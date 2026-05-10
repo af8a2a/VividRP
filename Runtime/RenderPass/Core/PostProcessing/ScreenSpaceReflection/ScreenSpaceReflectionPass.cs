@@ -7,6 +7,13 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    public enum ScreenSpaceReflectionExecutionPath
+    {
+        Vivid = 0,
+        HDRP = 1,
+        VividAndHDRPComparison = 2
+    }
+
     public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout, IRenderGraphPreparePass
     {
         private const int ThreadGroupSize = 8;
@@ -17,12 +24,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string SSRTracingProfilerTag = "SSRTracing";
         private const string SSRResolveProfilerTag = "SSRResolve";
         private const string SSRAccumulateProfilerTag = "SSRAccumulate";
+        private const string SSRHDRPTracingProfilerTag = "SsrTracing";
+        private const string SSRHDRPReprojectionProfilerTag = "SsrReprojection";
+        private const string SSRHDRPAccumulateProfilerTag = "SsrAccumulate";
 
         private static readonly uint[] s_InitialDispatchIndirectArgsData = { 0u, 1u, 1u, 0u };
         private static readonly ProfilingSampler s_SSRClassifyTilesProfilingSampler = new(SSRClassifyTilesProfilerTag);
         private static readonly ProfilingSampler s_SSRTracingProfilingSampler = new(SSRTracingProfilerTag);
         private static readonly ProfilingSampler s_SSRResolveProfilingSampler = new(SSRResolveProfilerTag);
         private static readonly ProfilingSampler s_SSRAccumulateProfilingSampler = new(SSRAccumulateProfilerTag);
+        private static readonly ProfilingSampler s_SSRHDRPTracingProfilingSampler = new(SSRHDRPTracingProfilerTag);
+        private static readonly ProfilingSampler s_SSRHDRPReprojectionProfilingSampler = new(SSRHDRPReprojectionProfilerTag);
+        private static readonly ProfilingSampler s_SSRHDRPAccumulateProfilingSampler = new(SSRHDRPAccumulateProfilerTag);
 
         private static readonly int ConstantBufferId = Shader.PropertyToID("ShaderVariablesScreenSpaceReflection");
         private static readonly int OutputColorTextureId = Shader.PropertyToID("_OutputColorTexture");
@@ -42,6 +55,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
         private static readonly int SSRDebugTextureId = Shader.PropertyToID("_SSRDebugTexture");
+        private static readonly int SSRHDRPHitPointTextureId = Shader.PropertyToID("_SSRHDRPHitPointTexture");
+        private static readonly int SSRHDRPAccumTextureId = Shader.PropertyToID("_SSRHDRPAccumTexture");
+        private static readonly int SSRHDRPOutputTextureId = Shader.PropertyToID("_SSRHDRPOutputTexture");
+        private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
 
         [StructLayout(LayoutKind.Sequential)]
         private struct ScreenSpaceReflectionConstantBufferData
@@ -58,11 +75,15 @@ namespace VividRP.Runtime.RenderPass.Core
             public float SsrIntensity;
             public float SsrIntensityClamp;
             public int SsrReflectsSky;
-            public float Padding0;
+            public int SsrFrameIndex;
             public Vector4 SsrHistoryColorPyramidSize;
             public int SsrUseHistoryColorPyramid;
             public int SsrHistoryColorPyramidMaxMip;
             public Vector2 Padding1;
+            public Vector4 SsrWorldSpaceCameraPos;
+            public Matrix4x4 SsrViewProjMatrix;
+            public Matrix4x4 SsrInvViewProjMatrix;
+            public Matrix4x4 SsrPrevViewProjMatrix;
         }
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -125,14 +146,36 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(
             Name = "ScreenSpaceReflectionDebug",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private readonly RenderGraphTexture m_DebugTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionHDRPHitPoint",
             Access = AccessFlags.ReadWrite)]
         [TransientResource]
-        private readonly RenderGraphTexture m_DebugTexture;
+        private readonly RenderGraphTexture m_HDRPHitPointTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionHDRPAccum",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_HDRPAccumTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionHDRPOutput",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private readonly RenderGraphTexture m_HDRPOutputTexture;
+
         private readonly RenderGraphTexture m_DefaultPreviousColorPyramidTexture;
         private int m_SSRClassifyTilesKernel = -1;
         private int m_SSRTracingKernel = -1;
         private int m_SSRResolveKernel = -1;
         private int m_SSRAccumulateKernel = -1;
+        private int m_SSRHDRPTracingKernel = -1;
+        private int m_SSRHDRPReprojectionKernel = -1;
+        private int m_SSRHDRPAccumulateKernel = -1;
         private int m_CopyKernel = -1;
         private int m_Width = 1;
         private int m_Height = 1;
@@ -141,6 +184,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_ShouldApply;
         private bool m_IsPassResourceLayoutDirty;
         private bool m_UseHistoryColorPyramid;
+
+        [SerializeField]
+        private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;
 
         [RenderGraphResource(Name = "PreviousColorPyramid", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousColorPyramidTexture;
@@ -175,6 +221,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
             m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_HDRPHitPointTexture = CreateColorTexture("ScreenSpaceReflectionHDRPHitPoint", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_HDRPAccumTexture = CreateColorTexture("ScreenSpaceReflectionHDRPAccum", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_HDRPOutputTexture = CreateColorTexture("ScreenSpaceReflectionHDRPOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_DefaultPreviousColorPyramidTexture = RenderGraphTexture.CreateInput(
                 "PreviousColorPyramid",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -185,6 +234,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", 1, 1);
             ConfigureInternalTextureDescriptor(m_RayInfoTexture, "ScreenSpaceReflectionRayInfo", 1, 1);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", 1, 1);
+            ConfigureInternalTextureDescriptor(m_HDRPHitPointTexture, "ScreenSpaceReflectionHDRPHitPoint", 1, 1);
+            ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", 1, 1);
+            ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", 1, 1);
         }
 
         public void ClearPassResourceLayoutDirty()
@@ -205,6 +257,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SSRTracingKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsTracing");
                 m_SSRResolveKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsResolve");
                 m_SSRAccumulateKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsAccumulate");
+                m_SSRHDRPTracingKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsHDRPTracing");
+                m_SSRHDRPReprojectionKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsHDRPReprojection");
+                m_SSRHDRPAccumulateKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsHDRPAccumulate");
                 m_CopyKernel = m_ComputeShader.FindKernel("CopyScreenSpaceReflection");
             }
             catch (ArgumentException)
@@ -213,6 +268,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SSRTracingKernel = -1;
                 m_SSRResolveKernel = -1;
                 m_SSRAccumulateKernel = -1;
+                m_SSRHDRPTracingKernel = -1;
+                m_SSRHDRPReprojectionKernel = -1;
+                m_SSRHDRPAccumulateKernel = -1;
                 m_CopyKernel = -1;
             }
         }
@@ -247,7 +305,12 @@ namespace VividRP.Runtime.RenderPass.Core
             UpdateOutputDescriptor(m_Width, m_Height);
             UpdateTileResourcesDescriptor(m_Width, m_Height);
 
-            m_ConstantBuffer = BuildConstantBuffer(camera, m_Width, m_Height, m_Settings);
+            m_ConstantBuffer = BuildConstantBuffer(
+                cameraData,
+                frameData.Get<VividCameraShaderData>(),
+                m_Width,
+                m_Height,
+                m_Settings);
             PrepareFrameContextOutput(frameData);
         }
 
@@ -265,10 +328,13 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 BindSkyParameters(cmd);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
+                BindDebugTexture(cmd, m_SSRClassifyTilesKernel);
+                BindDebugTexture(cmd, m_SSRTracingKernel);
+                BindDebugTexture(cmd, m_SSRResolveKernel);
+                BindDebugTexture(cmd, m_SSRAccumulateKernel);
+                BindDebugTexture(cmd, m_SSRHDRPTracingKernel);
+                BindDebugTexture(cmd, m_SSRHDRPReprojectionKernel);
+                BindDebugTexture(cmd, m_SSRHDRPAccumulateKernel);
 
                 if (!ShouldRecordEffect())
                 {
@@ -276,26 +342,36 @@ namespace VividRP.Runtime.RenderPass.Core
                     return;
                 }
 
-                if (!CanExecute())
+                ConstantBuffer.Push(cmd, m_ConstantBuffer, m_ComputeShader, ConstantBufferId);
+
+                bool executedPath = false;
+                if (ShouldRunVividPath() && CanExecuteVividPath())
                 {
-                    DispatchCopy(cmd);
-                    return;
+                    ResetDispatchIndirectArgs(cmd);
+
+                    using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
+                        DispatchClassifyTiles(cmd);
+
+                    using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
+                        DispatchTrace(cmd, context);
+
+                    using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
+                        DispatchResolve(cmd);
+
+                    using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))
+                        DispatchAccumulate(cmd);
+
+                    executedPath = true;
                 }
 
-                ConstantBuffer.Push(cmd, m_ConstantBuffer, m_ComputeShader, ConstantBufferId);
-                ResetDispatchIndirectArgs(cmd);
+                if (ShouldRunHDRPPath() && CanExecuteHDRPComparison())
+                {
+                    DispatchHDRPComparison(cmd, context);
+                    executedPath = true;
+                }
 
-                using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
-                    DispatchClassifyTiles(cmd);
-
-                using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
-                    DispatchTrace(cmd, context);
-
-                using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
-                    DispatchResolve(cmd);
-
-                using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))
-                    DispatchAccumulate(cmd);
+                if (!executedPath)
+                    DispatchCopy(cmd);
             }
         }
 
@@ -306,6 +382,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SSRTracingKernel = -1;
             m_SSRResolveKernel = -1;
             m_SSRAccumulateKernel = -1;
+            m_SSRHDRPTracingKernel = -1;
+            m_SSRHDRPReprojectionKernel = -1;
+            m_SSRHDRPAccumulateKernel = -1;
             m_CopyKernel = -1;
             m_ShouldApply = false;
             m_IsPassResourceLayoutDirty = false;
@@ -367,9 +446,10 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             return m_ShouldApply
                 && m_ComputeShader != null
-                && m_SSRTracingKernel >= 0
                 && m_Width > 0
-                && m_Height > 0;
+                && m_Height > 0
+                && (!ShouldRunVividPath() || m_SSRTracingKernel >= 0)
+                && (!ShouldRunHDRPPath() || m_SSRHDRPTracingKernel >= 0);
         }
 
         private bool CanRecordCopy()
@@ -380,15 +460,22 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_Height > 0;
         }
 
-        private bool CanExecute()
+        private bool CanSampleHistoryColorPyramid()
         {
-            bool canSampleHistory = m_UseHistoryColorPyramid
+            return m_UseHistoryColorPyramid
                 && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true;
-            bool canSampleSkyFallback = m_Settings.reflectSky
+        }
+
+        private bool CanSampleSkyFallback()
+        {
+            return m_Settings.reflectSky
                 && m_SkyTextureParams.w > 0.5f
                 && m_SkyTexture?.innerHandle.IsValid() == true;
+        }
 
-            return (canSampleHistory || canSampleSkyFallback)
+        private bool CanExecuteVividPath()
+        {
+            return (CanSampleHistoryColorPyramid() || CanSampleSkyFallback())
                 && m_SSRClassifyTilesKernel >= 0
                 && m_SSRTracingKernel >= 0
                 && m_SSRResolveKernel >= 0
@@ -411,7 +498,42 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanExecuteCopy()
         {
             return CanRecordCopy()
-                && output?.innerHandle.IsValid() == true;
+                && output?.innerHandle.IsValid() == true
+                && m_HDRPOutputTexture?.innerHandle.IsValid() == true;
+        }
+
+        private bool CanExecuteHDRPComparison()
+        {
+            return CanSampleHistoryColorPyramid()
+                && m_ComputeShader != null
+                && m_SSRHDRPTracingKernel >= 0
+                && m_SSRHDRPReprojectionKernel >= 0
+                && m_SSRHDRPAccumulateKernel >= 0
+                && m_HDRPHitPointTexture?.innerHandle.IsValid() == true
+                && m_HDRPAccumTexture?.innerHandle.IsValid() == true
+                && m_HDRPOutputTexture?.innerHandle.IsValid() == true
+                && output?.innerHandle.IsValid() == true
+                && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_HZBTexture?.innerHandle.IsValid() == true
+                && m_HZBMipLevelOffsets?.innerHandle.IsValid() == true
+                && m_GBuffer1?.innerHandle.IsValid() == true;
+        }
+
+        private bool ShouldRunVividPath()
+        {
+            return m_ExecutionPath == ScreenSpaceReflectionExecutionPath.Vivid
+                || m_ExecutionPath == ScreenSpaceReflectionExecutionPath.VividAndHDRPComparison;
+        }
+
+        private bool ShouldRunHDRPPath()
+        {
+            return m_ExecutionPath == ScreenSpaceReflectionExecutionPath.HDRP
+                || m_ExecutionPath == ScreenSpaceReflectionExecutionPath.VividAndHDRPComparison;
+        }
+
+        private bool ShouldUseHDRPAsMainOutput()
+        {
+            return m_ExecutionPath == ScreenSpaceReflectionExecutionPath.HDRP;
         }
 
         private void PrepareFrameContextOutput(ContextContainer frameData)
@@ -434,6 +556,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, OutputColorTextureId, output.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
             cmd.DispatchCompute(
                 m_ComputeShader,
                 m_CopyKernel,
@@ -514,6 +637,73 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_ComputeShader, m_SSRAccumulateKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
         }
 
+        private void DispatchHDRPComparison(ComputeCommandBuffer cmd, ComputePassContext context)
+        {
+            if (!CanExecuteHDRPComparison())
+                return;
+
+            using (new ProfilingScope(cmd, s_SSRHDRPTracingProfilingSampler))
+            {
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, DepthTextureId, m_DepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, HZBTextureId, m_HZBTexture.innerHandle);
+                cmd.SetComputeBufferParam(m_ComputeShader, m_SSRHDRPTracingKernel, DepthPyramidMipLevelOffsetsId, m_HZBMipLevelOffsets.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                DispatchFullScreen(cmd, m_SSRHDRPTracingKernel);
+            }
+
+            using (new ProfilingScope(cmd, s_SSRHDRPReprojectionProfilingSampler))
+            {
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
+                    && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+                {
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                }
+                else
+                {
+                    cmd.SetComputeTextureParam(
+                        m_ComputeShader,
+                        m_SSRHDRPReprojectionKernel,
+                        PreviousColorPyramidTextureId,
+                        context.renderGraphContext.defaultResources.blackTexture);
+                }
+
+                DispatchFullScreen(cmd, m_SSRHDRPReprojectionKernel);
+            }
+
+            using (new ProfilingScope(cmd, s_SSRHDRPAccumulateProfilingSampler))
+            {
+                cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, OutputColorTextureId, output.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
+                DispatchFullScreen(cmd, m_SSRHDRPAccumulateKernel);
+            }
+        }
+
+        private void DispatchFullScreen(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.DispatchCompute(
+                m_ComputeShader,
+                kernel,
+                CoreUtils.DivRoundUp(m_Width, ThreadGroupSize),
+                CoreUtils.DivRoundUp(m_Height, ThreadGroupSize),
+                1);
+        }
+
+        private void BindDebugTexture(ComputeCommandBuffer cmd, int kernel)
+        {
+            if (kernel < 0 || m_DebugTexture?.innerHandle.IsValid() != true)
+                return;
+
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRDebugTextureId, m_DebugTexture.innerHandle);
+        }
+
         private void BindSkyParameters(ComputeCommandBuffer cmd)
         {
             if (cmd == null || m_ComputeShader == null)
@@ -554,17 +744,22 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_ResolveTexture, "ScreenSpaceReflectionResolve", width, height);
             ConfigureInternalTextureDescriptor(m_RayInfoTexture, "ScreenSpaceReflectionRayInfo", width, height);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", width, height);
+            ConfigureInternalTextureDescriptor(m_HDRPHitPointTexture, "ScreenSpaceReflectionHDRPHitPoint", width, height);
+            ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", width, height);
+            ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", width, height);
             ConfigureTileListBuffer(m_TileListBuffer, maxTileCount);
             ConfigureIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
             m_DispatchIndirectArgsBuffer.SetData(s_InitialDispatchIndirectArgsData);
         }
 
         private static ScreenSpaceReflectionConstantBufferData BuildConstantBuffer(
-            Camera camera,
+            VividCameraData cameraData,
+            VividCameraShaderData cameraShaderData,
             int width,
             int height,
             ScreenSpaceReflectionSettingsData settings)
         {
+            var camera = cameraData?.camera;
             float nearPlane = camera != null ? Mathf.Max(camera.nearClipPlane, 0.0001f) : 0.1f;
             float farPlane = camera != null ? Mathf.Max(camera.farClipPlane, nearPlane + 0.0001f) : 1000.0f;
             float thickness = Mathf.Max(0.0001f, settings.depthBufferThickness);
@@ -577,6 +772,10 @@ namespace VividRP.Runtime.RenderPass.Core
             float roughnessFadeRcpLength = Mathf.Abs(roughnessFadeLength) > 0.000001f
                 ? 1.0f / roughnessFadeLength
                 : 0.0f;
+
+            var viewProjMatrix = ResolveSsrViewProjMatrix(cameraData);
+            var invViewProjMatrix = viewProjMatrix.inverse;
+            var prevViewProjMatrix = ResolveSsrPrevViewProjMatrix(cameraShaderData, viewProjMatrix);
 
             return new ScreenSpaceReflectionConstantBufferData
             {
@@ -598,12 +797,43 @@ namespace VividRP.Runtime.RenderPass.Core
                 SsrIntensity = settings.intensity,
                 SsrIntensityClamp = Mathf.Max(settings.clampValue, 0.001f),
                 SsrReflectsSky = settings.reflectSky ? 1 : 0,
-                Padding0 = 0.0f,
+                SsrFrameIndex = Time.frameCount,
                 SsrHistoryColorPyramidSize = Vector4.zero,
                 SsrUseHistoryColorPyramid = 0,
                 SsrHistoryColorPyramidMaxMip = 0,
-                Padding1 = Vector2.zero
+                Padding1 = Vector2.zero,
+                SsrWorldSpaceCameraPos = ResolveSsrWorldSpaceCameraPos(cameraData),
+                SsrViewProjMatrix = viewProjMatrix,
+                SsrInvViewProjMatrix = invViewProjMatrix,
+                SsrPrevViewProjMatrix = prevViewProjMatrix
             };
+        }
+
+        private static Matrix4x4 ResolveSsrViewProjMatrix(VividCameraData cameraData)
+        {
+            if (cameraData == null)
+                return Matrix4x4.identity;
+
+            return cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
+        }
+
+        private static Matrix4x4 ResolveSsrPrevViewProjMatrix(
+            VividCameraShaderData cameraShaderData,
+            Matrix4x4 fallbackViewProjMatrix)
+        {
+            return cameraShaderData != null && cameraShaderData.hasShaderVariablesGlobal
+                ? cameraShaderData.shaderVariablesGlobal._VividPrevViewProjMatrix
+                : fallbackViewProjMatrix;
+        }
+
+        private static Vector4 ResolveSsrWorldSpaceCameraPos(VividCameraData cameraData)
+        {
+            if (cameraData == null)
+                return new Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+
+            var cameraPosition = cameraData.GetInverseViewMatrix().GetColumn(3);
+            cameraPosition.w = 1.0f;
+            return cameraPosition;
         }
 
         private static int CalculateMipCount(int width, int height)

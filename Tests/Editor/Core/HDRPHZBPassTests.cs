@@ -6,6 +6,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
@@ -96,12 +97,121 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionTrace").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionResolve").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionRayInfo").IsTransient, Is.True);
-            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPHitPoint").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccum").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").IsTransient, Is.False);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").IsTransient, Is.False);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("PreviousColorPyramid"));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("ScreenSpaceReflectionSkyTexture"));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRTileList").IsTransient, Is.True);
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRDispatchIndirectArgs").IsTransient, Is.False);
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("source"));
+        }
+
+        [Test]
+        public void ScreenSpaceReflectionPassNode_ExportsDebugTextureOutputPort_ForVisualization()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new AutoRegisteredScreenSpaceReflectionPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, node);
+
+                Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture_In"), Is.Null);
+                Assert.That(node.GetOutputPortByName("m_HDRPOutputTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_HDRPOutputTexture"), Is.Null);
+                Assert.That(node.TryGetExecutionPath(out var executionPath), Is.True);
+                Assert.That(executionPath, Is.EqualTo(ScreenSpaceReflectionExecutionPath.Vivid));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_IncludesScreenSpaceReflectionExecutionPathEnumParameter()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new AutoRegisteredScreenSpaceReflectionPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, node);
+
+                var result = RenderGraphCompiler.Compile(graph);
+                var pass = result.Passes.Single(entry => entry.PassType.Contains(nameof(ScreenSpaceReflectionPass)));
+                var parameter = pass.EnumParameters.Single(entry => entry.FieldName == "m_ExecutionPath");
+
+                Assert.That(parameter.Value, Is.EqualTo((int)ScreenSpaceReflectionExecutionPath.Vivid));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void ScreenSpaceReflectionPass_ExecutionPath_SelectsRequestedRuntimePath()
+        {
+            var pass = new ScreenSpaceReflectionPass();
+
+            try
+            {
+                SetPrivateField(pass, "m_ExecutionPath", ScreenSpaceReflectionExecutionPath.Vivid);
+                Assert.That(InvokePrivateBool(pass, "ShouldRunVividPath"), Is.True);
+                Assert.That(InvokePrivateBool(pass, "ShouldRunHDRPPath"), Is.False);
+                Assert.That(InvokePrivateBool(pass, "ShouldUseHDRPAsMainOutput"), Is.False);
+
+                SetPrivateField(pass, "m_ExecutionPath", ScreenSpaceReflectionExecutionPath.HDRP);
+                Assert.That(InvokePrivateBool(pass, "ShouldRunVividPath"), Is.False);
+                Assert.That(InvokePrivateBool(pass, "ShouldRunHDRPPath"), Is.True);
+                Assert.That(InvokePrivateBool(pass, "ShouldUseHDRPAsMainOutput"), Is.True);
+
+                SetPrivateField(pass, "m_ExecutionPath", ScreenSpaceReflectionExecutionPath.VividAndHDRPComparison);
+                Assert.That(InvokePrivateBool(pass, "ShouldRunVividPath"), Is.True);
+                Assert.That(InvokePrivateBool(pass, "ShouldRunHDRPPath"), Is.True);
+                Assert.That(InvokePrivateBool(pass, "ShouldUseHDRPAsMainOutput"), Is.False);
+            }
+            finally
+            {
+                pass.Dispose();
+            }
+        }
+
+        [Test]
+        public void Compile_BindsScreenSpaceReflectionDebugTexture_WhenOverlayDebugConsumesPort()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var ssrNode = new AutoRegisteredScreenSpaceReflectionPassNode();
+                var overlayNode = new AutoRegisteredOverlayDebugPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, ssrNode);
+                RenderGraphTestUtility.AddTestNode(graph, overlayNode);
+
+                Assert.That(graph.Connect(
+                    ssrNode.GetOutputPortByName("m_DebugTexture"),
+                    overlayNode.GetInputPortByName("m_DebugTexture")),
+                    Is.True);
+
+                var result = RenderGraphCompiler.Compile(graph);
+                var overlayPass = result.Passes.Single(pass => pass.PassType.Contains(nameof(OverlayDebugPass)));
+                var binding = overlayPass.ResourceBindings.Single(entry => entry.FieldName == "m_DebugTexture");
+
+                Assert.That(binding.SourceKind, Is.EqualTo(RenderGraphPassBindingSourceKind.PassField));
+                Assert.That(binding.SourceFieldName, Is.EqualTo("m_DebugTexture"));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
         }
 
         [Test]
@@ -287,12 +397,32 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsTracing"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsResolve"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsAccumulate"));
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPTracing"));
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPReprojection"));
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPAccumulate"));
+            Assert.That(source, Does.Contain("int _SsrWriteHDRPToOutput;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRTileList;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRResolveTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRRayInfoTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPHitPointTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPAccumTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPOutputTexture;"));
             Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/DebugUtil.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl\""));
+            Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl\""));
             Assert.That(source, Does.Contain("#include \"Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl\""));
+            Assert.That(source, Does.Contain("float4x4 _SsrViewProjMatrix;"));
+            Assert.That(source, Does.Contain("float4x4 _SsrInvViewProjMatrix;"));
+            Assert.That(source, Does.Contain("float4x4 _SsrPrevViewProjMatrix;"));
+            Assert.That(source, Does.Contain("int _SsrFrameIndex;"));
+            Assert.That(source, Does.Contain("float3 ComputeSsrWorldSpacePosition(float2 screenUV, float deviceDepth)"));
+            Assert.That(source, Does.Contain("float3 ComputeSsrNormalizedDeviceCoordinatesWithZ(float3 positionWS)"));
+            Assert.That(source, Does.Contain("void StoreSsrWorldGridDebug(uint2 coordSS, float3 positionWS)"));
+            Assert.That(source, Does.Contain("Debug_WorldGrid(positionWS, 1.0, 0.02)"));
+            Assert.That(source, Does.Not.Contain("UNITY_MATRIX_I_VP"));
+            Assert.That(source, Does.Not.Contain("UNITY_MATRIX_VP"));
             Assert.That(source, Does.Contain("float _SsrIntensityClamp;"));
             Assert.That(source, Does.Contain("TEXTURECUBE(_SkyTexture);"));
             Assert.That(source, Does.Contain("float4 _SkyTextureTint;"));
@@ -303,11 +433,24 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float3 exposedSkyHsv = RgbToHsv(exposedSkyRadiance);"));
             Assert.That(source, Does.Contain("exposedSkyHsv.z = clamp(exposedSkyHsv.z, 0.0, _SsrIntensityClamp);"));
             Assert.That(source, Does.Contain("return ClampToFloat16Max(HsvToRgb(exposedSkyHsv));"));
+            Assert.That(source, Does.Contain("float2 GetSsrBlueNoiseSample(uint2 coordSS)"));
+            Assert.That(source, Does.Contain("GetBNDSequenceSample(coordSS, (uint)_SsrFrameIndex, 0)"));
+            Assert.That(source, Does.Contain("bool SampleSsrGGXVNDF("));
+            Assert.That(source, Does.Contain("SampleGGXVisibleNormal(inputSample.xy, viewDirWS, localToWorld, roughness, localV, localH, VdotH);"));
+            Assert.That(source, Does.Contain("float3 SampleSsrReflectionDir("));
+            Assert.That(source, Does.Contain("float traceSampleWeight;"));
+            Assert.That(source, Does.Contain("float2 traceBlueNoiseSample = GetSsrBlueNoiseSample(coordSS);"));
+            Assert.That(source, Does.Contain("float3 reflectionDirWS = SampleSsrReflectionDir(normalWS, viewDirWS, perceptualRoughness, traceBlueNoiseSample, traceSampleWeight);"));
+            Assert.That(source, Does.Contain("if (traceSampleWeight <= 0.0)"));
+            Assert.That(source, Does.Contain("float3 reflectionDirWS,"));
+            Assert.That(source, Does.Contain("reflectionDirWS,"));
+            Assert.That(source, Does.Contain("float2 blueNoiseSample = GetSsrBlueNoiseSample(coordSS);"));
+            Assert.That(source, Does.Contain("float3 reflectionDirWS = SampleSsrReflectionDir(normalWS, viewDirWS, perceptualRoughness, blueNoiseSample, sampleWeight);"));
             Assert.That(source, Does.Contain("BuildSsrSkyFallback("));
             Assert.That(source, Does.Contain("float ComputeHistoryColorPyramidReliability(float2 currentScreenUV, float2 historyScreenUV)"));
             Assert.That(source, Does.Contain("pixelMotion * rcp(32.0)"));
             Assert.That(source, Does.Contain("bool TryComputeHistoryPyramidUV("));
-            Assert.That(source, Does.Contain("ComputeNormalizedDeviceCoordinatesWithZ(positionWS, _PrevViewProjMatrix)"));
+            Assert.That(source, Does.Contain("ComputeNormalizedDeviceCoordinatesWithZ(positionWS, _SsrPrevViewProjMatrix)"));
             Assert.That(source, Does.Contain("bool insideHistoryDepth = previousNDC.z >= 0.0 && previousNDC.z <= 1.0;"));
             Assert.That(source, Does.Contain("historyReliability = insideHistory"));
             Assert.That(source, Does.Contain("historyScreenUV = saturate(historyScreenUV);"));
@@ -327,8 +470,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("max(sceneEyeDepth, tracedEyeDepth) * 0.03f"));
             Assert.That(source, Does.Contain("max(centerEyeDepth, sampleEyeDepth) * 0.04f"));
             Assert.That(source, Does.Contain("float3 hitRayPos = rayOrigin;"));
-            Assert.That(source, Does.Contain("hit = (distFloor >= 0.0) && (distFloor <= tMax);"));
-            Assert.That(source, Does.Contain("hitRayPos = rayOrigin + distFloor * rayDir;"));
+            Assert.That(source, Does.Contain("hitRayPos = rayPos;"));
+            Assert.That(source, Does.Not.Contain("hitRayPos = rayOrigin + distFloor * rayDir;"));
             Assert.That(source, Does.Contain("hitCoordSS = ClampPixelCoord((int2)floor(hitRayPos.xy));"));
             Assert.That(source, Does.Contain("hitDeviceDepth = hitRayPos.z;"));
             Assert.That(source, Does.Contain("if (!IsHitDepthConsistent(hitDeviceDepth, hitSceneDeviceDepth))"));
@@ -369,6 +512,15 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_SSRTraceTexture[coordSS] = float4(reflectedColor * fresnel, contribution);"));
             Assert.That(source, Does.Contain("_SSRResolveTexture[coordSS] = float4(colorSum * rcpWeightSum, saturate(alphaSum * rcpWeightSum));"));
             Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = _SSRResolveTexture[coordSS];"));
+            Assert.That(source, Does.Contain("bool TraceScreenSpaceReflectionHDRP("));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPTracing("));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPReprojection("));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPAccumulate("));
+            Assert.That(source, Does.Contain("_SSRHDRPHitPointTexture[coordSS] = float4(hitScreenUV, 1.0, 1.0);"));
+            Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
+            Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];"));
+            Assert.That(source, Does.Contain("if (_SsrWriteHDRPToOutput != 0)"));
+            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];"));
             Assert.That(source, Does.Not.Contain("ClearScreenSpaceReflectionTiles"));
             Assert.That(source, Does.Not.Contain("sourceColor.rgb + reflectedColor"));
             Assert.That(source, Does.Not.Contain("_InputColorTexture"));
@@ -395,14 +547,46 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsTracing\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsResolve\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsAccumulate\")"));
+            Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsHDRPTracing\")"));
+            Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsHDRPReprojection\")"));
+            Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsHDRPAccumulate\")"));
+            Assert.That(source, Does.Contain("DispatchHDRPComparison(cmd, context);"));
+            Assert.That(source, Does.Contain("[SerializeField]"));
+            Assert.That(source, Does.Contain("private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;"));
+            Assert.That(source, Does.Contain("private bool ShouldRunVividPath()"));
+            Assert.That(source, Does.Contain("private bool ShouldRunHDRPPath()"));
+            Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
+            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
+            Assert.That(source, Does.Not.Contain("BlueNoise.Instance?.Bind(cmd);"));
             Assert.That(source, Does.Contain("ResetDispatchIndirectArgs(cmd);"));
             Assert.That(source, Does.Contain("cmd.SetBufferData(dispatchIndirectArgsBuffer, s_InitialDispatchIndirectArgsData);"));
+            Assert.That(source, Does.Contain("public int SsrFrameIndex;"));
+            Assert.That(source, Does.Contain("SsrFrameIndex = Time.frameCount,"));
+            Assert.That(source, Does.Contain("public Matrix4x4 SsrViewProjMatrix;"));
+            Assert.That(source, Does.Contain("public Matrix4x4 SsrInvViewProjMatrix;"));
+            Assert.That(source, Does.Contain("public Matrix4x4 SsrPrevViewProjMatrix;"));
+            Assert.That(source, Does.Contain("cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);"));
+            Assert.That(source, Does.Contain("ResolveSsrPrevViewProjMatrix(cameraShaderData, viewProjMatrix);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))"));
             Assert.That(source, Does.Not.Contain("ScreenSpaceReflectionDenoise"));
             Assert.That(source, Does.Not.Contain("ClearScreenSpaceReflectionTiles"));
+        }
+
+        [Test]
+        public void FrameContextSystem_SourceBindsBlueNoiseGlobals_DuringFrameSetup()
+        {
+            var source = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderGraph",
+                "FrameContext",
+                "FrameContextSystem.cs"));
+
+            Assert.That(source, Does.Contain("private static void SetShaderGlobals("));
+            Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);"));
+            Assert.That(source, Does.Contain("BlueNoise.Instance?.Bind(cmd);"));
         }
 
         [Test]
@@ -455,6 +639,20 @@ namespace VividRP.Editor.Tests
             return (T)field.GetValue(instance);
         }
 
+        private static void SetPrivateField(object instance, string fieldName, object value)
+        {
+            var field = instance.GetType().GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, $"Field '{fieldName}' not found on {instance.GetType().Name}");
+            field.SetValue(instance, value);
+        }
+
+        private static bool InvokePrivateBool(object instance, string methodName)
+        {
+            var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null, $"Method '{methodName}' not found on {instance.GetType().Name}");
+            return (bool)method.Invoke(instance, null);
+        }
+
         private static string GetPackageFilePath(params string[] parts)
         {
             var customPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "Custom_URP"));
@@ -467,6 +665,21 @@ namespace VividRP.Editor.Tests
 
             var legacyPath = Path.GetFullPath(Path.Combine(Application.dataPath, "..", "Packages", "com.af8a2a.vividrp"));
             return Path.Combine(legacyPath, Path.Combine(parts));
+        }
+
+        private sealed class AutoRegisteredScreenSpaceReflectionPassNode : RenderPassNodeData
+        {
+            internal override System.Type GetRegisteredPassType() => typeof(ScreenSpaceReflectionPass);
+
+            internal bool TryGetExecutionPath(out ScreenSpaceReflectionExecutionPath value)
+            {
+                return TryGetEnumParameterValue("m_ExecutionPath", out value);
+            }
+        }
+
+        private sealed class AutoRegisteredOverlayDebugPassNode : RenderPassNodeData
+        {
+            internal override System.Type GetRegisteredPassType() => typeof(OverlayDebugPass);
         }
     }
 }

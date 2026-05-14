@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class DirectionalRayTracedShadowPass : UnsafePass
+    public sealed class DirectionalRayTracedShadowPass : UnsafePass, IBlueNoiseConsumerPass
     {
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;

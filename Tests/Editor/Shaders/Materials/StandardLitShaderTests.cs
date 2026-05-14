@@ -67,6 +67,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("SampleVividProbeVolume("));
             Assert.That(source, Does.Contain("surfaceData.bakedGI = SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS);"));
             Assert.That(source, Does.Contain("lightingRadiance += surfaceData.bakedGI * diffuseColor * INV_PI;"));
+            Assert.That(source, Does.Contain("float4 hitBaseColor;"));
+            Assert.That(source, Does.Contain("payload.hitBaseColor = float4(saturate(surfaceData.baseColor), 0.0);"));
         }
 
         [Test]

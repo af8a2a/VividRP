@@ -6,6 +6,7 @@
 #pragma kernel ScreenSpaceReflectionsHDRPTracing
 #pragma kernel ScreenSpaceReflectionsHDRPReprojection
 #pragma kernel ScreenSpaceReflectionsHDRPAccumulate
+#pragma kernel ScreenSpaceReflectionsHybridCandidates
 #pragma kernel CopyScreenSpaceReflection
 #pragma use_dxc
 #pragma require Native16Bit
@@ -48,6 +49,8 @@ Texture2D<float> _SSRPrevNumFramesAccumTexture;
 RWTexture2D<float> _SSRNumFramesAccumTexture;
 RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;
 RWStructuredBuffer<uint> _SSRTileList;
+RWStructuredBuffer<uint> _SSRHybridCandidateBuffer;
+RWStructuredBuffer<uint> _SSRHybridDispatchIndirectArgs;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _HZBTexture;
 StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;
@@ -958,6 +961,27 @@ void ScreenSpaceReflectionsTracing(
 
     _SSRTraceTexture[coordSS] = float4(reflectedColor, contribution);
     _SSRRayInfoTexture[coordSS] = BuildSsrRayInfo(hitDistance, historyReliability, hitSceneDeviceDepth, contribution);
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsHybridCandidates(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 trace = _SSRTraceTexture[coordSS];
+    float4 rayInfo = _SSRRayInfoTexture[coordSS];
+    bool hasNonFallbackHit = trace.a > 0.0001 && rayInfo.x < 4999.0;
+    if (hasNonFallbackHit || !ShouldTracePixel(coordSS))
+        return;
+
+    uint candidateCoord = coordSS.y * (uint)_SsrTraceScreenSize.x + coordSS.x;
+    uint candidateIndex;
+    InterlockedAdd(_SSRHybridDispatchIndirectArgs[0], 1u, candidateIndex);
+    _SSRHybridCandidateBuffer[candidateIndex] = candidateCoord;
 }
 
 struct SsrResolveCoordData

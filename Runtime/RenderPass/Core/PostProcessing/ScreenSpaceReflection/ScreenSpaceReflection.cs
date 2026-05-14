@@ -1,6 +1,7 @@
 using System;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
@@ -10,6 +11,10 @@ namespace VividRP.Runtime
     {
         [Tooltip("Whether screen space reflections are enabled.")]
         public BoolParameter enabled = new(false);
+
+        [Tooltip("Controls which screen space reflection implementation is executed.")]
+        public EnumParameter<ScreenSpaceReflectionExecutionPath> executionPath =
+            new(ScreenSpaceReflectionExecutionPath.Vivid);
 
         [Tooltip("Scales the traced reflection contribution.")]
         public ClampedFloatParameter intensity = new(1.0f, 0.0f, 2.0f);

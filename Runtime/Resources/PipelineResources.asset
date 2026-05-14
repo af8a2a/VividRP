@@ -135,6 +135,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 18a8ea50c3082fb4bba4e2e27578983f, type: 3}
   - ResourceName: Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflection.compute
     ResourceObject: {fileID: 7200000, guid: 6133c13e2211d524da9cbefa3ebf9198, type: 3}
+  - ResourceName: Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace
+    ResourceObject: {fileID: 4807578003741378534, guid: 434ac92cfb51a8146be7c318b46e1605, type: 3}
   - ResourceName: Shaders/Core/Private/ShadowClassify
     ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/AmbientProbeConvolution.compute

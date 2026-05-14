@@ -83,7 +83,7 @@ namespace VividRP.Runtime
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
-        private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
+        private static readonly Dictionary<IRenderPass, List<ImportedPassHandle>> s_PassImportedHandles = new();
         private static readonly Dictionary<string, TextureHistoryFrameBinding> s_TextureHistoryFrameBindings = new(16, StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedTextureHistoryRequest> s_CodeManagedTextureHistoryRequests = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
@@ -386,20 +386,48 @@ namespace VividRP.Runtime
 
             var handle = s_CurrentRenderGraph.ImportTexture(rtHandle);
 
-            if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
-            {
-                handles = new List<ImportedPassTexture>(32);
-                s_PassImportedHandles[pass] = handles;
-            }
-
-            var importedTexture = new ImportedPassTexture(handle, access);
-            if (!handles.Contains(importedTexture))
-                handles.Add(importedTexture);
+            RegisterImportedTextureForPass(pass, handle, access);
 
             return handle;
         }
 
         internal static bool IsPassTextureImportActive => s_CurrentRenderGraph != null;
+
+        internal static void RegisterImportedTextureForPass(
+            IRenderPass pass,
+            TextureHandle handle,
+            AccessFlags access = AccessFlags.Read)
+        {
+            if (pass == null || !handle.IsValid())
+                return;
+
+            var importedHandle = ImportedPassHandle.Texture(handle, access);
+            RegisterImportedHandleForPass(pass, importedHandle);
+        }
+
+        internal static void RegisterImportedBufferForPass(
+            IRenderPass pass,
+            BufferHandle handle,
+            AccessFlags access = AccessFlags.Read)
+        {
+            if (pass == null || !handle.IsValid())
+                return;
+
+            var importedHandle = ImportedPassHandle.Buffer(handle, access);
+            RegisterImportedHandleForPass(pass, importedHandle);
+        }
+
+        private static void RegisterImportedHandleForPass(IRenderPass pass, ImportedPassHandle importedHandle)
+        {
+            if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
+            {
+                handles = new List<ImportedPassHandle>(32);
+                s_PassImportedHandles[pass] = handles;
+            }
+
+            if (!handles.Contains(importedHandle))
+                handles.Add(importedHandle);
+        }
 
         /// <summary>
         /// Imports an external RTHandle into a RenderGraphTexture for use in passes.

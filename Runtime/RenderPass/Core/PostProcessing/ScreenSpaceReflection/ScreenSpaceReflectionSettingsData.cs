@@ -1,11 +1,13 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Runtime
 {
     internal struct ScreenSpaceReflectionSettingsData
     {
         public bool enabled;
+        public ScreenSpaceReflectionExecutionPath executionPath;
         public float intensity;
         public float minSmoothness;
         public float smoothnessFadeStart;
@@ -20,6 +22,7 @@ namespace VividRP.Runtime
             return new ScreenSpaceReflectionSettingsData
             {
                 enabled = false,
+                executionPath = ScreenSpaceReflectionExecutionPath.Vivid,
                 intensity = 1.0f,
                 minSmoothness = 0.9f,
                 smoothnessFadeStart = 0.9f,
@@ -46,6 +49,7 @@ namespace VividRP.Runtime
                 return settings;
 
             settings.enabled = true;
+            settings.executionPath = ssr.executionPath?.value ?? ScreenSpaceReflectionExecutionPath.Vivid;
             settings.intensity = Mathf.Clamp(ssr.intensity.value, 0.0f, 2.0f);
             settings.minSmoothness = Mathf.Clamp01(ssr.minSmoothness.value);
             settings.smoothnessFadeStart = Mathf.Clamp01(Mathf.Max(ssr.smoothnessFadeStart.value, settings.minSmoothness));

@@ -328,6 +328,13 @@ namespace VividRP.Runtime
     }
 
     /// <summary>
+    /// Marks passes that sample the shared blue-noise resources during execution.
+    /// </summary>
+    public interface IBlueNoiseConsumerPass
+    {
+    }
+
+    /// <summary>
     /// Marks passes whose work has effects outside same-frame RenderGraph resource consumers.
     /// Examples include history updates, readbacks, imported resource updates, or other persistent side effects.
     /// </summary>

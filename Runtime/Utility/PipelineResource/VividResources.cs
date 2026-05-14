@@ -191,6 +191,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflection.compute")]
         public ComputeShader ScreenSpaceReflectionCompute;
 
+        [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace")]
+        public RayTracingShader ScreenSpaceReflectionHybridTraceRayTracing;
+
         [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 

@@ -11,28 +11,38 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         Vivid = 0,
         HDRP = 1,
-        VividAndHDRPComparison = 2
+        VividAndHDRPComparison = 2,
+        Hybrid = 3,
+        RayTracing = 4
     }
 
-    public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout, IRenderGraphPreparePass
+    public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout, IRenderGraphPreparePass, IBlueNoiseConsumerPass
     {
         private const int ThreadGroupSize = 8;
         private const int IndirectArgsElementCount = 4;
+        private const int RayDispatchArgsElementCount = 3;
         private const int MaxDepthPyramidMipCount = 15;
         private const string RenderSSRProfilerTag = "RenderSSR";
         private const string SSRClassifyTilesProfilerTag = "SSRClassifyTiles";
         private const string SSRTracingProfilerTag = "SSRTracing";
+        private const string SSRHybridTraceProfilerTag = "SSRHybridTrace";
+        private const string SSRRayTracingProfilerTag = "SSRRayTracing";
         private const string SSRResolveProfilerTag = "SSRResolve";
         private const string SSRAccumulateProfilerTag = "SSRAccumulate";
         private const string SSRHDRPTracingProfilerTag = "SsrTracing";
         private const string SSRHDRPReprojectionProfilerTag = "SsrReprojection";
         private const string SSRHDRPAccumulateProfilerTag = "SsrAccumulate";
+        private const string HybridRayGenName = "RayGenScreenSpaceReflectionsHybridTrace";
+        private const string RayTracingRayGenName = "RayGenIntegration";
         private const string AccumulationHistoryKey = "SSRAccumulation";
         private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
 
         private static readonly uint[] s_InitialDispatchIndirectArgsData = { 0u, 1u, 1u, 0u };
+        private static readonly uint[] s_InitialRayDispatchIndirectArgsData = { 0u, 1u, 1u };
         private static readonly ProfilingSampler s_SSRClassifyTilesProfilingSampler = new(SSRClassifyTilesProfilerTag);
         private static readonly ProfilingSampler s_SSRTracingProfilingSampler = new(SSRTracingProfilerTag);
+        private static readonly ProfilingSampler s_SSRHybridTraceProfilingSampler = new(SSRHybridTraceProfilerTag);
+        private static readonly ProfilingSampler s_SSRRayTracingProfilingSampler = new(SSRRayTracingProfilerTag);
         private static readonly ProfilingSampler s_SSRResolveProfilingSampler = new(SSRResolveProfilerTag);
         private static readonly ProfilingSampler s_SSRAccumulateProfilingSampler = new(SSRAccumulateProfilerTag);
         private static readonly ProfilingSampler s_SSRHDRPTracingProfilingSampler = new(SSRHDRPTracingProfilerTag);
@@ -46,6 +56,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SSRRayInfoTextureId = Shader.PropertyToID("_SSRRayInfoTexture");
         private static readonly int SSRTileListId = Shader.PropertyToID("_SSRTileList");
         private static readonly int SSRDispatchIndirectArgsId = Shader.PropertyToID("_SSRDispatchIndirectArgs");
+        private static readonly int SSRHybridCandidateBufferId = Shader.PropertyToID("_SSRHybridCandidateBuffer");
+        private static readonly int SSRHybridDispatchIndirectArgsId = Shader.PropertyToID("_SSRHybridDispatchIndirectArgs");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int HZBTextureId = Shader.PropertyToID("_HZBTexture");
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
@@ -63,6 +75,24 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
         private static readonly int SSRAccumTextureId = Shader.PropertyToID("_SSRAccumTexture");
         private static readonly int SSRAvgRadianceTextureId = Shader.PropertyToID("_SSRAvgRadianceTexture");
+        private const string AccelerationStructureName = "_AccelerationStructure";
+        private static readonly int SsrTraceScreenSizeId = Shader.PropertyToID("_SsrTraceScreenSize");
+        private static readonly int SsrRoughnessFadeEndId = Shader.PropertyToID("_SsrRoughnessFadeEnd");
+        private static readonly int SsrRoughnessFadeRcpLengthId = Shader.PropertyToID("_SsrRoughnessFadeRcpLength");
+        private static readonly int SsrRoughnessFadeEndTimesRcpLengthId = Shader.PropertyToID("_SsrRoughnessFadeEndTimesRcpLength");
+        private static readonly int SsrEdgeFadeRcpLengthId = Shader.PropertyToID("_SsrEdgeFadeRcpLength");
+        private static readonly int SsrIntensityId = Shader.PropertyToID("_SsrIntensity");
+        private static readonly int SsrIntensityClampId = Shader.PropertyToID("_SsrIntensityClamp");
+        private static readonly int SsrReflectsSkyId = Shader.PropertyToID("_SsrReflectsSky");
+        private static readonly int SsrFrameIndexId = Shader.PropertyToID("_SsrFrameIndex");
+        private static readonly int SsrHistoryColorPyramidSizeId = Shader.PropertyToID("_SsrHistoryColorPyramidSize");
+        private static readonly int SsrUseHistoryColorPyramidId = Shader.PropertyToID("_SsrUseHistoryColorPyramid");
+        private static readonly int SsrHistoryColorPyramidMaxMipId = Shader.PropertyToID("_SsrHistoryColorPyramidMaxMip");
+        private static readonly int SsrWorldSpaceCameraPosId = Shader.PropertyToID("_SsrWorldSpaceCameraPos");
+        private static readonly int SsrViewProjMatrixId = Shader.PropertyToID("_SsrViewProjMatrix");
+        private static readonly int SsrInvViewProjMatrixId = Shader.PropertyToID("_SsrInvViewProjMatrix");
+        private static readonly int SsrPrevViewProjMatrixId = Shader.PropertyToID("_SsrPrevViewProjMatrix");
+        private static readonly int SsrHybridRayBiasId = Shader.PropertyToID("_SsrHybridRayBias");
         private static readonly int SsrAccumPrevId = Shader.PropertyToID("_SsrAccumPrev");
         private static readonly int SsrAccumTextureId = Shader.PropertyToID("_SsrAccumTexture");
         private static readonly int SSRPrevNumFramesAccumTextureId = Shader.PropertyToID("_SSRPrevNumFramesAccumTexture");
@@ -113,6 +143,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "GBuffer2", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer2;
+
+        [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
+        private readonly RenderGraphAccelerationStructure m_SceneAccelerationStructure;
 
         [RenderGraphResource(
             Name = "ScreenSpaceReflectionOutput",
@@ -165,6 +198,18 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.ReadWrite,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private readonly RenderGraphBuffer m_DispatchIndirectArgsBuffer;
+
+        [RenderGraphResource(
+            Name = "SSRHybridCandidateBuffer",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_HybridCandidateBuffer;
+
+        [RenderGraphResource(
+            Name = "SSRHybridDispatchIndirectArgs",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphBuffer m_HybridDispatchIndirectArgsBuffer;
         private readonly RenderGraphTexture m_SkyTexture;
 
         [RenderGraphResource(
@@ -215,12 +260,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private int m_SSRClassifyTilesKernel = -1;
         private int m_SSRTracingKernel = -1;
+        private int m_SSRHybridCandidatesKernel = -1;
         private int m_SSRResolveKernel = -1;
         private int m_SSRAccumulateKernel = -1;
         private int m_SSRHDRPTracingKernel = -1;
         private int m_SSRHDRPReprojectionKernel = -1;
         private int m_SSRHDRPAccumulateKernel = -1;
         private int m_CopyKernel = -1;
+        private RayTracingShader m_HybridTraceRayTracingShader;
         private int m_Width = 1;
         private int m_Height = 1;
         private int m_TileCountX = 1;
@@ -230,8 +277,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_UseHistoryColorPyramid;
         private bool m_HasValidAccumulationHistory;
         private bool m_HistoryInvalidated = true;
+        private bool m_SupportsRayTracing;
 
-        [SerializeField]
         private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;
 
         [RenderGraphResource(Name = "PreviousColorPyramid", Access = AccessFlags.Read)]
@@ -240,6 +287,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_SkyTextureParams;
         private ScreenSpaceReflectionSettingsData m_Settings;
         private ScreenSpaceReflectionConstantBufferData m_ConstantBuffer;
+        private ShaderVariablesRayTracing m_ShaderVariablesRayTracing;
 
         public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
 
@@ -255,6 +303,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
+            m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
             output = CreateColorTexture("ScreenSpaceReflectionOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_TraceTexture = CreateColorTexture("ScreenSpaceReflectionTrace", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_ResolveTexture = CreateColorTexture("ScreenSpaceReflectionResolve", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
@@ -265,6 +314,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchIndirectArgsBuffer = RenderGraphBuffer.CreateStructured(
                 "SSRDispatchIndirectArgs",
                 IndirectArgsElementCount,
+                sizeof(uint),
+                GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
+            m_HybridCandidateBuffer = RenderGraphBuffer.CreateStructured("SSRHybridCandidateBuffer", 1, sizeof(uint));
+            m_HybridDispatchIndirectArgsBuffer = RenderGraphBuffer.CreateStructured(
+                "SSRHybridDispatchIndirectArgs",
+                RayDispatchArgsElementCount,
                 sizeof(uint),
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
@@ -316,8 +371,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Create()
         {
+            m_SupportsRayTracing = SystemInfo.supportsRayTracing;
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_ComputeShader = resources?.ScreenSpaceReflectionCompute;
+            m_HybridTraceRayTracingShader = resources?.ScreenSpaceReflectionHybridTraceRayTracing;
             if (m_ComputeShader == null)
                 return;
 
@@ -336,6 +393,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_SSRClassifyTilesKernel = -1;
                 m_SSRTracingKernel = -1;
+                m_SSRHybridCandidatesKernel = -1;
                 m_SSRResolveKernel = -1;
                 m_SSRAccumulateKernel = -1;
                 m_SSRHDRPTracingKernel = -1;
@@ -343,6 +401,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SSRHDRPAccumulateKernel = -1;
                 m_CopyKernel = -1;
             }
+
+            m_SSRHybridCandidatesKernel = TryFindKernel(m_ComputeShader, "ScreenSpaceReflectionsHybridCandidates");
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -356,6 +416,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Settings = postProcessingAllowed
                 ? ScreenSpaceReflectionSettingsResolver.Resolve()
                 : ScreenSpaceReflectionSettingsData.CreateDefault();
+            m_ExecutionPath = m_Settings.executionPath;
             m_ShouldApply = postProcessingAllowed && m_Settings.enabled;
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
 
@@ -381,6 +442,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Width,
                 m_Height,
                 m_Settings);
+            m_ShaderVariablesRayTracing =
+                ShaderVariablesRayTracingUtility.Create(frameData.GetOrCreate<VividRayTracingSettingsData>());
             PrepareAccumulationHistory(frameData);
             PrepareFrameContextOutput(frameData);
         }
@@ -401,6 +464,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 BindSkyParameters(cmd);
                 BindDebugTexture(cmd, m_SSRClassifyTilesKernel);
                 BindDebugTexture(cmd, m_SSRTracingKernel);
+                BindDebugTexture(cmd, m_SSRHybridCandidatesKernel);
                 BindDebugTexture(cmd, m_SSRResolveKernel);
                 BindDebugTexture(cmd, m_SSRAccumulateKernel);
                 BindDebugTexture(cmd, m_SSRHDRPTracingKernel);
@@ -423,8 +487,26 @@ namespace VividRP.Runtime.RenderPass.Core
                     using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
                         DispatchClassifyTiles(cmd);
 
-                    using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
-                        DispatchTrace(cmd, context);
+                    if (ShouldRunRayTracingPath())
+                    {
+                        using (new ProfilingScope(cmd, s_SSRRayTracingProfilingSampler))
+                            DispatchRayTracing(cmd, context);
+                    }
+                    else
+                    {
+                        using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
+                            DispatchTrace(cmd, context);
+
+                        if (ShouldRunHybridPath() && CanExecuteHybridIntersection())
+                        {
+                            using (new ProfilingScope(cmd, s_SSRHybridTraceProfilingSampler))
+                            {
+                                ResetHybridDispatchIndirectArgs(cmd);
+                                DispatchHybridCandidates(cmd);
+                                DispatchHybridTrace(cmd, context);
+                            }
+                        }
+                    }
 
                     using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
                         DispatchResolve(cmd);
@@ -449,8 +531,10 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_ComputeShader = null;
+            m_HybridTraceRayTracingShader = null;
             m_SSRClassifyTilesKernel = -1;
             m_SSRTracingKernel = -1;
+            m_SSRHybridCandidatesKernel = -1;
             m_SSRResolveKernel = -1;
             m_SSRAccumulateKernel = -1;
             m_SSRHDRPTracingKernel = -1;
@@ -462,11 +546,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_UseHistoryColorPyramid = false;
             m_HasValidAccumulationHistory = false;
             m_HistoryInvalidated = true;
+            m_SupportsRayTracing = false;
             m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
             m_SkyTextureTint = Color.white;
             m_SkyTextureParams = Vector4.zero;
             m_Settings = ScreenSpaceReflectionSettingsData.CreateDefault();
+            m_ExecutionPath = m_Settings.executionPath;
             m_ConstantBuffer = default;
+            m_ShaderVariablesRayTracing = default;
         }
 
         private bool ResolveColorPyramidHistory(ContextContainer frameData)
@@ -607,9 +694,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool CanExecuteVividPath()
         {
-            return (CanSampleHistoryColorPyramid() || CanSampleSkyFallback())
-                && m_SSRClassifyTilesKernel >= 0
-                && m_SSRTracingKernel >= 0
+            return CanExecuteVividDenoisePath()
+                && (ShouldRunRayTracingPath()
+                    ? CanExecuteRayTracingPath()
+                    : CanExecuteScreenSpaceTracePath());
+        }
+
+        private bool CanExecuteVividDenoisePath()
+        {
+            return m_SSRClassifyTilesKernel >= 0
                 && m_SSRResolveKernel >= 0
                 && m_SSRAccumulateKernel >= 0
                 && output?.innerHandle.IsValid() == true
@@ -624,13 +717,34 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_NumFramesHistoryCurrent?.innerHandle.IsValid() == true
                 && m_TileListBuffer?.innerHandle.IsValid() == true
                 && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true
-                && m_SkyTexture?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer1?.innerHandle.IsValid() == true;
+        }
+
+        private bool CanExecuteScreenSpaceTracePath()
+        {
+            return (CanSampleHistoryColorPyramid() || CanSampleSkyFallback())
+                && m_SSRClassifyTilesKernel >= 0
+                && m_SSRTracingKernel >= 0
+                && m_SkyTexture?.innerHandle.IsValid() == true
                 && m_HZBTexture?.innerHandle.IsValid() == true
                 && m_HZBMipLevelOffsets?.innerHandle.IsValid() == true
                 && m_GBuffer0?.innerHandle.IsValid() == true
-                && m_GBuffer1?.innerHandle.IsValid() == true
                 && m_GBuffer2?.innerHandle.IsValid() == true;
+        }
+
+        private bool CanExecuteRayTracingPath()
+        {
+            return m_SupportsRayTracing
+                && m_HybridTraceRayTracingShader != null
+                && m_SceneAccelerationStructure != null
+                && (m_SceneAccelerationStructure.innerHandle.IsValid()
+                    || m_SceneAccelerationStructure.HasAccelerationStructure)
+                && m_TraceTexture?.innerHandle.IsValid() == true
+                && m_RayInfoTexture?.innerHandle.IsValid() == true
+                && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer1?.innerHandle.IsValid() == true
+                && m_SkyTexture?.innerHandle.IsValid() == true;
         }
 
         private bool CanExecuteCopy()
@@ -657,10 +771,43 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_GBuffer1?.innerHandle.IsValid() == true;
         }
 
+        private bool CanExecuteHybridIntersection()
+        {
+            return m_SupportsRayTracing
+                && m_SSRHybridCandidatesKernel >= 0
+                && m_HybridTraceRayTracingShader != null
+                && CanSampleHistoryColorPyramid()
+                && m_SceneAccelerationStructure != null
+                && (m_SceneAccelerationStructure.innerHandle.IsValid()
+                    || m_SceneAccelerationStructure.HasAccelerationStructure)
+                && m_TraceTexture?.innerHandle.IsValid() == true
+                && m_RayInfoTexture?.innerHandle.IsValid() == true
+                && m_TileListBuffer?.innerHandle.IsValid() == true
+                && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true
+                && m_HybridCandidateBuffer?.innerHandle.IsValid() == true
+                && m_HybridDispatchIndirectArgsBuffer?.innerHandle.IsValid() == true
+                && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer1?.innerHandle.IsValid() == true
+                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true
+                && m_SkyTexture?.innerHandle.IsValid() == true;
+        }
+
         private bool ShouldRunVividPath()
         {
             return m_ExecutionPath == ScreenSpaceReflectionExecutionPath.Vivid
-                || m_ExecutionPath == ScreenSpaceReflectionExecutionPath.VividAndHDRPComparison;
+                || m_ExecutionPath == ScreenSpaceReflectionExecutionPath.VividAndHDRPComparison
+                || m_ExecutionPath == ScreenSpaceReflectionExecutionPath.Hybrid
+                || m_ExecutionPath == ScreenSpaceReflectionExecutionPath.RayTracing;
+        }
+
+        private bool ShouldRunHybridPath()
+        {
+            return m_ExecutionPath == ScreenSpaceReflectionExecutionPath.Hybrid;
+        }
+
+        private bool ShouldRunRayTracingPath()
+        {
+            return m_ExecutionPath == ScreenSpaceReflectionExecutionPath.RayTracing;
         }
 
         private bool ShouldRunHDRPPath()
@@ -755,6 +902,104 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             cmd.DispatchCompute(m_ComputeShader, m_SSRTracingKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
+        }
+
+        private void ResetHybridDispatchIndirectArgs(ComputeCommandBuffer cmd)
+        {
+            GraphicsBuffer dispatchIndirectArgsBuffer = m_HybridDispatchIndirectArgsBuffer;
+            if (dispatchIndirectArgsBuffer == null)
+                return;
+
+            cmd.SetBufferData(dispatchIndirectArgsBuffer, s_InitialRayDispatchIndirectArgsData);
+        }
+
+        private void DispatchHybridCandidates(ComputeCommandBuffer cmd)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeBufferParam(m_ComputeShader, m_SSRHybridCandidatesKernel, SSRTileListId, m_TileListBuffer.innerHandle);
+            cmd.SetComputeBufferParam(
+                m_ComputeShader,
+                m_SSRHybridCandidatesKernel,
+                SSRHybridCandidateBufferId,
+                m_HybridCandidateBuffer.innerHandle);
+            cmd.SetComputeBufferParam(
+                m_ComputeShader,
+                m_SSRHybridCandidatesKernel,
+                SSRHybridDispatchIndirectArgsId,
+                m_HybridDispatchIndirectArgsBuffer.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_SSRHybridCandidatesKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
+        }
+
+        private void DispatchHybridTrace(ComputeCommandBuffer cmd, ComputePassContext context)
+        {
+            var accelerationStructure = (RayTracingAccelerationStructure)m_SceneAccelerationStructure;
+            if (accelerationStructure == null)
+                return;
+
+            BindHybridRayTracingParameters(cmd);
+            cmd.SetRayTracingShaderPass(m_HybridTraceRayTracingShader, "IndirectDXR");
+            cmd.SetRayTracingAccelerationStructure(m_HybridTraceRayTracingShader, AccelerationStructureName, accelerationStructure);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SkyTextureId, m_SkyTexture.innerHandle);
+            cmd.SetRayTracingBufferParam(
+                m_HybridTraceRayTracingShader,
+                SSRHybridCandidateBufferId,
+                m_HybridCandidateBuffer.innerHandle);
+
+            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
+                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            {
+                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+            }
+            else
+            {
+                cmd.SetRayTracingTextureParam(
+                    m_HybridTraceRayTracingShader,
+                    PreviousColorPyramidTextureId,
+                    context.renderGraphContext.defaultResources.blackTexture);
+            }
+
+            cmd.DispatchRays(m_HybridTraceRayTracingShader, HybridRayGenName, m_HybridDispatchIndirectArgsBuffer.innerHandle, 0, null);
+        }
+
+        private void DispatchRayTracing(ComputeCommandBuffer cmd, ComputePassContext context)
+        {
+            var accelerationStructure = (RayTracingAccelerationStructure)m_SceneAccelerationStructure;
+            if (accelerationStructure == null)
+                return;
+
+            BindHybridRayTracingParameters(cmd);
+            cmd.SetRayTracingShaderPass(m_HybridTraceRayTracingShader, "IndirectDXR");
+            cmd.SetRayTracingAccelerationStructure(m_HybridTraceRayTracingShader, AccelerationStructureName, accelerationStructure);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SkyTextureId, m_SkyTexture.innerHandle);
+
+            if (m_HybridCandidateBuffer?.innerHandle.IsValid() == true)
+                cmd.SetRayTracingBufferParam(m_HybridTraceRayTracingShader, SSRHybridCandidateBufferId, m_HybridCandidateBuffer.innerHandle);
+
+            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
+                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            {
+                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+            }
+            else
+            {
+                cmd.SetRayTracingTextureParam(
+                    m_HybridTraceRayTracingShader,
+                    PreviousColorPyramidTextureId,
+                    context.renderGraphContext.defaultResources.blackTexture);
+            }
+
+            cmd.DispatchRays(m_HybridTraceRayTracingShader, RayTracingRayGenName, (uint)m_Width, (uint)m_Height, 1, null);
         }
 
         private void DispatchResolve(ComputeCommandBuffer cmd)
@@ -873,6 +1118,42 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(m_ComputeShader, SkyTextureParamsId, m_SkyTextureParams);
         }
 
+        private void BindHybridRayTracingParameters(ComputeCommandBuffer cmd)
+        {
+            if (cmd == null || m_HybridTraceRayTracingShader == null)
+                return;
+
+            BlueNoise.Instance?.Bind(cmd, m_HybridTraceRayTracingShader);
+            cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SkyTextureTintId, m_SkyTextureTint);
+            cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SkyTextureParamsId, m_SkyTextureParams);
+            cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SsrTraceScreenSizeId, m_ConstantBuffer.SsrTraceScreenSize);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrRoughnessFadeEndId, m_ConstantBuffer.SsrRoughnessFadeEnd);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrRoughnessFadeRcpLengthId, m_ConstantBuffer.SsrRoughnessFadeRcpLength);
+            cmd.SetRayTracingFloatParam(
+                m_HybridTraceRayTracingShader,
+                SsrRoughnessFadeEndTimesRcpLengthId,
+                m_ConstantBuffer.SsrRoughnessFadeEndTimesRcpLength);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrEdgeFadeRcpLengthId, m_ConstantBuffer.SsrEdgeFadeRcpLength);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrIntensityId, m_ConstantBuffer.SsrIntensity);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrIntensityClampId, m_ConstantBuffer.SsrIntensityClamp);
+            cmd.SetRayTracingIntParam(m_HybridTraceRayTracingShader, SsrReflectsSkyId, m_ConstantBuffer.SsrReflectsSky);
+            cmd.SetRayTracingIntParam(m_HybridTraceRayTracingShader, SsrFrameIndexId, m_ConstantBuffer.SsrFrameIndex);
+            cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SsrHistoryColorPyramidSizeId, m_ConstantBuffer.SsrHistoryColorPyramidSize);
+            cmd.SetRayTracingIntParam(
+                m_HybridTraceRayTracingShader,
+                SsrUseHistoryColorPyramidId,
+                m_ConstantBuffer.SsrUseHistoryColorPyramid);
+            cmd.SetRayTracingIntParam(
+                m_HybridTraceRayTracingShader,
+                SsrHistoryColorPyramidMaxMipId,
+                m_ConstantBuffer.SsrHistoryColorPyramidMaxMip);
+            cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SsrWorldSpaceCameraPosId, m_ConstantBuffer.SsrWorldSpaceCameraPos);
+            cmd.SetRayTracingMatrixParam(m_HybridTraceRayTracingShader, SsrViewProjMatrixId, m_ConstantBuffer.SsrViewProjMatrix);
+            cmd.SetRayTracingMatrixParam(m_HybridTraceRayTracingShader, SsrInvViewProjMatrixId, m_ConstantBuffer.SsrInvViewProjMatrix);
+            cmd.SetRayTracingMatrixParam(m_HybridTraceRayTracingShader, SsrPrevViewProjMatrixId, m_ConstantBuffer.SsrPrevViewProjMatrix);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrHybridRayBiasId, m_ShaderVariablesRayTracing._RayTracingRayBias);
+        }
+
         private void UpdateOutputDescriptor(int width, int height)
         {
             if (output == null)
@@ -915,6 +1196,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureSingleChannelHistoryDescriptor(m_NumFramesHistoryCurrent, "ScreenSpaceReflectionNumFramesAccum", width, height);
             ConfigureTileListBuffer(m_TileListBuffer, maxTileCount);
             ConfigureIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
+            ConfigureHybridCandidateBuffer(m_HybridCandidateBuffer, width, height);
+            ConfigureHybridDispatchIndirectArgsBuffer(m_HybridDispatchIndirectArgsBuffer);
             m_DispatchIndirectArgsBuffer.SetData(s_InitialDispatchIndirectArgsData);
         }
 
@@ -1014,6 +1297,29 @@ namespace VividRP.Runtime.RenderPass.Core
             return Mathf.CeilToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
         }
 
+        private static int TryFindKernel(ComputeShader shader, string kernelName)
+        {
+            if (shader == null)
+                return -1;
+
+            try
+            {
+                return shader.FindKernel(kernelName);
+            }
+            catch (ArgumentException)
+            {
+                return -1;
+            }
+        }
+
+        private static RenderGraphAccelerationStructure CreateSceneAccelerationStructure()
+        {
+            return new RenderGraphAccelerationStructure
+            {
+                desc = RenderGraphAccelerationStructureDesc.Create("SceneRTAS")
+            };
+        }
+
         private static void ResizeInputTexture(RenderGraphTexture texture, int width, int height)
         {
             texture?.Resize(Mathf.Max(1, width), Mathf.Max(1, height));
@@ -1066,6 +1372,28 @@ namespace VividRP.Runtime.RenderPass.Core
             buffer.desc.Stride = sizeof(uint);
             buffer.desc.Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
             buffer.desc.Name = "SSRDispatchIndirectArgs";
+        }
+
+        private static void ConfigureHybridCandidateBuffer(RenderGraphBuffer buffer, int width, int height)
+        {
+            if (buffer?.desc == null)
+                return;
+
+            buffer.desc.Count = Mathf.Max(1, Mathf.Max(1, width) * Mathf.Max(1, height));
+            buffer.desc.Stride = sizeof(uint);
+            buffer.desc.Target = GraphicsBuffer.Target.Structured;
+            buffer.desc.Name = "SSRHybridCandidateBuffer";
+        }
+
+        private static void ConfigureHybridDispatchIndirectArgsBuffer(RenderGraphBuffer buffer)
+        {
+            if (buffer?.desc == null)
+                return;
+
+            buffer.desc.Count = RayDispatchArgsElementCount;
+            buffer.desc.Stride = sizeof(uint);
+            buffer.desc.Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
+            buffer.desc.Name = "SSRHybridDispatchIndirectArgs";
         }
 
         private static void ConfigureInternalTextureDescriptor(

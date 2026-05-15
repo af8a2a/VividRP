@@ -94,7 +94,7 @@ namespace VividRP.Runtime.SubSystem.Decal
             return new BoundProxyShape
             {
                 shape = BoundProxyShapeType.Box,
-                size = new Vector3(10.0f, 5.0f, 10.0f),
+                size = new Vector3(1.0f, 1.0f, 1.0f),
             };
         }
 

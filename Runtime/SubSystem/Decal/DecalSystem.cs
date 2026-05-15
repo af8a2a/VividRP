@@ -11,144 +11,126 @@ using VividRP.Runtime.GPUDriven.Bindless;
 
 namespace VividRP.Runtime.SubSystem.Decal
 {
-    internal static class DecalSystem
+    internal sealed class DecalSystem : VividSubsystem<DecalSystem>
     {
         private const int k_InlineJobDecalThreshold = 64;
         private const int k_PrepareJobBatchSize = 32;
         private const int k_CullJobBatchSize = 64;
         private static readonly Quaternion s_ProjectorToDecalSpaceRotation = Quaternion.Euler(-90.0f, 0.0f, 0.0f);
-        private static readonly List<DecalProjector> s_Projectors = new();
+
+        private readonly List<DecalProjector> m_Projectors = new();
 
         // Prepared snapshot produced by the PlayerLoop kick (or first SRP update) and consumed by SRP UpdateCore.
-        // s_SourceProjectors[i] / s_Prepared[i] / s_CullingInstances[i] correspond to s_Sources[i] for i < s_SourceCount.
-        private static NativeArray<DecalSourceData> s_Sources;
-        private static NativeArray<DecalPreparedData> s_Prepared;
-        private static NativeArray<CullingInstance> s_CullingInstances;
-        private static NativeArray<float4> s_FrustumPlanes;
-        private static NativeList<int> s_VisibleIndices;
-        private static DecalProjector[] s_SourceProjectors = System.Array.Empty<DecalProjector>();
-        private static int s_SourceCount;
-        private static JobHandle s_PreparedJobHandle;
-        private static JobHandle s_CullJobHandle;
-        private static EntityId s_CullScheduledForCameraId;
-        private static bool s_PrepareScheduled;
-        private static bool s_CullScheduled;
-        private static bool s_CullReady;
-        private static bool s_KickRan;
-        private static bool s_Initialized;
+        // m_SourceProjectors[i] / m_Prepared[i] / m_CullingInstances[i] correspond to m_Sources[i] for i < m_SourceCount.
+        private NativeArray<DecalSourceData> m_Sources;
+        private NativeArray<DecalPreparedData> m_Prepared;
+        private NativeArray<CullingInstance> m_CullingInstances;
+        private NativeArray<float4> m_FrustumPlanes;
+        private NativeList<int> m_VisibleIndices;
+        private DecalProjector[] m_SourceProjectors = System.Array.Empty<DecalProjector>();
+        private int m_SourceCount;
+        private JobHandle m_PreparedJobHandle;
+        private JobHandle m_CullJobHandle;
+        private EntityId m_CullScheduledForCameraId;
+        private bool m_PrepareScheduled;
+        private bool m_CullScheduled;
+        private bool m_CullReady;
+        private bool m_KickRan;
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif
-        internal static void Initialize()
+        private static void AutoInitialize()
         {
-            if (s_Initialized)
-                return;
+            Initialize();
+        }
 
-            FrameContextSystem.SubsystemPreRender -= Update;
-            FrameContextSystem.SubsystemPreRender += Update;
+        protected override void OnInitialize()
+        {
             RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
             RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
             InsertIntoPlayerLoop();
-#if UNITY_EDITOR
-            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
-            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
-#endif
-            s_Initialized = true;
         }
 
-        internal static void Deinitialize()
+        protected override void OnDeinitialize()
         {
-            if (!s_Initialized)
-                return;
-
             CompleteScheduledWork();
-            s_KickRan = false;
+            m_KickRan = false;
 
             RemoveFromPlayerLoop();
             RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
 
-#if UNITY_EDITOR
-            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
-#else
-            FrameContextSystem.SubsystemPreRender -= Update;
-#endif
+            if (m_Sources.IsCreated)
+                m_Sources.Dispose();
+            if (m_Prepared.IsCreated)
+                m_Prepared.Dispose();
+            if (m_CullingInstances.IsCreated)
+                m_CullingInstances.Dispose();
+            if (m_FrustumPlanes.IsCreated)
+                m_FrustumPlanes.Dispose();
+            if (m_VisibleIndices.IsCreated)
+                m_VisibleIndices.Dispose();
+            for (int i = 0; i < m_SourceProjectors.Length; i++)
+                m_SourceProjectors[i] = null;
+            m_SourceCount = 0;
 
-            if (s_Sources.IsCreated)
-                s_Sources.Dispose();
-            if (s_Prepared.IsCreated)
-                s_Prepared.Dispose();
-            if (s_CullingInstances.IsCreated)
-                s_CullingInstances.Dispose();
-            if (s_FrustumPlanes.IsCreated)
-                s_FrustumPlanes.Dispose();
-            if (s_VisibleIndices.IsCreated)
-                s_VisibleIndices.Dispose();
-            for (int i = 0; i < s_SourceProjectors.Length; i++)
-                s_SourceProjectors[i] = null;
-            s_SourceCount = 0;
-
-            s_Projectors.Clear();
-            s_Initialized = false;
+            m_Projectors.Clear();
         }
-
-#if UNITY_EDITOR
-        private static void OnBeforeAssemblyReload()
-        {
-            Deinitialize();
-        }
-#endif
 
         internal static void Register(DecalProjector projector)
         {
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             if (projector == null)
                 return;
 
-            if (!s_Projectors.Contains(projector))
-                s_Projectors.Add(projector);
+            var projectors = Instance.m_Projectors;
+            if (!projectors.Contains(projector))
+                projectors.Add(projector);
         }
 
         internal static void Unregister(DecalProjector projector)
         {
-            s_Projectors.Remove(projector);
+            if (!HasInstance)
+                return;
+
+            Instance.m_Projectors.Remove(projector);
         }
 
         private static void PlayerLoopKick()
         {
-            if (!s_Initialized)
+            if (!IsInitialized)
                 return;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalKickMarker.Auto())
             {
-                BuildSnapshotAndSchedulePrepare(true);
+                Instance.BuildSnapshotAndSchedulePrepare(true);
             }
         }
 
-        private static void BuildSnapshotAndSchedulePrepare(bool allowAsyncSchedule)
+        private void BuildSnapshotAndSchedulePrepare(bool allowAsyncSchedule)
         {
             // Drain any leftover cull/prepare from the previous frame (e.g. SRP swapped, no camera rendered).
             CompleteScheduledWork();
 
-            int projectorCount = s_Projectors.Count;
+            int projectorCount = m_Projectors.Count;
             EnsureSnapshotCapacity(projectorCount);
 
             int sourceCount = 0;
             for (int i = 0; i < projectorCount; i++)
             {
-                DecalProjector projector = s_Projectors[i];
+                DecalProjector projector = m_Projectors[i];
                 if (projector == null || !projector.isActiveAndEnabled)
                     continue;
 
                 if (!projector.TryCreateBoundProxyWorldData(out BoundProxyWorldData wd))
                     continue;
 
-                s_SourceProjectors[sourceCount] = projector;
-                s_Sources[sourceCount] = new DecalSourceData
+                m_SourceProjectors[sourceCount] = projector;
+                m_Sources[sourceCount] = new DecalSourceData
                 {
                     worldCenter = wd.worldCenter,
                     worldRotation = wd.worldRotation,
@@ -161,17 +143,17 @@ namespace VividRP.Runtime.SubSystem.Decal
                 sourceCount++;
             }
 
-            s_SourceCount = sourceCount;
-            s_KickRan = true;
+            m_SourceCount = sourceCount;
+            m_KickRan = true;
 
             if (sourceCount == 0)
                 return;
 
             var job = new PrepareDecalsJob
             {
-                Sources = s_Sources,
-                Prepared = s_Prepared,
-                CullingInstances = s_CullingInstances,
+                Sources = m_Sources,
+                Prepared = m_Prepared,
+                CullingInstances = m_CullingInstances,
             };
 
             if (!allowAsyncSchedule || ShouldRunInline(sourceCount))
@@ -180,66 +162,70 @@ namespace VividRP.Runtime.SubSystem.Decal
                 return;
             }
 
-            s_PreparedJobHandle = job.Schedule(sourceCount, k_PrepareJobBatchSize);
-            s_PrepareScheduled = true;
+            m_PreparedJobHandle = job.Schedule(sourceCount, k_PrepareJobBatchSize);
+            m_PrepareScheduled = true;
             JobHandle.ScheduleBatchedJobs();
         }
 
-        private static void EnsureSnapshotCapacity(int requiredCapacity)
+        private void EnsureSnapshotCapacity(int requiredCapacity)
         {
-            int current = s_Sources.IsCreated ? s_Sources.Length : 0;
+            int current = m_Sources.IsCreated ? m_Sources.Length : 0;
             if (current >= requiredCapacity
-                && s_Prepared.IsCreated && s_Prepared.Length >= requiredCapacity
-                && s_CullingInstances.IsCreated && s_CullingInstances.Length >= requiredCapacity
-                && s_VisibleIndices.IsCreated && s_VisibleIndices.Capacity >= requiredCapacity)
+                && m_Prepared.IsCreated && m_Prepared.Length >= requiredCapacity
+                && m_CullingInstances.IsCreated && m_CullingInstances.Length >= requiredCapacity
+                && m_VisibleIndices.IsCreated && m_VisibleIndices.Capacity >= requiredCapacity)
                 return;
 
             int newCapacity = math.max(8, math.ceilpow2(requiredCapacity));
 
-            if (s_Sources.IsCreated)
-                s_Sources.Dispose();
-            if (s_Prepared.IsCreated)
-                s_Prepared.Dispose();
-            if (s_CullingInstances.IsCreated)
-                s_CullingInstances.Dispose();
-            if (s_VisibleIndices.IsCreated)
-                s_VisibleIndices.Dispose();
+            if (m_Sources.IsCreated)
+                m_Sources.Dispose();
+            if (m_Prepared.IsCreated)
+                m_Prepared.Dispose();
+            if (m_CullingInstances.IsCreated)
+                m_CullingInstances.Dispose();
+            if (m_VisibleIndices.IsCreated)
+                m_VisibleIndices.Dispose();
 
-            s_Sources = new NativeArray<DecalSourceData>(newCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            s_Prepared = new NativeArray<DecalPreparedData>(newCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            s_CullingInstances = new NativeArray<CullingInstance>(newCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            s_VisibleIndices = new NativeList<int>(newCapacity, Allocator.Persistent);
+            m_Sources = new NativeArray<DecalSourceData>(newCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_Prepared = new NativeArray<DecalPreparedData>(newCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_CullingInstances = new NativeArray<CullingInstance>(newCapacity, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            m_VisibleIndices = new NativeList<int>(newCapacity, Allocator.Persistent);
 
-            if (!s_FrustumPlanes.IsCreated)
-                s_FrustumPlanes = new NativeArray<float4>(6, Allocator.Persistent);
+            if (!m_FrustumPlanes.IsCreated)
+                m_FrustumPlanes = new NativeArray<float4>(6, Allocator.Persistent);
 
-            if (s_SourceProjectors.Length < newCapacity)
+            if (m_SourceProjectors.Length < newCapacity)
             {
                 var grown = new DecalProjector[newCapacity];
-                System.Array.Copy(s_SourceProjectors, grown, s_SourceProjectors.Length);
-                s_SourceProjectors = grown;
+                System.Array.Copy(m_SourceProjectors, grown, m_SourceProjectors.Length);
+                m_SourceProjectors = grown;
             }
         }
 
         private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
         {
-            if (!s_Initialized || !s_KickRan || camera == null)
+            if (!IsInitialized || camera == null)
+                return;
+
+            DecalSystem instance = Instance;
+            if (!instance.m_KickRan)
                 return;
 
             // Persistent cull buffers are shared across cameras; drain any pending slot before reusing them.
-            if (s_CullScheduled || s_CullReady)
-                CompleteScheduledWork();
+            if (instance.m_CullScheduled || instance.m_CullReady)
+                instance.CompleteScheduledWork();
 
-            if (s_SourceCount == 0)
+            if (instance.m_SourceCount == 0)
                 return;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalCullScheduleMarker.Auto())
             {
-                ScheduleOrRunCull(camera);
+                instance.ScheduleOrRunCull(camera);
             }
         }
 
-        private static void Update(ContextContainer frameData, CommandBuffer cmd)
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalMarker.Auto())
             {
@@ -247,16 +233,13 @@ namespace VividRP.Runtime.SubSystem.Decal
             }
         }
 
-        private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
+        private void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            if (!s_Initialized)
-                Initialize();
-
-            if (!s_KickRan)
+            if (!m_KickRan)
                 BuildSnapshotAndSchedulePrepare(false);
 
             Camera camera = GetCamera(frameData);
-            if (camera == null || s_SourceCount == 0)
+            if (camera == null || m_SourceCount == 0)
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalCompleteMarker.Auto())
                 {
@@ -268,14 +251,14 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             // Cull was scheduled by OnBeginCameraRendering for this camera — just join the result.
             EntityId cameraId = camera.GetEntityId();
-            if ((s_CullScheduled || s_CullReady) && s_CullScheduledForCameraId == cameraId)
+            if ((m_CullScheduled || m_CullReady) && m_CullScheduledForCameraId == cameraId)
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalCompleteMarker.Auto())
                 {
                     CompleteScheduledWork();
                 }
 
-                EmitVisibleDecals(frameData, s_VisibleIndices.AsArray());
+                EmitVisibleDecals(frameData, m_VisibleIndices.AsArray());
                 return;
             }
 
@@ -288,7 +271,7 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             RunCullInlineOrComplete(camera);
 
-            EmitVisibleDecals(frameData, s_VisibleIndices.AsArray());
+            EmitVisibleDecals(frameData, m_VisibleIndices.AsArray());
         }
 
         private static bool ShouldRunInline(int decalCount)
@@ -296,72 +279,72 @@ namespace VividRP.Runtime.SubSystem.Decal
             return decalCount <= k_InlineJobDecalThreshold;
         }
 
-        private static void CompleteScheduledWork()
+        private void CompleteScheduledWork()
         {
-            bool completedCull = s_CullScheduled;
-            if (s_CullScheduled)
-                s_CullJobHandle.Complete();
-            s_CullJobHandle = default;
-            s_CullScheduled = false;
-            s_CullReady = false;
-            s_CullScheduledForCameraId = default;
+            bool completedCull = m_CullScheduled;
+            if (m_CullScheduled)
+                m_CullJobHandle.Complete();
+            m_CullJobHandle = default;
+            m_CullScheduled = false;
+            m_CullReady = false;
+            m_CullScheduledForCameraId = default;
 
-            if (!completedCull && s_PrepareScheduled)
-                s_PreparedJobHandle.Complete();
+            if (!completedCull && m_PrepareScheduled)
+                m_PreparedJobHandle.Complete();
 
-            s_PreparedJobHandle = default;
-            s_PrepareScheduled = false;
+            m_PreparedJobHandle = default;
+            m_PrepareScheduled = false;
         }
 
-        private static void ScheduleOrRunCull(Camera camera)
+        private void ScheduleOrRunCull(Camera camera)
         {
             var cullingJob = CreateFrustumCullingJob(camera);
             EntityId cameraId = camera.GetEntityId();
 
-            if (!s_PrepareScheduled && ShouldRunInline(s_SourceCount))
+            if (!m_PrepareScheduled && ShouldRunInline(m_SourceCount))
             {
-                cullingJob.Run(s_SourceCount);
-                s_CullReady = true;
-                s_CullScheduledForCameraId = cameraId;
+                cullingJob.Run(m_SourceCount);
+                m_CullReady = true;
+                m_CullScheduledForCameraId = cameraId;
                 return;
             }
 
-            s_CullJobHandle = cullingJob.Schedule(s_SourceCount, k_CullJobBatchSize, s_PreparedJobHandle);
-            s_CullScheduled = true;
-            s_CullScheduledForCameraId = cameraId;
+            m_CullJobHandle = cullingJob.Schedule(m_SourceCount, k_CullJobBatchSize, m_PreparedJobHandle);
+            m_CullScheduled = true;
+            m_CullScheduledForCameraId = cameraId;
             JobHandle.ScheduleBatchedJobs();
         }
 
-        private static void RunCullInlineOrComplete(Camera camera)
+        private void RunCullInlineOrComplete(Camera camera)
         {
             var cullingJob = CreateFrustumCullingJob(camera);
-            if (ShouldRunInline(s_SourceCount))
+            if (ShouldRunInline(m_SourceCount))
             {
-                cullingJob.Run(s_SourceCount);
+                cullingJob.Run(m_SourceCount);
                 return;
             }
 
-            cullingJob.Schedule(s_SourceCount, k_CullJobBatchSize).Complete();
+            cullingJob.Schedule(m_SourceCount, k_CullJobBatchSize).Complete();
         }
 
-        private static FrustumCullingJob CreateFrustumCullingJob(Camera camera)
+        private FrustumCullingJob CreateFrustumCullingJob(Camera camera)
         {
             float4x4 viewProj = (float4x4)(camera.projectionMatrix * camera.worldToCameraMatrix);
-            CullingUtility.ExtractFrustumPlanes(viewProj, s_FrustumPlanes);
+            CullingUtility.ExtractFrustumPlanes(viewProj, m_FrustumPlanes);
 
-            s_VisibleIndices.Clear();
-            if (s_VisibleIndices.Capacity < s_SourceCount)
-                s_VisibleIndices.SetCapacity(s_SourceCount);
+            m_VisibleIndices.Clear();
+            if (m_VisibleIndices.Capacity < m_SourceCount)
+                m_VisibleIndices.SetCapacity(m_SourceCount);
 
             return new FrustumCullingJob
             {
-                FrustumPlanes = s_FrustumPlanes,
-                Instances = s_CullingInstances.GetSubArray(0, s_SourceCount),
-                VisibleIndices = s_VisibleIndices.AsParallelWriter(),
+                FrustumPlanes = m_FrustumPlanes,
+                Instances = m_CullingInstances.GetSubArray(0, m_SourceCount),
+                VisibleIndices = m_VisibleIndices.AsParallelWriter(),
             };
         }
 
-        private static void EmitVisibleDecals(ContextContainer frameData, NativeArray<int> visibleIndices)
+        private void EmitVisibleDecals(ContextContainer frameData, NativeArray<int> visibleIndices)
         {
             var gpuDrivenDecalData = frameData.GetOrCreate<VividGPUDrivenDecalData>();
             var gpuDrivenDecalEnabled = TryResolveGPUDrivenDecalBindlessContainer(out var bindlessTextureContainer);
@@ -380,8 +363,8 @@ namespace VividRP.Runtime.SubSystem.Decal
             for (int i = 0; i < visibleCount; i++)
             {
                 int idx = visibleIndices[i];
-                DecalProjector projector = s_SourceProjectors[idx];
-                DecalPreparedData prepared = s_Prepared[idx];
+                DecalProjector projector = m_SourceProjectors[idx];
+                DecalPreparedData prepared = m_Prepared[idx];
 
                 float4x4 m = prepared.worldToDecal;
                 Matrix4x4 worldToDecal = new(m.c0, m.c1, m.c2, m.c3);

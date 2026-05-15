@@ -111,7 +111,7 @@ namespace VividRP.Runtime
         private static readonly BaseRenderFunc<RenderGizmosPassData, UnsafeGraphContext> s_RenderGizmosRenderFunc =
             ExecuteRenderGizmosPass;
 #endif
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void InitializeContext(
             ScriptableRenderContext context,
             Camera camera,
@@ -307,7 +307,7 @@ namespace VividRP.Runtime
             s_IsCompiled = false;
             RenderPassProfilingUtility.Clear();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             using var prepareFrameScope = RenderPassProfilingUtility.PrepareFrameMarker.Auto();
@@ -358,6 +358,7 @@ namespace VividRP.Runtime
         /// Imports an external RTHandle for a specific pass during Prepare().
         /// Returns a TextureHandle that can be assigned to pass member variables.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static TextureHandle ImportTextureForPass(IRenderPass pass, RTHandle rtHandle, AccessFlags access = AccessFlags.Read)
         {
             if (s_CurrentRenderGraph == null)
@@ -396,6 +397,7 @@ namespace VividRP.Runtime
         /// </summary>
         /// <param name="texture">The RenderGraphTexture to import into</param>
         /// <param name="rtHandle">The external RTHandle to import</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ImportTexture(RenderGraphTexture texture, RTHandle rtHandle)
         {
             if (texture == null)
@@ -412,7 +414,7 @@ namespace VividRP.Runtime
 
             s_ImportedRTHandles[texture] = rtHandle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static bool AllocHistoryTextureForPass(
             IRenderPass pass,
             string key,
@@ -451,7 +453,7 @@ namespace VividRP.Runtime
 
             return hasHistoryTextures && hasValidData;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
             RestoreInjectedSourceOverrides();
@@ -864,7 +866,7 @@ namespace VividRP.Runtime
             s_IsCompiled = true;
         }
 
-        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphTexture[] CreateRuntimeTextures(RenderGraphData graphAsset)
         {
             if (graphAsset.TextureDescriptors == null || graphAsset.TextureDescriptors.Count == 0)
@@ -881,7 +883,7 @@ namespace VividRP.Runtime
 
             return textures;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void CreateRuntimeHistoryTextures(
             RenderGraphData graphAsset,
             out RenderGraphTexture[] previousTextures,
@@ -910,7 +912,7 @@ namespace VividRP.Runtime
                 };
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphBuffer[] CreateRuntimeBuffers(RenderGraphData graphAsset)
         {
             if (graphAsset.BufferDescriptors == null || graphAsset.BufferDescriptors.Count == 0)
@@ -927,7 +929,7 @@ namespace VividRP.Runtime
 
             return buffers;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphRenderList[] CreateRuntimeRenderLists(RenderGraphData graphAsset)
         {
             if (graphAsset.RenderListDescriptors == null || graphAsset.RenderListDescriptors.Count == 0)
@@ -944,7 +946,7 @@ namespace VividRP.Runtime
 
             return renderLists;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphAccelerationStructure[] CreateRuntimeAccelerationStructures(RenderGraphData graphAsset)
         {
             if (graphAsset.AccelerationStructureDescriptors == null || graphAsset.AccelerationStructureDescriptors.Count == 0)
@@ -979,7 +981,7 @@ namespace VividRP.Runtime
 
             return null;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ApplyResourceBindings(
             IRenderPass pass,
             Type passType,
@@ -1195,7 +1197,7 @@ namespace VividRP.Runtime
             Debug.LogWarning(
                 $"[VividRP] Skipping legacy RenderGraph binding for transient field '{fieldName}' on '{passType?.FullName ?? "<Unknown Pass>"}'.");
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void PrepareHistoryTargets(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
@@ -1237,7 +1239,7 @@ namespace VividRP.Runtime
                     currentHandle);
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void PreparePendingHistoryTextureImports(RenderGraph renderGraph)
         {
             if (renderGraph == null || s_TextureHistoryFrameBindings.Count == 0)
@@ -1253,7 +1255,7 @@ namespace VividRP.Runtime
 
             s_HistoryTextureImportCache.Clear();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ImportHistoryTexture(
             RenderGraph renderGraph,
             RenderGraphTexture texture,
@@ -1289,7 +1291,7 @@ namespace VividRP.Runtime
 
             return false;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void CommitTextureHistories(RenderGraphData graphAsset)
         {
             if (graphAsset == null || s_TextureHistoryFrameBindings.Count == 0)

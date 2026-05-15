@@ -33,6 +33,7 @@ namespace VividRP.Runtime.SubSystem.Decal
     {
         [ReadOnly] public NativeArray<DecalSourceData> Sources;
         [WriteOnly] public NativeArray<DecalPreparedData> Prepared;
+        [WriteOnly] public NativeArray<CullingInstance> CullingInstances;
 
         public void Execute(int index)
         {
@@ -61,16 +62,29 @@ namespace VividRP.Runtime.SubSystem.Decal
                     normalizedBlendDistance = math.clamp(src.blendDistance / minDimension, 0f, 0.5f);
             }
 
+            float4 aabbCenter = new(src.worldCenter, 0f);
+            float4 aabbExtents4 = new(aabbExtents, 0f);
+
             Prepared[index] = new DecalPreparedData
             {
                 worldToDecal = worldToDecal,
-                worldAabbCenter = new float4(src.worldCenter, 0f),
-                worldAabbExtents = new float4(aabbExtents, 0f),
+                worldAabbCenter = aabbCenter,
+                worldAabbExtents = aabbExtents4,
                 baseColor = src.baseColor,
                 normalizedBlendDistance = normalizedBlendDistance,
                 clampedMetallic = math.saturate(src.metallic),
                 clampedRoughness = math.saturate(src.roughness),
                 padding = 0f,
+            };
+
+            CullingInstances[index] = new CullingInstance
+            {
+                Bounds = new AABB
+                {
+                    Center = aabbCenter,
+                    Extents = aabbExtents4,
+                },
+                OriginalIndex = index,
             };
         }
     }

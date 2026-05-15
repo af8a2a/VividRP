@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -11,6 +12,7 @@ namespace VividRP.Runtime
     public class VividRenderPipeline : RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
         private const string RenderGraphName = "VividRP RenderGraph";
+        private static readonly ProfilerMarker s_ContextSubmitMarker = new("VividRP.RenderPipeline.RenderCamera.ContextSubmit");
 
         private readonly VividRenderPipelineAsset m_Asset;
         private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
@@ -126,7 +128,12 @@ namespace VividRP.Runtime
                 try
                 {
                     if (shouldSubmit)
-                        context.Submit();
+                    {
+                        using (s_ContextSubmitMarker.Auto())
+                        {
+                            context.Submit();
+                        }
+                    }
                 }
                 finally
                 {

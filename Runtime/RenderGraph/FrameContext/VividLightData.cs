@@ -289,8 +289,13 @@ namespace VividRP.Runtime
         private NativeList<VisibleLightRenderDataRecord> m_LightGridVisibleLightRecords;
         private NativeList<PunctualLightCandidate> m_LightGridPunctualCandidates;
         private NativeList<AreaLightCandidate> m_LightGridAreaCandidates;
+        private NativeList<SFiniteLightBound> m_LightGridPunctualLightBounds;
+        private NativeList<LightVolumeData> m_LightGridPunctualLightVolumeData;
+        private NativeList<SFiniteLightBound> m_LightGridAreaLightBounds;
+        private NativeList<LightVolumeData> m_LightGridAreaLightVolumeData;
         private JobHandle m_LightGridJobHandle;
         private bool m_LightGridJobScheduled;
+        private bool m_LightGridClusteredCullDataPrepared;
 
         public bool hasVisibleLights => visibleLights.IsCreated && visibleLights.Length > 0;
 
@@ -320,7 +325,7 @@ namespace VividRP.Runtime
 
         public DirectionalLightData mainDirectionalLight => hasMainDirectionalLight ? directionalLights[mainDirectionalLightIndex] : default;
 
-        internal void Update(CullingResults cullingResults)
+        internal void Update(CullingResults cullingResults, Matrix4x4 worldToViewMatrix)
         {
             // Defensive: previous frame's LightGridPass should have drained this, but bail-outs (camera early-return,
             // pipeline swap) can leave the handle live. Drain before mutating any state read by the job.
@@ -328,7 +333,12 @@ namespace VividRP.Runtime
 
             visibleLights = cullingResults.visibleLights;
             visibleReflectionProbes = cullingResults.visibleReflectionProbes;
-            UpdateVisibleLightData(visibleLights, RenderSettings.sun);
+            UpdateVisibleLightData(visibleLights, RenderSettings.sun, worldToViewMatrix);
+        }
+
+        internal void Update(CullingResults cullingResults)
+        {
+            Update(cullingResults, Matrix4x4.identity);
         }
 
         // Called from LightGridPass.Prepare just before LightGrid reads punctualLightCount/areaLightCount/punctualLights/areaLights.
@@ -343,6 +353,13 @@ namespace VividRP.Runtime
 
             ApplyPunctualLightCandidates(m_LightGridPunctualCandidates);
             ApplyAreaLightCandidates(m_LightGridAreaCandidates);
+            ApplyPunctualLightClusteredCullData(
+                m_LightGridPunctualLightBounds,
+                m_LightGridPunctualLightVolumeData);
+            ApplyAreaLightClusteredCullData(
+                m_LightGridAreaLightBounds,
+                m_LightGridAreaLightVolumeData);
+            m_LightGridClusteredCullDataPrepared = true;
 
             DisposeLightGridBuffers();
         }
@@ -358,6 +375,7 @@ namespace VividRP.Runtime
             m_LightGridJobHandle.Complete();
             m_LightGridJobHandle = default;
             m_LightGridJobScheduled = false;
+            m_LightGridClusteredCullDataPrepared = false;
             DisposeLightGridBuffers();
         }
 
@@ -369,12 +387,32 @@ namespace VividRP.Runtime
                 m_LightGridPunctualCandidates.Dispose();
             if (m_LightGridAreaCandidates.IsCreated)
                 m_LightGridAreaCandidates.Dispose();
+            if (m_LightGridPunctualLightBounds.IsCreated)
+                m_LightGridPunctualLightBounds.Dispose();
+            if (m_LightGridPunctualLightVolumeData.IsCreated)
+                m_LightGridPunctualLightVolumeData.Dispose();
+            if (m_LightGridAreaLightBounds.IsCreated)
+                m_LightGridAreaLightBounds.Dispose();
+            if (m_LightGridAreaLightVolumeData.IsCreated)
+                m_LightGridAreaLightVolumeData.Dispose();
         }
 
         internal void UpdateFiniteLightClusteredCullData(Matrix4x4 worldToViewMatrix)
         {
-            BuildPunctualLightClusteredCullingData(worldToViewMatrix);
-            BuildAreaLightClusteredCullingData(worldToViewMatrix);
+            if (m_LightGridJobScheduled)
+                CompleteLightGridPrepare();
+
+            if (!m_LightGridClusteredCullDataPrepared)
+            {
+                BuildPunctualLightClusteredCullingData(worldToViewMatrix);
+                BuildAreaLightClusteredCullingData(worldToViewMatrix);
+            }
+
+            BuildDecalClusteredCullingData(worldToViewMatrix);
+        }
+
+        internal void UpdateDecalClusteredCullData(Matrix4x4 worldToViewMatrix)
+        {
             BuildDecalClusteredCullingData(worldToViewMatrix);
         }
 
@@ -538,6 +576,7 @@ namespace VividRP.Runtime
 
             visibleLights = default;
             visibleReflectionProbes = default;
+            m_LightGridClusteredCullDataPrepared = false;
             mainLightIndex = -1;
             mainLightEntityId = EntityId.None;
             directionalLightCount = 0;
@@ -602,7 +641,10 @@ namespace VividRP.Runtime
         }
 
 
-        private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight)
+        private void UpdateVisibleLightData(
+            NativeArray<VisibleLight> visibleLights,
+            Light sunLight,
+            Matrix4x4 worldToViewMatrix)
         {
             directionalLightCount = 0;
             mainLightIndex = -1;
@@ -611,6 +653,7 @@ namespace VividRP.Runtime
             mainDirectionalLightEntityId = EntityId.None;
             punctualLightCount = 0;
             areaLightCount = 0;
+            m_LightGridClusteredCullDataPrepared = false;
 
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
                 return;
@@ -622,6 +665,10 @@ namespace VividRP.Runtime
             m_LightGridVisibleLightRecords = new NativeList<VisibleLightRenderDataRecord>(lightCapacity, Allocator.Persistent);
             m_LightGridPunctualCandidates = new NativeList<PunctualLightCandidate>(lightCapacity, Allocator.Persistent);
             m_LightGridAreaCandidates = new NativeList<AreaLightCandidate>(lightCapacity, Allocator.Persistent);
+            m_LightGridPunctualLightBounds = new NativeList<SFiniteLightBound>(lightCapacity, Allocator.Persistent);
+            m_LightGridPunctualLightVolumeData = new NativeList<LightVolumeData>(lightCapacity, Allocator.Persistent);
+            m_LightGridAreaLightBounds = new NativeList<SFiniteLightBound>(lightCapacity, Allocator.Persistent);
+            m_LightGridAreaLightVolumeData = new NativeList<LightVolumeData>(lightCapacity, Allocator.Persistent);
 
             CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
 
@@ -632,9 +679,15 @@ namespace VividRP.Runtime
                 visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
                 punctualLights = m_LightGridPunctualCandidates,
                 areaLights = m_LightGridAreaCandidates,
+                punctualLightBounds = m_LightGridPunctualLightBounds,
+                punctualLightVolumeData = m_LightGridPunctualLightVolumeData,
+                areaLightBounds = m_LightGridAreaLightBounds,
+                areaLightVolumeData = m_LightGridAreaLightVolumeData,
+                worldToViewMatrix = worldToViewMatrix,
             };
             m_LightGridJobHandle = buildLightGridJob.Schedule();
             m_LightGridJobScheduled = true;
+            JobHandle.ScheduleBatchedJobs();
         }
 
         private void CollectDirectionalLightCandidatesAndApply(
@@ -724,6 +777,28 @@ namespace VividRP.Runtime
 
             for (var areaIndex = 0; areaIndex < areaLightCount; areaIndex++)
                 areaLights[areaIndex] = areaCandidates[areaIndex].lightData;
+        }
+
+        private void ApplyPunctualLightClusteredCullData(
+            NativeList<SFiniteLightBound> lightBounds,
+            NativeList<LightVolumeData> lightVolumeData)
+        {
+            for (var lightIndex = 0; lightIndex < punctualLightCount; lightIndex++)
+            {
+                punctualLightBounds[lightIndex] = lightBounds[lightIndex];
+                punctualLightVolumeData[lightIndex] = lightVolumeData[lightIndex];
+            }
+        }
+
+        private void ApplyAreaLightClusteredCullData(
+            NativeList<SFiniteLightBound> lightBounds,
+            NativeList<LightVolumeData> lightVolumeData)
+        {
+            for (var lightIndex = 0; lightIndex < areaLightCount; lightIndex++)
+            {
+                areaLightBounds[lightIndex] = lightBounds[lightIndex];
+                areaLightVolumeData[lightIndex] = lightVolumeData[lightIndex];
+            }
         }
 
         private void CollectVisibleLightRenderDataRecords(

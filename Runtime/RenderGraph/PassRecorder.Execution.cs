@@ -156,7 +156,7 @@ namespace VividRP.Runtime
             renderingData.context = context;
             gpuDrivenFrameData.Reset();
             gpuDrivenDecalData.Reset();
-            lightData.Update(cullingResults);
+            lightData.Update(cullingResults, cameraData.viewMatrix);
         }
 
         private static int ResolveFrameIndex()

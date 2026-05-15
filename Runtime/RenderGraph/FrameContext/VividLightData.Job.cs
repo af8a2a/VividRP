@@ -145,13 +145,18 @@ namespace VividRP.Runtime
         }
 
 
-        [BurstCompile]
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
         private struct BuildLightGridLightCandidatesJob : IJob
         {
             [ReadOnly] public NativeArray<VisibleLightRenderDataRecord> visibleLightRenderDataRecords;
 
             public NativeList<PunctualLightCandidate> punctualLights;
             public NativeList<AreaLightCandidate> areaLights;
+            public NativeList<SFiniteLightBound> punctualLightBounds;
+            public NativeList<LightVolumeData> punctualLightVolumeData;
+            public NativeList<SFiniteLightBound> areaLightBounds;
+            public NativeList<LightVolumeData> areaLightVolumeData;
+            public float4x4 worldToViewMatrix;
 
             public void Execute()
             {
@@ -161,16 +166,33 @@ namespace VividRP.Runtime
 
                     if (IsPunctualLightSupported(lightRenderData))
                     {
-                        punctualLights.AddNoResize(
-                            CreatePunctualLightCandidate(
-                                lightRenderData));
+                        var candidate = CreatePunctualLightCandidate(lightRenderData);
+                        var viewSpaceCullData = BuildPunctualLightViewSpaceCullDataRecord(
+                            candidate.lightCullData,
+                            worldToViewMatrix);
+                        BuildPunctualLightVolumeDataAndBound(
+                            candidate.lightCullData,
+                            viewSpaceCullData,
+                            out var lightVolumeData,
+                            out var lightBound);
+
+                        punctualLights.AddNoResize(candidate);
+                        punctualLightBounds.AddNoResize(lightBound);
+                        punctualLightVolumeData.AddNoResize(lightVolumeData);
                     }
 
                     if (IsAreaLightSupported(lightRenderData))
                     {
-                        areaLights.AddNoResize(
-                            CreateAreaLightCandidate(
-                                lightRenderData));
+                        var candidate = CreateAreaLightCandidate(lightRenderData);
+                        BuildAreaLightVolumeDataAndBound(
+                            candidate.lightData,
+                            worldToViewMatrix,
+                            out var lightVolumeData,
+                            out var lightBound);
+
+                        areaLights.AddNoResize(candidate);
+                        areaLightBounds.AddNoResize(lightBound);
+                        areaLightVolumeData.AddNoResize(lightVolumeData);
                     }
                 }
             }

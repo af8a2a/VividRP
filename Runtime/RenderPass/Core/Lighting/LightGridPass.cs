@@ -195,6 +195,9 @@ namespace VividRP.Runtime
         {
             Camera camera;
             VividLightData lightData;
+            int punctualLightCapacity;
+            int areaLightCapacity;
+            int finiteLightCapacity;
 
             using (s_PrepareFrameDataMarker.Auto())
             {
@@ -202,16 +205,17 @@ namespace VividRP.Runtime
                 lightData = frameData.GetOrCreate<VividLightData>();
                 camera = cameraData.camera;
 
-                lightData.CompleteLightGridPrepare();
-
                 m_DirectionalLightCount = lightData.directionalLightCount;
-                m_PunctualLightCount = lightData.punctualLightCount;
-                m_AreaLightCount = lightData.areaLightCount;
+                m_PunctualLightCount = 0;
+                m_AreaLightCount = 0;
                 m_DecalCount = lightData.decalCount;
-                m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_DecalCount;
+                m_FiniteLightCount = m_DecalCount;
                 m_MainDirectionalLightIndex = lightData.mainDirectionalLightIndex;
                 m_LightingWidth = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
                 m_LightingHeight = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
+                punctualLightCapacity = Mathf.Max(lightData.visibleLightCount, 1);
+                areaLightCapacity = punctualLightCapacity;
+                finiteLightCapacity = Mathf.Max(lightData.visibleLightCount + m_DecalCount, 1);
 
                 if (m_LightingWidth <= 0)
                     m_LightingWidth = Mathf.Max(1, Screen.width);
@@ -238,12 +242,12 @@ namespace VividRP.Runtime
                 UpdateLightListMatrices(camera);
 
                 ResizeStructuredBuffer(m_DirectionalLightBuffer, Mathf.Max(m_DirectionalLightCount, 1), VividLightData.DirectionalLightData.Stride);
-                ResizeStructuredBuffer(m_PunctualLightBuffer, Mathf.Max(m_PunctualLightCount, 1), VividLightData.PunctualLightData.Stride);
-                ResizeStructuredBuffer(m_AreaLightBuffer, Mathf.Max(m_AreaLightCount, 1), VividLightData.AreaLightData.Stride);
+                ResizeStructuredBuffer(m_PunctualLightBuffer, punctualLightCapacity, VividLightData.PunctualLightData.Stride);
+                ResizeStructuredBuffer(m_AreaLightBuffer, areaLightCapacity, VividLightData.AreaLightData.Stride);
                 ResizeStructuredBuffer(m_DecalDataBuffer, Mathf.Max(m_DecalCount, 1), VividLightData.DecalClusterData.Stride);
-                ResizeStructuredBuffer(m_FiniteLightBoundBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.SFiniteLightBound.Stride);
-                ResizeStructuredBuffer(m_LightVolumeDataBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.LightVolumeData.Stride);
-                ResizeStructuredBuffer(m_ScreenSpaceBoundsBuffer, Mathf.Max(m_FiniteLightCount * 2, 1), sizeof(float) * 4);
+                ResizeStructuredBuffer(m_FiniteLightBoundBuffer, finiteLightCapacity, VividLightData.SFiniteLightBound.Stride);
+                ResizeStructuredBuffer(m_LightVolumeDataBuffer, finiteLightCapacity, VividLightData.LightVolumeData.Stride);
+                ResizeStructuredBuffer(m_ScreenSpaceBoundsBuffer, Mathf.Max(finiteLightCapacity * 2, 1), sizeof(float) * 4);
                 ResizeStructuredBuffer(m_BigTileLightListBuffer, Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_BigTileVolumetricLightListBuffer, Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredOffsetBuffer, Mathf.Max(m_LayeredOffsetCapacity, 1), sizeof(uint));
@@ -259,6 +263,12 @@ namespace VividRP.Runtime
 
             using (s_PrepareUploadMarker.Auto())
             {
+                lightData.CompleteLightGridPrepare();
+
+                m_PunctualLightCount = lightData.punctualLightCount;
+                m_AreaLightCount = lightData.areaLightCount;
+                m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_DecalCount;
+
                 UploadLightData(lightData, camera);
             }
 

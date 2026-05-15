@@ -361,40 +361,55 @@ namespace VividRP.Runtime
                 m_LightGridAreaLightVolumeData);
             m_LightGridClusteredCullDataPrepared = true;
 
-            DisposeLightGridBuffers();
+            ClearLightGridBuffers();
         }
 
         private void DrainLightGridPrepare()
         {
-            if (!m_LightGridJobScheduled)
+            if (m_LightGridJobScheduled)
             {
-                DisposeLightGridBuffers();
-                return;
+                m_LightGridJobHandle.Complete();
+                m_LightGridJobHandle = default;
+                m_LightGridJobScheduled = false;
             }
 
-            m_LightGridJobHandle.Complete();
-            m_LightGridJobHandle = default;
-            m_LightGridJobScheduled = false;
+            m_LightGridClusteredCullDataPrepared = false;
+            ClearLightGridBuffers();
+        }
+
+        internal void ReleaseLightGridNativeResources()
+        {
+            if (m_LightGridJobScheduled)
+            {
+                m_LightGridJobHandle.Complete();
+                m_LightGridJobHandle = default;
+                m_LightGridJobScheduled = false;
+            }
+
             m_LightGridClusteredCullDataPrepared = false;
             DisposeLightGridBuffers();
         }
 
+        private void ClearLightGridBuffers()
+        {
+            ClearLightGridBuffer(ref m_LightGridVisibleLightRecords);
+            ClearLightGridBuffer(ref m_LightGridPunctualCandidates);
+            ClearLightGridBuffer(ref m_LightGridAreaCandidates);
+            ClearLightGridBuffer(ref m_LightGridPunctualLightBounds);
+            ClearLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
+            ClearLightGridBuffer(ref m_LightGridAreaLightBounds);
+            ClearLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+        }
+
         private void DisposeLightGridBuffers()
         {
-            if (m_LightGridVisibleLightRecords.IsCreated)
-                m_LightGridVisibleLightRecords.Dispose();
-            if (m_LightGridPunctualCandidates.IsCreated)
-                m_LightGridPunctualCandidates.Dispose();
-            if (m_LightGridAreaCandidates.IsCreated)
-                m_LightGridAreaCandidates.Dispose();
-            if (m_LightGridPunctualLightBounds.IsCreated)
-                m_LightGridPunctualLightBounds.Dispose();
-            if (m_LightGridPunctualLightVolumeData.IsCreated)
-                m_LightGridPunctualLightVolumeData.Dispose();
-            if (m_LightGridAreaLightBounds.IsCreated)
-                m_LightGridAreaLightBounds.Dispose();
-            if (m_LightGridAreaLightVolumeData.IsCreated)
-                m_LightGridAreaLightVolumeData.Dispose();
+            DisposeLightGridBuffer(ref m_LightGridVisibleLightRecords);
+            DisposeLightGridBuffer(ref m_LightGridPunctualCandidates);
+            DisposeLightGridBuffer(ref m_LightGridAreaCandidates);
+            DisposeLightGridBuffer(ref m_LightGridPunctualLightBounds);
+            DisposeLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
+            DisposeLightGridBuffer(ref m_LightGridAreaLightBounds);
+            DisposeLightGridBuffer(ref m_LightGridAreaLightVolumeData);
         }
 
         internal void UpdateFiniteLightClusteredCullData(Matrix4x4 worldToViewMatrix)
@@ -656,19 +671,13 @@ namespace VividRP.Runtime
             m_LightGridClusteredCullDataPrepared = false;
 
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
+            {
+                ClearLightGridBuffers();
                 return;
+            }
 
             var lightCapacity = Mathf.Max(visibleLights.Length, 1);
-
-            // VisibleLightRenderDataRecord must be built on the main thread (touches managed Light + database).
-            // It is consumed by both the synchronous directional pass below and the deferred LightGrid Burst job.
-            m_LightGridVisibleLightRecords = new NativeList<VisibleLightRenderDataRecord>(lightCapacity, Allocator.Persistent);
-            m_LightGridPunctualCandidates = new NativeList<PunctualLightCandidate>(lightCapacity, Allocator.Persistent);
-            m_LightGridAreaCandidates = new NativeList<AreaLightCandidate>(lightCapacity, Allocator.Persistent);
-            m_LightGridPunctualLightBounds = new NativeList<SFiniteLightBound>(lightCapacity, Allocator.Persistent);
-            m_LightGridPunctualLightVolumeData = new NativeList<LightVolumeData>(lightCapacity, Allocator.Persistent);
-            m_LightGridAreaLightBounds = new NativeList<SFiniteLightBound>(lightCapacity, Allocator.Persistent);
-            m_LightGridAreaLightVolumeData = new NativeList<LightVolumeData>(lightCapacity, Allocator.Persistent);
+            EnsureLightGridBufferCapacity(lightCapacity);
 
             CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
 
@@ -688,6 +697,54 @@ namespace VividRP.Runtime
             m_LightGridJobHandle = buildLightGridJob.Schedule();
             m_LightGridJobScheduled = true;
             JobHandle.ScheduleBatchedJobs();
+        }
+
+        private void EnsureLightGridBufferCapacity(int lightCapacity)
+        {
+            // VisibleLightRenderDataRecord must be built on the main thread (touches managed Light + database).
+            // It is consumed by both the synchronous directional pass below and the deferred LightGrid Burst job.
+            EnsureLightGridBufferCapacity(ref m_LightGridVisibleLightRecords, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridPunctualCandidates, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridAreaCandidates, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightBounds, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightVolumeData, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridAreaLightBounds, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridAreaLightVolumeData, lightCapacity);
+        }
+
+        private static void EnsureLightGridBufferCapacity<T>(
+            ref NativeList<T> list,
+            int requiredCapacity) where T : unmanaged
+        {
+            requiredCapacity = Mathf.Max(requiredCapacity, 1);
+
+            if (!list.IsCreated)
+            {
+                list = new NativeList<T>(requiredCapacity, Allocator.Persistent);
+                return;
+            }
+
+            if (list.Capacity < requiredCapacity)
+                list.Capacity = requiredCapacity;
+
+            list.Clear();
+        }
+
+        private static void ClearLightGridBuffer<T>(ref NativeList<T> list)
+            where T : unmanaged
+        {
+            if (list.IsCreated)
+                list.Clear();
+        }
+
+        private static void DisposeLightGridBuffer<T>(ref NativeList<T> list)
+            where T : unmanaged
+        {
+            if (!list.IsCreated)
+                return;
+
+            list.Dispose();
+            list = default;
         }
 
         private void CollectDirectionalLightCandidatesAndApply(

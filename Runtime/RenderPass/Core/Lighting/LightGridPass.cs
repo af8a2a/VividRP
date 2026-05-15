@@ -251,6 +251,7 @@ namespace VividRP.Runtime
                 ResizeStructuredBuffer(m_LayeredLightListBuffer, Mathf.Max(m_ClusterLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredLightListCounterBuffer, 1, sizeof(uint));
                 ResizeStructuredBuffer(m_LogBaseBuffer, Mathf.Max(m_ClusterTileCount, 1), sizeof(float));
+                EnsureLightGridUploadCapacity(punctualLightCapacity, areaLightCapacity, finiteLightCapacity);
             }
 
             using (s_PrepareImportMarker.Auto())
@@ -879,6 +880,34 @@ namespace VividRP.Runtime
             EnsureNativeUploadCapacity(ref uploadData, count);
             NativeArray<T>.Copy(source, uploadData, count);
             UploadNativeArray(buffer, uploadData, count);
+        }
+
+        private void EnsureLightGridUploadCapacity(
+            int punctualLightCapacity,
+            int areaLightCapacity,
+            int finiteLightCapacity)
+        {
+            EnsureNativeUploadCapacity(
+                ref m_DirectionalLightUploadNativeData,
+                Mathf.Max(m_DirectionalLightCount, 1));
+            EnsureNativeUploadCapacity(
+                ref m_PunctualLightUploadNativeData,
+                Mathf.Max(punctualLightCapacity, 1));
+            EnsureNativeUploadCapacity(
+                ref m_AreaLightUploadNativeData,
+                Mathf.Max(areaLightCapacity, 1));
+            EnsureNativeUploadCapacity(
+                ref m_DecalDataUploadNativeData,
+                Mathf.Max(m_DecalCount, 1));
+            EnsureNativeUploadCapacity(
+                ref m_FiniteLightBoundUploadNativeData,
+                Mathf.Max(finiteLightCapacity, 1));
+            EnsureNativeUploadCapacity(
+                ref m_LightVolumeDataUploadNativeData,
+                Mathf.Max(finiteLightCapacity, 1));
+            EnsureZeroedNativeUploadCapacity(
+                ref m_LayeredOffsetUploadNativeData,
+                Mathf.Max(m_LayeredOffsetCapacity, 1));
         }
 
         private static void UploadNativeArray<T>(

@@ -296,6 +296,8 @@ namespace VividRP.Runtime
             RenderGraphHistoryRegistry.Clear();
             RenderGraphBufferHistoryRegistry.Clear();
             VividAntialiasingRuntimeUtility.Clear();
+            if (s_FrameData.Contains<VividLightData>())
+                s_FrameData.Get<VividLightData>().ReleaseLightGridNativeResources();
             FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_EditModeFrameIndex = 0;

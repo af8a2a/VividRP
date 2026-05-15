@@ -13,6 +13,9 @@ namespace VividRP.Runtime.SubSystem.Decal
 {
     internal static class DecalSystem
     {
+        private const int k_InlineJobDecalThreshold = 64;
+        private const int k_PrepareJobBatchSize = 32;
+        private const int k_CullJobBatchSize = 64;
         private static readonly Quaternion s_ProjectorToDecalSpaceRotation = Quaternion.Euler(-90.0f, 0.0f, 0.0f);
         private static readonly List<DecalProjector> s_Projectors = new();
 
@@ -28,7 +31,9 @@ namespace VividRP.Runtime.SubSystem.Decal
         private static JobHandle s_PreparedJobHandle;
         private static JobHandle s_CullJobHandle;
         private static EntityId s_CullScheduledForCameraId;
+        private static bool s_PrepareScheduled;
         private static bool s_CullScheduled;
+        private static bool s_CullReady;
         private static bool s_KickRan;
         private static bool s_Initialized;
 
@@ -120,11 +125,11 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalKickMarker.Auto())
             {
-                BuildSnapshotAndSchedulePrepare();
+                BuildSnapshotAndSchedulePrepare(true);
             }
         }
 
-        private static void BuildSnapshotAndSchedulePrepare()
+        private static void BuildSnapshotAndSchedulePrepare(bool allowAsyncSchedule)
         {
             // Drain any leftover cull/prepare from the previous frame (e.g. SRP swapped, no camera rendered).
             CompleteScheduledWork();
@@ -168,7 +173,16 @@ namespace VividRP.Runtime.SubSystem.Decal
                 Prepared = s_Prepared,
                 CullingInstances = s_CullingInstances,
             };
-            s_PreparedJobHandle = job.Schedule(sourceCount, 32);
+
+            if (!allowAsyncSchedule || ShouldRunInline(sourceCount))
+            {
+                job.Run(sourceCount);
+                return;
+            }
+
+            s_PreparedJobHandle = job.Schedule(sourceCount, k_PrepareJobBatchSize);
+            s_PrepareScheduled = true;
+            JobHandle.ScheduleBatchedJobs();
         }
 
         private static void EnsureSnapshotCapacity(int requiredCapacity)
@@ -213,20 +227,15 @@ namespace VividRP.Runtime.SubSystem.Decal
                 return;
 
             // Persistent cull buffers are shared across cameras; drain any pending slot before reusing them.
-            if (s_CullScheduled)
-            {
+            if (s_CullScheduled || s_CullReady)
                 CompleteScheduledWork();
-            }
 
             if (s_SourceCount == 0)
                 return;
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalCullScheduleMarker.Auto())
             {
-                var cullingJob = CreateFrustumCullingJob(camera);
-                s_CullJobHandle = cullingJob.Schedule(s_SourceCount, 64, s_PreparedJobHandle);
-                s_CullScheduled = true;
-                s_CullScheduledForCameraId = camera.GetEntityId();
+                ScheduleOrRunCull(camera);
             }
         }
 
@@ -244,7 +253,7 @@ namespace VividRP.Runtime.SubSystem.Decal
                 Initialize();
 
             if (!s_KickRan)
-                BuildSnapshotAndSchedulePrepare();
+                BuildSnapshotAndSchedulePrepare(false);
 
             Camera camera = GetCamera(frameData);
             if (camera == null || s_SourceCount == 0)
@@ -259,7 +268,7 @@ namespace VividRP.Runtime.SubSystem.Decal
 
             // Cull was scheduled by OnBeginCameraRendering for this camera — just join the result.
             EntityId cameraId = camera.GetEntityId();
-            if (s_CullScheduled && s_CullScheduledForCameraId == cameraId)
+            if ((s_CullScheduled || s_CullReady) && s_CullScheduledForCameraId == cameraId)
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemDecalCompleteMarker.Auto())
                 {
@@ -277,24 +286,62 @@ namespace VividRP.Runtime.SubSystem.Decal
                 CompleteScheduledWork();
             }
 
-            var cullingJob = CreateFrustumCullingJob(camera);
-            cullingJob.Schedule(s_SourceCount, 64).Complete();
+            RunCullInlineOrComplete(camera);
 
             EmitVisibleDecals(frameData, s_VisibleIndices.AsArray());
+        }
+
+        private static bool ShouldRunInline(int decalCount)
+        {
+            return decalCount <= k_InlineJobDecalThreshold;
         }
 
         private static void CompleteScheduledWork()
         {
             bool completedCull = s_CullScheduled;
-            s_CullJobHandle.Complete();
+            if (s_CullScheduled)
+                s_CullJobHandle.Complete();
             s_CullJobHandle = default;
             s_CullScheduled = false;
+            s_CullReady = false;
             s_CullScheduledForCameraId = default;
 
-            if (!completedCull)
+            if (!completedCull && s_PrepareScheduled)
                 s_PreparedJobHandle.Complete();
 
             s_PreparedJobHandle = default;
+            s_PrepareScheduled = false;
+        }
+
+        private static void ScheduleOrRunCull(Camera camera)
+        {
+            var cullingJob = CreateFrustumCullingJob(camera);
+            EntityId cameraId = camera.GetEntityId();
+
+            if (!s_PrepareScheduled && ShouldRunInline(s_SourceCount))
+            {
+                cullingJob.Run(s_SourceCount);
+                s_CullReady = true;
+                s_CullScheduledForCameraId = cameraId;
+                return;
+            }
+
+            s_CullJobHandle = cullingJob.Schedule(s_SourceCount, k_CullJobBatchSize, s_PreparedJobHandle);
+            s_CullScheduled = true;
+            s_CullScheduledForCameraId = cameraId;
+            JobHandle.ScheduleBatchedJobs();
+        }
+
+        private static void RunCullInlineOrComplete(Camera camera)
+        {
+            var cullingJob = CreateFrustumCullingJob(camera);
+            if (ShouldRunInline(s_SourceCount))
+            {
+                cullingJob.Run(s_SourceCount);
+                return;
+            }
+
+            cullingJob.Schedule(s_SourceCount, k_CullJobBatchSize).Complete();
         }
 
         private static FrustumCullingJob CreateFrustumCullingJob(Camera camera)

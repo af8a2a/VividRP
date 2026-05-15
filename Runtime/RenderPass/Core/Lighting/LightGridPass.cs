@@ -202,6 +202,8 @@ namespace VividRP.Runtime
                 lightData = frameData.GetOrCreate<VividLightData>();
                 camera = cameraData.camera;
 
+                lightData.CompleteLightGridPrepare();
+
                 m_DirectionalLightCount = lightData.directionalLightCount;
                 m_PunctualLightCount = lightData.punctualLightCount;
                 m_AreaLightCount = lightData.areaLightCount;

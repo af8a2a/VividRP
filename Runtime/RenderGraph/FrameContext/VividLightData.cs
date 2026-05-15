@@ -139,15 +139,6 @@ namespace VividRP.Runtime
             internal static int Stride => Marshal.SizeOf<DecalClusterData>();
         }
 
-        [Flags]
-        private enum VisibleLightCollectionMask
-        {
-            None = 0,
-            Directional = 1 << 0,
-            Punctual = 1 << 1,
-            Area = 1 << 2,
-        }
-
         private const uint HdrpLightCategoryPunctual = 0u;
         private const uint HdrpLightCategoryArea = 1u;
         private const uint HdrpLightCategoryDecal = 3u;
@@ -293,6 +284,14 @@ namespace VividRP.Runtime
         public int mainDirectionalLightIndex;
         public EntityId mainDirectionalLightEntityId;
 
+        // LightGrid candidate build runs on a Burst job scheduled in Update and completed by LightGridPass.Prepare.
+        // The fields below are owned by VividLightData while the job is in flight; do not access from outside CompleteLightGridPrepare.
+        private NativeList<VisibleLightRenderDataRecord> m_LightGridVisibleLightRecords;
+        private NativeList<PunctualLightCandidate> m_LightGridPunctualCandidates;
+        private NativeList<AreaLightCandidate> m_LightGridAreaCandidates;
+        private JobHandle m_LightGridJobHandle;
+        private bool m_LightGridJobScheduled;
+
         public bool hasVisibleLights => visibleLights.IsCreated && visibleLights.Length > 0;
 
         public bool hasVisibleReflectionProbes => visibleReflectionProbes.IsCreated && visibleReflectionProbes.Length > 0;
@@ -323,12 +322,53 @@ namespace VividRP.Runtime
 
         internal void Update(CullingResults cullingResults)
         {
+            // Defensive: previous frame's LightGridPass should have drained this, but bail-outs (camera early-return,
+            // pipeline swap) can leave the handle live. Drain before mutating any state read by the job.
+            DrainLightGridPrepare();
+
             visibleLights = cullingResults.visibleLights;
             visibleReflectionProbes = cullingResults.visibleReflectionProbes;
-            UpdateVisibleLightData(
-                visibleLights,
-                RenderSettings.sun,
-                VisibleLightCollectionMask.Directional | VisibleLightCollectionMask.Punctual | VisibleLightCollectionMask.Area);
+            UpdateVisibleLightData(visibleLights, RenderSettings.sun);
+        }
+
+        // Called from LightGridPass.Prepare just before LightGrid reads punctualLightCount/areaLightCount/punctualLights/areaLights.
+        internal void CompleteLightGridPrepare()
+        {
+            if (!m_LightGridJobScheduled)
+                return;
+
+            m_LightGridJobHandle.Complete();
+            m_LightGridJobHandle = default;
+            m_LightGridJobScheduled = false;
+
+            ApplyPunctualLightCandidates(m_LightGridPunctualCandidates);
+            ApplyAreaLightCandidates(m_LightGridAreaCandidates);
+
+            DisposeLightGridBuffers();
+        }
+
+        private void DrainLightGridPrepare()
+        {
+            if (!m_LightGridJobScheduled)
+            {
+                DisposeLightGridBuffers();
+                return;
+            }
+
+            m_LightGridJobHandle.Complete();
+            m_LightGridJobHandle = default;
+            m_LightGridJobScheduled = false;
+            DisposeLightGridBuffers();
+        }
+
+        private void DisposeLightGridBuffers()
+        {
+            if (m_LightGridVisibleLightRecords.IsCreated)
+                m_LightGridVisibleLightRecords.Dispose();
+            if (m_LightGridPunctualCandidates.IsCreated)
+                m_LightGridPunctualCandidates.Dispose();
+            if (m_LightGridAreaCandidates.IsCreated)
+                m_LightGridAreaCandidates.Dispose();
         }
 
         internal void UpdateFiniteLightClusteredCullData(Matrix4x4 worldToViewMatrix)
@@ -494,6 +534,8 @@ namespace VividRP.Runtime
 
         public override void Reset()
         {
+            DrainLightGridPrepare();
+
             visibleLights = default;
             visibleReflectionProbes = default;
             mainLightIndex = -1;
@@ -560,59 +602,58 @@ namespace VividRP.Runtime
         }
 
 
-        private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight, VisibleLightCollectionMask collectionMask)
+        private void UpdateVisibleLightData(NativeArray<VisibleLight> visibleLights, Light sunLight)
         {
-            var collectDirectionalLights = (collectionMask & VisibleLightCollectionMask.Directional) != 0;
-            var collectPunctualLights = (collectionMask & VisibleLightCollectionMask.Punctual) != 0;
-            var collectAreaLights = (collectionMask & VisibleLightCollectionMask.Area) != 0;
-
-            if (collectDirectionalLights)
-            {
-                directionalLightCount = 0;
-                mainLightIndex = -1;
-                mainLightEntityId = EntityId.None;
-                mainDirectionalLightIndex = -1;
-                mainDirectionalLightEntityId = EntityId.None;
-            }
-
-            if (collectPunctualLights)
-                punctualLightCount = 0;
-
-            if (collectAreaLights)
-                areaLightCount = 0;
+            directionalLightCount = 0;
+            mainLightIndex = -1;
+            mainLightEntityId = EntityId.None;
+            mainDirectionalLightIndex = -1;
+            mainDirectionalLightEntityId = EntityId.None;
+            punctualLightCount = 0;
+            areaLightCount = 0;
 
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
                 return;
 
             var lightCapacity = Mathf.Max(visibleLights.Length, 1);
-            using var visibleLightRenderDataRecords = new NativeList<VisibleLightRenderDataRecord>(lightCapacity, Allocator.TempJob);
-            using var directionalCandidates = new NativeList<DirectionalLightCandidate>(lightCapacity, Allocator.TempJob);
-            using var punctualCandidates = new NativeList<PunctualLightCandidate>(lightCapacity, Allocator.TempJob);
-            using var areaCandidates = new NativeList<AreaLightCandidate>(lightCapacity, Allocator.TempJob);
 
-            CollectVisibleLightRenderDataRecords(visibleLights, visibleLightRenderDataRecords);
+            // VisibleLightRenderDataRecord must be built on the main thread (touches managed Light + database).
+            // It is consumed by both the synchronous directional pass below and the deferred LightGrid Burst job.
+            m_LightGridVisibleLightRecords = new NativeList<VisibleLightRenderDataRecord>(lightCapacity, Allocator.Persistent);
+            m_LightGridPunctualCandidates = new NativeList<PunctualLightCandidate>(lightCapacity, Allocator.Persistent);
+            m_LightGridAreaCandidates = new NativeList<AreaLightCandidate>(lightCapacity, Allocator.Persistent);
 
-            var buildCandidatesJob = new BuildVisibleLightCandidatesJob
+            CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
+
+            CollectDirectionalLightCandidatesAndApply(m_LightGridVisibleLightRecords, sunLight);
+
+            var buildLightGridJob = new BuildLightGridLightCandidatesJob
             {
-                visibleLightRenderDataRecords = visibleLightRenderDataRecords.AsArray(),
-                collectDirectionalLights = collectDirectionalLights,
-                collectPunctualLights = collectPunctualLights,
-                collectAreaLights = collectAreaLights,
-                directionalLights = directionalCandidates,
-                punctualLights = punctualCandidates,
-                areaLights = areaCandidates,
+                visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
+                punctualLights = m_LightGridPunctualCandidates,
+                areaLights = m_LightGridAreaCandidates,
             };
+            m_LightGridJobHandle = buildLightGridJob.Schedule();
+            m_LightGridJobScheduled = true;
+        }
 
-            buildCandidatesJob.Schedule().Complete();
+        private void CollectDirectionalLightCandidatesAndApply(
+            NativeList<VisibleLightRenderDataRecord> visibleLightRenderDataRecords,
+            Light sunLight)
+        {
+            using var directionalCandidates = new NativeList<DirectionalLightCandidate>(visibleLightRenderDataRecords.Length, Allocator.Temp);
 
-            if (collectDirectionalLights)
-                ApplyDirectionalLightCandidates(directionalCandidates, sunLight);
+            for (var lightIndex = 0; lightIndex < visibleLightRenderDataRecords.Length; lightIndex++)
+            {
+                var record = visibleLightRenderDataRecords[lightIndex];
+                if (record.lightRenderData.lightType != LightType.Directional)
+                    continue;
 
-            if (collectPunctualLights)
-                ApplyPunctualLightCandidates(punctualCandidates);
+                directionalCandidates.Add(
+                    CreateDirectionalLightCandidate(record.visibleLightIndex, record.lightRenderData));
+            }
 
-            if (collectAreaLights)
-                ApplyAreaLightCandidates(areaCandidates);
+            ApplyDirectionalLightCandidates(directionalCandidates, sunLight);
         }
 
         private void ApplyDirectionalLightCandidates(NativeList<DirectionalLightCandidate> directionalCandidates, Light sunLight)

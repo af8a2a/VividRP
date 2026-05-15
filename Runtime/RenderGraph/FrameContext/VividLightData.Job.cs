@@ -146,14 +146,10 @@ namespace VividRP.Runtime
 
 
         [BurstCompile]
-        private struct BuildVisibleLightCandidatesJob : IJob
+        private struct BuildLightGridLightCandidatesJob : IJob
         {
             [ReadOnly] public NativeArray<VisibleLightRenderDataRecord> visibleLightRenderDataRecords;
 
-            public bool collectDirectionalLights;
-            public bool collectPunctualLights;
-            public bool collectAreaLights;
-            public NativeList<DirectionalLightCandidate> directionalLights;
             public NativeList<PunctualLightCandidate> punctualLights;
             public NativeList<AreaLightCandidate> areaLights;
 
@@ -161,25 +157,16 @@ namespace VividRP.Runtime
             {
                 for (var lightIndex = 0; lightIndex < visibleLightRenderDataRecords.Length; lightIndex++)
                 {
-                    var visibleLightRenderDataRecord = visibleLightRenderDataRecords[lightIndex];
-                    var lightRenderData = visibleLightRenderDataRecord.lightRenderData;
+                    var lightRenderData = visibleLightRenderDataRecords[lightIndex].lightRenderData;
 
-                    if (collectDirectionalLights && lightRenderData.lightType == LightType.Directional)
-                    {
-                        directionalLights.AddNoResize(
-                            CreateDirectionalLightCandidate(
-                                visibleLightRenderDataRecord.visibleLightIndex,
-                                lightRenderData));
-                    }
-
-                    if (collectPunctualLights && IsPunctualLightSupported(lightRenderData))
+                    if (IsPunctualLightSupported(lightRenderData))
                     {
                         punctualLights.AddNoResize(
                             CreatePunctualLightCandidate(
                                 lightRenderData));
                     }
 
-                    if (collectAreaLights && IsAreaLightSupported(lightRenderData))
+                    if (IsAreaLightSupported(lightRenderData))
                     {
                         areaLights.AddNoResize(
                             CreateAreaLightCandidate(

@@ -51,10 +51,46 @@ namespace VividRP.Editor.Tests
             AssertNativeArrayField("m_LightVolumeDataUploadNativeData", typeof(VividLightData.LightVolumeData));
             AssertNativeArrayField("m_LayeredOffsetUploadNativeData", typeof(uint));
 
-            var oldManagedLayeredOffsetField = typeof(LightGridPass).GetField(
-                "m_LayeredOffsetUploadData",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(oldManagedLayeredOffsetField, Is.Null);
+            AssertNoField("m_DirectionalLightUploadData");
+            AssertNoField("m_FiniteLightBoundUploadData");
+            AssertNoField("m_LightVolumeDataUploadData");
+            AssertNoField("m_LayeredOffsetUploadData");
+        }
+
+        [Test]
+        public void ResizeStructuredBuffer_ExpandsCapacity_WhenRequiredCountExceedsCurrentCapacity()
+        {
+            var buffer = RenderGraphBuffer.CreateStructured("TestBuffer", 100, sizeof(uint));
+
+            InvokeResizeStructuredBuffer(buffer, 120, sizeof(uint));
+
+            Assert.That(buffer.desc.Count, Is.EqualTo(120));
+            Assert.That(buffer.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(buffer.desc.Target, Is.EqualTo(GraphicsBuffer.Target.Structured));
+        }
+
+        [Test]
+        public void ResizeStructuredBuffer_KeepsCapacity_WhenRequiredCountFitsCurrentCapacity()
+        {
+            var buffer = RenderGraphBuffer.CreateStructured("TestBuffer", 100, sizeof(uint));
+
+            InvokeResizeStructuredBuffer(buffer, 34, sizeof(uint));
+
+            Assert.That(buffer.desc.Count, Is.EqualTo(100));
+            Assert.That(buffer.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(buffer.desc.Target, Is.EqualTo(GraphicsBuffer.Target.Structured));
+        }
+
+        [Test]
+        public void ResizeStructuredBuffer_ShrinksCapacity_WhenRequiredCountFallsBelowOneThirdCapacity()
+        {
+            var buffer = RenderGraphBuffer.CreateStructured("TestBuffer", 100, sizeof(uint));
+
+            InvokeResizeStructuredBuffer(buffer, 32, sizeof(uint));
+
+            Assert.That(buffer.desc.Count, Is.EqualTo(32));
+            Assert.That(buffer.desc.Stride, Is.EqualTo(sizeof(uint)));
+            Assert.That(buffer.desc.Target, Is.EqualTo(GraphicsBuffer.Target.Structured));
         }
 
         [Test]
@@ -106,6 +142,16 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(buffer.desc.Stride), fieldName);
         }
 
+        private static void InvokeResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)
+        {
+            var method = typeof(LightGridPass).GetMethod(
+                "ResizeStructuredBuffer",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null);
+
+            method.Invoke(null, new object[] { buffer, count, stride });
+        }
+
         private static void AssertNativeArrayField(string fieldName, Type elementType)
         {
             var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -113,6 +159,12 @@ namespace VividRP.Editor.Tests
             Assert.That(field.FieldType.IsGenericType, Is.True, fieldName);
             Assert.That(field.FieldType.GetGenericTypeDefinition(), Is.EqualTo(typeof(NativeArray<>)), fieldName);
             Assert.That(field.FieldType.GetGenericArguments()[0], Is.EqualTo(elementType), fieldName);
+        }
+
+        private static void AssertNoField(string fieldName)
+        {
+            var field = typeof(LightGridPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Null, fieldName);
         }
 
         private static void AssertBindingMode(string fieldName, RenderGraphResourceBindingMode expectedBindingMode)

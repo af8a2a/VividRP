@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal static class VirtualTextureSystem
+    internal sealed class VirtualTextureSystem : VividSubsystem<VirtualTextureSystem>
     {
         private static readonly Dictionary<int, VTAddressSpace> s_AddressSpaces = new();
         private static readonly Dictionary<string, int> s_SpaceIdsByName = new(StringComparer.Ordinal);
@@ -16,7 +16,6 @@ namespace VividRP.Runtime
         private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();
         private static readonly Dictionary<int, List<VirtualTextureAggregatedFeedbackRequest>> s_GroupedRequests = new();
 
-        private static bool s_Initialized;
         private static int s_NextSpaceId = 1;
         private static int s_FallbackFrameIndex = -1;
 
@@ -25,27 +24,17 @@ namespace VividRP.Runtime
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif
-
-        internal static void Initialize()
+        private static void AutoInitialize()
         {
-            if (s_Initialized)
-                return;
-
-            FrameContextSystem.SubsystemPreRender -= Update;
-            FrameContextSystem.SubsystemPreRender += Update;
-            s_Initialized = true;
+            Initialize();
         }
 
-        internal static void Deinitialize()
+        protected override void OnInitialize()
         {
-            if (!s_Initialized)
-            {
-                VirtualTextureStatsRegistry.Clear();
-                return;
-            }
+        }
 
-            FrameContextSystem.SubsystemPreRender -= Update;
-
+        protected override void OnDeinitialize()
+        {
             foreach (VTAddressSpace addressSpace in s_AddressSpaces.Values)
                 addressSpace.Dispose();
 
@@ -59,8 +48,12 @@ namespace VividRP.Runtime
             s_FeedbackCameraSystem.Dispose();
             s_NextSpaceId = 1;
             s_FallbackFrameIndex = -1;
-            s_Initialized = false;
             VTUploadScheduler.ResetFenceFactory();
+        }
+
+        public new static void Deinitialize()
+        {
+            VividSubsystem<VirtualTextureSystem>.Deinitialize();
             VirtualTextureStatsRegistry.Clear();
         }
 
@@ -100,9 +93,14 @@ namespace VividRP.Runtime
             }
         }
 
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
+        {
+            Update(frameData, cmd);
+        }
+
         private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             VividVirtualTextureFrameData virtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();

@@ -181,7 +181,12 @@ namespace VividRP.Editor.Tests
 
             FrameContextSystem.Clear();
 
-            Assert.That(HasFrameContextSubscriber("SubsystemPreRender", typeof(VividGPUDrivenSystem), "Update"), Is.True);
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemPreRender",
+                    typeof(VividSubsystem<VividGPUDrivenSystem>),
+                    "DispatchUpdate"),
+                Is.True);
         }
 
         [Test]

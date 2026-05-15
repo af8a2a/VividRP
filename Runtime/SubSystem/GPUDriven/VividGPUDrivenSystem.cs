@@ -6,10 +6,8 @@ using VividRP.Runtime.GPUDriven.Bindless;
 
 namespace VividRP.Runtime.GPUDriven
 {
-    public sealed class VividGPUDrivenSystem : IDisposable
+    public sealed class VividGPUDrivenSystem : VividSubsystem<VividGPUDrivenSystem>, IDisposable
     {
-        private static VividGPUDrivenSystem s_Instance;
-        private static bool s_Initialized;
         private static int s_PreparedFrameIndex = -1;
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
@@ -49,29 +47,40 @@ namespace VividRP.Runtime.GPUDriven
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif
-        internal static void Initialize()
+        private static void AutoInitialize()
         {
-            if (s_Initialized)
-                return;
-
-            RegisterFrameContextCallbacks();
-            s_Initialized = true;
+            Initialize();
         }
 
-        internal static void Deinitialize()
+        protected override void OnInitialize()
         {
-#if UNITY_EDITOR
-            RegisterFrameContextCallbacks();
-            s_Initialized = true;
-#else
-            if (s_Initialized)
-            {
-                UnregisterFrameContextCallbacks();
-                s_Initialized = false;
-            }
-#endif
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
+        }
 
+        protected override void OnDeinitialize()
+        {
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
             Shutdown();
+        }
+
+        public new static void Deinitialize()
+        {
+            VividSubsystem<VividGPUDrivenSystem>.Deinitialize();
+
+#if UNITY_EDITOR
+            // In editor we keep the FrameContext callbacks alive so the next preview render rebuilds
+            // a fresh singleton lazily; the heavy GPU resources owned by the previous instance were
+            // already released by Shutdown() inside OnDeinitialize.
+            EnsurePreRenderSubscribed();
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
+#endif
+        }
+
+        private static void OnSubsystemDispose()
+        {
+            Deinitialize();
         }
 
         public static VividGPUDrivenSystem instance
@@ -79,11 +88,11 @@ namespace VividRP.Runtime.GPUDriven
             get
             {
                 Initialize();
-                return s_Instance ??= new VividGPUDrivenSystem();
+                return Instance;
             }
         }
 
-        public static bool HasInstance => s_Instance != null && !s_Instance.m_IsDisposed;
+        public static new bool HasInstance => RawInstance != null && !RawInstance.m_IsDisposed;
 
         public BindlessTextureContainer BindlessTextureContainer { get; }
 
@@ -129,33 +138,20 @@ namespace VividRP.Runtime.GPUDriven
             return m_ShadowCullingDispatchers[cascadeIndex]?.BufferSet.VisibleMeshletIndirectDrawArgsBuffer;
         }
 
-        private static void RegisterFrameContextCallbacks()
-        {
-            FrameContextSystem.SubsystemPreRender -= Update;
-            FrameContextSystem.SubsystemPreRender += Update;
-            FrameContextSystem.SubsystemDispose -= Deinitialize;
-            FrameContextSystem.SubsystemDispose += Deinitialize;
-        }
-
-        private static void UnregisterFrameContextCallbacks()
-        {
-            FrameContextSystem.SubsystemPreRender -= Update;
-            FrameContextSystem.SubsystemDispose -= Deinitialize;
-        }
-
         public static bool TryGetCurrentVisibleMeshletBuffers(
             out GraphicsBuffer visibleMeshletRenderRequestsBuffer,
             out GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer)
         {
-            if (s_Instance == null || s_Instance.m_IsDisposed || !s_Instance.IsAvailable)
+            VividGPUDrivenSystem currentInstance = RawInstance;
+            if (currentInstance == null || currentInstance.m_IsDisposed || !currentInstance.IsAvailable)
             {
                 visibleMeshletRenderRequestsBuffer = null;
                 visibleMeshletIndirectDrawArgsBuffer = null;
                 return false;
             }
 
-            visibleMeshletRenderRequestsBuffer = s_Instance.VisibleMeshletRenderRequestsBuffer;
-            visibleMeshletIndirectDrawArgsBuffer = s_Instance.VisibleMeshletIndirectDrawArgsBuffer;
+            visibleMeshletRenderRequestsBuffer = currentInstance.VisibleMeshletRenderRequestsBuffer;
+            visibleMeshletIndirectDrawArgsBuffer = currentInstance.VisibleMeshletIndirectDrawArgsBuffer;
             return visibleMeshletRenderRequestsBuffer != null && visibleMeshletIndirectDrawArgsBuffer != null;
         }
 
@@ -280,8 +276,8 @@ namespace VividRP.Runtime.GPUDriven
 
         public static void Shutdown()
         {
-            s_Instance?.Dispose();
-            s_Instance = null;
+            RawInstance?.Dispose();
+            ClearInstance();
             s_PreparedFrameIndex = -1;
             VividGPUDrivenStatsRegistry.Clear();
         }
@@ -311,7 +307,7 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenStatsRegistry.Clear();
         }
 
-        private static void Update(ContextContainer frameData, CommandBuffer cmd)
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenMarker.Auto())
             {
@@ -321,7 +317,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             if (frameData == null || cmd == null)

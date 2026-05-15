@@ -10,22 +10,35 @@ namespace VividRP.Runtime
 
         protected static TSelf Instance => s_Instance ??= new TSelf();
 
+        protected static TSelf RawInstance => s_Instance;
+
         protected static bool HasInstance => s_Instance != null;
 
         public static bool IsInitialized => s_Instance != null && s_Instance.m_Initialized;
 
+        protected static void ClearInstance()
+        {
+            s_Instance = null;
+        }
+
+        protected static void EnsurePreRenderSubscribed()
+        {
+            FrameContextSystem.SubsystemPreRender -= DispatchUpdate;
+            FrameContextSystem.SubsystemPreRender += DispatchUpdate;
+        }
+
         public static void Initialize()
         {
-            TSelf instance = Instance;
-            if (instance.m_Initialized)
+            if (s_Instance != null && s_Instance.m_Initialized)
                 return;
 
-            FrameContextSystem.SubsystemPreRender -= instance.OnUpdate;
-            FrameContextSystem.SubsystemPreRender += instance.OnUpdate;
+            FrameContextSystem.SubsystemPreRender -= DispatchUpdate;
+            FrameContextSystem.SubsystemPreRender += DispatchUpdate;
 #if UNITY_EDITOR
             UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
             UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
 #endif
+            TSelf instance = Instance;
             instance.OnInitialize();
             instance.m_Initialized = true;
         }
@@ -35,13 +48,15 @@ namespace VividRP.Runtime
             if (s_Instance == null || !s_Instance.m_Initialized)
                 return;
 
-            s_Instance.OnDeinitialize();
+            TSelf instance = s_Instance;
+            instance.OnDeinitialize();
 
-            FrameContextSystem.SubsystemPreRender -= s_Instance.OnUpdate;
+            FrameContextSystem.SubsystemPreRender -= DispatchUpdate;
 #if UNITY_EDITOR
             UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
 #endif
-            s_Instance.m_Initialized = false;
+            instance.m_Initialized = false;
+            s_Instance = null;
         }
 
 #if UNITY_EDITOR
@@ -50,6 +65,11 @@ namespace VividRP.Runtime
             Deinitialize();
         }
 #endif
+
+        private static void DispatchUpdate(ContextContainer frameData, CommandBuffer cmd)
+        {
+            Instance.OnUpdate(frameData, cmd);
+        }
 
         protected virtual void OnInitialize()
         {

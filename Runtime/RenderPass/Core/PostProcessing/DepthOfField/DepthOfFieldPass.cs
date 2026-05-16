@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public sealed class DepthOfFieldPass : UnsafePass, IPostProcessSourceOverridePass, IRenderGraphRecordingPass, IStablePassResourceLayout
+    public sealed class DepthOfFieldPass : ComputePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private const int ThreadGroupSize = 8;
         private const int TileSize = 8;
@@ -89,6 +89,7 @@ namespace VividRP.Runtime
             Name = "DepthOfFieldOutput",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        [PassBypass(nameof(source))]
         private RenderGraphTexture output = new();
 
         private ComputeShader m_ComputeShader;
@@ -221,6 +222,21 @@ namespace VividRP.Runtime
             EnsureApertureShapeBuffer();
         }
 
+        public override bool IsActive(ContextContainer frameData)
+        {
+            if (!HasExecutableComputeResources())
+                return false;
+
+            var cameraData = frameData != null && frameData.Contains<VividCameraData>()
+                ? frameData.Get<VividCameraData>()
+                : null;
+            var camera = cameraData?.camera;
+            if (camera == null || !CoreUtils.ArePostProcessesEnabled(camera))
+                return false;
+
+            return ShouldApplySettings(DepthOfFieldSettingsResolver.Resolve());
+        }
+
         public override void Prepare(ContextContainer frameData)
         {
             VividCameraData cameraData;
@@ -269,11 +285,7 @@ namespace VividRP.Runtime
 
             using (s_PrepareHistoryMarker.Auto())
             {
-                m_ShouldApply = postProcessingAllowed
-                    && m_Settings.enabled
-                    && m_Settings.physicallyBased
-                    && m_Settings.focusMode != DepthOfFieldMode.Off
-                    && (IsNearLayerActive() || IsFarLayerActive());
+                m_ShouldApply = postProcessingAllowed && ShouldApplySettings(m_Settings);
 
                 if (m_ShouldApply && m_Settings.coCStabilization && m_UsesTemporalAntialiasing)
                 {
@@ -293,12 +305,12 @@ namespace VividRP.Runtime
             }
         }
 
-        public override void Record(UnsafePassContext context)
+        public override void Record(ComputePassContext context)
         {
             if (source?.innerHandle.IsValid() != true || output?.innerHandle.IsValid() != true)
                 return;
 
-            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 if (!CanExecutePhysicalPath())
@@ -309,7 +321,7 @@ namespace VividRP.Runtime
 
                 DispatchCircleOfConfusion(cmd);
 
-                RTHandle effectiveCoC = m_FullResCoC.innerHandle;
+                TextureHandle effectiveCoC = m_FullResCoC.innerHandle;
                 if (m_CoCHistoryCurrent?.innerHandle.IsValid() == true)
                 {
                     if (ShouldReprojectCoC())
@@ -328,27 +340,6 @@ namespace VividRP.Runtime
                 DispatchFastTiles(cmd, m_ScaledSource.innerHandle, effectiveCoC, tileTexture, m_ScaledBlur.innerHandle);
                 DispatchCombine(cmd, m_ScaledBlur.innerHandle, tileTexture, output.innerHandle);
             }
-        }
-
-        public void RecordGraph(RenderGraphRecordingContext context)
-        {
-            if (context?.RenderGraph == null || source == null)
-                return;
-
-            var sourceHandle = context.GetOrCreateTextureHandle(source);
-            if (sourceHandle.IsValid())
-                source.innerHandle = sourceHandle;
-
-            if (source?.innerHandle.IsValid() != true)
-                return;
-
-            if (!ShouldRecordPhysicalPath() && TryRegisterPassthrough(context, sourceHandle))
-                return;
-
-            context.RecordUnsafePass(
-                this,
-                ((IRenderPass)this).Initialize(),
-                context.PassDefinition);
         }
 
         public override void Dispose()
@@ -377,7 +368,7 @@ namespace VividRP.Runtime
 
         private bool CanExecutePhysicalPath()
         {
-            return ShouldRecordPhysicalPath()
+            return ShouldExecutePhysicalPath()
                 && linearDepth?.innerHandle.IsValid() == true
                 && m_FullResCoC?.innerHandle.IsValid() == true
                 && m_TileMinMaxPing?.innerHandle.IsValid() == true
@@ -386,10 +377,14 @@ namespace VividRP.Runtime
                 && m_ScaledBlur?.innerHandle.IsValid() == true;
         }
 
-        private bool ShouldRecordPhysicalPath()
+        private bool ShouldExecutePhysicalPath()
+        {
+            return m_ShouldApply && HasExecutableComputeResources();
+        }
+
+        private bool HasExecutableComputeResources()
         {
             return m_ComputeShader != null
-                && m_ShouldApply
                 && m_ApertureShapeBuffer != null
                 && m_ResampleColorKernel >= 0
                 && m_CopyCoCKernel >= 0
@@ -403,29 +398,12 @@ namespace VividRP.Runtime
                 && m_CombineFastTilesKernel >= 0;
         }
 
-        private bool TryRegisterPassthrough(RenderGraphRecordingContext context, TextureHandle sourceHandle)
+        private static bool ShouldApplySettings(DepthOfFieldSettingsData settings)
         {
-            if (!sourceHandle.IsValid() || !CanAliasPassthrough())
-                return false;
-
-            context.RegisterTextureHandle(output, sourceHandle);
-            return true;
-        }
-
-        private bool CanAliasPassthrough()
-        {
-            var sourceDesc = source?.desc;
-            var outputDesc = output?.desc;
-            if (sourceDesc == null || outputDesc == null)
-                return false;
-
-            return sourceDesc.Width == outputDesc.Width
-                && sourceDesc.Height == outputDesc.Height
-                && sourceDesc.Slices == outputDesc.Slices
-                && sourceDesc.Dimension == outputDesc.Dimension
-                && sourceDesc.ColorFormat == outputDesc.ColorFormat
-                && sourceDesc.DepthBufferBits == outputDesc.DepthBufferBits
-                && sourceDesc.MsaaSamples == outputDesc.MsaaSamples;
+            return settings.enabled
+                && settings.physicallyBased
+                && settings.focusMode != DepthOfFieldMode.Off
+                && (IsNearLayerActive(settings) || IsFarLayerActive(settings));
         }
 
         private bool ShouldReprojectCoC()
@@ -439,15 +417,15 @@ namespace VividRP.Runtime
         }
 
         private void DispatchResampleColor(
-            CommandBuffer cmd,
-            RTHandle input,
-            RTHandle outputHandle,
+            ComputeCommandBuffer cmd,
+            TextureHandle input,
+            TextureHandle outputHandle,
             int sourceWidth,
             int sourceHeight,
             int targetWidth,
             int targetHeight)
         {
-            if (input == null || outputHandle == null || m_ResampleColorKernel < 0)
+            if (!input.IsValid() || !outputHandle.IsValid() || m_ResampleColorKernel < 0)
                 return;
 
             SetSizeParams(
@@ -462,9 +440,9 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_ResampleColorKernel, targetWidth, targetHeight);
         }
 
-        private void DispatchCopyCoC(CommandBuffer cmd, RTHandle input, RTHandle outputHandle, int width, int height)
+        private void DispatchCopyCoC(ComputeCommandBuffer cmd, TextureHandle input, TextureHandle outputHandle, int width, int height)
         {
-            if (input == null || outputHandle == null || m_CopyCoCKernel < 0)
+            if (!input.IsValid() || !outputHandle.IsValid() || m_CopyCoCKernel < 0)
                 return;
 
             SetSizeParams(
@@ -479,7 +457,7 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_CopyCoCKernel, width, height);
         }
 
-        private void DispatchCircleOfConfusion(CommandBuffer cmd)
+        private void DispatchCircleOfConfusion(ComputeCommandBuffer cmd)
         {
             var focusDistance = ResolveFocusDistance();
             var blurLimits = ResolveBlurLimits();
@@ -522,9 +500,9 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_ManualCoCKernel, m_Width, m_Height);
         }
 
-        private void DispatchCoCReprojection(CommandBuffer cmd, RTHandle currentCoC, RTHandle historyCoC, RTHandle outputHandle)
+        private void DispatchCoCReprojection(ComputeCommandBuffer cmd, TextureHandle currentCoC, TextureHandle historyCoC, TextureHandle outputHandle)
         {
-            if (currentCoC == null || historyCoC == null || outputHandle == null || m_ReprojectCoCKernel < 0)
+            if (!currentCoC.IsValid() || !historyCoC.IsValid() || !outputHandle.IsValid() || m_ReprojectCoCKernel < 0)
                 return;
 
             SetSizeParams(
@@ -541,9 +519,9 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_ReprojectCoCKernel, m_Width, m_Height);
         }
 
-        private void DispatchCoCMinMax(CommandBuffer cmd, RTHandle cocTexture, RTHandle tileTexture)
+        private void DispatchCoCMinMax(ComputeCommandBuffer cmd, TextureHandle cocTexture, TextureHandle tileTexture)
         {
-            if (cocTexture == null || tileTexture == null || m_MinMaxKernel < 0)
+            if (!cocTexture.IsValid() || !tileTexture.IsValid() || m_MinMaxKernel < 0)
                 return;
 
             SetSizeParams(
@@ -557,9 +535,9 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_MinMaxKernel, m_TileCountX, m_TileCountY);
         }
 
-        private RTHandle DispatchDilatedTileMinMax(CommandBuffer cmd, RTHandle ping, RTHandle pong)
+        private TextureHandle DispatchDilatedTileMinMax(ComputeCommandBuffer cmd, TextureHandle ping, TextureHandle pong)
         {
-            if (ping == null || pong == null || m_DilateKernel < 0)
+            if (!ping.IsValid() || !pong.IsValid() || m_DilateKernel < 0)
                 return ping;
 
             var result = ping;
@@ -584,9 +562,9 @@ namespace VividRP.Runtime
             return result;
         }
 
-        private void DispatchSlowTiles(CommandBuffer cmd, RTHandle inputColor, RTHandle cocTexture, RTHandle tileTexture, RTHandle outputHandle)
+        private void DispatchSlowTiles(ComputeCommandBuffer cmd, TextureHandle inputColor, TextureHandle cocTexture, TextureHandle tileTexture, TextureHandle outputHandle)
         {
-            if (inputColor == null || cocTexture == null || tileTexture == null || outputHandle == null || m_ComputeSlowTilesKernel < 0)
+            if (!inputColor.IsValid() || !cocTexture.IsValid() || !tileTexture.IsValid() || !outputHandle.IsValid() || m_ComputeSlowTilesKernel < 0)
                 return;
 
             SetGatherParams(cmd, m_Width, m_Height, m_Width, m_Height, 1f);
@@ -600,9 +578,9 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_ComputeSlowTilesKernel, m_Width, m_Height);
         }
 
-        private void DispatchFastTiles(CommandBuffer cmd, RTHandle inputColor, RTHandle cocTexture, RTHandle tileTexture, RTHandle outputHandle)
+        private void DispatchFastTiles(ComputeCommandBuffer cmd, TextureHandle inputColor, TextureHandle cocTexture, TextureHandle tileTexture, TextureHandle outputHandle)
         {
-            if (inputColor == null || cocTexture == null || tileTexture == null || outputHandle == null || m_GatherFastTilesKernel < 0)
+            if (!inputColor.IsValid() || !cocTexture.IsValid() || !tileTexture.IsValid() || !outputHandle.IsValid() || m_GatherFastTilesKernel < 0)
                 return;
 
             SetGatherParams(cmd, m_ScaledWidth, m_ScaledHeight, m_Width, m_Height, m_ResolutionDivisor);
@@ -616,9 +594,9 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_GatherFastTilesKernel, m_ScaledWidth, m_ScaledHeight);
         }
 
-        private void DispatchCombine(CommandBuffer cmd, RTHandle scaledBlur, RTHandle tileTexture, RTHandle outputHandle)
+        private void DispatchCombine(ComputeCommandBuffer cmd, TextureHandle scaledBlur, TextureHandle tileTexture, TextureHandle outputHandle)
         {
-            if (scaledBlur == null || tileTexture == null || outputHandle == null || m_CombineFastTilesKernel < 0)
+            if (!scaledBlur.IsValid() || !tileTexture.IsValid() || !outputHandle.IsValid() || m_CombineFastTilesKernel < 0)
                 return;
 
             SetSizeParams(
@@ -634,7 +612,7 @@ namespace VividRP.Runtime
             Dispatch(cmd, m_CombineFastTilesKernel, m_Width, m_Height);
         }
 
-        private void SetGatherParams(CommandBuffer cmd, int sourceWidth, int sourceHeight, int fullResWidth, int fullResHeight, float resolutionScale)
+        private void SetGatherParams(ComputeCommandBuffer cmd, int sourceWidth, int sourceHeight, int fullResWidth, int fullResHeight, float resolutionScale)
         {
             var adaptiveWeights = ResolveAdaptiveSamplingWeights();
             var usePointSampling = !m_Settings.highQualityFiltering || m_ResolutionDivisor == (int)DepthOfFieldResolution.Quarter
@@ -658,7 +636,7 @@ namespace VividRP.Runtime
                 new Vector4(adaptiveWeights.x, adaptiveWeights.y, blurLimits.x, blurLimits.y));
         }
 
-        private void SetSizeParams(CommandBuffer cmd, Vector4 sourceSize, Vector4 fullResSize, Vector4 currentSize, Vector4 tileSize)
+        private void SetSizeParams(ComputeCommandBuffer cmd, Vector4 sourceSize, Vector4 fullResSize, Vector4 currentSize, Vector4 tileSize)
         {
             cmd.SetComputeVectorParam(m_ComputeShader, SourceSizeId, sourceSize);
             cmd.SetComputeVectorParam(m_ComputeShader, FullResSizeId, fullResSize);
@@ -666,7 +644,7 @@ namespace VividRP.Runtime
             cmd.SetComputeVectorParam(m_ComputeShader, TileSizeId, tileSize);
         }
 
-        private void Dispatch(CommandBuffer cmd, int kernel, int width, int height)
+        private void Dispatch(ComputeCommandBuffer cmd, int kernel, int width, int height)
         {
             cmd.DispatchCompute(
                 m_ComputeShader,
@@ -919,12 +897,22 @@ namespace VividRP.Runtime
 
         private bool IsNearLayerActive()
         {
-            return m_Settings.nearMaxBlur > 0f && m_Settings.nearFocusEnd > 0f;
+            return IsNearLayerActive(m_Settings);
         }
 
         private bool IsFarLayerActive()
         {
-            return m_Settings.farMaxBlur > 0f;
+            return IsFarLayerActive(m_Settings);
+        }
+
+        private static bool IsNearLayerActive(DepthOfFieldSettingsData settings)
+        {
+            return settings.nearMaxBlur > 0f && settings.nearFocusEnd > 0f;
+        }
+
+        private static bool IsFarLayerActive(DepthOfFieldSettingsData settings)
+        {
+            return settings.farMaxBlur > 0f;
         }
 
         private int ResolveSampleCount(int baseCount)

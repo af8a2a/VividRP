@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using NUnit.Framework;
@@ -8,6 +9,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
+using UnityRenderGraph = UnityEngine.Rendering.RenderGraphModule.RenderGraph;
 
 namespace VividRP.Editor.Tests
 {
@@ -39,6 +41,10 @@ namespace VividRP.Editor.Tests
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldCoC" && texture.Access == AccessFlags.ReadWrite), Is.True);
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldTileMinMaxPing" && texture.Access == AccessFlags.ReadWrite), Is.True);
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldOutput" && texture.Access == AccessFlags.Write), Is.True);
+            Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
+            Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("source"));
+            Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("output"));
+            Assert.That(resources.BypassRules[0].ResourceType, Is.EqualTo(PassResourceType.Texture));
         }
 
         [Test]
@@ -73,6 +79,64 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.Name, Is.EqualTo("DepthOfFieldOutput"));
             Assert.That(outputTexture.desc.UseDynamicScale, Is.True);
             Assert.That(outputTexture.desc.ClearBuffer, Is.False);
+        }
+
+        [Test]
+        public void InactiveBypassDescriptors_CopiesSourceDescriptorToOutput()
+        {
+            var pass = new DepthOfFieldPass();
+            var sourceField = typeof(DepthOfFieldPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
+            var outputField = typeof(DepthOfFieldPass).GetField("output", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceTexture = RenderGraphTexture.CreateInput("SceneColor", GraphicsFormat.R16G16B16A16_SFloat);
+            sourceTexture.desc.Width = 640;
+            sourceTexture.desc.Height = 360;
+            sourceTexture.desc.UseDynamicScale = true;
+
+            Assert.That(sourceField, Is.Not.Null);
+            Assert.That(outputField, Is.Not.Null);
+            sourceField.SetValue(pass, sourceTexture);
+
+            var resources = ((IRenderPass)pass).Initialize();
+            var outputTexture = (RenderGraphTexture)outputField.GetValue(pass);
+            outputTexture.desc.Width = 1;
+            outputTexture.desc.Height = 1;
+            outputTexture.desc.UseDynamicScale = false;
+
+            InvokeApplyInactivePassBypassDescriptors(pass, resources);
+
+            Assert.That(outputTexture.desc.Width, Is.EqualTo(640));
+            Assert.That(outputTexture.desc.Height, Is.EqualTo(360));
+            Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(outputTexture.desc.UseDynamicScale, Is.True);
+        }
+
+        [Test]
+        public void InactiveBypassHandles_ForwardsSourceHandleToOutput()
+        {
+            var renderGraph = new UnityRenderGraph("VividRP DepthOfField Bypass Test");
+            var pass = new DepthOfFieldPass();
+            var sourceField = typeof(DepthOfFieldPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
+            var outputField = typeof(DepthOfFieldPass).GetField("output", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceTexture = RenderGraphTexture.CreateInput("SceneColor", GraphicsFormat.R16G16B16A16_SFloat);
+
+            Assert.That(sourceField, Is.Not.Null);
+            Assert.That(outputField, Is.Not.Null);
+            sourceField.SetValue(pass, sourceTexture);
+
+            var resources = ((IRenderPass)pass).Initialize();
+            var outputTexture = (RenderGraphTexture)outputField.GetValue(pass);
+
+            try
+            {
+                InvokeApplyInactivePassBypassHandles(renderGraph, pass, resources);
+
+                Assert.That(sourceTexture.innerHandle.IsValid(), Is.True);
+                Assert.That(outputTexture.innerHandle.Equals(sourceTexture.innerHandle), Is.True);
+            }
+            finally
+            {
+                renderGraph.Cleanup();
+            }
         }
 
         [Test]
@@ -267,9 +331,12 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("DispatchCoCMinMax"));
             Assert.That(passSource, Does.Contain("DispatchSlowTiles"));
             Assert.That(passSource, Does.Contain("DispatchCombine"));
-            Assert.That(passSource, Does.Contain("IRenderGraphRecordingPass"));
-            Assert.That(passSource, Does.Contain("TryRegisterPassthrough"));
-            Assert.That(passSource, Does.Contain("context.RegisterTextureHandle(output, sourceHandle)"));
+            Assert.That(passSource, Does.Contain("DepthOfFieldPass : ComputePass"));
+            Assert.That(passSource, Does.Contain("[PassBypass(nameof(source))]"));
+            Assert.That(passSource, Does.Contain("public override bool IsActive(ContextContainer frameData)"));
+            Assert.That(passSource, Does.Not.Contain("IRenderGraphRecordingPass"));
+            Assert.That(passSource, Does.Not.Contain("TryRegisterPassthrough"));
+            Assert.That(passSource, Does.Not.Contain("context.RegisterTextureHandle(output, sourceHandle)"));
             Assert.That(passSource, Does.Contain("m_ComputeSlowTilesKernel, InputLinearDepthId"));
             Assert.That(passSource, Does.Contain("m_GatherFastTilesKernel, InputLinearDepthId"));
             Assert.That(passSource, Does.Contain("ResolvePhysicalMaxCoC"));
@@ -305,6 +372,40 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static void InvokeApplyInactivePassBypassDescriptors(
+            IRenderPass pass,
+            PassResource resources,
+            RenderGraphPassDefinition passDefinition = null)
+        {
+            var method = typeof(PassRecorder).GetMethod(
+                "ApplyInactivePassBypassDescriptors",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+            method.Invoke(null, new object[] { pass, resources, passDefinition });
+        }
+
+        private static void InvokeApplyInactivePassBypassHandles(
+            UnityRenderGraph renderGraph,
+            IRenderPass pass,
+            PassResource resources,
+            RenderGraphPassDefinition passDefinition = null)
+        {
+            var method = typeof(PassRecorder).GetMethod(
+                "ApplyInactivePassBypassHandles",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+
+            method.Invoke(null, new object[]
+            {
+                renderGraph,
+                pass,
+                resources,
+                passDefinition,
+                new Dictionary<RenderGraphTexture, TextureHandle>(),
+                new Dictionary<RenderGraphBuffer, BufferHandle>(),
+            });
         }
     }
 }

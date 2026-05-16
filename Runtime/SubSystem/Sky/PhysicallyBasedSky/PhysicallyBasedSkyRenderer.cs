@@ -22,7 +22,7 @@ namespace VividRP.Runtime
         private static readonly int SkyUseLutId = Shader.PropertyToID("_SkyUseLUT");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
-        private static readonly int PreExposureBufferId = AutoExposureShaderBindings.PreExposureBufferId;
+        private static readonly int PreExposureBufferId = VividAutoExposureSystem.PreExposureBufferId;
         private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
         private static readonly int MultiScatteringLutId = Shader.PropertyToID("_MultiScatteringLUT");
         private static readonly int MultiScatteringLutRwId = Shader.PropertyToID("_MultiScatteringLUT_RW");
@@ -296,7 +296,7 @@ namespace VividRP.Runtime
             properties.SetTexture(SkyViewLutId, skyViewTexture ?? Texture2D.blackTexture);
             properties.SetFloat(SkyUseLutId, skyViewTexture != null ? 1.0f : 0.0f);
             properties.SetTexture(DirectionalShadowTextureId, directionalShadowTexture ?? Texture2D.whiteTexture);
-            var preExposureBuffer = AutoExposureShaderBindings.ResolvePreExposureBuffer(m_RenderContext.exposureData);
+            var preExposureBuffer = VividAutoExposureSystem.ResolvePreExposureBuffer(m_RenderContext.exposureData);
             if (preExposureBuffer != null)
                 properties.SetBuffer(PreExposureBufferId, preExposureBuffer);
             if (m_HasRenderMaterialParameters)

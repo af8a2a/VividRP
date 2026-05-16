@@ -62,10 +62,9 @@ namespace VividRP.Runtime
                 vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
             }
 
-            using (RenderPassProfilingUtility.PrepareFrameContextAutoExposureMarker.Auto())
+            using (RenderPassProfilingUtility.PrepareFrameContextSubsystemPreRenderMarker.Auto())
             {
-                AutoExposureRuntimeManager.PrepareFrame(frameData);
-                AutoExposureShaderBindings.BindFrameGlobals(cmd, frameData.Get<VividExposureData>());
+                SubsystemPreRender?.Invoke(frameData, cmd);
             }
 
             // 3. Build and set all shader globals in one place
@@ -92,10 +91,6 @@ namespace VividRP.Runtime
                     cameraData.frameIndex);
             }
 
-            using (RenderPassProfilingUtility.PrepareFrameContextSubsystemPreRenderMarker.Auto())
-            {
-                SubsystemPreRender?.Invoke(frameData, cmd);
-            }
         }
 
         public static void ExecutePostRender(ContextContainer frameData, CommandBuffer cmd)
@@ -117,7 +112,7 @@ namespace VividRP.Runtime
         public static void Clear()
         {
             s_Instance.Dispose();
-            AutoExposureRuntimeManager.Clear();
+            VividAutoExposureSystem.Deinitialize();
             SubsystemDispose?.Invoke();
 #if VIVIDRP_DEBUG
             CameraShaderVariablesGlobalComparisonLogger.Reset();

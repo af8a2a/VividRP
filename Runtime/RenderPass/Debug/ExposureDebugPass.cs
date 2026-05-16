@@ -381,7 +381,7 @@ namespace VividRP.Runtime.RenderPass.Core
             return m_ExposureData?.currentExposureBuffer
                    ?? m_ExposureData?.previousExposureBuffer
                    ?? m_ExposureData?.defaultExposureBuffer
-                   ?? AutoExposureRuntimeManager.GetOrCreateDefaultExposureBuffer();
+                   ?? VividAutoExposureSystem.GetOrCreateDefaultExposureBuffer();
         }
 
         private GraphicsBuffer ResolveHistogramBuffer()

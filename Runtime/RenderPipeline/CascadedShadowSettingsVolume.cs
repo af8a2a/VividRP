@@ -27,6 +27,7 @@ namespace VividRP.Runtime
         public ClampedFloatParameter cascadeBorder2 = new(DefaultCascadeBorder, 0f, 1f);
         public ClampedFloatParameter cascadeBorder3 = new(DefaultCascadeBorder, 0f, 1f);
         public ClampedFloatParameter cascadeBorder4 = new(DefaultCascadeBorder, 0f, 1f);
+        public BoolParameter screenSpaceShadowDenoise = new(false);
         // Legacy serialized fields kept only to avoid breaking existing volume assets.
         [HideInInspector]
         public ClampedIntParameter shadowResolution = new(DefaultShadowResolution, MinShadowResolution, MaxShadowResolution);

@@ -85,6 +85,41 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_DirectionalShadowTexture[pixelCoord] = 1.0;"));
         }
 
+        [Test]
+        public void CSMShadowResolveCompute_ContainsLegacyTileClassifyResolveAndBilateralFilterKernels()
+        {
+            var source = File.ReadAllText(GetComputeShaderSourcePath());
+
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowClearTiles"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowClassifyTiles"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowResolveTiles"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowCopyFilterSource"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowBilateralFilterH CSM_SHADOW_BILATERAL_FILTER_H"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowBilateralFilterV CSM_SHADOW_BILATERAL_FILTER_V"));
+            Assert.That(source, Does.Contain("Texture2D<float> _CSMShadowFilterSource;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float> _CSMShadowFilterTexture;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _CSMShadowTileList;"));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _CSMShadowDispatchIndirectArgs;"));
+            Assert.That(source, Does.Contain("static const uint kCSMShadowTileSize = 16;"));
+            Assert.That(source, Does.Contain("static const float kCSMShadowPenumbraSentinel = 0.5;"));
+            Assert.That(source, Does.Contain("float ApplyCSMShadowDistanceFade(float3 positionWS, float shadow)"));
+            Assert.That(source, Does.Contain("bool TryClassifyCascadeShadow("));
+            Assert.That(source, Does.Contain("needsResolve = needsResolve || IsCSMShadowPenumbraClass(nextCascadeShadow);"));
+            Assert.That(source, Does.Contain(": ApplyCSMShadowDistanceFade(positionWS, shadow);"));
+            Assert.That(source, Does.Contain("float ClassifyCSMShadowForPixel(uint2 pixelCoord, out bool needsResolve)"));
+            Assert.That(source, Does.Contain("void CSMShadowClearTiles(uint3 dispatchThreadID : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("void CSMShadowClassifyTiles("));
+            Assert.That(source, Does.Contain("InterlockedAdd(_CSMShadowDispatchIndirectArgs[0], 4u, previousGroupCount);"));
+            Assert.That(source, Does.Contain("_CSMShadowTileList[previousGroupCount / 4u] = EncodeCSMShadowTileIndex(tileCoord);"));
+            Assert.That(source, Does.Contain("InitializeCSMShadowDispatchThreadIdFromTileList(groupID.x, groupThreadId, pixelCoord);"));
+            Assert.That(source, Does.Contain("void CSMShadowResolveTiles("));
+            Assert.That(source, Does.Contain("float FilterCSMShadow(uint2 pixelCoord, int2 axis)"));
+            Assert.That(source, Does.Contain("void CSMShadowCopyFilterSource(uint3 dispatchThreadID : SV_DispatchThreadID)"));
+            Assert.That(source, Does.Contain("_CSMShadowFilterTexture[pixelCoord] = _CSMShadowFilterSource.Load(int3(pixelCoord, 0));"));
+            Assert.That(source, Does.Contain("void CSMShadowBilateralFilterH("));
+            Assert.That(source, Does.Contain("void CSMShadowBilateralFilterV("));
+        }
+
         private static string GetComputeShaderSourcePath()
         {
             var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "CSMShadowResolve.compute");

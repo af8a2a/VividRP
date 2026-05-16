@@ -55,6 +55,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_CascadeBorder2", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeBorder3", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_CascadeBorder4", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ScreenSpaceShadowDenoise", flags)?.GetValue(editor), Is.Not.Null);
             }
             finally
             {
@@ -83,6 +84,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("borderSize = borderParameters[i].value.floatValue"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Directional Light\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Per Light\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Screen Space Denoise\""));
+            Assert.That(source, Does.Contain("m_ScreenSpaceShadowDenoise = Unpack(fetcher.Find(x => x.screenSpaceShadowDenoise));"));
+            Assert.That(source, Does.Contain("PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);"));
             Assert.That(source, Does.Contain("When Screen Space Quality is set to Very High (PCSS), blocker and filter tuning also lives on that light."));
         }
 

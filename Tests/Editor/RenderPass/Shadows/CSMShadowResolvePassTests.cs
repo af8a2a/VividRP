@@ -43,6 +43,37 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSamplingClumpExponentId, m_PCSSBlockerSamplingClumpExponent);"));
         }
 
+        [Test]
+        public void CSMShadowResolvePass_UsesLegacyTileResolvePath_ForVeryHighScreenSpaceShadows()
+        {
+            var source = File.ReadAllText(GetPassSourcePath());
+
+            Assert.That(source, Does.Contain("private const int ScreenSpaceShadowTileSize = 16;"));
+            Assert.That(source, Does.Contain("private const int IndirectDispatchArgsElementCount = 3;"));
+            Assert.That(source, Does.Contain("private const string ClearTilesKernelName = \"CSMShadowClearTiles\";"));
+            Assert.That(source, Does.Contain("private const string ClassifyTilesKernelName = \"CSMShadowClassifyTiles\";"));
+            Assert.That(source, Does.Contain("private const string ResolveTilesKernelName = \"CSMShadowResolveTiles\";"));
+            Assert.That(source, Does.Contain("private const string CopyFilterSourceKernelName = \"CSMShadowCopyFilterSource\";"));
+            Assert.That(source, Does.Contain("private const string BilateralFilterHKernelName = \"CSMShadowBilateralFilterH\";"));
+            Assert.That(source, Does.Contain("private const string BilateralFilterVKernelName = \"CSMShadowBilateralFilterV\";"));
+            Assert.That(source, Does.Contain("private static readonly int CSMShadowTileListId = Shader.PropertyToID(\"_CSMShadowTileList\");"));
+            Assert.That(source, Does.Contain("private static readonly int CSMShadowDispatchIndirectArgsId = Shader.PropertyToID(\"_CSMShadowDispatchIndirectArgs\");"));
+            Assert.That(source, Does.Contain("[RenderGraphResource(Name = \"CSMShadowTileList\", Access = AccessFlags.ReadWrite)]"));
+            Assert.That(source, Does.Contain("[RenderGraphResource(Name = \"CSMShadowDispatchIndirectArgs\", Access = AccessFlags.ReadWrite)]"));
+            Assert.That(source, Does.Contain("[RenderGraphResource(Name = \"CSMShadowFilterTexture\", Access = AccessFlags.ReadWrite)]"));
+            Assert.That(source, Does.Contain("m_EnableBilateralDenoise = csmSettings != null && csmSettings.screenSpaceShadowDenoise.value;"));
+            Assert.That(source, Does.Contain("m_EnableTiledResolve = m_ShadowQuality == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh"));
+            Assert.That(source, Does.Contain("RecordTiledScreenSpaceResolve(cmd);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ResolveCompute, m_ClearTilesKernel, 1, 1, 1);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ResolveCompute, m_ClassifyTilesKernel, m_TileCountX, m_TileCountY, 1);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ResolveCompute, m_ResolveTilesKernel, m_DispatchIndirectArgsBuffer, 0);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ResolveCompute, m_CopyFilterSourceKernel, m_DispatchGroupCountX, m_DispatchGroupCountY, 1);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ResolveCompute, m_BilateralFilterHKernel, m_DispatchIndirectArgsBuffer, 0);"));
+            Assert.That(source, Does.Contain("cmd.DispatchCompute(m_ResolveCompute, m_BilateralFilterVKernel, m_DispatchIndirectArgsBuffer, 0);"));
+            Assert.That(source, Does.Contain("m_CopyFilterSourceKernel >= 0"));
+            Assert.That(source, Does.Contain("return shader != null && shader.HasKernel(kernelName) ? shader.FindKernel(kernelName) : -1;"));
+        }
+
         private static string GetPassSourcePath()
         {
             var passPath = GetPackageFilePath("Runtime", "RenderPass", "Core", "CSMShadowResolvePass.cs");

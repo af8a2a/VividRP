@@ -1,4 +1,10 @@
 #pragma kernel CSMShadowResolve
+#pragma kernel CSMShadowClearTiles
+#pragma kernel CSMShadowClassifyTiles
+#pragma kernel CSMShadowResolveTiles
+#pragma kernel CSMShadowCopyFilterSource
+#pragma kernel CSMShadowBilateralFilterH CSM_SHADOW_BILATERAL_FILTER_H
+#pragma kernel CSMShadowBilateralFilterV CSM_SHADOW_BILATERAL_FILTER_V
 #pragma enable_d3d11_debug_symbols
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
@@ -8,6 +14,10 @@ Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
 Texture2D<float>  _CSMShadowAtlas;
 RWTexture2D<float> _DirectionalShadowTexture;
+Texture2D<float> _CSMShadowFilterSource;
+RWTexture2D<float> _CSMShadowFilterTexture;
+RWStructuredBuffer<uint> _CSMShadowTileList;
+RWStructuredBuffer<uint> _CSMShadowDispatchIndirectArgs;
 SamplerComparisonState sampler_CSMShadowAtlas;
 
 float4x4 _CSMViewProjMatrices[4];
@@ -539,6 +549,344 @@ bool TryEvaluateCascadeBlendShadow(float3 positionWS, float3 normalWS, int casca
     atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
     shadow = EvaluateShadow(atlasUV, shadowCoord.z, cascadeIndex, pixelCoord);
     return true;
+}
+
+float ApplyCSMShadowDistanceFade(float3 positionWS, float shadow)
+{
+    float distanceFade = 1.0;
+    float3 cameraToPixel = positionWS - _WorldSpaceCameraPos;
+    float pixelDistance = length(cameraToPixel);
+    float fadeStart = _CSMMaxShadowDistance * 0.8;
+    if (pixelDistance > fadeStart)
+    {
+        float fadeRange = max(_CSMMaxShadowDistance - fadeStart, 1.0e-5);
+        distanceFade = 1.0 - saturate((pixelDistance - fadeStart) / fadeRange);
+    }
+
+    return lerp(1.0, shadow, distanceFade);
+}
+
+static const uint kCSMShadowTileSize = 16;
+static const uint kCSMShadowTileSubGroupSize = 8;
+static const uint kCSMShadowClassifyThreads = 64;
+static const float kCSMShadowPenumbraSentinel = 0.5;
+static const float kCSMShadowClassifyEpsilon = 1.0e-4;
+
+uint EncodeCSMShadowTileIndex(uint2 tileCoord)
+{
+    return (tileCoord.y << 16) | (tileCoord.x & 0xffffu);
+}
+
+uint2 DecodeCSMShadowTileIndex(uint encodedTileIndex)
+{
+    return uint2(encodedTileIndex & 0xffffu, encodedTileIndex >> 16);
+}
+
+bool TryBuildCSMShadowInputs(
+    uint2 pixelCoord,
+    out float deviceDepth,
+    out float3 positionWS,
+    out float3 normalWS,
+    out int cascadeIndex,
+    out float relDistance)
+{
+    deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    positionWS = 0.0;
+    normalWS = float3(0.0, 1.0, 0.0);
+    cascadeIndex = -1;
+    relDistance = 1.0;
+
+    if (IsSkyPixel(deviceDepth))
+        return false;
+
+    positionWS = ReconstructWorldPosition(pixelCoord, deviceDepth);
+    cascadeIndex = SelectCascade(positionWS, relDistance);
+    if (cascadeIndex < 0)
+        return false;
+
+    float4 gbuffer1 = _GBuffer1.Load(int3(pixelCoord, 0));
+    normalWS = DecodeVividNormalOct(gbuffer1.xy);
+    return true;
+}
+
+float ResolveCSMShadowForPixel(uint2 pixelCoord)
+{
+    float deviceDepth;
+    float3 positionWS;
+    float3 normalWS;
+    int cascadeIndex;
+    float relDistance;
+    if (!TryBuildCSMShadowInputs(pixelCoord, deviceDepth, positionWS, normalWS, cascadeIndex, relDistance))
+        return 1.0;
+
+    float shadowCurrent;
+    if (!TryEvaluateCascadeShadow(positionWS, normalWS, cascadeIndex, pixelCoord, shadowCurrent))
+        return 1.0;
+
+    float shadow = shadowCurrent;
+    float cascadeBlendAlpha = ComputeCascadeBlendAlpha(positionWS, cascadeIndex, relDistance);
+    if (cascadeBlendAlpha > 0.0)
+    {
+        float shadowNext = 1.0;
+        int nextCascadeIndex = cascadeIndex + 1;
+        if (nextCascadeIndex < _CSMCascadeCount)
+        {
+            shadowNext = shadowCurrent;
+            float nextCascadeShadow;
+            if (TryEvaluateCascadeBlendShadow(positionWS, normalWS, nextCascadeIndex, pixelCoord, nextCascadeShadow))
+                shadowNext = nextCascadeShadow;
+        }
+
+        shadow = lerp(shadowCurrent, shadowNext, cascadeBlendAlpha);
+    }
+
+    return ApplyCSMShadowDistanceFade(positionWS, shadow);
+}
+
+bool IsCSMShadowPenumbraClass(float prefilteredShadow)
+{
+    return prefilteredShadow > kCSMShadowClassifyEpsilon
+        && prefilteredShadow < 1.0 - kCSMShadowClassifyEpsilon;
+}
+
+float QuantizeCSMShadowClass(float prefilteredShadow)
+{
+    return prefilteredShadow <= kCSMShadowClassifyEpsilon ? 0.0 : 1.0;
+}
+
+bool TryClassifyCascadeShadow(
+    float3 positionWS,
+    float3 normalWS,
+    int cascadeIndex,
+    uint2 pixelCoord,
+    bool requireBlendSamplingBounds,
+    out float prefilteredShadow)
+{
+    prefilteredShadow = 1.0;
+    float3 shadowCoord;
+    if (!TryGetBiasedShadowCoord(positionWS, normalWS, cascadeIndex, shadowCoord))
+        return false;
+
+    if (requireBlendSamplingBounds && !IsWithinCascadeBlendSamplingBounds(shadowCoord))
+        return false;
+
+    shadowCoord = ClampShadowCoordToShadowMap(shadowCoord);
+    shadowCoord.z = ApplyShadowComparisonDepthBias(shadowCoord.z);
+    float2 atlasUV = RemapToAtlasUV(shadowCoord.xy, cascadeIndex);
+    atlasUV += ComputeShadowUVJitter(pixelCoord, cascadeIndex);
+    atlasUV = ClampShadowAtlasUV(atlasUV, cascadeIndex);
+
+    prefilteredShadow = SampleShadowPCF3x3(atlasUV, shadowCoord.z, cascadeIndex);
+    return true;
+}
+
+float ClassifyCSMShadowForPixel(uint2 pixelCoord, out bool needsResolve)
+{
+    needsResolve = false;
+
+    float deviceDepth;
+    float3 positionWS;
+    float3 normalWS;
+    int cascadeIndex;
+    float relDistance;
+    if (!TryBuildCSMShadowInputs(pixelCoord, deviceDepth, positionWS, normalWS, cascadeIndex, relDistance))
+        return 1.0;
+
+    float shadowCurrent;
+    if (!TryClassifyCascadeShadow(positionWS, normalWS, cascadeIndex, pixelCoord, false, shadowCurrent))
+        return 1.0;
+
+    needsResolve = IsCSMShadowPenumbraClass(shadowCurrent);
+    float shadow = QuantizeCSMShadowClass(shadowCurrent);
+    float cascadeBlendAlpha = ComputeCascadeBlendAlpha(positionWS, cascadeIndex, relDistance);
+    if (cascadeBlendAlpha > 0.0)
+    {
+        float shadowNext = shadow;
+        int nextCascadeIndex = cascadeIndex + 1;
+        if (nextCascadeIndex < _CSMCascadeCount)
+        {
+            float nextCascadeShadow;
+            if (TryClassifyCascadeShadow(positionWS, normalWS, nextCascadeIndex, pixelCoord, true, nextCascadeShadow))
+            {
+                needsResolve = needsResolve || IsCSMShadowPenumbraClass(nextCascadeShadow);
+                shadowNext = QuantizeCSMShadowClass(nextCascadeShadow);
+            }
+        }
+
+        shadow = lerp(shadow, shadowNext, cascadeBlendAlpha);
+    }
+
+    return needsResolve
+        ? kCSMShadowPenumbraSentinel
+        : ApplyCSMShadowDistanceFade(positionWS, shadow);
+}
+
+groupshared uint g_CSMShadowTileNeedsResolve;
+
+[numthreads(1, 1, 1)]
+void CSMShadowClearTiles(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    _CSMShadowDispatchIndirectArgs[0] = 0u;
+    _CSMShadowDispatchIndirectArgs[1] = 1u;
+    _CSMShadowDispatchIndirectArgs[2] = 1u;
+    _CSMShadowTileList[0] = 0u;
+}
+
+[numthreads(64, 1, 1)]
+void CSMShadowClassifyTiles(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex,
+    uint3 groupID : SV_GroupID)
+{
+    if (groupIndex == 0)
+        g_CSMShadowTileNeedsResolve = 0u;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint2 tileCoord = groupID.xy;
+    uint2 tileOrigin = tileCoord * kCSMShadowTileSize;
+
+    [unroll]
+    for (uint i = 0; i < 4u; i++)
+    {
+        uint pixelIndex = i * kCSMShadowClassifyThreads + groupIndex;
+        uint2 localCoord = uint2(pixelIndex & 15u, pixelIndex >> 4);
+        uint2 pixelCoord = tileOrigin + localCoord;
+        if (pixelCoord.x >= (uint)_CSMOutputWidth || pixelCoord.y >= (uint)_CSMOutputHeight)
+            continue;
+
+        bool needsResolve;
+        float classifiedShadow = ClassifyCSMShadowForPixel(pixelCoord, needsResolve);
+        _DirectionalShadowTexture[pixelCoord] = classifiedShadow;
+
+        if (needsResolve)
+            InterlockedOr(g_CSMShadowTileNeedsResolve, 1u);
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0 && g_CSMShadowTileNeedsResolve != 0u)
+    {
+        uint previousGroupCount;
+        InterlockedAdd(_CSMShadowDispatchIndirectArgs[0], 4u, previousGroupCount);
+        _CSMShadowTileList[previousGroupCount / 4u] = EncodeCSMShadowTileIndex(tileCoord);
+    }
+}
+
+void InitializeCSMShadowDispatchThreadIdFromTileList(
+    uint groupIndex,
+    uint2 groupThreadId,
+    out uint2 pixelCoord)
+{
+    uint encodedTileIndex = _CSMShadowTileList[groupIndex / 4u];
+    uint2 tileCoord = DecodeCSMShadowTileIndex(encodedTileIndex);
+    pixelCoord = tileCoord * kCSMShadowTileSize
+        + uint2(groupIndex & 1u, (groupIndex >> 1) & 1u) * kCSMShadowTileSubGroupSize
+        + groupThreadId;
+}
+
+[numthreads(8, 8, 1)]
+void CSMShadowResolveTiles(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uint2 groupThreadId : SV_GroupThreadID,
+    uint3 groupID : SV_GroupID)
+{
+    uint2 pixelCoord;
+    InitializeCSMShadowDispatchThreadIdFromTileList(groupID.x, groupThreadId, pixelCoord);
+    if (pixelCoord.x >= (uint)_CSMOutputWidth || pixelCoord.y >= (uint)_CSMOutputHeight)
+        return;
+
+    float classifiedShadow = _DirectionalShadowTexture[pixelCoord];
+    if (abs(classifiedShadow - kCSMShadowPenumbraSentinel) > kCSMShadowClassifyEpsilon)
+        return;
+
+    _DirectionalShadowTexture[pixelCoord] = ResolveCSMShadowForPixel(pixelCoord);
+}
+
+float ComputeCSMShadowBilateralWeight(float centerDepth, float3 centerNormal, uint2 sampleCoord)
+{
+    float sampleDepth = _DepthTexture.Load(int3(sampleCoord, 0));
+    if (IsSkyPixel(sampleDepth))
+        return 0.0;
+
+    float3 sampleNormal = DecodeVividNormalOct(_GBuffer1.Load(int3(sampleCoord, 0)).xy);
+    float centerLinearDepth = LinearEyeDepth(centerDepth, _ZBufferParams);
+    float sampleLinearDepth = LinearEyeDepth(sampleDepth, _ZBufferParams);
+    float depthWeight = exp(-abs(centerLinearDepth - sampleLinearDepth) * 4.0);
+    float normalWeight = pow(saturate(dot(centerNormal, sampleNormal)), 32.0);
+    return depthWeight * normalWeight;
+}
+
+float FilterCSMShadow(uint2 pixelCoord, int2 axis)
+{
+    static const float gaussianWeight[9] =
+    {
+        0.02763055, 0.06628224, 0.1238315, 0.1801738, 0.2041637,
+        0.1801738, 0.1238315, 0.06628224, 0.02763055
+    };
+
+    float centerDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    if (IsSkyPixel(centerDepth))
+        return _CSMShadowFilterSource.Load(int3(pixelCoord, 0));
+
+    float3 centerNormal = DecodeVividNormalOct(_GBuffer1.Load(int3(pixelCoord, 0)).xy);
+    float colorSum = _CSMShadowFilterSource.Load(int3(pixelCoord, 0)) * gaussianWeight[4];
+    float weightSum = gaussianWeight[4];
+
+    [unroll]
+    for (int i = -4; i <= 4; i++)
+    {
+        if (i == 0)
+            continue;
+
+        int2 sampleCoordInt = int2(pixelCoord) + axis * i;
+        sampleCoordInt = clamp(sampleCoordInt, int2(0, 0), int2(_CSMOutputWidth - 1, _CSMOutputHeight - 1));
+        uint2 sampleCoord = uint2(sampleCoordInt);
+        float bilateralWeight = ComputeCSMShadowBilateralWeight(centerDepth, centerNormal, sampleCoord);
+        float weight = gaussianWeight[i + 4] * bilateralWeight;
+        colorSum += _CSMShadowFilterSource.Load(int3(sampleCoord, 0)) * weight;
+        weightSum += weight;
+    }
+
+    return colorSum / max(weightSum, 1.0e-5);
+}
+
+[numthreads(8, 8, 1)]
+void CSMShadowCopyFilterSource(uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x >= (uint)_CSMOutputWidth || dispatchThreadID.y >= (uint)_CSMOutputHeight)
+        return;
+
+    uint2 pixelCoord = dispatchThreadID.xy;
+    _CSMShadowFilterTexture[pixelCoord] = _CSMShadowFilterSource.Load(int3(pixelCoord, 0));
+}
+
+[numthreads(8, 8, 1)]
+void CSMShadowBilateralFilterH(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uint2 groupThreadId : SV_GroupThreadID,
+    uint3 groupID : SV_GroupID)
+{
+    uint2 pixelCoord;
+    InitializeCSMShadowDispatchThreadIdFromTileList(groupID.x, groupThreadId, pixelCoord);
+    if (pixelCoord.x >= (uint)_CSMOutputWidth || pixelCoord.y >= (uint)_CSMOutputHeight)
+        return;
+
+    _CSMShadowFilterTexture[pixelCoord] = FilterCSMShadow(pixelCoord, int2(1, 0));
+}
+
+[numthreads(8, 8, 1)]
+void CSMShadowBilateralFilterV(
+    uint3 dispatchThreadID : SV_DispatchThreadID,
+    uint2 groupThreadId : SV_GroupThreadID,
+    uint3 groupID : SV_GroupID)
+{
+    uint2 pixelCoord;
+    InitializeCSMShadowDispatchThreadIdFromTileList(groupID.x, groupThreadId, pixelCoord);
+    if (pixelCoord.x >= (uint)_CSMOutputWidth || pixelCoord.y >= (uint)_CSMOutputHeight)
+        return;
+
+    _CSMShadowFilterTexture[pixelCoord] = FilterCSMShadow(pixelCoord, int2(0, 1));
 }
 
 [numthreads(8, 8, 1)]

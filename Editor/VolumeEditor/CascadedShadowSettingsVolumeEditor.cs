@@ -19,6 +19,8 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("State", "When enabled, VividRP renders cascaded shadow maps for the main directional light.");
         private static readonly GUIContent s_MaxShadowDistanceLabel =
             EditorGUIUtility.TrTextContent("Max Distance", "Maximum distance from the camera that receives cascaded directional shadows.");
+        private static readonly GUIContent s_ScreenSpaceShadowDenoiseLabel =
+            EditorGUIUtility.TrTextContent("Screen Space Denoise", "Applies the legacy tile-based bilateral filter to Very High screen-space CSM shadows.");
         private static readonly GUIContent s_WorkingUnitLabel =
             EditorGUIUtility.TrTextContent("Working Unit", "Controls whether cascade splits are edited in meters or as a percentage of Max Distance.");
         private static readonly GUIContent s_CascadeCountLabel =
@@ -48,6 +50,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_EnableCSM;
         private SerializedDataParameter m_CascadeCount;
         private SerializedDataParameter m_MaxShadowDistance;
+        private SerializedDataParameter m_ScreenSpaceShadowDenoise;
         private SerializedDataParameter m_CascadeSplit1;
         private SerializedDataParameter m_CascadeSplit2;
         private SerializedDataParameter m_CascadeSplit3;
@@ -70,6 +73,7 @@ namespace VividRP.Editor
             m_EnableCSM = Unpack(fetcher.Find(x => x.enableCSM));
             m_CascadeCount = Unpack(fetcher.Find(x => x.cascadeCount));
             m_MaxShadowDistance = Unpack(fetcher.Find(x => x.maxShadowDistance));
+            m_ScreenSpaceShadowDenoise = Unpack(fetcher.Find(x => x.screenSpaceShadowDenoise));
             m_CascadeSplit1 = Unpack(fetcher.Find(x => x.cascadeSplit1));
             m_CascadeSplit2 = Unpack(fetcher.Find(x => x.cascadeSplit2));
             m_CascadeSplit3 = Unpack(fetcher.Find(x => x.cascadeSplit3));
@@ -83,6 +87,7 @@ namespace VividRP.Editor
         {
             PropertyField(m_EnableCSM, s_StateLabel);
             PropertyField(m_MaxShadowDistance, s_MaxShadowDistanceLabel);
+            PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);
 
             DrawSectionHeader("Directional Light");
             DrawWorkingUnitField();

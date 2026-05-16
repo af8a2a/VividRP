@@ -43,5 +43,25 @@ namespace VividRP.Editor.Tests
 
             return 1.0f - (1.0f - rangeBorder) * (1.0f - rangeBorder);
         }
+
+        [Test]
+        public void CascadedShadowSettingsVolume_ExposesScreenSpaceShadowDenoiseToggle()
+        {
+            var volume = ScriptableObject.CreateInstance<CascadedShadowSettingsVolume>();
+
+            try
+            {
+                Assert.That(volume.screenSpaceShadowDenoise, Is.Not.Null);
+                Assert.That(volume.screenSpaceShadowDenoise.value, Is.False);
+
+                volume.screenSpaceShadowDenoise.value = true;
+
+                Assert.That(volume.screenSpaceShadowDenoise.value, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(volume);
+            }
+        }
     }
 }

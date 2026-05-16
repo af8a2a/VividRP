@@ -9,12 +9,24 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
+        private const int ScreenSpaceShadowTileSize = 16;
+        private const int IndirectDispatchArgsElementCount = 3;
         private const string KernelName = "CSMShadowResolve";
+        private const string ClearTilesKernelName = "CSMShadowClearTiles";
+        private const string ClassifyTilesKernelName = "CSMShadowClassifyTiles";
+        private const string ResolveTilesKernelName = "CSMShadowResolveTiles";
+        private const string CopyFilterSourceKernelName = "CSMShadowCopyFilterSource";
+        private const string BilateralFilterHKernelName = "CSMShadowBilateralFilterH";
+        private const string BilateralFilterVKernelName = "CSMShadowBilateralFilterV";
 
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
         private static readonly int DirectionalShadowTextureId = Shader.PropertyToID("_DirectionalShadowTexture");
+        private static readonly int CSMShadowTileListId = Shader.PropertyToID("_CSMShadowTileList");
+        private static readonly int CSMShadowDispatchIndirectArgsId = Shader.PropertyToID("_CSMShadowDispatchIndirectArgs");
+        private static readonly int CSMShadowFilterSourceId = Shader.PropertyToID("_CSMShadowFilterSource");
+        private static readonly int CSMShadowFilterTextureId = Shader.PropertyToID("_CSMShadowFilterTexture");
         private static readonly int CSMViewProjMatricesId = Shader.PropertyToID("_CSMViewProjMatrices");
         private static readonly int CSMCascadeSpheresId = Shader.PropertyToID("_CSMCascadeSpheres");
         private static readonly int CSMAtlasScaleOffsetsId = Shader.PropertyToID("_CSMAtlasScaleOffsets");
@@ -53,11 +65,33 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Write)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
+        [RenderGraphResource(Name = "CSMShadowTileList", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphBuffer m_TileListBuffer;
+
+        [RenderGraphResource(Name = "CSMShadowDispatchIndirectArgs", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphBuffer m_DispatchIndirectArgsBuffer;
+
+        [RenderGraphResource(Name = "CSMShadowFilterTexture", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphTexture m_FilterTexture;
+
         private ComputeShader m_ResolveCompute;
         private int m_Kernel = -1;
+        private int m_ClearTilesKernel = -1;
+        private int m_ClassifyTilesKernel = -1;
+        private int m_ResolveTilesKernel = -1;
+        private int m_CopyFilterSourceKernel = -1;
+        private int m_BilateralFilterHKernel = -1;
+        private int m_BilateralFilterVKernel = -1;
         private bool m_IsActive;
+        private bool m_EnableTiledResolve;
+        private bool m_EnableBilateralDenoise;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
+        private int m_TileCountX = 1;
+        private int m_TileCountY = 1;
         private Matrix4x4 m_InvViewProjMatrix = Matrix4x4.identity;
         private Vector4 m_LightDirectionWS;
 
@@ -97,6 +131,23 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalShadowTexture.desc.FilterMode = FilterMode.Point;
             m_DirectionalShadowTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_DirectionalShadowTexture.desc.EnableRandomWrite = true;
+            m_TileListBuffer = RenderGraphBuffer.CreateStructured("CSMShadowTileList", 1, sizeof(uint));
+            m_DispatchIndirectArgsBuffer = new RenderGraphBuffer
+            {
+                desc = new RenderGraphBufferDesc
+                {
+                    Count = IndirectDispatchArgsElementCount,
+                    Stride = sizeof(uint),
+                    Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
+                    Name = "CSMShadowDispatchIndirectArgs"
+                }
+            };
+            m_FilterTexture = RenderGraphTexture.CreateOutput("CSMShadowFilterTexture", GraphicsFormat.R16_SFloat);
+            m_FilterTexture.desc.ClearBuffer = true;
+            m_FilterTexture.desc.ClearColor = Color.white;
+            m_FilterTexture.desc.FilterMode = FilterMode.Point;
+            m_FilterTexture.desc.WrapMode = TextureWrapMode.Clamp;
+            m_FilterTexture.desc.EnableRandomWrite = true;
         }
 
         public override void Create()
@@ -110,12 +161,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            m_Kernel = m_ResolveCompute.FindKernel(KernelName);
+            m_Kernel = FindKernelOrInvalid(m_ResolveCompute, KernelName);
+            m_ClearTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ClearTilesKernelName);
+            m_ClassifyTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ClassifyTilesKernelName);
+            m_ResolveTilesKernel = FindKernelOrInvalid(m_ResolveCompute, ResolveTilesKernelName);
+            m_CopyFilterSourceKernel = FindKernelOrInvalid(m_ResolveCompute, CopyFilterSourceKernelName);
+            m_BilateralFilterHKernel = FindKernelOrInvalid(m_ResolveCompute, BilateralFilterHKernelName);
+            m_BilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, BilateralFilterVKernelName);
         }
 
         public override void Prepare(ContextContainer frameData)
         {
             m_IsActive = false;
+            m_EnableTiledResolve = false;
+            m_EnableBilateralDenoise = false;
             m_LightDirectionWS = Vector4.zero;
             m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
@@ -136,8 +195,13 @@ namespace VividRP.Runtime.RenderPass.Core
             var height = cameraData.actualHeight;
 
             m_DirectionalShadowTexture.Resize(width, height);
+            m_FilterTexture.Resize(width, height);
             m_DispatchGroupCountX = CoreUtils.DivRoundUp(width, ThreadGroupSizeX);
             m_DispatchGroupCountY = CoreUtils.DivRoundUp(height, ThreadGroupSizeY);
+            m_TileCountX = CoreUtils.DivRoundUp(width, ScreenSpaceShadowTileSize);
+            m_TileCountY = CoreUtils.DivRoundUp(height, ScreenSpaceShadowTileSize);
+            ResizeStructuredBuffer(m_TileListBuffer, Mathf.Max(1, m_TileCountX * m_TileCountY), sizeof(uint));
+            ResizeIndirectArgsBuffer(m_DispatchIndirectArgsBuffer);
 
             var shadowData = frameData.GetOrCreate<VividShadowData>();
             if (!shadowData.isCSMActive)
@@ -185,6 +249,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PCSSBlockerSamplingClumpExponent = additionalLightData.dirLightPCSSBlockerSamplingClumpExponent;
                 }
             }
+
+            var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
+            m_EnableBilateralDenoise = csmSettings != null && csmSettings.screenSpaceShadowDenoise.value;
+            m_EnableTiledResolve = m_ShadowQuality == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh
+                && CanUseTiledResolveKernels();
         }
 
         public override void Record(ComputePassContext context)
@@ -200,11 +269,109 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cmd = context.cmd;
 
+            if (m_EnableTiledResolve
+                && m_TileListBuffer?.innerHandle.IsValid() == true
+                && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true)
+            {
+                RecordTiledScreenSpaceResolve(cmd);
+                return;
+            }
+
             cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, CSMShadowAtlasId, m_CSMShadowAtlas.innerHandle);
             cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
 
+            BindShadowParameters(cmd);
+
+            cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
+                m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+        }
+
+        public override void Dispose()
+        {
+            m_ResolveCompute = null;
+            m_Kernel = -1;
+            m_ClearTilesKernel = -1;
+            m_ClassifyTilesKernel = -1;
+            m_ResolveTilesKernel = -1;
+            m_CopyFilterSourceKernel = -1;
+            m_BilateralFilterHKernel = -1;
+            m_BilateralFilterVKernel = -1;
+            m_IsActive = false;
+            m_EnableTiledResolve = false;
+            m_EnableBilateralDenoise = false;
+            m_DispatchGroupCountX = 1;
+            m_DispatchGroupCountY = 1;
+            m_TileCountX = 1;
+            m_TileCountY = 1;
+            m_FrameIndex = 0;
+            m_CascadeWorldTexelSizes = Vector4.zero;
+            m_CascadeBorders = Vector4.zero;
+        }
+
+        private void RecordTiledScreenSpaceResolve(ComputeCommandBuffer cmd)
+        {
+            BindShadowParameters(cmd);
+
+            BindTileBuffers(cmd, m_ClearTilesKernel);
+            cmd.DispatchCompute(m_ResolveCompute, m_ClearTilesKernel, 1, 1, 1);
+
+            BindCommonTextures(cmd, m_ClassifyTilesKernel);
+            BindTileBuffers(cmd, m_ClassifyTilesKernel);
+            cmd.DispatchCompute(m_ResolveCompute, m_ClassifyTilesKernel, m_TileCountX, m_TileCountY, 1);
+
+            BindCommonTextures(cmd, m_ResolveTilesKernel);
+            BindTileBuffers(cmd, m_ResolveTilesKernel);
+            cmd.DispatchCompute(m_ResolveCompute, m_ResolveTilesKernel, m_DispatchIndirectArgsBuffer, 0);
+
+            if (!m_EnableBilateralDenoise || m_FilterTexture?.innerHandle.IsValid() != true)
+                return;
+
+            BindFilterTextures(cmd, m_CopyFilterSourceKernel, m_DirectionalShadowTexture, m_FilterTexture);
+            cmd.DispatchCompute(m_ResolveCompute, m_CopyFilterSourceKernel, m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+
+            BindFilterTextures(cmd, m_BilateralFilterHKernel, m_DirectionalShadowTexture, m_FilterTexture);
+            BindTileBuffers(cmd, m_BilateralFilterHKernel);
+            cmd.DispatchCompute(m_ResolveCompute, m_BilateralFilterHKernel, m_DispatchIndirectArgsBuffer, 0);
+
+            BindFilterTextures(cmd, m_BilateralFilterVKernel, m_FilterTexture, m_DirectionalShadowTexture);
+            BindTileBuffers(cmd, m_BilateralFilterVKernel);
+            cmd.DispatchCompute(m_ResolveCompute, m_BilateralFilterVKernel, m_DispatchIndirectArgsBuffer, 0);
+        }
+
+        private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, CSMShadowAtlasId, m_CSMShadowAtlas.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
+        }
+
+        private void BindFilterTextures(
+            ComputeCommandBuffer cmd,
+            int kernel,
+            RenderGraphTexture source,
+            RenderGraphTexture destination)
+        {
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, CSMShadowFilterSourceId, source.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, CSMShadowFilterTextureId, destination.innerHandle);
+        }
+
+        private void BindTileBuffers(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeBufferParam(m_ResolveCompute, kernel, CSMShadowTileListId, m_TileListBuffer.innerHandle);
+            cmd.SetComputeBufferParam(
+                m_ResolveCompute,
+                kernel,
+                CSMShadowDispatchIndirectArgsId,
+                m_DispatchIndirectArgsBuffer.innerHandle);
+        }
+
+        private void BindShadowParameters(ComputeCommandBuffer cmd)
+        {
             cmd.SetComputeMatrixArrayParam(m_ResolveCompute, CSMViewProjMatricesId, m_ViewProjMatrices);
             cmd.SetComputeVectorArrayParam(m_ResolveCompute, CSMCascadeSpheresId, m_CascadeSpheres);
             cmd.SetComputeVectorArrayParam(m_ResolveCompute, CSMAtlasScaleOffsetsId, m_AtlasScaleOffsets);
@@ -230,21 +397,42 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSMinFilterMaxAngularDiameterId, m_PCSSMinFilterMaxAngularDiameter);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSearchAngularDiameterId, m_PCSSBlockerSearchAngularDiameter);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSamplingClumpExponentId, m_PCSSBlockerSamplingClumpExponent);
-
-            cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
-                m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
         }
 
-        public override void Dispose()
+        private bool CanUseTiledResolveKernels()
         {
-            m_ResolveCompute = null;
-            m_Kernel = -1;
-            m_IsActive = false;
-            m_DispatchGroupCountX = 1;
-            m_DispatchGroupCountY = 1;
-            m_FrameIndex = 0;
-            m_CascadeWorldTexelSizes = Vector4.zero;
-            m_CascadeBorders = Vector4.zero;
+            return m_ClearTilesKernel >= 0
+                && m_ClassifyTilesKernel >= 0
+                && m_ResolveTilesKernel >= 0
+                && (!m_EnableBilateralDenoise
+                    || (m_CopyFilterSourceKernel >= 0
+                        && m_BilateralFilterHKernel >= 0
+                        && m_BilateralFilterVKernel >= 0));
+        }
+
+        private static int FindKernelOrInvalid(ComputeShader shader, string kernelName)
+        {
+            return shader != null && shader.HasKernel(kernelName) ? shader.FindKernel(kernelName) : -1;
+        }
+
+        private static void ResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)
+        {
+            if (buffer?.desc == null)
+                return;
+
+            buffer.desc.Count = Mathf.Max(1, count);
+            buffer.desc.Stride = stride;
+            buffer.desc.Target = GraphicsBuffer.Target.Structured;
+        }
+
+        private static void ResizeIndirectArgsBuffer(RenderGraphBuffer buffer)
+        {
+            if (buffer?.desc == null)
+                return;
+
+            buffer.desc.Count = IndirectDispatchArgsElementCount;
+            buffer.desc.Stride = sizeof(uint);
+            buffer.desc.Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
         }
     }
 }

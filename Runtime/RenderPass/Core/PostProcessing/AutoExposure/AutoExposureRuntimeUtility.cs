@@ -172,17 +172,71 @@ namespace VividRP.Runtime
     {
     }
 
-    internal static class AutoExposureRuntimeManager
+    internal sealed class VividAutoExposureSystem : VividSubsystem<VividAutoExposureSystem>
     {
         private const int AutoExposureVectorStride = sizeof(float) * 4;
+
+        internal static readonly int PreExposureBufferId = Shader.PropertyToID("_VividAutoExposurePreExposureBuffer");
 
         private static readonly AutoExposureHistorySystem s_HistorySystem = new();
         private static readonly Vector4[] s_ExposureBufferData = new Vector4[1];
 
         private static GraphicsBuffer s_DefaultExposureBuffer;
 
+#if UNITY_EDITOR
+        [UnityEditor.InitializeOnLoadMethod]
+#else
+        [RuntimeInitializeOnLoadMethod]
+#endif
+        private static void AutoInitialize()
+        {
+            Initialize();
+        }
+
+        protected override void OnInitialize()
+        {
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
+        }
+
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
+        {
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemAutoExposureMarker.Auto())
+            {
+                if (frameData == null || cmd == null)
+                    return;
+
+                PrepareFrame(frameData);
+                BindFrameGlobals(cmd, frameData.Get<VividExposureData>());
+            }
+        }
+
+        public new static void Deinitialize()
+        {
+            VividSubsystem<VividAutoExposureSystem>.Deinitialize();
+
+#if UNITY_EDITOR
+            // Keep the FrameContext callback wired in editor so the next preview render lazily
+            // rebuilds exposure resources after Clear() releases the previous frame state.
+            EnsurePreRenderSubscribed();
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
+#endif
+        }
+
+        private static void OnSubsystemDispose()
+        {
+            Deinitialize();
+        }
+
         internal static void PrepareFrame(ContextContainer frameData)
         {
+            if (!IsInitialized)
+                Initialize();
+
+            if (frameData == null)
+                return;
+
             var exposureData = frameData.GetOrCreate<VividExposureData>();
             var cameraData = frameData.Get<VividCameraData>();
             var temporalData = frameData.GetOrCreate<VividTemporalData>();
@@ -301,8 +355,9 @@ namespace VividRP.Runtime
             state.wasEnabledLastFrame = true;
         }
 
-        internal static void Clear()
+        protected override void OnDeinitialize()
         {
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
             s_HistorySystem.Dispose();
             s_DefaultExposureBuffer?.Dispose();
             s_DefaultExposureBuffer = null;
@@ -314,6 +369,23 @@ namespace VividRP.Runtime
         {
             EnsureDefaultExposureBuffer();
             return s_DefaultExposureBuffer;
+        }
+
+        internal static GraphicsBuffer ResolvePreExposureBuffer(VividExposureData exposureData)
+        {
+            return exposureData?.preExposureBuffer
+                ?? exposureData?.defaultExposureBuffer
+                ?? GetOrCreateDefaultExposureBuffer();
+        }
+
+        private static void BindFrameGlobals(CommandBuffer cmd, VividExposureData exposureData)
+        {
+            if (cmd == null)
+                return;
+
+            var preExposureBuffer = ResolvePreExposureBuffer(exposureData);
+            if (preExposureBuffer != null)
+                cmd.SetGlobalBuffer(PreExposureBufferId, preExposureBuffer);
         }
 
         private static void EnsureDefaultExposureBuffer()

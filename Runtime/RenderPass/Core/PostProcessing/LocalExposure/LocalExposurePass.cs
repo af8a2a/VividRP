@@ -266,8 +266,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var exposureBuffer = m_ExposureData?.frameExposureBuffer
                 ?? m_ExposureData?.defaultExposureBuffer
-                ?? AutoExposureRuntimeManager.GetOrCreateDefaultExposureBuffer();
-            var preExposureBuffer = AutoExposureShaderBindings.ResolvePreExposureBuffer(m_ExposureData);
+                ?? VividAutoExposureSystem.GetOrCreateDefaultExposureBuffer();
+            var preExposureBuffer = VividAutoExposureSystem.ResolvePreExposureBuffer(m_ExposureData);
 
             if (exposureBuffer == null || preExposureBuffer == null)
             {

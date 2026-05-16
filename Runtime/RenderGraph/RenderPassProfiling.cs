@@ -85,13 +85,16 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameContextResolveDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.ResolveData");
         public static readonly ProfilerMarker PrepareFrameContextAdvanceTemporalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AdvanceTemporal");
         public static readonly ProfilerMarker PrepareFrameContextPopulateTemporalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.PopulateTemporal");
-        public static readonly ProfilerMarker PrepareFrameContextAutoExposureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AutoExposure");
         public static readonly ProfilerMarker PrepareFrameContextBuildShaderVariablesMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.BuildShaderVariables");
         public static readonly ProfilerMarker PrepareFrameContextSetShaderGlobalsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals");
         public static readonly ProfilerMarker PrepareFrameContextAdaptiveProbeVolumeMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume");
         public static readonly ProfilerMarker PrepareFrameContextSubsystemPreRenderMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender");
+        public static readonly ProfilerMarker PrepareFrameSubsystemAutoExposureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividAutoExposureSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemLTCAreaLightMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem");
+        public static readonly ProfilerMarker PrepareFrameSubsystemDecalKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/DecalSystem.Kick");
+        public static readonly ProfilerMarker PrepareFrameSubsystemDecalCullScheduleMarker = new("VividRP.BeginCameraRendering/DecalSystem.CullSchedule");
+        public static readonly ProfilerMarker PrepareFrameSubsystemDecalCompleteMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem/Complete");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenResolveAssetMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ResolveAsset");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenCameraDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/CameraData");

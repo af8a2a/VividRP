@@ -21,17 +21,17 @@ namespace VividRP.Runtime
         public ContextContainer frameData => m_FrameData;
         public ComputeCommandBuffer cmd => m_RenderGraphContext.cmd;
         public RenderGraphObjectPool renderGraphPool => m_RenderGraphContext.renderGraphPool;
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TextureUVOrigin GetTextureUVOrigin(TextureHandle textureHandle)
         {
             return m_RenderGraphContext.GetTextureUVOrigin(textureHandle);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Contains<T>() where T : ContextItem, new()
         {
             return m_FrameData != null && m_FrameData.Contains<T>();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGet<T>(out T item) where T : ContextItem, new()
         {
             if (Contains<T>())
@@ -43,12 +43,12 @@ namespace VividRP.Runtime
             item = default;
             return false;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T Get<T>() where T : ContextItem, new()
         {
             return m_FrameData.Get<T>();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T GetOrCreate<T>() where T : ContextItem, new()
         {
             return m_FrameData.GetOrCreate<T>();
@@ -77,17 +77,17 @@ namespace VividRP.Runtime
         public ContextContainer frameData => m_FrameData;
         public RasterCommandBuffer cmd => m_RenderGraphContext.cmd;
         public RenderGraphObjectPool renderGraphPool => m_RenderGraphContext.renderGraphPool;
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TextureUVOrigin GetTextureUVOrigin(TextureHandle textureHandle)
         {
             return m_RenderGraphContext.GetTextureUVOrigin(textureHandle);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Contains<T>() where T : ContextItem, new()
         {
             return m_FrameData != null && m_FrameData.Contains<T>();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGet<T>(out T item) where T : ContextItem, new()
         {
             if (Contains<T>())
@@ -99,12 +99,12 @@ namespace VividRP.Runtime
             item = default;
             return false;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T Get<T>() where T : ContextItem, new()
         {
             return m_FrameData.Get<T>();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T GetOrCreate<T>() where T : ContextItem, new()
         {
             return m_FrameData.GetOrCreate<T>();
@@ -133,7 +133,7 @@ namespace VividRP.Runtime
         public ContextContainer frameData => m_FrameData;
         public UnsafeCommandBuffer cmd => m_RenderGraphContext.cmd;
         public RenderGraphObjectPool renderGraphPool => m_RenderGraphContext.renderGraphPool;
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public TextureUVOrigin GetTextureUVOrigin(TextureHandle textureHandle)
         {
             return m_RenderGraphContext.GetTextureUVOrigin(textureHandle);
@@ -144,12 +144,12 @@ namespace VividRP.Runtime
         {
             return CommandBufferHelpers.GetNativeCommandBuffer(m_RenderGraphContext.cmd);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool Contains<T>() where T : ContextItem, new()
         {
             return m_FrameData != null && m_FrameData.Contains<T>();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool TryGet<T>(out T item) where T : ContextItem, new()
         {
             if (Contains<T>())
@@ -161,12 +161,12 @@ namespace VividRP.Runtime
             item = default;
             return false;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T Get<T>() where T : ContextItem, new()
         {
             return m_FrameData.Get<T>();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public T GetOrCreate<T>() where T : ContextItem, new()
         {
             return m_FrameData.GetOrCreate<T>();

@@ -16,6 +16,7 @@ namespace VividRP.Editor.RenderPipeline
             "This profile defines the baseline Volume state before scene Volumes are blended on top.");
 
         protected override GUIContent volumeInfoBoxLabel => s_InfoBoxLabel;
+        protected override GUIContent defaultVolumeProfileAssetLabel => s_InfoBoxLabel;
 
         protected override VisualElement CreateAssetFieldUI()
         {

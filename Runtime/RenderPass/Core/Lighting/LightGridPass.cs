@@ -130,9 +130,6 @@ namespace VividRP.Runtime
         private readonly Matrix4x4[] m_ScreenProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_InvProjectionMatrices = new Matrix4x4[2];
         private readonly Matrix4x4[] m_ProjectionMatrices = new Matrix4x4[2];
-        private VividLightData.DirectionalLightData[] m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
-        private VividLightData.SFiniteLightBound[] m_FiniteLightBoundUploadData = Array.Empty<VividLightData.SFiniteLightBound>();
-        private VividLightData.LightVolumeData[] m_LightVolumeDataUploadData = Array.Empty<VividLightData.LightVolumeData>();
         private NativeArray<VividLightData.DirectionalLightData> m_DirectionalLightUploadNativeData;
         private NativeArray<VividLightData.PunctualLightData> m_PunctualLightUploadNativeData;
         private NativeArray<VividLightData.AreaLightData> m_AreaLightUploadNativeData;
@@ -195,6 +192,9 @@ namespace VividRP.Runtime
         {
             Camera camera;
             VividLightData lightData;
+            int punctualLightCapacity;
+            int areaLightCapacity;
+            int finiteLightCapacity;
 
             using (s_PrepareFrameDataMarker.Auto())
             {
@@ -203,13 +203,16 @@ namespace VividRP.Runtime
                 camera = cameraData.camera;
 
                 m_DirectionalLightCount = lightData.directionalLightCount;
-                m_PunctualLightCount = lightData.punctualLightCount;
-                m_AreaLightCount = lightData.areaLightCount;
+                m_PunctualLightCount = 0;
+                m_AreaLightCount = 0;
                 m_DecalCount = lightData.decalCount;
-                m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_DecalCount;
+                m_FiniteLightCount = m_DecalCount;
                 m_MainDirectionalLightIndex = lightData.mainDirectionalLightIndex;
                 m_LightingWidth = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
                 m_LightingHeight = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
+                punctualLightCapacity = Mathf.Max(lightData.visibleLightCount, 1);
+                areaLightCapacity = punctualLightCapacity;
+                finiteLightCapacity = Mathf.Max(lightData.visibleLightCount + m_DecalCount, 1);
 
                 if (m_LightingWidth <= 0)
                     m_LightingWidth = Mathf.Max(1, Screen.width);
@@ -236,18 +239,19 @@ namespace VividRP.Runtime
                 UpdateLightListMatrices(camera);
 
                 ResizeStructuredBuffer(m_DirectionalLightBuffer, Mathf.Max(m_DirectionalLightCount, 1), VividLightData.DirectionalLightData.Stride);
-                ResizeStructuredBuffer(m_PunctualLightBuffer, Mathf.Max(m_PunctualLightCount, 1), VividLightData.PunctualLightData.Stride);
-                ResizeStructuredBuffer(m_AreaLightBuffer, Mathf.Max(m_AreaLightCount, 1), VividLightData.AreaLightData.Stride);
+                ResizeStructuredBuffer(m_PunctualLightBuffer, punctualLightCapacity, VividLightData.PunctualLightData.Stride);
+                ResizeStructuredBuffer(m_AreaLightBuffer, areaLightCapacity, VividLightData.AreaLightData.Stride);
                 ResizeStructuredBuffer(m_DecalDataBuffer, Mathf.Max(m_DecalCount, 1), VividLightData.DecalClusterData.Stride);
-                ResizeStructuredBuffer(m_FiniteLightBoundBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.SFiniteLightBound.Stride);
-                ResizeStructuredBuffer(m_LightVolumeDataBuffer, Mathf.Max(m_FiniteLightCount, 1), VividLightData.LightVolumeData.Stride);
-                ResizeStructuredBuffer(m_ScreenSpaceBoundsBuffer, Mathf.Max(m_FiniteLightCount * 2, 1), sizeof(float) * 4);
+                ResizeStructuredBuffer(m_FiniteLightBoundBuffer, finiteLightCapacity, VividLightData.SFiniteLightBound.Stride);
+                ResizeStructuredBuffer(m_LightVolumeDataBuffer, finiteLightCapacity, VividLightData.LightVolumeData.Stride);
+                ResizeStructuredBuffer(m_ScreenSpaceBoundsBuffer, Mathf.Max(finiteLightCapacity * 2, 1), sizeof(float) * 4);
                 ResizeStructuredBuffer(m_BigTileLightListBuffer, Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_BigTileVolumetricLightListBuffer, Mathf.Max(m_ClusterBigTileLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredOffsetBuffer, Mathf.Max(m_LayeredOffsetCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredLightListBuffer, Mathf.Max(m_ClusterLightIndexCapacity, 1), sizeof(uint));
                 ResizeStructuredBuffer(m_LayeredLightListCounterBuffer, 1, sizeof(uint));
                 ResizeStructuredBuffer(m_LogBaseBuffer, Mathf.Max(m_ClusterTileCount, 1), sizeof(float));
+                EnsureLightGridUploadCapacity(punctualLightCapacity, areaLightCapacity, finiteLightCapacity);
             }
 
             using (s_PrepareImportMarker.Auto())
@@ -257,6 +261,12 @@ namespace VividRP.Runtime
 
             using (s_PrepareUploadMarker.Auto())
             {
+                lightData.CompleteLightGridPrepare();
+
+                m_PunctualLightCount = lightData.punctualLightCount;
+                m_AreaLightCount = lightData.areaLightCount;
+                m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_DecalCount;
+
                 UploadLightData(lightData, camera);
             }
 
@@ -382,9 +392,6 @@ namespace VividRP.Runtime
             m_BuildPerBigTileLightListKernel = -1;
             m_BuildPerVoxelLightListDepthKernel = -1;
             m_BuildPerVoxelLightListNoDepthKernel = -1;
-            m_DirectionalLightUploadData = Array.Empty<VividLightData.DirectionalLightData>();
-            m_FiniteLightBoundUploadData = Array.Empty<VividLightData.SFiniteLightBound>();
-            m_LightVolumeDataUploadData = Array.Empty<VividLightData.LightVolumeData>();
             DisposeNativeUploadData(ref m_DirectionalLightUploadNativeData);
             DisposeNativeUploadData(ref m_PunctualLightUploadNativeData);
             DisposeNativeUploadData(ref m_AreaLightUploadNativeData);
@@ -543,8 +550,11 @@ namespace VividRP.Runtime
             if (lightData == null)
                 return;
 
-            EnsureDirectionalLightUploadCapacity(m_DirectionalLightCount);
-            Array.Copy(lightData.directionalLights, m_DirectionalLightUploadData, m_DirectionalLightCount);
+            EnsureNativeUploadCapacity(ref m_DirectionalLightUploadNativeData, m_DirectionalLightCount);
+            NativeArray<VividLightData.DirectionalLightData>.Copy(
+                lightData.directionalLights,
+                m_DirectionalLightUploadNativeData,
+                m_DirectionalLightCount);
 
             if (camera == null
                 || !lightData.hasVisibleLights
@@ -565,14 +575,16 @@ namespace VividRP.Runtime
                 var light = visibleLight.light;
                 if (ShouldDirectionalLightInteractWithSky(light))
                 {
+                    var directionalLight = m_DirectionalLightUploadNativeData[directionalIndex];
                     var attenuation = PhysicallyBasedSkyAtmosphericAttenuation.Evaluate(
                         in attenuationContext,
-                        m_DirectionalLightUploadData[directionalIndex].directionWS);
-                    var color = m_DirectionalLightUploadData[directionalIndex].color;
-                    m_DirectionalLightUploadData[directionalIndex].color = new Vector3(
+                        directionalLight.directionWS);
+                    var color = directionalLight.color;
+                    directionalLight.color = new Vector3(
                         color.x * attenuation.x,
                         color.y * attenuation.y,
                         color.z * attenuation.z);
+                    m_DirectionalLightUploadNativeData[directionalIndex] = directionalLight;
                 }
 
                 directionalIndex++;
@@ -581,36 +593,37 @@ namespace VividRP.Runtime
 
         private void UpdateFiniteLightUploadData(VividLightData lightData)
         {
-            EnsureFiniteLightUploadCapacity(m_FiniteLightCount);
+            EnsureNativeUploadCapacity(ref m_FiniteLightBoundUploadNativeData, m_FiniteLightCount);
+            EnsureNativeUploadCapacity(ref m_LightVolumeDataUploadNativeData, m_FiniteLightCount);
 
             if (m_PunctualLightCount > 0)
             {
-                Array.Copy(
+                NativeArray<VividLightData.SFiniteLightBound>.Copy(
                     lightData.punctualLightBounds,
                     0,
-                    m_FiniteLightBoundUploadData,
+                    m_FiniteLightBoundUploadNativeData,
                     0,
                     m_PunctualLightCount);
-                Array.Copy(
+                NativeArray<VividLightData.LightVolumeData>.Copy(
                     lightData.punctualLightVolumeData,
                     0,
-                    m_LightVolumeDataUploadData,
+                    m_LightVolumeDataUploadNativeData,
                     0,
                     m_PunctualLightCount);
             }
 
             if (m_AreaLightCount > 0)
             {
-                Array.Copy(
+                NativeArray<VividLightData.SFiniteLightBound>.Copy(
                     lightData.areaLightBounds,
                     0,
-                    m_FiniteLightBoundUploadData,
+                    m_FiniteLightBoundUploadNativeData,
                     m_PunctualLightCount,
                     m_AreaLightCount);
-                Array.Copy(
+                NativeArray<VividLightData.LightVolumeData>.Copy(
                     lightData.areaLightVolumeData,
                     0,
-                    m_LightVolumeDataUploadData,
+                    m_LightVolumeDataUploadNativeData,
                     m_PunctualLightCount,
                     m_AreaLightCount);
             }
@@ -618,16 +631,16 @@ namespace VividRP.Runtime
             if (m_DecalCount > 0)
             {
                 int decalOffset = m_PunctualLightCount + m_AreaLightCount;
-                Array.Copy(
+                NativeArray<VividLightData.SFiniteLightBound>.Copy(
                     lightData.decalBounds,
                     0,
-                    m_FiniteLightBoundUploadData,
+                    m_FiniteLightBoundUploadNativeData,
                     decalOffset,
                     m_DecalCount);
-                Array.Copy(
+                NativeArray<VividLightData.LightVolumeData>.Copy(
                     lightData.decalVolumeData,
                     0,
-                    m_LightVolumeDataUploadData,
+                    m_LightVolumeDataUploadNativeData,
                     decalOffset,
                     m_DecalCount);
             }
@@ -756,10 +769,9 @@ namespace VividRP.Runtime
             if (m_DirectionalLightCount > 0)
             {
                 UpdateDirectionalLightUploadData(lightData, camera);
-                UploadManagedArray(
+                UploadNativeArray(
                     m_DirectionalLightBuffer,
-                    m_DirectionalLightUploadData,
-                    ref m_DirectionalLightUploadNativeData,
+                    m_DirectionalLightUploadNativeData,
                     m_DirectionalLightCount);
             }
             else
@@ -800,15 +812,13 @@ namespace VividRP.Runtime
                     : Matrix4x4.identity;
                 lightData.UpdateFiniteLightClusteredCullData(worldToViewMatrix);
                 UpdateFiniteLightUploadData(lightData);
-                UploadManagedArray(
+                UploadNativeArray(
                     m_FiniteLightBoundBuffer,
-                    m_FiniteLightBoundUploadData,
-                    ref m_FiniteLightBoundUploadNativeData,
+                    m_FiniteLightBoundUploadNativeData,
                     m_FiniteLightCount);
-                UploadManagedArray(
+                UploadNativeArray(
                     m_LightVolumeDataBuffer,
-                    m_LightVolumeDataUploadData,
-                    ref m_LightVolumeDataUploadNativeData,
+                    m_LightVolumeDataUploadNativeData,
                     m_FiniteLightCount);
             }
             else
@@ -858,21 +868,6 @@ namespace VividRP.Runtime
             buffer.desc.Target = GraphicsBuffer.Target.Structured;
         }
 
-        private void EnsureDirectionalLightUploadCapacity(int requiredCapacity)
-        {
-            if (requiredCapacity > m_DirectionalLightUploadData.Length)
-                m_DirectionalLightUploadData = new VividLightData.DirectionalLightData[requiredCapacity];
-        }
-
-        private void EnsureFiniteLightUploadCapacity(int requiredCapacity)
-        {
-            if (requiredCapacity > m_FiniteLightBoundUploadData.Length)
-                m_FiniteLightBoundUploadData = new VividLightData.SFiniteLightBound[requiredCapacity];
-
-            if (requiredCapacity > m_LightVolumeDataUploadData.Length)
-                m_LightVolumeDataUploadData = new VividLightData.LightVolumeData[requiredCapacity];
-        }
-
         private static void UploadManagedArray<T>(
             RenderGraphBuffer buffer,
             T[] source,
@@ -883,7 +878,46 @@ namespace VividRP.Runtime
                 return;
 
             EnsureNativeUploadCapacity(ref uploadData, count);
-            CopyManagedArrayToNative(source, uploadData, count);
+            NativeArray<T>.Copy(source, uploadData, count);
+            UploadNativeArray(buffer, uploadData, count);
+        }
+
+        private void EnsureLightGridUploadCapacity(
+            int punctualLightCapacity,
+            int areaLightCapacity,
+            int finiteLightCapacity)
+        {
+            EnsureNativeUploadCapacity(
+                ref m_DirectionalLightUploadNativeData,
+                Mathf.Max(m_DirectionalLightCount, 1));
+            EnsureNativeUploadCapacity(
+                ref m_PunctualLightUploadNativeData,
+                Mathf.Max(punctualLightCapacity, 1));
+            EnsureNativeUploadCapacity(
+                ref m_AreaLightUploadNativeData,
+                Mathf.Max(areaLightCapacity, 1));
+            EnsureNativeUploadCapacity(
+                ref m_DecalDataUploadNativeData,
+                Mathf.Max(m_DecalCount, 1));
+            EnsureNativeUploadCapacity(
+                ref m_FiniteLightBoundUploadNativeData,
+                Mathf.Max(finiteLightCapacity, 1));
+            EnsureNativeUploadCapacity(
+                ref m_LightVolumeDataUploadNativeData,
+                Mathf.Max(finiteLightCapacity, 1));
+            EnsureZeroedNativeUploadCapacity(
+                ref m_LayeredOffsetUploadNativeData,
+                Mathf.Max(m_LayeredOffsetCapacity, 1));
+        }
+
+        private static void UploadNativeArray<T>(
+            RenderGraphBuffer buffer,
+            NativeArray<T> uploadData,
+            int count) where T : struct
+        {
+            if (buffer == null || count <= 0 || !uploadData.IsCreated)
+                return;
+
             buffer.SetData(uploadData, 0, 0, count);
         }
 
@@ -921,13 +955,6 @@ namespace VividRP.Runtime
 
             DisposeNativeUploadData(ref uploadData);
             uploadData = new NativeArray<T>(requiredCapacity, Allocator.Persistent, allocationOptions);
-        }
-
-        private static void CopyManagedArrayToNative<T>(T[] source, NativeArray<T> destination, int count)
-            where T : struct
-        {
-            for (var index = 0; index < count; index++)
-                destination[index] = source[index];
         }
 
         private static void DisposeNativeUploadData<T>(ref NativeArray<T> uploadData)

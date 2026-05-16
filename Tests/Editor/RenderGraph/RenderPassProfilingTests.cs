@@ -100,11 +100,11 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.ResolveData"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AdvanceTemporal"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.PopulateTemporal"));
-            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AutoExposure"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.BuildShaderVariables"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividAutoExposureSystem"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem"));
@@ -131,7 +131,6 @@ namespace VividRP.Editor.Tests
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextResolveDataMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAdvanceTemporalMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextPopulateTemporalMarker.Auto()"));
-            Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAutoExposureMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextBuildShaderVariablesMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextSetShaderGlobalsMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextAdaptiveProbeVolumeMarker.Auto()"));

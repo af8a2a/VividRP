@@ -1,6 +1,5 @@
 using System.Collections.Generic;
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -49,14 +48,9 @@ namespace VividRP.Editor.Tests
             {
                 DecalSystem.Deinitialize();
 
-                var initializedField = typeof(DecalSystem).GetField(
-                    "s_Initialized",
-                    BindingFlags.Static | BindingFlags.NonPublic);
-                Assert.That(initializedField, Is.Not.Null);
-
                 var projector = owner.AddComponent<DecalProjector>();
 
-                Assert.That(initializedField.GetValue(null), Is.EqualTo(true));
+                Assert.That(DecalSystem.IsInitialized, Is.True);
 
                 DecalSystem.Unregister(projector);
             }

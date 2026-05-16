@@ -81,14 +81,31 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 return false;
             }
 
-            return TryGetOrCreateIndex(texture, GetTrackedTextureId(texture), out index);
+            EntityId textureId = GetTrackedTextureId(texture);
+            if (TryGetExistingIndex(textureId, out index))
+            {
+                return true;
+            }
+
+            return TryGetOrCreateIndex(texture, textureId, out index);
         }
 
         public bool TryGetExistingIndex(Texture texture, out uint index)
         {
             ThrowIfDisposed();
 
-            if (texture != null && m_TextureInfos.TryGetValue(GetTrackedTextureId(texture), out BindlessTextureInfo info))
+            if (texture != null)
+            {
+                return TryGetExistingIndex(GetTrackedTextureId(texture), out index);
+            }
+
+            index = InvalidTextureIndex;
+            return false;
+        }
+
+        private bool TryGetExistingIndex(EntityId textureId, out uint index)
+        {
+            if (m_TextureInfos.TryGetValue(textureId, out BindlessTextureInfo info))
             {
                 index = info.Index;
                 return true;

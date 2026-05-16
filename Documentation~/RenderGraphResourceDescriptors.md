@@ -153,6 +153,30 @@ var port = textureNode.Ports[0];
 var desc = port.TextureDesc; // Returns RenderGraphTextureDesc
 ```
 
+## Pass Bypass
+
+Passes that produce a replacement texture or buffer can declare a zero-GPU bypass path for disabled frames:
+
+```csharp
+[RenderGraphResource(Access = AccessFlags.Read)]
+private RenderGraphTexture m_Source = new();
+
+[RenderGraphResource(Access = AccessFlags.Write)]
+[PassBypass(nameof(m_Source))]
+private RenderGraphTexture m_Output = new();
+
+public override bool IsActive(ContextContainer frameData)
+{
+    return MySettings.Resolve(frameData).enabled;
+}
+```
+
+When `IsActive` returns `false`, `PassRecorder` skips the RenderGraph builder for that pass and forwards the output handle to the source handle. The `PassBypass` argument must be the C# field name, not the `RenderGraphResource.Name` display name. V1 supports `RenderGraphTexture` and `RenderGraphBuffer` fields only; source and output fields must use the same type, source must be readable, and output must be writable.
+
+`StopNaNPass` follows this model: it is no longer injected by `PassRecorder`; add it explicitly to a `.vrdg` graph and wire its output downstream. When the camera Stop NaNs option is off, its output is forwarded to its input without recording GPU work.
+
+`ReadWrite` resources do not need `PassBypass`: because the input and output are the same field, skipping an inactive pass naturally leaves the existing handle available for downstream readers.
+
 ## Future Enhancements
 
 1. **Editor UI** - Custom property drawers for descriptors in the graph editor

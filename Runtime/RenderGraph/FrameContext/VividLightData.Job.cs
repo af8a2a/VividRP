@@ -145,45 +145,54 @@ namespace VividRP.Runtime
         }
 
 
-        [BurstCompile]
-        private struct BuildVisibleLightCandidatesJob : IJob
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+        private struct BuildLightGridLightCandidatesJob : IJob
         {
             [ReadOnly] public NativeArray<VisibleLightRenderDataRecord> visibleLightRenderDataRecords;
 
-            public bool collectDirectionalLights;
-            public bool collectPunctualLights;
-            public bool collectAreaLights;
-            public NativeList<DirectionalLightCandidate> directionalLights;
             public NativeList<PunctualLightCandidate> punctualLights;
             public NativeList<AreaLightCandidate> areaLights;
+            public NativeList<SFiniteLightBound> punctualLightBounds;
+            public NativeList<LightVolumeData> punctualLightVolumeData;
+            public NativeList<SFiniteLightBound> areaLightBounds;
+            public NativeList<LightVolumeData> areaLightVolumeData;
+            public float4x4 worldToViewMatrix;
 
             public void Execute()
             {
                 for (var lightIndex = 0; lightIndex < visibleLightRenderDataRecords.Length; lightIndex++)
                 {
-                    var visibleLightRenderDataRecord = visibleLightRenderDataRecords[lightIndex];
-                    var lightRenderData = visibleLightRenderDataRecord.lightRenderData;
+                    var lightRenderData = visibleLightRenderDataRecords[lightIndex].lightRenderData;
 
-                    if (collectDirectionalLights && lightRenderData.lightType == LightType.Directional)
+                    if (IsPunctualLightSupported(lightRenderData))
                     {
-                        directionalLights.AddNoResize(
-                            CreateDirectionalLightCandidate(
-                                visibleLightRenderDataRecord.visibleLightIndex,
-                                lightRenderData));
+                        var candidate = CreatePunctualLightCandidate(lightRenderData);
+                        var viewSpaceCullData = BuildPunctualLightViewSpaceCullDataRecord(
+                            candidate.lightCullData,
+                            worldToViewMatrix);
+                        BuildPunctualLightVolumeDataAndBound(
+                            candidate.lightCullData,
+                            viewSpaceCullData,
+                            out var lightVolumeData,
+                            out var lightBound);
+
+                        punctualLights.AddNoResize(candidate);
+                        punctualLightBounds.AddNoResize(lightBound);
+                        punctualLightVolumeData.AddNoResize(lightVolumeData);
                     }
 
-                    if (collectPunctualLights && IsPunctualLightSupported(lightRenderData))
+                    if (IsAreaLightSupported(lightRenderData))
                     {
-                        punctualLights.AddNoResize(
-                            CreatePunctualLightCandidate(
-                                lightRenderData));
-                    }
+                        var candidate = CreateAreaLightCandidate(lightRenderData);
+                        BuildAreaLightVolumeDataAndBound(
+                            candidate.lightData,
+                            worldToViewMatrix,
+                            out var lightVolumeData,
+                            out var lightBound);
 
-                    if (collectAreaLights && IsAreaLightSupported(lightRenderData))
-                    {
-                        areaLights.AddNoResize(
-                            CreateAreaLightCandidate(
-                                lightRenderData));
+                        areaLights.AddNoResize(candidate);
+                        areaLightBounds.AddNoResize(lightBound);
+                        areaLightVolumeData.AddNoResize(lightVolumeData);
                     }
                 }
             }

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -671,6 +672,34 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FrameContextClear_KeepsAutoExposureCallbacksRegistered_InEditor()
+        {
+            VividAutoExposureSystem.Initialize();
+
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemDispose",
+                    typeof(VividAutoExposureSystem),
+                    "OnSubsystemDispose"),
+                Is.True);
+
+            FrameContextSystem.Clear();
+
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemPreRender",
+                    typeof(VividSubsystem<VividAutoExposureSystem>),
+                    "DispatchUpdate"),
+                Is.True);
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemDispose",
+                    typeof(VividAutoExposureSystem),
+                    "OnSubsystemDispose"),
+                Is.True);
+        }
+
+        [Test]
         public void AutoExposureEditorOnlyGpuReadbackPath_WiresRuntimeAndEditorStatsMonitor()
         {
             var autoExposurePassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AutoExposurePass.cs"));
@@ -696,7 +725,7 @@ namespace VividRP.Editor.Tests
             Assert.That(readbackBridgeSource, Does.Contain("cameraName = camera != null ? camera.name : string.Empty;"));
             Assert.That(readbackBridgeSource, Does.Not.Contain("request => HandleExposureReadback"));
             Assert.That(readbackBridgeSource, Does.Not.Contain("state.cameraName = camera.name;"));
-            Assert.That(autoExposurePassSource, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer(m_ExposureData)"));
+            Assert.That(autoExposurePassSource, Does.Contain("VividAutoExposureSystem.ResolvePreExposureBuffer(m_ExposureData)"));
             Assert.That(editorSource, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
             Assert.That(editorSource, Does.Contain("return BuildLiveStatsPreviewData(snapshot);"));
             Assert.That(editorSource, Does.Contain("snapshot.hasPreExposureState"));
@@ -739,6 +768,21 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static bool HasFrameContextSubscriber(string eventName, global::System.Type declaringType, string methodName)
+        {
+            FieldInfo eventField = typeof(FrameContextSystem).GetField(
+                eventName,
+                BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(eventField, Is.Not.Null);
+
+            var multicastDelegate = eventField.GetValue(null) as global::System.MulticastDelegate;
+            return multicastDelegate != null
+                && multicastDelegate.GetInvocationList().Any(
+                    callback => callback.Method.DeclaringType == declaringType
+                        && callback.Method.Name == methodName);
         }
 
         private static AutoExposureSettingsData CreateGoldenHistogramSettings()

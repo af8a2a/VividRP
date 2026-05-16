@@ -56,6 +56,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryGetOrCreateIndex_ReusesCachedIndex_WhenAllocatorBecomesUnavailable()
+        {
+            var allocator = new FakeBindlessTextureDescriptorAllocator(8);
+            using var container = new BindlessTextureContainer(allocator);
+            var texture = new Texture2D(1, 1);
+
+            try
+            {
+                var firstCreated = container.TryGetOrCreateIndex(texture, out uint firstIndex);
+                allocator.IsAvailable = false;
+
+                var secondCreated = container.TryGetOrCreateIndex(texture, out uint secondIndex);
+
+                Assert.That(firstCreated, Is.True);
+                Assert.That(secondCreated, Is.True);
+                Assert.That(secondIndex, Is.EqualTo(firstIndex));
+                Assert.That(allocator.DescriptorWrites.Count, Is.EqualTo(1));
+            }
+            finally
+            {
+                Object.DestroyImmediate(texture);
+            }
+        }
+
+        [Test]
         public void TryAllocateRange_ReturnsContiguousRangeFromHeapEnd()
         {
             var allocator = new FakeBindlessTextureDescriptorAllocator(10);

@@ -1,4 +1,4 @@
-﻿
+
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -33,30 +33,45 @@ namespace VividRP.Runtime
     }
 
 
-    public static class LTCAreaLightSystem
+    public sealed class LTCAreaLightSystem : VividSubsystem<LTCAreaLightSystem>
     {
-        static Texture2DArray m_LtcData;
-
         const int k_LtcLUTResolution = 64;
-        static bool s_Initialized;
+
+        Texture2DArray m_LtcData;
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif
-        internal static void Initialize()
+        private static void AutoInitialize()
         {
-            if (s_Initialized)
-                return;
-
-            BuildLTCData();
-            FrameContextSystem.SubsystemPreRender -= Update;
-            FrameContextSystem.SubsystemPreRender += Update;
-            s_Initialized = true;
+            Initialize();
         }
 
-        static void BuildLTCData()
+        protected override void OnInitialize()
+        {
+            BuildLTCData();
+        }
+
+        protected override void OnDeinitialize()
+        {
+            CoreUtils.Destroy(m_LtcData);
+            m_LtcData = null;
+        }
+
+        public new static void Deinitialize()
+        {
+            VividSubsystem<LTCAreaLightSystem>.Deinitialize();
+
+#if UNITY_EDITOR
+            // Keep the FrameContext callback wired in editor so the next preview render lazily
+            // rebuilds the LUT; OnDeinitialize already released the previous GPU texture.
+            EnsurePreRenderSubscribed();
+#endif
+        }
+
+        void BuildLTCData()
         {
             CoreUtils.Destroy(m_LtcData);
             m_LtcData = new Texture2DArray(k_LtcLUTResolution, k_LtcLUTResolution, (int)LTCLightingModel.Count,
@@ -85,7 +100,7 @@ namespace VividRP.Runtime
         }
 
 
-        internal static void Update(ContextContainer frameData, CommandBuffer cmd)
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemLTCAreaLightMarker.Auto())
             {
@@ -93,23 +108,12 @@ namespace VividRP.Runtime
             }
         }
 
-        private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
+        private void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            if (!s_Initialized)
-                Initialize();
+            if (m_LtcData == null)
+                BuildLTCData();
 
             cmd.SetGlobalTexture("_LtcData", m_LtcData);
-        }
-
-
-        internal static void Deinitialize()
-        {
-#if !UNITY_EDITOR
-            FrameContextSystem.SubsystemPreRender -= Update;
-#endif
-            CoreUtils.Destroy(m_LtcData);
-            m_LtcData = null;
-            s_Initialized = false;
         }
     }
 }

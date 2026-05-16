@@ -28,6 +28,17 @@ namespace VividRP.Runtime
     }
 
     [AttributeUsage(AttributeTargets.Field)]
+    public sealed class PassBypassAttribute : Attribute
+    {
+        public PassBypassAttribute(string sourceFieldName)
+        {
+            SourceFieldName = sourceFieldName;
+        }
+
+        public string SourceFieldName { get; }
+    }
+
+    [AttributeUsage(AttributeTargets.Field)]
     public sealed class TransientResourceAttribute : Attribute
     {
     }

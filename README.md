@@ -24,7 +24,7 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 
 ### RenderGraph 工作流
 
-- 使用 `Assets/Create/VividRP/Render Graph` 创建 `.vrdg`
+- 使用 `Assets/Create/VividRP/Standard Render Graph` 创建基于内置模板的可运行 `.vrdg`，或用 `Assets/Create/VividRP/Render Graph` 创建空图
 - `ScriptedImporter` 在导入时把 `.vrdg` 编译为运行时 `RenderGraphData`
 - Pass 端口由 `[RenderGraphResource]` 字段反射生成
 - 三种 Pass 基类：`RasterPass`（光栅化渲染）、`ComputePass`（Compute Shader 调度）、`UnsafePass`（原生 CommandBuffer 访问）
@@ -187,8 +187,8 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 1. 使用 Unity `6000.5.0a7` 或兼容的 `6000.5` 打开包含该包的 Unity 项目根目录
 2. 通过 `Assets/Create/VividRP/Vivid Render Pipeline` 创建 `VividRenderPipelineAsset`
 3. 在 `Project Settings > Graphics` 中把该资产设为当前 SRP
-4. 通过 `Assets/Create/VividRP/Render Graph` 创建 `.vrdg`
-5. 双击 `.vrdg` 打开 RenderGraph 编辑器，添加资源节点和 Pass 节点
+4. 通过 `Assets/Create/VividRP/Standard Render Graph` 创建基于内置模板的 `.vrdg`；如果需要从零开始，也可以使用 `Assets/Create/VividRP/Render Graph`
+5. 双击 `.vrdg` 打开 RenderGraph 编辑器，按项目需要调整资源节点和 Pass 节点
 6. 将该 `.vrdg` 生成的主对象 `RenderGraphData` 赋给管线资产的 `Render Graph Asset`
 7. 如需默认 Volume，直接在管线资产 Inspector 的 `Default Volume` 折叠区初始化或编辑
 8. 如需抗锯齿，在相机 `VividAdditionalCameraData` 中选择 `CMAA2` 或 `TemporalAntiAliasing`

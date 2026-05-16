@@ -62,7 +62,7 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererSource, Does.Contain("UpdateLocalSkyPrecomputation(context, skyData, cmd);"));
             Assert.That(rendererSource, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
             Assert.That(rendererSource, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
-            Assert.That(rendererSource, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer(m_RenderContext.exposureData)"));
+            Assert.That(rendererSource, Does.Contain("VividAutoExposureSystem.ResolvePreExposureBuffer(m_RenderContext.exposureData)"));
             Assert.That(rendererSource, Does.Contain("properties.SetBuffer(PreExposureBufferId, preExposureBuffer);"));
             Assert.That(rendererSource, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
             Assert.That(skyManagerSource, Does.Not.Contain("private static readonly PhysicallyBasedSkyAtmosphereLutCache"));

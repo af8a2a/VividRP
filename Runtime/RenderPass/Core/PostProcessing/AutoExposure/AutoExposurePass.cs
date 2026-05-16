@@ -201,7 +201,7 @@ namespace VividRP.Runtime.RenderPass
 
 #if UNITY_EDITOR
             var preExposureBuffer = m_EnableExposure
-                ? AutoExposureShaderBindings.ResolvePreExposureBuffer(m_ExposureData)
+                ? VividAutoExposureSystem.ResolvePreExposureBuffer(m_ExposureData)
                 : null;
             AutoExposureStatsReadbackBridge.Request(
                 cmd,
@@ -218,7 +218,7 @@ namespace VividRP.Runtime.RenderPass
 #endif
 
             if (exposureUpdated)
-                AutoExposureRuntimeManager.CommitFrame(m_Camera);
+                VividAutoExposureSystem.CommitFrame(m_Camera);
         }
 
         public override void Dispose()

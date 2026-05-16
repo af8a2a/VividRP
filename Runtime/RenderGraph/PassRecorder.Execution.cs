@@ -101,7 +101,6 @@ namespace VividRP.Runtime
         private static long s_CurrentImportVersion;
         private static bool s_IsCompiled;
         private static bool s_RenderedPreImageEffectGizmosInGraph;
-        private static StopNaNPass s_InjectedStopNaNPass;
         private static int s_EditModeFrameIndex;
 
 #if UNITY_EDITOR
@@ -117,7 +116,7 @@ namespace VividRP.Runtime
         private static readonly BaseRenderFunc<RenderGizmosPassData, UnsafeGraphContext> s_RenderGizmosRenderFunc =
             ExecuteRenderGizmosPass;
 #endif
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void InitializeContext(
             ScriptableRenderContext context,
             Camera camera,
@@ -164,7 +163,7 @@ namespace VividRP.Runtime
             renderingData.context = context;
             gpuDrivenFrameData.Reset();
             gpuDrivenDecalData.Reset();
-            lightData.Update(cullingResults);
+            lightData.Update(cullingResults, cameraData.viewMatrix);
         }
 
         private static int ResolveFrameIndex()
@@ -280,20 +279,6 @@ namespace VividRP.Runtime
                 }
             }
 
-            if (s_InjectedStopNaNPass != null)
-            {
-                try
-                {
-                    DisposeRenderPass(s_InjectedStopNaNPass, "StopNaNPass (Injected)");
-                }
-                catch (Exception e)
-                {
-                    Debug.LogException(e);
-                }
-
-                s_InjectedStopNaNPass = null;
-            }
-
             DisposeAccelerationStructures();
             s_RenderPasses.Clear();
             s_PassResources.Clear();
@@ -310,6 +295,8 @@ namespace VividRP.Runtime
             RenderGraphHistoryRegistry.Clear();
             RenderGraphBufferHistoryRegistry.Clear();
             VividAntialiasingRuntimeUtility.Clear();
+            if (s_FrameData.Contains<VividLightData>())
+                s_FrameData.Get<VividLightData>().ReleaseLightGridNativeResources();
             FrameContextSystem.Clear();
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
             s_EditModeFrameIndex = 0;
@@ -319,7 +306,7 @@ namespace VividRP.Runtime
             s_IsCompiled = false;
             RenderPassProfilingUtility.Clear();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void PrepareFrame(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             using var prepareFrameScope = RenderPassProfilingUtility.PrepareFrameMarker.Auto();
@@ -359,7 +346,6 @@ namespace VividRP.Runtime
 
         internal static void AbortFrame()
         {
-            RestoreInjectedSourceOverrides();
             ClearImportedTextures();
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
@@ -370,6 +356,7 @@ namespace VividRP.Runtime
         /// Imports an external RTHandle for a specific pass during Prepare().
         /// Returns a TextureHandle that can be assigned to pass member variables.
         /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static TextureHandle ImportTextureForPass(IRenderPass pass, RTHandle rtHandle, AccessFlags access = AccessFlags.Read)
         {
             if (s_CurrentRenderGraph == null)
@@ -436,6 +423,7 @@ namespace VividRP.Runtime
         /// </summary>
         /// <param name="texture">The RenderGraphTexture to import into</param>
         /// <param name="rtHandle">The external RTHandle to import</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static void ImportTexture(RenderGraphTexture texture, RTHandle rtHandle)
         {
             if (texture == null)
@@ -452,7 +440,7 @@ namespace VividRP.Runtime
 
             s_ImportedRTHandles[texture] = rtHandle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static bool AllocHistoryTextureForPass(
             IRenderPass pass,
             string key,
@@ -491,7 +479,6 @@ namespace VividRP.Runtime
 
             return hasHistoryTextures && hasValidData;
         }
-
         internal static void RegisterHistoryTextureWriteForPass(
             IRenderPass pass,
             string key,
@@ -510,9 +497,9 @@ namespace VividRP.Runtime
             };
         }
 
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
-            RestoreInjectedSourceOverrides();
             CommitTextureHistories(graphAsset);
             FinalizeCodeManagedBufferHistories(graphAsset);
             ClearHistoryImportedHandles();
@@ -571,60 +558,6 @@ namespace VividRP.Runtime
             bool renderedPreImageEffectGizmosInGraph)
         {
             return !hasRenderGizmoPrePostProcessBoundary || !renderedPreImageEffectGizmosInGraph;
-        }
-
-        private static bool ShouldInjectStopNaNPass()
-        {
-            var additionalData = s_FrameData.GetOrCreate<VividCameraData>().additionalData;
-            return additionalData != null && additionalData.stopNaNs;
-        }
-
-        private static StopNaNPass GetOrCreateInjectedStopNaNPass()
-        {
-            if (s_InjectedStopNaNPass != null)
-                return s_InjectedStopNaNPass;
-
-            s_InjectedStopNaNPass = new StopNaNPass();
-            CreateRenderPass(s_InjectedStopNaNPass, "StopNaNPass (Injected)");
-            GetCurrentPassResources(s_InjectedStopNaNPass, "StopNaNPass (Injected)");
-            return s_InjectedStopNaNPass;
-        }
-
-        private static void RecordInjectedStopNaNPass(
-            RenderGraph renderGraph,
-            StopNaNPass stopNaNPass,
-            RenderGraphTexture sourceTexture,
-            bool enableAsyncCompute,
-            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
-            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache,
-            Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
-            Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
-        {
-            if (renderGraph == null || stopNaNPass == null || sourceTexture == null || sourceTexture.innerHandle.IsValid() != true)
-                return;
-
-            stopNaNPass.SetInput(sourceTexture);
-            var stopNaNResources = GetCurrentPassResources(stopNaNPass, "StopNaNPass (Injected)");
-            RecordUnsafePass(
-                renderGraph,
-                stopNaNPass,
-                stopNaNResources,
-                null,
-                enableAsyncCompute,
-                textureCache,
-                bufferCache,
-                renderListCache,
-                accelerationStructureCache,
-                "StopNaNPass (Injected)");
-        }
-
-        private static void RestoreInjectedSourceOverrides()
-        {
-            foreach (var pass in s_RenderPasses)
-            {
-                if (pass is IPostProcessSourceOverridePass sourceOverridePass)
-                    sourceOverridePass.RestoreSourceTexture();
-            }
         }
 
         private static void RegisterTextureHistoryBinding(
@@ -828,6 +761,7 @@ namespace VividRP.Runtime
                 var fallbackPass = new FullScreenPass();
                 s_PassIndices[fallbackPass] = 0;
                 s_RenderPasses.Add(fallbackPass);
+                s_RuntimePassDefinitions.Add(null);
             }
             else
             {
@@ -893,6 +827,7 @@ namespace VividRP.Runtime
                     indexedPassTypes[passIndex] = passType;
                     s_PassIndices[pass] = s_RenderPasses.Count;
                     s_RenderPasses.Add(pass);
+                    s_RuntimePassDefinitions.Add(passDef);
                 }
 
                 for (var passIndex = 0; passIndex < passDefinitions.Count; passIndex++)
@@ -923,7 +858,7 @@ namespace VividRP.Runtime
             s_IsCompiled = true;
         }
 
-        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphTexture[] CreateRuntimeTextures(RenderGraphData graphAsset)
         {
             if (graphAsset.TextureDescriptors == null || graphAsset.TextureDescriptors.Count == 0)
@@ -940,7 +875,7 @@ namespace VividRP.Runtime
 
             return textures;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void CreateRuntimeHistoryTextures(
             RenderGraphData graphAsset,
             out RenderGraphTexture[] previousTextures,
@@ -969,7 +904,7 @@ namespace VividRP.Runtime
                 };
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphBuffer[] CreateRuntimeBuffers(RenderGraphData graphAsset)
         {
             if (graphAsset.BufferDescriptors == null || graphAsset.BufferDescriptors.Count == 0)
@@ -986,7 +921,7 @@ namespace VividRP.Runtime
 
             return buffers;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphRenderList[] CreateRuntimeRenderLists(RenderGraphData graphAsset)
         {
             if (graphAsset.RenderListDescriptors == null || graphAsset.RenderListDescriptors.Count == 0)
@@ -1003,7 +938,7 @@ namespace VividRP.Runtime
 
             return renderLists;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RenderGraphAccelerationStructure[] CreateRuntimeAccelerationStructures(RenderGraphData graphAsset)
         {
             if (graphAsset.AccelerationStructureDescriptors == null || graphAsset.AccelerationStructureDescriptors.Count == 0)
@@ -1038,7 +973,7 @@ namespace VividRP.Runtime
 
             return null;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ApplyResourceBindings(
             IRenderPass pass,
             Type passType,
@@ -1254,7 +1189,7 @@ namespace VividRP.Runtime
             Debug.LogWarning(
                 $"[VividRP] Skipping legacy RenderGraph binding for transient field '{fieldName}' on '{passType?.FullName ?? "<Unknown Pass>"}'.");
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void PrepareHistoryTargets(RenderGraphData graphAsset, CommandBuffer cmdBuffer)
         {
             if (graphAsset?.HistoryTextureDescriptors == null || graphAsset.HistoryTextureDescriptors.Count == 0)
@@ -1296,7 +1231,7 @@ namespace VividRP.Runtime
                     currentHandle);
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void PreparePendingHistoryTextureImports(RenderGraph renderGraph)
         {
             if (renderGraph == null || s_TextureHistoryFrameBindings.Count == 0)
@@ -1312,7 +1247,7 @@ namespace VividRP.Runtime
 
             s_HistoryTextureImportCache.Clear();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ImportHistoryTexture(
             RenderGraph renderGraph,
             RenderGraphTexture texture,
@@ -1348,7 +1283,7 @@ namespace VividRP.Runtime
 
             return false;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void CommitTextureHistories(RenderGraphData graphAsset)
         {
             if (graphAsset == null || s_TextureHistoryFrameBindings.Count == 0)
@@ -1533,23 +1468,33 @@ namespace VividRP.Runtime
         {
             using var recordRenderGraphScope = RenderPassProfilingUtility.RecordRenderGraphMarker.Auto();
             EnsureCompiled(graphAsset);
-            RestoreInjectedSourceOverrides();
-            var injectedStopNaNPass = ShouldInjectStopNaNPass()
-                ? GetOrCreateInjectedStopNaNPass()
-                : null;
 
             s_CurrentRenderGraph = renderGraph;
             BlueNoise.Instance?.ImportResources(renderGraph);
 
+            var passDefinitions = s_RuntimePassDefinitions;
+            var passActiveStates = new bool[s_RenderPasses.Count];
             using (RenderPassProfilingUtility.PrepareAllMarker.Auto())
             {
-                foreach (var pass in s_RenderPasses)
+                for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
                 {
-                    PrepareRenderPass(pass);
+                    var pass = s_RenderPasses[passIndex];
+                    var resources = GetCurrentPassResources(pass);
+                    var passDefinition = GetRuntimePassDefinition(passDefinitions, passIndex);
+                    var isActive = IsRenderPassActive(pass);
+                    passActiveStates[passIndex] = isActive;
+
+                    if (isActive)
+                    {
+                        PrepareRenderPass(pass);
+                        GetCurrentPassResources(pass);
+                    }
+                    else
+                    {
+                        ApplyInactivePassBypassDescriptors(pass, resources, passDefinition);
+                    }
                 }
 
-                if (injectedStopNaNPass != null)
-                    PrepareRenderPass(injectedStopNaNPass, "StopNaNPass (Injected)");
             }
 
             PreparePendingHistoryTextureImports(renderGraph);
@@ -1561,10 +1506,7 @@ namespace VividRP.Runtime
             var renderListCache = s_RecordGraphRenderListCache;
             var accelerationStructureCache = s_RecordGraphAccelerationStructureCache;
             var recordedPreImageEffectGizmos = false;
-            RenderGraphTexture stopNaNOriginalSource = null;
-            RenderGraphTexture stopNaNSanitizedSource = null;
 
-            var passDefinitions = s_RuntimePassDefinitions;
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
             {
                 var pass = s_RenderPasses[passIndex];
@@ -1593,45 +1535,20 @@ namespace VividRP.Runtime
                     recordedPreImageEffectGizmos = true;
                 }
 #endif
-                if (pass is IPostProcessSourceOverridePass sourceOverridePass)
-                {
-                    var sourceTexture = sourceOverridePass.GetSourceTexture();
-                    var resolvedSourceTexture = sourceTexture;
-                    if (injectedStopNaNPass != null
-                        && stopNaNSanitizedSource == null
-                        && resolvedSourceTexture != null
-                        && resolvedSourceTexture.innerHandle.IsValid())
-                    {
-                        RecordInjectedStopNaNPass(
-                            renderGraph,
-                            injectedStopNaNPass,
-                            resolvedSourceTexture,
-                            enableAsyncCompute,
-                            textureCache,
-                            bufferCache,
-                            renderListCache,
-                            accelerationStructureCache);
-                        stopNaNOriginalSource = resolvedSourceTexture;
-                        stopNaNSanitizedSource = injectedStopNaNPass.GetOutputTexture();
-                    }
-
-                    if (stopNaNOriginalSource != null
-                        && stopNaNSanitizedSource != null
-                        && ReferenceEquals(resolvedSourceTexture, stopNaNOriginalSource))
-                    {
-                        resolvedSourceTexture = stopNaNSanitizedSource;
-                    }
-
-                    if (!ReferenceEquals(resolvedSourceTexture, sourceTexture) && resolvedSourceTexture != null)
-                    {
-                        sourceOverridePass.SetSourceTexture(resolvedSourceTexture);
-                    }
-                }
-
                 var resources = GetCurrentPassResources(pass);
-                var passDefinition = passDefinitions != null && passIndex < passDefinitions.Count
-                    ? passDefinitions[passIndex]
-                    : null;
+                var passDefinition = GetRuntimePassDefinition(passDefinitions, passIndex);
+
+                if (passIndex < passActiveStates.Length && !passActiveStates[passIndex])
+                {
+                    ApplyInactivePassBypassHandles(
+                        renderGraph,
+                        pass,
+                        resources,
+                        passDefinition,
+                        textureCache,
+                        bufferCache);
+                    continue;
+                }
 
                 if (pass is IRenderGraphRecordingPass graphRecordingPass)
                 {
@@ -1694,6 +1611,273 @@ namespace VividRP.Runtime
             s_RecordGraphBufferCache.Clear();
             s_RecordGraphRenderListCache.Clear();
             s_RecordGraphAccelerationStructureCache.Clear();
+        }
+
+        private static RenderGraphPassDefinition GetRuntimePassDefinition(
+            IReadOnlyList<RenderGraphPassDefinition> passDefinitions,
+            int passIndex)
+        {
+            return passDefinitions != null && passIndex >= 0 && passIndex < passDefinitions.Count
+                ? passDefinitions[passIndex]
+                : null;
+        }
+
+        private static bool IsRenderPassActive(IRenderPass pass)
+        {
+            return pass == null || pass.IsActive(s_FrameData);
+        }
+
+        private static void ApplyInactivePassBypassDescriptors(
+            IRenderPass pass,
+            PassResource resources,
+            RenderGraphPassDefinition passDefinition)
+        {
+            if (pass == null || resources?.BypassRules == null || resources.BypassRules.Length == 0)
+                return;
+
+            foreach (var rule in resources.BypassRules)
+            {
+                if (!CanApplyBypassRule(rule, passDefinition, logWarning: false))
+                    continue;
+
+                switch (rule.ResourceType)
+                {
+                    case PassResourceType.Texture:
+                        CopyBypassTextureDescriptor(pass, rule);
+                        break;
+                    case PassResourceType.Buffer:
+                        CopyBypassBufferDescriptor(pass, rule);
+                        break;
+                }
+            }
+        }
+
+        private static bool CanApplyBypassRule(
+            PassBypassRule rule,
+            RenderGraphPassDefinition passDefinition,
+            bool logWarning = true)
+        {
+            if (rule == null)
+                return false;
+
+            if (passDefinition?.ResourceBindings == null)
+                return true;
+
+            foreach (var binding in passDefinition.ResourceBindings)
+            {
+                if (binding == null
+                    || !string.Equals(binding.FieldName, rule.OutputFieldName, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (binding.ResourceBindingVariant == RenderGraphResourceBindingVariant.HistoryCurrent)
+                {
+                    if (logWarning)
+                    {
+                        Debug.LogWarning(
+                            $"[VividRP] Skipping {nameof(PassBypassAttribute)} for history current output field '{rule.OutputFieldName}'.");
+                    }
+
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static void CopyBypassTextureDescriptor(IRenderPass pass, PassBypassRule rule)
+        {
+            var sourceTexture = rule.SourceField?.GetValue(pass) as RenderGraphTexture;
+            var outputTexture = rule.OutputField?.GetValue(pass) as RenderGraphTexture;
+            var sourceDescriptor = sourceTexture?.desc;
+            if (sourceDescriptor == null || outputTexture == null)
+                return;
+
+            outputTexture.desc ??= new RenderGraphTextureDesc();
+            RenderGraphTextureDescUtility.Copy(sourceDescriptor, outputTexture.desc);
+        }
+
+        private static void CopyBypassBufferDescriptor(IRenderPass pass, PassBypassRule rule)
+        {
+            var sourceBuffer = rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
+            var outputBuffer = rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
+            var sourceDescriptor = sourceBuffer?.desc;
+            if (sourceDescriptor == null || outputBuffer == null)
+                return;
+
+            outputBuffer.desc = sourceDescriptor.Clone();
+        }
+
+        private static void ApplyInactivePassBypassHandles(
+            RenderGraph renderGraph,
+            IRenderPass pass,
+            PassResource resources,
+            RenderGraphPassDefinition passDefinition,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
+        {
+            var bypassedOutputFields = new HashSet<string>(StringComparer.Ordinal);
+
+            if (pass != null && resources?.BypassRules != null)
+            {
+                foreach (var rule in resources.BypassRules)
+                {
+                    if (!CanApplyBypassRule(rule, passDefinition))
+                        continue;
+
+                    if (TryApplyInactivePassBypassHandle(
+                            renderGraph,
+                            pass,
+                            rule,
+                            textureCache,
+                            bufferCache))
+                    {
+                        bypassedOutputFields.Add(rule.OutputFieldName);
+                    }
+                }
+            }
+
+            ClearInactivePassUnbypassedOutputs(resources, bypassedOutputFields);
+        }
+
+        private static bool TryApplyInactivePassBypassHandle(
+            RenderGraph renderGraph,
+            IRenderPass pass,
+            PassBypassRule rule,
+            Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
+        {
+            if (renderGraph == null || pass == null || rule == null)
+                return false;
+
+            switch (rule.ResourceType)
+            {
+                case PassResourceType.Texture:
+                {
+                    var sourceTexture = rule.SourceField?.GetValue(pass) as RenderGraphTexture;
+                    var outputTexture = rule.OutputField?.GetValue(pass) as RenderGraphTexture;
+                    if (sourceTexture == null || outputTexture == null)
+                        return false;
+
+                    var sourceHandle = GetOrCreateTextureHandle(renderGraph, sourceTexture, textureCache);
+                    if (!sourceHandle.IsValid())
+                        return false;
+
+                    outputTexture.ClearImportedHandle();
+                    outputTexture.innerHandle = sourceHandle;
+                    textureCache[outputTexture] = sourceHandle;
+                    return true;
+                }
+                case PassResourceType.Buffer:
+                {
+                    var sourceBuffer = rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
+                    var outputBuffer = rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
+                    if (sourceBuffer == null || outputBuffer == null)
+                        return false;
+
+                    var sourceHandle = GetOrCreateBufferHandle(renderGraph, sourceBuffer, bufferCache);
+                    if (!sourceHandle.IsValid())
+                        return false;
+
+                    outputBuffer.innerHandle = sourceHandle;
+                    bufferCache[outputBuffer] = sourceHandle;
+                    return true;
+                }
+                default:
+                    return false;
+            }
+        }
+
+        private static void ClearInactivePassUnbypassedOutputs(
+            PassResource resources,
+            ISet<string> bypassedOutputFields)
+        {
+            if (resources == null)
+                return;
+
+            ClearInactivePassUnbypassedTextures(resources.Textures, bypassedOutputFields);
+            ClearInactivePassUnbypassedBuffers(resources.Buffers, bypassedOutputFields);
+            ClearInactivePassUnbypassedRenderLists(resources.RenderLists, bypassedOutputFields);
+            ClearInactivePassUnbypassedAccelerationStructures(resources.AccelerationStructures, bypassedOutputFields);
+        }
+
+        private static bool ShouldClearInactivePassOutput(PassResourceEntry entry, ISet<string> bypassedOutputFields)
+        {
+            if (entry == null)
+                return false;
+
+            if ((entry.Access & AccessFlags.Write) == 0 || (entry.Access & AccessFlags.Read) != 0)
+                return false;
+
+            var fieldName = entry.Field?.Name;
+            return string.IsNullOrEmpty(fieldName)
+                   || bypassedOutputFields == null
+                   || !bypassedOutputFields.Contains(fieldName);
+        }
+
+        private static void ClearInactivePassUnbypassedTextures(
+            IEnumerable<PassResourceEntry> entries,
+            ISet<string> bypassedOutputFields)
+        {
+            if (entries == null)
+                return;
+
+            foreach (var entry in entries)
+            {
+                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields))
+                    continue;
+
+                entry.Texture?.ClearImportedHandle();
+            }
+        }
+
+        private static void ClearInactivePassUnbypassedBuffers(
+            IEnumerable<PassResourceEntry> entries,
+            ISet<string> bypassedOutputFields)
+        {
+            if (entries == null)
+                return;
+
+            foreach (var entry in entries)
+            {
+                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields) || entry.Buffer == null)
+                    continue;
+
+                entry.Buffer.innerHandle = default;
+            }
+        }
+
+        private static void ClearInactivePassUnbypassedRenderLists(
+            IEnumerable<PassResourceEntry> entries,
+            ISet<string> bypassedOutputFields)
+        {
+            if (entries == null)
+                return;
+
+            foreach (var entry in entries)
+            {
+                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields) || entry.RenderList == null)
+                    continue;
+
+                entry.RenderList.innerHandle = default;
+            }
+        }
+
+        private static void ClearInactivePassUnbypassedAccelerationStructures(
+            IEnumerable<PassResourceEntry> entries,
+            ISet<string> bypassedOutputFields)
+        {
+            if (entries == null)
+                return;
+
+            foreach (var entry in entries)
+            {
+                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields) || entry.AccelerationStructure == null)
+                    continue;
+
+                entry.AccelerationStructure.innerHandle = default;
+            }
         }
 
         private static PassResource GetCurrentPassResources(IRenderPass pass, string displayName = null)

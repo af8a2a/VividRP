@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -16,6 +17,7 @@ namespace VividRP.Runtime
         public PassResourceEntry[] Buffers = Array.Empty<PassResourceEntry>();
         public PassResourceEntry[] RenderLists = Array.Empty<PassResourceEntry>();
         public PassResourceEntry[] AccelerationStructures = Array.Empty<PassResourceEntry>();
+        public PassBypassRule[] BypassRules = Array.Empty<PassBypassRule>();
 
         /// <summary>
         /// All entries across all resource types.
@@ -30,6 +32,15 @@ namespace VividRP.Runtime
                 foreach (var e in AccelerationStructures) yield return e;
             }
         }
+    }
+
+    public sealed class PassBypassRule
+    {
+        public string SourceFieldName;
+        public string OutputFieldName;
+        public PassResourceType ResourceType;
+        public FieldInfo SourceField;
+        public FieldInfo OutputField;
     }
 
     internal static class RenderGraphPassReflectionUtility
@@ -130,6 +141,7 @@ namespace VividRP.Runtime
             var buffers = new List<PassResourceEntry>();
             var renderLists = new List<PassResourceEntry>();
             var accelerationStructures = new List<PassResourceEntry>();
+            var bypassRules = new List<PassBypassRule>();
 
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(type))
             {
@@ -190,6 +202,8 @@ namespace VividRP.Runtime
                             isTransient: false));
                         break;
                 }
+
+                TryAddBypassRule(type, field, attr, isTransient, bypassRules);
             }
 
             return new PassResource
@@ -198,7 +212,142 @@ namespace VividRP.Runtime
                 Buffers = buffers.ToArray(),
                 RenderLists = renderLists.ToArray(),
                 AccelerationStructures = accelerationStructures.ToArray(),
+                BypassRules = bypassRules.ToArray(),
             };
+        }
+
+        private static void TryAddBypassRule(
+            Type passType,
+            FieldInfo outputField,
+            RenderGraphResource outputAttr,
+            bool outputIsTransient,
+            List<PassBypassRule> bypassRules)
+        {
+            var bypassAttr = outputField.GetCustomAttribute<PassBypassAttribute>();
+            if (bypassAttr == null)
+                return;
+
+            if (!TryValidateBypassRule(
+                    passType,
+                    outputField,
+                    outputAttr,
+                    outputIsTransient,
+                    bypassAttr.SourceFieldName,
+                    out var sourceField,
+                    out var resourceType,
+                    out var error))
+            {
+                Debug.LogWarning(error);
+                return;
+            }
+
+            bypassRules.Add(new PassBypassRule
+            {
+                SourceFieldName = sourceField.Name,
+                OutputFieldName = outputField.Name,
+                ResourceType = resourceType,
+                SourceField = sourceField,
+                OutputField = outputField,
+            });
+        }
+
+        internal static bool TryValidateBypassRule(
+            Type passType,
+            FieldInfo outputField,
+            RenderGraphResource outputAttr,
+            bool outputIsTransient,
+            string sourceFieldName,
+            out FieldInfo sourceField,
+            out PassResourceType resourceType,
+            out string error)
+        {
+            sourceField = null;
+            resourceType = default;
+            error = null;
+
+            var passTypeName = passType?.FullName ?? "<Unknown Pass>";
+            var outputFieldName = outputField?.Name ?? "<Unknown Field>";
+            if (passType == null || outputField == null || outputAttr == null)
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. The output field must be marked with {nameof(RenderGraphResource)}.";
+                return false;
+            }
+
+            if (outputIsTransient || RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(outputField))
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Transient resources cannot be bypass outputs.";
+                return false;
+            }
+
+            if ((outputAttr.Access & AccessFlags.Write) == 0)
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. The bypass output must be writable.";
+                return false;
+            }
+
+            if (!TryGetBypassResourceType(outputField.FieldType, out resourceType))
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Only {nameof(RenderGraphTexture)} and {nameof(RenderGraphBuffer)} fields are supported.";
+                return false;
+            }
+
+            if (string.IsNullOrWhiteSpace(sourceFieldName))
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field name is empty.";
+                return false;
+            }
+
+            sourceField = RenderGraphPassReflectionUtility.GetInstanceField(passType, sourceFieldName);
+            if (sourceField == null)
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceFieldName}' was not found.";
+                return false;
+            }
+
+            var sourceAttr = sourceField.GetCustomAttribute<RenderGraphResource>();
+            if (sourceAttr == null)
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' must be marked with {nameof(RenderGraphResource)}.";
+                return false;
+            }
+
+            if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(sourceField))
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' cannot be transient.";
+                return false;
+            }
+
+            if (sourceField.FieldType != outputField.FieldType)
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' must use the same resource type as the output.";
+                return false;
+            }
+
+            if ((sourceAttr.Access & AccessFlags.Read) == 0)
+            {
+                error = $"[VividRP] Invalid {nameof(PassBypassAttribute)} on '{passTypeName}.{outputFieldName}'. Source field '{sourceField.Name}' must be readable.";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryGetBypassResourceType(Type fieldType, out PassResourceType resourceType)
+        {
+            if (fieldType == typeof(RenderGraphTexture))
+            {
+                resourceType = PassResourceType.Texture;
+                return true;
+            }
+
+            if (fieldType == typeof(RenderGraphBuffer))
+            {
+                resourceType = PassResourceType.Buffer;
+                return true;
+            }
+
+            resourceType = default;
+            return false;
         }
 
         private static PassResourceEntry CreateEntry(
@@ -538,6 +687,11 @@ namespace VividRP.Runtime
         /// previous receives the last valid frame, current is registered as this frame's output.
         /// </summary>
         bool AllocHistoryBuffer(string key, RenderGraphBuffer previous, RenderGraphBuffer current, RenderGraphBufferDesc desc);
+
+        bool IsActive(ContextContainer frameData)
+        {
+            return true;
+        }
     }
 
     public abstract class ComputePass : IRenderPass
@@ -546,6 +700,7 @@ namespace VividRP.Runtime
 
         public abstract void Create();
         public abstract void Prepare(ContextContainer frameData);
+        public virtual bool IsActive(ContextContainer frameData) => true;
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
@@ -581,6 +736,7 @@ namespace VividRP.Runtime
 
         public abstract void Create();
         public abstract void Prepare(ContextContainer frameData);
+        public virtual bool IsActive(ContextContainer frameData) => true;
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.
@@ -623,6 +779,7 @@ namespace VividRP.Runtime
         /// collected by Initialize() to set up builder calls.
         /// </summary>
         public abstract void Prepare(ContextContainer frameData);
+        public virtual bool IsActive(ContextContainer frameData) => true;
 
         /// <summary>
         /// Record rendering commands. Called from within the RenderGraph render func.

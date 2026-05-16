@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    internal static class SkyManager
+    internal sealed class SkyManager : VividSubsystem<SkyManager>
     {
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
@@ -15,7 +15,6 @@ namespace VividRP.Runtime
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
         private static readonly SkySpecularCache s_SpecularCache = new();
 
-        private static bool s_Initialized;
         private static bool s_UpdateRequested;
         private static float s_LastUpdateTime;
         private static ISkyRenderer s_ActiveRenderer;
@@ -29,11 +28,13 @@ namespace VividRP.Runtime
 #else
         [RuntimeInitializeOnLoadMethod]
 #endif
-        internal static void Initialize()
+        private static void AutoInitialize()
         {
-            if (s_Initialized)
-                return;
+            Initialize();
+        }
 
+        protected override void OnInitialize()
+        {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             RegisterRenderer(new HDRISkyRenderer(), resources);
             RegisterRenderer(new PhysicallyBasedSkyRenderer(), resources);
@@ -47,12 +48,9 @@ namespace VividRP.Runtime
             s_PendingSkyCamera = null;
             s_SkyUpdateVersion = 0;
             s_PendingSkyUpdateVersion = -1;
-            s_Initialized = true;
-
-            FrameContextSystem.SubsystemPreRender += Update;
         }
 
-        internal static void Deinitialize()
+        protected override void OnDeinitialize()
         {
             foreach (var renderer in s_Renderers.Values)
                 renderer.Dispose();
@@ -68,9 +66,6 @@ namespace VividRP.Runtime
             s_PendingSkyCamera = null;
             s_SkyUpdateVersion = 0;
             s_PendingSkyUpdateVersion = -1;
-            s_Initialized = false;
-
-            FrameContextSystem.SubsystemPreRender -= Update;
         }
 
         internal static void RequestUpdate()
@@ -78,7 +73,7 @@ namespace VividRP.Runtime
             s_UpdateRequested = true;
         }
 
-        internal static void Update(ContextContainer frameData, CommandBuffer cmd)
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyMarker.Auto())
             {
@@ -91,7 +86,7 @@ namespace VividRP.Runtime
             if (frameData == null)
                 return;
 
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             s_SkyUpdateVersion++;
@@ -154,7 +149,7 @@ namespace VividRP.Runtime
             if (frameData == null)
                 return false;
 
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             if (s_ActiveRenderer == null)
@@ -200,7 +195,7 @@ namespace VividRP.Runtime
 
         internal static RTHandle GetSpecularCubemapHandle()
         {
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             return s_SpecularCache.Cubemap;
@@ -208,7 +203,7 @@ namespace VividRP.Runtime
 
         internal static int GetSpecularCubemapMaxMip(VividSkyData skyData = null)
         {
-            if (!s_Initialized)
+            if (!IsInitialized)
                 Initialize();
 
             var source = skyData?.specularCubemap;

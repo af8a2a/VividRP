@@ -86,6 +86,7 @@ namespace VividRP.Editor.RenderGraph
 
                 ValidateAsyncCompute(passNode, passType, reporter, ref summary);
                 ValidateTransientResourceFields(passNode, passType, reporter, ref summary);
+                ValidatePassBypassFields(passNode, passType, reporter, ref summary);
                 ValidateReadWriteBindings(passNode, passType, reporter, ref summary);
                 ValidateHistoryBindings(passNode, passType, reporter, ref summary);
             }
@@ -138,6 +139,71 @@ namespace VividRP.Editor.RenderGraph
 
                 ValidateTransientLegacyConnections(passNode, field, attr, reporter, ref summary);
             }
+        }
+
+        private static void ValidatePassBypassFields(
+            RenderPassNodeData passNode,
+            System.Type passType,
+            IRenderGraphValidationReporter reporter,
+            ref ValidationSummary summary)
+        {
+            foreach (var field in RenderGraphPassReflectionUtility.EnumerateInstanceFields(passType))
+            {
+                var bypassAttr = field.GetCustomAttribute<PassBypassAttribute>();
+                if (bypassAttr == null)
+                    continue;
+
+                var attr = field.GetCustomAttribute<RenderGraphResource>();
+                if (!PassResourceCollector.TryValidateBypassRule(
+                        passType,
+                        field,
+                        attr,
+                        RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field),
+                        bypassAttr.SourceFieldName,
+                        out _,
+                        out _,
+                        out var error))
+                {
+                    reporter.LogError(error, passNode);
+                    summary.ErrorCount++;
+                    continue;
+                }
+
+                if (IsBypassFieldBoundToHistoryCurrent(passNode, field, attr))
+                {
+                    reporter.LogError(
+                        $"Field '{field.Name}' cannot use {nameof(PassBypassAttribute)} while bound to CurrOut on a history node.",
+                        passNode);
+                    summary.ErrorCount++;
+                }
+            }
+        }
+
+        internal static bool IsBypassFieldBoundToHistoryCurrent(
+            RenderPassNodeData passNode,
+            FieldInfo field,
+            RenderGraphResource attr)
+        {
+            if (passNode == null || field == null || attr == null || field.FieldType != typeof(RenderGraphTexture))
+                return false;
+
+            var inputPortName = passNode.GetInputPortName(field, attr);
+            var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+            var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
+                ? null
+                : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort;
+            var outputConnectedPort = string.IsNullOrEmpty(outputPortName)
+                ? null
+                : passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort;
+
+            return IsHistoryCurrentOutput(inputConnectedPort)
+                   || IsHistoryCurrentOutput(outputConnectedPort);
+        }
+
+        private static bool IsHistoryCurrentOutput(IPort connectedPort)
+        {
+            return connectedPort?.GetNode() is HistoryResourceNodeData historyNode
+                   && historyNode.IsCurrentOutputPort(connectedPort);
         }
 
         private static void ValidateReadWriteBindings(

@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -6,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class StopNaNPass : UnsafePass, IDynamicPassResourceLayout
+    public sealed class StopNaNPass : UnsafePass
     {
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture m_Source = new();
@@ -14,41 +13,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(
             Name = "StopNaNOutput",
             Access = AccessFlags.Write)]
+        [PassBypass(nameof(m_Source))]
         private RenderGraphTexture m_OutputTexture;
 
         private Material m_Material;
-        private bool m_IsPassResourceLayoutDirty;
-
-        public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
 
         public StopNaNPass()
         {
             profilingSampler = new ProfilingSampler(nameof(StopNaNPass));
             m_OutputTexture = CreatePassOwnedTexture("StopNaNOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
-        }
-
-        public void ClearPassResourceLayoutDirty()
-        {
-            m_IsPassResourceLayoutDirty = false;
-        }
-
-        internal void SetInput(RenderGraphTexture sourceTexture)
-        {
-            if (sourceTexture == null)
-                throw new ArgumentNullException(nameof(sourceTexture));
-
-            UpdateOutputDescriptor(sourceTexture);
-
-            if (ReferenceEquals(m_Source, sourceTexture))
-                return;
-
-            m_Source = sourceTexture;
-            m_IsPassResourceLayoutDirty = true;
-        }
-
-        internal RenderGraphTexture GetOutputTexture()
-        {
-            return m_OutputTexture;
         }
 
         public override void Create()
@@ -60,8 +33,23 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.SetKeyword(m_Material, "_STOP_NANS", true);
         }
 
+        public override bool IsActive(ContextContainer frameData)
+        {
+            if (frameData == null || !frameData.Contains<VividCameraData>())
+                return false;
+
+            var cameraData = frameData.Get<VividCameraData>();
+            return cameraData?.additionalData != null && cameraData.additionalData.stopNaNs;
+        }
+
         public override void Prepare(ContextContainer frameData)
         {
+            if (m_Source?.desc != null)
+            {
+                UpdateOutputDescriptor(m_Source);
+                return;
+            }
+
             var cameraData = frameData.Get<VividCameraData>();
             var width = cameraData != null && cameraData.actualWidth > 0
                 ? cameraData.actualWidth
@@ -110,8 +98,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 CoreUtils.Destroy(m_Material);
                 m_Material = null;
             }
-
-            m_IsPassResourceLayoutDirty = false;
         }
 
         private void UpdateOutputDescriptor(RenderGraphTexture sourceTexture)

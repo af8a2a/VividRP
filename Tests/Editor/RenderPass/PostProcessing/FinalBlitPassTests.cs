@@ -176,18 +176,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CommitFrame_RestoresFinalBlitSourceOverride()
-        {
-            AssertPassRecorderRestoresFinalBlitSourceOverride(() => PassRecorder.CommitFrame(null));
-        }
-
-        [Test]
-        public void AbortFrame_RestoresFinalBlitSourceOverride()
-        {
-            AssertPassRecorderRestoresFinalBlitSourceOverride(PassRecorder.AbortFrame);
-        }
-
-        [Test]
         public void VividRPCoreResources_DeclaresFinalBlitShader()
         {
             var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.FinalBlitShader));
@@ -239,6 +227,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PassRecorderSource_DoesNotInjectStopNaNPass()
+        {
+            var passRecorderSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
+
+            Assert.That(passRecorderSource, Does.Not.Contain("ShouldInjectStopNaNPass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("GetOrCreateInjectedStopNaNPass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("RecordInjectedStopNaNPass"));
+            Assert.That(passRecorderSource, Does.Not.Contain("StopNaNPass (Injected)"));
+        }
+
+        [Test]
         public void FinalBlitPassNode_DoesNotExposeAsyncComputeOption()
         {
             var node = new AutoRegisteredFinalBlitPassNode();
@@ -263,7 +262,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void StopNaNPass_RegistersReadOnlyInput_AndWriteOnlyOutput()
+        public void StopNaNPass_RegistersReadOnlyInput_WriteOnlyOutput_AndBypassRule()
         {
             IRenderPass renderPass = new StopNaNPass();
 
@@ -275,27 +274,31 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries[0].Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries[1].Name, Is.EqualTo("StopNaNOutput"));
             Assert.That(textureEntries[1].Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
+            Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("m_Source"));
+            Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("m_OutputTexture"));
+            Assert.That(resources.BypassRules[0].ResourceType, Is.EqualTo(PassResourceType.Texture));
         }
 
         [Test]
-        public void StopNaNPass_SetInput_MarksPassResourceLayoutDirty_AndClonesDescriptor()
+        public void StopNaNPass_Prepare_ClonesInputDescriptorToOutput()
         {
             var pass = new StopNaNPass();
-            var setMethod = typeof(StopNaNPass).GetMethod("SetInput", BindingFlags.Instance | BindingFlags.NonPublic);
-            var outputMethod = typeof(StopNaNPass).GetMethod("GetOutputTexture", BindingFlags.Instance | BindingFlags.NonPublic);
+            var sourceField = typeof(StopNaNPass).GetField("m_Source", BindingFlags.Instance | BindingFlags.NonPublic);
+            var outputField = typeof(StopNaNPass).GetField("m_OutputTexture", BindingFlags.Instance | BindingFlags.NonPublic);
             var input = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.B10G11R11_UFloatPack32);
             input.desc.Width = 320;
             input.desc.Height = 180;
             input.desc.UseDynamicScale = true;
 
-            Assert.That(setMethod, Is.Not.Null);
-            Assert.That(outputMethod, Is.Not.Null);
+            Assert.That(sourceField, Is.Not.Null);
+            Assert.That(outputField, Is.Not.Null);
+            sourceField.SetValue(pass, input);
 
-            setMethod.Invoke(pass, new object[] { input });
+            pass.Prepare(new ContextContainer());
 
-            var outputTexture = (RenderGraphTexture)outputMethod.Invoke(pass, Array.Empty<object>());
+            var outputTexture = (RenderGraphTexture)outputField.GetValue(pass);
 
-            Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
             Assert.That(outputTexture.desc.Width, Is.EqualTo(320));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(180));
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.B10G11R11_UFloatPack32));
@@ -376,41 +379,5 @@ namespace VividRP.Editor.Tests
             Assert.That(sourceField.GetValue(pass), Is.SameAs(originalSource));
         }
 
-        private static void AssertPassRecorderRestoresFinalBlitSourceOverride(Action restoreAction)
-        {
-            PassRecorder.Dispose();
-
-            var pass = new FinalBlitPass();
-            var setMethod = typeof(FinalBlitPass).GetMethod("SetSourceTexture", BindingFlags.Instance | BindingFlags.NonPublic);
-            var sourceField = typeof(FinalBlitPass).GetField("source", BindingFlags.Instance | BindingFlags.NonPublic);
-            var renderPassesField = typeof(PassRecorder).GetField("s_RenderPasses", BindingFlags.NonPublic | BindingFlags.Static);
-            var originalSource = RenderGraphTexture.CreateInput("OriginalSource", GraphicsFormat.R16G16B16A16_SFloat);
-            var injectedSource = RenderGraphTexture.CreateInput("InjectedSource", GraphicsFormat.R16G16B16A16_SFloat);
-
-            try
-            {
-                Assert.That(setMethod, Is.Not.Null);
-                Assert.That(sourceField, Is.Not.Null);
-                Assert.That(renderPassesField, Is.Not.Null);
-
-                sourceField.SetValue(pass, originalSource);
-                setMethod.Invoke(pass, new object[] { injectedSource });
-
-                var renderPasses = renderPassesField.GetValue(null) as System.Collections.IList;
-                Assert.That(renderPasses, Is.Not.Null);
-                renderPasses.Add(pass);
-
-                pass.ClearPassResourceLayoutDirty();
-
-                restoreAction();
-
-                Assert.That(sourceField.GetValue(pass), Is.SameAs(originalSource));
-                Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
-            }
-            finally
-            {
-                PassRecorder.Dispose();
-            }
-        }
     }
 }

@@ -68,7 +68,7 @@ float4 LoadScreenSpaceReflection(uint2 pixelCoord)
         return float4(0.0, 0.0, 0.0, 0.0);
 
     float4 reflection = _ScreenSpaceReflectionTexture.Load(int3(pixelCoord, 0));
-    return float4(max(reflection.rgb, 0.0), saturate(reflection.a));
+    return float4(VividApplyPreExposure(max(reflection.rgb, 0.0)), saturate(reflection.a));
 }
 
 float EvaluateDeferredDirectionalShadowAttenuation(

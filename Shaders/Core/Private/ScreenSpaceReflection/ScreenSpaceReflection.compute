@@ -3,6 +3,18 @@
 #pragma kernel ScreenSpaceReflectionsTracing
 #pragma kernel ScreenSpaceReflectionsResolve
 #pragma kernel ScreenSpaceReflectionsAccumulate
+#pragma kernel ScreenSpaceReflectionsRayTracingTemporal
+#pragma kernel ScreenSpaceReflectionsRayTracingDenoiseH SSR_RAYTRACING_DENOISE_HORIZONTAL
+#pragma kernel ScreenSpaceReflectionsRayTracingDenoiseV SSR_RAYTRACING_DENOISE_VERTICAL
+#pragma kernel PreBlur
+#pragma kernel TemporalAccumulation
+#pragma kernel MipGeneration
+#pragma kernel HistoryFix
+#pragma kernel Blur
+#pragma kernel CopyHistoryAccumulation
+#pragma kernel CopyHistory
+#pragma kernel TemporalStabilization
+#pragma kernel PostBlur
 #pragma kernel ScreenSpaceReflectionsHDRPTracing
 #pragma kernel ScreenSpaceReflectionsHDRPReprojection
 #pragma kernel ScreenSpaceReflectionsHDRPAccumulate
@@ -43,6 +55,18 @@ RWTexture2D<float4> _SSRHDRPAccumTexture;
 RWTexture2D<float4> _SSRHDRPOutputTexture;
 RWTexture2D<float4> _SSRAccumTexture;
 RWTexture2D<float4> _SSRAvgRadianceTexture;
+Texture2D<float4> _ReBlurLightingDistanceTexture;
+RWTexture2D<float4> _ReBlurLightingDistanceTextureRW;
+Texture2D<uint> _ReBlurAccumulationTexture;
+RWTexture2D<uint> _ReBlurAccumulationTextureRW;
+Texture2D<float4> _ReBlurLightingDistanceHistory;
+RWTexture2D<float4> _ReBlurLightingDistanceHistoryRW;
+Texture2D<uint> _ReBlurAccumulationHistory;
+RWTexture2D<uint> _ReBlurAccumulationHistoryRW;
+Texture2D<float4> _ReBlurStabilizationHistory;
+RWTexture2D<float4> _ReBlurStabilizationHistoryRW;
+Texture2D<float4> _ReBlurMipChain;
+RWTexture2D<float4> _ReBlurMipChainRW;
 Texture2D<float4> _SsrAccumPrev;
 RWTexture2D<float4> _SsrAccumTexture;
 Texture2D<float> _SSRPrevNumFramesAccumTexture;
@@ -63,6 +87,7 @@ SAMPLER(sampler_SkyTexture);
 float4 _SkyTextureTint;
 float4 _SkyTextureParams;
 int _SsrWriteHDRPToOutput;
+int _TargetMipLevel;
 
 CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float4 _SsrTraceScreenSize;
@@ -88,6 +113,14 @@ CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     float4x4 _SsrViewProjMatrix;
     float4x4 _SsrInvViewProjMatrix;
     float4x4 _SsrPrevViewProjMatrix;
+    float4 _ReBlurPreBlurRotator;
+    float4 _ReBlurBlurRotator;
+    float4 _ReBlurPostBlurRotator;
+    float4 _ReBlurHistorySizeAndScale;
+    float _ReBlurDenoiserRadius;
+    float _ReBlurAntiFlickeringStrength;
+    float _ReBlurHistoryValidity;
+    float _ReBlurPadding;
 CBUFFER_END
 
 uint2 GetTilePixelCoord(uint groupIndex, uint2 groupThreadId)
@@ -139,12 +172,25 @@ int2 ClampPixelCoord(int2 pixelCoord)
     return clamp(pixelCoord, int2(0, 0), maxCoord);
 }
 
+float GetSsrRadianceClampValue()
+{
+    return max(_SsrIntensityClamp * VividGetOneOverPreExposure(), 0.0);
+}
+
 float3 SanitizeSsrRadiance(float3 color)
 {
     if (any(isnan(color)) || any(isinf(color)))
         return 0.0;
 
-    return min(max(color, 0.0), _SsrIntensityClamp);
+    return min(max(color, 0.0), GetSsrRadianceClampValue());
+}
+
+float3 DecodePreExposedSsrRadiance(float3 color)
+{
+    if (any(isnan(color)) || any(isinf(color)))
+        return 0.0;
+
+    return ClampToFloat16Max(clamp(color, 0.0, _SsrIntensityClamp) * VividGetOneOverPreExposure());
 }
 
 float4 EmptySsrResult()
@@ -172,7 +218,7 @@ float3 LoadHistoryPyramidColor(int2 pixelCoord, int mipLevel)
 
     int2 maxCoord = int2(max((int)width - 1, 0), max((int)height - 1, 0));
     pixelCoord = clamp(pixelCoord, int2(0, 0), maxCoord);
-    return SanitizeSsrRadiance(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb);
+    return DecodePreExposedSsrRadiance(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb);
 }
 
 float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
@@ -454,11 +500,15 @@ float3 SampleSsrSkyFallback(float3 directionWS, float perceptualRoughness)
 
     float skyMipLevel = saturate(perceptualRoughness) * max(_SkyTextureParams.z, 0.0);
     float3 rotatedDirectionWS = RotateSsrSkyDirectionAroundYAxis(directionWS, _SkyTextureParams.y);
-    float3 skyRadiance = SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, skyMipLevel).rgb;
-    float3 exposedSkyRadiance = VividApplyPreExposure(max(skyRadiance * _SkyTextureTint.rgb * _SkyTextureParams.x, 0.0));
+    float3 skyRadiance = max(
+        SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, skyMipLevel).rgb
+            * _SkyTextureTint.rgb
+            * _SkyTextureParams.x,
+        0.0);
+    float3 exposedSkyRadiance = VividApplyPreExposure(skyRadiance);
     float3 exposedSkyHsv = RgbToHsv(exposedSkyRadiance);
     exposedSkyHsv.z = clamp(exposedSkyHsv.z, 0.0, _SsrIntensityClamp);
-    return ClampToFloat16Max(HsvToRgb(exposedSkyHsv));
+    return ClampToFloat16Max(HsvToRgb(exposedSkyHsv) * VividGetOneOverPreExposure());
 }
 
 float4 BuildSsrSkyFallback(
@@ -1284,7 +1334,8 @@ SsrNeighborStatistics GetSsrNeighborStatistics(uint2 coordSS, float3 centerColor
     statistics.mean = 0.0;
     statistics.variance = 0.0;
     statistics.stdDev = 0.0;
-    statistics.minVal = float3(_SsrIntensityClamp, _SsrIntensityClamp, _SsrIntensityClamp);
+    float radianceClamp = GetSsrRadianceClampValue();
+    statistics.minVal = float3(radianceClamp, radianceClamp, radianceClamp);
     statistics.maxVal = 0.0;
 
     float sampleCount = 0.0;
@@ -1399,6 +1450,847 @@ SsrHistorySample SampleSsrAccumulationHistory(float2 historyScreenUV)
     return sample;
 }
 
+SsrNeighborStatistics GetSsrRayTracingTemporalStatistics(uint2 coordSS, float3 centerColor)
+{
+    SsrNeighborStatistics statistics;
+    statistics.mean = 0.0;
+    statistics.variance = 0.0;
+    statistics.stdDev = 0.0;
+    float radianceClamp = GetSsrRadianceClampValue();
+    statistics.minVal = float3(radianceClamp, radianceClamp, radianceClamp);
+    statistics.maxVal = 0.0;
+
+    float sampleCount = 0.0;
+    float3 m2 = 0.0;
+    AccumulateSsrNeighborSample(centerColor, sampleCount, statistics.mean, m2, statistics.minVal, statistics.maxVal);
+
+    [unroll]
+    for (int y = -1; y <= 1; y++)
+    {
+        [unroll]
+        for (int x = -1; x <= 1; x++)
+        {
+            if (x == 0 && y == 0)
+                continue;
+
+            SsrResolveCoordData sampleData = LoadSsrResolveCoordData((int2)coordSS + int2(x, y));
+            if (sampleData.valid <= 0.0)
+                continue;
+
+            AccumulateSsrNeighborSample(sampleData.radiance, sampleCount, statistics.mean, m2, statistics.minVal, statistics.maxVal);
+        }
+    }
+
+    statistics.variance = max(m2 / max(sampleCount, 1.0), 0.0);
+    statistics.stdDev = sqrt(statistics.variance);
+    return statistics;
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsRayTracingTemporal(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 currentReflection = _SSRTraceTexture[coordSS];
+    float4 rayInfo = _SSRRayInfoTexture[coordSS];
+    if (currentReflection.a <= 0.0001 || !IsValidSsrRayInfo(rayInfo) || !ShouldTracePixel(coordSS))
+    {
+        _SSRResolveTexture[coordSS] = EmptySsrResult();
+        _SsrAccumTexture[coordSS] = EmptySsrResult();
+        _SSRNumFramesAccumTexture[coordSS] = 0.0;
+        return;
+    }
+
+    currentReflection.rgb = SanitizeSsrRadiance(currentReflection.rgb);
+    currentReflection.a = saturate(min(currentReflection.a, rayInfo.w));
+
+    float3 accumulatedColor = currentReflection.rgb;
+    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+    float roughness = clamp(
+        PerceptualRoughnessToRoughness(perceptualRoughness),
+        SSR_MIN_GGX_ROUGHNESS,
+        SSR_MAX_GGX_ROUGHNESS);
+    float roughnessReductionFactor = 1.0 - exp(-roughness * 100.0);
+    float maxSamplesNum = max(8.0, SSR_MAX_ACCUMULATED_FRAMES * roughnessReductionFactor)
+        * max(_SsrAccumulationAmount, 0.0);
+    maxSamplesNum = max(maxSamplesNum, 1.0);
+    float normalizedFrameCount = 1.0 / maxSamplesNum;
+
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    float2 historyScreenUV;
+    if (TryComputeSsrAccumulationHistoryUV(coordSS, deviceDepth, historyScreenUV))
+    {
+        SsrHistorySample history = SampleSsrAccumulationHistory(historyScreenUV);
+        if (history.validWeight > 0.0001 && !any(isnan(history.color)) && !any(isinf(history.color)))
+        {
+            SsrNeighborStatistics neighborStatistics = GetSsrRayTracingTemporalStatistics(coordSS, currentReflection.rgb);
+            float3 historyClampMin = max(
+                float3(0.0, 0.0, 0.0),
+                min(neighborStatistics.minVal, neighborStatistics.mean - neighborStatistics.stdDev));
+            float radianceClamp = GetSsrRadianceClampValue();
+            float3 historyClampMax = min(
+                float3(radianceClamp, radianceClamp, radianceClamp),
+                max(neighborStatistics.maxVal, neighborStatistics.mean + neighborStatistics.stdDev));
+            float3 historyColor = clamp(history.color, historyClampMin, historyClampMax);
+
+            float accumulatedFramesNum = min(history.normalizedFrameCount * maxSamplesNum + 1.0, maxSamplesNum);
+            float temporalWeight = rcp(max(accumulatedFramesNum, 1.0));
+            accumulatedColor = lerp(historyColor, currentReflection.rgb, temporalWeight);
+            normalizedFrameCount = accumulatedFramesNum / maxSamplesNum;
+        }
+    }
+
+    accumulatedColor = SanitizeSsrRadiance(accumulatedColor);
+    float validHistory = currentReflection.a > 0.0001 ? 1.0 : 0.0;
+    _SSRResolveTexture[coordSS] = float4(accumulatedColor, currentReflection.a);
+    _SsrAccumTexture[coordSS] = float4(accumulatedColor, validHistory);
+    _SSRNumFramesAccumTexture[coordSS] = validHistory > 0.0 ? normalizedFrameCount : 0.0;
+}
+
+SsrResolveCoordData LoadSsrRayTracingSpatialData(int2 coordSS, bool readIntermediate)
+{
+    if (coordSS.x < 0 || coordSS.y < 0)
+        return EmptySsrResolveCoordData();
+
+    uint2 sampleCoord = (uint2)coordSS;
+    if (IsOutsideScreen(sampleCoord))
+        return EmptySsrResolveCoordData();
+
+    float4 reflection = EmptySsrResult();
+    if (readIntermediate)
+        reflection = _SSRAccumTexture[sampleCoord];
+    else
+        reflection = _SSRResolveTexture[sampleCoord];
+
+    float4 rayInfo = _SSRRayInfoTexture[sampleCoord];
+    if (reflection.a <= 0.0001 || !IsValidSsrRayInfo(rayInfo))
+        return EmptySsrResolveCoordData();
+
+    float deviceDepth = _DepthTexture.Load(int3(sampleCoord, 0));
+    if (IsRawFarDepth(deviceDepth))
+        return EmptySsrResolveCoordData();
+
+    float eyeDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+    if (isnan(eyeDepth) || isinf(eyeDepth) || eyeDepth <= 0.0)
+        return EmptySsrResolveCoordData();
+
+    SsrResolveCoordData data;
+    data.radiance = SanitizeSsrRadiance(reflection.rgb);
+    data.hitDistance = rayInfo.x;
+    data.normalWS = LoadNormalWS(sampleCoord);
+    data.eyeDepth = eyeDepth;
+    data.alpha = saturate(reflection.a);
+    data.valid = 1.0;
+    return data;
+}
+
+#define SSR_RAYTRACING_DENOISE_RADIUS 8
+
+float ComputeSsrRayTracingDenoiseRadius(float perceptualRoughness, float hitDistance)
+{
+    if (IsMirrorSsrReflection(perceptualRoughness))
+        return 0.0;
+
+    float roughness = saturate(PerceptualRoughnessToRoughness(perceptualRoughness) * 32.0);
+    float distanceScale = saturate(hitDistance * 0.25);
+    return lerp(1.0, (float)SSR_RAYTRACING_DENOISE_RADIUS, saturate(roughness * max(distanceScale, 0.25)));
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsRayTracingDenoiseH(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    SsrResolveCoordData center = LoadSsrRayTracingSpatialData((int2)coordSS, false);
+    if (center.valid <= 0.0 || !ShouldTracePixel(coordSS))
+    {
+        _SSRAccumTexture[coordSS] = EmptySsrResult();
+        return;
+    }
+
+    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+    float radius = ComputeSsrRayTracingDenoiseRadius(perceptualRoughness, center.hitDistance);
+    float sigma = max(radius * 0.5, 1.0);
+    float3 radianceSum = center.radiance;
+    float weightSum = 1.0;
+
+    [unroll]
+    for (int tap = -SSR_RAYTRACING_DENOISE_RADIUS; tap <= SSR_RAYTRACING_DENOISE_RADIUS; tap++)
+    {
+        if (tap == 0 || abs(tap) > (int)ceil(radius))
+            continue;
+
+        SsrResolveCoordData sampleData = LoadSsrRayTracingSpatialData((int2)coordSS + int2(tap, 0), false);
+        if (sampleData.valid <= 0.0)
+            continue;
+
+        float tapDistance = (float)tap;
+        float weight = exp(-0.5 * tapDistance * tapDistance / max(sigma * sigma, 0.0001));
+        weight *= ResolveEdgeStoppingNormalWeight(center.normalWS, sampleData.normalWS);
+        weight *= ResolveEdgeStoppingDepthWeight(center.eyeDepth, sampleData.eyeDepth);
+        weight *= ResolveRayDistanceWeight(center.hitDistance, sampleData.hitDistance);
+        weight *= ResolveRadianceWeight(center.radiance, sampleData.radiance);
+        weight *= min(center.alpha, sampleData.alpha);
+
+        if (weight <= 0.001)
+            continue;
+
+        radianceSum += sampleData.radiance * weight;
+        weightSum += weight;
+    }
+
+    float3 filteredRadiance = SanitizeSsrRadiance(radianceSum * rcp(max(weightSum, 0.0001)));
+    _SSRAccumTexture[coordSS] = float4(filteredRadiance, center.alpha);
+}
+
+[numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsRayTracingDenoiseV(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = GetTilePixelCoord(groupId.x, groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    SsrResolveCoordData center = LoadSsrRayTracingSpatialData((int2)coordSS, true);
+    if (center.valid <= 0.0 || !ShouldTracePixel(coordSS))
+    {
+        _OutputColorTexture[coordSS] = EmptySsrResult();
+        return;
+    }
+
+    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+    float radius = ComputeSsrRayTracingDenoiseRadius(perceptualRoughness, center.hitDistance);
+    float sigma = max(radius * 0.5, 1.0);
+    float3 radianceSum = center.radiance;
+    float weightSum = 1.0;
+
+    [unroll]
+    for (int tap = -SSR_RAYTRACING_DENOISE_RADIUS; tap <= SSR_RAYTRACING_DENOISE_RADIUS; tap++)
+    {
+        if (tap == 0 || abs(tap) > (int)ceil(radius))
+            continue;
+
+        SsrResolveCoordData sampleData = LoadSsrRayTracingSpatialData((int2)coordSS + int2(0, tap), true);
+        if (sampleData.valid <= 0.0)
+            continue;
+
+        float tapDistance = (float)tap;
+        float weight = exp(-0.5 * tapDistance * tapDistance / max(sigma * sigma, 0.0001));
+        weight *= ResolveEdgeStoppingNormalWeight(center.normalWS, sampleData.normalWS);
+        weight *= ResolveEdgeStoppingDepthWeight(center.eyeDepth, sampleData.eyeDepth);
+        weight *= ResolveRayDistanceWeight(center.hitDistance, sampleData.hitDistance);
+        weight *= ResolveRadianceWeight(center.radiance, sampleData.radiance);
+        weight *= min(center.alpha, sampleData.alpha);
+
+        if (weight <= 0.001)
+            continue;
+
+        radianceSum += sampleData.radiance * weight;
+        weightSum += weight;
+    }
+
+    float3 filteredRadiance = SanitizeSsrRadiance(radianceSum * rcp(max(weightSum, 0.0001)));
+    _OutputColorTexture[coordSS] = float4(filteredRadiance, center.alpha);
+}
+
+#define SSR_REBLUR_MAX_ACCUM_FRAME_NUM 32u
+#define SSR_REBLUR_HISTORY_FIX_FRAME_NUM 4u
+#define SSR_REBLUR_MAX_RADIUS 8
+
+struct SsrReBlurSurfaceData
+{
+    float3 normalWS;
+    float eyeDepth;
+    float perceptualRoughness;
+    float alpha;
+    float valid;
+};
+
+float2 RotateReBlurOffset(float4 rotator, float2 offset)
+{
+    return offset.x * rotator.xz + offset.y * rotator.yw;
+}
+
+float4 EmptySsrReBlurSignal()
+{
+    return float4(0.0, 0.0, 0.0, -1.0);
+}
+
+bool IsValidSsrReBlurSignal(float4 signal)
+{
+    if (any(isnan(signal)) || any(isinf(signal)))
+        return false;
+
+    return signal.w > 0.0001;
+}
+
+uint2 ClampReBlurCoord(int2 coordSS)
+{
+    return (uint2)ClampPixelCoord(coordSS);
+}
+
+float ComputeReBlurOutputAlpha(uint2 coordSS)
+{
+    float4 trace = _SSRTraceTexture[coordSS];
+    float4 rayInfo = _SSRRayInfoTexture[coordSS];
+    if (trace.a <= 0.0001 || !IsValidSsrRayInfo(rayInfo))
+        return 0.0;
+
+    return saturate(min(trace.a, rayInfo.w));
+}
+
+SsrReBlurSurfaceData EmptySsrReBlurSurfaceData()
+{
+    SsrReBlurSurfaceData data;
+    data.normalWS = float3(0.0, 1.0, 0.0);
+    data.eyeDepth = 0.0;
+    data.perceptualRoughness = 1.0;
+    data.alpha = 0.0;
+    data.valid = 0.0;
+    return data;
+}
+
+SsrReBlurSurfaceData LoadSsrReBlurSurfaceData(int2 coordSS)
+{
+    if (coordSS.x < 0 || coordSS.y < 0)
+        return EmptySsrReBlurSurfaceData();
+
+    uint2 sampleCoord = (uint2)coordSS;
+    if (IsOutsideScreen(sampleCoord))
+        return EmptySsrReBlurSurfaceData();
+
+    float deviceDepth = _DepthTexture.Load(int3(sampleCoord, 0));
+    if (IsRawFarDepth(deviceDepth))
+        return EmptySsrReBlurSurfaceData();
+
+    float eyeDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+    if (isnan(eyeDepth) || isinf(eyeDepth) || eyeDepth <= 0.0)
+        return EmptySsrReBlurSurfaceData();
+
+    SsrReBlurSurfaceData data;
+    data.normalWS = LoadNormalWS(sampleCoord);
+    data.eyeDepth = eyeDepth;
+    data.perceptualRoughness = LoadPerceptualRoughness(sampleCoord);
+    data.alpha = ComputeReBlurOutputAlpha(sampleCoord);
+    data.valid = data.alpha > 0.0001 && ShouldTracePixel(sampleCoord) ? 1.0 : 0.0;
+    return data;
+}
+
+float4 LoadSsrReBlurTraceSignal(int2 coordSS)
+{
+    if (coordSS.x < 0 || coordSS.y < 0)
+        return EmptySsrReBlurSignal();
+
+    uint2 sampleCoord = (uint2)coordSS;
+    if (IsOutsideScreen(sampleCoord))
+        return EmptySsrReBlurSignal();
+
+    float4 reflection = _SSRTraceTexture[sampleCoord];
+    float4 rayInfo = _SSRRayInfoTexture[sampleCoord];
+    if (reflection.a <= 0.0001 || !IsValidSsrRayInfo(rayInfo))
+        return EmptySsrReBlurSignal();
+
+    return float4(SanitizeSsrRadiance(reflection.rgb), rayInfo.x);
+}
+
+float4 LoadSsrReBlurLightingSignal(int2 coordSS)
+{
+    if (coordSS.x < 0 || coordSS.y < 0)
+        return EmptySsrReBlurSignal();
+
+    uint2 sampleCoord = (uint2)coordSS;
+    if (IsOutsideScreen(sampleCoord))
+        return EmptySsrReBlurSignal();
+
+    float4 signal = _ReBlurLightingDistanceTexture.Load(int3(sampleCoord, 0));
+    if (!IsValidSsrReBlurSignal(signal))
+        return EmptySsrReBlurSignal();
+
+    signal.rgb = SanitizeSsrRadiance(signal.rgb);
+    return signal;
+}
+
+float4 LoadSsrReBlurFilterSignal(int2 coordSS, bool readTraceSignal)
+{
+    if (readTraceSignal)
+        return LoadSsrReBlurTraceSignal(coordSS);
+
+    return LoadSsrReBlurLightingSignal(coordSS);
+}
+
+float4 LoadSsrReBlurHistorySignal(int2 coordSS)
+{
+    int2 maxCoord = int2((int)_ReBlurHistorySizeAndScale.x - 1, (int)_ReBlurHistorySizeAndScale.y - 1);
+    coordSS = clamp(coordSS, int2(0, 0), maxCoord);
+
+    float4 signal = _ReBlurLightingDistanceHistory.Load(int3(coordSS, 0));
+    if (!IsValidSsrReBlurSignal(signal))
+        return EmptySsrReBlurSignal();
+
+    signal.rgb = SanitizeSsrRadiance(signal.rgb);
+    return signal;
+}
+
+uint LoadSsrReBlurAccumulationHistory(int2 coordSS)
+{
+    int2 maxCoord = int2((int)_ReBlurHistorySizeAndScale.x - 1, (int)_ReBlurHistorySizeAndScale.y - 1);
+    coordSS = clamp(coordSS, int2(0, 0), maxCoord);
+    return min(_ReBlurAccumulationHistory.Load(int3(coordSS, 0)), SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+}
+
+bool SampleSsrReBlurHistory(float2 historyScreenUV, out float4 signal, out uint accumulationCount)
+{
+    signal = EmptySsrReBlurSignal();
+    accumulationCount = 0u;
+
+    float2 pixelCoord = saturate(historyScreenUV) * _ReBlurHistorySizeAndScale.xy - 0.5;
+    int2 baseCoord = (int2)floor(pixelCoord);
+    float2 factor = frac(pixelCoord);
+
+    float4 signal00 = LoadSsrReBlurHistorySignal(baseCoord);
+    float4 signal10 = LoadSsrReBlurHistorySignal(baseCoord + int2(1, 0));
+    float4 signal01 = LoadSsrReBlurHistorySignal(baseCoord + int2(0, 1));
+    float4 signal11 = LoadSsrReBlurHistorySignal(baseCoord + int2(1, 1));
+
+    float4 weights = float4(
+        (1.0 - factor.x) * (1.0 - factor.y),
+        factor.x * (1.0 - factor.y),
+        (1.0 - factor.x) * factor.y,
+        factor.x * factor.y);
+    weights *= float4(
+        IsValidSsrReBlurSignal(signal00) ? 1.0 : 0.0,
+        IsValidSsrReBlurSignal(signal10) ? 1.0 : 0.0,
+        IsValidSsrReBlurSignal(signal01) ? 1.0 : 0.0,
+        IsValidSsrReBlurSignal(signal11) ? 1.0 : 0.0);
+
+    float weightSum = dot(weights, float4(1.0, 1.0, 1.0, 1.0));
+    if (weightSum <= 0.0001)
+        return false;
+
+    float rcpWeightSum = rcp(weightSum);
+    signal = (signal00 * weights.x
+        + signal10 * weights.y
+        + signal01 * weights.z
+        + signal11 * weights.w) * rcpWeightSum;
+    signal.rgb = SanitizeSsrRadiance(signal.rgb);
+    signal.w = max(signal.w, 0.0);
+
+    uint acc00 = LoadSsrReBlurAccumulationHistory(baseCoord);
+    uint acc10 = LoadSsrReBlurAccumulationHistory(baseCoord + int2(1, 0));
+    uint acc01 = LoadSsrReBlurAccumulationHistory(baseCoord + int2(0, 1));
+    uint acc11 = LoadSsrReBlurAccumulationHistory(baseCoord + int2(1, 1));
+    float weightedAccumulation = ((float)acc00 * weights.x
+        + (float)acc10 * weights.y
+        + (float)acc01 * weights.z
+        + (float)acc11 * weights.w) * rcpWeightSum;
+    accumulationCount = min((uint)round(weightedAccumulation), SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+    return IsValidSsrReBlurSignal(signal);
+}
+
+float ComputeSsrReBlurRadius(float perceptualRoughness, float hitDistance, float scale)
+{
+    if (IsMirrorSsrReflection(perceptualRoughness))
+        return 0.0;
+
+    float roughness = saturate(PerceptualRoughnessToRoughness(perceptualRoughness) * 32.0);
+    float distanceScale = saturate(hitDistance * 0.25);
+    return lerp(1.0, (float)SSR_REBLUR_MAX_RADIUS * max(_ReBlurDenoiserRadius, 0.0), saturate(roughness * max(distanceScale, 0.25))) * scale;
+}
+
+float ComputeSsrReBlurBilateralWeight(
+    SsrReBlurSurfaceData centerSurface,
+    SsrReBlurSurfaceData sampleSurface,
+    float4 centerSignal,
+    float4 sampleSignal,
+    float2 offset,
+    float sigma)
+{
+    if (centerSurface.valid <= 0.0 || sampleSurface.valid <= 0.0)
+        return 0.0;
+
+    if (!IsValidSsrReBlurSignal(centerSignal) || !IsValidSsrReBlurSignal(sampleSignal))
+        return 0.0;
+
+    float offsetLengthSq = dot(offset, offset);
+    float weight = exp(-0.5 * offsetLengthSq / max(sigma * sigma, 0.0001));
+    weight *= ResolveEdgeStoppingNormalWeight(centerSurface.normalWS, sampleSurface.normalWS);
+    weight *= ResolveEdgeStoppingDepthWeight(centerSurface.eyeDepth, sampleSurface.eyeDepth);
+    weight *= ResolveRayDistanceWeight(centerSignal.w, sampleSignal.w);
+    weight *= ResolveRadianceWeight(centerSignal.rgb, sampleSignal.rgb);
+    weight *= min(centerSurface.alpha, sampleSurface.alpha);
+    return weight;
+}
+
+float4 FilterSsrReBlurSignal(
+    uint2 coordSS,
+    float4 centerSignal,
+    SsrReBlurSurfaceData centerSurface,
+    float radius,
+    float4 rotator,
+    bool readTraceSignal)
+{
+    if (centerSurface.valid <= 0.0 || !IsValidSsrReBlurSignal(centerSignal))
+        return EmptySsrReBlurSignal();
+
+    if (radius <= 0.25)
+        return float4(SanitizeSsrRadiance(centerSignal.rgb), centerSignal.w);
+
+    float sigma = max(radius * 0.5, 1.0);
+    float3 lightingSum = centerSignal.rgb;
+    float distanceSum = centerSignal.w;
+    float weightSum = 1.0;
+    int maxTap = min(SSR_REBLUR_MAX_RADIUS, (int)ceil(radius));
+
+    [loop]
+    for (int y = -SSR_REBLUR_MAX_RADIUS; y <= SSR_REBLUR_MAX_RADIUS; y++)
+    {
+        [loop]
+        for (int x = -SSR_REBLUR_MAX_RADIUS; x <= SSR_REBLUR_MAX_RADIUS; x++)
+        {
+            if (x == 0 && y == 0)
+                continue;
+
+            float2 unrotatedOffset = float2((float)x, (float)y);
+            if (dot(unrotatedOffset, unrotatedOffset) > radius * radius || abs(x) > maxTap || abs(y) > maxTap)
+                continue;
+
+            float2 rotatedOffset = RotateReBlurOffset(rotator, unrotatedOffset);
+            int2 sampleCoord = (int2)ClampReBlurCoord((int2)coordSS + (int2)round(rotatedOffset));
+            float4 sampleSignal = LoadSsrReBlurFilterSignal(sampleCoord, readTraceSignal);
+            SsrReBlurSurfaceData sampleSurface = LoadSsrReBlurSurfaceData(sampleCoord);
+            float weight = ComputeSsrReBlurBilateralWeight(
+                centerSurface,
+                sampleSurface,
+                centerSignal,
+                sampleSignal,
+                unrotatedOffset,
+                sigma);
+            if (weight <= 0.001)
+                continue;
+
+            lightingSum += sampleSignal.rgb * weight;
+            distanceSum += sampleSignal.w * weight;
+            weightSum += weight;
+        }
+    }
+
+    float rcpWeightSum = rcp(max(weightSum, 0.0001));
+    return float4(SanitizeSsrRadiance(lightingSum * rcpWeightSum), max(distanceSum * rcpWeightSum, 0.0));
+}
+
+[numthreads(8, 8, 1)]
+void PreBlur(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 centerSignal = LoadSsrReBlurTraceSignal((int2)coordSS);
+    SsrReBlurSurfaceData centerSurface = LoadSsrReBlurSurfaceData((int2)coordSS);
+    if (centerSurface.valid <= 0.0 || !IsValidSsrReBlurSignal(centerSignal))
+    {
+        _ReBlurLightingDistanceTextureRW[coordSS] = EmptySsrReBlurSignal();
+        return;
+    }
+
+    float radius = ComputeSsrReBlurRadius(centerSurface.perceptualRoughness, centerSignal.w, 0.45);
+    _ReBlurLightingDistanceTextureRW[coordSS] = FilterSsrReBlurSignal(
+        coordSS,
+        centerSignal,
+        centerSurface,
+        radius,
+        _ReBlurPreBlurRotator,
+        true);
+}
+
+[numthreads(8, 8, 1)]
+void TemporalAccumulation(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 currentSignal = LoadSsrReBlurLightingSignal((int2)coordSS);
+    SsrReBlurSurfaceData centerSurface = LoadSsrReBlurSurfaceData((int2)coordSS);
+    if (centerSurface.valid <= 0.0 || !IsValidSsrReBlurSignal(currentSignal))
+    {
+        _ReBlurLightingDistanceTextureRW[coordSS] = EmptySsrReBlurSignal();
+        _ReBlurAccumulationTextureRW[coordSS] = 0u;
+        return;
+    }
+
+    float4 accumulatedSignal = currentSignal;
+    uint accumulationCount = 1u;
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    float2 historyScreenUV;
+    if (_ReBlurHistoryValidity > 0.0 && TryComputeSsrAccumulationHistoryUV(coordSS, deviceDepth, historyScreenUV))
+    {
+        float4 historySignal;
+        uint historyAccumulationCount;
+        if (SampleSsrReBlurHistory(historyScreenUV, historySignal, historyAccumulationCount))
+        {
+            float distanceWeight = ResolveRayDistanceWeight(currentSignal.w, historySignal.w);
+            float radianceWeight = ResolveRadianceWeight(currentSignal.rgb, historySignal.rgb);
+            float historyValidity = saturate(distanceWeight * radianceWeight);
+            if (historyValidity > 0.001)
+            {
+                accumulationCount = min(historyAccumulationCount + 1u, SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+                float temporalWeight = rcp((float)max(accumulationCount, 1u));
+                temporalWeight = lerp(1.0, temporalWeight, historyValidity);
+                accumulatedSignal.rgb = lerp(historySignal.rgb, currentSignal.rgb, temporalWeight);
+                accumulatedSignal.w = lerp(historySignal.w, currentSignal.w, temporalWeight);
+            }
+        }
+    }
+
+    accumulatedSignal.rgb = SanitizeSsrRadiance(accumulatedSignal.rgb);
+    accumulatedSignal.w = max(accumulatedSignal.w, 0.0);
+    _ReBlurLightingDistanceTextureRW[coordSS] = accumulatedSignal;
+    _ReBlurAccumulationTextureRW[coordSS] = accumulationCount;
+}
+
+[numthreads(8, 8, 1)]
+void MipGeneration(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    uint width;
+    uint height;
+    _ReBlurMipChainRW.GetDimensions(width, height);
+    if (coordSS.x >= width || coordSS.y >= height)
+        return;
+
+    if (_TargetMipLevel <= 0)
+    {
+        float4 signal = _ReBlurLightingDistanceTexture.Load(int3(coordSS, 0));
+        _ReBlurMipChainRW[coordSS] = IsValidSsrReBlurSignal(signal)
+            ? float4(SanitizeSsrRadiance(signal.rgb), max(signal.w, 0.0))
+            : EmptySsrReBlurSignal();
+        return;
+    }
+
+    float4 signalSum = 0.0;
+    float weightSum = 0.0;
+    int2 sourceBaseCoord = (int2)coordSS * 2;
+    int sourceMipLevel = max(_TargetMipLevel - 1, 0);
+    uint sourceWidth;
+    uint sourceHeight;
+    uint sourceMipCount;
+    _ReBlurLightingDistanceTexture.GetDimensions(sourceMipLevel, sourceWidth, sourceHeight, sourceMipCount);
+    int2 maxSourceCoord = int2(max((int)sourceWidth - 1, 0), max((int)sourceHeight - 1, 0));
+
+    [unroll]
+    for (int y = 0; y < 2; y++)
+    {
+        [unroll]
+        for (int x = 0; x < 2; x++)
+        {
+            int2 sourceCoord = clamp(sourceBaseCoord + int2(x, y), int2(0, 0), maxSourceCoord);
+            float4 signal = _ReBlurLightingDistanceTexture.Load(int3(sourceCoord, sourceMipLevel));
+            if (!IsValidSsrReBlurSignal(signal))
+                continue;
+
+            signal.rgb = SanitizeSsrRadiance(signal.rgb);
+            signalSum += signal;
+            weightSum += 1.0;
+        }
+    }
+
+    if (weightSum <= 0.0001)
+    {
+        _ReBlurMipChainRW[coordSS] = EmptySsrReBlurSignal();
+        return;
+    }
+
+    float4 averagedSignal = signalSum * rcp(weightSum);
+    averagedSignal.rgb = SanitizeSsrRadiance(averagedSignal.rgb);
+    averagedSignal.w = max(averagedSignal.w, 0.0);
+    _ReBlurMipChainRW[coordSS] = averagedSignal;
+}
+
+[numthreads(8, 8, 1)]
+void HistoryFix(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 signal = LoadSsrReBlurLightingSignal((int2)coordSS);
+    if (!IsValidSsrReBlurSignal(signal))
+    {
+        _ReBlurLightingDistanceTextureRW[coordSS] = EmptySsrReBlurSignal();
+        return;
+    }
+
+    uint accumulationCount = min(_ReBlurAccumulationTexture.Load(int3(coordSS, 0)), SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+    if (accumulationCount < SSR_REBLUR_HISTORY_FIX_FRAME_NUM)
+    {
+        uint missingFrames = SSR_REBLUR_HISTORY_FIX_FRAME_NUM - accumulationCount;
+        uint mipLevel = min(missingFrames, 3u);
+        uint2 mipCoord = max(coordSS >> mipLevel, uint2(0u, 0u));
+        float4 mipSignal = _ReBlurMipChain.Load(int3(mipCoord, mipLevel));
+        if (IsValidSsrReBlurSignal(mipSignal))
+        {
+            float fixWeight = (float)missingFrames / (float)SSR_REBLUR_HISTORY_FIX_FRAME_NUM;
+            signal.rgb = lerp(signal.rgb, SanitizeSsrRadiance(mipSignal.rgb), fixWeight);
+            signal.w = lerp(signal.w, mipSignal.w, fixWeight);
+        }
+    }
+
+    signal.rgb = SanitizeSsrRadiance(signal.rgb);
+    signal.w = max(signal.w, 0.0);
+    _ReBlurLightingDistanceTextureRW[coordSS] = signal;
+}
+
+[numthreads(8, 8, 1)]
+void Blur(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 centerSignal = LoadSsrReBlurLightingSignal((int2)coordSS);
+    SsrReBlurSurfaceData centerSurface = LoadSsrReBlurSurfaceData((int2)coordSS);
+    if (centerSurface.valid <= 0.0 || !IsValidSsrReBlurSignal(centerSignal))
+    {
+        _ReBlurLightingDistanceTextureRW[coordSS] = EmptySsrReBlurSignal();
+        return;
+    }
+
+    uint accumulationCount = min(_ReBlurAccumulationTexture.Load(int3(coordSS, 0)), SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+    float accumulationScale = lerp(1.0, 0.35, saturate((float)accumulationCount / 8.0));
+    float radius = ComputeSsrReBlurRadius(centerSurface.perceptualRoughness, centerSignal.w, 0.75 * accumulationScale);
+    _ReBlurLightingDistanceTextureRW[coordSS] = FilterSsrReBlurSignal(
+        coordSS,
+        centerSignal,
+        centerSurface,
+        radius,
+        _ReBlurBlurRotator,
+        false);
+}
+
+[numthreads(8, 8, 1)]
+void CopyHistoryAccumulation(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 signal = LoadSsrReBlurLightingSignal((int2)coordSS);
+    uint accumulationCount = min(_ReBlurAccumulationTexture.Load(int3(coordSS, 0)), SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+    if (!IsValidSsrReBlurSignal(signal))
+        accumulationCount = 0u;
+
+    _ReBlurLightingDistanceHistoryRW[coordSS] = signal;
+    _ReBlurAccumulationHistoryRW[coordSS] = accumulationCount;
+}
+
+[numthreads(8, 8, 1)]
+void TemporalStabilization(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float4 currentSignal = LoadSsrReBlurLightingSignal((int2)coordSS);
+    if (!IsValidSsrReBlurSignal(currentSignal))
+    {
+        _ReBlurLightingDistanceTextureRW[coordSS] = EmptySsrReBlurSignal();
+        return;
+    }
+
+    float4 stabilizedSignal = currentSignal;
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    float2 historyScreenUV;
+    if (_ReBlurHistoryValidity > 0.0 && TryComputeSsrAccumulationHistoryUV(coordSS, deviceDepth, historyScreenUV))
+    {
+        float2 pixelCoord = saturate(historyScreenUV) * _ReBlurHistorySizeAndScale.xy - 0.5;
+        int2 historyCoord = (int2)round(pixelCoord);
+        int2 maxCoord = int2((int)_ReBlurHistorySizeAndScale.x - 1, (int)_ReBlurHistorySizeAndScale.y - 1);
+        historyCoord = clamp(historyCoord, int2(0, 0), maxCoord);
+        float4 historySignal = _ReBlurStabilizationHistory.Load(int3(historyCoord, 0));
+        if (IsValidSsrReBlurSignal(historySignal))
+        {
+            historySignal.rgb = SanitizeSsrRadiance(historySignal.rgb);
+            float historyWeight = saturate(_ReBlurAntiFlickeringStrength * 0.25);
+            historyWeight *= ResolveRayDistanceWeight(currentSignal.w, historySignal.w);
+            historyWeight *= ResolveRadianceWeight(currentSignal.rgb, historySignal.rgb);
+            stabilizedSignal.rgb = lerp(currentSignal.rgb, historySignal.rgb, historyWeight);
+            stabilizedSignal.w = lerp(currentSignal.w, historySignal.w, historyWeight);
+        }
+    }
+
+    stabilizedSignal.rgb = SanitizeSsrRadiance(stabilizedSignal.rgb);
+    stabilizedSignal.w = max(stabilizedSignal.w, 0.0);
+    _ReBlurLightingDistanceTextureRW[coordSS] = stabilizedSignal;
+}
+
+[numthreads(8, 8, 1)]
+void CopyHistory(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    _ReBlurStabilizationHistoryRW[coordSS] = LoadSsrReBlurLightingSignal((int2)coordSS);
+}
+
+[numthreads(8, 8, 1)]
+void PostBlur(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint2 coordSS = uint2(groupId.xy * SSR_THREAD_GROUP_SIZE + groupThreadId.xy);
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    float outputAlpha = ComputeReBlurOutputAlpha(coordSS);
+    float4 centerSignal = LoadSsrReBlurLightingSignal((int2)coordSS);
+    SsrReBlurSurfaceData centerSurface = LoadSsrReBlurSurfaceData((int2)coordSS);
+    if (outputAlpha <= 0.0001 || centerSurface.valid <= 0.0 || !IsValidSsrReBlurSignal(centerSignal))
+    {
+        _OutputColorTexture[coordSS] = EmptySsrResult();
+        return;
+    }
+
+    uint accumulationCount = min(_ReBlurAccumulationTexture.Load(int3(coordSS, 0)), SSR_REBLUR_MAX_ACCUM_FRAME_NUM);
+    float accumulationScale = lerp(1.0, 0.25, saturate((float)accumulationCount / 16.0));
+    float radius = ComputeSsrReBlurRadius(centerSurface.perceptualRoughness, centerSignal.w, 0.35 * accumulationScale);
+    float4 filteredSignal = FilterSsrReBlurSignal(
+        coordSS,
+        centerSignal,
+        centerSurface,
+        radius,
+        _ReBlurPostBlurRotator,
+        false);
+
+    _OutputColorTexture[coordSS] = float4(SanitizeSsrRadiance(filteredSignal.rgb), outputAlpha);
+}
+
 [numthreads(8, 8, 1)]
 void ScreenSpaceReflectionsAccumulate(
     uint3 groupId : SV_GroupID,
@@ -1449,8 +2341,9 @@ void ScreenSpaceReflectionsAccumulate(
             float3 historyClampMin = max(
                 float3(0.0, 0.0, 0.0),
                 min(neighborStatistics.minVal, neighborStatistics.mean - neighborStatistics.stdDev));
+            float radianceClamp = GetSsrRadianceClampValue();
             float3 historyClampMax = min(
-                float3(_SsrIntensityClamp, _SsrIntensityClamp, _SsrIntensityClamp),
+                float3(radianceClamp, radianceClamp, radianceClamp),
                 max(neighborStatistics.maxVal, neighborStatistics.mean + neighborStatistics.stdDev));
             float3 historyColor = clamp(history.color, historyClampMin, historyClampMax);
 

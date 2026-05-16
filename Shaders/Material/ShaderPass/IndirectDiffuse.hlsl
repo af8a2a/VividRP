@@ -84,7 +84,6 @@ struct VividIndirectDiffusePayload
     float4 emissionRadiance;
     float4 mainDirectionalRadiance;
     float4 shadowNormalWS;
-    float4 hitBaseColor;
 };
 
 static const uint kVividIndirectDiffuseTraceKindRadiance = 0u;
@@ -100,7 +99,6 @@ void VividIndirectDiffuseInitializePayload(out VividIndirectDiffusePayload paylo
     payload.emissionRadiance = 0.0;
     payload.mainDirectionalRadiance = 0.0;
     payload.shadowNormalWS = 0.0;
-    payload.hitBaseColor = 0.0;
 }
 
 void VividIndirectDiffuseInitializeRadiancePayload(out VividIndirectDiffusePayload payload)
@@ -447,7 +445,6 @@ void VividIndirectDiffuseWritePayload(
     payload.lightingRadiance = 0.0;
     payload.emissionRadiance = 0.0;
     payload.mainDirectionalRadiance = 0.0;
-    payload.hitBaseColor = float4(saturate(surfaceData.baseColor), 0.0);
 
     if (geometry.isFrontFace)
     {

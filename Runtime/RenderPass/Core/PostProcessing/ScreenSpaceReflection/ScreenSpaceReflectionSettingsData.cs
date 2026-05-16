@@ -16,6 +16,8 @@ namespace VividRP.Runtime
         public float depthBufferThickness;
         public float screenFadeDistance;
         public int rayMaxIterations;
+        public float reBlurDenoiserRadius;
+        public float reBlurAntiFlickeringStrength;
 
         public static ScreenSpaceReflectionSettingsData CreateDefault()
         {
@@ -30,7 +32,9 @@ namespace VividRP.Runtime
                 clampValue = 100.0f,
                 depthBufferThickness = 0.01f,
                 screenFadeDistance = 0.1f,
-                rayMaxIterations = 32
+                rayMaxIterations = 32,
+                reBlurDenoiserRadius = 1.0f,
+                reBlurAntiFlickeringStrength = 0.5f
             };
         }
     }
@@ -58,6 +62,8 @@ namespace VividRP.Runtime
             settings.depthBufferThickness = Mathf.Clamp(ssr.depthBufferThickness.value, 0.0001f, 1.0f);
             settings.screenFadeDistance = Mathf.Clamp(ssr.screenFadeDistance.value, 0.0001f, 1.0f);
             settings.rayMaxIterations = Mathf.Clamp(ssr.rayMaxIterations.value, 1, 128);
+            settings.reBlurDenoiserRadius = Mathf.Clamp01(ssr.reBlurDenoiserRadius.value);
+            settings.reBlurAntiFlickeringStrength = Mathf.Clamp01(ssr.reBlurAntiFlickeringStrength.value);
             return settings;
         }
     }

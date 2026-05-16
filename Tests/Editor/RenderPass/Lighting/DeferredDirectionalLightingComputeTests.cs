@@ -61,7 +61,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Contain("surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));"));
             Assert.That(source, Does.Contain("float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);"));
-            Assert.That(source, Does.Contain("return float4(max(reflection.rgb, 0.0), saturate(reflection.a));"));
+            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(max(reflection.rgb, 0.0)), saturate(reflection.a));"));
             Assert.That(source, Does.Contain("indirectSpecularLighting = FinalizeVividSpecularLighting("));
             Assert.That(source, Does.Contain("float reflectionWeight = screenSpaceReflection.a;"));
             Assert.That(source, Does.Contain("float3 screenSpaceReflectionFGD;"));

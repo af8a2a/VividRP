@@ -26,7 +26,17 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string SSRClassifyTilesProfilerTag = "SSRClassifyTiles";
         private const string SSRTracingProfilerTag = "SSRTracing";
         private const string SSRHybridTraceProfilerTag = "SSRHybridTrace";
-        private const string SSRRayTracingProfilerTag = "SSRRayTracing";
+        private const string SSRRayTracingProfilerTag = "RaytracingReflectionEvaluation";
+        private const string SSRRayTracingDenoiseProfilerTag = "RaytracingReflectionFilter";
+        private const string ReBlurPreBlurProfilerTag = "ReBlurPreBlur";
+        private const string ReBlurTemporalAccumulationProfilerTag = "ReBlurTemporalAccumulation";
+        private const string ReBlurMipGenerationProfilerTag = "ReBlurMipGeneration";
+        private const string ReBlurMipHistoryFixProfilerTag = "ReBlurMipHistoryFix";
+        private const string ReBlurBlurProfilerTag = "ReBlurBlur";
+        private const string ReBlurCopyHistoryProfilerTag = "ReBlurCopyHistory";
+        private const string ReBlurTemporalStabilizationProfilerTag = "ReBlurTemporalStabilization";
+        private const string ReBlurCopyHistoryStabProfilerTag = "ReBlurCopyHistoryStab";
+        private const string ReBlurPostBlurProfilerTag = "ReBlurPostBlur";
         private const string SSRResolveProfilerTag = "SSRResolve";
         private const string SSRAccumulateProfilerTag = "SSRAccumulate";
         private const string SSRHDRPTracingProfilerTag = "SsrTracing";
@@ -36,13 +46,47 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string RayTracingRayGenName = "RayGenIntegration";
         private const string AccumulationHistoryKey = "SSRAccumulation";
         private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
+        private const string ReBlurLightingDistanceHistoryKey = "SSRReBlurLightingDistance";
+        private const string ReBlurAccumulationHistoryKey = "SSRReBlurAccumulation";
+        private const string ReBlurStabilizationHistoryKey = "SSRReBlurStabilization";
 
         private static readonly uint[] s_InitialDispatchIndirectArgsData = { 0u, 1u, 1u, 0u };
         private static readonly uint[] s_InitialRayDispatchIndirectArgsData = { 0u, 1u, 1u };
+        private static readonly float[] s_ReBlurPreBlurRands =
+        {
+            0.840188f, 0.394383f, 0.783099f, 0.79844f, 0.911647f, 0.197551f, 0.335223f, 0.76823f,
+            0.277775f, 0.55397f, 0.477397f, 0.628871f, 0.364784f, 0.513401f, 0.95223f, 0.916195f,
+            0.635712f, 0.717297f, 0.141603f, 0.606969f, 0.0163006f, 0.242887f, 0.137232f, 0.804177f,
+            0.156679f, 0.400944f, 0.12979f, 0.108809f, 0.998924f, 0.218257f, 0.512932f, 0.839112f
+        };
+        private static readonly float[] s_ReBlurBlurRands =
+        {
+            0.61264f, 0.296032f, 0.637552f, 0.524287f, 0.493583f, 0.972775f, 0.292517f, 0.771358f,
+            0.526745f, 0.769914f, 0.400229f, 0.891529f, 0.283315f, 0.352458f, 0.807725f, 0.919026f,
+            0.0697553f, 0.949327f, 0.525995f, 0.0860558f, 0.192214f, 0.663227f, 0.890233f, 0.348893f,
+            0.0641713f, 0.020023f, 0.457702f, 0.0630958f, 0.23828f, 0.970634f, 0.902208f, 0.85092f
+        };
+        private static readonly float[] s_ReBlurPostBlurRands =
+        {
+            0.266666f, 0.53976f, 0.375207f, 0.760249f, 0.512535f, 0.667724f, 0.531606f, 0.0392803f,
+            0.437638f, 0.931835f, 0.93081f, 0.720952f, 0.284293f, 0.738534f, 0.639979f, 0.354049f,
+            0.687861f, 0.165974f, 0.440105f, 0.880075f, 0.829201f, 0.330337f, 0.228968f, 0.893372f,
+            0.35036f, 0.68667f, 0.956468f, 0.58864f, 0.657304f, 0.858676f, 0.43956f, 0.92397f
+        };
         private static readonly ProfilingSampler s_SSRClassifyTilesProfilingSampler = new(SSRClassifyTilesProfilerTag);
         private static readonly ProfilingSampler s_SSRTracingProfilingSampler = new(SSRTracingProfilerTag);
         private static readonly ProfilingSampler s_SSRHybridTraceProfilingSampler = new(SSRHybridTraceProfilerTag);
         private static readonly ProfilingSampler s_SSRRayTracingProfilingSampler = new(SSRRayTracingProfilerTag);
+        private static readonly ProfilingSampler s_SSRRayTracingDenoiseProfilingSampler = new(SSRRayTracingDenoiseProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurPreBlurProfilingSampler = new(ReBlurPreBlurProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurTemporalAccumulationProfilingSampler = new(ReBlurTemporalAccumulationProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurMipGenerationProfilingSampler = new(ReBlurMipGenerationProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurMipHistoryFixProfilingSampler = new(ReBlurMipHistoryFixProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurBlurProfilingSampler = new(ReBlurBlurProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurCopyHistoryProfilingSampler = new(ReBlurCopyHistoryProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurTemporalStabilizationProfilingSampler = new(ReBlurTemporalStabilizationProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurCopyHistoryStabProfilingSampler = new(ReBlurCopyHistoryStabProfilerTag);
+        private static readonly ProfilingSampler s_ReBlurPostBlurProfilingSampler = new(ReBlurPostBlurProfilerTag);
         private static readonly ProfilingSampler s_SSRResolveProfilingSampler = new(SSRResolveProfilerTag);
         private static readonly ProfilingSampler s_SSRAccumulateProfilingSampler = new(SSRAccumulateProfilerTag);
         private static readonly ProfilingSampler s_SSRHDRPTracingProfilingSampler = new(SSRHDRPTracingProfilerTag);
@@ -75,6 +119,19 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
         private static readonly int SSRAccumTextureId = Shader.PropertyToID("_SSRAccumTexture");
         private static readonly int SSRAvgRadianceTextureId = Shader.PropertyToID("_SSRAvgRadianceTexture");
+        private static readonly int ReBlurLightingDistanceTextureId = Shader.PropertyToID("_ReBlurLightingDistanceTexture");
+        private static readonly int ReBlurLightingDistanceTextureRWId = Shader.PropertyToID("_ReBlurLightingDistanceTextureRW");
+        private static readonly int ReBlurAccumulationTextureId = Shader.PropertyToID("_ReBlurAccumulationTexture");
+        private static readonly int ReBlurAccumulationTextureRWId = Shader.PropertyToID("_ReBlurAccumulationTextureRW");
+        private static readonly int ReBlurLightingDistanceHistoryId = Shader.PropertyToID("_ReBlurLightingDistanceHistory");
+        private static readonly int ReBlurLightingDistanceHistoryRWId = Shader.PropertyToID("_ReBlurLightingDistanceHistoryRW");
+        private static readonly int ReBlurAccumulationHistoryId = Shader.PropertyToID("_ReBlurAccumulationHistory");
+        private static readonly int ReBlurAccumulationHistoryRWId = Shader.PropertyToID("_ReBlurAccumulationHistoryRW");
+        private static readonly int ReBlurStabilizationHistoryId = Shader.PropertyToID("_ReBlurStabilizationHistory");
+        private static readonly int ReBlurStabilizationHistoryRWId = Shader.PropertyToID("_ReBlurStabilizationHistoryRW");
+        private static readonly int ReBlurMipChainId = Shader.PropertyToID("_ReBlurMipChain");
+        private static readonly int ReBlurMipChainRWId = Shader.PropertyToID("_ReBlurMipChainRW");
+        private static readonly int ReBlurTargetMipLevelId = Shader.PropertyToID("_TargetMipLevel");
         private const string AccelerationStructureName = "_AccelerationStructure";
         private static readonly int SsrTraceScreenSizeId = Shader.PropertyToID("_SsrTraceScreenSize");
         private static readonly int SsrRoughnessFadeEndId = Shader.PropertyToID("_SsrRoughnessFadeEnd");
@@ -124,6 +181,14 @@ namespace VividRP.Runtime.RenderPass.Core
             public Matrix4x4 SsrViewProjMatrix;
             public Matrix4x4 SsrInvViewProjMatrix;
             public Matrix4x4 SsrPrevViewProjMatrix;
+            public Vector4 ReBlurPreBlurRotator;
+            public Vector4 ReBlurBlurRotator;
+            public Vector4 ReBlurPostBlurRotator;
+            public Vector4 ReBlurHistorySizeAndScale;
+            public float ReBlurDenoiserRadius;
+            public float ReBlurAntiFlickeringStrength;
+            public float ReBlurHistoryValidity;
+            public float ReBlurPadding;
         }
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -258,9 +323,75 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_NumFramesHistoryCurrent;
 
+        [RenderGraphResource(
+            Name = "ReBlurLightingDistance",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_ReBlurLightingDistanceTexture;
+
+        [RenderGraphResource(
+            Name = "ReBlurLightingDistanceIntermediate",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_ReBlurIntermediateTexture;
+
+        [RenderGraphResource(
+            Name = "ReBlurMipChain",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_ReBlurMipTexture;
+
+        [RenderGraphResource(
+            Name = "ReBlurAccumulation",
+            Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private readonly RenderGraphTexture m_ReBlurAccumulationTexture;
+
+        [RenderGraphResource(
+            Name = "ReBlurLightingDistanceHistory",
+            Access = AccessFlags.Read)]
+        private readonly RenderGraphTexture m_ReBlurLightingDistanceHistoryPrevious;
+
+        [RenderGraphResource(
+            Name = "ReBlurLightingDistanceHistoryTexture",
+            Access = AccessFlags.Write)]
+        private readonly RenderGraphTexture m_ReBlurLightingDistanceHistoryCurrent;
+
+        [RenderGraphResource(
+            Name = "ReBlurAccumulationHistory",
+            Access = AccessFlags.Read)]
+        private readonly RenderGraphTexture m_ReBlurAccumulationHistoryPrevious;
+
+        [RenderGraphResource(
+            Name = "ReBlurAccumulationHistoryTexture",
+            Access = AccessFlags.Write)]
+        private readonly RenderGraphTexture m_ReBlurAccumulationHistoryCurrent;
+
+        [RenderGraphResource(
+            Name = "ReBlurStabilizationHistory",
+            Access = AccessFlags.Read)]
+        private readonly RenderGraphTexture m_ReBlurStabilizationHistoryPrevious;
+
+        [RenderGraphResource(
+            Name = "ReBlurStabilizationHistoryTexture",
+            Access = AccessFlags.Write)]
+        private readonly RenderGraphTexture m_ReBlurStabilizationHistoryCurrent;
+
         private int m_SSRClassifyTilesKernel = -1;
         private int m_SSRTracingKernel = -1;
         private int m_SSRHybridCandidatesKernel = -1;
+        private int m_SSRRayTracingTemporalKernel = -1;
+        private int m_SSRRayTracingDenoiseHKernel = -1;
+        private int m_SSRRayTracingDenoiseVKernel = -1;
+        private int m_ReBlurPreBlurKernel = -1;
+        private int m_ReBlurTemporalAccumulationKernel = -1;
+        private int m_ReBlurMipGenerationKernel = -1;
+        private int m_ReBlurHistoryFixKernel = -1;
+        private int m_ReBlurBlurKernel = -1;
+        private int m_ReBlurCopyHistoryAccumulationKernel = -1;
+        private int m_ReBlurCopyHistoryKernel = -1;
+        private int m_ReBlurTemporalStabilizationKernel = -1;
+        private int m_ReBlurPostBlurKernel = -1;
         private int m_SSRResolveKernel = -1;
         private int m_SSRAccumulateKernel = -1;
         private int m_SSRHDRPTracingKernel = -1;
@@ -276,6 +407,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsPassResourceLayoutDirty;
         private bool m_UseHistoryColorPyramid;
         private bool m_HasValidAccumulationHistory;
+        private bool m_HasValidReBlurHistory;
         private bool m_HistoryInvalidated = true;
         private bool m_SupportsRayTracing;
 
@@ -347,6 +479,34 @@ namespace VividRP.Runtime.RenderPass.Core
                 1,
                 1,
                 GraphicsFormat.R16_SFloat);
+            m_ReBlurLightingDistanceTexture = CreateColorTexture("ReBlurLightingDistance", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_ReBlurIntermediateTexture = CreateColorTexture("ReBlurLightingDistanceIntermediate", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_ReBlurMipTexture = CreateColorTexture("ReBlurMipChain", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_ReBlurAccumulationTexture = CreateColorTexture("ReBlurAccumulation", 1, 1, GraphicsFormat.R8_UInt);
+            m_ReBlurLightingDistanceHistoryPrevious = RenderGraphTexture.CreateInput(
+                "ReBlurLightingDistanceHistory",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_ReBlurLightingDistanceHistoryCurrent = CreateColorTexture(
+                "ReBlurLightingDistanceHistoryTexture",
+                1,
+                1,
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_ReBlurAccumulationHistoryPrevious = RenderGraphTexture.CreateInput(
+                "ReBlurAccumulationHistory",
+                GraphicsFormat.R8_UInt);
+            m_ReBlurAccumulationHistoryCurrent = CreateColorTexture(
+                "ReBlurAccumulationHistoryTexture",
+                1,
+                1,
+                GraphicsFormat.R8_UInt);
+            m_ReBlurStabilizationHistoryPrevious = RenderGraphTexture.CreateInput(
+                "ReBlurStabilizationHistory",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_ReBlurStabilizationHistoryCurrent = CreateColorTexture(
+                "ReBlurStabilizationHistoryTexture",
+                1,
+                1,
+                GraphicsFormat.R16G16B16A16_SFloat);
 
             ConfigureHZBDescriptor(m_HZBTexture);
             ConfigureInternalTextureDescriptor(m_TraceTexture, "ScreenSpaceReflectionTrace", 1, 1);
@@ -362,11 +522,34 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryCurrent, "ScreenSpaceReflectionAccumTexture", 1, 1);
             ConfigureSingleChannelHistoryDescriptor(m_NumFramesHistoryPrevious, "ScreenSpaceReflectionPrevNumFramesAccum", 1, 1);
             ConfigureSingleChannelHistoryDescriptor(m_NumFramesHistoryCurrent, "ScreenSpaceReflectionNumFramesAccum", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ReBlurLightingDistanceTexture, "ReBlurLightingDistance", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ReBlurIntermediateTexture, "ReBlurLightingDistanceIntermediate", 1, 1);
+            ConfigureReBlurMipDescriptor(m_ReBlurMipTexture, 1, 1);
+            ConfigureReBlurAccumulationDescriptor(m_ReBlurAccumulationTexture, "ReBlurAccumulation", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ReBlurLightingDistanceHistoryPrevious, "ReBlurLightingDistanceHistory", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ReBlurLightingDistanceHistoryCurrent, "ReBlurLightingDistanceHistoryTexture", 1, 1);
+            ConfigureReBlurAccumulationDescriptor(m_ReBlurAccumulationHistoryPrevious, "ReBlurAccumulationHistory", 1, 1);
+            ConfigureReBlurAccumulationDescriptor(m_ReBlurAccumulationHistoryCurrent, "ReBlurAccumulationHistoryTexture", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ReBlurStabilizationHistoryPrevious, "ReBlurStabilizationHistory", 1, 1);
+            ConfigureInternalTextureDescriptor(m_ReBlurStabilizationHistoryCurrent, "ReBlurStabilizationHistoryTexture", 1, 1);
         }
 
         public void ClearPassResourceLayoutDirty()
         {
             m_IsPassResourceLayoutDirty = false;
+        }
+
+        private void ResetReBlurKernels()
+        {
+            m_ReBlurPreBlurKernel = -1;
+            m_ReBlurTemporalAccumulationKernel = -1;
+            m_ReBlurMipGenerationKernel = -1;
+            m_ReBlurHistoryFixKernel = -1;
+            m_ReBlurBlurKernel = -1;
+            m_ReBlurCopyHistoryAccumulationKernel = -1;
+            m_ReBlurCopyHistoryKernel = -1;
+            m_ReBlurTemporalStabilizationKernel = -1;
+            m_ReBlurPostBlurKernel = -1;
         }
 
         public override void Create()
@@ -394,6 +577,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SSRClassifyTilesKernel = -1;
                 m_SSRTracingKernel = -1;
                 m_SSRHybridCandidatesKernel = -1;
+                m_SSRRayTracingTemporalKernel = -1;
+                m_SSRRayTracingDenoiseHKernel = -1;
+                m_SSRRayTracingDenoiseVKernel = -1;
+                ResetReBlurKernels();
                 m_SSRResolveKernel = -1;
                 m_SSRAccumulateKernel = -1;
                 m_SSRHDRPTracingKernel = -1;
@@ -403,6 +590,18 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_SSRHybridCandidatesKernel = TryFindKernel(m_ComputeShader, "ScreenSpaceReflectionsHybridCandidates");
+            m_SSRRayTracingTemporalKernel = TryFindKernel(m_ComputeShader, "ScreenSpaceReflectionsRayTracingTemporal");
+            m_SSRRayTracingDenoiseHKernel = TryFindKernel(m_ComputeShader, "ScreenSpaceReflectionsRayTracingDenoiseH");
+            m_SSRRayTracingDenoiseVKernel = TryFindKernel(m_ComputeShader, "ScreenSpaceReflectionsRayTracingDenoiseV");
+            m_ReBlurPreBlurKernel = TryFindKernel(m_ComputeShader, "PreBlur");
+            m_ReBlurTemporalAccumulationKernel = TryFindKernel(m_ComputeShader, "TemporalAccumulation");
+            m_ReBlurMipGenerationKernel = TryFindKernel(m_ComputeShader, "MipGeneration");
+            m_ReBlurHistoryFixKernel = TryFindKernel(m_ComputeShader, "HistoryFix");
+            m_ReBlurBlurKernel = TryFindKernel(m_ComputeShader, "Blur");
+            m_ReBlurCopyHistoryAccumulationKernel = TryFindKernel(m_ComputeShader, "CopyHistoryAccumulation");
+            m_ReBlurCopyHistoryKernel = TryFindKernel(m_ComputeShader, "CopyHistory");
+            m_ReBlurTemporalStabilizationKernel = TryFindKernel(m_ComputeShader, "TemporalStabilization");
+            m_ReBlurPostBlurKernel = TryFindKernel(m_ComputeShader, "PostBlur");
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -435,6 +634,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             UpdateOutputDescriptor(m_Width, m_Height);
             UpdateTileResourcesDescriptor(m_Width, m_Height);
+            UpdateReBlurResourcesDescriptor(m_Width, m_Height);
 
             m_ConstantBuffer = BuildConstantBuffer(
                 cameraData,
@@ -444,6 +644,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Settings);
             m_ShaderVariablesRayTracing =
                 ShaderVariablesRayTracingUtility.Create(frameData.GetOrCreate<VividRayTracingSettingsData>());
+            PrepareReBlurHistory(frameData);
             PrepareAccumulationHistory(frameData);
             PrepareFrameContextOutput(frameData);
         }
@@ -465,6 +666,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 BindDebugTexture(cmd, m_SSRClassifyTilesKernel);
                 BindDebugTexture(cmd, m_SSRTracingKernel);
                 BindDebugTexture(cmd, m_SSRHybridCandidatesKernel);
+                BindDebugTexture(cmd, m_SSRRayTracingTemporalKernel);
+                BindDebugTexture(cmd, m_SSRRayTracingDenoiseHKernel);
+                BindDebugTexture(cmd, m_SSRRayTracingDenoiseVKernel);
+                BindDebugTexture(cmd, m_ReBlurPreBlurKernel);
+                BindDebugTexture(cmd, m_ReBlurTemporalAccumulationKernel);
+                BindDebugTexture(cmd, m_ReBlurMipGenerationKernel);
+                BindDebugTexture(cmd, m_ReBlurHistoryFixKernel);
+                BindDebugTexture(cmd, m_ReBlurBlurKernel);
+                BindDebugTexture(cmd, m_ReBlurCopyHistoryAccumulationKernel);
+                BindDebugTexture(cmd, m_ReBlurCopyHistoryKernel);
+                BindDebugTexture(cmd, m_ReBlurTemporalStabilizationKernel);
+                BindDebugTexture(cmd, m_ReBlurPostBlurKernel);
                 BindDebugTexture(cmd, m_SSRResolveKernel);
                 BindDebugTexture(cmd, m_SSRAccumulateKernel);
                 BindDebugTexture(cmd, m_SSRHDRPTracingKernel);
@@ -482,18 +695,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 bool executedPath = false;
                 if (ShouldRunVividPath() && CanExecuteVividPath())
                 {
-                    ResetDispatchIndirectArgs(cmd);
-
-                    using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
-                        DispatchClassifyTiles(cmd);
-
                     if (ShouldRunRayTracingPath())
                     {
                         using (new ProfilingScope(cmd, s_SSRRayTracingProfilingSampler))
                             DispatchRayTracing(cmd, context);
+
+                        using (new ProfilingScope(cmd, s_SSRRayTracingDenoiseProfilingSampler))
+                            DispatchRayTracingReBlur(cmd);
                     }
                     else
                     {
+                        ResetDispatchIndirectArgs(cmd);
+
+                        using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
+                            DispatchClassifyTiles(cmd);
+
                         using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))
                             DispatchTrace(cmd, context);
 
@@ -506,13 +722,13 @@ namespace VividRP.Runtime.RenderPass.Core
                                 DispatchHybridTrace(cmd, context);
                             }
                         }
+
+                        using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
+                            DispatchResolve(cmd);
+
+                        using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))
+                            DispatchAccumulate(cmd);
                     }
-
-                    using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))
-                        DispatchResolve(cmd);
-
-                    using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))
-                        DispatchAccumulate(cmd);
 
                     executedPath = true;
                 }
@@ -535,6 +751,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SSRClassifyTilesKernel = -1;
             m_SSRTracingKernel = -1;
             m_SSRHybridCandidatesKernel = -1;
+            m_SSRRayTracingTemporalKernel = -1;
+            m_SSRRayTracingDenoiseHKernel = -1;
+            m_SSRRayTracingDenoiseVKernel = -1;
+            ResetReBlurKernels();
             m_SSRResolveKernel = -1;
             m_SSRAccumulateKernel = -1;
             m_SSRHDRPTracingKernel = -1;
@@ -545,6 +765,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsPassResourceLayoutDirty = false;
             m_UseHistoryColorPyramid = false;
             m_HasValidAccumulationHistory = false;
+            m_HasValidReBlurHistory = false;
             m_HistoryInvalidated = true;
             m_SupportsRayTracing = false;
             m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
@@ -651,6 +872,71 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HistoryInvalidated = false;
         }
 
+        private void PrepareReBlurHistory(ContextContainer frameData)
+        {
+            m_HasValidReBlurHistory = false;
+            m_ConstantBuffer.ReBlurHistoryValidity = 0.0f;
+
+            ConfigureInternalTextureDescriptor(
+                m_ReBlurLightingDistanceHistoryPrevious,
+                "ReBlurLightingDistanceHistory",
+                m_Width,
+                m_Height);
+            ConfigureInternalTextureDescriptor(
+                m_ReBlurLightingDistanceHistoryCurrent,
+                "ReBlurLightingDistanceHistoryTexture",
+                m_Width,
+                m_Height);
+            ConfigureReBlurAccumulationDescriptor(
+                m_ReBlurAccumulationHistoryPrevious,
+                "ReBlurAccumulationHistory",
+                m_Width,
+                m_Height);
+            ConfigureReBlurAccumulationDescriptor(
+                m_ReBlurAccumulationHistoryCurrent,
+                "ReBlurAccumulationHistoryTexture",
+                m_Width,
+                m_Height);
+            ConfigureInternalTextureDescriptor(
+                m_ReBlurStabilizationHistoryPrevious,
+                "ReBlurStabilizationHistory",
+                m_Width,
+                m_Height);
+            ConfigureInternalTextureDescriptor(
+                m_ReBlurStabilizationHistoryCurrent,
+                "ReBlurStabilizationHistoryTexture",
+                m_Width,
+                m_Height);
+
+            if (!m_ShouldApply || !ShouldRunRayTracingPath())
+                return;
+
+            bool hasLightingHistory = AllocHistoryTexture(
+                ReBlurLightingDistanceHistoryKey,
+                m_ReBlurLightingDistanceHistoryPrevious,
+                m_ReBlurLightingDistanceHistoryCurrent,
+                m_ReBlurLightingDistanceHistoryCurrent.desc);
+            bool hasAccumulationHistory = AllocHistoryTexture(
+                ReBlurAccumulationHistoryKey,
+                m_ReBlurAccumulationHistoryPrevious,
+                m_ReBlurAccumulationHistoryCurrent,
+                m_ReBlurAccumulationHistoryCurrent.desc);
+            bool hasStabilizationHistory = AllocHistoryTexture(
+                ReBlurStabilizationHistoryKey,
+                m_ReBlurStabilizationHistoryPrevious,
+                m_ReBlurStabilizationHistoryCurrent,
+                m_ReBlurStabilizationHistoryCurrent.desc);
+
+            var temporalData = frameData.Get<VividTemporalData>();
+            bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;
+            m_HasValidReBlurHistory = hasLightingHistory
+                && hasAccumulationHistory
+                && hasStabilizationHistory
+                && !isFirstFrame
+                && !m_HistoryInvalidated;
+            m_ConstantBuffer.ReBlurHistoryValidity = m_HasValidReBlurHistory ? 1.0f : 0.0f;
+        }
+
         private void SetPreviousColorPyramidTexture(RenderGraphTexture texture)
         {
             var resolvedTexture = texture ?? m_DefaultPreviousColorPyramidTexture;
@@ -694,10 +980,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool CanExecuteVividPath()
         {
-            return CanExecuteVividDenoisePath()
-                && (ShouldRunRayTracingPath()
-                    ? CanExecuteRayTracingPath()
-                    : CanExecuteScreenSpaceTracePath());
+            if (ShouldRunRayTracingPath())
+                return CanExecuteRayTracingPath() && CanExecuteRayTracingDenoisePath();
+
+            return CanExecuteVividDenoisePath() && CanExecuteScreenSpaceTracePath();
         }
 
         private bool CanExecuteVividDenoisePath()
@@ -745,6 +1031,39 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_DepthTexture?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true
                 && m_SkyTexture?.innerHandle.IsValid() == true;
+        }
+
+        private bool CanExecuteRayTracingDenoisePath()
+        {
+            return CanExecuteReBlurPath()
+                && output?.innerHandle.IsValid() == true
+                && m_TraceTexture?.innerHandle.IsValid() == true
+                && m_RayInfoTexture?.innerHandle.IsValid() == true
+                && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer1?.innerHandle.IsValid() == true;
+        }
+
+        private bool CanExecuteReBlurPath()
+        {
+            return m_ReBlurPreBlurKernel >= 0
+                && m_ReBlurTemporalAccumulationKernel >= 0
+                && m_ReBlurMipGenerationKernel >= 0
+                && m_ReBlurHistoryFixKernel >= 0
+                && m_ReBlurBlurKernel >= 0
+                && m_ReBlurCopyHistoryAccumulationKernel >= 0
+                && m_ReBlurCopyHistoryKernel >= 0
+                && m_ReBlurTemporalStabilizationKernel >= 0
+                && m_ReBlurPostBlurKernel >= 0
+                && m_ReBlurLightingDistanceTexture?.innerHandle.IsValid() == true
+                && m_ReBlurIntermediateTexture?.innerHandle.IsValid() == true
+                && m_ReBlurMipTexture?.innerHandle.IsValid() == true
+                && m_ReBlurAccumulationTexture?.innerHandle.IsValid() == true
+                && m_ReBlurLightingDistanceHistoryPrevious?.innerHandle.IsValid() == true
+                && m_ReBlurLightingDistanceHistoryCurrent?.innerHandle.IsValid() == true
+                && m_ReBlurAccumulationHistoryPrevious?.innerHandle.IsValid() == true
+                && m_ReBlurAccumulationHistoryCurrent?.innerHandle.IsValid() == true
+                && m_ReBlurStabilizationHistoryPrevious?.innerHandle.IsValid() == true
+                && m_ReBlurStabilizationHistoryCurrent?.innerHandle.IsValid() == true;
         }
 
         private bool CanExecuteCopy()
@@ -939,7 +1258,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (accelerationStructure == null)
                 return;
 
-            BindHybridRayTracingParameters(cmd);
+            BindHybridRayTracingParameters(cmd, context);
             cmd.SetRayTracingShaderPass(m_HybridTraceRayTracingShader, "IndirectDXR");
             cmd.SetRayTracingAccelerationStructure(m_HybridTraceRayTracingShader, AccelerationStructureName, accelerationStructure);
             cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SSRTraceTextureId, m_TraceTexture.innerHandle);
@@ -974,7 +1293,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (accelerationStructure == null)
                 return;
 
-            BindHybridRayTracingParameters(cmd);
+            BindHybridRayTracingParameters(cmd, context);
             cmd.SetRayTracingShaderPass(m_HybridTraceRayTracingShader, "IndirectDXR");
             cmd.SetRayTracingAccelerationStructure(m_HybridTraceRayTracingShader, AccelerationStructureName, accelerationStructure);
             cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, SSRTraceTextureId, m_TraceTexture.innerHandle);
@@ -1000,6 +1319,273 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             cmd.DispatchRays(m_HybridTraceRayTracingShader, RayTracingRayGenName, (uint)m_Width, (uint)m_Height, 1, null);
+        }
+
+        private void DispatchRayTracingDenoise(ComputeCommandBuffer cmd)
+        {
+            DispatchRayTracingTemporal(cmd);
+            DispatchRayTracingDenoiseH(cmd);
+            DispatchRayTracingDenoiseV(cmd);
+        }
+
+        private void DispatchRayTracingReBlur(ComputeCommandBuffer cmd)
+        {
+            int groupsX = CoreUtils.DivRoundUp(m_Width, ThreadGroupSize);
+            int groupsY = CoreUtils.DivRoundUp(m_Height, ThreadGroupSize);
+
+            using (new ProfilingScope(cmd, s_ReBlurPreBlurProfilingSampler))
+                DispatchReBlurPreBlur(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurTemporalAccumulationProfilingSampler))
+                DispatchReBlurTemporalAccumulation(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurMipGenerationProfilingSampler))
+                DispatchReBlurMipGeneration(cmd);
+
+            using (new ProfilingScope(cmd, s_ReBlurMipHistoryFixProfilingSampler))
+                DispatchReBlurHistoryFix(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurBlurProfilingSampler))
+                DispatchReBlurBlur(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurCopyHistoryProfilingSampler))
+                DispatchReBlurCopyHistory(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurTemporalStabilizationProfilingSampler))
+                DispatchReBlurTemporalStabilization(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurCopyHistoryStabProfilingSampler))
+                DispatchReBlurCopyHistoryStab(cmd, groupsX, groupsY);
+
+            using (new ProfilingScope(cmd, s_ReBlurPostBlurProfilingSampler))
+                DispatchReBlurPostBlur(cmd, groupsX, groupsY);
+        }
+
+        private void DispatchReBlurPreBlur(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            BindReBlurGBufferInputs(cmd, m_ReBlurPreBlurKernel);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPreBlurKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPreBlurKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurPreBlurKernel,
+                ReBlurLightingDistanceTextureRWId,
+                m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurPreBlurKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurTemporalAccumulation(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            BindReBlurGBufferInputs(cmd, m_ReBlurTemporalAccumulationKernel);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalAccumulationKernel,
+                ReBlurLightingDistanceTextureId,
+                m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalAccumulationKernel,
+                ReBlurLightingDistanceHistoryId,
+                m_ReBlurLightingDistanceHistoryPrevious.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalAccumulationKernel,
+                ReBlurAccumulationHistoryId,
+                m_ReBlurAccumulationHistoryPrevious.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalAccumulationKernel,
+                ReBlurLightingDistanceTextureRWId,
+                m_ReBlurIntermediateTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalAccumulationKernel,
+                ReBlurAccumulationTextureRWId,
+                m_ReBlurAccumulationTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurTemporalAccumulationKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurMipGeneration(ComputeCommandBuffer cmd)
+        {
+            if (m_ReBlurMipTexture?.innerHandle.IsValid() != true)
+                return;
+
+            int mipCount = Mathf.Min(4, Mathf.Max(1, m_ReBlurMipTexture.desc.MipCount));
+            for (int mip = 0; mip < mipCount; mip++)
+            {
+                int mipWidth = Mathf.Max(1, m_Width >> mip);
+                int mipHeight = Mathf.Max(1, m_Height >> mip);
+                cmd.SetComputeIntParam(m_ComputeShader, ReBlurTargetMipLevelId, mip);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_ReBlurMipGenerationKernel,
+                    ReBlurLightingDistanceTextureId,
+                    mip == 0 ? m_ReBlurIntermediateTexture.innerHandle : m_ReBlurMipTexture.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_ReBlurMipGenerationKernel,
+                    ReBlurMipChainId,
+                    m_ReBlurMipTexture.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_ReBlurMipGenerationKernel,
+                    ReBlurMipChainRWId,
+                    m_ReBlurMipTexture.innerHandle,
+                    mip);
+                cmd.DispatchCompute(
+                    m_ComputeShader,
+                    m_ReBlurMipGenerationKernel,
+                    CoreUtils.DivRoundUp(mipWidth, ThreadGroupSize),
+                    CoreUtils.DivRoundUp(mipHeight, ThreadGroupSize),
+                    1);
+            }
+        }
+
+        private void DispatchReBlurHistoryFix(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            BindReBlurGBufferInputs(cmd, m_ReBlurHistoryFixKernel);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurHistoryFixKernel,
+                ReBlurLightingDistanceTextureId,
+                m_ReBlurIntermediateTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurHistoryFixKernel, ReBlurAccumulationTextureId, m_ReBlurAccumulationTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurHistoryFixKernel, ReBlurMipChainId, m_ReBlurMipTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurHistoryFixKernel,
+                ReBlurLightingDistanceTextureRWId,
+                m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurHistoryFixKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurBlur(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            BindReBlurGBufferInputs(cmd, m_ReBlurBlurKernel);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurBlurKernel, ReBlurLightingDistanceTextureId, m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurBlurKernel, ReBlurAccumulationTextureId, m_ReBlurAccumulationTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurBlurKernel,
+                ReBlurLightingDistanceTextureRWId,
+                m_ReBlurIntermediateTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurBlurKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurCopyHistory(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurCopyHistoryAccumulationKernel, ReBlurLightingDistanceTextureId, m_ReBlurIntermediateTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurCopyHistoryAccumulationKernel, ReBlurAccumulationTextureId, m_ReBlurAccumulationTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurCopyHistoryAccumulationKernel,
+                ReBlurLightingDistanceHistoryRWId,
+                m_ReBlurLightingDistanceHistoryCurrent.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurCopyHistoryAccumulationKernel,
+                ReBlurAccumulationHistoryRWId,
+                m_ReBlurAccumulationHistoryCurrent.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurCopyHistoryAccumulationKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurTemporalStabilization(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            BindReBlurGBufferInputs(cmd, m_ReBlurTemporalStabilizationKernel);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalStabilizationKernel,
+                ReBlurLightingDistanceTextureId,
+                m_ReBlurIntermediateTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalStabilizationKernel,
+                ReBlurStabilizationHistoryId,
+                m_ReBlurStabilizationHistoryPrevious.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurTemporalStabilizationKernel,
+                ReBlurLightingDistanceTextureRWId,
+                m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurTemporalStabilizationKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurCopyHistoryStab(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurCopyHistoryKernel, ReBlurLightingDistanceTextureId, m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ReBlurCopyHistoryKernel,
+                ReBlurStabilizationHistoryRWId,
+                m_ReBlurStabilizationHistoryCurrent.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurCopyHistoryKernel, groupsX, groupsY, 1);
+        }
+
+        private void DispatchReBlurPostBlur(ComputeCommandBuffer cmd, int groupsX, int groupsY)
+        {
+            BindReBlurGBufferInputs(cmd, m_ReBlurPostBlurKernel);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPostBlurKernel, ReBlurLightingDistanceTextureId, m_ReBlurLightingDistanceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPostBlurKernel, ReBlurAccumulationTextureId, m_ReBlurAccumulationTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPostBlurKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPostBlurKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_ReBlurPostBlurKernel, OutputColorTextureId, output.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_ReBlurPostBlurKernel, groupsX, groupsY, 1);
+        }
+
+        private void BindReBlurGBufferInputs(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+        }
+
+        private void DispatchRayTracingTemporal(ComputeCommandBuffer cmd)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SsrAccumPrevId, m_AccumulationHistoryPrevious.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_SSRRayTracingTemporalKernel,
+                SSRPrevNumFramesAccumTextureId,
+                m_NumFramesHistoryPrevious.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_SSRRayTracingTemporalKernel,
+                SSRNumFramesAccumTextureId,
+                m_NumFramesHistoryCurrent.innerHandle);
+            cmd.SetComputeBufferParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SSRTileListId, m_TileListBuffer.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_SSRRayTracingTemporalKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
+        }
+
+        private void DispatchRayTracingDenoiseH(ComputeCommandBuffer cmd)
+        {
+            BindRayTracingDenoiseSpatialInputs(cmd, m_SSRRayTracingDenoiseHKernel);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingDenoiseHKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingDenoiseHKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_SSRRayTracingDenoiseHKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
+        }
+
+        private void DispatchRayTracingDenoiseV(ComputeCommandBuffer cmd)
+        {
+            BindRayTracingDenoiseSpatialInputs(cmd, m_SSRRayTracingDenoiseVKernel);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingDenoiseVKernel, OutputColorTextureId, output.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingDenoiseVKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
+            cmd.DispatchCompute(m_ComputeShader, m_SSRRayTracingDenoiseVKernel, m_DispatchIndirectArgsBuffer.innerHandle, 0);
+        }
+
+        private void BindRayTracingDenoiseSpatialInputs(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
+            cmd.SetComputeBufferParam(m_ComputeShader, kernel, SSRTileListId, m_TileListBuffer.innerHandle);
         }
 
         private void DispatchResolve(ComputeCommandBuffer cmd)
@@ -1118,12 +1704,13 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeVectorParam(m_ComputeShader, SkyTextureParamsId, m_SkyTextureParams);
         }
 
-        private void BindHybridRayTracingParameters(ComputeCommandBuffer cmd)
+        private void BindHybridRayTracingParameters(ComputeCommandBuffer cmd, ComputePassContext context)
         {
             if (cmd == null || m_HybridTraceRayTracingShader == null)
                 return;
 
             BlueNoise.Instance?.Bind(cmd, m_HybridTraceRayTracingShader);
+
             cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SkyTextureTintId, m_SkyTextureTint);
             cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SkyTextureParamsId, m_SkyTextureParams);
             cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SsrTraceScreenSizeId, m_ConstantBuffer.SsrTraceScreenSize);
@@ -1201,6 +1788,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DispatchIndirectArgsBuffer.SetData(s_InitialDispatchIndirectArgsData);
         }
 
+        private void UpdateReBlurResourcesDescriptor(int width, int height)
+        {
+            ConfigureInternalTextureDescriptor(m_ReBlurLightingDistanceTexture, "ReBlurLightingDistance", width, height);
+            ConfigureInternalTextureDescriptor(m_ReBlurIntermediateTexture, "ReBlurLightingDistanceIntermediate", width, height);
+            ConfigureReBlurMipDescriptor(m_ReBlurMipTexture, width, height);
+            ConfigureReBlurAccumulationDescriptor(m_ReBlurAccumulationTexture, "ReBlurAccumulation", width, height);
+        }
+
         private static ScreenSpaceReflectionConstantBufferData BuildConstantBuffer(
             VividCameraData cameraData,
             VividCameraShaderData cameraShaderData,
@@ -1225,6 +1820,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var viewProjMatrix = ResolveSsrViewProjMatrix(cameraData);
             var invViewProjMatrix = viewProjMatrix.inverse;
             var prevViewProjMatrix = ResolveSsrPrevViewProjMatrix(cameraShaderData, viewProjMatrix);
+            int reBlurFrameIndex = Time.frameCount & 31;
 
             return new ScreenSpaceReflectionConstantBufferData
             {
@@ -1260,8 +1856,27 @@ namespace VividRP.Runtime.RenderPass.Core
                 SsrWorldSpaceCameraPos = ResolveSsrWorldSpaceCameraPos(cameraData),
                 SsrViewProjMatrix = viewProjMatrix,
                 SsrInvViewProjMatrix = invViewProjMatrix,
-                SsrPrevViewProjMatrix = prevViewProjMatrix
+                SsrPrevViewProjMatrix = prevViewProjMatrix,
+                ReBlurPreBlurRotator = EvaluateReBlurRotator(s_ReBlurPreBlurRands[reBlurFrameIndex]),
+                ReBlurBlurRotator = EvaluateReBlurRotator(s_ReBlurBlurRands[reBlurFrameIndex]),
+                ReBlurPostBlurRotator = EvaluateReBlurRotator(s_ReBlurPostBlurRands[reBlurFrameIndex]),
+                ReBlurHistorySizeAndScale = new Vector4(
+                    width,
+                    height,
+                    1.0f / Mathf.Max(1, width),
+                    1.0f / Mathf.Max(1, height)),
+                ReBlurDenoiserRadius = Mathf.Lerp(0.5f, 1.0f, settings.reBlurDenoiserRadius),
+                ReBlurAntiFlickeringStrength = Mathf.Lerp(0.0f, 3.5f, settings.reBlurAntiFlickeringStrength),
+                ReBlurHistoryValidity = 0.0f,
+                ReBlurPadding = 0.0f
             };
+        }
+
+        private static Vector4 EvaluateReBlurRotator(float rand)
+        {
+            float cos = Mathf.Cos(rand);
+            float sin = Mathf.Sin(rand);
+            return new Vector4(cos, sin, -sin, cos);
         }
 
         private static Matrix4x4 ResolveSsrViewProjMatrix(VividCameraData cameraData)
@@ -1432,6 +2047,32 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
+            texture.desc.FilterMode = FilterMode.Bilinear;
+        }
+
+        private static void ConfigureReBlurAccumulationDescriptor(
+            RenderGraphTexture texture,
+            string name,
+            int width,
+            int height)
+        {
+            ConfigureInternalTextureDescriptor(texture, name, width, height);
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.ColorFormat = GraphicsFormat.R8_UInt;
+            texture.desc.FilterMode = FilterMode.Point;
+        }
+
+        private static void ConfigureReBlurMipDescriptor(RenderGraphTexture texture, int width, int height)
+        {
+            ConfigureInternalTextureDescriptor(texture, "ReBlurMipChain", width, height);
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.UseMipMap = true;
+            texture.desc.AutoGenerateMips = false;
+            texture.desc.MipCount = Mathf.Min(4, CalculateMipCount(width, height));
             texture.desc.FilterMode = FilterMode.Bilinear;
         }
 

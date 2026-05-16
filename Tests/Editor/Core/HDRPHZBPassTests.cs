@@ -100,6 +100,16 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionRayInfo").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionResolveAccum").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionAvgRadiance").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurLightingDistance").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurLightingDistanceIntermediate").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurMipChain").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurAccumulation").IsTransient, Is.True);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurLightingDistanceHistory").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurLightingDistanceHistoryTexture").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurAccumulationHistory").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurAccumulationHistoryTexture").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurStabilizationHistory").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurStabilizationHistoryTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPHitPoint").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccum").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").IsTransient, Is.False);
@@ -277,6 +287,8 @@ namespace VividRP.Editor.Tests
 
             ssr.enabled.value = true;
             ssr.executionPath.value = ScreenSpaceReflectionExecutionPath.Hybrid;
+            ssr.reBlurDenoiserRadius.value = 0.25f;
+            ssr.reBlurAntiFlickeringStrength.value = 0.75f;
 
             try
             {
@@ -290,6 +302,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(settings.enabled, Is.True);
                 Assert.That(settings.executionPath, Is.EqualTo(ScreenSpaceReflectionExecutionPath.Hybrid));
+                Assert.That(settings.reBlurDenoiserRadius, Is.EqualTo(0.25f).Within(0.0001f));
+                Assert.That(settings.reBlurAntiFlickeringStrength, Is.EqualTo(0.75f).Within(0.0001f));
             }
             finally
             {
@@ -355,6 +369,18 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(GetPrivateField<ComputeShader>(pass, "m_ComputeShader"), Is.Not.Null);
                 Assert.That(GetPrivateField<int>(pass, "m_SSRHybridCandidatesKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_SSRRayTracingTemporalKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_SSRRayTracingDenoiseHKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_SSRRayTracingDenoiseVKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurPreBlurKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurTemporalAccumulationKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurMipGenerationKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurHistoryFixKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurBlurKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurCopyHistoryAccumulationKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurCopyHistoryKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurTemporalStabilizationKernel"), Is.GreaterThanOrEqualTo(0));
+                Assert.That(GetPrivateField<int>(pass, "m_ReBlurPostBlurKernel"), Is.GreaterThanOrEqualTo(0));
                 Assert.That(GetPrivateField<RayTracingShader>(pass, "m_HybridTraceRayTracingShader"), Is.Not.Null);
             }
             finally
@@ -558,6 +584,24 @@ namespace VividRP.Editor.Tests
                 Assert.That(frameCountHistory.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
                 Assert.That(frameCountHistory.desc.EnableRandomWrite, Is.True);
 
+                var reBlurMipTexture = GetPrivateField<RenderGraphTexture>(pass, "m_ReBlurMipTexture");
+                Assert.That(reBlurMipTexture.desc.Name, Is.EqualTo("ReBlurMipChain"));
+                Assert.That(reBlurMipTexture.desc.Width, Is.EqualTo(1920));
+                Assert.That(reBlurMipTexture.desc.Height, Is.EqualTo(1080));
+                Assert.That(reBlurMipTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Assert.That(reBlurMipTexture.desc.UseMipMap, Is.True);
+                Assert.That(reBlurMipTexture.desc.AutoGenerateMips, Is.False);
+                Assert.That(reBlurMipTexture.desc.MipCount, Is.EqualTo(4));
+                Assert.That(reBlurMipTexture.desc.EnableRandomWrite, Is.True);
+
+                var reBlurAccumulation = GetPrivateField<RenderGraphTexture>(pass, "m_ReBlurAccumulationTexture");
+                Assert.That(reBlurAccumulation.desc.Name, Is.EqualTo("ReBlurAccumulation"));
+                Assert.That(reBlurAccumulation.desc.Width, Is.EqualTo(1920));
+                Assert.That(reBlurAccumulation.desc.Height, Is.EqualTo(1080));
+                Assert.That(reBlurAccumulation.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8_UInt));
+                Assert.That(reBlurAccumulation.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+                Assert.That(reBlurAccumulation.desc.EnableRandomWrite, Is.True);
+
                 var tileListBuffer = GetPrivateField<RenderGraphBuffer>(pass, "m_TileListBuffer");
                 Assert.That(tileListBuffer.desc.Name, Is.EqualTo("SSRTileList"));
                 Assert.That(tileListBuffer.desc.Count, Is.EqualTo(240 * 135));
@@ -614,6 +658,18 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsTracing"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsResolve"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsAccumulate"));
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsRayTracingTemporal"));
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsRayTracingDenoiseH SSR_RAYTRACING_DENOISE_HORIZONTAL"));
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsRayTracingDenoiseV SSR_RAYTRACING_DENOISE_VERTICAL"));
+            Assert.That(source, Does.Contain("#pragma kernel PreBlur"));
+            Assert.That(source, Does.Contain("#pragma kernel TemporalAccumulation"));
+            Assert.That(source, Does.Contain("#pragma kernel MipGeneration"));
+            Assert.That(source, Does.Contain("#pragma kernel HistoryFix"));
+            Assert.That(source, Does.Contain("#pragma kernel Blur"));
+            Assert.That(source, Does.Contain("#pragma kernel CopyHistoryAccumulation"));
+            Assert.That(source, Does.Contain("#pragma kernel CopyHistory"));
+            Assert.That(source, Does.Contain("#pragma kernel TemporalStabilization"));
+            Assert.That(source, Does.Contain("#pragma kernel PostBlur"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPTracing"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPReprojection"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPAccumulate"));
@@ -630,6 +686,18 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPOutputTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRAccumTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRAvgRadianceTexture;"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _ReBlurLightingDistanceTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _ReBlurLightingDistanceTextureRW;"));
+            Assert.That(source, Does.Contain("Texture2D<uint> _ReBlurAccumulationTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<uint> _ReBlurAccumulationTextureRW;"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _ReBlurLightingDistanceHistory;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _ReBlurLightingDistanceHistoryRW;"));
+            Assert.That(source, Does.Contain("Texture2D<uint> _ReBlurAccumulationHistory;"));
+            Assert.That(source, Does.Contain("RWTexture2D<uint> _ReBlurAccumulationHistoryRW;"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _ReBlurStabilizationHistory;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _ReBlurStabilizationHistoryRW;"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _ReBlurMipChain;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float4> _ReBlurMipChainRW;"));
             Assert.That(source, Does.Contain("Texture2D<float4> _SsrAccumPrev;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SsrAccumTexture;"));
             Assert.That(source, Does.Contain("Texture2D<float> _SSRPrevNumFramesAccumTexture;"));
@@ -644,6 +712,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float4x4 _SsrInvViewProjMatrix;"));
             Assert.That(source, Does.Contain("float4x4 _SsrPrevViewProjMatrix;"));
             Assert.That(source, Does.Contain("int _SsrFrameIndex;"));
+            Assert.That(source, Does.Contain("float4 _ReBlurPreBlurRotator;"));
+            Assert.That(source, Does.Contain("float4 _ReBlurBlurRotator;"));
+            Assert.That(source, Does.Contain("float4 _ReBlurPostBlurRotator;"));
+            Assert.That(source, Does.Contain("float4 _ReBlurHistorySizeAndScale;"));
+            Assert.That(source, Does.Contain("float _ReBlurDenoiserRadius;"));
+            Assert.That(source, Does.Contain("float _ReBlurAntiFlickeringStrength;"));
+            Assert.That(source, Does.Contain("float _ReBlurHistoryValidity;"));
             Assert.That(source, Does.Contain("float3 ComputeSsrWorldSpacePosition(float2 screenUV, float deviceDepth)"));
             Assert.That(source, Does.Contain("float3 ComputeSsrNormalizedDeviceCoordinatesWithZ(float3 positionWS)"));
             Assert.That(source, Does.Contain("void StoreSsrWorldGridDebug(uint2 coordSS, float3 positionWS)"));
@@ -651,15 +726,20 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("UNITY_MATRIX_I_VP"));
             Assert.That(source, Does.Not.Contain("UNITY_MATRIX_VP"));
             Assert.That(source, Does.Contain("float _SsrIntensityClamp;"));
+            Assert.That(source, Does.Contain("float GetSsrRadianceClampValue()"));
+            Assert.That(source, Does.Contain("return max(_SsrIntensityClamp * VividGetOneOverPreExposure(), 0.0);"));
+            Assert.That(source, Does.Contain("float3 DecodePreExposedSsrRadiance(float3 color)"));
+            Assert.That(source, Does.Contain("return ClampToFloat16Max(clamp(color, 0.0, _SsrIntensityClamp) * VividGetOneOverPreExposure());"));
+            Assert.That(source, Does.Contain("return DecodePreExposedSsrRadiance(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb);"));
             Assert.That(source, Does.Contain("TEXTURECUBE(_SkyTexture);"));
             Assert.That(source, Does.Contain("float4 _SkyTextureTint;"));
             Assert.That(source, Does.Contain("float4 _SkyTextureParams;"));
             Assert.That(source, Does.Contain("float3 SampleSsrSkyFallback(float3 directionWS, float perceptualRoughness)"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, skyMipLevel).rgb;"));
-            Assert.That(source, Does.Contain("float3 exposedSkyRadiance = VividApplyPreExposure"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURECUBE_LOD(_SkyTexture, sampler_SkyTexture, rotatedDirectionWS, skyMipLevel).rgb"));
+            Assert.That(source, Does.Contain("float3 exposedSkyRadiance = VividApplyPreExposure(skyRadiance);"));
             Assert.That(source, Does.Contain("float3 exposedSkyHsv = RgbToHsv(exposedSkyRadiance);"));
             Assert.That(source, Does.Contain("exposedSkyHsv.z = clamp(exposedSkyHsv.z, 0.0, _SsrIntensityClamp);"));
-            Assert.That(source, Does.Contain("return ClampToFloat16Max(HsvToRgb(exposedSkyHsv));"));
+            Assert.That(source, Does.Contain("return ClampToFloat16Max(HsvToRgb(exposedSkyHsv) * VividGetOneOverPreExposure());"));
             Assert.That(source, Does.Contain("float2 GetSsrBlueNoiseSample(uint2 coordSS)"));
             Assert.That(source, Does.Contain("GetBNDSequenceSample(coordSS, (uint)_SsrFrameIndex, 0)"));
             Assert.That(source, Does.Contain("bool SampleSsrGGXVNDF("));
@@ -776,6 +856,35 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = float4(accumulatedColor, currentReflection.a);"));
             Assert.That(source, Does.Contain("_SsrAccumTexture[coordSS] = float4(accumulatedColor, validHistory);"));
             Assert.That(source, Does.Contain("_SSRNumFramesAccumTexture[coordSS] = validHistory > 0.0 ? normalizedFrameCount : 0.0;"));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsRayTracingTemporal("));
+            Assert.That(source, Does.Contain("SsrNeighborStatistics GetSsrRayTracingTemporalStatistics(uint2 coordSS, float3 centerColor)"));
+            Assert.That(source, Does.Contain("_SSRResolveTexture[coordSS] = float4(accumulatedColor, currentReflection.a);"));
+            Assert.That(source, Does.Contain("SsrResolveCoordData LoadSsrRayTracingSpatialData(int2 coordSS, bool readIntermediate)"));
+            Assert.That(source, Does.Contain("float ComputeSsrRayTracingDenoiseRadius(float perceptualRoughness, float hitDistance)"));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsRayTracingDenoiseH("));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsRayTracingDenoiseV("));
+            Assert.That(source, Does.Contain("_SSRAccumTexture[coordSS] = float4(filteredRadiance, center.alpha);"));
+            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = float4(filteredRadiance, center.alpha);"));
+            Assert.That(source, Does.Contain("#define SSR_REBLUR_MAX_ACCUM_FRAME_NUM 32u"));
+            Assert.That(source, Does.Contain("struct SsrReBlurSurfaceData"));
+            Assert.That(source, Does.Contain("float2 RotateReBlurOffset(float4 rotator, float2 offset)"));
+            Assert.That(source, Does.Contain("float4 LoadSsrReBlurTraceSignal(int2 coordSS)"));
+            Assert.That(source, Does.Contain("float4 LoadSsrReBlurLightingSignal(int2 coordSS)"));
+            Assert.That(source, Does.Contain("bool SampleSsrReBlurHistory(float2 historyScreenUV, out float4 signal, out uint accumulationCount)"));
+            Assert.That(source, Does.Contain("float4 FilterSsrReBlurSignal("));
+            Assert.That(source, Does.Contain("void PreBlur("));
+            Assert.That(source, Does.Contain("void TemporalAccumulation("));
+            Assert.That(source, Does.Contain("void MipGeneration("));
+            Assert.That(source, Does.Contain("void HistoryFix("));
+            Assert.That(source, Does.Contain("void Blur("));
+            Assert.That(source, Does.Contain("void CopyHistoryAccumulation("));
+            Assert.That(source, Does.Contain("void TemporalStabilization("));
+            Assert.That(source, Does.Contain("void CopyHistory("));
+            Assert.That(source, Does.Contain("void PostBlur("));
+            Assert.That(source, Does.Contain("_ReBlurLightingDistanceHistoryRW[coordSS] = signal;"));
+            Assert.That(source, Does.Contain("_ReBlurAccumulationHistoryRW[coordSS] = accumulationCount;"));
+            Assert.That(source, Does.Contain("_ReBlurStabilizationHistoryRW[coordSS] = LoadSsrReBlurLightingSignal((int2)coordSS);"));
+            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = float4(SanitizeSsrRadiance(filteredSignal.rgb), outputAlpha);"));
             Assert.That(source, Does.Contain("bool TraceScreenSpaceReflectionHDRP("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPTracing("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPReprojection("));
@@ -808,6 +917,17 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private const string SSRTracingProfilerTag = \"SSRTracing\";"));
             Assert.That(source, Does.Contain("private const string SSRResolveProfilerTag = \"SSRResolve\";"));
             Assert.That(source, Does.Contain("private const string SSRAccumulateProfilerTag = \"SSRAccumulate\";"));
+            Assert.That(source, Does.Contain("private const string SSRRayTracingProfilerTag = \"RaytracingReflectionEvaluation\";"));
+            Assert.That(source, Does.Contain("private const string SSRRayTracingDenoiseProfilerTag = \"RaytracingReflectionFilter\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurPreBlurProfilerTag = \"ReBlurPreBlur\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurTemporalAccumulationProfilerTag = \"ReBlurTemporalAccumulation\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurMipGenerationProfilerTag = \"ReBlurMipGeneration\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurMipHistoryFixProfilerTag = \"ReBlurMipHistoryFix\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurBlurProfilerTag = \"ReBlurBlur\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurCopyHistoryProfilerTag = \"ReBlurCopyHistory\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurTemporalStabilizationProfilerTag = \"ReBlurTemporalStabilization\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurCopyHistoryStabProfilerTag = \"ReBlurCopyHistoryStab\";"));
+            Assert.That(source, Does.Contain("private const string ReBlurPostBlurProfilerTag = \"ReBlurPostBlur\";"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsClassifyTiles\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsTracing\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsResolve\")"));
@@ -816,13 +936,40 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsHDRPReprojection\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsHDRPAccumulate\")"));
             Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"ScreenSpaceReflectionsHybridCandidates\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"ScreenSpaceReflectionsRayTracingTemporal\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"ScreenSpaceReflectionsRayTracingDenoiseH\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"ScreenSpaceReflectionsRayTracingDenoiseV\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"PreBlur\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"TemporalAccumulation\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"MipGeneration\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"HistoryFix\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"Blur\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"CopyHistoryAccumulation\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"CopyHistory\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"TemporalStabilization\")"));
+            Assert.That(source, Does.Contain("TryFindKernel(m_ComputeShader, \"PostBlur\")"));
             Assert.That(source, Does.Contain("DispatchHDRPComparison(cmd, context);"));
             Assert.That(source, Does.Contain("DispatchHybridCandidates(cmd);"));
             Assert.That(source, Does.Contain("cmd.SetRayTracingShaderPass(m_HybridTraceRayTracingShader, \"IndirectDXR\");"));
             Assert.That(source, Does.Contain("cmd.DispatchRays(m_HybridTraceRayTracingShader, HybridRayGenName, m_HybridDispatchIndirectArgsBuffer.innerHandle, 0, null);"));
-            Assert.That(source, Does.Contain("private const string SSRRayTracingProfilerTag = \"SSRRayTracing\";"));
             Assert.That(source, Does.Contain("private const string RayTracingRayGenName = \"RayGenIntegration\";"));
             Assert.That(source, Does.Contain("DispatchRayTracing(cmd, context);"));
+            Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRRayTracingDenoiseProfilingSampler))"));
+            Assert.That(source, Does.Contain("DispatchRayTracingReBlur(cmd);"));
+            Assert.That(source, Does.Contain("DispatchReBlurPreBlur(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurTemporalAccumulation(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurMipGeneration(cmd);"));
+            Assert.That(source, Does.Contain("DispatchReBlurHistoryFix(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurBlur(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurCopyHistory(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurTemporalStabilization(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurCopyHistoryStab(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("DispatchReBlurPostBlur(cmd, groupsX, groupsY);"));
+            Assert.That(source, Does.Contain("if (ShouldRunRayTracingPath())"));
+            Assert.That(source, Does.Contain("return CanExecuteReBlurPath()"));
+            Assert.That(source, Does.Not.Contain("return m_SSRClassifyTilesKernel >= 0\r\n                && CanExecuteReBlurPath()"));
+            Assert.That(source, Does.Not.Contain("return m_SSRClassifyTilesKernel >= 0\n                && CanExecuteReBlurPath()"));
+            Assert.That(source, Does.Contain("CanExecuteRayTracingDenoisePath()"));
             Assert.That(source, Does.Contain("cmd.DispatchRays(m_HybridTraceRayTracingShader, RayTracingRayGenName, (uint)m_Width, (uint)m_Height, 1, null);"));
             Assert.That(source, Does.Contain("private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;"));
             Assert.That(source, Does.Contain("m_ExecutionPath = m_Settings.executionPath;"));
@@ -835,6 +982,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
             Assert.That(source, Does.Contain("BlueNoise.Instance?.Bind(cmd, m_HybridTraceRayTracingShader);"));
+            Assert.That(source, Does.Contain("BindHybridRayTracingParameters(cmd, context);"));
+            Assert.That(source, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer"));
+            Assert.That(source, Does.Contain("AutoExposureShaderBindings.PreExposureBufferId"));
             Assert.That(source, Does.Not.Contain("BlueNoise.Instance?.Bind(cmd);"));
             Assert.That(source, Does.Contain("ResetDispatchIndirectArgs(cmd);"));
             Assert.That(source, Does.Contain("cmd.SetBufferData(dispatchIndirectArgsBuffer, s_InitialDispatchIndirectArgsData);"));
@@ -854,20 +1004,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ScreenSpaceReflectionRayTracingShader_UsesVividScreenCoordinatesAndVisibleHitFallback()
+        public void ScreenSpaceReflectionRayTracingShader_AvoidsExposureClamp_ForIncompleteIndirectLighting()
         {
             var source = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Core",
                 "Private",
                 "ScreenSpaceReflection",
-                "ScreenSpaceReflectionHybrid.raytrace"));
+                "RaytracingReflection.hlsl"));
 
             Assert.That(source, Does.Contain("void RayGenIntegration()"));
-            Assert.That(source, Does.Contain("uint2 coordSS = launchIndex.xy;"));
-            Assert.That(source, Does.Not.Contain("launchDim.y - launchIndex.y"));
-            Assert.That(source, Does.Contain("if (Luminance(radiance) <= 1e-5)"));
-            Assert.That(source, Does.Contain("radiance = payload.hitBaseColor.rgb;"));
+            Assert.That(source, Does.Contain("uint2 coordSS = uint2(launchIndex.x, launchDim.y - launchIndex.y - 1u);"));
+            Assert.That(source, Does.Contain("float3 DecodePreExposedHistoryRadiance(float3 color)"));
+            Assert.That(source, Does.Contain("return DecodePreExposedHistoryRadiance(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb);"));
+            Assert.That(source, Does.Contain("return SanitizeSsrRadiance(skyRadiance);"));
+            Assert.That(source, Does.Contain("return SanitizeSsrRadiance(radiance);"));
+            Assert.That(source, Does.Not.Contain("VividApplyPreExposure(skyRadiance)"));
+            Assert.That(source, Does.Not.Contain("exposedRadiance"));
+            Assert.That(source, Does.Not.Contain("HsvToRgb(exposedSkyHsv) * VividGetOneOverPreExposure()"));
+            Assert.That(source, Does.Not.Contain("payload.hitBaseColor"));
         }
 
         [Test]

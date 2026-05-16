@@ -40,6 +40,12 @@ namespace VividRP.Runtime
         [Tooltip("Maximum HiZ ray marching steps.")]
         public ClampedIntParameter rayMaxIterations = new(32, 1, 128);
 
+        [Tooltip("Scales the ReBLUR filter radius used by DXR reflections.")]
+        public ClampedFloatParameter reBlurDenoiserRadius = new(1.0f, 0.0f, 1.0f);
+
+        [Tooltip("Controls ReBLUR temporal stabilization strength for DXR reflections.")]
+        public ClampedFloatParameter reBlurAntiFlickeringStrength = new(0.5f, 0.0f, 1.0f);
+
         public bool IsActive()
         {
             return enabled.value && intensity.value > 0.0f && rayMaxIterations.value > 0;

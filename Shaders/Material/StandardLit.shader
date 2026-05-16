@@ -117,7 +117,7 @@ Shader "VividRP/Material/StandardLit"
             Cull [_Cull]
 
             HLSLPROGRAM
-                #pragma target 4.5
+                #pragma use_dxc
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
                 #pragma multi_compile _ LIGHTMAP_ON
@@ -150,6 +150,7 @@ Shader "VividRP/Material/StandardLit"
             Cull [_Cull]
 
             HLSLPROGRAM
+                #pragma use_dxc
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
                 #pragma multi_compile _ LIGHTMAP_ON

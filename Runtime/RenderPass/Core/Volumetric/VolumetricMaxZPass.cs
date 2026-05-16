@@ -170,7 +170,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     MsaaSamples = MSAASamples.None,
                     FilterMode = FilterMode.Point,
                     WrapMode = TextureWrapMode.Clamp,
-                    ClearBuffer = true,
+                    ClearBuffer = false,
                     ClearColor = Color.clear,
                     EnableRandomWrite = true,
                     Name = name
@@ -207,7 +207,7 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.UseMipMap = false;
             texture.desc.AutoGenerateMips = false;
             texture.desc.MipCount = 1;
-            texture.desc.ClearBuffer = true;
+            texture.desc.ClearBuffer = false;
             texture.desc.ClearColor = Color.clear;
             texture.desc.EnableRandomWrite = true;
             texture.desc.BindTextureMS = false;

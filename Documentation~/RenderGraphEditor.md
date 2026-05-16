@@ -38,10 +38,16 @@
 
 ## 使用方式（最小闭环）
 
-1. 菜单创建：`Assets/Create/VividRP/Render Graph`
+1. 菜单创建：`Assets/Create/VividRP/Standard Render Graph` 会从内置标准模板生成一份可运行管线；`Assets/Create/VividRP/Render Graph` 仍用于创建空图
 2. 双击打开 `.vrdg`，添加资源节点与 Pass 节点
 3. 将资源节点输出连接到 Pass 节点对应的资源端口
 4. 在 `VividRenderPipelineAsset` 的 `RenderGraphAsset` 字段中引用该 `.vrdg` 资产（其主对象为 `RenderGraphData`）
+
+## 标准模板
+
+- 内置模板位于 `Editor/RenderGraph/Templates/StandardRenderGraph.vrdg.txt`
+- 模板内容基于项目示例 `Assets/Hybrid.vrdg`，包含预深度、GBuffer、阴影、天空、延迟光照、后处理、抗锯齿和最终 Blit 等基础链路
+- 新项目建议优先从 `Assets/Create/VividRP/Standard Render Graph` 创建，再按项目需求删减或替换 Pass
 
 ## SubSystem
 

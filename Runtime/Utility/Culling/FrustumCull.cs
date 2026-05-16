@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace VividRP.Runtime
 {
-    [BurstCompile(FloatMode = FloatMode.Fast, FloatPrecision = FloatPrecision.Standard)]
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
     public struct FrustumCullingJob : IJobParallelFor
     {
         [ReadOnly] public NativeArray<float4> FrustumPlanes; // 长度固定为 6

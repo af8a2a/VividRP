@@ -28,7 +28,7 @@ namespace VividRP.Runtime.SubSystem.Decal
         public float padding;
     }
 
-    [BurstCompile(FloatMode = FloatMode.Fast, FloatPrecision = FloatPrecision.Standard)]
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct PrepareDecalsJob : IJobParallelFor
     {
         [ReadOnly] public NativeArray<DecalSourceData> Sources;

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
 using UnityEngine;
@@ -13,12 +14,71 @@ namespace VividRP.Editor.RenderGraph
     internal class RenderGraphEditorGraph : Graph
     {
         internal const string AssetExtension = "vrdg";
+        internal const string StandardGraphTemplateMenuPath = "Assets/Create/VividRP/Standard Render Graph";
+        internal const string StandardGraphTemplateRelativePath = "Editor/RenderGraph/Templates/StandardRenderGraph.vrdg.txt";
+        private const string StandardGraphTemplateFileName = "StandardRenderGraph.vrdg.txt";
         private const string DefaultGraphName = "Vivid Render Graph";
+        private const string DefaultStandardGraphName = "Standard Vivid Render Graph";
 
         [MenuItem("Assets/Create/VividRP/Render Graph", false)]
         private static void CreateAssetFile()
         {
             GraphDatabase.PromptInProjectBrowserToCreateNewAsset<RenderGraphEditorGraph>(DefaultGraphName);
+        }
+
+        [MenuItem(StandardGraphTemplateMenuPath, false)]
+        private static void CreateStandardAssetFile()
+        {
+            var templateContent = LoadStandardGraphTemplateContent();
+            if (string.IsNullOrEmpty(templateContent))
+                return;
+
+            ProjectWindowUtil.CreateAssetWithTextContent($"{DefaultStandardGraphName}.{AssetExtension}", templateContent);
+        }
+
+        internal static string LoadStandardGraphTemplateContent()
+        {
+            var candidatePaths = VividPackagePathUtility.GetCandidateAssetPaths(StandardGraphTemplateRelativePath);
+            for (var i = 0; i < candidatePaths.Length; i++)
+            {
+                if (TryReadTemplateContent(candidatePaths[i], out var content))
+                    return content;
+            }
+
+            var templateGuids = AssetDatabase.FindAssets("StandardRenderGraph");
+            for (var i = 0; i < templateGuids.Length; i++)
+            {
+                var assetPath = AssetDatabase.GUIDToAssetPath(templateGuids[i]);
+                if (!assetPath.EndsWith($"/{StandardGraphTemplateFileName}", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (TryReadTemplateContent(assetPath, out var content))
+                    return content;
+            }
+
+            Debug.LogError($"[VividRP] Failed to find RenderGraph template: {StandardGraphTemplateRelativePath}");
+            return string.Empty;
+        }
+
+        private static bool TryReadTemplateContent(string assetPath, out string content)
+        {
+            content = string.Empty;
+            if (string.IsNullOrEmpty(assetPath))
+                return false;
+
+            var textAsset = AssetDatabase.LoadAssetAtPath<TextAsset>(assetPath);
+            if (textAsset != null)
+            {
+                content = textAsset.text;
+                return true;
+            }
+
+            var fullPath = Path.GetFullPath(assetPath);
+            if (!File.Exists(fullPath))
+                return false;
+
+            content = File.ReadAllText(fullPath);
+            return true;
         }
 
         public override void OnGraphChanged(GraphLogger infos)

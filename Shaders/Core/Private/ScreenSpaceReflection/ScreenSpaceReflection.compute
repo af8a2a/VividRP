@@ -2132,7 +2132,8 @@ void HistoryFix(
         return;
 
     float4 signal = LoadSsrReBlurLightingSignal((int2)coordSS);
-    if (!IsValidSsrReBlurSignal(signal))
+    SsrReBlurSurfaceData centerSurface = LoadSsrReBlurSurfaceData((int2)coordSS);
+    if (centerSurface.valid <= 0.0 || !IsValidSsrReBlurSignal(signal))
     {
         _ReBlurLightingDistanceTextureRW[coordSS] = EmptySsrReBlurSignal();
         return;
@@ -2142,14 +2143,21 @@ void HistoryFix(
     if (accumulationCount < SSR_REBLUR_HISTORY_FIX_FRAME_NUM)
     {
         uint missingFrames = SSR_REBLUR_HISTORY_FIX_FRAME_NUM - accumulationCount;
-        uint mipLevel = min(missingFrames, 3u);
-        uint2 mipCoord = max(coordSS >> mipLevel, uint2(0u, 0u));
-        float4 mipSignal = _ReBlurMipChain.Load(int3(mipCoord, mipLevel));
-        if (IsValidSsrReBlurSignal(mipSignal))
+        float roughnessWeight = saturate(PerceptualRoughnessToRoughness(centerSurface.perceptualRoughness) * 8.0);
+        float distanceWeight = saturate(signal.w * 0.15);
+        uint maxHistoryFixMip = (uint)round(saturate(roughnessWeight * distanceWeight) * 2.0);
+        uint mipLevel = min(missingFrames, maxHistoryFixMip);
+        if (mipLevel > 0u)
         {
-            float fixWeight = (float)missingFrames / (float)SSR_REBLUR_HISTORY_FIX_FRAME_NUM;
-            signal.rgb = lerp(signal.rgb, SanitizeSsrRadiance(mipSignal.rgb), fixWeight);
-            signal.w = lerp(signal.w, mipSignal.w, fixWeight);
+            uint2 mipCoord = max(coordSS >> mipLevel, uint2(0u, 0u));
+            float4 mipSignal = _ReBlurMipChain.Load(int3(mipCoord, mipLevel));
+            if (IsValidSsrReBlurSignal(mipSignal))
+            {
+                float fixWeight = (float)missingFrames / (float)SSR_REBLUR_HISTORY_FIX_FRAME_NUM;
+                fixWeight *= 0.35 * saturate(roughnessWeight * max(distanceWeight, 0.25));
+                signal.rgb = lerp(signal.rgb, SanitizeSsrRadiance(mipSignal.rgb), fixWeight);
+                signal.w = lerp(signal.w, mipSignal.w, fixWeight);
+            }
         }
     }
 

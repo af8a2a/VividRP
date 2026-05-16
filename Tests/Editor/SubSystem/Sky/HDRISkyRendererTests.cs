@@ -81,6 +81,20 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("UpdateAtmosphericScatteringResources("));
         }
 
+        [Test]
+        public void SkyManager_SkipsGlobalSkyEnvironmentUpdatesForAuxiliaryCameras()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
+
+            Assert.That(source, Does.Contain("private static bool ShouldUpdateGlobalSkyEnvironment(VividCameraData cameraData)"));
+            Assert.That(source, Does.Contain("if (!ShouldUpdateGlobalSkyEnvironment(cameraData))"));
+            Assert.That(source, Does.Contain("CopyCachedSkyDataToFrame(skyData, cmd);"));
+            Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, s_CachedSkyData.ambientProbeCubemap == null);"));
+            Assert.That(source, Does.Contain("camera.cameraType != CameraType.Preview"));
+            Assert.That(source, Does.Contain("camera.cameraType != CameraType.Reflection"));
+            Assert.That(source, Does.Contain("&& !camera.isProcessingRenderRequest"));
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));

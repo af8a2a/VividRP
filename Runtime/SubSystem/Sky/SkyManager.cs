@@ -89,13 +89,20 @@ namespace VividRP.Runtime
             if (!IsInitialized)
                 Initialize();
 
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            skyData.Reset();
+
             s_SkyUpdateVersion++;
             s_PendingSkyRenderer = null;
             s_PendingSkyCamera = null;
             s_PendingSkyUpdateVersion = -1;
 
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-            skyData.Reset();
+            if (!ShouldUpdateGlobalSkyEnvironment(cameraData))
+            {
+                CopyCachedSkyDataToFrame(skyData, cmd);
+                return;
+            }
 
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var activeSkyType = skySettings?.skyType.value ?? SkyType.HDRI;
@@ -107,7 +114,7 @@ namespace VividRP.Runtime
             s_ActiveRenderer = hasActiveSky ? renderer : null;
 
             var context = new SkyRendererContext(
-                frameData.GetOrCreate<VividCameraData>(),
+                cameraData,
                 frameData.GetOrCreate<VividLightData>(),
                 frameData.GetOrCreate<VividExposureData>());
 
@@ -152,6 +159,10 @@ namespace VividRP.Runtime
             if (!IsInitialized)
                 Initialize();
 
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            if (!ShouldUpdateGlobalSkyEnvironment(cameraData))
+                return false;
+
             if (s_ActiveRenderer == null)
                 return false;
 
@@ -160,7 +171,7 @@ namespace VividRP.Runtime
                 return false;
 
             var context = new SkyRendererContext(
-                frameData.GetOrCreate<VividCameraData>(),
+                cameraData,
                 frameData.GetOrCreate<VividLightData>(),
                 frameData.GetOrCreate<VividExposureData>());
             var camera = context.cameraData?.camera;
@@ -263,6 +274,24 @@ namespace VividRP.Runtime
         {
             renderer.Build(resources);
             s_Renderers[renderer.Type] = renderer;
+        }
+
+        private static bool ShouldUpdateGlobalSkyEnvironment(VividCameraData cameraData)
+        {
+            var camera = cameraData?.camera;
+            if (camera == null)
+                return true;
+
+            return camera.cameraType != CameraType.Preview
+                   && camera.cameraType != CameraType.Reflection
+                   && !camera.isProcessingRenderRequest;
+        }
+
+        private static void CopyCachedSkyDataToFrame(VividSkyData skyData, CommandBuffer cmd)
+        {
+            skyData?.CopyFrom(s_CachedSkyData);
+            s_AmbientProbeConvolution.BindGlobalBuffer(cmd, s_CachedSkyData.ambientProbeCubemap == null);
+            BindGlobalSkyTexture(cmd, s_CachedSkyData);
         }
 
         private static void UpdateSpecularCubemap(CommandBuffer cmd, VividSkyData skyData)

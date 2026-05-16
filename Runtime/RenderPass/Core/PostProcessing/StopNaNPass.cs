@@ -5,14 +5,15 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class StopNaNPass : UnsafePass
+    public sealed class StopNaNPass : RasterPass
     {
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture m_Source = new();
 
         [RenderGraphResource(
             Name = "StopNaNOutput",
-            Access = AccessFlags.Write)]
+            Access = AccessFlags.Write,
+            AttachmentIndex = 0)]
         [PassBypass(nameof(m_Source))]
         private RenderGraphTexture m_OutputTexture;
 
@@ -71,7 +72,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.Name = "StopNaNOutput";
         }
 
-        public override void Record(UnsafePassContext context)
+        public override void Record(RasterPassContext context)
         {
             if (m_Material == null)
                 return;
@@ -79,16 +80,13 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Source == null || m_Source.innerHandle.IsValid() != true || m_OutputTexture?.innerHandle.IsValid() != true)
                 return;
 
-            var cmd = context.cmd;
-            var unsafeCmd = CommandBufferHelpers.GetNativeCommandBuffer(cmd);
             RTHandle sourceHandle = m_Source.innerHandle;
             var scaleBias = TextureScaleBiasUtility.GetScaleBias(
                 sourceHandle,
                 context.GetTextureUVOrigin(m_Source.innerHandle),
                 context.GetTextureUVOrigin(m_OutputTexture.innerHandle));
 
-            cmd.SetRenderTarget(m_OutputTexture.innerHandle);
-            Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
+            Blitter.BlitTexture(context.cmd, sourceHandle, scaleBias, m_Material, 0);
         }
 
         public override void Dispose()

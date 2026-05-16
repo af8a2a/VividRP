@@ -269,11 +269,14 @@ namespace VividRP.Editor.Tests
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures;
 
+            Assert.That(typeof(RasterPass).IsAssignableFrom(typeof(StopNaNPass)), Is.True);
             Assert.That(textureEntries, Has.Length.EqualTo(2));
             Assert.That(textureEntries[0].Name, Is.EqualTo("m_Source"));
             Assert.That(textureEntries[0].Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries[0].AttachmentIndex, Is.EqualTo(-1));
             Assert.That(textureEntries[1].Name, Is.EqualTo("StopNaNOutput"));
             Assert.That(textureEntries[1].Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(textureEntries[1].AttachmentIndex, Is.EqualTo(0));
             Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
             Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("m_Source"));
             Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("m_OutputTexture"));

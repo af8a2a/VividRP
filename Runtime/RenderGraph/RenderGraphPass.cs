@@ -476,6 +476,21 @@ namespace VividRP.Runtime
     {
     }
 
+    /// <summary>
+    /// Marks passes that sample the shared blue-noise resources during execution.
+    /// </summary>
+    public interface IBlueNoiseConsumerPass
+    {
+    }
+
+    /// <summary>
+    /// Marks passes whose work has effects outside same-frame RenderGraph resource consumers.
+    /// Examples include history updates, readbacks, imported resource updates, or other persistent side effects.
+    /// </summary>
+    public interface IRenderGraphSideEffectPass
+    {
+    }
+
     public interface IRenderGizmoPrePostProcessBoundaryPass
     {
     }
@@ -489,9 +504,19 @@ namespace VividRP.Runtime
         void RestoreSourceTexture();
     }
 
+    //only used for  Antialiasing
     public interface IRenderGraphRecordingPass
     {
         void RecordGraph(RenderGraphRecordingContext context);
+    }
+
+    /// <summary>
+    /// Optional hook for passes that must refresh resource references after all passes have completed Prepare()
+    /// and before the pass's resources are collected for RenderGraph recording.
+    /// </summary>
+    public interface IRenderGraphPreparePass
+    {
+        void PrepareRenderGraph(ContextContainer frameData);
     }
 
     public sealed class RenderGraphRecordingContext
@@ -538,6 +563,14 @@ namespace VividRP.Runtime
                 return default;
 
             return PassRecorder.GetOrCreateTextureHandle(RenderGraph, texture, TextureCache);
+        }
+
+        internal BufferHandle GetOrCreateBufferHandle(RenderGraphBuffer buffer)
+        {
+            if (RenderGraph == null || buffer == null)
+                return default;
+
+            return PassRecorder.GetOrCreateBufferHandle(RenderGraph, buffer, BufferCache);
         }
 
         internal void RegisterTextureHandle(RenderGraphTexture texture, TextureHandle handle)

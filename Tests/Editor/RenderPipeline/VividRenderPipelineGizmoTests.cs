@@ -8,7 +8,7 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VividRenderPipelineGizmoTests
     {
-        [TestCase(CameraType.SceneView, true)]
+        [TestCase(CameraType.SceneView, false)]
         [TestCase(CameraType.Game, false)]
         [TestCase(CameraType.Preview, false)]
         [TestCase(CameraType.Reflection, false)]
@@ -24,6 +24,17 @@ namespace VividRP.Editor.Tests
         public void CanRenderGizmos_ReturnsExpectedValue_ForCameraType(CameraType cameraType, bool expected)
         {
             Assert.That(VividRenderPipeline.CanRenderGizmos(cameraType), Is.EqualTo(expected));
+        }
+
+        [TestCase(CameraType.SceneView, false)]
+        [TestCase(CameraType.Game, true)]
+        [TestCase(CameraType.Preview, false)]
+        [TestCase(CameraType.Reflection, false)]
+        public void ShouldRenderPreImageEffectGizmosInRenderGraph_ReturnsExpectedValue_ForCameraType(
+            CameraType cameraType,
+            bool expected)
+        {
+            Assert.That(VividRenderPipeline.ShouldRenderPreImageEffectGizmosInRenderGraph(cameraType), Is.EqualTo(expected));
         }
 
         [Test]

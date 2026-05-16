@@ -89,19 +89,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresAerialPerspectiveShader()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.AerialPerspectiveShader));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/AtmosphericScattering/OpaqueAtmosphericScattering"));
-        }
-
-        [Test]
         public void Source_UsesShaderFallbackAndFrameContextAtmosphericScatteringLutHandle()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphericScatteringPass.cs"));

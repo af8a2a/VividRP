@@ -59,23 +59,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresLensFlareShaders()
-        {
-            var shaderField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.LensFlareDataDrivenShader));
-            var computeField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.LensFlareMergeOcclusionDataDrivenCompute));
-
-            Assert.That(shaderField, Is.Not.Null);
-            Assert.That(computeField, Is.Not.Null);
-
-            Assert.That(
-                shaderField.GetCustomAttribute<VividRP.Runtime.VividResourcePathAttribute>()?.Path,
-                Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven"));
-            Assert.That(
-                computeField.GetCustomAttribute<VividRP.Runtime.VividResourcePathAttribute>()?.Path,
-                Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareMergeOcclusionDataDriven.compute"));
-        }
-
-        [Test]
         public void LensFlareShader_UsesVividPipelineAndCoreLensFlareBody()
         {
             var shaderSource = File.ReadAllText(GetPackageFilePath(

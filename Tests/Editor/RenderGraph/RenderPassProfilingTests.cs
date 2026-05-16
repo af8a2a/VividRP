@@ -60,13 +60,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PassRecorder_WrapsRenderPassRecord_WithCpuAndCommandProfiling()
+        public void PassRecorder_WrapsRenderPassRecord_WithCpuProfilingOnly()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.cs"))
                          + File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
 
             Assert.That(source, Does.Contain("data.Markers.Record.Auto()"));
-            Assert.That(source, Does.Contain("data.Markers.CommandSampler"));
+            Assert.That(source, Does.Not.Contain("data.Markers.CommandSampler"));
+            Assert.That(typeof(RenderPassProfilerMarkers).GetProperty("CommandSampler"), Is.Null);
             Assert.That(source, Does.Contain("markers.GraphName, out var passData"));
             Assert.That(source, Does.Not.Contain("passName ?? pass.GetType().Name"));
             Assert.That(source, Does.Contain("s_ComputeRenderFunc"));

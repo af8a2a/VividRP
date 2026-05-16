@@ -110,6 +110,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetLivePassIndices_PreservesSideEffectPass_WhenGraphOutputsAreUnused()
+        {
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<ColorPyramidPass>(),
+                }
+            };
+
+            var livePassIndices = RenderGraphPassCullingUtility.GetLivePassIndices(passDefinitions);
+
+            Assert.That(livePassIndices, Is.EqualTo(new[] { 0 }));
+        }
+
+        [Test]
         public void GetLivePassIndices_CullsPassWithTransientIntermediateWrites_WhenExternalOutputHasNoConsumer()
         {
             var passDefinitions = new List<RenderGraphPassDefinition>

@@ -1,8 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -22,6 +20,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_DepthTexture"));
             Assert.That(source, Does.Contain("_DirectionalShadowTexture"));
             Assert.That(source, Does.Contain("_GTAOTexture"));
+            Assert.That(source, Does.Contain("_ScreenSpaceReflectionTexture"));
+            Assert.That(source, Does.Contain("_ScreenSpaceReflectionEnabled"));
             Assert.That(source, Does.Contain("_MaterialPixelIndices"));
             Assert.That(source, Does.Not.Contain("_MaterialDispatchArgs"));
             Assert.That(source, Does.Contain("_LightingTexture"));
@@ -60,42 +60,27 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return CombineVividLightLoopOutput(lightLoopOutput);"));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Contain("surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));"));
+            Assert.That(source, Does.Contain("float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);"));
+            Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(max(reflection.rgb, 0.0)), saturate(reflection.a));"));
+            Assert.That(source, Does.Contain("indirectSpecularLighting = FinalizeVividSpecularLighting("));
+            Assert.That(source, Does.Contain("float reflectionWeight = screenSpaceReflection.a;"));
+            Assert.That(source, Does.Contain("float3 screenSpaceReflectionFGD;"));
+            Assert.That(source, Does.Contain("screenSpaceReflectionFGD = preLightData.specularFGD;"));
+            Assert.That(source, Does.Contain("lighting = max(lighting - preExposedIndirectSpecular * reflectionWeight, 0.0)"));
+            Assert.That(source, Does.Contain("+ screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;"));
+            Assert.That(source, Does.Not.Contain("+ screenSpaceReflection.rgb * reflectionWeight;"));
             Assert.That(source, Does.Not.Contain("tileCount ="));
             Assert.That(source, Does.Contain("uint tileListIndex = groupId.x;"));
             Assert.That(source, Does.Contain("UnpackTileCoord"));
             Assert.That(source, Does.Contain("tileCoord * CLASSIFY_TILE_SIZE"));
             Assert.That(source, Does.Contain("float3 emissive = VividApplyPreExposure(max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0));"));
             Assert.That(source, Does.Contain("_LightingTexture[dispatchThreadId.xy] = float4(emissive, 1.0);"));
-            Assert.That(source, Does.Contain("float3 lighting = VividApplyPreExposure(EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS));"));
+            Assert.That(source, Does.Contain("float3 indirectSpecularLighting;"));
+            Assert.That(source, Does.Contain("float3 lightingNoPreExposure = EvaluateDeferredLitLighting("));
+            Assert.That(source, Does.Contain("float3 lighting = VividApplyPreExposure(lightingNoPreExposure);"));
             Assert.That(source, Does.Contain("uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);"));
             Assert.That(source, Does.Contain("uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);"));
             Assert.That(source, Does.Not.Contain("_LightingTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 1.0);"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresDeferredLitCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DeferredLitCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/DeferredLit"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresGTAOCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.GTAOCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/GTAO/GTAO.compute"));
         }
 
         private static string GetComputeShaderSourcePath()

@@ -1,7 +1,5 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -30,19 +28,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_ConvolutionMaterial, m_PropertyBlock, passIndex);"));
             Assert.That(source, Does.Contain("GetIBLRuntimeFilterSampleCount"));
             Assert.That(source, Does.Contain("BuildGgxIblSampleDataTexture()"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresSkyGGXConvolutionShader()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.SkyGGXConvolutionShader));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/Sky/GGXConvolve"));
         }
 
         [Test]

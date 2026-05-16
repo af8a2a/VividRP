@@ -129,18 +129,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresHzbComputePath()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.HZBGenerateCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividRP.Runtime.VividResourcePathAttribute>();
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/DownSample/HZBGenerate"));
-        }
-
-        [Test]
         public void FidelityFxSpd_PackedWaveReduction_UsesWavePath()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "FidelityFX", "ffx_spd.hlsl"));

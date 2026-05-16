@@ -491,7 +491,7 @@ void VividIndirectDiffuseClosestHit(
     VividGBufferSurfaceData surfaceData = BuildStandardLitSurfaceData(geometry, baseSample);
     VividIndirectDiffuseWritePayload(geometry, surfaceData, payload);
 }
-#ifndef SHADERSTAGE_RGS
+#if VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS && !defined(SHADERSTAGE_RGS)
 [shader("closesthit")]
 void VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME(
     inout VividIndirectDiffusePayload payload : SV_RayPayload,

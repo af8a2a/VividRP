@@ -33,6 +33,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class ColorGradingPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class ColorPyramidPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class CopyDepthPass : RenderPassNodeData { }
 
     [Serializable]
@@ -75,6 +78,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class GenerateViewZPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class HDRPHZBPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class HZBGeneratePass : RenderPassNodeData { }
 
     [Serializable]
@@ -115,6 +121,9 @@ namespace VividRP.Editor.RenderGraph.Generated
 
     [Serializable]
     internal sealed class ScreenSpaceLensFlarePass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ScreenSpaceReflectionPass : RenderPassNodeData { }
 
     [Serializable]
     internal sealed class ShadowClassifyPass : RenderPassNodeData { }

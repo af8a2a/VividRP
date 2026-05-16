@@ -69,6 +69,11 @@ namespace VividRP.Runtime
             public RenderGraphBuffer CurrentBuffer;
         }
 
+        private sealed class CodeManagedTextureHistoryRequest
+        {
+            public RenderGraphTexture CurrentTexture;
+        }
+
         private static readonly List<IRenderPass> s_RenderPasses = new();
         private static readonly ContextContainer s_FrameData = new();
         private static readonly Dictionary<IRenderPass, PassResource> s_PassResources = new();
@@ -78,8 +83,9 @@ namespace VividRP.Runtime
         private static RenderGraphTexture[] s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
         private static RenderGraphTexture[] s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
         private static readonly Dictionary<RenderGraphTexture, RTHandle> s_ImportedRTHandles = new();
-        private static readonly Dictionary<IRenderPass, List<ImportedPassTexture>> s_PassImportedHandles = new();
+        private static readonly Dictionary<IRenderPass, List<ImportedPassHandle>> s_PassImportedHandles = new();
         private static readonly Dictionary<string, TextureHistoryFrameBinding> s_TextureHistoryFrameBindings = new(16, StringComparer.Ordinal);
+        private static readonly Dictionary<string, CodeManagedTextureHistoryRequest> s_CodeManagedTextureHistoryRequests = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
         private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
         private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
@@ -118,6 +124,8 @@ namespace VividRP.Runtime
             RenderGraphData graphAsset)
         {
             ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
+            VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
+            VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
 
             var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
             var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
@@ -237,6 +245,12 @@ namespace VividRP.Runtime
             {
                 pass.Prepare(s_FrameData);
             }
+        }
+
+        private static void PrepareRenderGraphPass(IRenderPass pass)
+        {
+            if (pass is IRenderGraphPreparePass preparePass)
+                preparePass.PrepareRenderGraph(s_FrameData);
         }
 
         private static void DisposeRenderPass(IRenderPass pass, string displayName = null)
@@ -359,20 +373,48 @@ namespace VividRP.Runtime
 
             var handle = s_CurrentRenderGraph.ImportTexture(rtHandle);
 
-            if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
-            {
-                handles = new List<ImportedPassTexture>(32);
-                s_PassImportedHandles[pass] = handles;
-            }
-
-            var importedTexture = new ImportedPassTexture(handle, access);
-            if (!handles.Contains(importedTexture))
-                handles.Add(importedTexture);
+            RegisterImportedTextureForPass(pass, handle, access);
 
             return handle;
         }
 
         internal static bool IsPassTextureImportActive => s_CurrentRenderGraph != null;
+
+        internal static void RegisterImportedTextureForPass(
+            IRenderPass pass,
+            TextureHandle handle,
+            AccessFlags access = AccessFlags.Read)
+        {
+            if (pass == null || !handle.IsValid())
+                return;
+
+            var importedHandle = ImportedPassHandle.Texture(handle, access);
+            RegisterImportedHandleForPass(pass, importedHandle);
+        }
+
+        internal static void RegisterImportedBufferForPass(
+            IRenderPass pass,
+            BufferHandle handle,
+            AccessFlags access = AccessFlags.Read)
+        {
+            if (pass == null || !handle.IsValid())
+                return;
+
+            var importedHandle = ImportedPassHandle.Buffer(handle, access);
+            RegisterImportedHandleForPass(pass, importedHandle);
+        }
+
+        private static void RegisterImportedHandleForPass(IRenderPass pass, ImportedPassHandle importedHandle)
+        {
+            if (!s_PassImportedHandles.TryGetValue(pass, out var handles))
+            {
+                handles = new List<ImportedPassHandle>(32);
+                s_PassImportedHandles[pass] = handles;
+            }
+
+            if (!handles.Contains(importedHandle))
+                handles.Add(importedHandle);
+        }
 
         /// <summary>
         /// Imports an external RTHandle into a RenderGraphTexture for use in passes.
@@ -437,6 +479,24 @@ namespace VividRP.Runtime
 
             return hasHistoryTextures && hasValidData;
         }
+        internal static void RegisterHistoryTextureWriteForPass(
+            IRenderPass pass,
+            string key,
+            RenderGraphTexture currentTexture)
+        {
+            if (currentTexture == null)
+                return;
+
+            var historyKey = BuildPassHistoryKey(pass, key);
+            if (string.IsNullOrEmpty(historyKey))
+                return;
+
+            s_CodeManagedTextureHistoryRequests[historyKey] = new CodeManagedTextureHistoryRequest
+            {
+                CurrentTexture = currentTexture
+            };
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
@@ -665,6 +725,7 @@ namespace VividRP.Runtime
 
             s_HistoryImportedTextures.Clear();
             s_TextureHistoryFrameBindings.Clear();
+            s_CodeManagedTextureHistoryRequests.Clear();
         }
 
         private static void ClearCodeManagedHistoryFrameState()
@@ -1235,13 +1296,23 @@ namespace VividRP.Runtime
             foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
                 var currentTexture = binding.CurrentTexture;
-                if (currentTexture == null || !ShouldPersistHistoryTexture(currentTexture))
+                if (currentTexture == null
+                    || (!ShouldPersistHistoryTexture(currentTexture)
+                        && !ShouldPersistCodeManagedHistoryTexture(binding.Key, currentTexture)))
                 {
                     continue;
                 }
 
                 RenderGraphHistoryRegistry.CommitHistory(camera, graphAsset, binding.Key);
             }
+        }
+
+        private static bool ShouldPersistCodeManagedHistoryTexture(string historyKey, RenderGraphTexture currentTexture)
+        {
+            return !string.IsNullOrEmpty(historyKey)
+                && currentTexture != null
+                && s_CodeManagedTextureHistoryRequests.TryGetValue(historyKey, out var request)
+                && ReferenceEquals(request?.CurrentTexture, currentTexture);
         }
 
         private static bool ShouldPersistHistoryBuffer(RenderGraphBuffer buffer)
@@ -1439,11 +1510,15 @@ namespace VividRP.Runtime
             for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
             {
                 var pass = s_RenderPasses[passIndex];
+                PrepareRenderGraphPass(pass);
+
 #if UNITY_EDITOR
                 if (!recordedPreImageEffectGizmos && pass is IRenderGizmoPrePostProcessBoundaryPass)
                 {
                     var boundaryResources = GetCurrentPassResources(pass);
-                    if (TryGetPreImageEffectGizmoTargets(
+                    var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+                    if (VividRenderPipeline.ShouldRenderPreImageEffectGizmosInRenderGraph(camera)
+                        && TryGetPreImageEffectGizmoTargets(
                             passIndex,
                             boundaryResources,
                             out var gizmoColorTexture,

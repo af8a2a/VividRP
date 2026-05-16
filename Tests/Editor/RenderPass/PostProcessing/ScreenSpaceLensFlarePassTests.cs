@@ -87,17 +87,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresScreenSpaceLensFlareShader()
-        {
-            var shaderField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.LensFlareScreenSpaceShader));
-
-            Assert.That(shaderField, Is.Not.Null);
-            Assert.That(
-                shaderField.GetCustomAttribute<VividResourcePathAttribute>()?.Path,
-                Is.EqualTo("Shaders/Core/Private/PostProcessing/LensFlare/LensFlareScreenSpace"));
-        }
-
-        [Test]
         public void ScreenSpaceLensFlareShader_UsesVividPipelineAndCoreLensFlareBody()
         {
             var shaderSource = File.ReadAllText(GetPackageFilePath(

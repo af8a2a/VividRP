@@ -252,6 +252,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void DepthOfFieldPass_UsesStandardUnsafePassRecording()
+        {
+            Assert.That(typeof(IRenderGraphRecordingPass).IsAssignableFrom(typeof(DepthOfFieldPass)), Is.False);
+        }
+
+        [Test]
         public void Prepare_UsesEffectiveAntialiasingData_ForTemporalHistory()
         {
             var gameObject = new GameObject("DepthOfFieldPassTests_AAResolver");
@@ -291,24 +297,6 @@ namespace VividRP.Editor.Tests
             {
                 GameObject.DestroyImmediate(gameObject);
             }
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresDepthOfFieldShader_AndCompute()
-        {
-            var shaderField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DepthOfFieldShader));
-            var computeField = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.DepthOfFieldCompute));
-
-            Assert.That(shaderField, Is.Not.Null);
-            Assert.That(computeField, Is.Not.Null);
-
-            var shaderResourcePath = shaderField.GetCustomAttribute<VividResourcePathAttribute>();
-            var computeResourcePath = computeField.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(shaderResourcePath, Is.Not.Null);
-            Assert.That(shaderResourcePath.Path, Is.EqualTo("Shaders/Core/Private/DepthOfField"));
-            Assert.That(computeResourcePath, Is.Not.Null);
-            Assert.That(computeResourcePath.Path, Is.EqualTo("Shaders/Core/Private/DepthOfField.compute"));
         }
 
         [Test]

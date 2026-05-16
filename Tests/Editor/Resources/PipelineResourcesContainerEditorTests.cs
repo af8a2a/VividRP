@@ -2,6 +2,7 @@ using System.Linq;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.UIElements;
 using VividRP.Runtime;
 
@@ -47,6 +48,11 @@ namespace VividRP.Editor.Tests
                     container.Entries.Any(entry =>
                         entry.ResourceName == "Shaders/Core/Private/CoreBlit"
                         && entry.ResourceObject != null),
+                    Is.True);
+                Assert.That(
+                    container.Entries.Any(entry =>
+                        entry.ResourceName == "Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace"
+                        && entry.ResourceObject is RayTracingShader),
                     Is.True);
             }
             finally

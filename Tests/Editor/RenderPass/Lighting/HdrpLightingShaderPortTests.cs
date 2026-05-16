@@ -1,5 +1,4 @@
 using System.IO;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using NUnit.Framework;
 using UnityEngine;
@@ -290,16 +289,6 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresHdrpClusteredLightBuildShaders()
-        {
-            AssertResourcePath(nameof(VividRPCoreResources.BuildScreenAABBCompute), "Shaders/Core/Private/Lighting/scrbound");
-            AssertResourcePath(nameof(VividRPCoreResources.BuildPerBigTileLightListCompute), "Shaders/Core/Private/Lighting/lightlistbuild-bigtile");
-            AssertResourcePath(nameof(VividRPCoreResources.BuildPerVoxelLightListCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clustered");
-            AssertResourcePath(nameof(VividRPCoreResources.ClearLightListsCompute), "Shaders/Core/Private/Lighting/ClearLightLists");
-            AssertResourcePath(nameof(VividRPCoreResources.ClearClusterAtomicIndexCompute), "Shaders/Core/Private/Lighting/lightlistbuild-clearatomic");
-        }
-
-        [Test]
         public void BigTileLightListGen_UsesWaveCompactionInsteadOfBitonicSort()
         {
             var source = File.ReadAllText(GetLightingPath("lightlistbuild-bigtile.compute"));
@@ -330,18 +319,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition/Runtime/Lighting/LightLoop/"));
             Assert.That(source, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition-config/Runtime/ShaderConfig.cs.hlsl"));
             Assert.That(source, Does.Not.Contain("Packages/com.unity.render-pipelines.high-definition/Runtime/ShaderLibrary/ShaderVariablesGlobal.hlsl"));
-        }
-
-        private static void AssertResourcePath(string fieldName, string expectedPath)
-        {
-            var field = typeof(VividRPCoreResources).GetField(fieldName, BindingFlags.Instance | BindingFlags.Public);
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));
         }
 
         private static string GetLightingPath(string fileName)

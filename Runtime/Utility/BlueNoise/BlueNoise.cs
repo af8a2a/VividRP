@@ -26,7 +26,7 @@ namespace VividRP.Runtime
         TextureHandle m_ScramblingTileHandle;
         TextureHandle m_RankingTileHandle;
         TextureHandle m_OwenScrambledSequenceHandle;
-
+        BufferHandle m_SobolMatricesBufferHandle;
         BlueNoise() { }
 
         public static void Initialize()
@@ -60,12 +60,37 @@ namespace VividRP.Runtime
 
         public void ImportResources(RenderGraph renderGraph)
         {
+            m_ScramblingTileHandle = default;
+            m_RankingTileHandle = default;
+            m_OwenScrambledSequenceHandle = default;
+            m_SobolMatricesBufferHandle = default;
+
             if (m_ScramblingTile != null)
                 m_ScramblingTileHandle = renderGraph.ImportTexture(m_ScramblingTile);
             if (m_RankingTile != null)
                 m_RankingTileHandle = renderGraph.ImportTexture(m_RankingTile);
             if (m_OwenScrambledSequence != null)
                 m_OwenScrambledSequenceHandle = renderGraph.ImportTexture(m_OwenScrambledSequence);
+
+            if (m_SobolMatricesBuffer != null)
+            {
+                m_SobolMatricesBufferHandle = renderGraph.ImportBuffer(m_SobolMatricesBuffer);
+            }
+        }
+
+        public void RegisterPassResources(IRenderPass pass)
+        {
+            if (pass == null)
+                return;
+
+            if (m_ScramblingTileHandle.IsValid())
+                PassRecorder.RegisterImportedTextureForPass(pass, m_ScramblingTileHandle);
+            if (m_RankingTileHandle.IsValid())
+                PassRecorder.RegisterImportedTextureForPass(pass, m_RankingTileHandle);
+            if (m_OwenScrambledSequenceHandle.IsValid())
+                PassRecorder.RegisterImportedTextureForPass(pass, m_OwenScrambledSequenceHandle);
+            if (m_SobolMatricesBufferHandle.IsValid())
+                PassRecorder.RegisterImportedBufferForPass(pass, m_SobolMatricesBufferHandle);
         }
 
         public void Bind(CommandBuffer cmd)
@@ -88,9 +113,35 @@ namespace VividRP.Runtime
                 cmd.SetGlobalTexture(s_RankingTileId, m_RankingTileHandle);
             if (m_OwenScrambledSequenceHandle.IsValid())
                 cmd.SetGlobalTexture(s_OwenScrambledSequenceId, m_OwenScrambledSequenceHandle);
-            if (m_SobolMatricesBuffer != null)
-                cmd.SetGlobalBuffer(s_SobolMatricesBufferId, m_SobolMatricesBuffer);
+            if (m_SobolMatricesBufferHandle.IsValid())
+                cmd.SetGlobalBuffer(s_SobolMatricesBufferId, m_SobolMatricesBufferHandle);
         }
+
+
+        public void Bind(ComputeCommandBuffer cmd, ComputeShader cs, int kernel)
+        {
+            if (m_ScramblingTileHandle.IsValid())
+                cmd.SetComputeTextureParam(cs, kernel, s_ScramblingTileId, m_ScramblingTileHandle);
+            if (m_RankingTileHandle.IsValid())
+                cmd.SetComputeTextureParam(cs, kernel, s_RankingTileId, m_RankingTileHandle);
+            if (m_OwenScrambledSequenceHandle.IsValid())
+                cmd.SetComputeTextureParam(cs, kernel, s_OwenScrambledSequenceId, m_OwenScrambledSequenceHandle);
+            if (m_SobolMatricesBufferHandle.IsValid())
+                cmd.SetComputeBufferParam(cs, kernel, s_SobolMatricesBufferId, m_SobolMatricesBufferHandle);
+        }
+
+        public void Bind(ComputeCommandBuffer cmd, RayTracingShader shader)
+        {
+            if (m_ScramblingTileHandle.IsValid())
+                cmd.SetRayTracingTextureParam(shader, s_ScramblingTileId, m_ScramblingTileHandle);
+            if (m_RankingTileHandle.IsValid())
+                cmd.SetRayTracingTextureParam(shader, s_RankingTileId, m_RankingTileHandle);
+            if (m_OwenScrambledSequenceHandle.IsValid())
+                cmd.SetRayTracingTextureParam(shader, s_OwenScrambledSequenceId, m_OwenScrambledSequenceHandle);
+            if (m_SobolMatricesBufferHandle.IsValid())
+                cmd.SetRayTracingBufferParam(shader, s_SobolMatricesBufferId, m_SobolMatricesBufferHandle);
+        }
+
 
         public void Dispose()
         {

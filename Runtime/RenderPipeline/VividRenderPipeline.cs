@@ -203,7 +203,8 @@ namespace VividRP.Runtime
 
         internal static bool ShouldEmitWorldGeometry(CameraType cameraType)
         {
-            return cameraType == CameraType.SceneView;
+            // SceneView editor world geometry participates in culling and would pollute SSR inputs.
+            return false;
         }
 
         internal static bool CanRenderGizmos(CameraType cameraType)
@@ -214,6 +215,16 @@ namespace VividRP.Runtime
         internal static bool CanRenderGizmos(Camera camera)
         {
             return camera != null && CanRenderGizmos(camera.cameraType);
+        }
+
+        internal static bool ShouldRenderPreImageEffectGizmosInRenderGraph(CameraType cameraType)
+        {
+            return cameraType == CameraType.Game;
+        }
+
+        internal static bool ShouldRenderPreImageEffectGizmosInRenderGraph(Camera camera)
+        {
+            return camera != null && ShouldRenderPreImageEffectGizmosInRenderGraph(camera.cameraType);
         }
 
         private static void EmitGeometryForCamera(Camera camera)

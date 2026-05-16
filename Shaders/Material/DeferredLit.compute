@@ -20,12 +20,14 @@ Texture2D<float4> _GBuffer4;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _GTAOTexture;
+Texture2D<float4> _ScreenSpaceReflectionTexture;
 StructuredBuffer<uint> _MaterialPixelIndices;
 
 RWTexture2D<float4> _LightingTexture;
 
 uint _LightingWidth;
 uint _LightingHeight;
+uint _ScreenSpaceReflectionEnabled;
 
 bool IsSkyPixel(float deviceDepth)
 {
@@ -60,6 +62,15 @@ float SampleGTAO(uint2 pixelCoord)
     return _GTAOTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
 }
 
+float4 LoadScreenSpaceReflection(uint2 pixelCoord)
+{
+    if (_ScreenSpaceReflectionEnabled == 0)
+        return float4(0.0, 0.0, 0.0, 0.0);
+
+    float4 reflection = _ScreenSpaceReflectionTexture.Load(int3(pixelCoord, 0));
+    return float4(VividApplyPreExposure(max(reflection.rgb, 0.0)), saturate(reflection.a));
+}
+
 float EvaluateDeferredDirectionalShadowAttenuation(
     uint2 pixelCoord,
     uint lightIndex,
@@ -75,11 +86,14 @@ float EvaluateDeferredDirectionalShadowAttenuation(
 VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividGBufferSurfaceData surfaceData,
     uint2 pixelCoord,
-    float3 positionWS)
+    float3 positionWS,
+    out float3 indirectSpecularLighting,
+    out float3 screenSpaceReflectionFGD)
 {
     float3 viewDirectionWS = SafeNormalize(GetWorldSpaceViewDir(positionWS));
     VividLitBSDFData bsdfData = BuildVividHDRPLitBSDFData(surfaceData);
     VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
+    screenSpaceReflectionFGD = preLightData.specularFGD;
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
 
     AccumulateIndirectLighting(
@@ -142,12 +156,27 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
 
     VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
     PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
+    indirectSpecularLighting = FinalizeVividSpecularLighting(
+        surfaceData,
+        bsdfData,
+        preLightData,
+        aggregateLighting.indirect.specularReflected);
     return lightLoopOutput;
 }
 
-float3 EvaluateDeferredLitLighting(VividGBufferSurfaceData surfaceData, uint2 pixelCoord, float3 positionWS)
+float3 EvaluateDeferredLitLighting(
+    VividGBufferSurfaceData surfaceData,
+    uint2 pixelCoord,
+    float3 positionWS,
+    out float3 indirectSpecularLighting,
+    out float3 screenSpaceReflectionFGD)
 {
-    VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLightLoop(surfaceData, pixelCoord, positionWS);
+    VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLightLoop(
+        surfaceData,
+        pixelCoord,
+        positionWS,
+        indirectSpecularLighting,
+        screenSpaceReflectionFGD);
     return CombineVividLightLoopOutput(lightLoopOutput);
 }
 
@@ -185,7 +214,20 @@ void DeferredLit(
 
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
-    float3 lighting = VividApplyPreExposure(EvaluateDeferredLitLighting(surfaceData, pixelCoord, positionWS));
+    float3 indirectSpecularLighting;
+    float3 screenSpaceReflectionFGD;
+    float3 lightingNoPreExposure = EvaluateDeferredLitLighting(
+        surfaceData,
+        pixelCoord,
+        positionWS,
+        indirectSpecularLighting,
+        screenSpaceReflectionFGD);
+    float3 lighting = VividApplyPreExposure(lightingNoPreExposure);
+    float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);
+    float reflectionWeight = screenSpaceReflection.a;
+    float3 preExposedIndirectSpecular = VividApplyPreExposure(max(indirectSpecularLighting, 0.0));
+    lighting = max(lighting - preExposedIndirectSpecular * reflectionWeight, 0.0)
+        + screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

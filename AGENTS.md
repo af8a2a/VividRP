@@ -53,6 +53,8 @@
 - Pass ordering is compiler-driven. When changing binding semantics or connection rules, verify `RenderGraphPassCompilationUtility` still derives the right dependencies and cycle fallback behavior.
 - If a pass changes its exposed resource layout dynamically, keep `IDynamicPassResourceLayout` behavior and the related editor/runtime tests in sync.
 - If a pass supports async compute or global state modification, express that through the existing marker interfaces instead of ad hoc flags.
+- Reserve `IRenderGraphRecordingPass` for the antialiasing pass only. New runtime passes should use the standard `ComputePass`, `UnsafePass`, or `RasterPass` recorder path instead of bypassing the recorder for post-processing, history, resource, or culling behavior.
+- For passes whose work must run even without same-frame resource consumers, implement `IRenderGraphSideEffectPass` so `RenderGraphPassCullingUtility` treats the pass as live. Use it for history updates, readbacks, imported-resource updates, or persistent side effects, and pair behavior changes with focused culling utility tests.
 - When adding a runtime pass type, verify the generated node registry, navigation helpers, compilation utility, and pass-node tests still reflect the new pass correctly.
 
 ## Resource Workflow
@@ -66,6 +68,9 @@
 - Add focused EditMode tests with each fix or feature, especially around pass-port generation, descriptor drawers, preview metadata, registry generation, reflection-based pass/resource behavior, render-list/history resources, and custom editor utilities.
 - If a change introduces runtime-only behavior that cannot be validated meaningfully in current EditMode tests, add the appropriate `Tests/Runtime/` or PlayMode coverage in the same change.
 - Prefer self-contained tests that use dummy pass types or temporary ScriptableObjects over manual project setup.
+- Do not add or keep tests that only inspect implementation text, such as `File.ReadAllText(...)` with `Assert.That(source, Does.Contain(...))`, when the behavior can be validated through runtime/editor APIs.
+- Do not add or keep tests that only validate `[ResourcePath]` declarations or expected path strings, including `VividRPCoreResources_Declares*` reflection tests. Prefer resource recollection, pass initialization, or runtime binding coverage when the resource path matters.
+- For GPU-driven culling/debug counters, keep CPU mirror validation and GPU shader counting semantics in sync. If CPU/GPU counts diverge, fix the shared decision rules or counter increments rather than suppressing the mismatch.
 
 ## Commit & Pull Request Guidelines
 - Recent history is mixed, so prefer short imperative commit titles. Use scoped Conventional Commit prefixes such as `feat:`, `fix:`, `test:`, or `refactor:` when practical.

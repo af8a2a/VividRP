@@ -18,31 +18,52 @@ namespace VividRP.Runtime
         private static readonly FieldInfo s_AccelerationStructureResourceHandleField =
             typeof(RayTracingAccelerationStructureHandle).GetField("handle", BuilderMethodFlags);
 
-        private readonly struct ImportedPassTexture : IEquatable<ImportedPassTexture>
+        private readonly struct ImportedPassHandle : IEquatable<ImportedPassHandle>
         {
-            public ImportedPassTexture(TextureHandle handle, AccessFlags access)
+            private ImportedPassHandle(TextureHandle textureHandle, BufferHandle bufferHandle, bool isBuffer, AccessFlags access)
             {
-                Handle = handle;
+                TextureHandle = textureHandle;
+                BufferHandle = bufferHandle;
+                IsBuffer = isBuffer;
                 Access = access;
             }
 
-            public TextureHandle Handle { get; }
+            public static ImportedPassHandle Texture(TextureHandle handle, AccessFlags access)
+            {
+                return new ImportedPassHandle(handle, default, false, access);
+            }
+
+            public static ImportedPassHandle Buffer(BufferHandle handle, AccessFlags access)
+            {
+                return new ImportedPassHandle(default, handle, true, access);
+            }
+
+            public TextureHandle TextureHandle { get; }
+
+            public BufferHandle BufferHandle { get; }
+
+            public bool IsBuffer { get; }
 
             public AccessFlags Access { get; }
 
-            public bool Equals(ImportedPassTexture other)
+            public bool IsValid => IsBuffer ? BufferHandle.IsValid() : TextureHandle.IsValid();
+
+            public bool Equals(ImportedPassHandle other)
             {
-                return Handle.Equals(other.Handle) && Access == other.Access;
+                return TextureHandle.Equals(other.TextureHandle)
+                    && BufferHandle.Equals(other.BufferHandle)
+                    && IsBuffer == other.IsBuffer
+                    && Access == other.Access;
             }
 
             public override bool Equals(object obj)
             {
-                return obj is ImportedPassTexture other && Equals(other);
+                return obj is ImportedPassHandle other && Equals(other);
             }
 
             public override int GetHashCode()
             {
-                return HashCode.Combine(Handle, Access);
+                return HashCode.Combine(TextureHandle, BufferHandle, IsBuffer, Access);
             }
         }
 
@@ -103,7 +124,7 @@ namespace VividRP.Runtime
                 bufferCache,
                 renderListCache,
                 accelerationStructureCache);
-            SetupImportedTextures(builder, pass);
+            SetupImportedHandles(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
             if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
@@ -142,7 +163,7 @@ namespace VividRP.Runtime
                 bufferCache,
                 renderListCache,
                 accelerationStructureCache);
-            SetupImportedTextures(builder, pass);
+            SetupImportedHandles(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
             builder.SetRenderFunc<RasterPassData>(s_RasterRenderFunc);
@@ -180,7 +201,7 @@ namespace VividRP.Runtime
                 bufferCache,
                 renderListCache,
                 accelerationStructureCache);
-            SetupImportedTextures(builder, pass);
+            SetupImportedHandles(builder, pass);
             ConfigureGlobalStateModification(builder, pass);
 
             if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
@@ -192,29 +213,20 @@ namespace VividRP.Runtime
         private static void ExecuteComputePass(ComputePassData data, ComputeGraphContext ctx)
         {
             using var recordScope = data.Markers.Record.Auto();
-            using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
-            {
-                data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
-            }
+            data.Pass.Record(new ComputePassContext(ctx, s_FrameData));
         }
 
         private static void ExecuteRasterPass(RasterPassData data, RasterGraphContext ctx)
         {
             using var recordScope = data.Markers.Record.Auto();
-            using (new ProfilingScope(ctx.cmd, data.Markers.CommandSampler))
-            {
-                data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
-            }
+            data.Pass.Record(new RasterPassContext(ctx, s_FrameData));
         }
 
         private static void ExecuteUnsafePass(UnsafePassData data, UnsafeGraphContext ctx)
         {
             var passContext = new UnsafePassContext(ctx, s_FrameData);
             using var recordScope = data.Markers.Record.Auto();
-            using (new ProfilingScope(passContext.GetNativeCommandBuffer(), data.Markers.CommandSampler))
-            {
-                data.Pass.Record(passContext);
-            }
+            data.Pass.Record(passContext);
         }
 
         internal static bool ShouldEnableAsyncCompute(
@@ -230,22 +242,28 @@ namespace VividRP.Runtime
                 && RenderGraphPassExecutionUtility.SupportsAsyncCompute(pass.GetType());
         }
 
-        private static void SetupImportedTextures(IBaseRenderGraphBuilder builder, IRenderPass pass)
+        private static void SetupImportedHandles(IBaseRenderGraphBuilder builder, IRenderPass pass)
         {
+            if (pass is IBlueNoiseConsumerPass)
+                BlueNoise.Instance?.RegisterPassResources(pass);
+
             if (builder == null
                 || pass == null
-                || !s_PassImportedHandles.TryGetValue(pass, out var importedTextures)
-                || importedTextures == null)
+                || !s_PassImportedHandles.TryGetValue(pass, out var importedHandles)
+                || importedHandles == null)
             {
                 return;
             }
 
-            foreach (var importedTexture in importedTextures)
+            foreach (var importedHandle in importedHandles)
             {
-                if (!importedTexture.Handle.IsValid())
+                if (!importedHandle.IsValid)
                     continue;
 
-                builder.UseTexture(importedTexture.Handle, importedTexture.Access);
+                if (importedHandle.IsBuffer)
+                    builder.UseBuffer(importedHandle.BufferHandle, importedHandle.Access);
+                else
+                    builder.UseTexture(importedHandle.TextureHandle, importedHandle.Access);
             }
         }
 
@@ -286,7 +304,7 @@ namespace VividRP.Runtime
             return handle;
         }
 
-        private static BufferHandle GetOrCreateBufferHandle(
+        internal static BufferHandle GetOrCreateBufferHandle(
             RenderGraph renderGraph,
             RenderGraphBuffer buffer,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)

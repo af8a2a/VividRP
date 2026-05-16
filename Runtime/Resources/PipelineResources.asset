@@ -31,6 +31,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 46a3b53f4378e9044ac12b6bedeb99d5, type: 3}
   - ResourceName: Shaders/Core/Private/CameraMotionVectors
     ResourceObject: {fileID: 4800000, guid: 6a169e932f9bd824ca065335bba5eb55, type: 3}
+  - ResourceName: Shaders/Core/Private/ColorPyramid/ColorPyramid.compute
+    ResourceObject: {fileID: 7200000, guid: 2b7318d768776274895b71628ee6fcef, type: 3}
   - ResourceName: Shaders/Core/Private/CopyDepth
     ResourceObject: {fileID: 4800000, guid: d1e81e551800135429c7550ad3907c25, type: 3}
   - ResourceName: Shaders/Core/Private/CoreBlit
@@ -55,6 +57,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 0de418d39a918204d9329539518a3a1a, type: 3}
   - ResourceName: Shaders/Core/Private/DirectionalRayTracedShadow
     ResourceObject: {fileID: 7200000, guid: e18c323ebbcd75c45b1c45b7c0bb07b4, type: 3}
+  - ResourceName: Shaders/Core/Private/DownSample/HDRPHZB.compute
+    ResourceObject: {fileID: 7200000, guid: 62a056cf577d44a47af95a11741354fe, type: 3}
   - ResourceName: Shaders/Core/Private/DownSample/HZBGenerate
     ResourceObject: {fileID: 7200000, guid: 38a58f73a6734f28bea3e9ab4047a2ba, type: 3}
   - ResourceName: Shaders/Core/Private/FSR3/FSR3Accumulate.compute
@@ -129,6 +133,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: f9ea26c818e16a04fa0b6f8d7ae1a662, type: 3}
   - ResourceName: Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse
     ResourceObject: {fileID: 4800000, guid: 18a8ea50c3082fb4bba4e2e27578983f, type: 3}
+  - ResourceName: Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflection.compute
+    ResourceObject: {fileID: 7200000, guid: 6133c13e2211d524da9cbefa3ebf9198, type: 3}
+  - ResourceName: Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace
+    ResourceObject: {fileID: 4807578003741378534, guid: 434ac92cfb51a8146be7c318b46e1605, type: 3}
   - ResourceName: Shaders/Core/Private/ShadowClassify
     ResourceObject: {fileID: 7200000, guid: 3a6fdd688e96b924dbaf2f1c27e7b53d, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/AmbientProbeConvolution.compute

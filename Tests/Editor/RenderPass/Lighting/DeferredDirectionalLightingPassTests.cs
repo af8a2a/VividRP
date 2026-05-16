@@ -35,6 +35,7 @@ namespace VividRP.Editor.Tests
                 "GTAOTexture",
                 "PreIntegratedFGD_CharlieAndFabric",
                 "PreIntegratedFGD_GGXDisneyDiffuse",
+                "ScreenSpaceReflectionOutput",
                 "SkyIBLCubemap"
             }));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").Access, Is.EqualTo(AccessFlags.Write));
@@ -85,6 +86,7 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GBuffer4", 511, 257);
             AssertTextureSize(pass, "m_DepthTexture", 511, 257);
             AssertTextureSize(pass, "m_GTAOTexture", 511, 257);
+            AssertTextureSize(pass, "m_ScreenSpaceReflectionTexture", 511, 257);
             AssertTextureSize(pass, "m_ColorTexture", 511, 257);
             AssertTextureSize(pass, "m_PreIntegratedFGDGGXDisneyDiffuseTexture", 64, 64);
             AssertTextureSize(pass, "m_PreIntegratedFGDCharlieAndFabricTexture", 64, 64);
@@ -147,6 +149,74 @@ namespace VividRP.Editor.Tests
             Assert.That(gtaoTexture, Is.SameAs(localGtaoTexture));
             Assert.That(gtaoTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8_UNorm));
             Assert.That(gtaoTexture.desc.ClearColor, Is.EqualTo(Color.white));
+        }
+
+        [Test]
+        public void Prepare_KeepsLocalScreenSpaceReflectionFallback_WhenGraphDoesNotBindOne()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+
+            pass.Prepare(frameData);
+
+            var localSsrTexture = GetFieldValue<RenderGraphTexture>(pass, "m_LocalScreenSpaceReflectionTexture");
+            var ssrTexture = GetFieldValue<RenderGraphTexture>(pass, "m_ScreenSpaceReflectionTexture");
+
+            Assert.That(ssrTexture, Is.SameAs(localSsrTexture));
+            Assert.That(ssrTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(ssrTexture.desc.ClearColor, Is.EqualTo(Color.clear));
+        }
+
+        [Test]
+        public void Prepare_UsesScreenSpaceReflectionFrameContext_WhenAvailable()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+            var ssrTexture = RenderGraphTexture.CreateColorTarget(
+                "ScreenSpaceReflectionOutput",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            var ssrData = frameData.GetOrCreate<VividScreenSpaceReflectionData>();
+            ssrData.hasValidTexture = true;
+            ssrData.reflectionTexture = ssrTexture;
+
+            pass.Prepare(frameData);
+
+            Assert.That(GetFieldValue<RenderGraphTexture>(pass, "m_ScreenSpaceReflectionTexture"), Is.SameAs(ssrTexture));
+            Assert.That(ssrTexture.desc.Width, Is.EqualTo(256));
+            Assert.That(ssrTexture.desc.Height, Is.EqualTo(144));
+            Assert.That(((IStablePassResourceLayout)pass).IsPassResourceLayoutDirty, Is.True);
+        }
+
+        [Test]
+        public void Prepare_PreservesExplicitScreenSpaceReflectionOverride_WhenGraphBindsOne()
+        {
+            var pass = new DeferredLightingPass();
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.actualWidth = 256;
+            cameraData.actualHeight = 144;
+            var explicitSsrTexture = RenderGraphTexture.CreateColorTarget(
+                "ExplicitScreenSpaceReflection",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            var frameContextSsrTexture = RenderGraphTexture.CreateColorTarget(
+                "ScreenSpaceReflectionOutput",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            SetFieldValue(pass, "m_ScreenSpaceReflectionTexture", explicitSsrTexture);
+            var ssrData = frameData.GetOrCreate<VividScreenSpaceReflectionData>();
+            ssrData.hasValidTexture = true;
+            ssrData.reflectionTexture = frameContextSsrTexture;
+
+            pass.Prepare(frameData);
+
+            Assert.That(GetFieldValue<RenderGraphTexture>(pass, "m_ScreenSpaceReflectionTexture"), Is.SameAs(explicitSsrTexture));
+            Assert.That(explicitSsrTexture.desc.Width, Is.EqualTo(256));
+            Assert.That(explicitSsrTexture.desc.Height, Is.EqualTo(144));
         }
 
         [Test]

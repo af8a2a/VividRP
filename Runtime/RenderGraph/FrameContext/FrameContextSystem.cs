@@ -137,6 +137,7 @@ namespace VividRP.Runtime
 
             cmd.SetGlobalVectorArray(CameraWorldClipPlanesId, sv.cameraWorldClipPlanes);
             cmd.SetGlobalVectorArray(FrustumPlanesId, sv.frustumPlanes);
+            BlueNoise.Instance?.Bind(cmd);
         }
     }
 }

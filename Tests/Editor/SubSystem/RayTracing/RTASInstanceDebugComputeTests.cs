@@ -1,8 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -25,19 +23,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("query.CommittedInstanceIndex()"));
             Assert.That(source, Does.Contain("query.CommittedPrimitiveIndex()"));
             Assert.That(source, Does.Contain("_OutputTexture[dispatchThreadID.xy] = float4(debugColor, 1.0);"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclaresRTASInstanceDebugCompute()
-        {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.RTASInstanceDebugCompute));
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Core/Private/RTASInstanceDebug"));
         }
 
         private static string GetComputeShaderSourcePath()

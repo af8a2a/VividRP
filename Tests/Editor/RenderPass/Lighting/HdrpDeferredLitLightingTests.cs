@@ -1,8 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -245,29 +243,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("UpdateFiniteLightUploadData(lightData);"));
             Assert.That(source, Does.Not.Contain("UploadAreaLightGridData();"));
             Assert.That(source, Does.Not.Contain("UpdateAreaLightScreenSpaceBounds(lightData, camera);"));
-        }
-
-        [Test]
-        public void VividRPCoreResources_DeclarePreIntegratedFGDShaders()
-        {
-            AssertResourcePath(
-                nameof(VividRPCoreResources.PreIntegratedFGDGGXDisneyDiffuseShader),
-                "Shaders/Core/Private/PreIntegratedFGD_GGXDisneyDiffuse");
-            AssertResourcePath(
-                nameof(VividRPCoreResources.PreIntegratedFGDCharlieFabricLambertShader),
-                "Shaders/Core/Private/PreIntegratedFGD_CharlieFabricLambert");
-        }
-
-        private static void AssertResourcePath(string fieldName, string expectedPath)
-        {
-            var field = typeof(VividRPCoreResources).GetField(fieldName, BindingFlags.Instance | BindingFlags.Public);
-
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo(expectedPath));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

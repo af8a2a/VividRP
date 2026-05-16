@@ -1,8 +1,6 @@
 using System.IO;
-using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
-using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -50,16 +48,15 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividRPCoreResources_DeclaresMaterialClassificationCompute()
+        public void TileClassificationHelpers_ExposeStructuredDispatchFinalize_ForRenderGraphIndirectArgs()
         {
-            var field = typeof(VividRPCoreResources).GetField(nameof(VividRPCoreResources.MaterialClassificationCompute));
+            var source = File.ReadAllText(GetTileClassificationSourcePath());
 
-            Assert.That(field, Is.Not.Null);
-
-            var resourcePath = field.GetCustomAttribute<VividResourcePathAttribute>();
-
-            Assert.That(resourcePath, Is.Not.Null);
-            Assert.That(resourcePath.Path, Is.EqualTo("Shaders/Material/MaterialClassification"));
+            Assert.That(source, Does.Contain("void FinalizeTileClassificationDispatch("));
+            Assert.That(source, Does.Contain("RWStructuredBuffer<uint> indirectArgs"));
+            Assert.That(source, Does.Contain("uint argsElementOffset"));
+            Assert.That(source, Does.Contain("InterlockedAdd(indirectArgs[argsElementOffset], 1, globalTileIndex);"));
+            Assert.That(source, Does.Contain("tileList[globalTileIndex] = PackTileCoord(tileCoord);"));
         }
 
         private static string GetComputeShaderSourcePath()
@@ -67,6 +64,14 @@ namespace VividRP.Editor.Tests
             var shaderPath = GetPackageFilePath("Shaders", "Material", "MaterialClassification.compute");
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected compute shader source at '{shaderPath}'.");
+            return shaderPath;
+        }
+
+        private static string GetTileClassificationSourcePath()
+        {
+            var shaderPath = GetPackageFilePath("Shaders", "Core", "Public", "TileClassification.hlsl");
+
+            Assert.That(File.Exists(shaderPath), Is.True, $"Expected tile classification source at '{shaderPath}'.");
             return shaderPath;
         }
 

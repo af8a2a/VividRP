@@ -80,10 +80,10 @@ namespace VividRP.Runtime
         public ComputeShader TSRSharpenCompute;
 
 #if DLSS_PLUGIN_INTEGRATE
-        [ResourcePath("Shaders/Core/Private/DLSS/DLSSBiasColorMask")]
+        [VividResourcePath("Shaders/Core/Private/DLSS/DLSSBiasColorMask")]
         public Shader DLSSBiasColorMaskShader;
 
-        [ResourcePath("Shaders/Core/Private/DLSS/DLSSRRResourcePrep.compute")]
+        [VividResourcePath("Shaders/Core/Private/DLSS/DLSSRRResourcePrep.compute")]
         public ComputeShader DLSSRRResourcePrepCompute;
 #endif
 
@@ -185,6 +185,15 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Material/DeferredLit")]
         public ComputeShader DeferredLitCompute;
 
+        [VividResourcePath("Shaders/Core/Private/ColorPyramid/ColorPyramid.compute")]
+        public ComputeShader ColorPyramidCompute;
+
+        [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflection.compute")]
+        public ComputeShader ScreenSpaceReflectionCompute;
+
+        [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace")]
+        public RayTracingShader ScreenSpaceReflectionHybridTraceRayTracing;
+
         [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 
@@ -221,6 +230,9 @@ namespace VividRP.Runtime
 
         [VividResourcePath("Shaders/Core/Private/DownSample/HZBGenerate")]
         public ComputeShader HZBGenerateCompute;
+
+        [VividResourcePath("Shaders/Core/Private/DownSample/HDRPHZB.compute")]
+        public ComputeShader HDRPHZBCompute;
 
         [VividResourcePath("Shaders/Core/Private/TemporalAA")]
         public ComputeShader TemporalAACompute;

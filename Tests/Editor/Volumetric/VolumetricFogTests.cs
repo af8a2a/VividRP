@@ -1417,29 +1417,6 @@ namespace VividRP.Editor.Tests
             Assert.That(editorSource, Does.Contain("EditorGUILayout.Foldout"));
         }
 
-        [Test]
-        public void VividRPCoreResources_DefinesVolumetricResourcePaths()
-        {
-            Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricDensityCompute)), Is.EqualTo(
-                "Shaders/Core/Private/Volumetric/VolumetricDensity.compute"));
-            Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricMaxZCompute)), Is.EqualTo(
-                "Shaders/Core/Private/Volumetric/VolumetricMaxZ.compute"));
-            Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricMaterialCompute)), Is.EqualTo(
-                "Shaders/Core/Private/Volumetric/VolumetricMaterial.compute"));
-            Assert.That(GetResourcePath(nameof(VividRPCoreResources.LocalVolumetricFogVoxelizeShader)), Is.EqualTo(
-                "Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize"));
-            Assert.That(GetResourcePath(nameof(VividRPCoreResources.VolumetricLightingCompute)), Is.EqualTo(
-                "Shaders/Core/Private/Volumetric/VolumetricLighting.compute"));
-        }
-
-        private static string GetResourcePath(string fieldName)
-        {
-            return typeof(VividRPCoreResources)
-                .GetField(fieldName, BindingFlags.Public | BindingFlags.Instance)
-                ?.GetCustomAttribute<VividResourcePathAttribute>()
-                ?.Path;
-        }
-
         private static string GetPackageFilePath(params string[] path)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));

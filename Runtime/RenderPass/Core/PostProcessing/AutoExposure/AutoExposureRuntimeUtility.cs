@@ -193,6 +193,12 @@ namespace VividRP.Runtime
             Initialize();
         }
 
+        protected override void OnInitialize()
+        {
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
+        }
+
         protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemAutoExposureMarker.Auto())
@@ -213,7 +219,14 @@ namespace VividRP.Runtime
             // Keep the FrameContext callback wired in editor so the next preview render lazily
             // rebuilds exposure resources after Clear() releases the previous frame state.
             EnsurePreRenderSubscribed();
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
 #endif
+        }
+
+        private static void OnSubsystemDispose()
+        {
+            Deinitialize();
         }
 
         internal static void PrepareFrame(ContextContainer frameData)
@@ -344,6 +357,7 @@ namespace VividRP.Runtime
 
         protected override void OnDeinitialize()
         {
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
             s_HistorySystem.Dispose();
             s_DefaultExposureBuffer?.Dispose();
             s_DefaultExposureBuffer = null;

@@ -283,9 +283,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("SubsystemPreRender?.Invoke(frameData, cmd);"));
             Assert.That(source, Does.Not.Contain("AutoExposureRuntimeManager.PrepareFrame(frameData);"));
             Assert.That(source, Does.Not.Contain("BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
+            Assert.That(source, Does.Not.Contain("VividAutoExposureSystem.Deinitialize();"));
             Assert.That(autoExposureSystemSource, Does.Contain("internal sealed class VividAutoExposureSystem : VividSubsystem<VividAutoExposureSystem>"));
             Assert.That(autoExposureSystemSource, Does.Contain("PrepareFrame(frameData);"));
             Assert.That(autoExposureSystemSource, Does.Contain("BindFrameGlobals(cmd, frameData.Get<VividExposureData>());"));
+            Assert.That(autoExposureSystemSource, Does.Contain("FrameContextSystem.SubsystemDispose += OnSubsystemDispose;"));
             Assert.That(source, Does.Contain("skyData = frameData.GetOrCreate<VividSkyData>();"));
             Assert.That(source, Does.Contain("var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);"));
             Assert.That(source, Does.Contain("#if VIVIDRP_DEBUG"));

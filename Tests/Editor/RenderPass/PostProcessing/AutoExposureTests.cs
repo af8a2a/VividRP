@@ -687,9 +687,16 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void FrameContextClear_KeepsAutoExposurePreRenderCallbackRegistered_InEditor()
+        public void FrameContextClear_KeepsAutoExposureCallbacksRegistered_InEditor()
         {
             VividAutoExposureSystem.Initialize();
+
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemDispose",
+                    typeof(VividAutoExposureSystem),
+                    "OnSubsystemDispose"),
+                Is.True);
 
             FrameContextSystem.Clear();
 
@@ -698,6 +705,12 @@ namespace VividRP.Editor.Tests
                     "SubsystemPreRender",
                     typeof(VividSubsystem<VividAutoExposureSystem>),
                     "DispatchUpdate"),
+                Is.True);
+            Assert.That(
+                HasFrameContextSubscriber(
+                    "SubsystemDispose",
+                    typeof(VividAutoExposureSystem),
+                    "OnSubsystemDispose"),
                 Is.True);
         }
 

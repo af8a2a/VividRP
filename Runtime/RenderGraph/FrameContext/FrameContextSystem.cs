@@ -112,7 +112,6 @@ namespace VividRP.Runtime
         public static void Clear()
         {
             s_Instance.Dispose();
-            VividAutoExposureSystem.Deinitialize();
             SubsystemDispose?.Invoke();
 #if VIVIDRP_DEBUG
             CameraShaderVariablesGlobalComparisonLogger.Reset();

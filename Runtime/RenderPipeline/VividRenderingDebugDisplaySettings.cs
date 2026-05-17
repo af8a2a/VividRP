@@ -38,6 +38,9 @@ namespace VividRP.Runtime
     [Serializable]
     internal sealed class VividRenderingDebugSettingsData : IDebugDisplaySettingsData, ISerializedDebugDisplaySettings
     {
+        internal const ReGIRDebugVisualizationMode DefaultReGIRDebugMode = ReGIRDebugVisualizationMode.None;
+        internal const float DefaultReGIRDebugOpacity = 0.45f;
+
         [SerializeField]
         private TileClusterDebug m_TileClusterDebug = TileClusterDebug.None;
 
@@ -49,6 +52,12 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_ClusterDebugDistance = 1f;
+
+        [SerializeField]
+        private ReGIRDebugVisualizationMode m_ReGIRDebugMode = DefaultReGIRDebugMode;
+
+        [SerializeField]
+        private float m_ReGIRDebugOpacity = DefaultReGIRDebugOpacity;
 
         [SerializeField]
         private ExposureDebugMode m_ExposureMode = ExposureDebugMode.None;
@@ -127,6 +136,18 @@ namespace VividRP.Runtime
         {
             get => m_ClusterDebugDistance;
             set => m_ClusterDebugDistance = value;
+        }
+
+        internal ReGIRDebugVisualizationMode reGIRDebugMode
+        {
+            get => ReGIRDebugPass.NormalizeVisualizationMode(m_ReGIRDebugMode);
+            set => m_ReGIRDebugMode = ReGIRDebugPass.NormalizeVisualizationMode(value);
+        }
+
+        internal float reGIRDebugOpacity
+        {
+            get => m_ReGIRDebugOpacity;
+            set => m_ReGIRDebugOpacity = value;
         }
 
         internal ExposureDebugMode exposureMode
@@ -242,6 +263,8 @@ namespace VividRP.Runtime
             || tileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
             || m_ClusterDebugMode != ClusterDebugMode.VisualizeOpaque
             || !Mathf.Approximately(m_ClusterDebugDistance, 1f)
+            || reGIRDebugMode != DefaultReGIRDebugMode
+            || !Mathf.Approximately(m_ReGIRDebugOpacity, DefaultReGIRDebugOpacity)
             || m_ExposureMode != ExposureDebugMode.None
             || !Mathf.Approximately(m_DebugExposure, 0f)
             || m_CenterHistogramAroundMiddleGrey
@@ -272,6 +295,8 @@ namespace VividRP.Runtime
             m_TileClusterDebugByCategory = TileClusterCategoryDebug.Punctual;
             m_ClusterDebugMode = ClusterDebugMode.VisualizeOpaque;
             m_ClusterDebugDistance = 1f;
+            m_ReGIRDebugMode = DefaultReGIRDebugMode;
+            m_ReGIRDebugOpacity = DefaultReGIRDebugOpacity;
             m_ExposureMode = ExposureDebugMode.None;
             m_DebugExposure = 0f;
             m_CenterHistogramAroundMiddleGrey = false;
@@ -309,6 +334,7 @@ namespace VividRP.Runtime
         {
             public const string RootName = "VividRP Debug";
             public const string ClusterName = "Cluster";
+            public const string ReGIRName = "ReGIR";
             public const string ExposureName = "Exposure";
             public const string OverlayName = "Overlay";
             public const string VisibilityBufferName = "Visibility Buffer";
@@ -337,6 +363,18 @@ namespace VividRP.Runtime
             {
                 name = "Distance",
                 tooltip = "Distance used when visualizing cluster slices."
+            };
+
+            public static readonly NameAndTooltip ReGIRDebugMode = new()
+            {
+                name = "Mode",
+                tooltip = "Select the ReGIR debug visualization mode."
+            };
+
+            public static readonly NameAndTooltip ReGIRDebugOpacity = new()
+            {
+                name = "Opacity",
+                tooltip = "Opacity of the ReGIR debug overlay."
             };
 
             public static readonly NameAndTooltip ExposureMode = new()
@@ -467,6 +505,7 @@ namespace VividRP.Runtime
                 };
 
                 root.children.Add(CreateClusterFoldout(data));
+                root.children.Add(CreateReGIRFoldout(data));
                 root.children.Add(CreateExposureFoldout(data));
                 root.children.Add(CreateOverlayFoldout(data));
                 root.children.Add(CreateVisibilityBufferFoldout(data));
@@ -504,6 +543,29 @@ namespace VividRP.Runtime
                     getter = () => data.clusterDebugDistance,
                     setter = value => data.clusterDebugDistance = value,
                     min = () => 0f,
+                });
+                return foldout;
+            }
+
+            private static DebugUI.Foldout CreateReGIRFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.ReGIRName,
+                    opened = true,
+                };
+
+                foldout.children.Add(CreateEnumField(
+                    Strings.ReGIRDebugMode,
+                    () => data.reGIRDebugMode,
+                    value => data.reGIRDebugMode = value));
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.ReGIRDebugOpacity,
+                    getter = () => data.reGIRDebugOpacity,
+                    setter = value => data.reGIRDebugOpacity = value,
+                    min = () => 0f,
+                    max = () => 1f,
                 });
                 return foldout;
             }

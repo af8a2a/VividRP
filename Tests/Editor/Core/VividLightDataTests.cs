@@ -12,6 +12,12 @@ namespace VividRP.Editor.Tests
         private static readonly MethodInfo s_CreateAreaLightDataMethod =
             typeof(VividLightData).GetMethod("CreateAreaLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
+        private static readonly MethodInfo s_CreateReGIRLightDataMethod =
+            typeof(VividLightData).GetMethod("CreateReGIRLightData", BindingFlags.Static | BindingFlags.NonPublic);
+
+        private static readonly MethodInfo s_UpdateVisibleLightDataMethod =
+            typeof(VividLightData).GetMethod("UpdateVisibleLightData", BindingFlags.Instance | BindingFlags.NonPublic);
+
         [Test]
         public void DecalClusterData_UsesUnsignedBindlessTextureIndicesAndScalarMaterialInputs()
         {
@@ -299,9 +305,11 @@ namespace VividRP.Editor.Tests
                 lightData.directionalLightCount = 2;
                 lightData.punctualLightCount = 3;
                 lightData.areaLightCount = 1;
+                lightData.reGIRLightCount = 1;
                 lightData.mainDirectionalLightIndex = 1;
                 lightData.mainDirectionalLightEntityId = EntityId.FromULong(84);
                 lightData.areaLights = new[] { default(VividLightData.AreaLightData) };
+                lightData.reGIRLights = new[] { default(VividReGIRLightData) };
                 lightData.punctualLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
                 lightData.punctualLightVolumeData = new[] { default(VividLightData.LightVolumeData) };
                 lightData.areaLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
@@ -316,9 +324,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.directionalLightCount, Is.Zero);
                 Assert.That(lightData.punctualLightCount, Is.Zero);
                 Assert.That(lightData.areaLightCount, Is.Zero);
+                Assert.That(lightData.reGIRLightCount, Is.Zero);
                 Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(-1));
                 Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(lightData.areaLights, Is.Empty);
+                Assert.That(lightData.reGIRLights, Is.Empty);
                 Assert.That(lightData.punctualLightBounds, Is.Empty);
                 Assert.That(lightData.punctualLightVolumeData, Is.Empty);
                 Assert.That(lightData.areaLightBounds, Is.Empty);
@@ -328,6 +338,127 @@ namespace VividRP.Editor.Tests
             {
                 visibleLights.Dispose();
                 visibleReflectionProbes.Dispose();
+            }
+        }
+
+        [Test]
+        public void UpdateVisibleLightData_BuildsReGIRLights_WhenCompletedByReGIRPrepare()
+        {
+            var lightData = new VividLightData();
+            var visibleLights = new NativeArray<VisibleLight>(3, Allocator.TempJob);
+            var areaLightObject = new GameObject("ReGIR Rectangle Light");
+
+            try
+            {
+                VividLightRenderDatabase.instance.Clear();
+
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Point,
+                    new Color(2.0f, 1.0f, 0.5f),
+                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
+                    range: 6.0f);
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Spot,
+                    new Color(0.5f, 3.0f, 1.0f),
+                    Matrix4x4.TRS(new Vector3(4.0f, 5.0f, 6.0f), Quaternion.identity, Vector3.one),
+                    range: 8.0f,
+                    spotAngle: 45.0f,
+                    innerSpotAngle: 20.0f);
+                var areaLight = areaLightObject.AddComponent<Light>();
+                areaLight.type = LightType.Rectangle;
+                areaLight.range = 9.0f;
+                areaLight.color = Color.white;
+                areaLight.intensity = 2.0f;
+                areaLight.areaSize = new Vector2(4.0f, 2.0f);
+                areaLightObject.transform.position = new Vector3(7.0f, 8.0f, 9.0f);
+                visibleLights[2] = CreateVisibleLight(
+                    LightType.Rectangle,
+                    Color.white,
+                    Matrix4x4.TRS(areaLightObject.transform.position, areaLightObject.transform.rotation, Vector3.one),
+                    light: areaLight);
+
+                InvokeUpdateVisibleLightData(lightData, visibleLights);
+                lightData.CompleteReGIRPrepare();
+                lightData.CompleteLightGridPrepare();
+
+                Assert.That(lightData.reGIRLightCount, Is.EqualTo(3));
+                Assert.That(lightData.punctualLightCount, Is.EqualTo(2));
+                Assert.That(lightData.areaLightCount, Is.EqualTo(1));
+                Assert.That(lightData.reGIRLights[0].lightType, Is.EqualTo(VividReGIRLightData.TypePoint));
+                Assert.That(lightData.reGIRLights[1].lightType, Is.EqualTo(VividReGIRLightData.TypeSpot));
+                Assert.That(lightData.reGIRLights[2].lightType, Is.EqualTo(VividReGIRLightData.TypeRectangle));
+                Assert.That(lightData.reGIRLights[1].angleScale, Is.GreaterThan(0.0f));
+                Assert.That(lightData.reGIRLights[1].angleOffset, Is.LessThan(0.0f));
+                Assert.That(lightData.reGIRLights[2].areaSize.x, Is.EqualTo(4.0f).Within(0.0001f));
+                Assert.That(lightData.reGIRLights[2].areaSize.y, Is.EqualTo(2.0f).Within(0.0001f));
+            }
+            finally
+            {
+                lightData.ReleaseLightGridNativeResources();
+                VividLightRenderDatabase.instance.Clear();
+                visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(areaLightObject);
+            }
+        }
+
+        [Test]
+        public void UpdateVisibleLightData_KeepsReGIRLights_WhenLightGridCompletesFirst()
+        {
+            var lightData = new VividLightData();
+            var visibleLights = new NativeArray<VisibleLight>(1, Allocator.TempJob);
+
+            try
+            {
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Point,
+                    Color.white,
+                    Matrix4x4.TRS(new Vector3(1.0f, 0.0f, 0.0f), Quaternion.identity, Vector3.one),
+                    range: 4.0f);
+
+                InvokeUpdateVisibleLightData(lightData, visibleLights);
+                lightData.CompleteLightGridPrepare();
+                lightData.CompleteReGIRPrepare();
+
+                Assert.That(lightData.reGIRLightCount, Is.EqualTo(1));
+                Assert.That(lightData.punctualLightCount, Is.EqualTo(1));
+                Assert.That(lightData.reGIRLights[0].lightType, Is.EqualTo(VividReGIRLightData.TypePoint));
+            }
+            finally
+            {
+                lightData.ReleaseLightGridNativeResources();
+                visibleLights.Dispose();
+            }
+        }
+
+        [Test]
+        public void UpdateVisibleLightData_SkipsDirectionalAndZeroRangeLights_ForReGIR()
+        {
+            var lightData = new VividLightData();
+            var visibleLights = new NativeArray<VisibleLight>(2, Allocator.TempJob);
+
+            try
+            {
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Directional,
+                    Color.white,
+                    Matrix4x4.identity);
+                visibleLights[1] = CreateVisibleLight(
+                    LightType.Point,
+                    Color.white,
+                    Matrix4x4.identity,
+                    range: 0.0f);
+
+                InvokeUpdateVisibleLightData(lightData, visibleLights);
+                lightData.CompleteReGIRPrepare();
+
+                Assert.That(lightData.reGIRLightCount, Is.Zero);
+                Assert.That(lightData.punctualLightCount, Is.Zero);
+                Assert.That(lightData.directionalLightCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                lightData.ReleaseLightGridNativeResources();
+                visibleLights.Dispose();
             }
         }
 
@@ -367,6 +498,36 @@ namespace VividRP.Editor.Tests
                 trackedLightData.renderingLayerMask,
                 Mathf.Cos(45.0f * Mathf.Deg2Rad),
                 0.35f);
+        }
+
+        [Test]
+        public void CreateReGIRLightData_PacksAreaLightShape_ForRectangleLight()
+        {
+            var trackedLightData = new VividLightRenderData
+            {
+                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
+                range = 6.0f,
+                color = new Vector3(4.0f, 5.0f, 6.0f),
+                lightType = LightType.Rectangle,
+                forwardWS = Vector3.forward,
+                rightWS = Vector3.right,
+                upWS = Vector3.up,
+                areaSize = new Vector2(3.0f, 2.0f),
+                renderingLayerMask = 11u,
+            };
+
+            Assert.That(s_CreateReGIRLightDataMethod, Is.Not.Null);
+
+            var reGIRLight = (VividReGIRLightData)s_CreateReGIRLightDataMethod.Invoke(null, new object[] { trackedLightData });
+
+            AssertVector3(reGIRLight.positionWS, trackedLightData.positionWS);
+            AssertVector3(reGIRLight.color, trackedLightData.color);
+            Assert.That(reGIRLight.lightType, Is.EqualTo(VividReGIRLightData.TypeRectangle));
+            Assert.That(reGIRLight.range, Is.EqualTo(trackedLightData.range).Within(0.0001f));
+            Assert.That(reGIRLight.areaSize.x, Is.EqualTo(3.0f).Within(0.0001f));
+            Assert.That(reGIRLight.areaSize.y, Is.EqualTo(2.0f).Within(0.0001f));
+            Assert.That(reGIRLight.power, Is.EqualTo(36.0f).Within(0.0001f));
+            Assert.That(reGIRLight.renderingLayerMask, Is.EqualTo(11u));
         }
 
         private static void AssertDirectionalLight(
@@ -502,6 +663,16 @@ namespace VividRP.Editor.Tests
                 TrySetVisibleLightField(ref visibleLight, "m_Light", light);
 
             return visibleLight;
+        }
+
+        private static void InvokeUpdateVisibleLightData(
+            VividLightData lightData,
+            NativeArray<VisibleLight> visibleLights)
+        {
+            Assert.That(s_UpdateVisibleLightDataMethod, Is.Not.Null);
+            s_UpdateVisibleLightDataMethod.Invoke(
+                lightData,
+                new object[] { visibleLights, null, Matrix4x4.identity });
         }
 
         private static void SetVisibleLightField<T>(ref VisibleLight visibleLight, string fieldName, T value)

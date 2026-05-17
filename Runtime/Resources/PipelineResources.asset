@@ -47,6 +47,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: e395d09a0901a0f41ab15bd086c17efd, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/RTASInstanceDebug
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/ReGIRDebug
+    ResourceObject: {fileID: 4800000, guid: 2265eb7dd5eff0343883e74f26451387, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/VisibilityBufferDebug
@@ -95,6 +97,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
+  - ResourceName: Shaders/Core/Private/Lighting/ReGIRGridBuild.compute
+    ResourceObject: {fileID: 7200000, guid: 8b3f74e094430f44782931d61034fec3, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-bigtile
     ResourceObject: {fileID: 7200000, guid: 071513ee5c7b2734790b449e9173ca2b, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/lightlistbuild-clearatomic

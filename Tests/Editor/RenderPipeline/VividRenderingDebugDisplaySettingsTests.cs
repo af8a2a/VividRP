@@ -31,6 +31,9 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.PanelIndex("Rendering"), Is.GreaterThanOrEqualTo(0));
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Mode"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Opacity"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Visibility Buffer"), Is.Not.Null);
@@ -70,6 +73,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Reset_RestoresReGIRDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.reGIRDebugMode =
+                ReGIRDebugVisualizationMode.ReservoirWeight;
+            VividRenderingDebugDisplaySettings.Data.reGIRDebugOpacity = 0.2f;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.reGIRDebugMode,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultReGIRDebugMode));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.reGIRDebugOpacity,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultReGIRDebugOpacity));
+        }
+
+        [Test]
         public void AreAnySettingsActive_TracksVisibilityBufferDebugOverrides()
         {
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
@@ -81,6 +101,22 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.Reset();
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksReGIRDebugOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.reGIRDebugMode =
+                ReGIRDebugVisualizationMode.Cells;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.reGIRDebugOpacity = 0.25f;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

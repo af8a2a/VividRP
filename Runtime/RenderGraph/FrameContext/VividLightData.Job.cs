@@ -92,6 +92,47 @@ namespace VividRP.Runtime
             };
         }
 
+        private static VividReGIRLightData CreateReGIRLightData(VividLightRenderData trackedLightData)
+        {
+            var range = Mathf.Max(trackedLightData.range, 0.001f);
+            GetSpotAngleParameters(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle, out var angleScale, out var angleOffset);
+
+            return new VividReGIRLightData
+            {
+                positionWS = trackedLightData.positionWS,
+                range = range,
+                color = trackedLightData.color,
+                lightType = GetReGIRLightType(trackedLightData.lightType),
+                directionWS = NormalizeDirection(trackedLightData.forwardWS, Vector3.forward),
+                angleScale = angleScale,
+                rightWS = NormalizeDirection(trackedLightData.rightWS, Vector3.right),
+                angleOffset = angleOffset,
+                upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up),
+                shapeRadius = Mathf.Max(trackedLightData.shapeRadius, 0.0f),
+                areaSize = new Vector2(
+                    Mathf.Max(trackedLightData.areaSize.x, 0.0f),
+                    trackedLightData.lightType == LightType.Tube ? 0.0f : Mathf.Max(trackedLightData.areaSize.y, 0.0f)),
+                power = ComputeReGIRPower(trackedLightData),
+                renderingLayerMask = trackedLightData.renderingLayerMask,
+            };
+        }
+
+        private static float ComputeReGIRPower(VividLightRenderData trackedLightData)
+        {
+            var basePower = GetLightIntensity(trackedLightData.color);
+            if (basePower <= 0.0f)
+                return 0.0f;
+
+            return trackedLightData.lightType switch
+            {
+                LightType.Rectangle => basePower
+                    * Mathf.Max(trackedLightData.areaSize.x, 0.0f)
+                    * Mathf.Max(trackedLightData.areaSize.y, 0.0f),
+                LightType.Tube => basePower * Mathf.Max(trackedLightData.areaSize.x, 0.0f),
+                _ => basePower,
+            };
+        }
+
         private static PunctualLightCullData CreatePunctualLightCullData(PunctualLightData source)
         {
             GetPunctualLightCullingShapeData(
@@ -152,6 +193,7 @@ namespace VividRP.Runtime
 
             public NativeList<PunctualLightCandidate> punctualLights;
             public NativeList<AreaLightCandidate> areaLights;
+            public NativeList<VividReGIRLightData> reGIRLights;
             public NativeList<SFiniteLightBound> punctualLightBounds;
             public NativeList<LightVolumeData> punctualLightVolumeData;
             public NativeList<SFiniteLightBound> areaLightBounds;
@@ -177,6 +219,7 @@ namespace VividRP.Runtime
                             out var lightBound);
 
                         punctualLights.AddNoResize(candidate);
+                        reGIRLights.AddNoResize(CreateReGIRLightData(lightRenderData));
                         punctualLightBounds.AddNoResize(lightBound);
                         punctualLightVolumeData.AddNoResize(lightVolumeData);
                     }
@@ -191,6 +234,7 @@ namespace VividRP.Runtime
                             out var lightBound);
 
                         areaLights.AddNoResize(candidate);
+                        reGIRLights.AddNoResize(CreateReGIRLightData(lightRenderData));
                         areaLightBounds.AddNoResize(lightBound);
                         areaLightVolumeData.AddNoResize(lightVolumeData);
                     }

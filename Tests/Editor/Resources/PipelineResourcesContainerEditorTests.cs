@@ -54,6 +54,16 @@ namespace VividRP.Editor.Tests
                         entry.ResourceName == "Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace"
                         && entry.ResourceObject is RayTracingShader),
                     Is.True);
+                Assert.That(
+                    container.Entries.Any(entry =>
+                        entry.ResourceName == "Shaders/Core/Private/Lighting/ReGIRGridBuild.compute"
+                        && entry.ResourceObject is ComputeShader),
+                    Is.True);
+                Assert.That(
+                    container.Entries.Any(entry =>
+                        entry.ResourceName == "Shaders/Core/Private/Debug/ReGIRDebug"
+                        && entry.ResourceObject is Shader),
+                    Is.True);
             }
             finally
             {

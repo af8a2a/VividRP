@@ -182,6 +182,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/Lighting/lightlistbuild-clearatomic")]
         public ComputeShader ClearClusterAtomicIndexCompute;
 
+        [VividResourcePath("Shaders/Core/Private/Lighting/ReGIRGridBuild.compute")]
+        public ComputeShader ReGIRGridBuildCompute;
+
         [VividResourcePath("Shaders/Material/DeferredLit")]
         public ComputeShader DeferredLitCompute;
 
@@ -206,6 +209,9 @@ namespace VividRP.Runtime
 
         [VividResourcePath("Shaders/Core/Private/Debug/OverlayDebug")]
         public Shader OverlayDebugShader;
+
+        [VividResourcePath("Shaders/Core/Private/Debug/ReGIRDebug")]
+        public Shader ReGIRDebugShader;
 
         [VividResourcePath("Shaders/Core/Private/Debug/VisibilityBufferDebug")]
         public Shader VisibilityBufferDebugShader;

@@ -272,6 +272,7 @@ namespace VividRP.Runtime
         public LightVolumeData[] punctualLightVolumeData = Array.Empty<LightVolumeData>();
         public SFiniteLightBound[] areaLightBounds = Array.Empty<SFiniteLightBound>();
         public LightVolumeData[] areaLightVolumeData = Array.Empty<LightVolumeData>();
+        public VividReGIRLightData[] reGIRLights = Array.Empty<VividReGIRLightData>();
         public DecalClusterData[] decalClusterData = Array.Empty<DecalClusterData>();
         public SFiniteLightBound[] decalBounds = Array.Empty<SFiniteLightBound>();
         public LightVolumeData[] decalVolumeData = Array.Empty<LightVolumeData>();
@@ -281,6 +282,7 @@ namespace VividRP.Runtime
         public int directionalLightCount;
         public int punctualLightCount;
         public int areaLightCount;
+        public int reGIRLightCount;
         public int mainDirectionalLightIndex;
         public EntityId mainDirectionalLightEntityId;
 
@@ -293,6 +295,7 @@ namespace VividRP.Runtime
         private NativeList<LightVolumeData> m_LightGridPunctualLightVolumeData;
         private NativeList<SFiniteLightBound> m_LightGridAreaLightBounds;
         private NativeList<LightVolumeData> m_LightGridAreaLightVolumeData;
+        private NativeList<VividReGIRLightData> m_LightGridReGIRLights;
         private JobHandle m_LightGridJobHandle;
         private bool m_LightGridJobScheduled;
         private bool m_LightGridClusteredCullDataPrepared;
@@ -344,6 +347,17 @@ namespace VividRP.Runtime
         // Called from LightGridPass.Prepare just before LightGrid reads punctualLightCount/areaLightCount/punctualLights/areaLights.
         internal void CompleteLightGridPrepare()
         {
+            CompleteLightCollectionPrepare();
+        }
+
+        // Called from ReGIRGridBuildPass.Prepare before reading reGIRLightCount/reGIRLights.
+        internal void CompleteReGIRPrepare()
+        {
+            CompleteLightCollectionPrepare();
+        }
+
+        private void CompleteLightCollectionPrepare()
+        {
             if (!m_LightGridJobScheduled)
                 return;
 
@@ -353,6 +367,7 @@ namespace VividRP.Runtime
 
             ApplyPunctualLightCandidates(m_LightGridPunctualCandidates);
             ApplyAreaLightCandidates(m_LightGridAreaCandidates);
+            ApplyReGIRLightCandidates(m_LightGridReGIRLights);
             ApplyPunctualLightClusteredCullData(
                 m_LightGridPunctualLightBounds,
                 m_LightGridPunctualLightVolumeData);
@@ -399,6 +414,7 @@ namespace VividRP.Runtime
             ClearLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
             ClearLightGridBuffer(ref m_LightGridAreaLightBounds);
             ClearLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+            ClearLightGridBuffer(ref m_LightGridReGIRLights);
         }
 
         private void DisposeLightGridBuffers()
@@ -410,6 +426,7 @@ namespace VividRP.Runtime
             DisposeLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
             DisposeLightGridBuffer(ref m_LightGridAreaLightBounds);
             DisposeLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+            DisposeLightGridBuffer(ref m_LightGridReGIRLights);
         }
 
         internal void UpdateFiniteLightClusteredCullData(Matrix4x4 worldToViewMatrix)
@@ -597,9 +614,11 @@ namespace VividRP.Runtime
             directionalLightCount = 0;
             punctualLightCount = 0;
             areaLightCount = 0;
+            reGIRLightCount = 0;
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
             areaLights = Array.Empty<AreaLightData>();
+            reGIRLights = Array.Empty<VividReGIRLightData>();
             punctualLightBounds = Array.Empty<SFiniteLightBound>();
             punctualLightVolumeData = Array.Empty<LightVolumeData>();
             areaLightBounds = Array.Empty<SFiniteLightBound>();
@@ -655,6 +674,12 @@ namespace VividRP.Runtime
                 areaLightVolumeData = new LightVolumeData[requiredCapacity];
         }
 
+        private void EnsureReGIRLightCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > reGIRLights.Length)
+                reGIRLights = new VividReGIRLightData[requiredCapacity];
+        }
+
 
         private void UpdateVisibleLightData(
             NativeArray<VisibleLight> visibleLights,
@@ -668,6 +693,7 @@ namespace VividRP.Runtime
             mainDirectionalLightEntityId = EntityId.None;
             punctualLightCount = 0;
             areaLightCount = 0;
+            reGIRLightCount = 0;
             m_LightGridClusteredCullDataPrepared = false;
 
             if (!visibleLights.IsCreated || visibleLights.Length == 0)
@@ -688,6 +714,7 @@ namespace VividRP.Runtime
                 visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
                 punctualLights = m_LightGridPunctualCandidates,
                 areaLights = m_LightGridAreaCandidates,
+                reGIRLights = m_LightGridReGIRLights,
                 punctualLightBounds = m_LightGridPunctualLightBounds,
                 punctualLightVolumeData = m_LightGridPunctualLightVolumeData,
                 areaLightBounds = m_LightGridAreaLightBounds,
@@ -706,6 +733,7 @@ namespace VividRP.Runtime
             EnsureLightGridBufferCapacity(ref m_LightGridVisibleLightRecords, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridAreaCandidates, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridReGIRLights, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightBounds, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightVolumeData, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridAreaLightBounds, lightCapacity);
@@ -834,6 +862,16 @@ namespace VividRP.Runtime
 
             for (var areaIndex = 0; areaIndex < areaLightCount; areaIndex++)
                 areaLights[areaIndex] = areaCandidates[areaIndex].lightData;
+        }
+
+        private void ApplyReGIRLightCandidates(NativeList<VividReGIRLightData> reGIRLightCandidates)
+        {
+            EnsureReGIRLightCapacity(reGIRLightCandidates.Length);
+
+            reGIRLightCount = reGIRLightCandidates.Length;
+
+            for (var lightIndex = 0; lightIndex < reGIRLightCount; lightIndex++)
+                reGIRLights[lightIndex] = reGIRLightCandidates[lightIndex];
         }
 
         private void ApplyPunctualLightClusteredCullData(
@@ -975,6 +1013,17 @@ namespace VividRP.Runtime
         private static uint GetAreaLightType(LightType lightType)
         {
             return lightType == LightType.Tube ? 0u : 1u;
+        }
+
+        private static uint GetReGIRLightType(LightType lightType)
+        {
+            return lightType switch
+            {
+                LightType.Spot => VividReGIRLightData.TypeSpot,
+                LightType.Tube => VividReGIRLightData.TypeTube,
+                LightType.Rectangle => VividReGIRLightData.TypeRectangle,
+                _ => VividReGIRLightData.TypePoint,
+            };
         }
 
         private static void GetPunctualLightCullingShapeData(

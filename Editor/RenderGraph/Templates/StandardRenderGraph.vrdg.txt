@@ -6249,6 +6249,38 @@ MonoBehaviour:
           m_PortDirection: 1
           m_PortOrientation: 0
           m_Title: Color (R)
+    - rid: 8515051999999999000
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 17000000000000000001
+          m_Value1: 17000000000000000002
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 4df1dc6d7f96b37f906c872cd2e2ff6a
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 16217692952469770125
+            m_Value1: 14882032183244481893
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 8d0f51b4d0d110e165e5371a6c9987ce
+          m_UniqueId: m_CSMShadowAtlas_Out
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: CSMShadowAtlas (W)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 9373728999771638090
+            m_Value1: 11156056605223845320
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 4a892a74dc2c1682c87d84086046d29a
+          m_UniqueId: m_CSMShadowAtlas
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: CSMShadowAtlas (R)
     - rid: 8515051663678505526
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:

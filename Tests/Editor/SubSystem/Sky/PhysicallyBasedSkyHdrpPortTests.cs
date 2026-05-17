@@ -87,6 +87,11 @@ namespace VividRP.Editor.Tests
             Assert.That(skyLutSource, Does.Contain("for (uint i = 0; i < _CelestialLightCount; i++)"));
             Assert.That(skyLutSource, Does.Contain("CelestialBodyData light = _CelestialBodyDatas[i];"));
             Assert.That(skyLutSource, Does.Contain("float3 L = -light.forward.xyz;"));
+            Assert.That(skyLutSource, Does.Contain("Texture2D<float> _CSMShadowAtlas;"));
+            Assert.That(skyLutSource, Does.Contain("SamplerComparisonState sampler_CSMShadowAtlas;"));
+            Assert.That(skyLutSource, Does.Contain("float SampleAtmosphericScatteringShadow(float3 positionWS, float3 normalWS)"));
+            Assert.That(skyLutSource, Does.Contain("_CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, atlasUV, shadowCoord.z);"));
+            Assert.That(skyLutSource, Does.Contain("float shadow = light.shadowIndex >= 0 ? sunShadow : 1.0f;"));
             Assert.That(skyLutSource, Does.Not.Contain("GetPrimarySunDirection()"));
             Assert.That(skyLutSource, Does.Not.Contain("GetPrimarySunColor()"));
             Assert.That(skyLutSource, Does.Not.Contain("EvaluatePrimarySunShadow(float3 positionPS)"));

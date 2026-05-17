@@ -539,7 +539,7 @@ namespace VividRP.Runtime
                 flareFalloff = Mathf.Max(additionalData?.flareFalloff ?? 0.0f, 0.0f),
                 surfaceTextureIndex = ResolveSurfaceTextureIndex(additionalData),
                 padding = Vector2.zero,
-                shadowIndex = ResolveShadowIndex(light, additionalData, context),
+                shadowIndex = ResolveShadowIndex(light, context),
             };
 
             celestialBody.flareCosOuter = Mathf.Cos(celestialBody.angularRadius + celestialBody.flareSize);
@@ -649,11 +649,9 @@ namespace VividRP.Runtime
             return result;
         }
 
-        private static int ResolveShadowIndex(Light light, VividAdditionalLightData additionalData, in SkyRendererContext context)
+        private static int ResolveShadowIndex(Light light, in SkyRendererContext context)
         {
             if (light == null
-                || additionalData == null
-                || !additionalData.isRayTracedShadowActive
                 || light.shadows == LightShadows.None
                 || !light.enabled
                 || !light.gameObject.activeInHierarchy)
@@ -662,10 +660,9 @@ namespace VividRP.Runtime
             }
 
             if (context.lightData != null
-                && context.lightData.hasMainDirectionalLight
-                && context.lightData.mainDirectionalLightEntityId.Equals(light.GetEntityId()))
+                && context.lightData.hasMainDirectionalLight)
             {
-                return 0;
+                return context.lightData.mainDirectionalLightEntityId.Equals(light.GetEntityId()) ? 0 : -1;
             }
 
             return RenderSettings.sun == light ? 0 : -1;

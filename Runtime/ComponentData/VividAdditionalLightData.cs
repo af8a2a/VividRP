@@ -370,6 +370,25 @@ namespace VividRP.Runtime
             Manual = 2,
         }
 
+        internal readonly struct TimeOfDaySunState
+        {
+            public TimeOfDaySunState(Vector3 directionToSun, float elevationDegrees, float azimuthDegrees, float lux)
+            {
+                this.directionToSun = directionToSun;
+                this.elevationDegrees = elevationDegrees;
+                this.azimuthDegrees = azimuthDegrees;
+                this.lux = lux;
+            }
+
+            public Vector3 directionToSun { get; }
+
+            public float elevationDegrees { get; }
+
+            public float azimuthDegrees { get; }
+
+            public float lux { get; }
+        }
+
         internal const float DefaultRayTracedShadowRayLength = 1000f;
         internal const float DefaultRayTracedShadowRayBias = 0.001f;
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
@@ -403,6 +422,13 @@ namespace VividRP.Runtime
         internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
         internal const float DefaultCelestialBodyDistance = 149597870700.0f;
         internal const float DefaultManualSunIntensity = 130000.0f;
+        internal const float DefaultTimeOfDay = 12.0f;
+        internal const float DefaultTimeOfDayMaximumLux = DefaultManualSunIntensity;
+        private const float TimeOfDayHours = 24.0f;
+        private const float TimeOfDaySunrise = 6.0f;
+        private const float TimeOfDayDaylightDuration = 12.0f;
+        private const float TimeOfDayHorizonFadeDegrees = 5.0f;
+        private const float TimeOfDayAtmosphereExtinction = 0.14f;
 
         [SerializeField]
         private bool m_UsePipelineSettings = true;
@@ -487,6 +513,15 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private bool m_InteractsWithSky = true;
+
+        [SerializeField]
+        private bool m_EnableTimeOfDay;
+
+        [SerializeField, Range(0.0f, TimeOfDayHours)]
+        private float m_TimeOfDay = DefaultTimeOfDay;
+
+        [SerializeField, Min(0.0f)]
+        private float m_TimeOfDayMaximumLux = DefaultTimeOfDayMaximumLux;
 
         [SerializeField, Range(0.0f, 90.0f)]
         private float m_AngularDiameter = DefaultCelestialBodyAngularDiameter;
@@ -811,6 +846,50 @@ namespace VividRP.Runtime
             }
         }
 
+        public bool enableTimeOfDay
+        {
+            get => m_EnableTimeOfDay && supportsTimeOfDay;
+            set
+            {
+                if (m_EnableTimeOfDay == value)
+                    return;
+
+                m_EnableTimeOfDay = value;
+                ApplyTimeOfDayToLight();
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float timeOfDay
+        {
+            get => m_TimeOfDay;
+            set
+            {
+                var sanitizedValue = SanitizeTimeOfDay(value);
+                if (Mathf.Approximately(m_TimeOfDay, sanitizedValue))
+                    return;
+
+                m_TimeOfDay = sanitizedValue;
+                ApplyTimeOfDayToLight();
+                NotifyLightDataChanged();
+            }
+        }
+
+        public float timeOfDayMaximumLux
+        {
+            get => m_TimeOfDayMaximumLux;
+            set
+            {
+                var sanitizedValue = SanitizeNonNegativeFloat(value, DefaultTimeOfDayMaximumLux);
+                if (Mathf.Approximately(m_TimeOfDayMaximumLux, sanitizedValue))
+                    return;
+
+                m_TimeOfDayMaximumLux = sanitizedValue;
+                ApplyTimeOfDayToLight();
+                NotifyLightDataChanged();
+            }
+        }
+
         public float barnDoorAngle
         {
             get => m_BarnDoorAngle;
@@ -1029,10 +1108,19 @@ namespace VividRP.Runtime
 
         internal bool isRayTracedShadowActive => isActiveAndEnabled && supportsRayTracedShadow && m_EnableRayTracedShadow;
 
+        internal bool supportsTimeOfDay => light != null && light.type == LightType.Directional;
+
+        internal TimeOfDaySunState currentTimeOfDaySunState => EvaluateTimeOfDaySun(m_TimeOfDay, m_TimeOfDayMaximumLux);
+
         internal void NotifyLightDataChanged()
         {
             UpdateLightBoundsOverride(light);
             VividLightRenderDatabase.instance.UpdateLightData(light, this);
+        }
+
+        internal void ApplyTimeOfDayToLight()
+        {
+            ApplyTimeOfDayToLight(light);
         }
 
         private void Start()
@@ -1044,13 +1132,15 @@ namespace VividRP.Runtime
         {
             m_Light = light;
             RefreshAnimatedState();
+            ConstrainTimeOfDaySettings();
+            ApplyTimeOfDayToLight(m_Light);
             UpdateLightBoundsOverride(m_Light);
             VividLightRenderDatabase.instance.RegisterLight(this);
         }
 
         private void LateUpdate()
         {
-            if (!isActiveAndEnabled || !m_Animated)
+            if (!isActiveAndEnabled)
                 return;
 
             var currentLight = m_Light != null ? m_Light : light;
@@ -1058,6 +1148,10 @@ namespace VividRP.Runtime
                 return;
 
             UpdateLightBoundsOverride(currentLight);
+            ApplyTimeOfDayToLight(currentLight);
+
+            if (!m_Animated && !m_EnableTimeOfDay)
+                return;
 
             if (VividLightRenderDatabase.instance.TryGetLightData(currentLight, out var trackedLightData)
                 && !VividLightRenderDatabase.IsLightDataChanged(currentLight, this, trackedLightData))
@@ -1087,8 +1181,10 @@ namespace VividRP.Runtime
             ConstrainShadowBiasSettings();
             ConstrainAreaLightSettings();
             ConstrainVolumetricSettings();
+            ConstrainTimeOfDaySettings();
             ConstrainCelestialBodySettings();
             RefreshAnimatedState();
+            ApplyTimeOfDayToLight(m_Light);
             UpdateLightBoundsOverride(m_Light);
             VividLightRenderDatabase.instance.UpdateLightData(m_Light, this);
         }
@@ -1164,6 +1260,18 @@ namespace VividRP.Runtime
                 return;
 
             targetLight.useBoundingSphereOverride = false;
+        }
+
+        private void ApplyTimeOfDayToLight(Light targetLight)
+        {
+            if (!m_EnableTimeOfDay || targetLight == null || targetLight.type != LightType.Directional)
+                return;
+
+            var state = EvaluateTimeOfDaySun(m_TimeOfDay, m_TimeOfDayMaximumLux);
+            targetLight.transform.rotation = GetTimeOfDayLightRotation(state.directionToSun);
+            targetLight.lightUnit = LightUnit.Lux;
+            targetLight.luxAtDistance = 1.0f;
+            targetLight.intensity = state.lux;
         }
 
         private void SetRayTracedShadowFloat(ref float field, float value, float defaultValue)
@@ -1306,6 +1414,12 @@ namespace VividRP.Runtime
                 DefaultVolumetricShadowDimmer);
         }
 
+        private void ConstrainTimeOfDaySettings()
+        {
+            m_TimeOfDay = SanitizeTimeOfDay(m_TimeOfDay);
+            m_TimeOfDayMaximumLux = SanitizeNonNegativeFloat(m_TimeOfDayMaximumLux, DefaultTimeOfDayMaximumLux);
+        }
+
         private static CSMScreenSpaceShadowQuality SanitizeScreenSpaceShadowQuality(CSMScreenSpaceShadowQuality value)
         {
             return value switch
@@ -1345,6 +1459,59 @@ namespace VividRP.Runtime
             m_Distance = SanitizeNonNegativeFloat(m_Distance, DefaultCelestialBodyDistance);
         }
 
+        internal static TimeOfDaySunState EvaluateTimeOfDaySun(float timeOfDay, float maximumLux)
+        {
+            var sanitizedTime = SanitizeTimeOfDay(timeOfDay);
+            var elevationDegrees = Mathf.Sin((sanitizedTime - TimeOfDaySunrise) / TimeOfDayDaylightDuration * Mathf.PI) * 90.0f;
+            var azimuthDegrees = Mathf.Repeat(sanitizedTime / TimeOfDayHours * 360.0f, 360.0f);
+            var directionToSun = CalculateTimeOfDaySunDirection(elevationDegrees, azimuthDegrees);
+            var lux = EvaluateTimeOfDayLux(elevationDegrees, maximumLux);
+            return new TimeOfDaySunState(directionToSun, elevationDegrees, azimuthDegrees, lux);
+        }
+
+        internal static float EvaluateTimeOfDayLux(float elevationDegrees, float maximumLux)
+        {
+            var maxLux = Mathf.Max(SanitizeNonNegativeFloat(maximumLux, DefaultTimeOfDayMaximumLux), 0.0f);
+            if (maxLux <= 0.0f || elevationDegrees <= 0.0f)
+                return 0.0f;
+
+            var horizonFade = Mathf.SmoothStep(
+                0.0f,
+                1.0f,
+                Mathf.InverseLerp(0.0f, TimeOfDayHorizonFadeDegrees, elevationDegrees));
+            var airMass = CalculateRelativeAirMass(elevationDegrees);
+            var zenithAirMass = CalculateRelativeAirMass(90.0f);
+            var atmosphericScale = Mathf.Exp(-TimeOfDayAtmosphereExtinction * Mathf.Max(airMass - zenithAirMass, 0.0f));
+            return maxLux * horizonFade * atmosphericScale;
+        }
+
+        private static Vector3 CalculateTimeOfDaySunDirection(float elevationDegrees, float azimuthDegrees)
+        {
+            var elevationRadians = elevationDegrees * Mathf.Deg2Rad;
+            var azimuthRadians = azimuthDegrees * Mathf.Deg2Rad;
+            var cosElevation = Mathf.Cos(elevationRadians);
+            var direction = new Vector3(
+                Mathf.Sin(azimuthRadians) * cosElevation,
+                Mathf.Sin(elevationRadians),
+                Mathf.Cos(azimuthRadians) * cosElevation);
+
+            return direction.sqrMagnitude > 1e-6f ? direction.normalized : Vector3.up;
+        }
+
+        private static Quaternion GetTimeOfDayLightRotation(Vector3 directionToSun)
+        {
+            var forward = directionToSun.sqrMagnitude > 1e-6f ? -directionToSun.normalized : Vector3.down;
+            var up = Mathf.Abs(Vector3.Dot(forward, Vector3.up)) > 0.999f ? Vector3.forward : Vector3.up;
+            return Quaternion.LookRotation(forward, up);
+        }
+
+        private static float CalculateRelativeAirMass(float elevationDegrees)
+        {
+            var elevation = Mathf.Clamp(elevationDegrees, 0.001f, 90.0f);
+            var sinElevation = Mathf.Sin(elevation * Mathf.Deg2Rad);
+            return 1.0f / (sinElevation + 0.50572f * Mathf.Pow(elevation + 6.07995f, -1.6364f));
+        }
+
         private static float SanitizeRayTracedShadowFloat(float value, float defaultValue)
         {
             if (float.IsNaN(value) || float.IsInfinity(value))
@@ -1367,6 +1534,14 @@ namespace VividRP.Runtime
                 return defaultValue;
 
             return Mathf.Clamp(value, min, max);
+        }
+
+        private static float SanitizeTimeOfDay(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return DefaultTimeOfDay;
+
+            return Mathf.Clamp(value, 0.0f, TimeOfDayHours);
         }
 
         private static int SanitizeClampedInt(int value, int min, int max, int defaultValue)

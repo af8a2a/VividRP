@@ -221,6 +221,17 @@ void SkyViewLUT(uint2 coord : SV_DispatchThreadID)
 // Atmospheric Scattering LUT
 
 RW_TEXTURE3D(float3, _AtmosphericScatteringLUT_RW);
+Texture2D<float> _CSMShadowAtlas;
+SamplerComparisonState sampler_CSMShadowAtlas;
+
+float4x4 _CSMViewProjMatrices[4];
+float4   _CSMCascadeSpheres[4];
+float4   _CSMAtlasScaleOffsets[4];
+int      _CSMCascadeCount;
+float    _CSMNormalBias;
+int      _CSMAtlasResolution;
+int      _CSMCascadeResolution;
+float4   _CSMCascadeWorldTexelSizes;
 
 groupshared float3 gs_data[PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH];
 
@@ -269,6 +280,56 @@ float3 ParallelPostfixSum(uint threadIdx, float3 radiance)
 #endif
 }
 
+float3 TransformWorldToCSMShadowCoord(float3 positionWS, int cascadeIndex)
+{
+    return mul(_CSMViewProjMatrices[cascadeIndex], float4(positionWS, 1.0)).xyz;
+}
+
+float2 RemapCSMShadowCoordToAtlasUV(float2 shadowUV, int cascadeIndex)
+{
+    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
+    return shadowUV * scaleOffset.xy + scaleOffset.zw;
+}
+
+void GetCSMCascadeAtlasBounds(int cascadeIndex, out float2 cascadeMinUV, out float2 cascadeMaxUV, out float2 texelSize)
+{
+    texelSize = 1.0 / max((float)_CSMAtlasResolution, 1.0);
+    float4 scaleOffset = _CSMAtlasScaleOffsets[cascadeIndex];
+    cascadeMinUV = scaleOffset.zw + texelSize * 0.5;
+    cascadeMaxUV = scaleOffset.zw + scaleOffset.xy - texelSize * 0.5;
+}
+
+float ApplyCSMShadowComparisonDepthBias(float shadowDepth)
+{
+    return shadowDepth + 1.0 / 65536.0;
+}
+
+float SampleAtmosphericScatteringShadow(float3 positionWS, float3 normalWS)
+{
+    if (_CSMCascadeCount <= 0 || _CSMAtlasResolution <= 0)
+        return 1.0;
+
+    int cascadeIndex = min(_CSMCascadeCount, 4) - 1;
+    float4 sphere = _CSMCascadeSpheres[cascadeIndex];
+    float3 delta = positionWS - sphere.xyz;
+
+    if (sphere.w <= 0.0 || dot(delta, delta) >= sphere.w)
+        return 1.0;
+
+    float normalBias = _CSMNormalBias * max(_CSMCascadeWorldTexelSizes[cascadeIndex], 0.0);
+    float3 biasedPositionWS = positionWS + normalWS * normalBias;
+    float3 shadowCoord = TransformWorldToCSMShadowCoord(biasedPositionWS, cascadeIndex);
+    shadowCoord.xy = saturate(shadowCoord.xy);
+    shadowCoord.z = ApplyCSMShadowComparisonDepthBias(shadowCoord.z);
+
+    float2 atlasUV = RemapCSMShadowCoordToAtlasUV(shadowCoord.xy, cascadeIndex);
+    float2 cascadeMinUV, cascadeMaxUV, texelSize;
+    GetCSMCascadeAtlasBounds(cascadeIndex, cascadeMinUV, cascadeMaxUV, texelSize);
+    atlasUV = clamp(atlasUV, cascadeMinUV, cascadeMaxUV);
+
+    return _CSMShadowAtlas.SampleCmpLevelZero(sampler_CSMShadowAtlas, atlasUV, shadowCoord.z);
+}
+
 [numthreads(1, 1, PBRSKYCONFIG_ATMOSPHERIC_SCATTERING_LUT_DEPTH)]
 void AtmosphericScatteringLUT(uint2 coord : SV_GroupID, uint s : SV_GroupIndex)
 {
@@ -307,13 +368,15 @@ void AtmosphericScatteringLUT(uint2 coord : SV_GroupID, uint s : SV_GroupIndex)
     const float3 transmittanceOverSegment = TransmittanceFromOpticalDepth(sigmaE * dt);
 
     skyTransmittance = ParallelPrefixProduct(s, transmittanceOverSegment);
+    float sunShadow = SampleAtmosphericScatteringShadow(P + _PlanetCenterPosition, N);
 
     for (uint i = 0; i < _CelestialLightCount; i++)
     {
         CelestialBodyData light = _CelestialBodyDatas[i];
         float3 L = -light.forward.xyz;
 
-        const float3 sunTransmittance = EvaluateSunColorAttenuation(dot(N, L), r);
+        float shadow = light.shadowIndex >= 0 ? sunShadow : 1.0f;
+        const float3 sunTransmittance = shadow * EvaluateSunColorAttenuation(dot(N, L), r);
         const float3 phaseScatter = AirScatter(height) * AirPhase(-dot(L, V)) + AerosolScatter(height) * AerosolPhase(-dot(L, V));
         const float3 multiScatteredLuminance = EvaluateMultipleScattering(dot(N, L), height);
 

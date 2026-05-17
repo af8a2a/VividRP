@@ -42,6 +42,15 @@ namespace VividRP.Runtime
         private static readonly int SkyViewLutRwId = Shader.PropertyToID("_SkyViewLUT_RW");
         private static readonly int AtmosphericScatteringLutRwId = Shader.PropertyToID("_AtmosphericScatteringLUT_RW");
         private static readonly int CelestialBodyDatasId = Shader.PropertyToID("_CelestialBodyDatas");
+        private static readonly int CSMShadowAtlasId = Shader.PropertyToID("_CSMShadowAtlas");
+        private static readonly int CSMViewProjMatricesId = Shader.PropertyToID("_CSMViewProjMatrices");
+        private static readonly int CSMCascadeSpheresId = Shader.PropertyToID("_CSMCascadeSpheres");
+        private static readonly int CSMAtlasScaleOffsetsId = Shader.PropertyToID("_CSMAtlasScaleOffsets");
+        private static readonly int CSMCascadeCountId = Shader.PropertyToID("_CSMCascadeCount");
+        private static readonly int CSMNormalBiasId = Shader.PropertyToID("_CSMNormalBias");
+        private static readonly int CSMAtlasResolutionId = Shader.PropertyToID("_CSMAtlasResolution");
+        private static readonly int CSMCascadeResolutionId = Shader.PropertyToID("_CSMCascadeResolution");
+        private static readonly int CSMCascadeWorldTexelSizesId = Shader.PropertyToID("_CSMCascadeWorldTexelSizes");
 
         private ComputeShader m_ComputeShader;
         private int m_MultiScatteringKernel = -1;
@@ -70,6 +79,10 @@ namespace VividRP.Runtime
         private RTHandle m_CachedAtmosphericScatteringHandle;
         private PhysicallyBasedSkyShaderParameters m_Parameters;
         private PhysicallyBasedSkyMaterialParameters m_MaterialParameters;
+        private readonly Matrix4x4[] m_CSMViewProjMatrices = new Matrix4x4[VividShadowData.MaxCascadeCount];
+        private readonly Vector4[] m_CSMCascadeSpheres = new Vector4[VividShadowData.MaxCascadeCount];
+        private readonly Vector4[] m_CSMAtlasScaleOffsets = new Vector4[VividShadowData.MaxCascadeCount];
+        private Vector4 m_CSMCascadeWorldTexelSizes = Vector4.zero;
         private readonly PhysicallyBasedSkyCelestialBodyBuffer m_CelestialBodyBuffer = new();
 
         internal RTHandle MultiScatteringHandle => m_CachedMultiScatteringHandle;
@@ -195,49 +208,70 @@ namespace VividRP.Runtime
                 m_CachedSkyViewHash = m_NextSkyViewHash;
             }
 
-            if (m_ShouldRenderAtmosphericScattering)
+        }
+
+        internal void RenderAtmosphericScattering(
+            CommandBuffer cmd,
+            RenderGraphTexture csmShadowAtlas,
+            VividShadowData shadowData)
+        {
+            if (!m_ShouldRenderAtmosphericScattering
+                || !m_IsActive
+                || !m_HasMaterialParameters
+                || cmd == null
+                || m_ComputeShader == null
+                || m_AtmosphericScatteringCameraKernel < 0
+                || m_CachedMultiScatteringTexture == null
+                || !m_CachedMultiScatteringTexture.IsCreated()
+                || m_CachedAtmosphericScatteringTexture == null
+                || !m_CachedAtmosphericScatteringTexture.IsCreated())
             {
-                using (new ProfilingScope(cmd, s_AtmosphericScatteringSampler))
+                return;
+            }
+
+            using (new ProfilingScope(cmd, s_AtmosphericScatteringSampler))
+            {
+                BindCommonParameters(cmd);
+                BindDirectionalShadowParameters(cmd, m_AtmosphericScatteringCameraKernel, csmShadowAtlas, shadowData);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_AtmosphericScatteringCameraKernel,
+                    MultiScatteringLutId,
+                    m_CachedMultiScatteringTexture);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_AtmosphericScatteringCameraKernel,
+                    AtmosphericScatteringLutRwId,
+                    m_CachedAtmosphericScatteringTexture);
+                cmd.SetComputeBufferParam(
+                    m_ComputeShader,
+                    m_AtmosphericScatteringCameraKernel,
+                    CelestialBodyDatasId,
+                    m_CelestialBodyBuffer.Buffer);
+                cmd.DispatchCompute(
+                    m_ComputeShader,
+                    m_AtmosphericScatteringCameraKernel,
+                    AtmosphericScatteringWidth,
+                    AtmosphericScatteringHeight,
+                    1);
+
+                if (m_AtmosphericScatteringBlurKernel >= 0)
                 {
-                    BindCommonParameters(cmd);
                     cmd.SetComputeTextureParam(
                         m_ComputeShader,
-                        m_AtmosphericScatteringCameraKernel,
-                        MultiScatteringLutId,
-                        m_CachedMultiScatteringTexture);
-                    cmd.SetComputeTextureParam(
-                        m_ComputeShader,
-                        m_AtmosphericScatteringCameraKernel,
+                        m_AtmosphericScatteringBlurKernel,
                         AtmosphericScatteringLutRwId,
                         m_CachedAtmosphericScatteringTexture);
-                    cmd.SetComputeBufferParam(
-                        m_ComputeShader,
-                        m_AtmosphericScatteringCameraKernel,
-                        CelestialBodyDatasId,
-                        m_CelestialBodyBuffer.Buffer);
                     cmd.DispatchCompute(
                         m_ComputeShader,
-                        m_AtmosphericScatteringCameraKernel,
-                        AtmosphericScatteringWidth,
-                        AtmosphericScatteringHeight,
-                        1);
-
-                    if (m_AtmosphericScatteringBlurKernel >= 0)
-                    {
-                        cmd.SetComputeTextureParam(
-                            m_ComputeShader,
-                            m_AtmosphericScatteringBlurKernel,
-                            AtmosphericScatteringLutRwId,
-                            m_CachedAtmosphericScatteringTexture);
-                        cmd.DispatchCompute(
-                            m_ComputeShader,
-                            m_AtmosphericScatteringBlurKernel,
-                            1,
-                            1,
-                            AtmosphericScatteringDepth);
-                    }
+                        m_AtmosphericScatteringBlurKernel,
+                        1,
+                        1,
+                        AtmosphericScatteringDepth);
                 }
             }
+
+            m_ShouldRenderAtmosphericScattering = false;
         }
 
         internal bool TryGetSkyViewLut(int skyViewHash, out Texture skyViewTexture)
@@ -285,6 +319,55 @@ namespace VividRP.Runtime
         private void BindCommonParameters(CommandBuffer cmd)
         {
             PhysicallyBasedSkyComputeParameterBinder.Apply(cmd, m_ComputeShader, m_Parameters, m_MaterialParameters);
+        }
+
+        private void BindDirectionalShadowParameters(
+            CommandBuffer cmd,
+            int kernel,
+            RenderGraphTexture csmShadowAtlas,
+            VividShadowData shadowData)
+        {
+            var hasCSMShadowAtlas = shadowData != null
+                                    && shadowData.isCSMActive
+                                    && csmShadowAtlas?.innerHandle.IsValid() == true;
+            var cascadeCount = hasCSMShadowAtlas
+                ? Mathf.Clamp(shadowData.cascadeCount, 0, VividShadowData.MaxCascadeCount)
+                : 0;
+
+            m_CSMCascadeWorldTexelSizes = Vector4.zero;
+            for (int i = 0; i < VividShadowData.MaxCascadeCount; i++)
+            {
+                if (i < cascadeCount)
+                {
+                    m_CSMViewProjMatrices[i] = shadowData.viewProjMatrices[i];
+                    m_CSMCascadeSpheres[i] = shadowData.cascadeSpheres[i];
+                    m_CSMAtlasScaleOffsets[i] = shadowData.cascadeAtlasScaleOffsets[i];
+                    m_CSMCascadeWorldTexelSizes[i] = shadowData.cascadeWorldTexelSizes[i];
+                }
+                else
+                {
+                    m_CSMViewProjMatrices[i] = Matrix4x4.identity;
+                    m_CSMCascadeSpheres[i] = Vector4.zero;
+                    m_CSMAtlasScaleOffsets[i] = Vector4.zero;
+                }
+            }
+
+            if (hasCSMShadowAtlas)
+            {
+                cmd.SetComputeTextureParam(m_ComputeShader, kernel, CSMShadowAtlasId, csmShadowAtlas.innerHandle);
+            }
+            else
+            {
+                cmd.SetComputeTextureParam(m_ComputeShader, kernel, CSMShadowAtlasId, Texture2D.blackTexture);
+            }
+            cmd.SetComputeMatrixArrayParam(m_ComputeShader, CSMViewProjMatricesId, m_CSMViewProjMatrices);
+            cmd.SetComputeVectorArrayParam(m_ComputeShader, CSMCascadeSpheresId, m_CSMCascadeSpheres);
+            cmd.SetComputeVectorArrayParam(m_ComputeShader, CSMAtlasScaleOffsetsId, m_CSMAtlasScaleOffsets);
+            cmd.SetComputeIntParam(m_ComputeShader, CSMCascadeCountId, cascadeCount);
+            cmd.SetComputeFloatParam(m_ComputeShader, CSMNormalBiasId, hasCSMShadowAtlas ? Mathf.Max(shadowData.normalBias, 0.0f) : 0.0f);
+            cmd.SetComputeIntParam(m_ComputeShader, CSMAtlasResolutionId, hasCSMShadowAtlas ? Mathf.Max(shadowData.atlasResolution, 1) : 0);
+            cmd.SetComputeIntParam(m_ComputeShader, CSMCascadeResolutionId, hasCSMShadowAtlas ? Mathf.Max(shadowData.cascadeResolution, 1) : 0);
+            cmd.SetComputeVectorParam(m_ComputeShader, CSMCascadeWorldTexelSizesId, m_CSMCascadeWorldTexelSizes);
         }
 
         private void ResetFrameState()

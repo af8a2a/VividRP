@@ -151,7 +151,9 @@ namespace VividRP.Runtime
             RenderGraphTexture colorTarget,
             RenderGraphTexture depthTexture,
             RenderGraphTexture skyViewLut,
-            RenderGraphTexture directionalShadowTexture)
+            RenderGraphTexture directionalShadowTexture,
+            RenderGraphTexture csmShadowAtlas,
+            bool hasConnectedCSMShadowAtlas)
         {
             if (frameData == null)
                 return false;
@@ -187,7 +189,9 @@ namespace VividRP.Runtime
                 colorTarget,
                 depthTexture,
                 skyViewLut,
-                directionalShadowTexture);
+                directionalShadowTexture,
+                csmShadowAtlas,
+                hasConnectedCSMShadowAtlas);
 
             s_PendingSkyRenderer = s_ActiveRenderer;
             s_PendingSkyCamera = camera;
@@ -195,12 +199,12 @@ namespace VividRP.Runtime
             return true;
         }
 
-        internal static void RenderSkyInjection(RasterCommandBuffer cmd)
+        internal static void RenderSkyInjection(UnsafePassContext context)
         {
             if (s_PendingSkyRenderer == null)
                 return;
 
-            s_PendingSkyRenderer.RenderSky(cmd);
+            s_PendingSkyRenderer.RenderSky(context);
             s_PendingSkyRenderer = null;
         }
 

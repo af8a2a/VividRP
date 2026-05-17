@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class SkyInjectionPass : RasterPass
+    public class SkyInjectionPass : UnsafePass, IAllowGlobalStateModificationPass
     {
         [RenderGraphResource(Name = "Color", Access = AccessFlags.ReadWrite, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTarget;
@@ -19,6 +19,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "DirectionalShadowTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DirectionalShadowTexture;
 
+        [RenderGraphResource(Name = "CSMShadowAtlas", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_CSMShadowAtlas;
+
+        private readonly RenderGraphTexture m_LocalCSMShadowAtlas;
         private bool m_ShouldInject;
 
         public SkyInjectionPass()
@@ -29,6 +33,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
             m_SkyViewLUT = RenderGraphTexture.CreateInput("SkyViewLUT", GraphicsFormat.R16G16B16A16_SFloat);
             m_DirectionalShadowTexture = RenderGraphTexture.CreateInput("DirectionalShadowTexture", GraphicsFormat.R16_SFloat);
+            m_LocalCSMShadowAtlas = RenderGraphTexture.CreateInput("CSMShadowAtlas", GraphicsFormat.None, DepthBits.Depth16);
+            m_LocalCSMShadowAtlas.desc.IsShadowMap = true;
+            m_CSMShadowAtlas = m_LocalCSMShadowAtlas;
         }
 
         public override void Create()
@@ -50,18 +57,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ColorTarget,
                 m_DepthTexture,
                 m_SkyViewLUT,
-                m_DirectionalShadowTexture);
+                m_DirectionalShadowTexture,
+                m_CSMShadowAtlas,
+                !ReferenceEquals(m_CSMShadowAtlas, m_LocalCSMShadowAtlas));
         }
 
-        public override void Record(RasterPassContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (!m_ShouldInject)
                 return;
 
-            var cmd = context.cmd;
-            using (new ProfilingScope(cmd, profilingSampler))
+            var nativeCmd = context.GetNativeCommandBuffer();
+            using (new ProfilingScope(nativeCmd, profilingSampler))
             {
-                SkyManager.RenderSkyInjection(cmd);
+                nativeCmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);
+                SkyManager.RenderSkyInjection(context);
             }
         }
 

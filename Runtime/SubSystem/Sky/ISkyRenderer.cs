@@ -23,8 +23,10 @@ namespace VividRP.Runtime
             RenderGraphTexture colorTarget,
             RenderGraphTexture depthTexture,
             RenderGraphTexture skyViewLut,
-            RenderGraphTexture directionalShadowTexture);
+            RenderGraphTexture directionalShadowTexture,
+            RenderGraphTexture csmShadowAtlas,
+            bool hasConnectedCSMShadowAtlas);
 
-        void RenderSky(RasterCommandBuffer cmd);
+        void RenderSky(UnsafePassContext context);
     }
 }

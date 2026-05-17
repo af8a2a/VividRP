@@ -39,6 +39,8 @@ namespace VividRP.Editor
         internal SerializedProperty volumetricFadeDistance { get; }
         internal SerializedProperty volumetricShadowDimmer { get; }
         internal SerializedProperty interactsWithSky { get; }
+        internal SerializedProperty enableTimeOfDay { get; }
+        internal SerializedProperty timeOfDay { get; }
         internal SerializedProperty angularDiameter { get; }
         internal SerializedProperty diameterMultiplierMode { get; }
         internal SerializedProperty diameterMultiplier { get; }
@@ -109,6 +111,8 @@ namespace VividRP.Editor
             volumetricFadeDistance = serializedAdditionalDataObject.FindProperty("m_VolumetricFadeDistance");
             volumetricShadowDimmer = serializedAdditionalDataObject.FindProperty("m_VolumetricShadowDimmer");
             interactsWithSky = serializedAdditionalDataObject.FindProperty("m_InteractsWithSky");
+            enableTimeOfDay = serializedAdditionalDataObject.FindProperty("m_EnableTimeOfDay");
+            timeOfDay = serializedAdditionalDataObject.FindProperty("m_TimeOfDay");
             angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
             diameterMultiplierMode = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplierMode");
             diameterMultiplier = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplier");

@@ -129,7 +129,9 @@ namespace VividRP.Runtime
             RenderGraphTexture colorTarget,
             RenderGraphTexture depthTexture,
             RenderGraphTexture skyViewLut,
-            RenderGraphTexture directionalShadowTexture)
+            RenderGraphTexture directionalShadowTexture,
+            RenderGraphTexture csmShadowAtlas,
+            bool hasConnectedCSMShadowAtlas)
         {
             m_ColorTarget = colorTarget;
             m_DepthTexture = depthTexture;
@@ -152,7 +154,7 @@ namespace VividRP.Runtime
             m_RenderRotation = skyData.rotation;
         }
 
-        public void RenderSky(RasterCommandBuffer cmd)
+        public void RenderSky(UnsafePassContext context)
         {
             if (!m_ShouldRenderSky
                 || m_ColorTarget == null
@@ -163,6 +165,7 @@ namespace VividRP.Runtime
                 return;
             }
 
+            var cmd = context.GetNativeCommandBuffer();
             cmd.SetViewport(m_RenderViewport);
 
             var properties = m_RenderPropertyBlock;

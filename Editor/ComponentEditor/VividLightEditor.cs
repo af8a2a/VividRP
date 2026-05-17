@@ -28,6 +28,7 @@ namespace VividRP.Editor
             Volumetric = 1 << 9,
             CelestialBody = 1 << 10,
             RayTracedShadow = 1 << 11,
+            TimeOfDay = 1 << 12,
         }
 
         private const Expandable DefaultExpandedState =
@@ -42,7 +43,8 @@ namespace VividRP.Editor
             | Expandable.BarnDoor
             | Expandable.Volumetric
             | Expandable.CelestialBody
-            | Expandable.RayTracedShadow;
+            | Expandable.RayTracedShadow
+            | Expandable.TimeOfDay;
 
         private static ExpandedState<Expandable, VividLightEditor> s_ExpandedState;
 
@@ -86,6 +88,9 @@ namespace VividRP.Editor
         private static readonly GUIContent s_VolumetricDimmerLabel = EditorGUIUtility.TrTextContent("Dimmer", "Controls how much this light contributes to volumetric fog.");
         private static readonly GUIContent s_VolumetricFadeDistanceLabel = EditorGUIUtility.TrTextContent("Fade Distance", "Distance from the camera at which this local light stops contributing to volumetric fog.");
         private static readonly GUIContent s_VolumetricShadowDimmerLabel = EditorGUIUtility.TrTextContent("Shadow Dimmer", "Controls how strongly this light's shadows affect volumetric fog.");
+        private static readonly GUIContent s_TimeOfDayLabel = EditorGUIUtility.TrTextContent("Time of Day");
+        private static readonly GUIContent s_EnableTimeOfDayLabel = EditorGUIUtility.TrTextContent("Enable Time of Day");
+        private static readonly GUIContent s_TimeOfDayValueLabel = EditorGUIUtility.TrTextContent("Time", "Controls the directional light azimuth and Lux intensity over a 24 hour day.");
         private static readonly GUIContent s_CelestialBodyLabel = EditorGUIUtility.TrTextContent("Celestial Body");
         private static readonly GUIContent s_InteractsWithSkyLabel = EditorGUIUtility.TrTextContent("Affect Physically Based Sky", "Check this option to make the light and the Physically Based sky affect one another.");
         private static readonly GUIContent s_AngularDiameterLabel = EditorGUIUtility.TrTextContent("Angular Diameter", "Angular diameter of the emissive celestial body represented by the light as seen from the camera (in degrees). Used to render the sun/moon disk and affects the sharpness of shadows.");
@@ -140,6 +145,7 @@ namespace VividRP.Editor
         private const int DiameterModePopupWidth = 70;
 
         private VividSerializedLight m_SerializedLight;
+        private bool m_ShouldApplyTimeOfDay;
         private static MethodInfo s_TextureMiniThumbnailMethod;
         private static bool s_TextureMiniThumbnailMethodResolved;
         private static readonly Func<GUIContent, bool, bool, bool> s_DrawSubHeaderFoldout =
@@ -160,9 +166,13 @@ namespace VividRP.Editor
         public override void OnInspectorGUI()
         {
             m_SerializedLight.Update();
+            m_ShouldApplyTimeOfDay = false;
             DrawBuiltInLightInspector();
             DrawVividInspector();
             m_SerializedLight.Apply();
+            if (m_ShouldApplyTimeOfDay)
+                ApplyTimeOfDayToSelectedLights();
+
             NormalizeSelectedLightIntensityUnits();
         }
 
@@ -291,6 +301,7 @@ namespace VividRP.Editor
                 DrawVividGeneralInspector();
 
             DrawVolumetricInspector();
+            DrawTimeOfDayInspector();
             DrawPhysicallyBasedSkyInspector();
             DrawRayTracedShadowInspector();
         }
@@ -306,6 +317,30 @@ namespace VividRP.Editor
                 {
                     EditorGUILayout.PropertyField(m_SerializedLight.shadowRenderingLayers, s_ShadowRenderingLayersLabel);
                 }
+            }
+        }
+
+        private void DrawTimeOfDayInspector()
+        {
+            if (!ShouldShowDirectionalTimeOfDayControls(m_SerializedLight))
+                return;
+
+            if (!DrawLightFoldout(Expandable.TimeOfDay, s_TimeOfDayLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.PropertyField(m_SerializedLight.enableTimeOfDay, s_EnableTimeOfDayLabel);
+
+                if (m_SerializedLight.enableTimeOfDay.hasMultipleDifferentValues
+                    || m_SerializedLight.enableTimeOfDay.boolValue)
+                {
+                    EditorGUILayout.Slider(m_SerializedLight.timeOfDay, 0.0f, 24.0f, s_TimeOfDayValueLabel);
+                }
+
+                if (EditorGUI.EndChangeCheck())
+                    m_ShouldApplyTimeOfDay = true;
             }
         }
 
@@ -453,6 +488,15 @@ namespace VividRP.Editor
         }
 
         internal static bool ShouldShowDirectionalRayTracedShadowControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && serializedLight.settings.light.type == LightType.Directional;
+        }
+
+        internal static bool ShouldShowDirectionalTimeOfDayControls(VividSerializedLight serializedLight)
         {
             return serializedLight != null
                 && serializedLight.settings != null
@@ -731,6 +775,29 @@ namespace VividRP.Editor
                     continue;
 
                 VividLightIntensityUnitUtility.NormalizeUnsupportedLightUnit(light);
+            }
+        }
+
+        private void ApplyTimeOfDayToSelectedLights()
+        {
+            if (m_SerializedLight?.lightsAdditionalData == null)
+                return;
+
+            foreach (var additionalData in m_SerializedLight.lightsAdditionalData)
+            {
+                if (additionalData == null || !additionalData.enableTimeOfDay)
+                    continue;
+
+                var targetLight = additionalData.light;
+                if (targetLight == null)
+                    continue;
+
+                Undo.RecordObject(targetLight, "Apply Time of Day");
+                Undo.RecordObject(targetLight.transform, "Apply Time of Day");
+                additionalData.ApplyTimeOfDayToLight();
+                additionalData.NotifyLightDataChanged();
+                EditorUtility.SetDirty(targetLight);
+                EditorUtility.SetDirty(targetLight.transform);
             }
         }
     }

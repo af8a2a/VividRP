@@ -180,8 +180,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_AtmosphereLutCache.Update(context, cmd);"));
             Assert.That(source, Does.Contain("ApplyAtmosphereLutHandle(skyData);"));
             Assert.That(source, Does.Contain("public void PrepareSkyRendering("));
-            Assert.That(source, Does.Contain("public void RenderSky(RasterCommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("public void RenderSky(UnsafePassContext context)"));
             Assert.That(source, Does.Contain("ImportSkyViewLutForPass(skyViewLut);"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCache.RenderAtmosphericScattering("));
+            Assert.That(source, Does.Contain("context.GetOrCreate<VividShadowData>()"));
             Assert.That(source, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
             Assert.That(source, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
             Assert.That(source, Does.Contain("cmd.SetViewport(m_RenderViewport);"));

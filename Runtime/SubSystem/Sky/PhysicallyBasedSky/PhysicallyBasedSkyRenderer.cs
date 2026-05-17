@@ -74,6 +74,8 @@ namespace VividRP.Runtime
         private RenderGraphTexture m_DepthTexture;
         private RenderGraphTexture m_SkyViewLut;
         private RenderGraphTexture m_DirectionalShadowTexture;
+        private RenderGraphTexture m_CSMShadowAtlas;
+        private bool m_HasConnectedCSMShadowAtlas;
         private Rect m_RenderViewport;
         private bool m_ShouldRenderSky;
         private PhysicallyBasedSkyVolume m_RenderVolume;
@@ -234,12 +236,16 @@ namespace VividRP.Runtime
             RenderGraphTexture colorTarget,
             RenderGraphTexture depthTexture,
             RenderGraphTexture skyViewLut,
-            RenderGraphTexture directionalShadowTexture)
+            RenderGraphTexture directionalShadowTexture,
+            RenderGraphTexture csmShadowAtlas,
+            bool hasConnectedCSMShadowAtlas)
         {
             m_ColorTarget = colorTarget;
             m_DepthTexture = depthTexture;
             m_SkyViewLut = skyViewLut;
             m_DirectionalShadowTexture = directionalShadowTexture;
+            m_CSMShadowAtlas = csmShadowAtlas;
+            m_HasConnectedCSMShadowAtlas = hasConnectedCSMShadowAtlas;
             m_RenderContext = context;
             m_RenderVolume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
             m_RenderViewport = ResolveRenderViewport(context.cameraData, colorTarget);
@@ -272,7 +278,7 @@ namespace VividRP.Runtime
             m_CelestialBodyBuffer.Update(context);
         }
 
-        public void RenderSky(RasterCommandBuffer cmd)
+        public void RenderSky(UnsafePassContext context)
         {
             if (!m_ShouldRenderSky
                 || m_SkyMaterial == null
@@ -284,6 +290,11 @@ namespace VividRP.Runtime
                 return;
             }
 
+            var cmd = context.GetNativeCommandBuffer();
+            m_AtmosphereLutCache.RenderAtmosphericScattering(
+                cmd,
+                m_HasConnectedCSMShadowAtlas ? m_CSMShadowAtlas : null,
+                context.GetOrCreate<VividShadowData>());
             cmd.SetViewport(m_RenderViewport);
 
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
@@ -349,6 +360,8 @@ namespace VividRP.Runtime
             m_DepthTexture = null;
             m_SkyViewLut = null;
             m_DirectionalShadowTexture = null;
+            m_CSMShadowAtlas = null;
+            m_HasConnectedCSMShadowAtlas = false;
             m_RenderViewport = default;
             m_ShouldRenderSky = false;
             m_RenderVolume = null;

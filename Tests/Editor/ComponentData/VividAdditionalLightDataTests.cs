@@ -159,6 +159,8 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.volumetricFadeDistance, Is.Not.Null);
             Assert.That(serializedLight.volumetricShadowDimmer, Is.Not.Null);
             Assert.That(serializedLight.interactsWithSky, Is.Not.Null);
+            Assert.That(serializedLight.enableTimeOfDay, Is.Not.Null);
+            Assert.That(serializedLight.timeOfDay, Is.Not.Null);
             Assert.That(serializedLight.angularDiameter, Is.Not.Null);
             Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
             Assert.That(serializedLight.diameterMultiplier, Is.Not.Null);
@@ -531,6 +533,96 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TimeOfDaySettings_DefaultToExpectedValues_OnDirectionalLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(additionalData.enableTimeOfDay, Is.False);
+            Assert.That(additionalData.timeOfDay, Is.EqualTo(VividAdditionalLightData.DefaultTimeOfDay));
+            Assert.That(
+                additionalData.timeOfDayMaximumLux,
+                Is.EqualTo(VividAdditionalLightData.DefaultTimeOfDayMaximumLux));
+            Assert.That(additionalData.supportsTimeOfDay, Is.True);
+        }
+
+        [Test]
+        public void TimeOfDaySettings_ApplyDirectionalRotationAndLux_WhenEnabled()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.lightUnit = LightUnit.Candela;
+            light.luxAtDistance = 12.0f;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            var database = VividLightRenderDatabase.instance;
+
+            database.Clear();
+
+            additionalData.enableTimeOfDay = true;
+
+            Assert.That(light.lightUnit, Is.EqualTo(LightUnit.Lux));
+            Assert.That(light.luxAtDistance, Is.EqualTo(1.0f));
+            Assert.That(light.intensity, Is.GreaterThan(100000.0f));
+            Assert.That(light.transform.forward.y, Is.LessThan(-0.99f));
+            Assert.That(database.TryGetLightData(light, out var trackedLightData), Is.True);
+            Assert.That(trackedLightData.intensity, Is.EqualTo(light.intensity).Within(0.0001f));
+
+            additionalData.timeOfDay = 6.0f;
+
+            Assert.That(light.intensity, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.transform.forward.x, Is.LessThan(-0.99f));
+            Assert.That(database.TryGetLightData(light, out trackedLightData), Is.True);
+            Assert.That(trackedLightData.intensity, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void TimeOfDaySettings_DoNotApply_OnNonDirectionalLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.lightUnit = LightUnit.Candela;
+            light.intensity = 7.0f;
+            light.luxAtDistance = 5.0f;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            additionalData.enableTimeOfDay = true;
+            additionalData.timeOfDay = 18.0f;
+
+            Assert.That(additionalData.enableTimeOfDay, Is.False);
+            Assert.That(additionalData.supportsTimeOfDay, Is.False);
+            Assert.That(light.type, Is.EqualTo(LightType.Point));
+            Assert.That(light.lightUnit, Is.EqualTo(LightUnit.Candela));
+            Assert.That(light.luxAtDistance, Is.EqualTo(5.0f));
+            Assert.That(light.intensity, Is.EqualTo(7.0f));
+        }
+
+        [Test]
+        public void EvaluateTimeOfDaySun_ProducesExpectedAzimuthAndLux()
+        {
+            var noon = VividAdditionalLightData.EvaluateTimeOfDaySun(
+                12.0f,
+                VividAdditionalLightData.DefaultTimeOfDayMaximumLux);
+
+            Assert.That(noon.elevationDegrees, Is.EqualTo(90.0f).Within(0.0001f));
+            Assert.That(noon.azimuthDegrees, Is.EqualTo(180.0f).Within(0.0001f));
+            Assert.That(noon.directionToSun.y, Is.GreaterThan(0.99f));
+            Assert.That(noon.lux, Is.EqualTo(VividAdditionalLightData.DefaultTimeOfDayMaximumLux).Within(0.1f));
+
+            var sunrise = VividAdditionalLightData.EvaluateTimeOfDaySun(
+                6.0f,
+                VividAdditionalLightData.DefaultTimeOfDayMaximumLux);
+
+            Assert.That(sunrise.elevationDegrees, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(sunrise.azimuthDegrees, Is.EqualTo(90.0f).Within(0.0001f));
+            Assert.That(sunrise.directionToSun.x, Is.GreaterThan(0.99f));
+            Assert.That(sunrise.lux, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
         public void CelestialBodySettings_ClampAngularDiameterToHdrpRange()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -636,6 +728,37 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(
                     VividLightEditor.ShouldShowDirectionalPhysicallyBasedSkyControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsDirectionalTimeOfDayControls_OnlyForDirectionalLights()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalTimeOfDayControls(serializedDirectionalLight),
+                Is.True);
+
+            var pointLightObject = new GameObject("Vivid Point Light Time Of Day Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowDirectionalTimeOfDayControls(serializedPointLight),
                     Is.False);
             }
             finally

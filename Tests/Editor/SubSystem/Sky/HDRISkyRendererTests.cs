@@ -32,9 +32,10 @@ namespace VividRP.Editor.Tests
             var interfaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "ISkyRenderer.cs"));
 
             Assert.That(interfaceSource, Does.Contain("void PrepareSkyRendering("));
-            Assert.That(interfaceSource, Does.Contain("void RenderSky(RasterCommandBuffer cmd);"));
+            Assert.That(interfaceSource, Does.Contain("void RenderSky(UnsafePassContext context);"));
             Assert.That(source, Does.Contain("public void PrepareSkyRendering("));
-            Assert.That(source, Does.Contain("public void RenderSky(RasterCommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("public void RenderSky(UnsafePassContext context)"));
+            Assert.That(source, Does.Contain("var cmd = context.GetNativeCommandBuffer();"));
             Assert.That(source, Does.Contain("cmd.SetViewport(m_RenderViewport);"));
             Assert.That(source, Does.Contain("properties.SetMatrix(PixelCoordToViewDirWSId, m_PixelCoordToViewDirMatrix);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_Material, properties, 0);"));
@@ -69,8 +70,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("renderer.Update(context, s_CachedSkyData, cmd, skyHash, forceRebuild);"));
             Assert.That(source, Does.Contain("internal static bool PrepareSkyInjection("));
             Assert.That(source, Does.Contain("s_ActiveRenderer.PrepareSkyRendering("));
-            Assert.That(source, Does.Contain("internal static void RenderSkyInjection(RasterCommandBuffer cmd)"));
-            Assert.That(source, Does.Contain("s_PendingSkyRenderer.RenderSky(cmd);"));
+            Assert.That(source, Does.Contain("internal static void RenderSkyInjection(UnsafePassContext context)"));
+            Assert.That(source, Does.Contain("s_PendingSkyRenderer.RenderSky(context);"));
             Assert.That(source, Does.Contain("var useDefaultAmbientProbe = skyData == null || skyData.ambientProbeCubemap == null;"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
             Assert.That(source, Does.Contain("BindGlobalSkyTexture(cmd, s_CachedSkyData);"));

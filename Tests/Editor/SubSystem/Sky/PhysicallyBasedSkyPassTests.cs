@@ -21,7 +21,8 @@ namespace VividRP.Editor.Tests
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
 
-            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "Color", "Depth", "DirectionalShadowTexture", "SkyViewLUT" }));
+            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "CSMShadowAtlas", "Color", "Depth", "DirectionalShadowTexture", "SkyViewLUT" }));
+            Assert.That(textureEntries.Single(entry => entry.Name == "CSMShadowAtlas").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "DirectionalShadowTexture").Access, Is.EqualTo(AccessFlags.Read));
@@ -40,9 +41,11 @@ namespace VividRP.Editor.Tests
 
             Assert.That(injectionPassSource, Does.Contain("m_SkyViewLUT = RenderGraphTexture.CreateInput(\"SkyViewLUT\", GraphicsFormat.R16G16B16A16_SFloat);"));
             Assert.That(injectionPassSource, Does.Contain("m_DirectionalShadowTexture = RenderGraphTexture.CreateInput(\"DirectionalShadowTexture\", GraphicsFormat.R16_SFloat);"));
-            Assert.That(injectionPassSource, Does.Contain("public class SkyInjectionPass : RasterPass"));
+            Assert.That(injectionPassSource, Does.Contain("m_LocalCSMShadowAtlas = RenderGraphTexture.CreateInput(\"CSMShadowAtlas\", GraphicsFormat.None, DepthBits.Depth16);"));
+            Assert.That(injectionPassSource, Does.Contain("public class SkyInjectionPass : UnsafePass, IAllowGlobalStateModificationPass"));
             Assert.That(injectionPassSource, Does.Contain("SkyManager.PrepareSkyInjection("));
-            Assert.That(injectionPassSource, Does.Contain("SkyManager.RenderSkyInjection(cmd);"));
+            Assert.That(injectionPassSource, Does.Contain("nativeCmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
+            Assert.That(injectionPassSource, Does.Contain("SkyManager.RenderSkyInjection(context);"));
             Assert.That(injectionPassSource, Does.Not.Contain("SkyManager.ImportSkyViewLut("));
             Assert.That(registrySource, Does.Contain("internal sealed class SkyInjectionPass : RenderPassNodeData"));
             Assert.That(registrySource, Does.Not.Contain("internal sealed class AtmosphereLUTPass : RenderPassNodeData"));
@@ -54,11 +57,13 @@ namespace VividRP.Editor.Tests
 
             Assert.That(rendererSource, Does.Contain("private const string PhysicallyBasedSkyShaderName = \"Hidden/VividRP/PhysicallyBasedSky\";"));
             Assert.That(rendererSource, Does.Contain("public void PrepareSkyRendering("));
-            Assert.That(rendererSource, Does.Contain("public void RenderSky(RasterCommandBuffer cmd)"));
+            Assert.That(rendererSource, Does.Contain("public void RenderSky(UnsafePassContext context)"));
             Assert.That(rendererSource, Does.Contain("ImportSkyViewLutForPass(skyViewLut);"));
             Assert.That(rendererSource, Does.Contain("PassRecorder.ImportTexture(skyViewLut, handle);"));
             Assert.That(rendererSource, Does.Not.Contain("cmd.SetRenderTarget(m_ColorTarget, m_DepthTexture);"));
             Assert.That(rendererSource, Does.Contain("cmd.SetViewport(m_RenderViewport);"));
+            Assert.That(rendererSource, Does.Contain("m_AtmosphereLutCache.RenderAtmosphericScattering("));
+            Assert.That(rendererSource, Does.Contain("m_HasConnectedCSMShadowAtlas ? m_CSMShadowAtlas : null"));
             Assert.That(rendererSource, Does.Contain("UpdateLocalSkyPrecomputation(context, skyData, cmd);"));
             Assert.That(rendererSource, Does.Contain("var skyViewTexture = ResolveSkyViewTexture();"));
             Assert.That(rendererSource, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));

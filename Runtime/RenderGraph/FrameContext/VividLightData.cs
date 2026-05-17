@@ -290,7 +290,7 @@ namespace VividRP.Runtime
         public int mainDirectionalLightIndex;
         public EntityId mainDirectionalLightEntityId;
 
-        // LightGrid candidate build runs on a Burst job scheduled in Update and completed by LightGridPass.Prepare.
+        // LightGrid/ReGIR candidate builds run on Burst jobs scheduled in Update and completed by LightGrid/ReGIR Prepare.
         // The fields below are owned by VividLightData while the job is in flight; do not access from outside CompleteLightGridPrepare.
         private NativeList<VisibleLightRenderDataRecord> m_LightGridVisibleLightRecords;
         private NativeList<PunctualLightCandidate> m_LightGridPunctualCandidates;
@@ -299,6 +299,7 @@ namespace VividRP.Runtime
         private NativeList<LightVolumeData> m_LightGridPunctualLightVolumeData;
         private NativeList<SFiniteLightBound> m_LightGridAreaLightBounds;
         private NativeList<LightVolumeData> m_LightGridAreaLightVolumeData;
+        private NativeList<VividLightRenderData> m_ReGIRSceneLightSourceRecords;
         private NativeList<VividLightRenderData> m_ReGIRSceneLightRecords;
         private NativeList<VividReGIRLightData> m_LightGridReGIRLights;
         private JobHandle m_LightGridJobHandle;
@@ -419,6 +420,7 @@ namespace VividRP.Runtime
             ClearLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
             ClearLightGridBuffer(ref m_LightGridAreaLightBounds);
             ClearLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+            ClearLightGridBuffer(ref m_ReGIRSceneLightSourceRecords);
             ClearLightGridBuffer(ref m_ReGIRSceneLightRecords);
             ClearLightGridBuffer(ref m_LightGridReGIRLights);
         }
@@ -432,6 +434,7 @@ namespace VividRP.Runtime
             DisposeLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
             DisposeLightGridBuffer(ref m_LightGridAreaLightBounds);
             DisposeLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+            DisposeLightGridBuffer(ref m_ReGIRSceneLightSourceRecords);
             DisposeLightGridBuffer(ref m_ReGIRSceneLightRecords);
             DisposeLightGridBuffer(ref m_LightGridReGIRLights);
         }
@@ -717,16 +720,9 @@ namespace VividRP.Runtime
             if (visibleLightCount > 0)
                 CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
 
-            CollectReGIRSceneLightRenderDataRecords(
-                sceneLightData,
-                ResolveCameraPositionWS(worldToViewMatrix),
-                new Vector3(
-                    DefaultReGIRCollectionBoxHalfExtent,
-                    DefaultReGIRCollectionBoxHalfExtent,
-                    DefaultReGIRCollectionBoxHalfExtent),
-                m_ReGIRSceneLightRecords);
+            CollectReGIRSceneLightSourceRecords(sceneLightData, m_ReGIRSceneLightSourceRecords);
 
-            if (m_LightGridVisibleLightRecords.Length == 0 && m_ReGIRSceneLightRecords.Length == 0)
+            if (m_LightGridVisibleLightRecords.Length == 0 && m_ReGIRSceneLightSourceRecords.Length == 0)
             {
                 ClearLightGridBuffers();
                 return;
@@ -734,10 +730,26 @@ namespace VividRP.Runtime
 
             CollectDirectionalLightCandidatesAndApply(m_LightGridVisibleLightRecords, sunLight);
 
+            var collectReGIRJobHandle = default(JobHandle);
+            if (m_ReGIRSceneLightSourceRecords.Length > 0)
+            {
+                var collectReGIRSceneLightJob = new CollectReGIRSceneLightRenderDataRecordsJob
+                {
+                    sceneLightRenderDataRecords = m_ReGIRSceneLightSourceRecords.AsArray(),
+                    reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords,
+                    collectionBoxCenterWS = ResolveCameraPositionWS(worldToViewMatrix),
+                    collectionBoxHalfExtents = new Vector3(
+                        DefaultReGIRCollectionBoxHalfExtent,
+                        DefaultReGIRCollectionBoxHalfExtent,
+                        DefaultReGIRCollectionBoxHalfExtent),
+                };
+                collectReGIRJobHandle = collectReGIRSceneLightJob.Schedule();
+            }
+
             var buildLightGridJob = new BuildLightGridLightCandidatesJob
             {
                 visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
-                reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords.AsArray(),
+                reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords.AsDeferredJobArray(),
                 punctualLights = m_LightGridPunctualCandidates,
                 areaLights = m_LightGridAreaCandidates,
                 reGIRLights = m_LightGridReGIRLights,
@@ -747,7 +759,7 @@ namespace VividRP.Runtime
                 areaLightVolumeData = m_LightGridAreaLightVolumeData,
                 worldToViewMatrix = worldToViewMatrix,
             };
-            m_LightGridJobHandle = buildLightGridJob.Schedule();
+            m_LightGridJobHandle = buildLightGridJob.Schedule(collectReGIRJobHandle);
             m_LightGridJobScheduled = true;
             JobHandle.ScheduleBatchedJobs();
         }
@@ -760,6 +772,7 @@ namespace VividRP.Runtime
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridAreaCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridReGIRLights, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_ReGIRSceneLightSourceRecords, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_ReGIRSceneLightRecords, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightBounds, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightVolumeData, lightCapacity);
@@ -945,27 +958,12 @@ namespace VividRP.Runtime
             }
         }
 
-        private static void CollectReGIRSceneLightRenderDataRecords(
-            IReadOnlyList<VividLightRenderData> registeredLightData,
-            Vector3 collectionBoxCenterWS,
-            Vector3 collectionBoxHalfExtents,
-            NativeList<VividLightRenderData> reGIRLightRenderDataRecords)
+        private static void CollectReGIRSceneLightSourceRecords(
+            IReadOnlyList<VividLightRenderData> sceneLightData,
+            NativeList<VividLightRenderData> reGIRSceneLightSourceRecords)
         {
-            for (var lightIndex = 0; lightIndex < registeredLightData.Count; lightIndex++)
-            {
-                var trackedLightData = registeredLightData[lightIndex];
-                if (!IsReGIRLightSupported(trackedLightData)
-                    || !IsLightEnabledAndActive(trackedLightData)
-                    || !IntersectsReGIRCollectionBox(
-                        trackedLightData,
-                        collectionBoxCenterWS,
-                        collectionBoxHalfExtents))
-                {
-                    continue;
-                }
-
-                reGIRLightRenderDataRecords.AddNoResize(trackedLightData);
-            }
+            for (var lightIndex = 0; lightIndex < sceneLightData.Count; lightIndex++)
+                reGIRSceneLightSourceRecords.AddNoResize(sceneLightData[lightIndex]);
         }
 
         private static VividLightRenderData GetVisibleLightRenderData(Light light, VisibleLight visibleLight)

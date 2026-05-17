@@ -187,6 +187,35 @@ namespace VividRP.Runtime
 
 
         [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+        private struct CollectReGIRSceneLightRenderDataRecordsJob : IJob
+        {
+            [ReadOnly] public NativeArray<VividLightRenderData> sceneLightRenderDataRecords;
+
+            public NativeList<VividLightRenderData> reGIRSceneLightRenderDataRecords;
+            public Vector3 collectionBoxCenterWS;
+            public Vector3 collectionBoxHalfExtents;
+
+            public void Execute()
+            {
+                for (var lightIndex = 0; lightIndex < sceneLightRenderDataRecords.Length; lightIndex++)
+                {
+                    var trackedLightData = sceneLightRenderDataRecords[lightIndex];
+                    if (!IsReGIRLightSupported(trackedLightData)
+                        || !IsLightEnabledAndActive(trackedLightData)
+                        || !IntersectsReGIRCollectionBox(
+                            trackedLightData,
+                            collectionBoxCenterWS,
+                            collectionBoxHalfExtents))
+                    {
+                        continue;
+                    }
+
+                    reGIRSceneLightRenderDataRecords.AddNoResize(trackedLightData);
+                }
+            }
+        }
+
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
         private struct BuildLightGridLightCandidatesJob : IJob
         {
             [ReadOnly] public NativeArray<VisibleLightRenderDataRecord> visibleLightRenderDataRecords;

@@ -108,6 +108,9 @@ Shader "Hidden/VividRP/ReGIRDebug"
 
             float ResolveCellEdgeFactor(VividReGIRParameters parameters, float3 worldPos)
             {
+                if (parameters.mode != VIVID_REGIR_MODE_GRID)
+                    return 0.0;
+
                 float cellSize = max(parameters.cellSize, 1e-5);
                 float3 gridSize = float3(
                     max(parameters.gridSizeX, 1u),

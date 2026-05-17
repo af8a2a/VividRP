@@ -68,7 +68,7 @@ void ReGIRGridBuild(uint globalIndex : SV_DispatchThreadID)
             VividReGIRRandom01(rng),
             VividReGIRRandom01(rng),
             VividReGIRRandom01(rng)) - 0.5;
-        cellCenter += jitter * (parameters.cellSize * jitterScale);
+        cellCenter += jitter * VividReGIRGetJitterScale(parameters, cellCenter);
     }
 
     uint selectedLightIndex = VIVID_REGIR_INVALID_LIGHT_INDEX;

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -16,6 +17,11 @@ namespace VividRP.Editor.Tests
         private sealed class AutoRegisteredReGIRGridBuildPassNode : RenderPassNodeData
         {
             internal override Type GetRegisteredPassType() => typeof(ReGIRGridBuildPass);
+
+            internal bool TryGetMode(out VividReGIRMode value)
+            {
+                return TryGetEnumParameterValue("m_Mode", out value);
+            }
         }
 
         [Test]
@@ -34,6 +40,8 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("m_ReGIRLightBuffer"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ReGIRParameterBuffer"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ReGIRReservoirBuffer"), Is.Not.Null);
+            Assert.That(node.TryGetMode(out var mode), Is.True);
+            Assert.That(mode, Is.EqualTo(ReGIRGridBuildPass.DefaultMode));
         }
 
         [Test]
@@ -42,6 +50,49 @@ namespace VividRP.Editor.Tests
             var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[] { typeof(ReGIRGridBuildPass) });
 
             Assert.That(registrations.Select(registration => registration.NodeClassName), Contains.Item(nameof(ReGIRGridBuildPass)));
+        }
+
+        [Test]
+        public void ApplyEnumParameters_UpdatesMode()
+        {
+            var pass = new ReGIRGridBuildPass();
+
+            RenderGraphPassEnumParameterUtility.ApplyEnumParameters(
+                pass,
+                typeof(ReGIRGridBuildPass),
+                new List<RenderGraphPassEnumParameter>
+                {
+                    new()
+                    {
+                        FieldName = "m_Mode",
+                        Value = (int)VividReGIRMode.Onion,
+                    }
+                });
+
+            Assert.That(pass.Mode, Is.EqualTo(VividReGIRMode.Onion));
+        }
+
+        [Test]
+        public void Compile_IncludesModeEnumParameter_WhenReGIRGridBuildPassNodeIsPresent()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new AutoRegisteredReGIRGridBuildPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, node);
+
+                var result = RenderGraphCompiler.Compile(graph);
+
+                Assert.That(result.Passes, Has.Count.EqualTo(1));
+                Assert.That(result.Passes[0].EnumParameters, Has.Count.EqualTo(1));
+                Assert.That(result.Passes[0].EnumParameters.Single().FieldName, Is.EqualTo("m_Mode"));
+                Assert.That(result.Passes[0].EnumParameters.Single().Value, Is.EqualTo((int)ReGIRGridBuildPass.DefaultMode));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
         }
 
         [Test]
@@ -72,8 +123,41 @@ namespace VividRP.Editor.Tests
                 Assert.That(parameterBuffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
                 Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultSlotCount()));
                 Assert.That(reservoirBuffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
+                Assert.That(GetFieldValue<VividReGIRParameters>(pass, "m_ReGIRParameters").mode, Is.EqualTo(VividReGIRMode.Grid));
                 AssertImportedBackingBuffer(lightBuffer);
                 AssertImportedBackingBuffer(parameterBuffer);
+                AssertImportedBackingBuffer(reservoirBuffer);
+            }
+            finally
+            {
+                pass.Dispose();
+            }
+        }
+
+        [Test]
+        public void Prepare_ResizesReservoirBuffer_ForOnionMode()
+        {
+            var pass = new ReGIRGridBuildPass
+            {
+                Mode = VividReGIRMode.Onion,
+            };
+
+            try
+            {
+                var frameData = new ContextContainer();
+
+                pass.Prepare(frameData);
+
+                var reservoirBuffer = GetBuffer(pass, "m_ReGIRReservoirBuffer");
+                var parameters = GetFieldValue<VividReGIRParameters>(pass, "m_ReGIRParameters");
+
+                Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultOnionSlotCount()));
+                Assert.That(parameters.mode, Is.EqualTo(VividReGIRMode.Onion));
+                Assert.That(parameters.onionCellCount, Is.EqualTo((uint)ExpectedDefaultOnionCellCount()));
+                Assert.That(parameters.onionLayerGroupCount, Is.EqualTo((uint)ReGIRGridBuildPass.DefaultOnionDetailLayerGroups));
+                Assert.That(parameters.onionRingCount, Is.EqualTo(25u));
+                Assert.That(parameters.onionCubicRootFactor, Is.GreaterThan(0f));
+                Assert.That(parameters.onionLinearFactor, Is.GreaterThan(0f));
                 AssertImportedBackingBuffer(reservoirBuffer);
             }
             finally
@@ -166,6 +250,13 @@ namespace VividRP.Editor.Tests
             return (RenderGraphBuffer)field.GetValue(pass);
         }
 
+        private static T GetFieldValue<T>(ReGIRGridBuildPass pass, string fieldName)
+        {
+            var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            return (T)field.GetValue(pass);
+        }
+
         private static void AssertImportedBackingBuffer(RenderGraphBuffer buffer)
         {
             var importedGraphicsBufferProperty = typeof(RenderGraphBuffer).GetProperty(
@@ -186,6 +277,18 @@ namespace VividRP.Editor.Tests
                 * ReGIRGridBuildPass.DefaultGridSizeY
                 * ReGIRGridBuildPass.DefaultGridSizeZ
                 * ReGIRGridBuildPass.DefaultLightsPerCell;
+        }
+
+        private static int ExpectedDefaultOnionCellCount()
+        {
+            return ReGIRGridBuildPass.ComputeOnionCellCount(
+                ReGIRGridBuildPass.DefaultOnionDetailLayerGroups,
+                ReGIRGridBuildPass.DefaultOnionCoverageLayers);
+        }
+
+        private static int ExpectedDefaultOnionSlotCount()
+        {
+            return ExpectedDefaultOnionCellCount() * ReGIRGridBuildPass.DefaultLightsPerCell;
         }
 
         private static string GetPassTypeName<T>()

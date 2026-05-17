@@ -3,6 +3,13 @@ using UnityEngine;
 
 namespace VividRP.Runtime
 {
+    public enum VividReGIRMode : uint
+    {
+        Disabled = 0u,
+        Grid = 1u,
+        Onion = 2u,
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct VividReGIRLightData
     {
@@ -29,8 +36,11 @@ namespace VividRP.Runtime
     }
 
     [StructLayout(LayoutKind.Sequential)]
-    public struct VividReGIRParameters
+    public unsafe struct VividReGIRParameters
     {
+        public const int OnionMaxLayerGroups = 8;
+        public const int OnionMaxRings = 52;
+
         public Vector3 centerWS;
         public float cellSize;
         public uint gridSizeX;
@@ -42,9 +52,31 @@ namespace VividRP.Runtime
         public uint buildSamples;
         public float samplingJitter;
         public uint frameIndex;
+        public VividReGIRMode mode;
+        public uint onionCellCount;
+        public uint onionLayerGroupCount;
+        public float onionCubicRootFactor;
+        public float onionLinearFactor;
+        public uint onionRingCount;
         public uint pad0;
-        public uint pad1;
-        public uint pad2;
+
+        public fixed float onionLayerInnerRadius[OnionMaxLayerGroups];
+        public fixed float onionLayerOuterRadius[OnionMaxLayerGroups];
+        public fixed float onionLayerInvLogLayerScale[OnionMaxLayerGroups];
+        public fixed uint onionLayerCount[OnionMaxLayerGroups];
+        public fixed float onionLayerInvEquatorialCellAngle[OnionMaxLayerGroups];
+        public fixed uint onionLayerCellsPerLayer[OnionMaxLayerGroups];
+        public fixed uint onionLayerRingOffset[OnionMaxLayerGroups];
+        public fixed uint onionLayerRingCount[OnionMaxLayerGroups];
+        public fixed float onionLayerEquatorialCellAngle[OnionMaxLayerGroups];
+        public fixed float onionLayerScale[OnionMaxLayerGroups];
+        public fixed uint onionLayerCellOffset[OnionMaxLayerGroups];
+        public fixed uint onionLayerPad[OnionMaxLayerGroups];
+
+        public fixed float onionRingCellAngle[OnionMaxRings];
+        public fixed float onionRingInvCellAngle[OnionMaxRings];
+        public fixed uint onionRingCellOffset[OnionMaxRings];
+        public fixed uint onionRingCellCount[OnionMaxRings];
 
         internal static int Stride => Marshal.SizeOf<VividReGIRParameters>();
     }

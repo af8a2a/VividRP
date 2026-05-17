@@ -247,7 +247,7 @@ bool VividReGIRGridCellIndexToWorldPos(VividReGIRParameters parameters, uint cel
     float3 gridSize = float3(parameters.gridSizeX, parameters.gridSizeY, parameters.gridSizeZ);
     float3 gridOrigin = parameters.centerWS - gridSize * (parameters.cellSize * 0.5);
     cellCenter = gridOrigin + (float3(cellPosition) + 0.5) * parameters.cellSize;
-    cellRadius = parameters.cellSize * (0.5 * sqrt(3.0));
+    cellRadius = parameters.cellSize * sqrt(3.0);
     return true;
 }
 

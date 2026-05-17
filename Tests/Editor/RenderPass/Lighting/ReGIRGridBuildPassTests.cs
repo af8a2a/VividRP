@@ -155,6 +155,7 @@ namespace VividRP.Editor.Tests
                 var parameterBuffer = GetBuffer(pass, "m_ReGIRParameterBuffer");
                 var reservoirBuffer = GetBuffer(pass, "m_ReGIRReservoirBuffer");
                 var lightPdfTexture = GetTexture(pass, "m_ReGIRLightPdfTexture");
+                var presampledLightBuffer = GetGraphicsBuffer(pass, "m_ReGIRPresampledLightBuffer");
                 var parameters = GetFieldValue<VividReGIRParameters>(pass, "m_ReGIRParameters");
 
                 Assert.That(lightBuffer.desc.Count, Is.EqualTo(2));
@@ -169,6 +170,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightPdfTexture.desc.EnableRandomWrite, Is.True);
                 Assert.That(lightPdfTexture.desc.UseMipMap, Is.True);
                 Assert.That(lightPdfTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
+                Assert.That(presampledLightBuffer.count, Is.EqualTo(ExpectedDefaultPresampledLightCount()));
+                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
                 Assert.That(parameters.mode, Is.EqualTo(VividReGIRMode.Grid));
                 Assert.That(parameters.sourceSamplingMode, Is.EqualTo(ReGIRGridBuildPass.DefaultSourceSamplingMode));
                 Assert.That(parameters.lightPdfTextureWidth, Is.EqualTo(2u));
@@ -177,6 +180,37 @@ namespace VividRP.Editor.Tests
                 AssertImportedBackingBuffer(lightBuffer);
                 AssertImportedBackingBuffer(parameterBuffer);
                 AssertImportedBackingBuffer(reservoirBuffer);
+            }
+            finally
+            {
+                pass.Dispose();
+            }
+        }
+
+        [Test]
+        public void Prepare_UsesOneSizedPresampledLightBuffer_ForUniformSourceSampling()
+        {
+            var pass = new ReGIRGridBuildPass
+            {
+                SourceSamplingMode = VividReGIRSourceSamplingMode.Uniform,
+            };
+
+            try
+            {
+                var frameData = new ContextContainer();
+                var lightData = frameData.GetOrCreate<VividLightData>();
+                lightData.reGIRLights = new[]
+                {
+                    new VividReGIRLightData { range = 3.0f, power = 1.0f },
+                };
+                lightData.reGIRLightCount = 1;
+
+                pass.Prepare(frameData);
+
+                var presampledLightBuffer = GetGraphicsBuffer(pass, "m_ReGIRPresampledLightBuffer");
+
+                Assert.That(presampledLightBuffer.count, Is.EqualTo(1));
+                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
             }
             finally
             {
@@ -232,6 +266,7 @@ namespace VividRP.Editor.Tests
                 var parameterBuffer = GetBuffer(pass, "m_ReGIRParameterBuffer");
                 var reservoirBuffer = GetBuffer(pass, "m_ReGIRReservoirBuffer");
                 var lightPdfTexture = GetTexture(pass, "m_ReGIRLightPdfTexture");
+                var presampledLightBuffer = GetGraphicsBuffer(pass, "m_ReGIRPresampledLightBuffer");
 
                 Assert.That(lightBuffer.desc.Count, Is.EqualTo(1));
                 Assert.That(parameterBuffer.desc.Count, Is.EqualTo(1));
@@ -239,6 +274,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightPdfTexture.desc.Width, Is.EqualTo(1));
                 Assert.That(lightPdfTexture.desc.Height, Is.EqualTo(1));
                 Assert.That(lightPdfTexture.desc.MipCount, Is.EqualTo(1));
+                Assert.That(presampledLightBuffer.count, Is.EqualTo(1));
+                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
                 AssertImportedBackingBuffer(lightBuffer);
                 AssertImportedBackingBuffer(parameterBuffer);
                 AssertImportedBackingBuffer(reservoirBuffer);
@@ -380,6 +417,13 @@ namespace VividRP.Editor.Tests
             return (RenderGraphTexture)field.GetValue(pass);
         }
 
+        private static GraphicsBuffer GetGraphicsBuffer(ReGIRGridBuildPass pass, string fieldName)
+        {
+            var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            return (GraphicsBuffer)field.GetValue(pass);
+        }
+
         private static T GetFieldValue<T>(ReGIRGridBuildPass pass, string fieldName)
         {
             var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -419,6 +463,12 @@ namespace VividRP.Editor.Tests
         private static int ExpectedDefaultOnionSlotCount()
         {
             return ExpectedDefaultOnionCellCount() * ReGIRGridBuildPass.DefaultLightsPerCell;
+        }
+
+        private static int ExpectedDefaultPresampledLightCount()
+        {
+            return ReGIRGridBuildPass.DefaultPresampledLightTileSize
+                * ReGIRGridBuildPass.DefaultPresampledLightTileCount;
         }
 
         private static string GetPassTypeName<T>()

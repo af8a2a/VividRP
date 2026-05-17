@@ -1,13 +1,19 @@
 #pragma kernel ReGIRGridBuild
 #pragma kernel ReGIRPrepareLightPdf
 #pragma kernel ReGIRReduceLightPdf
+#pragma kernel ReGIRPresampleLocalLights
 #pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ReGIR.hlsl"
 
+#define VIVID_REGIR_PRESAMPLED_LIGHT_TILE_SIZE 1024u
+#define VIVID_REGIR_PRESAMPLED_LIGHT_TILE_COUNT 128u
+#define VIVID_REGIR_PRESAMPLED_LIGHT_COUNT (VIVID_REGIR_PRESAMPLED_LIGHT_TILE_SIZE * VIVID_REGIR_PRESAMPLED_LIGHT_TILE_COUNT)
+
 StructuredBuffer<VividReGIRLightData> _ReGIRLights;
 StructuredBuffer<VividReGIRParameters> _ReGIRParameters;
 RWStructuredBuffer<VividReGIRReservoir> _ReGIRReservoirs;
+RWStructuredBuffer<uint2> _ReGIRPresampledLights;
 Texture2D<float> _ReGIRLightPdfTexture;
 RWTexture2D<float> _ReGIRLightPdfMipInput;
 RWTexture2D<float> _ReGIRLightPdfMipOutput;
@@ -29,6 +35,21 @@ float VividReGIRRandom01(inout uint state)
     return (state & 0x00ffffffu) / 16777216.0;
 }
 
+uint VividReGIRIntegerExplode(uint value)
+{
+    value = (value | (value << 8)) & 0x00FF00FFu;
+    value = (value | (value << 4)) & 0x0F0F0F0Fu;
+    value = (value | (value << 2)) & 0x33333333u;
+    value = (value | (value << 1)) & 0x55555555u;
+    return value;
+}
+
+uint VividReGIRZCurveToLinearIndex(uint2 position)
+{
+    return VividReGIRIntegerExplode(position.x)
+        | (VividReGIRIntegerExplode(position.y) << 1);
+}
+
 VividReGIRReservoir VividReGIRInvalidReservoir()
 {
     VividReGIRReservoir reservoir;
@@ -37,6 +58,11 @@ VividReGIRReservoir VividReGIRInvalidReservoir()
     reservoir.pad0 = 0u;
     reservoir.pad1 = 0u;
     return reservoir;
+}
+
+uint2 VividReGIRInvalidPresampledLight()
+{
+    return uint2(VIVID_REGIR_INVALID_LIGHT_INDEX, 0u);
 }
 
 uint VividReGIRGetPdfMipSize(uint baseSize, uint mipLevel)
@@ -76,8 +102,9 @@ void ReGIRPrepareLightPdf(uint globalIndex : SV_DispatchThreadID)
 
     uint2 texelPosition = uint2(globalIndex % pdfWidth, globalIndex / pdfWidth);
     float power = 0.0;
-    if (globalIndex < parameters.lightCount)
-        power = max(_ReGIRLights[globalIndex].power, 0.0);
+    uint lightIndex = VividReGIRZCurveToLinearIndex(texelPosition);
+    if (lightIndex < parameters.lightCount)
+        power = max(_ReGIRLights[lightIndex].power, 0.0);
 
     _ReGIRLightPdfMipOutput[texelPosition] = power;
 }
@@ -159,7 +186,7 @@ bool VividReGIRSampleLightPdf(
     if (position.x >= pdfWidth || position.y >= pdfHeight)
         return false;
 
-    uint texelIndex = position.x + position.y * pdfWidth;
+    uint texelIndex = VividReGIRZCurveToLinearIndex(position);
     if (texelIndex >= parameters.lightCount)
         return false;
 
@@ -172,20 +199,79 @@ bool VividReGIRSampleLightPdf(
     return true;
 }
 
+uint VividReGIRSelectPresampledLightTileOffset(inout uint coherentRng)
+{
+    float tileRandom = VividReGIRRandom01(coherentRng);
+    uint tileIndex = min(
+        (uint)floor(tileRandom * VIVID_REGIR_PRESAMPLED_LIGHT_TILE_COUNT),
+        VIVID_REGIR_PRESAMPLED_LIGHT_TILE_COUNT - 1u);
+    return tileIndex * VIVID_REGIR_PRESAMPLED_LIGHT_TILE_SIZE;
+}
+
+bool VividReGIRSelectPresampledSourceLight(
+    VividReGIRParameters parameters,
+    inout uint rng,
+    uint presampledLightTileOffset,
+    out uint lightIndex,
+    out float invSourcePdf)
+{
+    float sampleRandom = VividReGIRRandom01(rng);
+    uint sampleInTile = min(
+        (uint)floor(sampleRandom * VIVID_REGIR_PRESAMPLED_LIGHT_TILE_SIZE),
+        VIVID_REGIR_PRESAMPLED_LIGHT_TILE_SIZE - 1u);
+    uint2 presampledLight = _ReGIRPresampledLights[presampledLightTileOffset + sampleInTile];
+
+    lightIndex = presampledLight.x;
+    invSourcePdf = asfloat(presampledLight.y);
+    return lightIndex < parameters.lightCount && invSourcePdf > 0.0;
+}
+
 void VividReGIRSelectSourceLight(
     VividReGIRParameters parameters,
     inout uint rng,
+    uint presampledLightTileOffset,
     out uint lightIndex,
     out float invSourcePdf)
 {
     if (parameters.sourceSamplingMode == VIVID_REGIR_SOURCE_SAMPLING_POWER_RIS
-        && VividReGIRSampleLightPdf(parameters, rng, lightIndex, invSourcePdf))
+        && VividReGIRSelectPresampledSourceLight(parameters, rng, presampledLightTileOffset, lightIndex, invSourcePdf))
     {
         return;
     }
 
-    lightIndex = rng % parameters.lightCount;
+    lightIndex = min(
+        (uint)floor(VividReGIRRandom01(rng) * parameters.lightCount),
+        parameters.lightCount - 1u);
     invSourcePdf = float(parameters.lightCount);
+}
+
+[numthreads(256, 1, 1)]
+void ReGIRPresampleLocalLights(uint globalIndex : SV_DispatchThreadID)
+{
+    if (globalIndex >= VIVID_REGIR_PRESAMPLED_LIGHT_COUNT)
+        return;
+
+    VividReGIRParameters parameters = _ReGIRParameters[0];
+    if (parameters.lightCount == 0u)
+    {
+        _ReGIRPresampledLights[globalIndex] = VividReGIRInvalidPresampledLight();
+        return;
+    }
+
+    uint rng = VividReGIRHash(
+        globalIndex
+        ^ (parameters.frameIndex * 1664525u)
+        ^ 0x9e3779b9u);
+
+    uint lightIndex;
+    float invSourcePdf;
+    if (!VividReGIRSampleLightPdf(parameters, rng, lightIndex, invSourcePdf))
+    {
+        _ReGIRPresampledLights[globalIndex] = VividReGIRInvalidPresampledLight();
+        return;
+    }
+
+    _ReGIRPresampledLights[globalIndex] = uint2(lightIndex, asuint(invSourcePdf));
 }
 
 [numthreads(256, 1, 1)]
@@ -216,15 +302,14 @@ void ReGIRGridBuild(uint globalIndex : SV_DispatchThreadID)
         return;
     }
 
-    float jitterScale = max(parameters.samplingJitter, 0.0);
-    if (jitterScale > 0.0)
-    {
-        float3 jitter = float3(
-            VividReGIRRandom01(rng),
-            VividReGIRRandom01(rng),
-            VividReGIRRandom01(rng)) - 0.5;
-        cellCenter += jitter * VividReGIRGetJitterScale(parameters, cellCenter);
-    }
+    cellRadius *= max(parameters.samplingJitter, 0.0) + 1.0;
+    uint coherentRng = VividReGIRHash(
+        cellIndex
+        ^ (parameters.frameIndex * 747796405u)
+        ^ (lightInCell * 2891336453u));
+    uint presampledLightTileOffset = parameters.sourceSamplingMode == VIVID_REGIR_SOURCE_SAMPLING_POWER_RIS
+        ? VividReGIRSelectPresampledLightTileOffset(coherentRng)
+        : 0u;
 
     uint selectedLightIndex = VIVID_REGIR_INVALID_LIGHT_INDEX;
     float selectedTargetWeight = 0.0;
@@ -238,7 +323,7 @@ void ReGIRGridBuild(uint globalIndex : SV_DispatchThreadID)
         rng = VividReGIRHash(rng + sampleIndex + 1u);
         uint candidateLightIndex;
         float invSourcePdf;
-        VividReGIRSelectSourceLight(parameters, rng, candidateLightIndex, invSourcePdf);
+        VividReGIRSelectSourceLight(parameters, rng, presampledLightTileOffset, candidateLightIndex, invSourcePdf);
         VividReGIRLightData candidateLight = _ReGIRLights[candidateLightIndex];
         float targetWeight = VividReGIREvaluateLightTargetWeight(candidateLight, cellCenter, cellRadius);
         float risWeight = targetWeight * invSourcePdf * invSampleCount;

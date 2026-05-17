@@ -123,6 +123,8 @@ namespace VividRP.Runtime
             CullingResults cullingResults,
             RenderGraphData graphAsset)
         {
+            using var initializeContextScope = RenderPassProfilingUtility.InitializeContextMarker.Auto();
+
             ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
             VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
             VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);

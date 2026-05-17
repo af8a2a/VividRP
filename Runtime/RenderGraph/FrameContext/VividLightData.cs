@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
@@ -702,8 +703,14 @@ namespace VividRP.Runtime
             reGIRLightCount = 0;
             m_LightGridClusteredCullDataPrepared = false;
 
+            using (RenderPassProfilingUtility.InitializeContextSceneLightCompleteMarker.Auto())
+            {
+                VividLightRenderDatabase.instance.CompleteSceneLightPrepare();
+            }
+
+            var sceneLightData = VividLightRenderDatabase.instance.sceneLightData;
             var visibleLightCount = visibleLights.IsCreated ? visibleLights.Length : 0;
-            var sceneLightCount = VividLightRenderDatabase.instance.lightCount;
+            var sceneLightCount = sceneLightData.Count;
             var lightCapacity = Mathf.Max(Mathf.Max(visibleLightCount, sceneLightCount), 1);
             EnsureLightGridBufferCapacity(lightCapacity);
 
@@ -711,6 +718,7 @@ namespace VividRP.Runtime
                 CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
 
             CollectReGIRSceneLightRenderDataRecords(
+                sceneLightData,
                 ResolveCameraPositionWS(worldToViewMatrix),
                 new Vector3(
                     DefaultReGIRCollectionBoxHalfExtent,
@@ -938,11 +946,11 @@ namespace VividRP.Runtime
         }
 
         private static void CollectReGIRSceneLightRenderDataRecords(
+            IReadOnlyList<VividLightRenderData> registeredLightData,
             Vector3 collectionBoxCenterWS,
             Vector3 collectionBoxHalfExtents,
             NativeList<VividLightRenderData> reGIRLightRenderDataRecords)
         {
-            var registeredLightData = VividLightRenderDatabase.instance.lightData;
             for (var lightIndex = 0; lightIndex < registeredLightData.Count; lightIndex++)
             {
                 var trackedLightData = registeredLightData[lightIndex];

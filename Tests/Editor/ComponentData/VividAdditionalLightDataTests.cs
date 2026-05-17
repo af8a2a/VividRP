@@ -1045,6 +1045,56 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CompleteSceneLightPrepare_BuildsPreparedSceneSnapshot_WhenPlayerLoopDidNotRun()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.lightUnit = LightUnit.Candela;
+            light.color = Color.white;
+            light.intensity = 1.0f;
+            light.range = 4.0f;
+            light.transform.position = new Vector3(1.0f, 0.0f, 0.0f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+            var database = VividLightRenderDatabase.instance;
+
+            database.Clear();
+            database.RegisterLight(additionalData);
+
+            light.intensity = 4.0f;
+            light.range = 8.0f;
+            light.transform.position = new Vector3(3.0f, 0.0f, 0.0f);
+
+            database.CompleteSceneLightPrepare();
+
+            Assert.That(database.sceneLightData.Count, Is.EqualTo(1));
+            Assert.That(database.sceneLightData[0].intensity, Is.EqualTo(4.0f).Within(0.0001f));
+            Assert.That(database.sceneLightData[0].range, Is.EqualTo(8.0f).Within(0.0001f));
+            Assert.That(database.sceneLightData[0].positionWS.x, Is.EqualTo(3.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void BuildSceneLightSnapshotAndSchedulePrepare_SkipsDisabledLights()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Point;
+            light.range = 4.0f;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            var database = VividLightRenderDatabase.instance;
+
+            database.Clear();
+            database.RegisterLight(additionalData);
+
+            light.enabled = false;
+
+            database.BuildSceneLightSnapshotAndSchedulePrepare(false);
+            database.CompleteSceneLightPrepare();
+
+            Assert.That(database.sceneLightData.Count, Is.Zero);
+        }
+
+        [Test]
         public void OnDisable_UnregistersTrackedLight_WhenAdditionalLightDataIsDisabled()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -1062,7 +1112,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LateUpdate_RefreshesTrackedLightData_WhenRegisteredSnapshotChanges()
+        public void LateUpdate_DoesNotRefreshTrackedLightData_WhenLightIsNotAnimated()
         {
             var light = m_GameObject.AddComponent<Light>();
             light.type = LightType.Point;
@@ -1081,8 +1131,8 @@ namespace VividRP.Editor.Tests
             InvokeLateUpdate(additionalData);
 
             Assert.That(database.TryGetLightData(light, out var trackedLightData), Is.True);
-            Assert.That(trackedLightData.intensity, Is.EqualTo(4.0f).Within(0.0001f));
-            Assert.That(trackedLightData.color.x, Is.EqualTo(4.0f).Within(0.0001f));
+            Assert.That(trackedLightData.intensity, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(trackedLightData.color.x, Is.EqualTo(1.0f).Within(0.0001f));
         }
 
         [Test]

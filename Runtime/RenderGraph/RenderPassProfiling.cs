@@ -74,6 +74,8 @@ namespace VividRP.Runtime
         private static readonly Dictionary<PassProfilerKey, RenderPassProfilerMarkers> s_Markers = new(new PassProfilerKeyComparer());
 
         public static readonly ProfilerMarker CompileMarker = new("VividRP.RenderPass.Compile");
+        public static readonly ProfilerMarker InitializeContextMarker = new("VividRP.RenderPass.InitializeContext");
+        public static readonly ProfilerMarker InitializeContextSceneLightCompleteMarker = new("VividRP.RenderPass.InitializeContext/VividSceneLightSystem.Complete");
         public static readonly ProfilerMarker PrepareFrameMarker = new("VividRP.RenderPass.PrepareFrame");
         public static readonly ProfilerMarker PrepareFrameEnsureCompiledMarker = new("VividRP.RenderPass.PrepareFrame/EnsureCompiled");
         public static readonly ProfilerMarker PrepareFrameClearHistoryImportsMarker = new("VividRP.RenderPass.PrepareFrame/ClearHistoryImports");
@@ -95,6 +97,7 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/DecalSystem.Kick");
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalCullScheduleMarker = new("VividRP.BeginCameraRendering/DecalSystem.CullSchedule");
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalCompleteMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem/Complete");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSceneLightKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividSceneLightSystem.Kick");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenResolveAssetMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ResolveAsset");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenCameraDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/CameraData");

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -49,8 +52,18 @@ namespace VividRP.Runtime
 
     public sealed class VividLightRenderDatabase
     {
+        private const int k_InlinePrepareLightThreshold = 64;
+
+        private readonly List<VividAdditionalLightData> m_RegisteredAdditionalLightData = new();
         private readonly List<VividLightRenderData> m_LightData = new();
+        private readonly List<VividLightRenderData> m_PreparedSceneLightData = new();
         private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new();
+        private NativeArray<VividLightRenderData> m_SceneLightSources;
+        private NativeList<VividLightRenderData> m_PreparedSceneLightNativeData;
+        private JobHandle m_PrepareSceneLightJobHandle;
+        private bool m_PrepareSceneLightScheduled;
+        private bool m_PreparedSceneLightPending;
+        private bool m_SceneLightKickRan;
 
         public static VividLightRenderDatabase instance => Singleton<VividLightRenderDatabase>.instance;
 
@@ -58,9 +71,15 @@ namespace VividRP.Runtime
 
         public IReadOnlyList<VividLightRenderData> lightData => m_LightData;
 
+        internal IReadOnlyList<VividLightRenderData> sceneLightData => m_PreparedSceneLightData;
+
         internal VividLightRenderData RegisterLight(VividAdditionalLightData additionalLightData)
         {
-            return UpdateLightData(additionalLightData);
+            if (additionalLightData == null)
+                return default;
+
+            RegisterAdditionalLightData(additionalLightData);
+            return UpdateLightData(additionalLightData.light, additionalLightData);
         }
 
         internal VividLightRenderData RegisterLight(Light light)
@@ -83,6 +102,9 @@ namespace VividRP.Runtime
 
             if (additionalLightData == null && !light.TryGetComponent(out additionalLightData))
                 additionalLightData = null;
+
+            if (additionalLightData != null && additionalLightData.isActiveAndEnabled)
+                RegisterAdditionalLightData(additionalLightData);
 
             var trackedLightData = CreateLightRenderData(light, additionalLightData);
             StoreLightData(trackedLightData);
@@ -115,6 +137,7 @@ namespace VividRP.Runtime
             if (additionalLightData == null)
                 return;
 
+            m_RegisteredAdditionalLightData.Remove(additionalLightData);
             UnregisterLight(additionalLightData.light);
         }
 
@@ -122,6 +145,8 @@ namespace VividRP.Runtime
         {
             if (light == null)
                 return;
+
+            RemoveRegisteredLight(light);
 
             var lightEntityId = light.GetEntityId();
             if (lightEntityId.Equals(EntityId.None)
@@ -144,8 +169,93 @@ namespace VividRP.Runtime
 
         internal void Clear()
         {
+            CompleteScheduledSceneLightPrepare(false);
+            m_RegisteredAdditionalLightData.Clear();
             m_LightData.Clear();
+            m_PreparedSceneLightData.Clear();
             m_EntityIdToDataIndex.Clear();
+            m_PreparedSceneLightPending = false;
+            m_SceneLightKickRan = false;
+            if (m_PreparedSceneLightNativeData.IsCreated)
+                m_PreparedSceneLightNativeData.Clear();
+        }
+
+        internal void BuildSceneLightSnapshotAndSchedulePrepare(bool allowAsyncSchedule)
+        {
+            CompleteScheduledSceneLightPrepare(true);
+
+            var registeredCount = m_RegisteredAdditionalLightData.Count;
+            EnsureSceneLightPrepareCapacity(registeredCount);
+
+            var sourceCount = 0;
+            for (var lightIndex = 0; lightIndex < registeredCount; lightIndex++)
+            {
+                var additionalLightData = m_RegisteredAdditionalLightData[lightIndex];
+                if (additionalLightData == null)
+                    continue;
+
+                var light = additionalLightData.light;
+                if (light == null)
+                    continue;
+
+                var trackedLightData = CreateLightRenderData(light, additionalLightData);
+                StoreLightData(trackedLightData);
+                m_SceneLightSources[sourceCount++] = trackedLightData;
+            }
+
+            m_SceneLightKickRan = true;
+
+            if (m_PreparedSceneLightNativeData.IsCreated)
+                m_PreparedSceneLightNativeData.Clear();
+
+            if (sourceCount == 0)
+            {
+                m_PreparedSceneLightData.Clear();
+                m_PreparedSceneLightPending = false;
+                return;
+            }
+
+            var job = new PrepareSceneLightsJob
+            {
+                SourceLights = m_SceneLightSources.GetSubArray(0, sourceCount),
+                PreparedLights = m_PreparedSceneLightNativeData,
+            };
+
+            m_PreparedSceneLightPending = true;
+            if (!allowAsyncSchedule || ShouldRunSceneLightPrepareInline(sourceCount))
+            {
+                job.Run();
+                return;
+            }
+
+            m_PrepareSceneLightJobHandle = job.Schedule();
+            m_PrepareSceneLightScheduled = true;
+            JobHandle.ScheduleBatchedJobs();
+        }
+
+        internal void CompleteSceneLightPrepare()
+        {
+            if (!m_SceneLightKickRan)
+                BuildSceneLightSnapshotAndSchedulePrepare(false);
+
+            CompleteScheduledSceneLightPrepare(true);
+        }
+
+        internal void ReleaseSceneLightPrepareResources()
+        {
+            CompleteScheduledSceneLightPrepare(false);
+
+            if (m_SceneLightSources.IsCreated)
+                m_SceneLightSources.Dispose();
+
+            if (m_PreparedSceneLightNativeData.IsCreated)
+                m_PreparedSceneLightNativeData.Dispose();
+
+            m_SceneLightSources = default;
+            m_PreparedSceneLightNativeData = default;
+            m_PreparedSceneLightData.Clear();
+            m_PreparedSceneLightPending = false;
+            m_SceneLightKickRan = false;
         }
 
         private bool TryGetLightData(int dataIndex, out VividLightRenderData trackedLightData)
@@ -157,6 +267,86 @@ namespace VividRP.Runtime
 
             trackedLightData = m_LightData[dataIndex];
             return true;
+        }
+
+        private void RegisterAdditionalLightData(VividAdditionalLightData additionalLightData)
+        {
+            if (additionalLightData == null)
+                return;
+
+            VividSceneLightSystem.EnsureInitialized();
+
+            if (!m_RegisteredAdditionalLightData.Contains(additionalLightData))
+                m_RegisteredAdditionalLightData.Add(additionalLightData);
+        }
+
+        private void RemoveRegisteredLight(Light light)
+        {
+            for (var lightIndex = m_RegisteredAdditionalLightData.Count - 1; lightIndex >= 0; lightIndex--)
+            {
+                var additionalLightData = m_RegisteredAdditionalLightData[lightIndex];
+                if (additionalLightData == null || additionalLightData.light == light)
+                    m_RegisteredAdditionalLightData.RemoveAt(lightIndex);
+            }
+        }
+
+        private static bool ShouldRunSceneLightPrepareInline(int lightCount)
+        {
+            return lightCount <= k_InlinePrepareLightThreshold;
+        }
+
+        private void EnsureSceneLightPrepareCapacity(int requiredCapacity)
+        {
+            requiredCapacity = Mathf.Max(requiredCapacity, 1);
+            var targetCapacity = Mathf.Max(8, Mathf.NextPowerOfTwo(requiredCapacity));
+
+            if (!m_SceneLightSources.IsCreated || m_SceneLightSources.Length < targetCapacity)
+            {
+                if (m_SceneLightSources.IsCreated)
+                    m_SceneLightSources.Dispose();
+
+                m_SceneLightSources = new NativeArray<VividLightRenderData>(
+                    targetCapacity,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+            }
+
+            if (!m_PreparedSceneLightNativeData.IsCreated)
+            {
+                m_PreparedSceneLightNativeData = new NativeList<VividLightRenderData>(targetCapacity, Allocator.Persistent);
+                return;
+            }
+
+            if (m_PreparedSceneLightNativeData.Capacity < targetCapacity)
+                m_PreparedSceneLightNativeData.Capacity = targetCapacity;
+        }
+
+        private void CompleteScheduledSceneLightPrepare(bool applyResult)
+        {
+            if (m_PrepareSceneLightScheduled)
+                m_PrepareSceneLightJobHandle.Complete();
+
+            m_PrepareSceneLightJobHandle = default;
+            m_PrepareSceneLightScheduled = false;
+
+            if (!m_PreparedSceneLightPending)
+                return;
+
+            if (applyResult)
+                ApplyPreparedSceneLightData();
+
+            m_PreparedSceneLightPending = false;
+        }
+
+        private void ApplyPreparedSceneLightData()
+        {
+            m_PreparedSceneLightData.Clear();
+
+            if (!m_PreparedSceneLightNativeData.IsCreated)
+                return;
+
+            for (var lightIndex = 0; lightIndex < m_PreparedSceneLightNativeData.Length; lightIndex++)
+                m_PreparedSceneLightData.Add(m_PreparedSceneLightNativeData[lightIndex]);
         }
 
         private void StoreLightData(VividLightRenderData trackedLightData)
@@ -182,6 +372,30 @@ namespace VividRP.Runtime
         {
             if (!trackedLightData.lightEntityId.Equals(EntityId.None))
                 m_EntityIdToDataIndex.Remove(trackedLightData.lightEntityId);
+        }
+
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+        private struct PrepareSceneLightsJob : IJob
+        {
+            [ReadOnly]
+            public NativeArray<VividLightRenderData> SourceLights;
+
+            public NativeList<VividLightRenderData> PreparedLights;
+
+            public void Execute()
+            {
+                const VividLightRenderDataFlags requiredFlags =
+                    VividLightRenderDataFlags.Enabled | VividLightRenderDataFlags.ActiveInHierarchy;
+
+                for (var lightIndex = 0; lightIndex < SourceLights.Length; lightIndex++)
+                {
+                    var lightData = SourceLights[lightIndex];
+                    if ((lightData.flags & requiredFlags) != requiredFlags)
+                        continue;
+
+                    PreparedLights.AddNoResize(lightData);
+                }
+            }
         }
 
         private static VividLightRenderData CreateLightRenderData(Light light, VividAdditionalLightData additionalLightData)
@@ -1149,6 +1363,9 @@ namespace VividRP.Runtime
 
             UpdateLightBoundsOverride(currentLight);
             ApplyTimeOfDayToLight(currentLight);
+
+            if (!m_Animated && !m_EnableTimeOfDay)
+                return;
 
             if (VividLightRenderDatabase.instance.TryGetLightData(currentLight, out var trackedLightData)
                 && !VividLightRenderDatabase.IsLightDataChanged(currentLight, this, trackedLightData))

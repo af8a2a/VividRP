@@ -90,6 +90,7 @@ namespace VividRP.Editor.Tests
             var skySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
             var virtualTextureSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
 
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/EnsureCompiled"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearHistoryImports"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearCodeManagedHistory"));
@@ -120,6 +121,7 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem"));
 
+            Assert.That(passRecorderSource, Does.Contain("InitializeContextMarker.Auto()"));
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameEnsureCompiledMarker.Auto()"));
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearHistoryImportsMarker.Auto()"));
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearCodeManagedHistoryMarker.Auto()"));

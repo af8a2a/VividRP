@@ -34,8 +34,13 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - The runtime includes history, preview, frame-context, and resource-binding management
 - `[Range]` float and enum parameter reflection allows direct configuration on graph nodes
 - `IAsyncComputeSupportedPass` marker interface for async compute
-- `IDynamicPassResourceLayout` interface for runtime-dynamic resource layout
+- `IDynamicPassResourceLayout` interface for runtime-dynamic resource layout; `IStablePassResourceLayout` sub-interface for passes with fixed fields but mutable descriptor instances
 - `IAllowGlobalStateModificationPass` marker for passes that modify global state
+- `IBlueNoiseConsumerPass` marker for passes that sample shared blue-noise resources
+- `IRenderGraphSideEffectPass` marker for passes with cross-frame effects (history updates, readbacks, imported resource updates)
+- `IRenderGraphPreparePass` hook for passes that must refresh resources after all passes complete Prepare()
+- `IRenderGraphRecordingPass` for anti-aliasing pass graph-recording callbacks
+- `IRenderGizmoPrePostProcessBoundaryPass` boundary marker for gizmo rendering during post processing
 
 ### Core Rendering and Debugging
 
@@ -47,12 +52,18 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - `DrawObjectPass` — General object drawing, up to 8 color targets, dynamic reconfiguration
 - `MotionVectorPass` — Object and camera motion vector rendering
 - `HZBGeneratePass` — SPD Hierarchical Z-Buffer with atomic counter
-- `CMAA2Pass` — Conservative Morphological Anti-Aliasing 2 (Edge Detection → Deferred Blend → Combine)
-- `TemporalAAPass` — Temporal Anti-Aliasing (TAA) with Halton jitter, history blend, motion decay, anti-flicker
+- `HDRPHZBPass` — HDRP-compatible HZB generation pass with stable resource layout
+- `AntialiasingPass` — Unified anti-aliasing pass that auto-routes to CMAA2, TAA, FSR3, TSR, or DLSS based on `VividAdditionalCameraData`
+  - `CMAA2Pass` — Conservative Morphological Anti-Aliasing (Compute Pass)
+  - `TemporalAAPass` — Temporal Anti-Aliasing (Compute Pass)
+  - `TSRUpscalerPass` — Unreal Engine TSR super resolution
+  - `FSR3UpscalerPass` — AMD FidelityFX Super Resolution 3
+  - `DLSSPass` — NVIDIA DLSS Super Resolution / Ray Reconstruction
 
 **Shadow System:**
 - `CSMShadowPass` — Cascaded Shadow Map rendering (2x2 Atlas, up to 4 cascades)
-- `CSMShadowResolvePass` — CSM shadow resolve with PCSS soft shadows (Percentage Closer Soft Shadows)
+- `MeshletShadowPass` — GPU Driven meshlet shadow casting (Visibility Buffer Shadow Caster)
+- `CSMShadowResolvePass` — CSM shadow resolve with PCSS soft shadows (Percentage Closer Soft Shadows), with screen-space shadow tile classification
 - `ShadowClassifyPass` — Pixel classification for ray-traced shadow regions
 - `DirectionalRayTracedShadowPass` — Directional light DXR ray-traced shadows
 - `SIGMAShadowDenoisePass` — SIGMA shadow denoising (ClassifyTiles → SmoothTiles → Blur → TemporalStabilization)
@@ -67,6 +78,14 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - `AtmosphericScatteringPass` — Atmospheric scattering and fog
 - `SkyInjectionPass` — Sky injection rendering
 
+**Volumetric Fog System:**
+- `VolumetricDensityPass` — Density accumulation (UnsafePass, global state modification supported)
+- `VolumetricLightingPass` — Volumetric fog lighting (Compute Pass, Async Compute supported)
+- `VolumetricMaxZPass` — Max-Z pass at VBuffer resolution (Compute Pass, Async Compute supported)
+- `VividVolumetricFogVolume` — Global volumetric fog Volume component
+- `VividLocalVolumetricFog` — Local volumetric fog component (with manager and voxelization shader)
+- Synced with HDRP volumetric lighting kernel, anisotropy support, projection and history handling
+
 **Post Processing:**
 - `AutoExposurePass` — Auto exposure (Unreal and HDRP implementation paths)
 - `BloomPass` — Bloom effect
@@ -76,8 +95,18 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - `GTAOPass` — Ground Truth Ambient Occlusion
 - `DataDrivenLensFlarePass` / `ScreenSpaceLensFlarePass` — Lens flare effects
 - `FinalBlitPass` — Final blit to camera backbuffer (combines Color Grading LUT, Auto Exposure, Film Grain, Bloom)
-- `StopNaNPass` — Removes NaN/Inf pixels from color buffer
+- `StopNaNPass` — Removes NaN/Inf pixels from color buffer (Raster Pass, bypass injection now explicit)
+- `ScreenSpaceReflectionPass` — Screen space reflections with Vivid / HDRP / Hybrid / RayTracing execution paths, built-in ReBlur denoiser with temporal accumulation
+- `LocalExposurePass` — Local exposure via bilateral grid (64×64×32), with grid construction, log luminance, separable blur, and final application
+- `ColorPyramidPass` — Color pyramid (mip chain) generation (Compute Pass, with history tracking and side-effect marker)
+- `Vignette` — Vignette effect
 - `FilmGrain`, `Tonemapping` (ACES / Neutral / Custom) Volume components
+
+**Super Resolution / Upscaling:**
+- `AntialiasingPass` unified entry point auto-selects based on camera configuration:
+  - **TSR** (Temporal Super Resolution) — Unreal Engine TSR-based temporal upscaling with spatial anti-aliasing, velocity dilation and depth-aware edge rejection, history clamping with hysteresis, thin geometry coverage detection, luma instability pre-processing, persistent history resurrection, optional Wave Ops and 16-bit VALU acceleration
+  - **FSR3** (AMD FidelityFX Super Resolution 3) — Includes Reactivity pre-processing, Shading Change detection, Luma Instability, Luma Pyramid, RCAS sharpening
+  - **DLSS** (NVIDIA Deep Learning Super Sampling) — Super Resolution and Ray Reconstruction (requires `DLSS_PLUGIN_INTEGRATE` scripting define symbol)
 
 **Debug Passes:**
 - `ClusterDebugPass` — Clustered lighting visualization (Opaque / Slice modes)
@@ -86,6 +115,7 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - `SliderDebugPass` — Debug slider
 - `RTASInstanceDebugPass` — RTAS instance visualization
 - `OverlayDebugPass` — Debug overlay
+- `VisibilityBufferDebugPass` — GPU Driven visibility buffer debugging (Raster Pass)
 - `VirtualTextureDemoPass` — Virtual Texture demo (Residency / MipBias / PhysicalPageId modes)
 - `VirtualTextureVisualizationPass` — Virtual Texture debugging
 
@@ -100,6 +130,39 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - `ObjectDispatcherService` — GPU-driven object dispatching service using `ObjectTracker` for batched Unity Object updates
 - Already includes bindless texture containers and native descriptor allocator
 - `Setup-Bindless.ps1` is provided to copy `UnityBindless.dll` into `Assets/Plugins/...` for early loading
+
+### Subsystem Framework (VividSubsystem)
+
+- CRTP-based `VividSubsystem<TSelf>` generic singleton base class with unified lifecycle management
+- Auto-subscribes to `FrameContextSystem.SubsystemPreRender`, dispatched per-frame via `OnUpdate(ContextContainer, CommandBuffer)`
+- `Initialize()` / `Deinitialize()` manage subscriptions and `AssemblyReloadEvents` hooks
+- All major subsystems run as VividSubsystem singletons:
+  - `DecalSystem` — DBuffer decal system
+  - `VirtualTextureSystem` — Virtual Texture system (address space, page table updates, feedback reads, residency management)
+  - `LTCAreaLightSystem` — LTC area light system (Charlie / CookTorrance / Disney / GGX / KajiyaKaySpecular / OrenNayar / Ward BRDFs)
+  - `SkyManager` — Sky manager (conditionally updates global sky environment based on camera type, caches sky data)
+  - `VividAutoExposureSystem` — Auto exposure subsystem (pre-render subscription, resource disposal on frame context clear)
+  - `VividGPUDrivenSystem` — GPU Driven subsystem
+
+### LTC Area Lights
+
+- `LTCAreaLightSystem` — Linearly Transformed Cosines area light system
+- Supports Charlie, CookTorrance, Disney, GGX, KajiyaKaySpecular, OrenNayar, Ward BRDF models
+- Area light data integrated with `VividLightRenderDatabase` (Barn Door, Shape Radius, etc.)
+
+### Virtual Texture
+
+- `VirtualTextureSystem` — Full Virtual Texture runtime system
+- Address space management (`VTAddressSpace`), page table updates (`VTPageTableUpdater`), feedback reads (`VirtualTextureFeedback`)
+- Producer and request pipeline, residency management (`VTResidencyManager`)
+- `VirtualTextureDemoPass` / `VirtualTextureVisualizationPass` for debugging
+
+### Native Plugin Bindings
+
+- `BindlessPluginBindings` — UnityBindless.dll native bindings
+- `METISBindings` — METIS library native bindings
+- `MeshOptimizerBindings` — Mesh Optimizer native bindings
+- `NVAPI` and `NeuralRadianceCache` directories — NVIDIA API and neural radiance cache integration
 
 ### Ray Tracing
 
@@ -131,6 +194,11 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
   - Light Render Database (`VividLightRenderDatabase`) global light tracking
   - Shadow Settings (CSM quality, Ray Traced Shadow, PCSS parameters)
   - Light category flags, cast shadows, rendering layer masks
+  - Time of Day controls (`m_EnableTimeOfDay` / `m_TimeOfDay` 0–24 hour range)
+    - `EvaluateTimeOfDaySun()` — computes sun position via sine-based elevation, atmospheric extinction, and horizon fading
+    - `EvaluateTimeOfDayLux()` — air mass attenuation with smooth horizon transition
+    - `ApplyTimeOfDayToLight()` — automatically sets directional light rotation and Lux intensity
+    - Configurable `m_TimeOfDayMaximumLux` for max illuminance
 
 **Volume Components (Runtime):**
 
@@ -138,8 +206,9 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 |---|---|
 | **Shadows** | `CascadedShadowSettingsVolume` (CSM cascade count/distance/split ratios/bias), `RayTracingSettingsVolume` (DXR build/culling/bias), `GPUDrivenSettingsVolume` (LOD depth/error threshold) |
 | **Sky** | `HDRISky`, `PhysicallyBasedSky`, `SkySettings` |
-| **Exposure** | `AutoExposure` (metering mode / HDRP & Unreal implementations / histogram / adaptation speed) |
-| **Post Processing** | `Bloom`, `ColorAdjustments`, `ColorCurves`, `ChannelMixer`, `LiftGammaGain`, `ShadowsMidtonesHighlights`, `SplitToning`, `Tonemapping`, `WhiteBalance`, `DepthOfField`, `Diffusion`, `GTAO`, `FilmGrain`, `ScreenSpaceLensFlare` |
+| **Volumetric Fog** | `VividVolumetricFogVolume` (fog density / anisotropy / lighting parameters) |
+| **Exposure** | `AutoExposure` (metering mode / HDRP & Unreal implementations / histogram / adaptation speed), `LocalExposure` (local exposure) |
+| **Post Processing** | `Bloom`, `ColorAdjustments`, `ColorCurves`, `ChannelMixer`, `LiftGammaGain`, `ShadowsMidtonesHighlights`, `SplitToning`, `Tonemapping`, `WhiteBalance`, `DepthOfField`, `Diffusion`, `GTAO`, `FilmGrain`, `ScreenSpaceLensFlare`, `ScreenSpaceReflection` (with HDRP comparison path), `Vignette` |
 
 ### Frame Context System
 
@@ -152,7 +221,11 @@ Unlike the legacy README, which described VividRP as a custom URP variant, the c
 - `VividClusteredLightingData` — Clustered lighting configuration (tile size, slice count, log distribution, light list buffers)
 - `VividRayTracingSettingsData` — Ray Tracing configuration data
 - `VividVirtualTextureFrameData` — Virtual Texture per-frame data
-- `FrameContextSystem` — CameraRelative system driving temporal state advancement / Shader Globals setup
+- `VividAntialiasingData` — Anti-aliasing state (mode selection, render/output resolution, temporal jitter and history reset)
+- `VividVolumetricData` — Volumetric fog frame state (VBuffer textures, local fog buffer, shader variables)
+- `VividColorPyramidData` — Color pyramid mip chain with history tracking
+- `VividScreenSpaceReflectionData` — SSR reflection texture tracking and validity flags
+- `FrameContextSystem` — CameraRelative system driving temporal state advancement / Shader Globals setup / Subsystem dispatch
 
 ### Editor Tooling and Tests
 
@@ -195,10 +268,11 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 
 Many advanced features listed in the legacy README are not the current delivered state of this package and should not be treated as available by default. Based on the current repository, the following directions are either incomplete or still mostly placeholders:
 
-- Super-resolution stacks such as `DLSS`, `TAAU`, and `FSR*`
-- The larger GI / SSR / Path Tracing / ReSTIR feature set mentioned in the legacy README
-- Full implementations of subsystems such as `Decal`, `Terrain`, `Foliage`, and `Volumetric`
+- The larger GI / Path Tracing / ReSTIR feature set mentioned in the legacy README
+- Full implementations of subsystems such as `Terrain` and `Foliage`
 - A production-ready samples / demo-scene workflow
+
+> The following capabilities are now substantially implemented and no longer listed as "not restored": SSR (with ReBlur denoiser and temporal accumulation), Volumetric Fog (density/lighting/MaxZ three-pass + Local Volumetric Fog components), DLSS SR/RR, LTC area lights, and the full Virtual Texture system.
 
 If you are looking for a feature based on the old README, check the current source tree, `Documentation/`, and `Tests/Editor/` first to verify that it actually exists in this package.
 
@@ -207,10 +281,17 @@ If you are looking for a feature based on the old README, check the current sour
 - `Runtime/RenderPipeline` — Pipeline assets, global settings, and Volume components
 - `Runtime/RenderGraph` — Runtime graph data, resource descriptors, History/Preview, Pass Recorder, Frame Context system
 - `Runtime/RenderGraph/FrameContext` — Per-frame context data (Camera / Light / Shadow / Sky / Temporal / ClusteredLighting / RayTracing / VirtualTexture)
-- `Runtime/RenderPass/Core` — Core rendering passes (PreDepth / GBuffer / DeferredLighting / MotionVector / Shadow / Sky / PostProcessing / GPUDriven, etc.)
-- `Runtime/RenderPass/Debug` — Debug passes (Cluster / Tile / Exposure / RTAS / VirtualTexture)
-- `Runtime/RenderPass/Example` — Example passes
+- `Runtime/RenderPass/Core` — Core rendering passes (PreDepth / GBuffer / DeferredLighting / MotionVector / Shadow / Sky / PostProcessing / GPUDriven / Volumetric, etc.)
+- `Runtime/RenderPass/Debug` — Debug passes (Cluster / Tile / Exposure / RTAS / VirtualTexture / VisibilityBuffer)
+- `Runtime/RenderPass/Example` — Example passes (FullScreen / ImportTexture)
 - `Runtime/SubSystem/GPUDriven` — GPU Driven, Meshlet, Bindless, Native integration
+- `Runtime/SubSystem/DLSS` — NVIDIA DLSS Super Resolution and Ray Reconstruction
+- `Runtime/SubSystem/Decal` — DBuffer decal system (DecalProjector / DecalData / DecalSystem)
+- `Runtime/SubSystem/AreaLight` — LTC area light system (multi-BRDF support)
+- `Runtime/SubSystem/Volumetric` — Volumetric fog system (global/local fog, VBuffer, voxelization)
+- `Runtime/SubSystem/VirtualTexture` — Virtual Texture system (address space / page table / residency management)
+- `Runtime/SubSystem/Sky` — Sky system (HDRI / PhysicallyBased / SkyManager)
+- `Runtime/SubSystem/Plugin` — Native plugin bindings (Bindless / METIS / MeshOptimizer / NVAPI / NeuralRadianceCache)
 - `Runtime/ComponentData` — Custom component data (VividAdditionalCameraData / VividAdditionalLightData)
 - `Runtime/Utility` — Runtime utilities (PipelineResource / BoundProxy / Camera Utility / BlueNoise / HaltonJitter)
 - `Runtime/Extension/CoreRP` — Core RP extensions (UnsafeGraphContext extension, ObjectDispatcherService)
@@ -225,12 +306,15 @@ If you are looking for a feature based on the old README, check the current sour
 
 ## Documentation
 
-- [RenderGraph Editor](Documentation/RenderGraphEditor.md)
-- [RenderGraph SubSystem](Documentation/RenderGraphSubSystem.md)
-- [RenderGraph Resource Descriptors](Documentation/RenderGraphResourceDescriptors.md)
-- [Acceleration Structure Support](Documentation/AccelerationStructureSupport.md)
-- [Bindless Setup](Documentation/Bindless.md)
-- [LWGUI Notes](Documentation/LWGUI.md)
+- [RenderGraph Editor](Documentation~/RenderGraphEditor.md)
+- [RenderGraph SubSystem](Documentation~/RenderGraphSubSystem.md)
+- [RenderGraph Resource Descriptors](Documentation~/RenderGraphResourceDescriptors.md)
+- [Acceleration Structure Support](Documentation~/AccelerationStructureSupport.md)
+- [Bindless Setup](Documentation~/Bindless.md)
+- [LWGUI Notes](Documentation~/LWGUI.md)
+- [Physically Based Sky HDRP Gap Inventory](Documentation~/PhysicallyBasedSkyHdrpGapInventory.md)
+- [Sky System Roadmap](Documentation~/SkySystemRoadmap.md)
+- [Local Exposure](Documentation~/LocalExposure.md)
 
 ## Testing
 

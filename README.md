@@ -34,8 +34,13 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - 运行时包含 history、preview、frame context 和资源绑定管理
 - 支持 `[Range]` float 参数和 enum 参数反射，可在图上直接配置
 - `IAsyncComputeSupportedPass` 标记接口支持异步计算
-- `IDynamicPassResourceLayout` 接口支持运行时动态资源布局
+- `IDynamicPassResourceLayout` 接口支持运行时动态资源布局；`IStablePassResourceLayout` 子接口用于字段固定但描述符实例可变的 Pass
 - `IAllowGlobalStateModificationPass` 标记全局状态修改类 Pass
+- `IBlueNoiseConsumerPass` 标记采样共享蓝噪声资源的 Pass
+- `IRenderGraphSideEffectPass` 标记具有跨帧副作用的 Pass（历史更新、回读、导入资源更新等）
+- `IRenderGraphPreparePass` 提供在所有 Pass 完成 Prepare() 后刷新资源的钩子
+- `IRenderGraphRecordingPass` 用于抗锯齿类 Pass 的图录制回调
+- `IRenderGizmoPrePostProcessBoundaryPass` 标记后处理中的 Gizmo 渲染边界
 
 ### 核心渲染与调试
 
@@ -47,11 +52,18 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `DrawObjectPass` — 通用物体绘制，支持最多 8 个颜色目标和动态重配置
 - `MotionVectorPass` — 物体和相机运动矢量渲染
 - `HZBGeneratePass` — SPD 分层深度缓冲（HZB），支持原子计数
+- `HDRPHZBPass` — HDRP 兼容的 HZB 生成 Pass，带稳定资源布局
 - `AntialiasingPass` — 统一抗锯齿 Pass，根据 `VividAdditionalCameraData` 配置自动路由到 CMAA2、TAA、FSR3、TSR 或 DLSS
+  - `CMAA2Pass` — 保守形态抗锯齿（Compute Pass）
+  - `TemporalAAPass` — 时域抗锯齿（Compute Pass）
+  - `TSRUpscalerPass` — Unreal Engine TSR 超分辨率
+  - `FSR3UpscalerPass` — AMD FidelityFX Super Resolution 3
+  - `DLSSPass` — NVIDIA DLSS Super Resolution / Ray Reconstruction
 
 **阴影系统：**
 - `CSMShadowPass` — Cascade Shadow Map 渲染（2x2 Atlas，最多 4 级 Cascade）
-- `CSMShadowResolvePass` — CSM 阴影解析，PCSS 柔和阴影（Percentage Closer Soft Shadows）
+- `MeshletShadowPass` — GPU Driven Meshlet 阴影投射（Visibility Buffer Shadow Caster）
+- `CSMShadowResolvePass` — CSM 阴影解析，PCSS 柔和阴影（Percentage Closer Soft Shadows），支持屏幕空间阴影 Tile 分类
 - `ShadowClassifyPass` — 像素分类标记需要光线追踪阴影的区域
 - `DirectionalRayTracedShadowPass` — 方向光 DXR 光线追踪阴影
 - `SIGMAShadowDenoisePass` — SIGMA 阴影降噪（ClassifyTiles → SmoothTiles → Blur → TemporalStabilization）
@@ -66,6 +78,14 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `AtmosphericScatteringPass` — 大气散射与雾效
 - `SkyInjectionPass` — 天空注入渲染
 
+**体积雾系统：**
+- `VolumetricDensityPass` — 体积雾密度累积（UnsafePass，支持全局状态修改）
+- `VolumetricLightingPass` — 体积雾光照计算（Compute Pass，支持 Async Compute）
+- `VolumetricMaxZPass` — VBuffer 分辨率下的最大深度 Pass（Compute Pass，支持 Async Compute）
+- `VividVolumetricFogVolume` — 全局体积雾 Volume 组件
+- `VividLocalVolumetricFog` — 局部体积雾组件（含管理器与体素化 Shader）
+- 已同步 HDRP 体积光照内核、各向异性支持、投影与历史处理
+
 **后处理：**
 - `AutoExposurePass` — 自动曝光（支持 Unreal 和 HDRP 两种实现路径）
 - `BloomPass` — 泛光效果
@@ -75,7 +95,11 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `GTAOPass` — Ground Truth Ambient Occlusion
 - `DataDrivenLensFlarePass` / `ScreenSpaceLensFlarePass` — 镜头光晕
 - `FinalBlitPass` — 最终 Blit 到相机 Backbuffer（含 Color Grading LUT、自动曝光、Film Grain、Bloom 合成）
-- `StopNaNPass` — 消除颜色缓冲中的 NaN/Inf 像素
+- `StopNaNPass` — 消除颜色缓冲中的 NaN/Inf 像素（Raster Pass，旁路注入已显式化）
+- `ScreenSpaceReflectionPass` — 屏幕空间反射，支持 Vivid / HDRP / Hybrid / RayTracing 四种执行路径，内置 ReBlur 降噪器与时域累积
+- `LocalExposurePass` — 局部曝光（Bilateral Grid 64×64×32），含双边网格构建、对数亮度、可分离模糊与最终应用
+- `ColorPyramidPass` — 颜色金字塔（Mip Chain）生成（Compute Pass，带历史追踪与 Side Effect 标记）
+- `Vignette` — 渐晕效果
 - `FilmGrain`、`Tonemapping`（ACES / Neutral / Custom）等 Volume 组件
 
 **超分辨率 / Upscaling：**
@@ -97,6 +121,7 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `SliderDebugPass` — 调试滑动条
 - `RTASInstanceDebugPass` — RTAS 实例可视化
 - `OverlayDebugPass` — 调试叠加层
+- `VisibilityBufferDebugPass` — GPU Driven 可见性缓冲调试（Raster Pass）
 - `VirtualTextureDemoPass` — Virtual Texture 演示（Residency / MipBias / PhysicalPageId 模式）
 - `VirtualTextureVisualizationPass` — Virtual Texture 可视化
 
@@ -111,6 +136,39 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `ObjectDispatcherService` — GPU Driven 对象调度服务，基于 `ObjectTracker` 批量处理 Unity Object 变更
 - 已包含 bindless 纹理容器和 native descriptor allocator
 - 提供 `Setup-Bindless.ps1`，用于把 `UnityBindless.dll` 复制到 `Assets/Plugins/...` 以满足早加载要求
+
+### 子系统框架（VividSubsystem）
+
+- 基于 CRTP 的 `VividSubsystem<TSelf>` 泛型单例基类，统一管理子系统生命周期
+- 自动订阅 `FrameContextSystem.SubsystemPreRender`，每帧通过 `OnUpdate(ContextContainer, CommandBuffer)` 调度
+- `Initialize()` / `Deinitialize()` 管理订阅与 `AssemblyReloadEvents` 钩子
+- 所有主要子系统均以 VividSubsystem 单例形式运行：
+  - `DecalSystem` — DBuffer Decal 系统
+  - `VirtualTextureSystem` — Virtual Texture 系统（地址空间、页表更新、反馈读取、驻留管理）
+  - `LTCAreaLightSystem` — LTC 面光源系统（Charlie / CookTorrance / Disney / GGX / KajiyaKaySpecular / OrenNayar / Ward BRDF）
+  - `SkyManager` — 天空管理器（按相机类型条件更新全局天空环境，缓存天空数据）
+  - `VividAutoExposureSystem` — 自动曝光子系统（预渲染订阅、帧上下文清理时的资源释放）
+  - `VividGPUDrivenSystem` — GPU Driven 子系统
+
+### LTC 面光源
+
+- `LTCAreaLightSystem` — 基于 Linearly Transformed Cosines 的面光源系统
+- 支持 Charlie、CookTorrance、Disney、GGX、KajiyaKaySpecular、OrenNayar、Ward 等 BRDF 模型
+- 面光源数据与 `VividLightRenderDatabase` 集成（Barn Door、Shape Radius 等参数）
+
+### Virtual Texture
+
+- `VirtualTextureSystem` — 完整的 Virtual Texture 运行时系统
+- 地址空间管理（`VTAddressSpace`）、页表更新（`VTPageTableUpdater`）、反馈读取（`VirtualTextureFeedback`）
+- Producer 与 Request 管线、驻留管理（`VTResidencyManager`）
+- `VirtualTextureDemoPass` / `VirtualTextureVisualizationPass` 调试可视化
+
+### 原生插件绑定
+
+- `BindlessPluginBindings` — UnityBindless.dll 原生绑定
+- `METISBindings` — METIS 库原生绑定
+- `MeshOptimizerBindings` — Mesh Optimizer 原生绑定
+- `NVAPI` 与 `NeuralRadianceCache` 目录 — NVIDIA API 与神经辐射缓存集成
 
 ### Ray Tracing
 
@@ -142,6 +200,11 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
   - Light Render Database (`VividLightRenderDatabase`) 全局灯光追踪
   - Shadow Settings（CSM 质量、Ray Traced Shadow、PCSS 参数）
   - Light category flags、cast shadows、rendering layer masks
+  - Time of Day 控制（`m_EnableTimeOfDay` / `m_TimeOfDay` 0–24 小时制）
+    - `EvaluateTimeOfDaySun()` — 基于正弦仰角、大气消光与地平线渐隐的太阳位置计算
+    - `EvaluateTimeOfDayLux()` — 大气质量衰减与平滑地平线过渡
+    - `ApplyTimeOfDayToLight()` — 自动设置方向光旋转与 Lux 强度
+    - 支持 `m_TimeOfDayMaximumLux` 配置最大照度
 
 **Volume 组件（运行时）：**
 
@@ -149,8 +212,9 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 |---|---|
 | **阴影** | `CascadedShadowSettingsVolume`（CSM 级联数/距离/分割比/偏移）、`RayTracingSettingsVolume`（DXR 构建/剔除/偏置）、`GPUDrivenSettingsVolume`（LOD 深度/误差阈值） |
 | **天空** | `HDRISky`、`PhysicallyBasedSky`、`SkySettings` |
-| **曝光** | `AutoExposure`（测光模式/HDRP 与 Unreal 实现/直方图/适应速度） |
-| **后处理** | `Bloom`、`ColorAdjustments`、`ColorCurves`、`ChannelMixer`、`LiftGammaGain`、`ShadowsMidtonesHighlights`、`SplitToning`、`Tonemapping`、`WhiteBalance`、`DepthOfField`、`Diffusion`、`GTAO`、`FilmGrain`、`ScreenSpaceLensFlare` |
+| **体积雾** | `VividVolumetricFogVolume`（雾密度/各向异性/光照参数） |
+| **曝光** | `AutoExposure`（测光模式/HDRP 与 Unreal 实现/直方图/适应速度）、`LocalExposure`（局部曝光） |
+| **后处理** | `Bloom`、`ColorAdjustments`、`ColorCurves`、`ChannelMixer`、`LiftGammaGain`、`ShadowsMidtonesHighlights`、`SplitToning`、`Tonemapping`、`WhiteBalance`、`DepthOfField`、`Diffusion`、`GTAO`、`FilmGrain`、`ScreenSpaceLensFlare`、`ScreenSpaceReflection`（含 HDRP 对比路径）、`Vignette` |
 
 ### 帧上下文系统
 
@@ -163,7 +227,11 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `VividClusteredLightingData` — 簇状光照配置（Tile 大小、Slice 数量、对数分布、光源列表 Buffer）
 - `VividRayTracingSettingsData` — Ray Tracing 配置数据
 - `VividVirtualTextureFrameData` — Virtual Texture 逐帧数据
-- `FrameContextSystem` — CameraRelative 系统，驱动时序状态推进 / Shader Globals 设置
+- `VividAntialiasingData` — 抗锯齿状态（模式选择、渲染/输出分辨率、时域 Jitter 与历史重置）
+- `VividVolumetricData` — 体积雾帧状态（VBuffer 纹理、局部雾 Buffer、Shader 变量）
+- `VividColorPyramidData` — 颜色金字塔 Mip Chain 与历史追踪
+- `VividScreenSpaceReflectionData` — SSR 反射纹理追踪与有效性标记
+- `FrameContextSystem` — CameraRelative 系统，驱动时序状态推进 / Shader Globals 设置 / Subsystem 调度
 
 ### 编辑器工具与测试
 
@@ -206,9 +274,11 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 
 legacy README 中提到的大量高级特性目前并不是当前包的已交付状态，至少不应在这个包里被默认认为"已经可用"。当前仓库中尚未看到完整落地或仅保留占位入口的方向包括：
 
-- legacy README 里的大规模 GI / SSR / Path Tracing / ReSTIR 系列能力
-- `Terrain`、`Foliage`、`Volumetric` 等子系统的完整实现
+- legacy README 里的大规模 GI / Path Tracing / ReSTIR 系列能力
+- `Terrain`、`Foliage` 等子系统的完整实现
 - 生产可用的 samples / demo scene 工作流
+
+> 以下能力已在当前包中实质落地，不再列入"未恢复"清单：SSR（含 ReBlur 降噪器与时域累积）、Volumetric Fog（密度/光照/MaxZ 三 Pass + Local Volumetric Fog 组件）、DLSS SR/RR、LTC 面光源、Virtual Texture 完整系统。
 
 如果你是在对照旧版 README 寻找某个特性，建议先检查当前源码、`Documentation/` 和 `Tests/Editor/` 是否真的存在对应实现。
 
@@ -217,12 +287,17 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 - `Runtime/RenderPipeline` — 管线资产、全局设置、Volume 组件
 - `Runtime/RenderGraph` — 运行时图数据、资源描述符、History/Preview、Pass Recorder、帧上下文系统
 - `Runtime/RenderGraph/FrameContext` — 逐帧上下文数据（Camera / Light / Shadow / Sky / Temporal / ClusteredLighting / RayTracing / VirtualTexture）
-- `Runtime/RenderPass/Core` — 核心渲染 Pass（PreDepth / GBuffer / DeferredLighting / MotionVector / Shadow / Sky / PostProcessing / GPUDriven 等）
-- `Runtime/RenderPass/Debug` — 调试 Pass（Cluster / Tile / Exposure / RTAS / VirtualTexture）
-- `Runtime/RenderPass/Example` — 示例 Pass
+- `Runtime/RenderPass/Core` — 核心渲染 Pass（PreDepth / GBuffer / DeferredLighting / MotionVector / Shadow / Sky / PostProcessing / GPUDriven / Volumetric 等）
+- `Runtime/RenderPass/Debug` — 调试 Pass（Cluster / Tile / Exposure / RTAS / VirtualTexture / VisibilityBuffer）
+- `Runtime/RenderPass/Example` — 示例 Pass（FullScreen / ImportTexture）
 - `Runtime/SubSystem/GPUDriven` — GPU Driven、Meshlet、Bindless、Native 集成
 - `Runtime/SubSystem/DLSS` — NVIDIA DLSS Super Resolution 与 Ray Reconstruction
 - `Runtime/SubSystem/Decal` — DBuffer Decal 系统（DecalProjector / DecalData / DecalSystem）
+- `Runtime/SubSystem/AreaLight` — LTC 面光源系统（多 BRDF 支持）
+- `Runtime/SubSystem/Volumetric` — 体积雾系统（全局/局部雾、VBuffer、体素化）
+- `Runtime/SubSystem/VirtualTexture` — Virtual Texture 系统（地址空间/页表/驻留管理）
+- `Runtime/SubSystem/Sky` — 天空系统（HDRI / PhysicallyBased / SkyManager）
+- `Runtime/SubSystem/Plugin` — 原生插件绑定（Bindless / METIS / MeshOptimizer / NVAPI / NeuralRadianceCache）
 - `Runtime/ComponentData` — 自定义组件数据（VividAdditionalCameraData / VividAdditionalLightData）
 - `Runtime/Utility` — 运行时工具集（PipelineResource / BoundProxy / Camera Utility / BlueNoise / HaltonJitter）
 - `Runtime/Extension/CoreRP` — Core RP 扩展（UnsafeGraphContext 扩展、ObjectDispatcherService）
@@ -237,12 +312,15 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 
 ## 文档
 
-- [RenderGraph Editor](Documentation/RenderGraphEditor.md)
-- [RenderGraph SubSystem](Documentation/RenderGraphSubSystem.md)
-- [RenderGraph Resource Descriptors](Documentation/RenderGraphResourceDescriptors.md)
-- [Acceleration Structure Support](Documentation/AccelerationStructureSupport.md)
-- [Bindless Setup](Documentation/Bindless.md)
-- [LWGUI Notes](Documentation/LWGUI.md)
+- [RenderGraph Editor](Documentation~/RenderGraphEditor.md)
+- [RenderGraph SubSystem](Documentation~/RenderGraphSubSystem.md)
+- [RenderGraph Resource Descriptors](Documentation~/RenderGraphResourceDescriptors.md)
+- [Acceleration Structure Support](Documentation~/AccelerationStructureSupport.md)
+- [Bindless Setup](Documentation~/Bindless.md)
+- [LWGUI Notes](Documentation~/LWGUI.md)
+- [Physically Based Sky HDRP Gap Inventory](Documentation~/PhysicallyBasedSkyHdrpGapInventory.md)
+- [Sky System Roadmap](Documentation~/SkySystemRoadmap.md)
+- [Local Exposure](Documentation~/LocalExposure.md)
 
 ## 测试
 

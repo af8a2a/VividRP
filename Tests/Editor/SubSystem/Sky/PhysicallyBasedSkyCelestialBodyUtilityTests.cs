@@ -133,6 +133,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_MaterialParameters.celestialLightCount = m_CelestialBodyBuffer.CelestialLightCount;"));
             Assert.That(source, Does.Contain("m_MaterialParameters.celestialBodyCount = m_CelestialBodyBuffer.CelestialBodyCount;"));
             Assert.That(source, Does.Contain("m_MaterialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);"));
+            Assert.That(source, Does.Contain("internal bool SkyViewLutRebuiltThisFrame => m_SkyViewLutRebuiltThisFrame;"));
+            Assert.That(source, Does.Contain("internal void Update(in SkyRendererContext context, CommandBuffer cmd, bool forceSkyViewRebuild = false)"));
+            Assert.That(source, Does.Contain("if (forceSkyViewRebuild)"));
+            Assert.That(source, Does.Contain("m_SkyViewLutRebuiltThisFrame = true;"));
         }
 
         [Test]

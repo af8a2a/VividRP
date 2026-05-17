@@ -25,6 +25,7 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "Color",
+                "DeferredLightingDebug",
                 "Depth",
                 "DirectionalShadowTexture",
                 "GBuffer0",
@@ -40,12 +41,14 @@ namespace VividRP.Editor.Tests
             }));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(textureEntries.Single(entry => entry.Name == "Color").AttachmentIndex, Is.EqualTo(0));
+            Assert.That(textureEntries.Single(entry => entry.Name == "DeferredLightingDebug").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(textureEntries.Single(entry => entry.Name == "DeferredLightingDebug").AttachmentIndex, Is.EqualTo(-1));
             Assert.That(textureEntries.Single(entry => entry.Name == "SkyIBLCubemap").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_GGXDisneyDiffuse").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_CharlieAndFabric").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 textureEntries
-                    .Where(entry => entry.Name != "Color")
+                    .Where(entry => entry.Name != "Color" && entry.Name != "DeferredLightingDebug")
                     .Select(entry => entry.Access)
                     .Distinct(),
                 Is.EqualTo(new[] { AccessFlags.Read }));
@@ -88,6 +91,7 @@ namespace VividRP.Editor.Tests
             AssertTextureSize(pass, "m_GTAOTexture", 511, 257);
             AssertTextureSize(pass, "m_ScreenSpaceReflectionTexture", 511, 257);
             AssertTextureSize(pass, "m_ColorTexture", 511, 257);
+            AssertTextureSize(pass, "m_DebugTexture", 511, 257);
             AssertTextureSize(pass, "m_PreIntegratedFGDGGXDisneyDiffuseTexture", 64, 64);
             AssertTextureSize(pass, "m_PreIntegratedFGDCharlieAndFabricTexture", 64, 64);
 
@@ -103,6 +107,13 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(outputTexture.desc.ClearBuffer, Is.True);
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+
+            var debugTexture = GetFieldValue<RenderGraphTexture>(pass, "m_DebugTexture");
+            Assert.That(debugTexture.desc.EnableRandomWrite, Is.True);
+            Assert.That(debugTexture.desc.ClearBuffer, Is.True);
+            Assert.That(debugTexture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(debugTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+            Assert.That(debugTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
 
             var gbuffer1Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer1");
             var gbuffer2Texture = GetFieldValue<RenderGraphTexture>(pass, "m_GBuffer2");
@@ -168,6 +179,26 @@ namespace VividRP.Editor.Tests
             Assert.That(ssrTexture, Is.SameAs(localSsrTexture));
             Assert.That(ssrTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(ssrTexture.desc.ClearColor, Is.EqualTo(Color.clear));
+        }
+
+        [Test]
+        public void DeferredLightingPassNode_ExportsDebugTextureOutputPort_ForVisualization()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new VividRP.Editor.RenderGraph.Generated.DeferredLightingPass();
+                RenderGraphTestUtility.AddTestNode(graph, node);
+
+                Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture_In"), Is.Null);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
         }
 
         [Test]

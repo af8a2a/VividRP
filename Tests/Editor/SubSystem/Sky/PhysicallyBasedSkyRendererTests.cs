@@ -188,6 +188,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Shader.GetGlobalTexture(DirectionalShadowTextureId)"));
             Assert.That(source, Does.Contain("cmd.SetViewport(m_RenderViewport);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
+            Assert.That(source, Does.Contain("RefreshSkyViewLutForRender(cmd);"));
+            Assert.That(source, Does.Contain("private void RefreshSkyViewLutForRender(CommandBuffer cmd)"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame"));
+            Assert.That(source, Does.Contain("m_AtmosphereLutCache.Update(m_RenderContext, cmd, forceSkyViewRebuild: true);"));
+            Assert.That(source, Does.Contain("m_LastRenderedSkyViewLutHash = m_RenderSkyViewLutHash;"));
+            Assert.That(source, Does.Contain("m_HasRenderedSkyViewLut = true;"));
+            Assert.That(source, Does.Contain("private bool TryResolveSkyViewTexture(out Texture skyViewTexture)"));
+            Assert.That(source, Does.Contain("|| !TryResolveSkyViewTexture(out _)"));
+            Assert.That(source, Does.Not.Contain("TextureResolveUtility.ResolveTexture(m_SkyViewLut)"));
+            Assert.That(source, Does.Contain("SyncRenderMaterialParametersWithCelestialBodyBuffer();"));
             Assert.That(source, Does.Contain("TryPrepareLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("ApplyLocalSkyPrecomputationTextures(properties);"));
             Assert.That(source, Does.Contain("CoreUtils.SetKeyword(m_SkyMaterial, \"LOCAL_SKY\", useLocalSkyPrecomputation);"));

@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class AtmosphericScatteringPass : RasterPass
+    public sealed class AtmosphericScatteringPass : UnsafePass
     {
         internal const string OpaqueAtmosphericScatteringPassName = "Opaque Atmospheric Scattering";
         internal const string OpaqueAtmosphericScatteringShaderName = "Hidden/VividRP/OpaqueAtmosphericScattering";
@@ -147,7 +147,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureOutputTexture(width, height, colorInputDescriptor);
         }
 
-        public override void Record(RasterPassContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_Material == null
                 || m_ColorInput?.innerHandle.IsValid() != true
@@ -213,8 +213,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_HasMaterialParameters)
                 PhysicallyBasedSkyMaterialPropertyBinder.Apply(mpb, m_MaterialParameters, VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume());
 
-            ConstantBuffer.Push(context.cmd, m_ShaderVariablesVolumetric,m_Material, ShaderVariablesVolumetricId);
-            CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, ResolveShaderPassIndex());
+            var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            ConstantBuffer.PushGlobal(nativeCmd, m_ShaderVariablesVolumetric, ShaderVariablesVolumetricId);
+            nativeCmd.SetRenderTarget(m_OutputTexture);
+            CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, ResolveShaderPassIndex());
         }
 
         public override void Dispose()

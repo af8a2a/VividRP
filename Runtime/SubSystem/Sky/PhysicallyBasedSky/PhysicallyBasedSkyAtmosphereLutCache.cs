@@ -62,6 +62,7 @@ namespace VividRP.Runtime
         private bool m_ShouldRebuildMultiScattering;
         private bool m_ShouldRebuildSkyView;
         private bool m_ShouldRenderAtmosphericScattering;
+        private bool m_SkyViewLutRebuiltThisFrame;
         private SkyLutRebuildReason m_MultiScatteringRebuildReason;
         private SkyLutRebuildReason m_SkyViewRebuildReason;
         private bool m_MultiScatteringCacheRecreated;
@@ -91,6 +92,8 @@ namespace VividRP.Runtime
 
         internal RTHandle AtmosphericScatteringHandle => m_CachedAtmosphericScatteringHandle;
 
+        internal bool SkyViewLutRebuiltThisFrame => m_SkyViewLutRebuiltThisFrame;
+
         internal void Build(VividRPCoreResources resources)
         {
             m_ComputeShader = resources?.AtmosphereLUTCompute;
@@ -106,7 +109,7 @@ namespace VividRP.Runtime
             m_AtmosphericScatteringBlurKernel = FindKernel(AtmosphericScatteringBlurKernelName);
         }
 
-        internal void Update(in SkyRendererContext context, CommandBuffer cmd)
+        internal void Update(in SkyRendererContext context, CommandBuffer cmd, bool forceSkyViewRebuild = false)
         {
             var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
 
@@ -153,6 +156,14 @@ namespace VividRP.Runtime
 
             m_ShouldRebuildMultiScattering = m_MultiScatteringRebuildReason != SkyLutRebuildReason.None;
             m_ShouldRebuildSkyView = m_ShouldRebuildMultiScattering || m_SkyViewRebuildReason != SkyLutRebuildReason.None;
+            if (forceSkyViewRebuild)
+            {
+                if (m_SkyViewRebuildReason == SkyLutRebuildReason.None)
+                    m_SkyViewRebuildReason = SkyLutRebuildReason.ParametersChanged;
+
+                m_ShouldRebuildSkyView = true;
+            }
+
             m_ShouldRenderAtmosphericScattering = m_CachedAtmosphericScatteringTexture != null
                                                  && m_CachedAtmosphericScatteringTexture.IsCreated();
 
@@ -206,6 +217,7 @@ namespace VividRP.Runtime
                 }
 
                 m_CachedSkyViewHash = m_NextSkyViewHash;
+                m_SkyViewLutRebuiltThisFrame = true;
             }
 
         }
@@ -380,6 +392,7 @@ namespace VividRP.Runtime
             m_MultiScatteringCacheRecreated = false;
             m_SkyViewCacheRecreated = false;
             m_AtmosphericScatteringCacheRecreated = false;
+            m_SkyViewLutRebuiltThisFrame = false;
             m_NextMultiScatteringHash = 0;
             m_NextSkyViewHash = 0;
         }

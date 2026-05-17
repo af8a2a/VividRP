@@ -72,7 +72,6 @@ namespace VividRP.Runtime
         private bool m_HasLocalSkyPrecomputation;
         private RenderGraphTexture m_ColorTarget;
         private RenderGraphTexture m_DepthTexture;
-        private RenderGraphTexture m_SkyViewLut;
         private RenderGraphTexture m_DirectionalShadowTexture;
         private RenderGraphTexture m_CSMShadowAtlas;
         private bool m_HasConnectedCSMShadowAtlas;
@@ -82,6 +81,9 @@ namespace VividRP.Runtime
         private SkyRendererContext m_RenderContext;
         private PhysicallyBasedSkyShaderParameters m_RenderParameters;
         private PhysicallyBasedSkyMaterialParameters m_RenderMaterialParameters;
+        private int m_RenderSkyViewLutHash;
+        private int m_LastRenderedSkyViewLutHash;
+        private bool m_HasRenderedSkyViewLut;
         private bool m_HasRenderMaterialParameters;
         private bool m_UseLocalSkyPrecomputationForRender;
         private readonly MaterialPropertyBlock m_RenderPropertyBlock = new();
@@ -242,14 +244,13 @@ namespace VividRP.Runtime
         {
             m_ColorTarget = colorTarget;
             m_DepthTexture = depthTexture;
-            m_SkyViewLut = skyViewLut;
             m_DirectionalShadowTexture = directionalShadowTexture;
             m_CSMShadowAtlas = csmShadowAtlas;
             m_HasConnectedCSMShadowAtlas = hasConnectedCSMShadowAtlas;
             m_RenderContext = context;
             m_RenderVolume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
             m_RenderViewport = ResolveRenderViewport(context.cameraData, colorTarget);
-            ImportSkyViewLutForPass(skyViewLut);
+            m_RenderSkyViewLutHash = 0;
             m_HasRenderMaterialParameters = false;
             m_UseLocalSkyPrecomputationForRender = false;
             m_ShouldRenderSky = m_SkyMaterial != null
@@ -271,11 +272,18 @@ namespace VividRP.Runtime
                 m_RenderVolume,
                 context,
                 out m_RenderMaterialParameters);
+            m_CelestialBodyBuffer.Update(context);
+            if (m_HasRenderMaterialParameters)
+            {
+                SyncRenderMaterialParametersWithCelestialBodyBuffer();
+                m_RenderSkyViewLutHash = PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext);
+            }
+
             m_UseLocalSkyPrecomputationForRender = m_HasRenderMaterialParameters
                                                    && HasMatchingLocalSkyPrecomputation(
                                                        m_RenderParameters,
                                                        m_RenderMaterialParameters);
-            m_CelestialBodyBuffer.Update(context);
+            ImportSkyViewLutForPass(skyViewLut);
         }
 
         public void RenderSky(UnsafePassContext context)
@@ -291,6 +299,7 @@ namespace VividRP.Runtime
             }
 
             var cmd = context.GetNativeCommandBuffer();
+            RefreshSkyViewLutForRender(cmd);
             m_AtmosphereLutCache.RenderAtmosphericScattering(
                 cmd,
                 m_HasConnectedCSMShadowAtlas ? m_CSMShadowAtlas : null,
@@ -300,6 +309,12 @@ namespace VividRP.Runtime
             m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
 
             var skyViewTexture = ResolveSkyViewTexture();
+            if (skyViewTexture != null)
+            {
+                m_LastRenderedSkyViewLutHash = m_RenderSkyViewLutHash;
+                m_HasRenderedSkyViewLut = true;
+            }
+
             var directionalShadowTexture = TextureResolveUtility.ResolveTexture(m_DirectionalShadowTexture) ?? Shader.GetGlobalTexture(DirectionalShadowTextureId);
             var properties = m_RenderPropertyBlock;
             properties.Clear();
@@ -358,7 +373,6 @@ namespace VividRP.Runtime
             m_HasLocalSkyPrecomputation = false;
             m_ColorTarget = null;
             m_DepthTexture = null;
-            m_SkyViewLut = null;
             m_DirectionalShadowTexture = null;
             m_CSMShadowAtlas = null;
             m_HasConnectedCSMShadowAtlas = false;
@@ -368,6 +382,9 @@ namespace VividRP.Runtime
             m_RenderContext = default;
             m_RenderParameters = default;
             m_RenderMaterialParameters = default;
+            m_RenderSkyViewLutHash = 0;
+            m_LastRenderedSkyViewLutHash = 0;
+            m_HasRenderedSkyViewLut = false;
             m_HasRenderMaterialParameters = false;
             m_UseLocalSkyPrecomputationForRender = false;
             m_AtmosphereLutCache.Dispose();
@@ -978,14 +995,36 @@ namespace VividRP.Runtime
 
         private Texture ResolveSkyViewTexture()
         {
-            var skyViewTexture = TextureResolveUtility.ResolveTexture(m_SkyViewLut);
-            if (skyViewTexture != null || !m_HasRenderMaterialParameters)
-                return skyViewTexture;
-
-            var skyViewHash = PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(m_RenderParameters, m_RenderMaterialParameters, m_RenderContext);
-            return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture)
+            return TryResolveSkyViewTexture(out var skyViewTexture)
                 ? skyViewTexture
                 : null;
+        }
+
+        private void RefreshSkyViewLutForRender(CommandBuffer cmd)
+        {
+            if (!m_HasRenderMaterialParameters || cmd == null)
+                return;
+
+            if (m_HasRenderedSkyViewLut
+                && m_LastRenderedSkyViewLutHash == m_RenderSkyViewLutHash
+                && !m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
+            {
+                return;
+            }
+
+            m_AtmosphereLutCache.Update(m_RenderContext, cmd, forceSkyViewRebuild: true);
+        }
+
+        private bool TryResolveSkyViewTexture(out Texture skyViewTexture)
+        {
+            if (!m_HasRenderMaterialParameters)
+            {
+                skyViewTexture = null;
+                return false;
+            }
+
+            var skyViewHash = m_RenderSkyViewLutHash;
+            return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewHash, out skyViewTexture);
         }
 
         private void ApplyAtmosphereLutHandle(VividSkyData skyData)
@@ -1004,7 +1043,9 @@ namespace VividRP.Runtime
 
         private void ImportSkyViewLutForPass(RenderGraphTexture skyViewLut)
         {
-            if (skyViewLut == null || !PassRecorder.IsPassTextureImportActive)
+            if (skyViewLut == null
+                || !PassRecorder.IsPassTextureImportActive
+                || !TryResolveSkyViewTexture(out _))
                 return;
 
             var handle = m_AtmosphereLutCache.SkyViewHandle;
@@ -1012,6 +1053,13 @@ namespace VividRP.Runtime
                 return;
 
             PassRecorder.ImportTexture(skyViewLut, handle);
+        }
+
+        private void SyncRenderMaterialParametersWithCelestialBodyBuffer()
+        {
+            m_RenderMaterialParameters.celestialLightCount = m_CelestialBodyBuffer.CelestialLightCount;
+            m_RenderMaterialParameters.celestialBodyCount = m_CelestialBodyBuffer.CelestialBodyCount;
+            m_RenderMaterialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);
         }
 
         private static Rect ResolveRenderViewport(VividCameraData cameraData, RenderGraphTexture colorTarget)

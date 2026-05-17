@@ -24,6 +24,7 @@ Texture2D<float4> _ScreenSpaceReflectionTexture;
 StructuredBuffer<uint> _MaterialPixelIndices;
 
 RWTexture2D<float4> _LightingTexture;
+RWTexture2D<float4> _LightingDebugTexture;
 
 uint _LightingWidth;
 uint _LightingHeight;
@@ -188,6 +189,7 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float3 emissive = VividApplyPreExposure(max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0));
     _LightingTexture[dispatchThreadId.xy] = float4(emissive, 1.0);
+    _LightingDebugTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 0.0);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
@@ -228,6 +230,7 @@ void DeferredLit(
     float3 preExposedIndirectSpecular = VividApplyPreExposure(max(indirectSpecularLighting, 0.0));
     lighting = max(lighting - preExposedIndirectSpecular * reflectionWeight, 0.0)
         + screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;
+    _LightingDebugTexture[pixelCoord] = float4(lighting, reflectionWeight);
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

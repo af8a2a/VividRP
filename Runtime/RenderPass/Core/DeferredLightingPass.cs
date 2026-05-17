@@ -23,6 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ScreenSpaceReflectionTextureId = Shader.PropertyToID("_ScreenSpaceReflectionTexture");
         private static readonly int ScreenSpaceReflectionEnabledId = Shader.PropertyToID("_ScreenSpaceReflectionEnabled");
         private static readonly int LightingTextureId = Shader.PropertyToID("_LightingTexture");
+        private static readonly int LightingDebugTextureId = Shader.PropertyToID("_LightingDebugTexture");
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
         private static readonly int MaterialPixelIndicesId = Shader.PropertyToID("_MaterialPixelIndices");
@@ -89,6 +90,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_ColorTexture;
+
+        [RenderGraphResource(
+            Name = "DeferredLightingDebug",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_DebugTexture;
 
         [RenderGraphResource(
             Name = "SkyIBLCubemap",
@@ -238,6 +245,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ColorTexture.desc.EnableRandomWrite = true;
             m_ColorTexture.desc.ClearBuffer = true;
             m_ColorTexture.desc.ClearColor = Color.clear;
+            m_DebugTexture = RenderGraphTexture.CreateOutput("DeferredLightingDebug", GraphicsFormat.R16G16B16A16_SFloat);
+            m_DebugTexture.desc.EnableRandomWrite = true;
+            m_DebugTexture.desc.ClearBuffer = true;
+            m_DebugTexture.desc.ClearColor = Color.clear;
+            m_DebugTexture.desc.FilterMode = FilterMode.Point;
+            m_DebugTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
             m_StandardMaterialIndices = RenderGraphBuffer.CreateStructured("StandardMaterialIndices", sizeof(uint));
             m_FabricMaterialIndices = RenderGraphBuffer.CreateStructured("FabricMaterialIndices", sizeof(uint));
@@ -306,6 +319,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GTAOTexture.Resize(width, height);
             m_ScreenSpaceReflectionTexture.Resize(width, height);
             m_ColorTexture.Resize(width, height);
+            m_DebugTexture.Resize(width, height);
             PrepareClusteredLightingParameters(frameData);
             PreparePreIntegratedFGDResources();
             PrepareSkyTextureState(frameData.GetOrCreate<VividSkyData>());
@@ -472,6 +486,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeIntParam(m_DeferredLitCompute, ScreenSpaceReflectionEnabledId, 1);
             }
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingTextureId, m_ColorTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, LightingDebugTextureId, m_DebugTexture.innerHandle);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingWidthId, m_LightingWidth);
             cmd.SetComputeIntParam(m_DeferredLitCompute, LightingHeightId, m_LightingHeight);
         }

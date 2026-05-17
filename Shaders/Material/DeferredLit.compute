@@ -88,6 +88,7 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividGBufferSurfaceData surfaceData,
     uint2 pixelCoord,
     float3 positionWS,
+    out float3 indirectDiffuseLighting,
     out float3 indirectSpecularLighting,
     out float3 screenSpaceReflectionFGD)
 {
@@ -157,28 +158,32 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
 
     VividLightLoopOutput lightLoopOutput = (VividLightLoopOutput)0;
     PostEvaluateBSDF(surfaceData, bsdfData, preLightData, aggregateLighting, lightLoopOutput);
+    indirectDiffuseLighting = bsdfData.diffuseColor * aggregateLighting.indirect.diffuse;
     indirectSpecularLighting = FinalizeVividSpecularLighting(
         surfaceData,
         bsdfData,
         preLightData,
         aggregateLighting.indirect.specularReflected);
+    // ClearDeferredLit owns emissive so unsupported/culled pixels still preserve it.
+    lightLoopOutput.diffuseLighting = max(lightLoopOutput.diffuseLighting - surfaceData.emissive, 0.0);
     return lightLoopOutput;
 }
 
-float3 EvaluateDeferredLitLighting(
+VividLightLoopOutput EvaluateDeferredLitLighting(
     VividGBufferSurfaceData surfaceData,
     uint2 pixelCoord,
     float3 positionWS,
+    out float3 indirectDiffuseLighting,
     out float3 indirectSpecularLighting,
     out float3 screenSpaceReflectionFGD)
 {
-    VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLightLoop(
+    return EvaluateDeferredLitLightLoop(
         surfaceData,
         pixelCoord,
         positionWS,
+        indirectDiffuseLighting,
         indirectSpecularLighting,
         screenSpaceReflectionFGD);
-    return CombineVividLightLoopOutput(lightLoopOutput);
 }
 
 [numthreads(8, 8, 1)]
@@ -216,21 +221,27 @@ void DeferredLit(
 
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 positionWS = ComputeWorldSpacePosition(uv, deviceDepth, UNITY_MATRIX_I_VP);
+    float3 indirectDiffuseLighting;
     float3 indirectSpecularLighting;
     float3 screenSpaceReflectionFGD;
-    float3 lightingNoPreExposure = EvaluateDeferredLitLighting(
+    VividLightLoopOutput lightLoopOutput = EvaluateDeferredLitLighting(
         surfaceData,
         pixelCoord,
         positionWS,
+        indirectDiffuseLighting,
         indirectSpecularLighting,
         screenSpaceReflectionFGD);
-    float3 lighting = VividApplyPreExposure(lightingNoPreExposure);
+    float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
+    float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting, 0.0));
     float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);
     float reflectionWeight = screenSpaceReflection.a;
     float3 preExposedIndirectSpecular = VividApplyPreExposure(max(indirectSpecularLighting, 0.0));
-    lighting = max(lighting - preExposedIndirectSpecular * reflectionWeight, 0.0)
+    specularLighting = max(specularLighting - preExposedIndirectSpecular * reflectionWeight, 0.0)
         + screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;
-    _LightingDebugTexture[pixelCoord] = float4(lighting, reflectionWeight);
+    float3 lighting = diffuseLighting + specularLighting;
+    float3 indirectLighting = VividApplyPreExposure(max(indirectDiffuseLighting + indirectSpecularLighting, 0.0));
+    _LightingDebugTexture[pixelCoord] = float4(indirectLighting, reflectionWeight);
+
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

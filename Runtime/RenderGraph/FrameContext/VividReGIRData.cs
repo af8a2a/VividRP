@@ -10,6 +10,12 @@ namespace VividRP.Runtime
         Onion = 2u,
     }
 
+    public enum VividReGIRSourceSamplingMode : uint
+    {
+        Uniform = 0u,
+        PowerRIS = 1u,
+    }
+
     [StructLayout(LayoutKind.Sequential)]
     public struct VividReGIRLightData
     {
@@ -53,6 +59,10 @@ namespace VividRP.Runtime
         public float samplingJitter;
         public uint frameIndex;
         public VividReGIRMode mode;
+        public VividReGIRSourceSamplingMode sourceSamplingMode;
+        public uint lightPdfTextureWidth;
+        public uint lightPdfTextureHeight;
+        public uint lightPdfTextureMipCount;
         public uint onionCellCount;
         public uint onionLayerGroupCount;
         public float onionCubicRootFactor;

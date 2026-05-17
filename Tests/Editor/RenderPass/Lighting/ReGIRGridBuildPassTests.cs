@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
@@ -22,14 +23,20 @@ namespace VividRP.Editor.Tests
             {
                 return TryGetEnumParameterValue("m_Mode", out value);
             }
+
+            internal bool TryGetSourceSamplingMode(out VividReGIRSourceSamplingMode value)
+            {
+                return TryGetEnumParameterValue("m_SourceSamplingMode", out value);
+            }
         }
 
         [Test]
-        public void ReGIRGridBuildPass_DeclaresOutputBufferPorts()
+        public void ReGIRGridBuildPass_DeclaresOutputPorts()
         {
             AssertBufferResource("m_ReGIRLightBuffer", "ReGIRLights");
             AssertBufferResource("m_ReGIRParameterBuffer", "ReGIRParameters");
             AssertBufferResource("m_ReGIRReservoirBuffer", "ReGIRReservoirs");
+            AssertTextureResource("m_ReGIRLightPdfTexture", "ReGIRLightPdfTexture");
         }
 
         [Test]
@@ -40,8 +47,11 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("m_ReGIRLightBuffer"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ReGIRParameterBuffer"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_ReGIRReservoirBuffer"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_ReGIRLightPdfTexture"), Is.Not.Null);
             Assert.That(node.TryGetMode(out var mode), Is.True);
             Assert.That(mode, Is.EqualTo(ReGIRGridBuildPass.DefaultMode));
+            Assert.That(node.TryGetSourceSamplingMode(out var sourceSamplingMode), Is.True);
+            Assert.That(sourceSamplingMode, Is.EqualTo(ReGIRGridBuildPass.DefaultSourceSamplingMode));
         }
 
         [Test]
@@ -73,6 +83,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ApplyEnumParameters_UpdatesSourceSamplingMode()
+        {
+            var pass = new ReGIRGridBuildPass();
+
+            RenderGraphPassEnumParameterUtility.ApplyEnumParameters(
+                pass,
+                typeof(ReGIRGridBuildPass),
+                new List<RenderGraphPassEnumParameter>
+                {
+                    new()
+                    {
+                        FieldName = "m_SourceSamplingMode",
+                        Value = (int)VividReGIRSourceSamplingMode.Uniform,
+                    }
+                });
+
+            Assert.That(pass.SourceSamplingMode, Is.EqualTo(VividReGIRSourceSamplingMode.Uniform));
+        }
+
+        [Test]
         public void Compile_IncludesModeEnumParameter_WhenReGIRGridBuildPassNodeIsPresent()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
@@ -85,9 +115,17 @@ namespace VividRP.Editor.Tests
                 var result = RenderGraphCompiler.Compile(graph);
 
                 Assert.That(result.Passes, Has.Count.EqualTo(1));
-                Assert.That(result.Passes[0].EnumParameters, Has.Count.EqualTo(1));
-                Assert.That(result.Passes[0].EnumParameters.Single().FieldName, Is.EqualTo("m_Mode"));
-                Assert.That(result.Passes[0].EnumParameters.Single().Value, Is.EqualTo((int)ReGIRGridBuildPass.DefaultMode));
+                Assert.That(result.Passes[0].EnumParameters.Select(parameter => parameter.FieldName), Is.EquivalentTo(new[]
+                {
+                    "m_Mode",
+                    "m_SourceSamplingMode",
+                }));
+                Assert.That(
+                    result.Passes[0].EnumParameters.Single(parameter => parameter.FieldName == "m_Mode").Value,
+                    Is.EqualTo((int)ReGIRGridBuildPass.DefaultMode));
+                Assert.That(
+                    result.Passes[0].EnumParameters.Single(parameter => parameter.FieldName == "m_SourceSamplingMode").Value,
+                    Is.EqualTo((int)ReGIRGridBuildPass.DefaultSourceSamplingMode));
             }
             finally
             {
@@ -116,6 +154,8 @@ namespace VividRP.Editor.Tests
                 var lightBuffer = GetBuffer(pass, "m_ReGIRLightBuffer");
                 var parameterBuffer = GetBuffer(pass, "m_ReGIRParameterBuffer");
                 var reservoirBuffer = GetBuffer(pass, "m_ReGIRReservoirBuffer");
+                var lightPdfTexture = GetTexture(pass, "m_ReGIRLightPdfTexture");
+                var parameters = GetFieldValue<VividReGIRParameters>(pass, "m_ReGIRParameters");
 
                 Assert.That(lightBuffer.desc.Count, Is.EqualTo(2));
                 Assert.That(lightBuffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
@@ -123,7 +163,17 @@ namespace VividRP.Editor.Tests
                 Assert.That(parameterBuffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
                 Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultSlotCount()));
                 Assert.That(reservoirBuffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
-                Assert.That(GetFieldValue<VividReGIRParameters>(pass, "m_ReGIRParameters").mode, Is.EqualTo(VividReGIRMode.Grid));
+                Assert.That(lightPdfTexture.desc.Width, Is.EqualTo(2));
+                Assert.That(lightPdfTexture.desc.Height, Is.EqualTo(2));
+                Assert.That(lightPdfTexture.desc.MipCount, Is.EqualTo(2));
+                Assert.That(lightPdfTexture.desc.EnableRandomWrite, Is.True);
+                Assert.That(lightPdfTexture.desc.UseMipMap, Is.True);
+                Assert.That(lightPdfTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
+                Assert.That(parameters.mode, Is.EqualTo(VividReGIRMode.Grid));
+                Assert.That(parameters.sourceSamplingMode, Is.EqualTo(ReGIRGridBuildPass.DefaultSourceSamplingMode));
+                Assert.That(parameters.lightPdfTextureWidth, Is.EqualTo(2u));
+                Assert.That(parameters.lightPdfTextureHeight, Is.EqualTo(2u));
+                Assert.That(parameters.lightPdfTextureMipCount, Is.EqualTo(2u));
                 AssertImportedBackingBuffer(lightBuffer);
                 AssertImportedBackingBuffer(parameterBuffer);
                 AssertImportedBackingBuffer(reservoirBuffer);
@@ -153,6 +203,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultOnionSlotCount()));
                 Assert.That(parameters.mode, Is.EqualTo(VividReGIRMode.Onion));
+                Assert.That(parameters.sourceSamplingMode, Is.EqualTo(ReGIRGridBuildPass.DefaultSourceSamplingMode));
                 Assert.That(parameters.onionCellCount, Is.EqualTo((uint)ExpectedDefaultOnionCellCount()));
                 Assert.That(parameters.onionLayerGroupCount, Is.EqualTo((uint)ReGIRGridBuildPass.DefaultOnionDetailLayerGroups));
                 Assert.That(parameters.onionRingCount, Is.EqualTo(25u));
@@ -180,10 +231,14 @@ namespace VividRP.Editor.Tests
                 var lightBuffer = GetBuffer(pass, "m_ReGIRLightBuffer");
                 var parameterBuffer = GetBuffer(pass, "m_ReGIRParameterBuffer");
                 var reservoirBuffer = GetBuffer(pass, "m_ReGIRReservoirBuffer");
+                var lightPdfTexture = GetTexture(pass, "m_ReGIRLightPdfTexture");
 
                 Assert.That(lightBuffer.desc.Count, Is.EqualTo(1));
                 Assert.That(parameterBuffer.desc.Count, Is.EqualTo(1));
                 Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultSlotCount()));
+                Assert.That(lightPdfTexture.desc.Width, Is.EqualTo(1));
+                Assert.That(lightPdfTexture.desc.Height, Is.EqualTo(1));
+                Assert.That(lightPdfTexture.desc.MipCount, Is.EqualTo(1));
                 AssertImportedBackingBuffer(lightBuffer);
                 AssertImportedBackingBuffer(parameterBuffer);
                 AssertImportedBackingBuffer(reservoirBuffer);
@@ -192,6 +247,25 @@ namespace VividRP.Editor.Tests
             {
                 pass.Dispose();
             }
+        }
+
+        [Test]
+        public void ResolveLightPdfTextureSize_ReturnsPowerOfTwoSquareCoveringLights()
+        {
+            Assert.That(ReGIRGridBuildPass.ResolveLightPdfTextureSize(0), Is.EqualTo(1));
+            Assert.That(ReGIRGridBuildPass.ResolveLightPdfTextureSize(1), Is.EqualTo(1));
+            Assert.That(ReGIRGridBuildPass.ResolveLightPdfTextureSize(2), Is.EqualTo(2));
+            Assert.That(ReGIRGridBuildPass.ResolveLightPdfTextureSize(5), Is.EqualTo(4));
+            Assert.That(ReGIRGridBuildPass.ResolveLightPdfTextureSize(17), Is.EqualTo(8));
+        }
+
+        [Test]
+        public void CalculateLightPdfMipCount_ReturnsFullMipChain()
+        {
+            Assert.That(ReGIRGridBuildPass.CalculateLightPdfMipCount(1), Is.EqualTo(1));
+            Assert.That(ReGIRGridBuildPass.CalculateLightPdfMipCount(2), Is.EqualTo(2));
+            Assert.That(ReGIRGridBuildPass.CalculateLightPdfMipCount(4), Is.EqualTo(3));
+            Assert.That(ReGIRGridBuildPass.CalculateLightPdfMipCount(8), Is.EqualTo(4));
         }
 
         [Test]
@@ -230,6 +304,42 @@ namespace VividRP.Editor.Tests
             Assert.That(ordered[1].ResourceBindings[0].SourcePassIndex, Is.Zero);
         }
 
+        [Test]
+        public void RenderGraphCompilation_OrdersReGIRBeforeLightPdfConsumer()
+        {
+            var passDefinitions = new[]
+            {
+                new RenderGraphPassDefinition
+                {
+                    PassType = GetPassTypeName<ReGIRLightPdfConsumerPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "m_ReGIRLightPdfTexture",
+                            ResourceKind = RenderGraphResourceKind.Texture,
+                            SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                            SourcePassIndex = 1,
+                            SourceFieldName = "m_ReGIRLightPdfTexture",
+                        }
+                    }
+                },
+                new RenderGraphPassDefinition
+                {
+                    PassType = GetPassTypeName<ReGIRGridBuildPass>(),
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered.Select(pass => pass.PassType), Is.EqualTo(new[]
+            {
+                GetPassTypeName<ReGIRGridBuildPass>(),
+                GetPassTypeName<ReGIRLightPdfConsumerPass>(),
+            }));
+            Assert.That(ordered[1].ResourceBindings[0].SourcePassIndex, Is.Zero);
+        }
+
         private static void AssertBufferResource(string fieldName, string expectedName)
         {
             var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
@@ -243,11 +353,31 @@ namespace VividRP.Editor.Tests
             Assert.That(attr.BindingMode, Is.EqualTo(RenderGraphResourceBindingMode.External), fieldName);
         }
 
+        private static void AssertTextureResource(string fieldName, string expectedName)
+        {
+            var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            Assert.That(field.FieldType, Is.EqualTo(typeof(RenderGraphTexture)), fieldName);
+
+            var attr = field.GetCustomAttribute<RenderGraphResource>();
+            Assert.That(attr, Is.Not.Null, fieldName);
+            Assert.That(attr.Name, Is.EqualTo(expectedName), fieldName);
+            Assert.That(attr.Access, Is.EqualTo(AccessFlags.Write), fieldName);
+            Assert.That(attr.BindingMode, Is.EqualTo(RenderGraphResourceBindingMode.External), fieldName);
+        }
+
         private static RenderGraphBuffer GetBuffer(ReGIRGridBuildPass pass, string fieldName)
         {
             var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null, fieldName);
             return (RenderGraphBuffer)field.GetValue(pass);
+        }
+
+        private static RenderGraphTexture GetTexture(ReGIRGridBuildPass pass, string fieldName)
+        {
+            var field = typeof(ReGIRGridBuildPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            return (RenderGraphTexture)field.GetValue(pass);
         }
 
         private static T GetFieldValue<T>(ReGIRGridBuildPass pass, string fieldName)
@@ -302,6 +432,29 @@ namespace VividRP.Editor.Tests
             [RenderGraphResource(Name = "ReGIRReservoirs", Access = AccessFlags.Read)]
             private readonly RenderGraphBuffer m_ReGIRReservoirBuffer =
                 RenderGraphBuffer.CreateStructured("ReGIRReservoirs", VividReGIRReservoir.Stride);
+
+            public override void Create()
+            {
+            }
+
+            public override void Prepare(ContextContainer frameData)
+            {
+            }
+
+            public override void Record(ComputePassContext context)
+            {
+            }
+
+            public override void Dispose()
+            {
+            }
+        }
+
+        private sealed class ReGIRLightPdfConsumerPass : ComputePass
+        {
+            [RenderGraphResource(Name = "ReGIRLightPdfTexture", Access = AccessFlags.Read)]
+            private readonly RenderGraphTexture m_ReGIRLightPdfTexture =
+                RenderGraphTexture.CreateInput("ReGIRLightPdfTexture", GraphicsFormat.R32_SFloat);
 
             public override void Create()
             {

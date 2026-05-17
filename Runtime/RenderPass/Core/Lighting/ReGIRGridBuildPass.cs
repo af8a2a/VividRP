@@ -1,6 +1,7 @@
 using System;
 using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 
@@ -9,6 +10,7 @@ namespace VividRP.Runtime
     public sealed class ReGIRGridBuildPass : ComputePass
     {
         internal const VividReGIRMode DefaultMode = VividReGIRMode.Grid;
+        internal const VividReGIRSourceSamplingMode DefaultSourceSamplingMode = VividReGIRSourceSamplingMode.PowerRIS;
         internal const int DefaultGridSizeX = 16;
         internal const int DefaultGridSizeY = 16;
         internal const int DefaultGridSizeZ = 16;
@@ -19,13 +21,20 @@ namespace VividRP.Runtime
         internal const int DefaultOnionDetailLayerGroups = 5;
         internal const int DefaultOnionCoverageLayers = 10;
 
-        private const string KernelName = "ReGIRGridBuild";
+        private const string BuildKernelName = "ReGIRGridBuild";
+        private const string PrepareLightPdfKernelName = "ReGIRPrepareLightPdf";
+        private const string ReduceLightPdfKernelName = "ReGIRReduceLightPdf";
         private const int ThreadGroupSize = 256;
+        private const int PdfReduceThreadGroupSize = 8;
         private const float Pi = Mathf.PI;
 
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
+        private static readonly int ReGIRLightPdfTextureId = Shader.PropertyToID("_ReGIRLightPdfTexture");
+        private static readonly int ReGIRLightPdfMipInputId = Shader.PropertyToID("_ReGIRLightPdfMipInput");
+        private static readonly int ReGIRLightPdfMipOutputId = Shader.PropertyToID("_ReGIRLightPdfMipOutput");
+        private static readonly int ReGIRLightPdfSourceMipId = Shader.PropertyToID("_ReGIRLightPdfSourceMip");
 
         [RenderGraphResource(Name = "ReGIRLights", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_ReGIRLightBuffer;
@@ -36,22 +45,40 @@ namespace VividRP.Runtime
         [RenderGraphResource(Name = "ReGIRReservoirs", Access = AccessFlags.Write)]
         private RenderGraphBuffer m_ReGIRReservoirBuffer;
 
+        [RenderGraphResource(Name = "ReGIRLightPdfTexture", Access = AccessFlags.Write)]
+        private RenderGraphTexture m_ReGIRLightPdfTexture;
+
         [SerializeField]
         private VividReGIRMode m_Mode = DefaultMode;
+
+        [SerializeField]
+        private VividReGIRSourceSamplingMode m_SourceSamplingMode = DefaultSourceSamplingMode;
 
         private ComputeShader m_ReGIRGridBuildCompute;
         private NativeArray<VividReGIRLightData> m_ReGIRLightUploadData;
         private NativeArray<VividReGIRParameters> m_ReGIRParameterUploadData;
         private VividReGIRParameters m_ReGIRParameters;
-        private int m_Kernel = -1;
+        private int m_BuildKernel = -1;
+        private int m_PrepareLightPdfKernel = -1;
+        private int m_ReduceLightPdfKernel = -1;
         private int m_ReGIRLightCount;
         private int m_ReGIRSlotCount;
         private int m_DispatchGroupCount;
+        private int m_LightPdfTextureSize;
+        private int m_LightPdfTexelCount;
+        private int m_LightPdfMipCount;
+        private int m_LightPdfPrepareDispatchGroupCount;
 
         public VividReGIRMode Mode
         {
             get => NormalizeMode(m_Mode);
             set => m_Mode = NormalizeMode(value);
+        }
+
+        public VividReGIRSourceSamplingMode SourceSamplingMode
+        {
+            get => NormalizeSourceSamplingMode(m_SourceSamplingMode);
+            set => m_SourceSamplingMode = NormalizeSourceSamplingMode(value);
         }
 
         public ReGIRGridBuildPass()
@@ -60,6 +87,7 @@ namespace VividRP.Runtime
             m_ReGIRLightBuffer = RenderGraphBuffer.CreateStructured("ReGIRLights", 1, VividReGIRLightData.Stride);
             m_ReGIRParameterBuffer = RenderGraphBuffer.CreateStructured("ReGIRParameters", 1, VividReGIRParameters.Stride);
             m_ReGIRReservoirBuffer = RenderGraphBuffer.CreateStructured("ReGIRReservoirs", 1, VividReGIRReservoir.Stride);
+            m_ReGIRLightPdfTexture = CreateLightPdfTexture();
         }
 
         public override void Create()
@@ -72,16 +100,17 @@ namespace VividRP.Runtime
                 return;
             }
 
-            try
-            {
-                m_Kernel = m_ReGIRGridBuildCompute.FindKernel(KernelName);
-            }
-            catch (ArgumentException)
-            {
-                Debug.LogWarning($"[VividRP] Could not find kernel '{KernelName}' in ReGIR grid build compute shader.");
-                m_ReGIRGridBuildCompute = null;
-                m_Kernel = -1;
-            }
+            m_PrepareLightPdfKernel = FindKernelOrLog(m_ReGIRGridBuildCompute, PrepareLightPdfKernelName);
+            m_ReduceLightPdfKernel = FindKernelOrLog(m_ReGIRGridBuildCompute, ReduceLightPdfKernelName);
+            m_BuildKernel = FindKernelOrLog(m_ReGIRGridBuildCompute, BuildKernelName);
+
+            if (m_PrepareLightPdfKernel >= 0 && m_ReduceLightPdfKernel >= 0 && m_BuildKernel >= 0)
+                return;
+
+            m_ReGIRGridBuildCompute = null;
+            m_PrepareLightPdfKernel = -1;
+            m_ReduceLightPdfKernel = -1;
+            m_BuildKernel = -1;
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -90,13 +119,16 @@ namespace VividRP.Runtime
             lightData.CompleteReGIRPrepare();
 
             m_ReGIRLightCount = Mathf.Clamp(lightData.reGIRLightCount, 0, lightData.reGIRLights?.Length ?? 0);
+            ResolveLightPdfTextureLayout(m_ReGIRLightCount, out m_LightPdfTextureSize, out m_LightPdfTexelCount, out m_LightPdfMipCount);
             m_ReGIRParameters = CreateParameters(frameData);
             m_ReGIRSlotCount = Mathf.Max(1, (int)Math.Min(m_ReGIRParameters.slotCount, int.MaxValue));
             m_DispatchGroupCount = Mathf.Max(1, CoreUtils.DivRoundUp(m_ReGIRSlotCount, ThreadGroupSize));
+            m_LightPdfPrepareDispatchGroupCount = Mathf.Max(1, CoreUtils.DivRoundUp(m_LightPdfTexelCount, ThreadGroupSize));
 
             ResizeStructuredBuffer(m_ReGIRLightBuffer, Mathf.Max(m_ReGIRLightCount, 1), VividReGIRLightData.Stride);
             ResizeStructuredBuffer(m_ReGIRParameterBuffer, 1, VividReGIRParameters.Stride);
             ResizeStructuredBuffer(m_ReGIRReservoirBuffer, Mathf.Max(m_ReGIRSlotCount, 1), VividReGIRReservoir.Stride);
+            ConfigureLightPdfTexture(m_ReGIRLightPdfTexture, m_LightPdfTextureSize, m_LightPdfMipCount);
             EnsureImportedBuffers();
 
             UploadReGIRLights(lightData);
@@ -105,15 +137,13 @@ namespace VividRP.Runtime
 
         public override void Record(ComputePassContext context)
         {
-            if (m_ReGIRGridBuildCompute == null || m_Kernel < 0)
+            if (m_ReGIRGridBuildCompute == null || m_BuildKernel < 0)
                 return;
 
             using (new ProfilingScope(context.cmd, profilingSampler))
             {
-                context.cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_Kernel, ReGIRLightsId, m_ReGIRLightBuffer.innerHandle);
-                context.cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_Kernel, ReGIRParametersId, m_ReGIRParameterBuffer.innerHandle);
-                context.cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_Kernel, ReGIRReservoirsId, m_ReGIRReservoirBuffer.innerHandle);
-                context.cmd.DispatchCompute(m_ReGIRGridBuildCompute, m_Kernel, m_DispatchGroupCount, 1, 1);
+                DispatchLightPdfBuild(context.cmd);
+                DispatchReGIRBuild(context.cmd);
             }
         }
 
@@ -123,10 +153,66 @@ namespace VividRP.Runtime
             DisposeNativeUploadData(ref m_ReGIRLightUploadData);
             DisposeNativeUploadData(ref m_ReGIRParameterUploadData);
             m_ReGIRGridBuildCompute = null;
-            m_Kernel = -1;
+            m_PrepareLightPdfKernel = -1;
+            m_ReduceLightPdfKernel = -1;
+            m_BuildKernel = -1;
             m_ReGIRLightCount = 0;
             m_ReGIRSlotCount = 0;
             m_DispatchGroupCount = 0;
+            m_LightPdfTextureSize = 0;
+            m_LightPdfTexelCount = 0;
+            m_LightPdfMipCount = 0;
+            m_LightPdfPrepareDispatchGroupCount = 0;
+        }
+
+        private void DispatchLightPdfBuild(ComputeCommandBuffer cmd)
+        {
+            if (m_PrepareLightPdfKernel < 0 || m_ReduceLightPdfKernel < 0 || m_ReGIRLightPdfTexture?.innerHandle.IsValid() != true)
+                return;
+
+            cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_PrepareLightPdfKernel, ReGIRLightsId, m_ReGIRLightBuffer.innerHandle);
+            cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_PrepareLightPdfKernel, ReGIRParametersId, m_ReGIRParameterBuffer.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ReGIRGridBuildCompute,
+                m_PrepareLightPdfKernel,
+                ReGIRLightPdfMipOutputId,
+                m_ReGIRLightPdfTexture.innerHandle,
+                0);
+            cmd.DispatchCompute(m_ReGIRGridBuildCompute, m_PrepareLightPdfKernel, m_LightPdfPrepareDispatchGroupCount, 1, 1);
+
+            for (var mipIndex = 1; mipIndex < m_LightPdfMipCount; mipIndex++)
+            {
+                var mipSize = Mathf.Max(1, m_LightPdfTextureSize >> mipIndex);
+                cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_ReduceLightPdfKernel, ReGIRParametersId, m_ReGIRParameterBuffer.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_ReGIRGridBuildCompute,
+                    m_ReduceLightPdfKernel,
+                    ReGIRLightPdfMipInputId,
+                    m_ReGIRLightPdfTexture.innerHandle,
+                    mipIndex - 1);
+                cmd.SetComputeTextureParam(
+                    m_ReGIRGridBuildCompute,
+                    m_ReduceLightPdfKernel,
+                    ReGIRLightPdfMipOutputId,
+                    m_ReGIRLightPdfTexture.innerHandle,
+                    mipIndex);
+                cmd.SetComputeIntParam(m_ReGIRGridBuildCompute, ReGIRLightPdfSourceMipId, mipIndex - 1);
+                cmd.DispatchCompute(
+                    m_ReGIRGridBuildCompute,
+                    m_ReduceLightPdfKernel,
+                    Mathf.Max(1, CoreUtils.DivRoundUp(mipSize, PdfReduceThreadGroupSize)),
+                    Mathf.Max(1, CoreUtils.DivRoundUp(mipSize, PdfReduceThreadGroupSize)),
+                    1);
+            }
+        }
+
+        private void DispatchReGIRBuild(ComputeCommandBuffer cmd)
+        {
+            cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_BuildKernel, ReGIRLightsId, m_ReGIRLightBuffer.innerHandle);
+            cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_BuildKernel, ReGIRParametersId, m_ReGIRParameterBuffer.innerHandle);
+            cmd.SetComputeBufferParam(m_ReGIRGridBuildCompute, m_BuildKernel, ReGIRReservoirsId, m_ReGIRReservoirBuffer.innerHandle);
+            cmd.SetComputeTextureParam(m_ReGIRGridBuildCompute, m_BuildKernel, ReGIRLightPdfTextureId, m_ReGIRLightPdfTexture.innerHandle);
+            cmd.DispatchCompute(m_ReGIRGridBuildCompute, m_BuildKernel, m_DispatchGroupCount, 1, 1);
         }
 
         private void UploadReGIRLights(VividLightData lightData)
@@ -174,6 +260,10 @@ namespace VividRP.Runtime
                 samplingJitter = ResolveSamplingJitter(mode),
                 frameIndex = ResolveFrameIndex(cameraData),
                 mode = mode,
+                sourceSamplingMode = NormalizeSourceSamplingMode(m_SourceSamplingMode),
+                lightPdfTextureWidth = (uint)Mathf.Max(m_LightPdfTextureSize, 1),
+                lightPdfTextureHeight = (uint)Mathf.Max(m_LightPdfTextureSize, 1),
+                lightPdfTextureMipCount = (uint)Mathf.Max(m_LightPdfMipCount, 1),
             };
 
             if (mode == VividReGIRMode.Onion)
@@ -255,6 +345,16 @@ namespace VividRP.Runtime
                 VividReGIRMode.Grid => VividReGIRMode.Grid,
                 VividReGIRMode.Onion => VividReGIRMode.Onion,
                 _ => DefaultMode,
+            };
+        }
+
+        private static VividReGIRSourceSamplingMode NormalizeSourceSamplingMode(VividReGIRSourceSamplingMode mode)
+        {
+            return mode switch
+            {
+                VividReGIRSourceSamplingMode.Uniform => VividReGIRSourceSamplingMode.Uniform,
+                VividReGIRSourceSamplingMode.PowerRIS => VividReGIRSourceSamplingMode.PowerRIS,
+                _ => DefaultSourceSamplingMode,
             };
         }
 
@@ -469,6 +569,81 @@ namespace VividRP.Runtime
             }
 
             return values[count / 2];
+        }
+
+        private static int FindKernelOrLog(ComputeShader computeShader, string kernelName)
+        {
+            try
+            {
+                return computeShader.FindKernel(kernelName);
+            }
+            catch (ArgumentException)
+            {
+                Debug.LogWarning($"[VividRP] Could not find kernel '{kernelName}' in ReGIR grid build compute shader.");
+                return -1;
+            }
+        }
+
+        internal static int ResolveLightPdfTextureSize(int lightCount)
+        {
+            lightCount = Mathf.Max(lightCount, 1);
+            var squareSize = Mathf.CeilToInt(Mathf.Sqrt(lightCount));
+            return Mathf.NextPowerOfTwo(Mathf.Max(squareSize, 1));
+        }
+
+        internal static int CalculateLightPdfMipCount(int textureSize)
+        {
+            textureSize = Mathf.Max(textureSize, 1);
+            var mipCount = 1;
+            while (textureSize > 1)
+            {
+                textureSize >>= 1;
+                mipCount++;
+            }
+
+            return mipCount;
+        }
+
+        private static void ResolveLightPdfTextureLayout(
+            int lightCount,
+            out int textureSize,
+            out int texelCount,
+            out int mipCount)
+        {
+            textureSize = ResolveLightPdfTextureSize(lightCount);
+            texelCount = Mathf.Max(1, textureSize * textureSize);
+            mipCount = CalculateLightPdfMipCount(textureSize);
+        }
+
+        private static RenderGraphTexture CreateLightPdfTexture()
+        {
+            var texture = RenderGraphTexture.CreateColorTarget("ReGIRLightPdfTexture", GraphicsFormat.R32_SFloat);
+            ConfigureLightPdfTexture(texture, 1, 1);
+            return texture;
+        }
+
+        private static void ConfigureLightPdfTexture(RenderGraphTexture texture, int textureSize, int mipCount)
+        {
+            if (texture?.desc == null)
+                return;
+
+            textureSize = Mathf.Max(textureSize, 1);
+            texture.desc.Width = textureSize;
+            texture.desc.Height = textureSize;
+            texture.desc.Slices = 1;
+            texture.desc.ColorFormat = GraphicsFormat.R32_SFloat;
+            texture.desc.DepthBufferBits = DepthBits.None;
+            texture.desc.MsaaSamples = MSAASamples.None;
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.clear;
+            texture.desc.EnableRandomWrite = true;
+            texture.desc.BindTextureMS = false;
+            texture.desc.UseMipMap = true;
+            texture.desc.AutoGenerateMips = false;
+            texture.desc.MipCount = Mathf.Max(mipCount, 1);
+            texture.desc.Name = "ReGIRLightPdfTexture";
         }
 
         private static void ResizeStructuredBuffer(RenderGraphBuffer buffer, int count, int stride)

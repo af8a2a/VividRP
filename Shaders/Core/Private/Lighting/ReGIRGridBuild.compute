@@ -1,4 +1,6 @@
 #pragma kernel ReGIRGridBuild
+#pragma kernel ReGIRPrepareLightPdf
+#pragma kernel ReGIRReduceLightPdf
 #pragma enable_d3d11_debug_symbols
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ReGIR.hlsl"
@@ -6,6 +8,10 @@
 StructuredBuffer<VividReGIRLightData> _ReGIRLights;
 StructuredBuffer<VividReGIRParameters> _ReGIRParameters;
 RWStructuredBuffer<VividReGIRReservoir> _ReGIRReservoirs;
+Texture2D<float> _ReGIRLightPdfTexture;
+RWTexture2D<float> _ReGIRLightPdfMipInput;
+RWTexture2D<float> _ReGIRLightPdfMipOutput;
+uint _ReGIRLightPdfSourceMip;
 
 uint VividReGIRHash(uint value)
 {
@@ -31,6 +37,155 @@ VividReGIRReservoir VividReGIRInvalidReservoir()
     reservoir.pad0 = 0u;
     reservoir.pad1 = 0u;
     return reservoir;
+}
+
+uint VividReGIRGetPdfMipSize(uint baseSize, uint mipLevel)
+{
+    return max(baseSize >> mipLevel, 1u);
+}
+
+float VividReGIRLoadPdfTexel(VividReGIRParameters parameters, uint2 position, uint mipLevel)
+{
+    uint mipWidth = VividReGIRGetPdfMipSize(max(parameters.lightPdfTextureWidth, 1u), mipLevel);
+    uint mipHeight = VividReGIRGetPdfMipSize(max(parameters.lightPdfTextureHeight, 1u), mipLevel);
+    if (position.x >= mipWidth || position.y >= mipHeight)
+        return 0.0;
+
+    return max(_ReGIRLightPdfTexture.Load(int3(int2(position), int(mipLevel))), 0.0);
+}
+
+float VividReGIRLoadPdfMipInputTexel(VividReGIRParameters parameters, uint2 position, uint mipLevel)
+{
+    uint mipWidth = VividReGIRGetPdfMipSize(max(parameters.lightPdfTextureWidth, 1u), mipLevel);
+    uint mipHeight = VividReGIRGetPdfMipSize(max(parameters.lightPdfTextureHeight, 1u), mipLevel);
+    if (position.x >= mipWidth || position.y >= mipHeight)
+        return 0.0;
+
+    return max(_ReGIRLightPdfMipInput[position], 0.0);
+}
+
+[numthreads(256, 1, 1)]
+void ReGIRPrepareLightPdf(uint globalIndex : SV_DispatchThreadID)
+{
+    VividReGIRParameters parameters = _ReGIRParameters[0];
+    uint pdfWidth = max(parameters.lightPdfTextureWidth, 1u);
+    uint pdfHeight = max(parameters.lightPdfTextureHeight, 1u);
+    uint texelCount = pdfWidth * pdfHeight;
+    if (globalIndex >= texelCount)
+        return;
+
+    uint2 texelPosition = uint2(globalIndex % pdfWidth, globalIndex / pdfWidth);
+    float power = 0.0;
+    if (globalIndex < parameters.lightCount)
+        power = max(_ReGIRLights[globalIndex].power, 0.0);
+
+    _ReGIRLightPdfMipOutput[texelPosition] = power;
+}
+
+[numthreads(8, 8, 1)]
+void ReGIRReduceLightPdf(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    VividReGIRParameters parameters = _ReGIRParameters[0];
+    uint sourceMip = _ReGIRLightPdfSourceMip;
+    uint destinationMip = sourceMip + 1u;
+    uint destinationWidth = VividReGIRGetPdfMipSize(max(parameters.lightPdfTextureWidth, 1u), destinationMip);
+    uint destinationHeight = VividReGIRGetPdfMipSize(max(parameters.lightPdfTextureHeight, 1u), destinationMip);
+    uint2 destinationPosition = dispatchThreadId.xy;
+    if (destinationPosition.x >= destinationWidth || destinationPosition.y >= destinationHeight)
+        return;
+
+    uint2 sourcePosition = destinationPosition * 2u;
+    float sum = 0.0;
+    sum += VividReGIRLoadPdfMipInputTexel(parameters, sourcePosition + uint2(0u, 0u), sourceMip);
+    sum += VividReGIRLoadPdfMipInputTexel(parameters, sourcePosition + uint2(1u, 0u), sourceMip);
+    sum += VividReGIRLoadPdfMipInputTexel(parameters, sourcePosition + uint2(0u, 1u), sourceMip);
+    sum += VividReGIRLoadPdfMipInputTexel(parameters, sourcePosition + uint2(1u, 1u), sourceMip);
+
+    _ReGIRLightPdfMipOutput[destinationPosition] = sum;
+}
+
+bool VividReGIRSampleLightPdf(
+    VividReGIRParameters parameters,
+    inout uint rng,
+    out uint lightIndex,
+    out float invSourcePdf)
+{
+    lightIndex = VIVID_REGIR_INVALID_LIGHT_INDEX;
+    invSourcePdf = 0.0;
+
+    uint pdfWidth = max(parameters.lightPdfTextureWidth, 1u);
+    uint pdfHeight = max(parameters.lightPdfTextureHeight, 1u);
+    uint mipCount = max(parameters.lightPdfTextureMipCount, 1u);
+    uint lastMip = mipCount - 1u;
+    float totalPower = VividReGIRLoadPdfTexel(parameters, uint2(0u, 0u), lastMip);
+    if (totalPower <= 0.0)
+        return false;
+
+    uint2 position = uint2(0u, 0u);
+    [loop]
+    for (int mipLevel = int(lastMip) - 1; mipLevel >= 0; mipLevel--)
+    {
+        uint sourceMip = uint(mipLevel);
+        uint2 basePosition = position * 2u;
+
+        float4 weights = float4(
+            VividReGIRLoadPdfTexel(parameters, basePosition + uint2(0u, 0u), sourceMip),
+            VividReGIRLoadPdfTexel(parameters, basePosition + uint2(1u, 0u), sourceMip),
+            VividReGIRLoadPdfTexel(parameters, basePosition + uint2(0u, 1u), sourceMip),
+            VividReGIRLoadPdfTexel(parameters, basePosition + uint2(1u, 1u), sourceMip));
+        float weightSum = weights.x + weights.y + weights.z + weights.w;
+        if (weightSum <= 0.0)
+            return false;
+
+        float randomValue = VividReGIRRandom01(rng) * weightSum;
+        if (randomValue < weights.x)
+        {
+            position = basePosition + uint2(0u, 0u);
+        }
+        else if (randomValue < weights.x + weights.y)
+        {
+            position = basePosition + uint2(1u, 0u);
+        }
+        else if (randomValue < weights.x + weights.y + weights.z)
+        {
+            position = basePosition + uint2(0u, 1u);
+        }
+        else
+        {
+            position = basePosition + uint2(1u, 1u);
+        }
+    }
+
+    if (position.x >= pdfWidth || position.y >= pdfHeight)
+        return false;
+
+    uint texelIndex = position.x + position.y * pdfWidth;
+    if (texelIndex >= parameters.lightCount)
+        return false;
+
+    float selectedPower = VividReGIRLoadPdfTexel(parameters, position, 0u);
+    if (selectedPower <= 0.0)
+        return false;
+
+    lightIndex = texelIndex;
+    invSourcePdf = totalPower / selectedPower;
+    return true;
+}
+
+void VividReGIRSelectSourceLight(
+    VividReGIRParameters parameters,
+    inout uint rng,
+    out uint lightIndex,
+    out float invSourcePdf)
+{
+    if (parameters.sourceSamplingMode == VIVID_REGIR_SOURCE_SAMPLING_POWER_RIS
+        && VividReGIRSampleLightPdf(parameters, rng, lightIndex, invSourcePdf))
+    {
+        return;
+    }
+
+    lightIndex = rng % parameters.lightCount;
+    invSourcePdf = float(parameters.lightCount);
 }
 
 [numthreads(256, 1, 1)]
@@ -75,16 +230,18 @@ void ReGIRGridBuild(uint globalIndex : SV_DispatchThreadID)
     float selectedTargetWeight = 0.0;
     float weightSum = 0.0;
     uint sampleCount = max(parameters.buildSamples, 1u);
-    float invSourcePdfPerSample = float(parameters.lightCount) / float(sampleCount);
+    float invSampleCount = 1.0 / float(sampleCount);
 
     [loop]
     for (uint sampleIndex = 0u; sampleIndex < sampleCount; sampleIndex++)
     {
         rng = VividReGIRHash(rng + sampleIndex + 1u);
-        uint candidateLightIndex = rng % parameters.lightCount;
+        uint candidateLightIndex;
+        float invSourcePdf;
+        VividReGIRSelectSourceLight(parameters, rng, candidateLightIndex, invSourcePdf);
         VividReGIRLightData candidateLight = _ReGIRLights[candidateLightIndex];
         float targetWeight = VividReGIREvaluateLightTargetWeight(candidateLight, cellCenter, cellRadius);
-        float risWeight = targetWeight * invSourcePdfPerSample;
+        float risWeight = targetWeight * invSourcePdf * invSampleCount;
         weightSum += risWeight;
 
         if (risWeight <= 0.0)

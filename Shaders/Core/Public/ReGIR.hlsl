@@ -8,6 +8,8 @@
 #define VIVID_REGIR_INVALID_LIGHT_INDEX  0xffffffffu
 #define VIVID_REGIR_MODE_GRID            1u
 #define VIVID_REGIR_MODE_ONION           2u
+#define VIVID_REGIR_SOURCE_SAMPLING_UNIFORM 0u
+#define VIVID_REGIR_SOURCE_SAMPLING_POWER_RIS 1u
 #define VIVID_REGIR_ONION_MAX_LAYER_GROUPS 8
 #define VIVID_REGIR_ONION_MAX_RINGS 52
 #define VIVID_REGIR_PI 3.14159265358979323846
@@ -43,6 +45,10 @@ struct VividReGIRParameters
     float samplingJitter;
     uint frameIndex;
     uint mode;
+    uint sourceSamplingMode;
+    uint lightPdfTextureWidth;
+    uint lightPdfTextureHeight;
+    uint lightPdfTextureMipCount;
     uint onionCellCount;
     uint onionLayerGroupCount;
     float onionCubicRootFactor;

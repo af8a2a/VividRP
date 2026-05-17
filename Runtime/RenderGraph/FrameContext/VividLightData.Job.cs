@@ -190,6 +190,7 @@ namespace VividRP.Runtime
         private struct BuildLightGridLightCandidatesJob : IJob
         {
             [ReadOnly] public NativeArray<VisibleLightRenderDataRecord> visibleLightRenderDataRecords;
+            [ReadOnly] public NativeArray<VividLightRenderData> reGIRSceneLightRenderDataRecords;
 
             public NativeList<PunctualLightCandidate> punctualLights;
             public NativeList<AreaLightCandidate> areaLights;
@@ -201,6 +202,12 @@ namespace VividRP.Runtime
             public float4x4 worldToViewMatrix;
 
             public void Execute()
+            {
+                BuildVisibleLightGridCandidates();
+                BuildReGIRLightCandidates();
+            }
+
+            private void BuildVisibleLightGridCandidates()
             {
                 for (var lightIndex = 0; lightIndex < visibleLightRenderDataRecords.Length; lightIndex++)
                 {
@@ -219,7 +226,6 @@ namespace VividRP.Runtime
                             out var lightBound);
 
                         punctualLights.AddNoResize(candidate);
-                        reGIRLights.AddNoResize(CreateReGIRLightData(lightRenderData));
                         punctualLightBounds.AddNoResize(lightBound);
                         punctualLightVolumeData.AddNoResize(lightVolumeData);
                     }
@@ -234,11 +240,16 @@ namespace VividRP.Runtime
                             out var lightBound);
 
                         areaLights.AddNoResize(candidate);
-                        reGIRLights.AddNoResize(CreateReGIRLightData(lightRenderData));
                         areaLightBounds.AddNoResize(lightBound);
                         areaLightVolumeData.AddNoResize(lightVolumeData);
                     }
                 }
+            }
+
+            private void BuildReGIRLightCandidates()
+            {
+                for (var lightIndex = 0; lightIndex < reGIRSceneLightRenderDataRecords.Length; lightIndex++)
+                    reGIRLights.AddNoResize(CreateReGIRLightData(reGIRSceneLightRenderDataRecords[lightIndex]));
             }
         }
 

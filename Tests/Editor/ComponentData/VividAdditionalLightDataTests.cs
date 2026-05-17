@@ -1062,7 +1062,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LateUpdate_DoesNotRefreshTrackedLightData_WhenLightIsNotAnimated()
+        public void LateUpdate_RefreshesTrackedLightData_WhenRegisteredSnapshotChanges()
         {
             var light = m_GameObject.AddComponent<Light>();
             light.type = LightType.Point;
@@ -1081,8 +1081,8 @@ namespace VividRP.Editor.Tests
             InvokeLateUpdate(additionalData);
 
             Assert.That(database.TryGetLightData(light, out var trackedLightData), Is.True);
-            Assert.That(trackedLightData.intensity, Is.EqualTo(1.0f).Within(0.0001f));
-            Assert.That(trackedLightData.color.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(trackedLightData.intensity, Is.EqualTo(4.0f).Within(0.0001f));
+            Assert.That(trackedLightData.color.x, Is.EqualTo(4.0f).Within(0.0001f));
         }
 
         [Test]

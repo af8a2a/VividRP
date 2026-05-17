@@ -1150,9 +1150,6 @@ namespace VividRP.Runtime
             UpdateLightBoundsOverride(currentLight);
             ApplyTimeOfDayToLight(currentLight);
 
-            if (!m_Animated && !m_EnableTimeOfDay)
-                return;
-
             if (VividLightRenderDatabase.instance.TryGetLightData(currentLight, out var trackedLightData)
                 && !VividLightRenderDatabase.IsLightDataChanged(currentLight, this, trackedLightData))
             {

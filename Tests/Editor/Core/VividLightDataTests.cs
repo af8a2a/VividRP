@@ -346,31 +346,51 @@ namespace VividRP.Editor.Tests
         {
             var lightData = new VividLightData();
             var visibleLights = new NativeArray<VisibleLight>(3, Allocator.TempJob);
+            var pointLightObject = new GameObject("ReGIR Point Light");
+            var spotLightObject = new GameObject("ReGIR Spot Light");
             var areaLightObject = new GameObject("ReGIR Rectangle Light");
 
             try
             {
                 VividLightRenderDatabase.instance.Clear();
 
+                var pointLight = CreateRegisteredLight(
+                    pointLightObject,
+                    LightType.Point,
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    range: 6.0f,
+                    color: new Color(2.0f, 1.0f, 0.5f));
+                var spotLight = CreateRegisteredLight(
+                    spotLightObject,
+                    LightType.Spot,
+                    new Vector3(4.0f, 5.0f, 6.0f),
+                    range: 8.0f,
+                    color: new Color(0.5f, 3.0f, 1.0f),
+                    spotAngle: 45.0f,
+                    innerSpotAngle: 20.0f);
+                var areaLight = CreateRegisteredLight(
+                    areaLightObject,
+                    LightType.Rectangle,
+                    new Vector3(7.0f, 8.0f, 9.0f),
+                    range: 9.0f,
+                    color: Color.white,
+                    intensity: 2.0f,
+                    areaSize: new Vector2(4.0f, 2.0f));
+
                 visibleLights[0] = CreateVisibleLight(
                     LightType.Point,
                     new Color(2.0f, 1.0f, 0.5f),
-                    Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.identity, Vector3.one),
-                    range: 6.0f);
+                    Matrix4x4.TRS(pointLightObject.transform.position, Quaternion.identity, Vector3.one),
+                    range: 6.0f,
+                    light: pointLight);
                 visibleLights[1] = CreateVisibleLight(
                     LightType.Spot,
                     new Color(0.5f, 3.0f, 1.0f),
-                    Matrix4x4.TRS(new Vector3(4.0f, 5.0f, 6.0f), Quaternion.identity, Vector3.one),
+                    Matrix4x4.TRS(spotLightObject.transform.position, Quaternion.identity, Vector3.one),
                     range: 8.0f,
                     spotAngle: 45.0f,
-                    innerSpotAngle: 20.0f);
-                var areaLight = areaLightObject.AddComponent<Light>();
-                areaLight.type = LightType.Rectangle;
-                areaLight.range = 9.0f;
-                areaLight.color = Color.white;
-                areaLight.intensity = 2.0f;
-                areaLight.areaSize = new Vector2(4.0f, 2.0f);
-                areaLightObject.transform.position = new Vector3(7.0f, 8.0f, 9.0f);
+                    innerSpotAngle: 20.0f,
+                    light: spotLight);
                 visibleLights[2] = CreateVisibleLight(
                     LightType.Rectangle,
                     Color.white,
@@ -397,6 +417,8 @@ namespace VividRP.Editor.Tests
                 lightData.ReleaseLightGridNativeResources();
                 VividLightRenderDatabase.instance.Clear();
                 visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(pointLightObject);
+                UnityEngine.Object.DestroyImmediate(spotLightObject);
                 UnityEngine.Object.DestroyImmediate(areaLightObject);
             }
         }
@@ -406,14 +428,25 @@ namespace VividRP.Editor.Tests
         {
             var lightData = new VividLightData();
             var visibleLights = new NativeArray<VisibleLight>(1, Allocator.TempJob);
+            var lightObject = new GameObject("ReGIR Completion Point Light");
 
             try
             {
+                VividLightRenderDatabase.instance.Clear();
+
+                var light = CreateRegisteredLight(
+                    lightObject,
+                    LightType.Point,
+                    new Vector3(1.0f, 0.0f, 0.0f),
+                    range: 4.0f,
+                    color: Color.white);
+
                 visibleLights[0] = CreateVisibleLight(
                     LightType.Point,
                     Color.white,
-                    Matrix4x4.TRS(new Vector3(1.0f, 0.0f, 0.0f), Quaternion.identity, Vector3.one),
-                    range: 4.0f);
+                    Matrix4x4.TRS(lightObject.transform.position, Quaternion.identity, Vector3.one),
+                    range: 4.0f,
+                    light: light);
 
                 InvokeUpdateVisibleLightData(lightData, visibleLights);
                 lightData.CompleteLightGridPrepare();
@@ -426,7 +459,9 @@ namespace VividRP.Editor.Tests
             finally
             {
                 lightData.ReleaseLightGridNativeResources();
+                VividLightRenderDatabase.instance.Clear();
                 visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(lightObject);
             }
         }
 
@@ -435,9 +470,19 @@ namespace VividRP.Editor.Tests
         {
             var lightData = new VividLightData();
             var visibleLights = new NativeArray<VisibleLight>(2, Allocator.TempJob);
+            var zeroRangeLightObject = new GameObject("ReGIR Zero Range Point Light");
 
             try
             {
+                VividLightRenderDatabase.instance.Clear();
+
+                var zeroRangeLight = CreateRegisteredLight(
+                    zeroRangeLightObject,
+                    LightType.Point,
+                    Vector3.zero,
+                    range: 0.0f,
+                    color: Color.white);
+
                 visibleLights[0] = CreateVisibleLight(
                     LightType.Directional,
                     Color.white,
@@ -446,7 +491,8 @@ namespace VividRP.Editor.Tests
                     LightType.Point,
                     Color.white,
                     Matrix4x4.identity,
-                    range: 0.0f);
+                    range: 0.0f,
+                    light: zeroRangeLight);
 
                 InvokeUpdateVisibleLightData(lightData, visibleLights);
                 lightData.CompleteReGIRPrepare();
@@ -458,7 +504,88 @@ namespace VividRP.Editor.Tests
             finally
             {
                 lightData.ReleaseLightGridNativeResources();
+                VividLightRenderDatabase.instance.Clear();
                 visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(zeroRangeLightObject);
+            }
+        }
+
+        [Test]
+        public void UpdateVisibleLightData_BuildsReGIRLights_FromRegisteredSceneLightsWithoutVisibleLights()
+        {
+            var lightData = new VividLightData();
+            var visibleLights = new NativeArray<VisibleLight>(0, Allocator.TempJob);
+            var lightObject = new GameObject("Registered ReGIR Point Light");
+
+            try
+            {
+                VividLightRenderDatabase.instance.Clear();
+
+                CreateRegisteredLight(
+                    lightObject,
+                    LightType.Point,
+                    new Vector3(2.0f, 0.0f, 0.0f),
+                    range: 4.0f,
+                    color: Color.white);
+
+                InvokeUpdateVisibleLightData(lightData, visibleLights);
+                lightData.CompleteReGIRPrepare();
+
+                Assert.That(lightData.reGIRLightCount, Is.EqualTo(1));
+                Assert.That(lightData.punctualLightCount, Is.Zero);
+                Assert.That(lightData.areaLightCount, Is.Zero);
+                Assert.That(lightData.reGIRLights[0].lightType, Is.EqualTo(VividReGIRLightData.TypePoint));
+            }
+            finally
+            {
+                lightData.ReleaseLightGridNativeResources();
+                VividLightRenderDatabase.instance.Clear();
+                visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(lightObject);
+            }
+        }
+
+        [Test]
+        public void UpdateVisibleLightData_CullsRegisteredReGIRLightsOutsideCameraBox()
+        {
+            var lightData = new VividLightData();
+            var visibleLights = new NativeArray<VisibleLight>(0, Allocator.TempJob);
+            var insideLightObject = new GameObject("Inside ReGIR Point Light");
+            var outsideLightObject = new GameObject("Outside ReGIR Point Light");
+
+            try
+            {
+                VividLightRenderDatabase.instance.Clear();
+
+                var cameraPosition = new Vector3(100.0f, 0.0f, 0.0f);
+                var worldToViewMatrix = Matrix4x4.Translate(-cameraPosition);
+
+                CreateRegisteredLight(
+                    insideLightObject,
+                    LightType.Point,
+                    new Vector3(105.0f, 0.0f, 0.0f),
+                    range: 2.0f,
+                    color: Color.white);
+                CreateRegisteredLight(
+                    outsideLightObject,
+                    LightType.Point,
+                    Vector3.zero,
+                    range: 2.0f,
+                    color: Color.white);
+
+                InvokeUpdateVisibleLightData(lightData, visibleLights, worldToViewMatrix);
+                lightData.CompleteReGIRPrepare();
+
+                Assert.That(lightData.reGIRLightCount, Is.EqualTo(1));
+                AssertVector3(lightData.reGIRLights[0].positionWS, insideLightObject.transform.position);
+            }
+            finally
+            {
+                lightData.ReleaseLightGridNativeResources();
+                VividLightRenderDatabase.instance.Clear();
+                visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(insideLightObject);
+                UnityEngine.Object.DestroyImmediate(outsideLightObject);
             }
         }
 
@@ -665,14 +792,50 @@ namespace VividRP.Editor.Tests
             return visibleLight;
         }
 
+        private static Light CreateRegisteredLight(
+            GameObject lightObject,
+            LightType lightType,
+            Vector3 position,
+            float range,
+            Color color,
+            float intensity = 1.0f,
+            float spotAngle = 30.0f,
+            float innerSpotAngle = 30.0f,
+            Vector2 areaSize = default)
+        {
+            lightObject.transform.position = position;
+
+            var light = lightObject.AddComponent<Light>();
+            light.type = lightType;
+            light.range = range;
+            light.color = color;
+            light.intensity = intensity;
+            light.spotAngle = spotAngle;
+            light.innerSpotAngle = innerSpotAngle;
+
+            if (lightType == LightType.Rectangle || lightType == LightType.Tube)
+                light.areaSize = areaSize;
+
+            VividLightRenderDatabase.instance.UpdateLightData(light, light.GetVividAdditionalLightData());
+            return light;
+        }
+
         private static void InvokeUpdateVisibleLightData(
             VividLightData lightData,
             NativeArray<VisibleLight> visibleLights)
         {
+            InvokeUpdateVisibleLightData(lightData, visibleLights, Matrix4x4.identity);
+        }
+
+        private static void InvokeUpdateVisibleLightData(
+            VividLightData lightData,
+            NativeArray<VisibleLight> visibleLights,
+            Matrix4x4 worldToViewMatrix)
+        {
             Assert.That(s_UpdateVisibleLightDataMethod, Is.Not.Null);
             s_UpdateVisibleLightDataMethod.Invoke(
                 lightData,
-                new object[] { visibleLights, null, Matrix4x4.identity });
+                new object[] { visibleLights, null, worldToViewMatrix });
         }
 
         private static void SetVisibleLightField<T>(ref VisibleLight visibleLight, string fieldName, T value)

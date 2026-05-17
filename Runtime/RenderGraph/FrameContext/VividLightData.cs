@@ -11,6 +11,9 @@ namespace VividRP.Runtime
 {
     public partial class VividLightData : ContextItem
     {
+        // Covers the default Grid volume and the current default Onion outer radius before sphere-vs-box rejection.
+        private const float DefaultReGIRCollectionBoxHalfExtent = 80.0f;
+
         [StructLayout(LayoutKind.Sequential)]
         public struct DirectionalLightData
         {
@@ -295,6 +298,7 @@ namespace VividRP.Runtime
         private NativeList<LightVolumeData> m_LightGridPunctualLightVolumeData;
         private NativeList<SFiniteLightBound> m_LightGridAreaLightBounds;
         private NativeList<LightVolumeData> m_LightGridAreaLightVolumeData;
+        private NativeList<VividLightRenderData> m_ReGIRSceneLightRecords;
         private NativeList<VividReGIRLightData> m_LightGridReGIRLights;
         private JobHandle m_LightGridJobHandle;
         private bool m_LightGridJobScheduled;
@@ -414,6 +418,7 @@ namespace VividRP.Runtime
             ClearLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
             ClearLightGridBuffer(ref m_LightGridAreaLightBounds);
             ClearLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+            ClearLightGridBuffer(ref m_ReGIRSceneLightRecords);
             ClearLightGridBuffer(ref m_LightGridReGIRLights);
         }
 
@@ -426,6 +431,7 @@ namespace VividRP.Runtime
             DisposeLightGridBuffer(ref m_LightGridPunctualLightVolumeData);
             DisposeLightGridBuffer(ref m_LightGridAreaLightBounds);
             DisposeLightGridBuffer(ref m_LightGridAreaLightVolumeData);
+            DisposeLightGridBuffer(ref m_ReGIRSceneLightRecords);
             DisposeLightGridBuffer(ref m_LightGridReGIRLights);
         }
 
@@ -696,22 +702,34 @@ namespace VividRP.Runtime
             reGIRLightCount = 0;
             m_LightGridClusteredCullDataPrepared = false;
 
-            if (!visibleLights.IsCreated || visibleLights.Length == 0)
+            var visibleLightCount = visibleLights.IsCreated ? visibleLights.Length : 0;
+            var sceneLightCount = VividLightRenderDatabase.instance.lightCount;
+            var lightCapacity = Mathf.Max(Mathf.Max(visibleLightCount, sceneLightCount), 1);
+            EnsureLightGridBufferCapacity(lightCapacity);
+
+            if (visibleLightCount > 0)
+                CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
+
+            CollectReGIRSceneLightRenderDataRecords(
+                ResolveCameraPositionWS(worldToViewMatrix),
+                new Vector3(
+                    DefaultReGIRCollectionBoxHalfExtent,
+                    DefaultReGIRCollectionBoxHalfExtent,
+                    DefaultReGIRCollectionBoxHalfExtent),
+                m_ReGIRSceneLightRecords);
+
+            if (m_LightGridVisibleLightRecords.Length == 0 && m_ReGIRSceneLightRecords.Length == 0)
             {
                 ClearLightGridBuffers();
                 return;
             }
-
-            var lightCapacity = Mathf.Max(visibleLights.Length, 1);
-            EnsureLightGridBufferCapacity(lightCapacity);
-
-            CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
 
             CollectDirectionalLightCandidatesAndApply(m_LightGridVisibleLightRecords, sunLight);
 
             var buildLightGridJob = new BuildLightGridLightCandidatesJob
             {
                 visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
+                reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords.AsArray(),
                 punctualLights = m_LightGridPunctualCandidates,
                 areaLights = m_LightGridAreaCandidates,
                 reGIRLights = m_LightGridReGIRLights,
@@ -734,6 +752,7 @@ namespace VividRP.Runtime
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridAreaCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridReGIRLights, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_ReGIRSceneLightRecords, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightBounds, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualLightVolumeData, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridAreaLightBounds, lightCapacity);
@@ -896,6 +915,11 @@ namespace VividRP.Runtime
             }
         }
 
+        private static Vector3 ResolveCameraPositionWS(Matrix4x4 worldToViewMatrix)
+        {
+            return worldToViewMatrix.inverse.MultiplyPoint3x4(Vector3.zero);
+        }
+
         private void CollectVisibleLightRenderDataRecords(
             NativeArray<VisibleLight> visibleLights,
             NativeList<VisibleLightRenderDataRecord> visibleLightRenderDataRecords)
@@ -910,6 +934,29 @@ namespace VividRP.Runtime
                     visibleLightIndex = lightIndex,
                     lightRenderData = GetVisibleLightRenderData(light, visibleLight),
                 });
+            }
+        }
+
+        private static void CollectReGIRSceneLightRenderDataRecords(
+            Vector3 collectionBoxCenterWS,
+            Vector3 collectionBoxHalfExtents,
+            NativeList<VividLightRenderData> reGIRLightRenderDataRecords)
+        {
+            var registeredLightData = VividLightRenderDatabase.instance.lightData;
+            for (var lightIndex = 0; lightIndex < registeredLightData.Count; lightIndex++)
+            {
+                var trackedLightData = registeredLightData[lightIndex];
+                if (!IsReGIRLightSupported(trackedLightData)
+                    || !IsLightEnabledAndActive(trackedLightData)
+                    || !IntersectsReGIRCollectionBox(
+                        trackedLightData,
+                        collectionBoxCenterWS,
+                        collectionBoxHalfExtents))
+                {
+                    continue;
+                }
+
+                reGIRLightRenderDataRecords.AddNoResize(trackedLightData);
             }
         }
 
@@ -1003,6 +1050,69 @@ namespace VividRP.Runtime
                     && trackedLightData.areaSize.x > 0.0f,
                 _ => false,
             };
+        }
+
+        private static bool IsReGIRLightSupported(VividLightRenderData trackedLightData)
+        {
+            return IsPunctualLightSupported(trackedLightData)
+                   || IsAreaLightSupported(trackedLightData);
+        }
+
+        private static bool IsLightEnabledAndActive(VividLightRenderData trackedLightData)
+        {
+            const VividLightRenderDataFlags requiredFlags =
+                VividLightRenderDataFlags.Enabled | VividLightRenderDataFlags.ActiveInHierarchy;
+
+            return (trackedLightData.flags & requiredFlags) == requiredFlags;
+        }
+
+        private static bool IntersectsReGIRCollectionBox(
+            VividLightRenderData trackedLightData,
+            Vector3 collectionBoxCenterWS,
+            Vector3 collectionBoxHalfExtents)
+        {
+            var cullingCenterWS = trackedLightData.positionWS;
+            var cullingRadius = ResolveReGIRCollectionRadius(trackedLightData);
+            if (cullingRadius <= 0.0f)
+                return false;
+
+            if (trackedLightData.lightType == LightType.Spot)
+            {
+                var punctualLightData = CreatePunctualLightData(trackedLightData);
+                var punctualCullData = CreatePunctualLightCullData(punctualLightData);
+                cullingCenterWS = punctualCullData.cullingCenterWS;
+                cullingRadius = punctualCullData.cullingRadius;
+            }
+
+            return SphereIntersectsAabb(cullingCenterWS, cullingRadius, collectionBoxCenterWS, collectionBoxHalfExtents);
+        }
+
+        private static float ResolveReGIRCollectionRadius(VividLightRenderData trackedLightData)
+        {
+            var range = Mathf.Max(trackedLightData.range, 0.0f);
+            return trackedLightData.lightType switch
+            {
+                LightType.Rectangle => range + 0.5f * new Vector2(
+                    Mathf.Max(trackedLightData.areaSize.x, 0.0f),
+                    Mathf.Max(trackedLightData.areaSize.y, 0.0f)).magnitude,
+                LightType.Tube => range + 0.5f * Mathf.Max(trackedLightData.areaSize.x, 0.0f),
+                _ => range + Mathf.Max(trackedLightData.shapeRadius, 0.0f),
+            };
+        }
+
+        private static bool SphereIntersectsAabb(
+            Vector3 sphereCenter,
+            float sphereRadius,
+            Vector3 boxCenter,
+            Vector3 boxHalfExtents)
+        {
+            var delta = sphereCenter - boxCenter;
+            var outsideX = Mathf.Max(Mathf.Abs(delta.x) - boxHalfExtents.x, 0.0f);
+            var outsideY = Mathf.Max(Mathf.Abs(delta.y) - boxHalfExtents.y, 0.0f);
+            var outsideZ = Mathf.Max(Mathf.Abs(delta.z) - boxHalfExtents.z, 0.0f);
+            var outsideDistanceSq = outsideX * outsideX + outsideY * outsideY + outsideZ * outsideZ;
+
+            return outsideDistanceSq <= sphereRadius * sphereRadius;
         }
 
         private static uint GetPunctualLightType(LightType lightType)

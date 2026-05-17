@@ -44,6 +44,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_DeclaresMetaPass_ForGlobalIlluminationBaking()
+        {
+            UnityEngine.Material material = CreateMaterial();
+
+            try
+            {
+                int metaPassIndex = material.FindPass("Meta");
+
+                Assert.That(metaPassIndex, Is.GreaterThanOrEqualTo(0));
+                Assert.That(
+                    material.shader.FindPassTagValue(metaPassIndex, new ShaderTagId("LightMode")),
+                    Is.EqualTo(new ShaderTagId("Meta")));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void StandardLitShader_DeclaresAdaptiveProbeVolumeVariants_ForDeferredAndIndirectDxrPasses()
         {
             string shaderSource = File.ReadAllText(GetShaderSourcePath());

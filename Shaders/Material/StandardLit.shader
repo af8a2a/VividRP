@@ -176,6 +176,29 @@ Shader "VividRP/Material/StandardLit"
 
         Pass
         {
+            Name "Meta"
+            Tags { "LightMode" = "Meta" }
+
+            Cull Off
+
+            HLSLPROGRAM
+
+                #pragma multi_compile_instancing
+                #pragma instancing_options renderinglayer
+                #pragma shader_feature EDITOR_VISUALIZATION
+                #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma shader_feature_local_fragment _OPACITYMAP
+                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_fragment _EMISSION
+                #pragma vertex Vert
+                #pragma fragment Frag
+
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMetaPass.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "SRPDefaultUnlit"
             Tags { "LightMode" = "SRPDefaultUnlit" }
 

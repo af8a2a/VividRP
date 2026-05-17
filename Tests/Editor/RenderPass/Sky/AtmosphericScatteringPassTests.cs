@@ -83,9 +83,10 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void AtmosphericScatteringPass_InheritsFromUnsafePass()
+        public void AtmosphericScatteringPass_InheritsFromRasterPass()
         {
-            Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(AtmosphericScatteringPass)), Is.True);
+            Assert.That(typeof(RasterPass).IsAssignableFrom(typeof(AtmosphericScatteringPass)), Is.True);
+            Assert.That(typeof(IAllowGlobalStateModificationPass).IsAssignableFrom(typeof(AtmosphericScatteringPass)), Is.True);
         }
 
         [Test]
@@ -93,7 +94,7 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "AtmosphericScatteringPass.cs"));
 
-            Assert.That(source, Does.Contain("public sealed class AtmosphericScatteringPass : UnsafePass"));
+            Assert.That(source, Does.Contain("public sealed class AtmosphericScatteringPass : RasterPass, IAllowGlobalStateModificationPass"));
             Assert.That(source, Does.Contain("internal const string OpaqueAtmosphericScatteringPassName = \"Opaque Atmospheric Scattering\";"));
             Assert.That(source, Does.Contain("internal const string OpaqueAtmosphericScatteringShaderName = \"Hidden/VividRP/OpaqueAtmosphericScattering\";"));
             Assert.That(source, Does.Contain("private const int HDRISkyShaderPassIndex = 1;"));
@@ -147,10 +148,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("SkyManager.ImportAtmosphericScatteringLut("));
             Assert.That(source, Does.Not.Contain("SetBuffer("));
             Assert.That(source, Does.Not.Contain("VividExposureData"));
-            Assert.That(source, Does.Contain("var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);"));
-            Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(nativeCmd, m_ShaderVariablesVolumetric, ShaderVariablesVolumetricId);"));
-            Assert.That(source, Does.Contain("nativeCmd.SetRenderTarget(m_OutputTexture);"));
-            Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, ResolveShaderPassIndex());"));
+            Assert.That(source, Does.Not.Contain("CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);"));
+            Assert.That(source, Does.Contain("ConstantBuffer.PushGlobal(context.cmd, m_ShaderVariablesVolumetric, ShaderVariablesVolumetricId);"));
+            Assert.That(source, Does.Not.Contain("nativeCmd.SetRenderTarget(m_OutputTexture);"));
+            Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, ResolveShaderPassIndex());"));
             Assert.That(source, Does.Contain("return m_ActiveSkyType == SkyType.HDRI"));
             Assert.That(source, Does.Contain("? HDRISkyShaderPassIndex"));
             Assert.That(source, Does.Contain("private static bool TryBuildHDRISkyFogParameters(out Vector4 fogParameters)"));

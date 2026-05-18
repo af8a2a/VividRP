@@ -246,7 +246,7 @@ namespace VividRP.Runtime
             for (var lightIndex = 0; lightIndex < visibleLights.Length && celestialBodyCount < MaxCelestialBodies; lightIndex++)
             {
                 var light = visibleLights[lightIndex].light;
-                if (light == null || light.type != LightType.Directional)
+                if (!light || light.type != LightType.Directional)
                     continue;
 
                 TryAppendDirectionalLight(
@@ -390,7 +390,7 @@ namespace VividRP.Runtime
                 return celestialLightHash;
             }
 
-            if (RenderSettings.sun == null)
+            if (!RenderSettings.sun)
                 return DefaultHash;
 
             var sunColor = PhysicallyBasedSkyRenderer.ResolveSunColor(context);
@@ -423,7 +423,7 @@ namespace VividRP.Runtime
             ref int celestialLightHash,
             ref int celestialBodyHash)
         {
-            if (light == null
+            if (!light
                 || !light.enabled
                 || !light.gameObject.activeInHierarchy
                 || light.type != LightType.Directional
@@ -514,7 +514,6 @@ namespace VividRP.Runtime
             var distanceFromCamera = additionalData != null
                 ? Mathf.Max(additionalData.distance, 0.0f)
                 : DefaultCelestialDistance;
-
             var celestialBody = new PhysicallyBasedSkyCelestialBodyData
             {
                 color = lightColor,
@@ -603,7 +602,7 @@ namespace VividRP.Runtime
 
         private static Vector3 ResolveLightColor(Light light, VividAdditionalLightData additionalData)
         {
-            if (light == null)
+            if (!light)
                 return Vector3.zero;
 
             var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light, additionalData);

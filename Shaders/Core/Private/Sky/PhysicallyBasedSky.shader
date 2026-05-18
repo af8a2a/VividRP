@@ -124,7 +124,7 @@ Shader "Hidden/VividRP/PhysicallyBasedSky"
         skyColor += radiance * (1.0f - skyOpacity);
         skyColor *= _IntensityMultiplier;
 
-        return float4(SanitizeSkyRadiance(skyColor), 1.0f);
+        return float4(skyColor, 1.0f);
     }
 
     float4 FragRender(Varyings input) : SV_Target

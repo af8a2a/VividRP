@@ -62,8 +62,8 @@ namespace VividRP.Runtime
             int passIndex)
         {
             if (cmd == null
-                || targetCubemap == null
-                || material == null
+                || !targetCubemap
+                || !material
                 || propertyBlock == null
                 || passIndex < 0)
             {
@@ -73,10 +73,7 @@ namespace VividRP.Runtime
             for (var faceIndex = 0; faceIndex < SkyDiffuseSHUtility.ValidCubemapFaces.Length; faceIndex++)
             {
                 var cubemapFace = SkyDiffuseSHUtility.ValidCubemapFaces[faceIndex];
-                propertyBlock.SetMatrix(
-                    PixelCoordToViewDirWSId,
-                    GetCubemapFacePixelCoordToViewDirWSMatrix(cubemapFace, targetCubemap.width));
-
+                propertyBlock.SetMatrix(PixelCoordToViewDirWSId, GetCubemapFacePixelCoordToViewDirWSMatrix(cubemapFace, targetCubemap.width));
                 cmd.SetRenderTarget(targetCubemap, 0, cubemapFace);
                 cmd.SetViewport(new Rect(0.0f, 0.0f, targetCubemap.width, targetCubemap.height));
                 CoreUtils.DrawFullScreen(cmd, material, propertyBlock, passIndex);

@@ -1003,6 +1003,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateLightData_AppliesColorTemperature_WhenColorTemperatureEnabled()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.lightUnit = LightUnit.Lux;
+            light.color = Color.white;
+            light.intensity = 130000.0f;
+            light.useColorTemperature = true;
+            light.colorTemperature = 5500.0f;
+
+            var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light, light.GetVividAdditionalLightData());
+            var expected = Mathf.CorrelatedColorTemperatureToRGB(light.colorTemperature) * light.intensity;
+
+            Assert.That(trackedLightData.color.x, Is.EqualTo(expected.r).Within(0.1f));
+            Assert.That(trackedLightData.color.y, Is.EqualTo(expected.g).Within(0.1f));
+            Assert.That(trackedLightData.color.z, Is.EqualTo(expected.b).Within(0.1f));
+        }
+
+        [Test]
+        public void UpdateLightData_IgnoresHiddenColorTint_WhenUsingColorTemperature()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.lightUnit = LightUnit.Lux;
+            light.color = new Color(1.0f, 0.9431372f, 0.9f, 1.0f);
+            light.intensity = 130000.0f;
+            light.useColorTemperature = true;
+            light.colorTemperature = 5500.0f;
+
+            var trackedLightData = VividLightRenderDatabase.instance.UpdateLightData(light, light.GetVividAdditionalLightData());
+            var expected = Mathf.CorrelatedColorTemperatureToRGB(light.colorTemperature) * light.intensity;
+
+            Assert.That(trackedLightData.color.x, Is.EqualTo(expected.r).Within(0.1f));
+            Assert.That(trackedLightData.color.y, Is.EqualTo(expected.g).Within(0.1f));
+            Assert.That(trackedLightData.color.z, Is.EqualTo(expected.b).Within(0.1f));
+        }
+
+        [Test]
         public void UpdateLightData_UsesNativeSpotLightIntensityForTrackedColor_WhenDisplayedAsLumen()
         {
             var light = m_GameObject.AddComponent<Light>();

@@ -139,7 +139,7 @@ namespace VividRP.Runtime
                 s_CachedSkyData.Reset();
             }
 
-            UpdateSpecularCubemap(cmd, s_CachedSkyData);
+            UpdateSpecularCubemap(cmd, s_CachedSkyData, forceRebuild);
             UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
             BindGlobalSkyTexture(cmd, s_CachedSkyData);
 
@@ -298,9 +298,9 @@ namespace VividRP.Runtime
             BindGlobalSkyTexture(cmd, s_CachedSkyData);
         }
 
-        private static void UpdateSpecularCubemap(CommandBuffer cmd, VividSkyData skyData)
+        private static void UpdateSpecularCubemap(CommandBuffer cmd, VividSkyData skyData, bool forceRebuild = false)
         {
-            s_SpecularCache.Update(cmd, skyData?.specularCubemap, skyData?.skyHash ?? 0);
+            s_SpecularCache.Update(cmd, skyData?.specularCubemap, skyData?.skyHash ?? 0, forceRebuild);
         }
 
         private static void UpdateSpecularCubemap(VividSkyData skyData)

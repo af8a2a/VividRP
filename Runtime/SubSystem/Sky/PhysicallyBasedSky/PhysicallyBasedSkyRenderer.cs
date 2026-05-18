@@ -154,7 +154,7 @@ namespace VividRP.Runtime
                 return;
 
             var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
-            if (volume == null || !volume.IsActive())
+            if (!volume || !volume.IsActive())
             {
                 skyData.Reset();
                 return;
@@ -446,8 +446,8 @@ namespace VividRP.Runtime
                 return new Color(color.x, color.y, color.z, 1.0f);
             }
 
-            if (RenderSettings.sun != null)
-                return RenderSettings.sun.color.linear * Mathf.Max(RenderSettings.sun.intensity, 0.0f);
+            if (RenderSettings.sun)
+                return VividLightRenderDatabase.EvaluateLightColor(RenderSettings.sun);
 
             return Color.white;
         }
@@ -513,7 +513,7 @@ namespace VividRP.Runtime
         {
             if (!IsCubemapValid(m_RuntimeSkyCubemap, resolution))
             {
-                if (m_RuntimeSkyCubemap != null)
+                if (m_RuntimeSkyCubemap)
                 {
                     m_RuntimeSkyCubemap.Release();
                     CoreUtils.Destroy(m_RuntimeSkyCubemap);
@@ -570,7 +570,7 @@ namespace VividRP.Runtime
             int runtimeCubemapViewSampleCount)
         {
             if (cmd == null
-                || m_RuntimeSkyCubemap == null
+                || !m_RuntimeSkyCubemap
                 || !TryBuildSkyBakingProperties(volume, context, cmd, runtimeCubemapViewSampleCount, out var properties))
             {
                 return false;
@@ -592,7 +592,7 @@ namespace VividRP.Runtime
             int viewSampleCount)
         {
             if (cmd == null
-                || m_AmbientProbeCubemap == null
+                || !m_AmbientProbeCubemap
                 || !TryBuildSkyBakingProperties(volume, context, cmd, viewSampleCount, out var properties))
             {
                 return false;
@@ -641,10 +641,15 @@ namespace VividRP.Runtime
             }
 
             var hasMaterialParameters = PhysicallyBasedSkyShaderParameterBuilder.TryBuildMaterialParameters(volume, context, out var materialParameters);
+            m_CelestialBodyBuffer.Update(context);
+            m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
+            if (hasMaterialParameters)
+                SyncSkyBakingMaterialParametersWithCelestialBodyBuffer(ref materialParameters);
+
             var skyViewLutHash = hasMaterialParameters
                 ? PhysicallyBasedSkyAtmosphereLutCache.ComputeSkyViewLutHash(parameters, materialParameters, context)
                 : 0;
-            var useSkyViewLut = m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out var skyViewLut) && hasMaterialParameters;
+            var useSkyViewLut = TryResolveSkyBakingSkyViewLut(context, cmd, skyViewLutHash, hasMaterialParameters, out var skyViewLut);
             var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(VividVolumeManagerUtility.GetSkySettingsVolume());
 
             properties = m_SkyBakingPropertyBlock;
@@ -652,8 +657,6 @@ namespace VividRP.Runtime
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
             properties.SetTexture(SkyViewLutId, useSkyViewLut ? skyViewLut : Texture2D.blackTexture);
             properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);
-            m_CelestialBodyBuffer.Update(context);
-            m_SkyMaterial.SetBuffer(CelestialBodyDatasId, m_CelestialBodyBuffer.Buffer);
             var useLocalSkyPrecomputation = hasMaterialParameters
                                             && UsesWorldSpacePrecomputation(materialParameters)
                                             && TryPrepareLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
@@ -668,6 +671,29 @@ namespace VividRP.Runtime
             }
 
             return true;
+        }
+
+        private bool TryResolveSkyBakingSkyViewLut(
+            in SkyRendererContext context,
+            CommandBuffer cmd,
+            int skyViewLutHash,
+            bool hasMaterialParameters,
+            out Texture skyViewLut)
+        {
+            if (!hasMaterialParameters)
+            {
+                skyViewLut = null;
+                return false;
+            }
+
+            if (m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut))
+                return true;
+
+            if (cmd == null)
+                return false;
+
+            m_AtmosphereLutCache.Update(context, cmd, forceSkyViewRebuild: true);
+            return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut);
         }
 
         private bool TryPrepareLocalSkyPrecomputation(
@@ -1060,6 +1086,13 @@ namespace VividRP.Runtime
             m_RenderMaterialParameters.celestialLightCount = m_CelestialBodyBuffer.CelestialLightCount;
             m_RenderMaterialParameters.celestialBodyCount = m_CelestialBodyBuffer.CelestialBodyCount;
             m_RenderMaterialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);
+        }
+
+        private void SyncSkyBakingMaterialParametersWithCelestialBodyBuffer(ref PhysicallyBasedSkyMaterialParameters materialParameters)
+        {
+            materialParameters.celestialLightCount = m_CelestialBodyBuffer.CelestialLightCount;
+            materialParameters.celestialBodyCount = m_CelestialBodyBuffer.CelestialBodyCount;
+            materialParameters.celestialLightExposure = Mathf.Max(m_CelestialBodyBuffer.CelestialLightExposure, 1.0f);
         }
 
         private static Rect ResolveRenderViewport(VividCameraData cameraData, RenderGraphTexture colorTarget)

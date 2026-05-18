@@ -97,13 +97,13 @@ namespace VividRP.Runtime
 
         internal VividLightRenderData UpdateLightData(Light light, VividAdditionalLightData additionalLightData = null)
         {
-            if (light == null)
+            if (!light)
                 return default;
 
-            if (additionalLightData == null && !light.TryGetComponent(out additionalLightData))
+            if (!additionalLightData && !light.TryGetComponent(out additionalLightData))
                 additionalLightData = null;
 
-            if (additionalLightData != null && additionalLightData.isActiveAndEnabled)
+            if (additionalLightData && additionalLightData.isActiveAndEnabled)
                 RegisterAdditionalLightData(additionalLightData);
 
             var trackedLightData = CreateLightRenderData(light, additionalLightData);
@@ -401,10 +401,11 @@ namespace VividRP.Runtime
         private static VividLightRenderData CreateLightRenderData(Light light, VividAdditionalLightData additionalLightData)
         {
             var nativeIntensity = Mathf.Max(light.intensity, 0.0f);
-            var finalColor = light.color.linear * nativeIntensity;
+            var finalColor = EvaluateLightColor(light);
+
             var range = Mathf.Max(light.range, 0.0f);
             var rangeAttenuationScale = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f;
-            var shadowRenderingLayerMask = additionalLightData != null
+            var shadowRenderingLayerMask = additionalLightData
                 ? additionalLightData.effectiveShadowRenderingLayers
                 : (RenderingLayerMask)light.renderingLayerMask;
 
@@ -434,7 +435,7 @@ namespace VividRP.Runtime
                 volumetricShadowDimmer = additionalLightData != null
                     ? additionalLightData.volumetricShadowDimmer
                     : VividAdditionalLightData.DefaultVolumetricShadowDimmer,
-                intensity = Mathf.Max(light.intensity, 0.0f),
+                intensity = nativeIntensity,
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
                 spotAngle = light.spotAngle,
@@ -445,6 +446,19 @@ namespace VividRP.Runtime
                 shadowRenderingLayerMask = (uint)shadowRenderingLayerMask,
                 flags = BuildFlags(light, additionalLightData),
             };
+        }
+
+        internal static Color EvaluateLightColor(Light light)
+        {
+            if (!light)
+                return Color.black;
+
+            var finalColor = light.useColorTemperature ? Color.white : light.color.linear;
+            finalColor *= Mathf.Max(light.intensity, 0.0f);
+            if (light.useColorTemperature)
+                finalColor *= Mathf.CorrelatedColorTemperatureToRGB(light.colorTemperature);
+
+            return finalColor;
         }
 
         private static VividLightRenderDataFlags BuildFlags(Light light, VividAdditionalLightData additionalLightData)

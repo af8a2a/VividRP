@@ -17,7 +17,7 @@ namespace VividRP.Runtime
         private static readonly int LevelId = Shader.PropertyToID("_Level");
         private static readonly int InvOmegaPId = Shader.PropertyToID("_InvOmegaP");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
-        private static readonly ProfilingSampler s_RenderMipZeroSampler = new("SkyCubemapGGXConvolution.RenderMipZero");
+        private static readonly ProfilingSampler s_CopyMipZeroSampler = new("SkyCubemapGGXConvolution.CopyMipZero");
         private static readonly ProfilingSampler s_RenderCubemapGGXConvolutionSampler = new("SkyCubemapGGXConvolution.RenderCubemapGGXConvolution");
 
         private readonly MaterialPropertyBlock m_PropertyBlock = new();
@@ -64,9 +64,10 @@ namespace VividRP.Runtime
             m_PropertyBlock.SetTexture(GgxIblSamplesId, m_GgxIblSampleData);
             m_PropertyBlock.SetFloat(InvOmegaPId, GetInverseTexelSolidAngle(source.width));
 
-            using (new ProfilingScope(cmd, s_RenderMipZeroSampler))
+            using (new ProfilingScope(cmd, s_CopyMipZeroSampler))
             {
-                RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);
+                if (!TryCopyCubemapMipZero(cmd, source, target))
+                    RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);
             }
 
             if (maxMipLevel <= 0)
@@ -260,6 +261,23 @@ namespace VividRP.Runtime
                 return false;
 
             return source is not RenderTexture renderTexture || renderTexture.IsCreated();
+        }
+
+        private static bool TryCopyCubemapMipZero(CommandBuffer cmd, Texture source, RenderTexture target)
+        {
+            if (cmd == null
+                || source == null
+                || target == null
+                || (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) == 0
+                || source.graphicsFormat != target.graphicsFormat)
+            {
+                return false;
+            }
+
+            for (var faceIndex = 0; faceIndex < SkyDiffuseSHUtility.ValidCubemapFaces.Length; faceIndex++)
+                cmd.CopyTexture(source, faceIndex, 0, target, faceIndex, 0);
+
+            return true;
         }
 
         private void RenderCubemapLevel(CommandBuffer cmd, Texture source, RenderTexture target, int mipLevel, int passIndex)

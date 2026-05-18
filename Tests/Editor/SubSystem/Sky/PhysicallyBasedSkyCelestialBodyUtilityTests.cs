@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Reflection;
+using Unity.Collections;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -20,6 +22,56 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VividGPUDrivenSystem.instance.BindlessTextureContainer.TryGetOrCreateIndex(surfaceTexture, out var"));
             Assert.That(source, Does.Contain("? surfaceTextureIndex"));
             Assert.That(source, Does.Contain("BindlessTextureContainer.InvalidTextureIndex"));
+        }
+
+        [Test]
+        public void BuildCelestialBodyData_UsesLightColorTemperature_WhenVisibleLightHasStaleTint()
+        {
+            var sunObject = new GameObject("Visible Sky Sun");
+            NativeArray<VisibleLight> visibleLights = default;
+
+            try
+            {
+                var sun = sunObject.AddComponent<Light>();
+                sun.type = LightType.Directional;
+                sun.color = new Color(1.0f, 0.9431372f, 0.9f, 1.0f);
+                sun.lightUnit = LightUnit.Lux;
+                sun.intensity = 130000.0f;
+                sun.useColorTemperature = true;
+                sun.colorTemperature = 5500.0f;
+
+                var visibleFinalColor = sun.color.linear * Mathf.CorrelatedColorTemperatureToRGB(sun.colorTemperature) * sun.intensity;
+                var expected = Mathf.CorrelatedColorTemperatureToRGB(sun.colorTemperature) * sun.intensity;
+                visibleLights = new NativeArray<VisibleLight>(1, Allocator.Temp);
+                visibleLights[0] = CreateVisibleDirectionalLight(sun, visibleFinalColor);
+
+                var lightData = new VividLightData
+                {
+                    visibleLights = visibleLights
+                };
+
+                var celestialBodies = new PhysicallyBasedSkyCelestialBodyData[PhysicallyBasedSkyCelestialBodyUtility.MaxCelestialBodies];
+                PhysicallyBasedSkyCelestialBodyUtility.BuildCelestialBodyData(
+                    new SkyRendererContext(new VividCameraData(), lightData),
+                    celestialBodies,
+                    out var celestialLightCount,
+                    out var celestialBodyCount,
+                    out var celestialLightExposure);
+
+                Assert.That(celestialLightCount, Is.EqualTo(1));
+                Assert.That(celestialBodyCount, Is.EqualTo(1));
+                Assert.That(celestialBodies[0].color.x, Is.EqualTo(expected.r).Within(0.1f));
+                Assert.That(celestialBodies[0].color.y, Is.EqualTo(expected.g).Within(0.1f));
+                Assert.That(celestialBodies[0].color.z, Is.EqualTo(expected.b).Within(0.1f));
+                Assert.That(celestialLightExposure, Is.EqualTo(expected.r).Within(0.1f));
+            }
+            finally
+            {
+                if (visibleLights.IsCreated)
+                    visibleLights.Dispose();
+
+                GameObject.DestroyImmediate(sunObject);
+            }
         }
 
         [Test]
@@ -217,6 +269,42 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static VisibleLight CreateVisibleDirectionalLight(Light light, Color finalColor)
+        {
+            var visibleLight = default(VisibleLight);
+            SetVisibleLightField(ref visibleLight, "m_LightType", LightType.Directional);
+            SetVisibleLightField(ref visibleLight, "m_FinalColor", finalColor);
+            SetVisibleLightField(ref visibleLight, "m_LocalToWorldMatrix", light.transform.localToWorldMatrix);
+            SetVisibleLightField(ref visibleLight, "m_Range", light.range);
+            SetVisibleLightField(ref visibleLight, "m_SpotAngle", light.spotAngle);
+            SetVisibleLightField(ref visibleLight, "m_InnerSpotAngle", light.innerSpotAngle);
+            TrySetVisibleLightField(ref visibleLight, "m_Light", light);
+            TrySetVisibleLightField(ref visibleLight, "m_EntityId", EntityId.None);
+            return visibleLight;
+        }
+
+        private static void SetVisibleLightField<T>(ref VisibleLight visibleLight, string fieldName, T value)
+        {
+            var field = typeof(VisibleLight).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null, $"Expected VisibleLight to contain field '{fieldName}'.");
+
+            object boxedVisibleLight = visibleLight;
+            field.SetValue(boxedVisibleLight, value);
+            visibleLight = (VisibleLight)boxedVisibleLight;
+        }
+
+        private static void TrySetVisibleLightField<T>(ref VisibleLight visibleLight, string fieldName, T value)
+        {
+            var field = typeof(VisibleLight).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+            if (field == null)
+                return;
+
+            object boxedVisibleLight = visibleLight;
+            field.SetValue(boxedVisibleLight, value);
+            visibleLight = (VisibleLight)boxedVisibleLight;
         }
     }
 }

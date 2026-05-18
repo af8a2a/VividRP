@@ -72,9 +72,10 @@ namespace VividRP.Runtime
             m_GgxConvolution.Build(resources);
         }
 
-        internal void Update(CommandBuffer cmd, Texture source, int skyHash)
+        internal void Update(CommandBuffer cmd, Texture source, int skyHash, bool forceRebuild = false)
         {
-            if (ReferenceEquals(m_CachedSource, source)
+            if (!forceRebuild
+                && ReferenceEquals(m_CachedSource, source)
                 && skyHash == m_CachedSkyHash
                 && (m_ConvolvedCubemapHandle != null || m_CachedSourceCubemapHandle != null))
                 return;

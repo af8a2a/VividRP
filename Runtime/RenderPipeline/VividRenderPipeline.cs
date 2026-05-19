@@ -4,6 +4,7 @@ using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Rendering.RendererUtils;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.SubSystem.Decal;
 
@@ -13,6 +14,17 @@ namespace VividRP.Runtime
     {
         private const string RenderGraphName = "VividRP RenderGraph";
         private static readonly ProfilerMarker s_ContextSubmitMarker = new("VividRP.RenderPipeline.RenderCamera.ContextSubmit");
+        private static readonly ShaderTagId[] s_PreviewCameraShaderTagIds =
+        {
+            new(RenderGraphRenderListDesc.ForwardShaderTagName),
+            new("ForwardOnly"),
+            new("Forward"),
+            new(RenderGraphRenderListDesc.DefaultUnlitShaderTagName),
+            new("UniversalForwardOnly"),
+            new("UniversalForward"),
+            new("ForwardBase"),
+            new("Always"),
+        };
 
         private readonly VividRenderPipelineAsset m_Asset;
         private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
@@ -72,9 +84,18 @@ namespace VividRP.Runtime
 
                 EmitGeometryForCamera(camera);
                 ApplyShadowDistanceOverride(camera, ref cullingParameters);
+                cullingParameters.cullingOptions = ResolveCullingOptions(camera.cameraType, cullingParameters.cullingOptions);
+
                 var cullingResults = context.Cull(ref cullingParameters);
 
                 cmdBuffer = CommandBufferPool.Get("VividRP");
+
+                if (ShouldUsePreviewCameraRenderPath(camera.cameraType))
+                {
+                    RenderPreviewCamera(context, camera, cullingResults, cmdBuffer);
+                    shouldSubmit = true;
+                    return;
+                }
 
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
@@ -217,6 +238,18 @@ namespace VividRP.Runtime
             return camera != null && CanRenderGizmos(camera.cameraType);
         }
 
+        internal static bool ShouldUsePreviewCameraRenderPath(CameraType cameraType)
+        {
+            return cameraType == CameraType.Preview;
+        }
+
+        internal static CullingOptions ResolveCullingOptions(CameraType cameraType, CullingOptions cullingOptions)
+        {
+            return ShouldUsePreviewCameraRenderPath(cameraType)
+                ? cullingOptions | CullingOptions.DisablePerObjectCulling
+                : cullingOptions;
+        }
+
         internal static bool ShouldRenderPreImageEffectGizmosInRenderGraph(CameraType cameraType)
         {
             return cameraType == CameraType.Game;
@@ -236,6 +269,97 @@ namespace VividRP.Runtime
             if (ShouldEmitWorldGeometry(camera.cameraType))
                 ScriptableRenderContext.EmitWorldGeometryForSceneView(camera);
 #endif
+        }
+
+        private static void RenderPreviewCamera(
+            ScriptableRenderContext context,
+            Camera camera,
+            CullingResults cullingResults,
+            CommandBuffer cmdBuffer)
+        {
+            context.SetupCameraProperties(camera);
+            ClearPreviewCameraTarget(cmdBuffer, camera);
+
+            DrawPreviewCameraRenderers(
+                context,
+                cmdBuffer,
+                camera,
+                cullingResults,
+                RenderQueueRange.opaque,
+                SortingCriteria.CommonOpaque);
+
+            if (camera.clearFlags == CameraClearFlags.Skybox)
+                DrawPreviewCameraSkybox(context, cmdBuffer, camera);
+
+            DrawPreviewCameraRenderers(
+                context,
+                cmdBuffer,
+                camera,
+                cullingResults,
+                RenderQueueRange.transparent,
+                SortingCriteria.CommonTransparent);
+
+            context.ExecuteCommandBuffer(cmdBuffer);
+            cmdBuffer.Clear();
+        }
+
+        private static void ClearPreviewCameraTarget(CommandBuffer cmdBuffer, Camera camera)
+        {
+            if (cmdBuffer == null || camera == null)
+                return;
+
+            cmdBuffer.ClearRenderTarget(true, true, ResolvePreviewCameraClearColor(camera));
+        }
+
+        private static Color ResolvePreviewCameraClearColor(Camera camera)
+        {
+            if (camera != null && camera.clearFlags == CameraClearFlags.SolidColor)
+                return camera.backgroundColor;
+
+#if UNITY_EDITOR
+            return CoreRenderPipelinePreferences.previewBackgroundColor;
+#else
+            return camera != null ? camera.backgroundColor : Color.black;
+#endif
+        }
+
+        private static void DrawPreviewCameraRenderers(
+            ScriptableRenderContext context,
+            CommandBuffer cmdBuffer,
+            Camera camera,
+            CullingResults cullingResults,
+            RenderQueueRange renderQueueRange,
+            SortingCriteria sortingCriteria)
+        {
+            if (cmdBuffer == null || camera == null)
+                return;
+
+            var desc = new RendererListDesc(s_PreviewCameraShaderTagIds, cullingResults, camera)
+            {
+                renderQueueRange = renderQueueRange,
+                sortingCriteria = sortingCriteria,
+                layerMask = camera.cullingMask,
+                renderingLayerMask = uint.MaxValue,
+                rendererConfiguration = PerObjectData.None
+            };
+
+            if (!desc.IsValid())
+                return;
+
+            var rendererList = context.CreateRendererList(desc);
+            CoreUtils.DrawRendererList(cmdBuffer, rendererList);
+        }
+
+        private static void DrawPreviewCameraSkybox(
+            ScriptableRenderContext context,
+            CommandBuffer cmdBuffer,
+            Camera camera)
+        {
+            if (cmdBuffer == null || camera == null)
+                return;
+
+            var rendererList = context.CreateSkyboxRendererList(camera);
+            CoreUtils.DrawRendererList(cmdBuffer, rendererList);
         }
 
         private static void RenderSubmittedGizmos(

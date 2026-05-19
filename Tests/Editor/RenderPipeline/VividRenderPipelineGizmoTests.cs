@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -24,6 +25,30 @@ namespace VividRP.Editor.Tests
         public void CanRenderGizmos_ReturnsExpectedValue_ForCameraType(CameraType cameraType, bool expected)
         {
             Assert.That(VividRenderPipeline.CanRenderGizmos(cameraType), Is.EqualTo(expected));
+        }
+
+        [TestCase(CameraType.SceneView, false)]
+        [TestCase(CameraType.Game, false)]
+        [TestCase(CameraType.Preview, true)]
+        [TestCase(CameraType.Reflection, false)]
+        public void ShouldUsePreviewCameraRenderPath_ReturnsExpectedValue_ForCameraType(
+            CameraType cameraType,
+            bool expected)
+        {
+            Assert.That(VividRenderPipeline.ShouldUsePreviewCameraRenderPath(cameraType), Is.EqualTo(expected));
+        }
+
+        [TestCase(CameraType.SceneView, false)]
+        [TestCase(CameraType.Game, false)]
+        [TestCase(CameraType.Preview, true)]
+        [TestCase(CameraType.Reflection, false)]
+        public void ResolveCullingOptions_DisablesPerObjectCulling_OnlyForPreviewCamera(
+            CameraType cameraType,
+            bool expected)
+        {
+            var options = VividRenderPipeline.ResolveCullingOptions(cameraType, default);
+
+            Assert.That((options & CullingOptions.DisablePerObjectCulling) != 0, Is.EqualTo(expected));
         }
 
         [TestCase(CameraType.SceneView, false)]

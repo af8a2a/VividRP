@@ -291,8 +291,7 @@ namespace VividRP.Runtime
                 m_PropertyBlock.SetMatrix(
                     PixelCoordToViewDirWSId,
                     SkyCubemapBakingUtility.GetCubemapFacePixelCoordToViewDirWSMatrix(face, faceSize));
-                cmd.SetRenderTarget(target, mipLevel, face);
-                cmd.SetViewport(new Rect(0.0f, 0.0f, faceSize, faceSize));
+                CoreUtils.SetRenderTarget(cmd, target, ClearFlag.None, mipLevel, face);
                 CoreUtils.DrawFullScreen(cmd, m_ConvolutionMaterial, m_PropertyBlock, passIndex);
             }
         }

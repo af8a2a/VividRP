@@ -177,7 +177,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_RenderList == null || !m_RenderList.IsValid)
                 return;
 
-            context.cmd.DrawRendererList(m_RenderList);
+            CoreUtils.DrawRendererList(context.cmd, m_RenderList);
         }
 
         public override void Dispose()

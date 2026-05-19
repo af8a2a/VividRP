@@ -290,6 +290,7 @@ namespace VividRP.Runtime
                 m_Material,
                 properties,
                 m_AmbientProbeBakingPass);
+            SkyCubemapBakingUtility.GenerateCubemapMipmaps(cmd, m_AmbientProbeCubemap);
             return true;
         }
 

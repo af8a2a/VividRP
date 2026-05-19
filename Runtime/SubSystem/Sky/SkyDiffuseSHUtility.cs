@@ -74,9 +74,19 @@ namespace VividRP.Runtime
             {
                 var cubemapFace = SkyDiffuseSHUtility.ValidCubemapFaces[faceIndex];
                 propertyBlock.SetMatrix(PixelCoordToViewDirWSId, GetCubemapFacePixelCoordToViewDirWSMatrix(cubemapFace, targetCubemap.width));
-                cmd.SetRenderTarget(targetCubemap, 0, cubemapFace);
-                cmd.SetViewport(new Rect(0.0f, 0.0f, targetCubemap.width, targetCubemap.height));
+                CoreUtils.SetRenderTarget(cmd, targetCubemap, ClearFlag.None, 0, cubemapFace);
                 CoreUtils.DrawFullScreen(cmd, material, propertyBlock, passIndex);
+            }
+        }
+
+        internal static void GenerateCubemapMipmaps(CommandBuffer cmd, RenderTexture targetCubemap)
+        {
+            if (cmd == null
+                || !targetCubemap
+                || !targetCubemap.useMipMap
+                || targetCubemap.autoGenerateMips)
+            {
+                return;
             }
 
             cmd.GenerateMips(targetCubemap);

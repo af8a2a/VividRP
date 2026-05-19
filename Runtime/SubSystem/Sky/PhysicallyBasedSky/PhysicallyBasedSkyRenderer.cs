@@ -582,6 +582,7 @@ namespace VividRP.Runtime
                 m_SkyMaterial,
                 properties,
                 m_SkyBakingPass);
+            SkyCubemapBakingUtility.GenerateCubemapMipmaps(cmd, m_RuntimeSkyCubemap);
             return true;
         }
 
@@ -604,6 +605,7 @@ namespace VividRP.Runtime
                 m_SkyMaterial,
                 properties,
                 m_SkyBakingPass);
+            SkyCubemapBakingUtility.GenerateCubemapMipmaps(cmd, m_AmbientProbeCubemap);
             return true;
         }
 

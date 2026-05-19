@@ -217,9 +217,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SkyTexture\")"));
             Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SkyTextureTint\")"));
             Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SkyTextureParams\")"));
+            Assert.That(source, Does.Contain("Shader.PropertyToID(\"_PixelCoordToViewDirWS\")"));
             Assert.That(source, Does.Contain("BuildSkyTextureParams("));
             Assert.That(source, Does.Contain("PrepareSkyTextureState("));
+            Assert.That(source, Does.Contain("BindSkyTextureParameters(cmd, m_ClearDeferredLitKernel);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SkyTextureId, m_SkyIBLCubemap.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeMatrixParam(m_DeferredLitCompute, PixelCoordToViewDirWSId, m_PixelCoordToViewDirWS);"));
         }
 
         [Test]

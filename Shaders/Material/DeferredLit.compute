@@ -10,6 +10,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/SkyUtils.hlsl"
 
 
 Texture2D<float4> _GBuffer0;
@@ -40,6 +41,12 @@ float3 GetCameraPositionWS()
     return _WorldSpaceCameraPos;
 }
 
+float3 EvaluateDeferredSkyLighting(uint2 pixelCoord)
+{
+    float3 viewDirectionWS = GetSkyViewDirWS(float2(pixelCoord) + 0.5);
+    float3 skyRadiance = SampleSkyTexture(-viewDirectionWS, 0.0);
+    return VividApplyPreExposure(max(skyRadiance, 0.0));
+}
 
 VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
 {
@@ -192,9 +199,13 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (dispatchThreadId.x >= _LightingWidth || dispatchThreadId.y >= _LightingHeight)
         return;
 
-    float3 emissive = VividApplyPreExposure(max(_GBuffer3.Load(int3(dispatchThreadId.xy, 0)).rgb, 0.0));
-    _LightingTexture[dispatchThreadId.xy] = float4(emissive, 1.0);
-    _LightingDebugTexture[dispatchThreadId.xy] = float4(0.0, 0.0, 0.0, 0.0);
+    uint2 pixelCoord = dispatchThreadId.xy;
+    float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+    float3 lighting = IsSkyPixel(deviceDepth)
+        ? EvaluateDeferredSkyLighting(pixelCoord)
+        : VividApplyPreExposure(max(_GBuffer3.Load(int3(pixelCoord, 0)).rgb, 0.0));
+    _LightingTexture[pixelCoord] = float4(lighting, 1.0);
+    _LightingDebugTexture[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
 }
 
 [numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]

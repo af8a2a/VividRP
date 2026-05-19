@@ -30,6 +30,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
+        private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int DirectionalLightsId = Shader.PropertyToID("_DirectionalLights");
         private static readonly int DirectionalLightCountId = Shader.PropertyToID("_DirectionalLightCount");
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
@@ -202,6 +203,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private VividPreIntegratedFGDTextures m_FallbackPreIntegratedFGDTextures;
         private Color m_SkyTextureTint = Color.white;
         private Vector4 m_SkyTextureParams;
+        private Matrix4x4 m_PixelCoordToViewDirWS = Matrix4x4.identity;
 
         public bool IsPassResourceLayoutDirty => m_IsPassResourceLayoutDirty;
 
@@ -307,6 +309,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LightingHeight = height;
             m_ClearDispatchGroupCountX = Mathf.Max(1, (width + ClearThreadGroupSizeX - 1) / ClearThreadGroupSizeX);
             m_ClearDispatchGroupCountY = Mathf.Max(1, (height + ClearThreadGroupSizeY - 1) / ClearThreadGroupSizeY);
+            m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
 
@@ -345,6 +348,7 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
                 BindSharedParameters(context, cmd, m_ClearDeferredLitKernel);
+                BindSkyTextureParameters(cmd, m_ClearDeferredLitKernel);
                 cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
                 BindSharedParameters(context, cmd, m_DeferredLitKernel);
@@ -384,6 +388,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SupportsClusteredPunctualLights = false;
             m_SupportsClusteredAreaLights = false;
             m_IsLogBaseBufferEnabled = false;
+            m_PixelCoordToViewDirWS = Matrix4x4.identity;
         }
 
         internal static Vector4 BuildSkyTextureParams(Texture skyCubemap, float intensityMultiplier, float rotation)
@@ -503,9 +508,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 kernel,
                 VividPreIntegratedFGD.CharlieAndFabricTextureId,
                 m_PreIntegratedFGDCharlieAndFabricTexture.innerHandle);
+            BindSkyTextureParameters(cmd, kernel);
+        }
+
+        private void BindSkyTextureParameters(ComputeCommandBuffer cmd, int kernel)
+        {
             cmd.SetComputeTextureParam(m_DeferredLitCompute, kernel, SkyTextureId, m_SkyIBLCubemap.innerHandle);
             cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyTextureTintId, m_SkyTextureTint);
             cmd.SetComputeVectorParam(m_DeferredLitCompute, SkyTextureParamsId, m_SkyTextureParams);
+            cmd.SetComputeMatrixParam(m_DeferredLitCompute, PixelCoordToViewDirWSId, m_PixelCoordToViewDirWS);
         }
 
         private void BindLightLoopParameters(ComputeCommandBuffer cmd, int kernel)

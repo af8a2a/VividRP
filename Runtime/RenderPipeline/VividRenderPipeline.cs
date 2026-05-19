@@ -84,7 +84,7 @@ namespace VividRP.Runtime
 
                 EmitGeometryForCamera(camera);
                 ApplyShadowDistanceOverride(camera, ref cullingParameters);
-                cullingParameters.cullingOptions = ResolveCullingOptions(camera.cameraType, cullingParameters.cullingOptions);
+                cullingParameters.cullingOptions |= CullingOptions.DisablePerObjectCulling;
 
                 var cullingResults = context.Cull(ref cullingParameters);
 
@@ -241,13 +241,6 @@ namespace VividRP.Runtime
         internal static bool ShouldUsePreviewCameraRenderPath(CameraType cameraType)
         {
             return cameraType == CameraType.Preview;
-        }
-
-        internal static CullingOptions ResolveCullingOptions(CameraType cameraType, CullingOptions cullingOptions)
-        {
-            return ShouldUsePreviewCameraRenderPath(cameraType)
-                ? cullingOptions | CullingOptions.DisablePerObjectCulling
-                : cullingOptions;
         }
 
         internal static bool ShouldRenderPreImageEffectGizmosInRenderGraph(CameraType cameraType)

@@ -26,6 +26,9 @@ namespace VividRP.Editor.RenderGraph
         {
             foreach (var window in Resources.FindObjectsOfTypeAll<EditorWindow>())
             {
+                if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _))
+                    continue;
+
                 var graphView = RenderGraphEditorWindowReflectionUtility.GetGraphView(window);
                 if (graphView == null)
                     continue;
@@ -151,6 +154,17 @@ namespace VividRP.Editor.RenderGraph
         internal static bool TryGetCurrentGraph(EditorWindow window, out RenderGraphEditorGraph graph)
         {
             graph = null;
+            if (window == null)
+                return false;
+
+#if UNITY_6000_6_OR_NEWER
+            if (window is IGraphWindow graphWindow)
+            {
+                graph = graphWindow.Graph as RenderGraphEditorGraph;
+                return graph != null;
+            }
+#endif
+
             return TryGetCurrentGraph(GetGraphView(window), out graph);
         }
 
@@ -289,14 +303,14 @@ namespace VividRP.Editor.RenderGraph
                 if (window.overlayCanvas == null)
                     continue;
 
-                var hasCurrentGraph = RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _);
-                if (window.TryGetOverlay(RenderGraphExecutionOrderOverlay.OverlayId, out var existingOverlay))
-                {
-                    existingOverlay.displayed = hasCurrentGraph;
+                if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _))
                     continue;
-                }
 
-                if (!hasCurrentGraph)
+                var graphView = RenderGraphEditorWindowReflectionUtility.GetGraphView(window);
+                if (graphView?.panel == null)
+                    continue;
+
+                if (window.TryGetOverlay(RenderGraphExecutionOrderOverlay.OverlayId, out _))
                     continue;
 
                 var overlay = new RenderGraphExecutionOrderOverlay();

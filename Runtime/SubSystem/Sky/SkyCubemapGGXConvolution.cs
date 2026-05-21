@@ -66,8 +66,7 @@ namespace VividRP.Runtime
 
             using (new ProfilingScope(cmd, s_CopyMipZeroSampler))
             {
-                if (!TryCopyCubemapMipZero(cmd, source, target))
-                    RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);
+                RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);
             }
 
             if (maxMipLevel <= 0)
@@ -261,23 +260,6 @@ namespace VividRP.Runtime
                 return false;
 
             return source is not RenderTexture renderTexture || renderTexture.IsCreated();
-        }
-
-        private static bool TryCopyCubemapMipZero(CommandBuffer cmd, Texture source, RenderTexture target)
-        {
-            if (cmd == null
-                || source == null
-                || target == null
-                || (SystemInfo.copyTextureSupport & CopyTextureSupport.Basic) == 0
-                || source.graphicsFormat != target.graphicsFormat)
-            {
-                return false;
-            }
-
-            for (var faceIndex = 0; faceIndex < SkyDiffuseSHUtility.ValidCubemapFaces.Length; faceIndex++)
-                cmd.CopyTexture(source, faceIndex, 0, target, faceIndex, 0);
-
-            return true;
         }
 
         private void RenderCubemapLevel(CommandBuffer cmd, Texture source, RenderTexture target, int mipLevel, int passIndex)

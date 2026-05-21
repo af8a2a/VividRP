@@ -355,6 +355,7 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
 
+            Assert.That(source, Does.Contain("RebuildCachedRuntimeCubemapIfNeeded(context, skyData, cmd);"));
             Assert.That(source, Does.Contain("var skyTextureResolution = SkySettingsVolume.GetSkyTextureResolution(skySettings);"));
             Assert.That(source, Does.Contain("var ambientProbeCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);"));
             Assert.That(source, Does.Contain("ResolveRuntimeCubemapRebuildReason("));
@@ -362,6 +363,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ResolveAmbientProbeCubemapRebuildReason(hash, ambientProbeCubemapResolution);"));
             Assert.That(source, Does.Contain("EnsureRuntimeCubemap(skyTextureResolution);"));
             Assert.That(source, Does.Contain("skyData.specularCubemap = m_RuntimeSkyCubemap;"));
+            Assert.That(source, Does.Not.Contain("RefreshRuntimeCubemapEveryFrame"));
+            Assert.That(source, Does.Not.Contain("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (FrameRefresh)"));
         }
 
         [Test]
@@ -374,7 +377,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private void ApplyAtmosphereLutHandle(VividSkyData skyData)"));
             Assert.That(source, Does.Contain("private bool TryPrepareLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("&& m_LocalSkyPrecomputationHash == localSkyPrecomputationHash"));
+            Assert.That(source, Does.Contain("&& !m_LocalSkyPrecomputationRebuiltThisFrame"));
             Assert.That(source, Does.Contain("&& HasLocalSkyPrecomputationTextures()"));
+            Assert.That(source, Does.Contain("m_LocalSkyPrecomputationRebuiltThisFrame = false;"));
+            Assert.That(source, Does.Contain("m_SkyViewLutRebuiltForBakingThisFrame = false;"));
+            Assert.That(source, Does.Contain("m_RuntimeCubemapNeedsDeferredBakingResourceRefresh ="));
+            Assert.That(source, Does.Contain("m_LocalSkyPrecomputationRebuiltThisFrame || m_SkyViewLutRebuiltForBakingThisFrame"));
+            Assert.That(source, Does.Contain("&& m_RuntimeCubemapNeedsDeferredBakingResourceRefresh"));
+            Assert.That(source, Does.Contain("!m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame"));
             Assert.That(source, Does.Contain("private void ApplyLocalSkyPrecomputationTextures(MaterialPropertyBlock properties)"));
             Assert.That(source, Does.Contain("properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);"));
             Assert.That(source, Does.Contain("properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);"));
@@ -402,7 +412,8 @@ namespace VividRP.Editor.Tests
             var packageRoots = new[]
             {
                 Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
+                Path.Combine(projectRoot, "Packages", "Custom_URP")
             };
 
             foreach (var packageRoot in packageRoots)

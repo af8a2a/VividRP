@@ -39,7 +39,6 @@ namespace VividRP.Runtime
         private static readonly ProfilingSampler s_RuntimeCubemapResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ResolutionChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapQualityChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (QualityChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapParametersChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ParametersChanged)");
-        private static readonly ProfilingSampler s_RuntimeCubemapFrameRefreshSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (FrameRefresh)");
         private static readonly ProfilingSampler s_AmbientProbeMissingTextureSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (MissingTexture)");
         private static readonly ProfilingSampler s_AmbientProbeResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ResolutionChanged)");
         private static readonly ProfilingSampler s_AmbientProbeParametersChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ParametersChanged)");
@@ -47,7 +46,6 @@ namespace VividRP.Runtime
 
         internal const float SunAngularDiameterDegrees = 0.53f;
         internal const float SunIlluminanceScale = 20.0f;
-        private const bool RefreshRuntimeCubemapEveryFrame = true;
         private const bool RefreshAmbientProbeCubemapEveryFrame = true;
         private const int GroundIrradianceTableSize = 256;
         private const int InScatteredRadianceTableSizeX = 128;
@@ -75,6 +73,9 @@ namespace VividRP.Runtime
         private int m_AmbientProbeSkyHash;
         private int m_LocalSkyPrecomputationHash;
         private bool m_HasLocalSkyPrecomputation;
+        private bool m_LocalSkyPrecomputationRebuiltThisFrame;
+        private bool m_SkyViewLutRebuiltForBakingThisFrame;
+        private bool m_RuntimeCubemapNeedsDeferredBakingResourceRefresh;
         private RenderGraphTexture m_ColorTarget;
         private RenderGraphTexture m_DepthTexture;
         private RenderGraphTexture m_DirectionalShadowTexture;
@@ -149,10 +150,12 @@ namespace VividRP.Runtime
 
         public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
         {
+            m_LocalSkyPrecomputationRebuiltThisFrame = false;
+            m_SkyViewLutRebuiltForBakingThisFrame = false;
             m_AtmosphereLutCache.Update(context, cmd);
             ApplyAtmosphereLutHandle(skyData);
             UpdateLocalSkyPrecomputation(context, skyData, cmd);
-            RefreshCachedRuntimeCubemap(context, skyData, cmd);
+            RebuildCachedRuntimeCubemapIfNeeded(context, skyData, cmd);
             RefreshCachedAmbientProbeCubemap(context, skyData, cmd);
         }
 
@@ -200,6 +203,7 @@ namespace VividRP.Runtime
                     {
                         m_RuntimeSkyHash = skyHash;
                         m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
+                        skyData.specularCubemapDirty = true;
                     }
                 }
             }
@@ -385,6 +389,9 @@ namespace VividRP.Runtime
             m_AmbientProbeSkyHash = 0;
             m_LocalSkyPrecomputationHash = 0;
             m_HasLocalSkyPrecomputation = false;
+            m_LocalSkyPrecomputationRebuiltThisFrame = false;
+            m_SkyViewLutRebuiltForBakingThisFrame = false;
+            m_RuntimeCubemapNeedsDeferredBakingResourceRefresh = false;
             m_ColorTarget = null;
             m_DepthTexture = null;
             m_DirectionalShadowTexture = null;
@@ -477,13 +484,12 @@ namespace VividRP.Runtime
             }
         }
 
-        private void RefreshCachedRuntimeCubemap(
+        private void RebuildCachedRuntimeCubemapIfNeeded(
             in SkyRendererContext context,
             VividSkyData skyData,
             CommandBuffer cmd)
         {
-            if (!RefreshRuntimeCubemapEveryFrame
-                || cmd == null
+            if (cmd == null
                 || skyData == null
                 || skyData.activeSkyType != SkyType.PhysicallyBased)
             {
@@ -507,10 +513,13 @@ namespace VividRP.Runtime
                 skyHash,
                 skyTextureResolution,
                 generatedCubemapViewSampleCount);
-            if (runtimeCubemapRebuildReason == SkyRebuildReason.None)
-                runtimeCubemapRebuildReason = SkyRebuildReason.FrameRefresh;
+            if (runtimeCubemapRebuildReason == SkyRebuildReason.None
+                && m_RuntimeCubemapNeedsDeferredBakingResourceRefresh)
+            {
+                runtimeCubemapRebuildReason = SkyRebuildReason.ParametersChanged;
+            }
 
-            if (!CanRebuildRuntimeCubemap())
+            if (runtimeCubemapRebuildReason == SkyRebuildReason.None || !CanRebuildRuntimeCubemap())
                 return;
 
             EnsureRuntimeCubemap(skyTextureResolution);
@@ -525,6 +534,7 @@ namespace VividRP.Runtime
                     m_RuntimeSkyHash = skyHash;
                     m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
                     skyData.specularCubemap = m_RuntimeSkyCubemap;
+                    skyData.specularCubemapDirty = true;
                 }
             }
         }
@@ -534,6 +544,7 @@ namespace VividRP.Runtime
             in PhysicallyBasedSkyMaterialParameters materialParameters)
         {
             return m_HasLocalSkyPrecomputation
+                   && !m_LocalSkyPrecomputationRebuiltThisFrame
                    && m_LocalSkyPrecomputationHash == ComputeLocalSkyPrecomputationHash(skyParameters, materialParameters)
                    && HasLocalSkyPrecomputationTextures();
         }
@@ -780,6 +791,8 @@ namespace VividRP.Runtime
                 properties,
                 m_SkyBakingPass);
             SkyCubemapBakingUtility.GenerateCubemapMipmaps(cmd, m_RuntimeSkyCubemap);
+            m_RuntimeCubemapNeedsDeferredBakingResourceRefresh =
+                m_LocalSkyPrecomputationRebuiltThisFrame || m_SkyViewLutRebuiltForBakingThisFrame;
             return true;
         }
 
@@ -868,9 +881,12 @@ namespace VividRP.Runtime
             properties.SetFloat(SkyUseLutId, useSkyViewLut ? 1.0f : 0.0f);
             properties.SetTexture(SkyViewLutId, useSkyViewLut ? skyViewLut : Texture2D.blackTexture);
             properties.SetTexture(DirectionalShadowTextureId, Texture2D.whiteTexture);
-            var useLocalSkyPrecomputation = hasMaterialParameters
-                                            && UsesWorldSpacePrecomputation(materialParameters)
-                                            && TryPrepareLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
+            var useLocalSkyPrecomputation = false;
+            if (hasMaterialParameters && UsesWorldSpacePrecomputation(materialParameters))
+            {
+                TryPrepareLocalSkyPrecomputation(volume, context, cmd, parameters, materialParameters);
+                useLocalSkyPrecomputation = HasMatchingLocalSkyPrecomputation(parameters, materialParameters);
+            }
             CoreUtils.SetKeyword(m_SkyMaterial, "LOCAL_SKY", useLocalSkyPrecomputation);
             if (useLocalSkyPrecomputation)
                 ApplyLocalSkyPrecomputationTextures(properties);
@@ -898,13 +914,30 @@ namespace VividRP.Runtime
             }
 
             if (m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut))
-                return true;
+            {
+                if (!m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
+                    return true;
+
+                m_SkyViewLutRebuiltForBakingThisFrame = true;
+                skyViewLut = null;
+                return false;
+            }
 
             if (cmd == null)
                 return false;
 
             m_AtmosphereLutCache.Update(context, cmd, forceSkyViewRebuild: true);
-            return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut);
+            if (m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut)
+                && !m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
+            {
+                return true;
+            }
+
+            if (m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
+                m_SkyViewLutRebuiltForBakingThisFrame = true;
+
+            skyViewLut = null;
+            return false;
         }
 
         private bool TryPrepareLocalSkyPrecomputation(
@@ -933,6 +966,7 @@ namespace VividRP.Runtime
 
             m_LocalSkyPrecomputationHash = localSkyPrecomputationHash;
             m_HasLocalSkyPrecomputation = true;
+            m_LocalSkyPrecomputationRebuiltThisFrame = true;
             return true;
         }
 
@@ -1033,6 +1067,9 @@ namespace VividRP.Runtime
             ReleaseRenderTexture(ref m_MultipleScatteringTable);
             ReleaseRenderTexture(ref m_MultiScatteringLut);
             m_HasLocalSkyPrecomputation = false;
+            m_LocalSkyPrecomputationRebuiltThisFrame = false;
+            m_SkyViewLutRebuiltForBakingThisFrame = false;
+            m_RuntimeCubemapNeedsDeferredBakingResourceRefresh = false;
             m_LocalSkyPrecomputationHash = 0;
         }
 
@@ -1232,7 +1269,6 @@ namespace VividRP.Runtime
                 SkyRebuildReason.ResolutionChanged => s_RuntimeCubemapResolutionChangedSampler,
                 SkyRebuildReason.QualityChanged => s_RuntimeCubemapQualityChangedSampler,
                 SkyRebuildReason.ParametersChanged => s_RuntimeCubemapParametersChangedSampler,
-                SkyRebuildReason.FrameRefresh => s_RuntimeCubemapFrameRefreshSampler,
                 _ => s_RuntimeCubemapMissingTextureSampler,
             };
         }

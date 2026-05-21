@@ -26,6 +26,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);"));
             Assert.That(source, Does.Contain("RenderCubemapLevel(cmd, source, target, mipLevel, GgxConvolutionPassIndex);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_ConvolutionMaterial, m_PropertyBlock, passIndex);"));
+            Assert.That(source, Does.Not.Contain("cmd.CopyTexture(source, faceIndex, 0, target, faceIndex, 0);"));
+            Assert.That(source, Does.Not.Contain("TryCopyCubemapMipZero"));
             Assert.That(source, Does.Contain("GetIBLRuntimeFilterSampleCount"));
             Assert.That(source, Does.Contain("BuildGgxIblSampleDataTexture()"));
         }
@@ -49,7 +51,8 @@ namespace VividRP.Editor.Tests
             var packageRoots = new[]
             {
                 Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
+                Path.Combine(projectRoot, "Packages", "Custom_URP")
             };
 
             foreach (var packageRoot in packageRoots)

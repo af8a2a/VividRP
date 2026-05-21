@@ -100,6 +100,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("if (!useDefaultAmbientProbe)"));
             Assert.That(source, Does.Contain("private const bool ForceAmbientProbeConvolutionEveryFrame = true;"));
             Assert.That(source, Does.Contain("forceRebuild || ForceAmbientProbeConvolutionEveryFrame"));
+            Assert.That(source, Does.Contain("forceRebuild || (skyData?.specularCubemapDirty == true)"));
+            Assert.That(source, Does.Contain("skyData.specularCubemapDirty = false;"));
+            Assert.That(source, Does.Not.Contain("ForceSpecularCubemapConvolutionEveryFrame"));
             Assert.That(source, Does.Contain("BuildVolumetricAmbientProbeFogParameters()"));
             Assert.That(source, Does.Contain("BuildVolumetricAmbientProbeHash(int ambientProbeHash, Vector4 fogParameters)"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));

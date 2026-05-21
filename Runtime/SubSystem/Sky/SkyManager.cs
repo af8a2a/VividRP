@@ -14,7 +14,6 @@ namespace VividRP.Runtime
         private static readonly VividSkyData s_CachedSkyData = new();
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
         private static readonly SkySpecularCache s_SpecularCache = new();
-        private const bool ForceSpecularCubemapConvolutionEveryFrame = true;
         private const bool ForceAmbientProbeConvolutionEveryFrame = true;
 
         private static bool s_UpdateRequested;
@@ -306,7 +305,9 @@ namespace VividRP.Runtime
                 cmd,
                 skyData?.specularCubemap,
                 skyData?.skyHash ?? 0,
-                forceRebuild || ForceSpecularCubemapConvolutionEveryFrame);
+                forceRebuild || (skyData?.specularCubemapDirty == true));
+            if (skyData != null)
+                skyData.specularCubemapDirty = false;
         }
 
         private static void UpdateSpecularCubemap(VividSkyData skyData)

@@ -17,6 +17,7 @@ namespace VividRP.Runtime
         public float ambientProbeRotation;
         public int skyHash;
         public int ambientProbeHash;
+        internal bool specularCubemapDirty;
 
         public override void Reset()
         {
@@ -32,6 +33,7 @@ namespace VividRP.Runtime
             ambientProbeRotation = 0.0f;
             skyHash = 0;
             ambientProbeHash = 0;
+            specularCubemapDirty = false;
         }
 
         internal void CopyFrom(VividSkyData other)
@@ -54,6 +56,7 @@ namespace VividRP.Runtime
             ambientProbeRotation = other.ambientProbeRotation;
             skyHash = other.skyHash;
             ambientProbeHash = other.ambientProbeHash;
+            specularCubemapDirty = other.specularCubemapDirty;
         }
     }
 }

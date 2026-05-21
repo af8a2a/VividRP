@@ -256,16 +256,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Source_ReusesRuntimeCubemapBeforeRebuildingAmbientProbe()
+        public void Source_RendersAmbientProbeCubemapEveryFrame()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
 
-            Assert.That(source, Does.Contain("private bool TryCopyRuntimeCubemapToAmbientProbe("));
-            Assert.That(source, Does.Contain("cmd.CopyTexture(m_RuntimeSkyCubemap, m_AmbientProbeCubemap);"));
-            Assert.That(source, Does.Contain("if (TryCopyRuntimeCubemapToAmbientProbe("));
-            Assert.That(source, Does.Contain("|| RebuildAmbientProbeCubemap(volume, context, cmd, generatedCubemapViewSampleCount))"));
-            Assert.That(source, Does.Contain("|| m_RuntimeSkyHash != skyHash"));
-            Assert.That(source, Does.Contain("|| m_RuntimeSkyViewSampleCount != viewSampleCount)"));
+            Assert.That(source, Does.Contain("private const bool RefreshAmbientProbeCubemapEveryFrame = true;"));
+            Assert.That(source, Does.Contain("RefreshCachedAmbientProbeCubemap(context, skyData, cmd);"));
+            Assert.That(source, Does.Contain("private bool RefreshAmbientProbeCubemap("));
+            Assert.That(source, Does.Contain("SkyRebuildReason.FrameRefresh"));
+            Assert.That(source, Does.Contain("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (FrameRefresh)"));
+            Assert.That(source, Does.Contain("RebuildAmbientProbeCubemap(volume, context, cmd, viewSampleCount)"));
+            Assert.That(source, Does.Not.Contain("private bool TryCopyRuntimeCubemapToAmbientProbe("));
+            Assert.That(source, Does.Not.Contain("cmd.CopyTexture(m_RuntimeSkyCubemap, m_AmbientProbeCubemap);"));
         }
 
         [Test]

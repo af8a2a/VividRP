@@ -1,5 +1,9 @@
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -31,6 +35,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RequestDebugReadback(cmd, activeBuffer, useDefault);"));
             Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (MissingBuffer)"));
             Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (SkyChanged)"));
+            Assert.That(source, Does.Contain("SkyAmbientProbeConvolution.Convolve (FrameRefresh)"));
+            Assert.That(source, Does.Contain("rebuildReason = AmbientProbeConvolutionRebuildReason.FrameRefresh;"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, GetConvolutionSampler(rebuildReason)))"));
             Assert.That(source, Does.Contain("cmd.RequestAsyncReadback(activeBuffer, request => OnDebugReadbackCompleted(request, debugSkyHash));"));
             Assert.That(source, Does.Contain("private void OnDebugReadbackCompleted(AsyncGPUReadbackRequest request, int skyHash)"));
@@ -92,9 +98,47 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("var fogParameters = BuildVolumetricAmbientProbeFogParameters();"));
             Assert.That(source, Does.Contain("var ambientProbeHash = BuildVolumetricAmbientProbeHash(skyData?.ambientProbeHash ?? 0, fogParameters);"));
             Assert.That(source, Does.Contain("if (!useDefaultAmbientProbe)"));
+            Assert.That(source, Does.Contain("private const bool ForceAmbientProbeConvolutionEveryFrame = true;"));
+            Assert.That(source, Does.Contain("forceRebuild || ForceAmbientProbeConvolutionEveryFrame"));
             Assert.That(source, Does.Contain("BuildVolumetricAmbientProbeFogParameters()"));
             Assert.That(source, Does.Contain("BuildVolumetricAmbientProbeHash(int ambientProbeHash, Vector4 fogParameters)"));
             Assert.That(source, Does.Contain("s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);"));
+        }
+
+        [Test]
+        public void SkyManager_HasValidSkyTexture_RequiresCreatedCubemapRenderTexture()
+        {
+            var method = typeof(SkyManager).GetMethod("HasValidSkyTexture", BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null);
+
+            var texture2D = new Texture2D(4, 4);
+            var cubemap = new RenderTexture(16, 16, 0)
+            {
+                dimension = TextureDimension.Cube,
+                volumeDepth = 6
+            };
+
+            try
+            {
+                Assert.That(InvokeHasValidSkyTexture(method, null), Is.False);
+                Assert.That(InvokeHasValidSkyTexture(method, texture2D), Is.False);
+                Assert.That(InvokeHasValidSkyTexture(method, cubemap), Is.False);
+
+                cubemap.Create();
+
+                Assert.That(InvokeHasValidSkyTexture(method, cubemap), Is.True);
+            }
+            finally
+            {
+                cubemap.Release();
+                Object.DestroyImmediate(cubemap);
+                Object.DestroyImmediate(texture2D);
+            }
+        }
+
+        private static bool InvokeHasValidSkyTexture(MethodInfo method, Texture texture)
+        {
+            return (bool)method.Invoke(null, new object[] { texture });
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

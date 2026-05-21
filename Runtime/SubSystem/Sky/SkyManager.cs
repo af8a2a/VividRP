@@ -14,6 +14,7 @@ namespace VividRP.Runtime
         private static readonly VividSkyData s_CachedSkyData = new();
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
         private static readonly SkySpecularCache s_SpecularCache = new();
+        private const bool ForceAmbientProbeConvolutionEveryFrame = true;
 
         private static bool s_UpdateRequested;
         private static float s_LastUpdateTime;
@@ -243,7 +244,7 @@ namespace VividRP.Runtime
         {
             forceRebuild = false;
 
-            if (s_CachedSkyData.activeSkyType != skyType || s_CachedSkyData.specularCubemap == null)
+            if (s_CachedSkyData.activeSkyType != skyType || !HasValidSkyTexture(s_CachedSkyData.specularCubemap))
                 return true;
 
             if (s_UpdateRequested)
@@ -320,10 +321,23 @@ namespace VividRP.Runtime
                     skyData.ambientProbeCubemap,
                     ambientProbeHash,
                     fogParameters,
-                    forceRebuild);
+                    forceRebuild || ForceAmbientProbeConvolutionEveryFrame);
             }
 
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
+        }
+
+        private static bool HasValidSkyTexture(Texture texture)
+        {
+            if (texture == null
+                || texture.dimension != TextureDimension.Cube
+                || texture.width <= 0
+                || texture.height <= 0)
+            {
+                return false;
+            }
+
+            return texture is not RenderTexture renderTexture || renderTexture.IsCreated();
         }
 
         private static Vector4 BuildVolumetricAmbientProbeFogParameters()

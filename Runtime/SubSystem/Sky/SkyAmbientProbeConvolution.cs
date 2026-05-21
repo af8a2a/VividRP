@@ -11,7 +11,8 @@ namespace VividRP.Runtime
         {
             None,
             MissingBuffer,
-            SkyChanged
+            SkyChanged,
+            FrameRefresh
         }
 
         private const string DiffuseVolumetricKernelName = "AmbientProbeConvolutionDiffuseVolumetric";
@@ -33,6 +34,7 @@ namespace VividRP.Runtime
         private static readonly int VividAmbientProbeDataId = Shader.PropertyToID("_VividAmbientProbeData");
         private static readonly ProfilingSampler s_ConvolutionMissingBufferSampler = new("SkyAmbientProbeConvolution.Convolve (MissingBuffer)");
         private static readonly ProfilingSampler s_ConvolutionSkyChangedSampler = new("SkyAmbientProbeConvolution.Convolve (SkyChanged)");
+        private static readonly ProfilingSampler s_ConvolutionFrameRefreshSampler = new("SkyAmbientProbeConvolution.Convolve (FrameRefresh)");
         private static readonly Vector4[] s_DefaultAmbientProbeData =
         {
             Vector4.zero,
@@ -109,7 +111,7 @@ namespace VividRP.Runtime
 
             var rebuildReason = ResolveRebuildReason(skyHash);
             if (forceRebuild && rebuildReason == AmbientProbeConvolutionRebuildReason.None)
-                rebuildReason = AmbientProbeConvolutionRebuildReason.SkyChanged;
+                rebuildReason = AmbientProbeConvolutionRebuildReason.FrameRefresh;
             if (rebuildReason == AmbientProbeConvolutionRebuildReason.None)
                 return;
 
@@ -313,9 +315,12 @@ namespace VividRP.Runtime
 
         private static ProfilingSampler GetConvolutionSampler(AmbientProbeConvolutionRebuildReason reason)
         {
-            return reason == AmbientProbeConvolutionRebuildReason.SkyChanged
-                ? s_ConvolutionSkyChangedSampler
-                : s_ConvolutionMissingBufferSampler;
+            return reason switch
+            {
+                AmbientProbeConvolutionRebuildReason.SkyChanged => s_ConvolutionSkyChangedSampler,
+                AmbientProbeConvolutionRebuildReason.FrameRefresh => s_ConvolutionFrameRefreshSampler,
+                _ => s_ConvolutionMissingBufferSampler,
+            };
         }
     }
 }

@@ -351,6 +351,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Source_SeparatesRuntimeSkyTextureResolutionFromAmbientProbeResolution()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
+
+            Assert.That(source, Does.Contain("var skyTextureResolution = SkySettingsVolume.GetSkyTextureResolution(skySettings);"));
+            Assert.That(source, Does.Contain("var ambientProbeCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);"));
+            Assert.That(source, Does.Contain("ResolveRuntimeCubemapRebuildReason("));
+            Assert.That(source, Does.Contain("skyTextureResolution,"));
+            Assert.That(source, Does.Contain("ResolveAmbientProbeCubemapRebuildReason(hash, ambientProbeCubemapResolution);"));
+            Assert.That(source, Does.Contain("EnsureRuntimeCubemap(skyTextureResolution);"));
+            Assert.That(source, Does.Contain("skyData.specularCubemap = m_RuntimeSkyCubemap;"));
+        }
+
+        [Test]
         public void Source_BindsRealtimeLocalSkyTexturesThroughRendererCache()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));

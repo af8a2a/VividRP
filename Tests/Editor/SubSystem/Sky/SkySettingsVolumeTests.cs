@@ -19,16 +19,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(8));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(4));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(16));
+                Assert.That(SkySettingsVolume.GetSkyTextureResolution(volume), Is.EqualTo(1024));
 
                 volume.generatedCubemapQuality.value = SkyGeneratedCubemapQuality.High;
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(16));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(8));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(64));
+                Assert.That(SkySettingsVolume.GetSkyTextureResolution(volume), Is.EqualTo(1024));
 
                 volume.generatedCubemapQuality.value = SkyGeneratedCubemapQuality.Ultra;
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(24));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(12));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(128));
+                Assert.That(SkySettingsVolume.GetSkyTextureResolution(volume), Is.EqualTo(1024));
             }
             finally
             {
@@ -42,6 +45,7 @@ namespace VividRP.Editor.Tests
             Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(), Is.EqualTo(12));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(), Is.EqualTo(6));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(), Is.EqualTo(32));
+            Assert.That(SkySettingsVolume.GetSkyTextureResolution(), Is.EqualTo(1024));
             Assert.That(SkySettingsVolume.GetIncludeSunInBaking(), Is.False);
         }
 
@@ -99,6 +103,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("internal static int GetIntensityHashCode(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Not.Contain("internal static float GetIntensityFromSettings(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Contain("internal static bool GetIncludeSunInBaking(SkySettingsVolume settings = null)"));
+            Assert.That(source, Does.Contain("internal const int DefaultSkyTextureResolution = 1024;"));
+            Assert.That(source, Does.Contain("internal static int GetSkyTextureResolution(SkySettingsVolume settings = null)"));
             Assert.That(source, Does.Contain("internal readonly struct SkyPlanet"));
         }
 
@@ -186,7 +192,8 @@ namespace VividRP.Editor.Tests
             var packageRoots = new[]
             {
                 Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
+                Path.Combine(projectRoot, "Packages", "Custom_URP")
             };
 
             foreach (var packageRoot in packageRoots)

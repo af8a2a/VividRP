@@ -169,12 +169,13 @@ namespace VividRP.Runtime
             }
 
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
-            var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
+            var skyTextureResolution = SkySettingsVolume.GetSkyTextureResolution(skySettings);
+            var ambientProbeCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             var intensityMultiplier = volume.GetIntensityMultiplier();
             var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason(
                 skyHash,
-                generatedCubemapResolution,
+                skyTextureResolution,
                 generatedCubemapViewSampleCount);
             if (forceRebuild && runtimeCubemapRebuildReason == SkyRebuildReason.None)
                 runtimeCubemapRebuildReason = SkyRebuildReason.ParametersChanged;
@@ -187,7 +188,7 @@ namespace VividRP.Runtime
                 && hasCommandBuffer)
             {
                 runtimeCubemapBakeAttempted = true;
-                EnsureRuntimeCubemap(generatedCubemapResolution);
+                EnsureRuntimeCubemap(skyTextureResolution);
                 using (new ProfilingScope(cmd, GetRuntimeCubemapRebuildSampler(runtimeCubemapRebuildReason)))
                 {
                     runtimeCubemapBakeSucceeded = RebuildRuntimeCubemap(
@@ -208,14 +209,14 @@ namespace VividRP.Runtime
                 runtimeCubemapBakeSucceeded,
                 canRebuildRuntimeCubemap,
                 hasCommandBuffer,
-                generatedCubemapResolution,
+                skyTextureResolution,
                 generatedCubemapViewSampleCount,
                 skyHash,
                 forceRebuild);
 
             var hash = ComputeAmbientProbeHash(volume, context, skySettings, generatedCubemapViewSampleCount, intensityMultiplier);
 
-            var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
+            var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, ambientProbeCubemapResolution);
             if (forceRebuild && ambientProbeRebuildReason == SkyRebuildReason.None)
                 ambientProbeRebuildReason = SkyRebuildReason.ParametersChanged;
             RefreshAmbientProbeCubemap(
@@ -223,7 +224,7 @@ namespace VividRP.Runtime
                 context,
                 cmd,
                 hash,
-                generatedCubemapResolution,
+                ambientProbeCubemapResolution,
                 generatedCubemapViewSampleCount,
                 ambientProbeRebuildReason,
                 RefreshAmbientProbeCubemapEveryFrame);
@@ -450,20 +451,20 @@ namespace VividRP.Runtime
                 return;
 
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
-            var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
+            var ambientProbeCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
             var intensityMultiplier = volume.GetIntensityMultiplier();
             var hash = ComputeAmbientProbeHash(volume, context, skySettings, generatedCubemapViewSampleCount, intensityMultiplier);
             if (skyData.ambientProbeHash != hash)
                 return;
 
-            var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, generatedCubemapResolution);
+            var ambientProbeRebuildReason = ResolveAmbientProbeCubemapRebuildReason(hash, ambientProbeCubemapResolution);
             if (RefreshAmbientProbeCubemap(
                     volume,
                     context,
                     cmd,
                     hash,
-                    generatedCubemapResolution,
+                    ambientProbeCubemapResolution,
                     generatedCubemapViewSampleCount,
                     ambientProbeRebuildReason,
                     true))
@@ -484,8 +485,7 @@ namespace VividRP.Runtime
             if (!RefreshRuntimeCubemapEveryFrame
                 || cmd == null
                 || skyData == null
-                || skyData.activeSkyType != SkyType.PhysicallyBased
-                || !ReferenceEquals(skyData.specularCubemap, m_RuntimeSkyCubemap))
+                || skyData.activeSkyType != SkyType.PhysicallyBased)
             {
                 return;
             }
@@ -496,23 +496,36 @@ namespace VividRP.Runtime
 
             var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
             var skyHash = GetSkyHash(context);
-            var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
+            var skyTextureResolution = SkySettingsVolume.GetSkyTextureResolution(skySettings);
             var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
-            if (skyHash != skyData.skyHash
-                || m_RuntimeSkyHash != skyHash
-                || m_RuntimeSkyViewSampleCount != generatedCubemapViewSampleCount
-                || !IsCubemapValid(m_RuntimeSkyCubemap, generatedCubemapResolution))
+            if (skyHash != skyData.skyHash)
             {
                 return;
             }
 
-            using (new ProfilingScope(cmd, s_RuntimeCubemapFrameRefreshSampler))
+            var runtimeCubemapRebuildReason = ResolveRuntimeCubemapRebuildReason(
+                skyHash,
+                skyTextureResolution,
+                generatedCubemapViewSampleCount);
+            if (runtimeCubemapRebuildReason == SkyRebuildReason.None)
+                runtimeCubemapRebuildReason = SkyRebuildReason.FrameRefresh;
+
+            if (!CanRebuildRuntimeCubemap())
+                return;
+
+            EnsureRuntimeCubemap(skyTextureResolution);
+            using (new ProfilingScope(cmd, GetRuntimeCubemapRebuildSampler(runtimeCubemapRebuildReason)))
             {
-                RebuildRuntimeCubemap(
-                    volume,
-                    context,
-                    cmd,
-                    generatedCubemapViewSampleCount);
+                if (RebuildRuntimeCubemap(
+                        volume,
+                        context,
+                        cmd,
+                        generatedCubemapViewSampleCount))
+                {
+                    m_RuntimeSkyHash = skyHash;
+                    m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
+                    skyData.specularCubemap = m_RuntimeSkyCubemap;
+                }
             }
         }
 

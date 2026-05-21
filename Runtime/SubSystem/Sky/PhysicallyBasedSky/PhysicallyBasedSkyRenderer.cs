@@ -39,6 +39,7 @@ namespace VividRP.Runtime
         private static readonly ProfilingSampler s_RuntimeCubemapResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ResolutionChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapQualityChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (QualityChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapParametersChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ParametersChanged)");
+        private static readonly ProfilingSampler s_RuntimeCubemapFrameRefreshSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (FrameRefresh)");
         private static readonly ProfilingSampler s_AmbientProbeMissingTextureSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (MissingTexture)");
         private static readonly ProfilingSampler s_AmbientProbeResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ResolutionChanged)");
         private static readonly ProfilingSampler s_AmbientProbeParametersChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ParametersChanged)");
@@ -46,6 +47,7 @@ namespace VividRP.Runtime
 
         internal const float SunAngularDiameterDegrees = 0.53f;
         internal const float SunIlluminanceScale = 20.0f;
+        private const bool RefreshRuntimeCubemapEveryFrame = true;
         private const bool RefreshAmbientProbeCubemapEveryFrame = true;
         private const int GroundIrradianceTableSize = 256;
         private const int InScatteredRadianceTableSizeX = 128;
@@ -89,6 +91,7 @@ namespace VividRP.Runtime
         private bool m_HasRenderedSkyViewLut;
         private bool m_HasRenderMaterialParameters;
         private bool m_UseLocalSkyPrecomputationForRender;
+        private bool m_RuntimeSkyTextureBakeLogged;
         private readonly MaterialPropertyBlock m_RenderPropertyBlock = new();
         private readonly MaterialPropertyBlock m_SkyBakingPropertyBlock = new();
         private readonly PhysicallyBasedSkyAtmosphereLutCache m_AtmosphereLutCache = new();
@@ -149,6 +152,7 @@ namespace VividRP.Runtime
             m_AtmosphereLutCache.Update(context, cmd);
             ApplyAtmosphereLutHandle(skyData);
             UpdateLocalSkyPrecomputation(context, skyData, cmd);
+            RefreshCachedRuntimeCubemap(context, skyData, cmd);
             RefreshCachedAmbientProbeCubemap(context, skyData, cmd);
         }
 
@@ -174,22 +178,40 @@ namespace VividRP.Runtime
                 generatedCubemapViewSampleCount);
             if (forceRebuild && runtimeCubemapRebuildReason == SkyRebuildReason.None)
                 runtimeCubemapRebuildReason = SkyRebuildReason.ParametersChanged;
-            if (runtimeCubemapRebuildReason != SkyRebuildReason.None && CanRebuildRuntimeCubemap() && cmd != null)
+            var canRebuildRuntimeCubemap = CanRebuildRuntimeCubemap();
+            var hasCommandBuffer = cmd != null;
+            var runtimeCubemapBakeAttempted = false;
+            var runtimeCubemapBakeSucceeded = false;
+            if (runtimeCubemapRebuildReason != SkyRebuildReason.None
+                && canRebuildRuntimeCubemap
+                && hasCommandBuffer)
             {
+                runtimeCubemapBakeAttempted = true;
                 EnsureRuntimeCubemap(generatedCubemapResolution);
                 using (new ProfilingScope(cmd, GetRuntimeCubemapRebuildSampler(runtimeCubemapRebuildReason)))
                 {
-                    if (RebuildRuntimeCubemap(
-                            volume,
-                            context,
-                            cmd,
-                            generatedCubemapViewSampleCount))
+                    runtimeCubemapBakeSucceeded = RebuildRuntimeCubemap(
+                        volume,
+                        context,
+                        cmd,
+                        generatedCubemapViewSampleCount);
+                    if (runtimeCubemapBakeSucceeded)
                     {
                         m_RuntimeSkyHash = skyHash;
                         m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
                     }
                 }
             }
+            LogRuntimeSkyTextureBakeOnce(
+                runtimeCubemapRebuildReason,
+                runtimeCubemapBakeAttempted,
+                runtimeCubemapBakeSucceeded,
+                canRebuildRuntimeCubemap,
+                hasCommandBuffer,
+                generatedCubemapResolution,
+                generatedCubemapViewSampleCount,
+                skyHash,
+                forceRebuild);
 
             var hash = ComputeAmbientProbeHash(volume, context, skySettings, generatedCubemapViewSampleCount, intensityMultiplier);
 
@@ -378,6 +400,7 @@ namespace VividRP.Runtime
             m_HasRenderedSkyViewLut = false;
             m_HasRenderMaterialParameters = false;
             m_UseLocalSkyPrecomputationForRender = false;
+            m_RuntimeSkyTextureBakeLogged = false;
             m_AtmosphereLutCache.Dispose();
             m_CelestialBodyBuffer.Dispose();
         }
@@ -453,6 +476,46 @@ namespace VividRP.Runtime
             }
         }
 
+        private void RefreshCachedRuntimeCubemap(
+            in SkyRendererContext context,
+            VividSkyData skyData,
+            CommandBuffer cmd)
+        {
+            if (!RefreshRuntimeCubemapEveryFrame
+                || cmd == null
+                || skyData == null
+                || skyData.activeSkyType != SkyType.PhysicallyBased
+                || !ReferenceEquals(skyData.specularCubemap, m_RuntimeSkyCubemap))
+            {
+                return;
+            }
+
+            var volume = VividVolumeManagerUtility.GetPhysicallyBasedSkyVolume();
+            if (volume == null || !volume.IsActive())
+                return;
+
+            var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
+            var skyHash = GetSkyHash(context);
+            var generatedCubemapResolution = SkySettingsVolume.GetGeneratedCubemapResolution(skySettings);
+            var generatedCubemapViewSampleCount = SkySettingsVolume.GetGeneratedCubemapViewSampleCount(skySettings);
+            if (skyHash != skyData.skyHash
+                || m_RuntimeSkyHash != skyHash
+                || m_RuntimeSkyViewSampleCount != generatedCubemapViewSampleCount
+                || !IsCubemapValid(m_RuntimeSkyCubemap, generatedCubemapResolution))
+            {
+                return;
+            }
+
+            using (new ProfilingScope(cmd, s_RuntimeCubemapFrameRefreshSampler))
+            {
+                RebuildRuntimeCubemap(
+                    volume,
+                    context,
+                    cmd,
+                    generatedCubemapViewSampleCount);
+            }
+        }
+
         private bool HasMatchingLocalSkyPrecomputation(
             in PhysicallyBasedSkyShaderParameters skyParameters,
             in PhysicallyBasedSkyMaterialParameters materialParameters)
@@ -464,11 +527,15 @@ namespace VividRP.Runtime
 
         internal static Vector3 ResolveSunDirection(in SkyRendererContext context)
         {
-            if (context.lightData != null && context.lightData.hasMainDirectionalLight)
+            if (context.lightData != null
+                && context.lightData.hasMainDirectionalLight
+                && HasPositiveColor(context.lightData.mainDirectionalLight.color))
+            {
                 return context.lightData.mainDirectionalLight.directionWS.normalized;
+            }
 
-            if (RenderSettings.sun != null)
-                return (-RenderSettings.sun.transform.forward).normalized;
+            if (TryResolveFallbackSunLight(out var sunLight))
+                return (-sunLight.transform.forward).normalized;
 
             return Vector3.up;
         }
@@ -478,13 +545,71 @@ namespace VividRP.Runtime
             if (context.lightData != null && context.lightData.hasMainDirectionalLight)
             {
                 var color = context.lightData.mainDirectionalLight.color;
-                return new Color(color.x, color.y, color.z, 1.0f);
+                if (HasPositiveColor(color))
+                    return new Color(color.x, color.y, color.z, 1.0f);
             }
 
-            if (RenderSettings.sun)
-                return VividLightRenderDatabase.EvaluateLightColor(RenderSettings.sun);
+            if (TryResolveFallbackSunLight(out var sunLight))
+                return VividLightRenderDatabase.EvaluateLightColor(sunLight);
 
             return Color.white;
+        }
+
+        internal static bool TryResolveFallbackSunLight(out Light sunLight)
+        {
+            sunLight = null;
+
+            if (IsUsableSkyDirectionalLight(RenderSettings.sun))
+            {
+                sunLight = RenderSettings.sun;
+                return true;
+            }
+
+            var sceneLights = UnityEngine.Object.FindObjectsByType<Light>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.None);
+            var brightestIntensity = 0.0f;
+            for (var lightIndex = 0; lightIndex < sceneLights.Length; lightIndex++)
+            {
+                var candidate = sceneLights[lightIndex];
+                if (!IsUsableSkyDirectionalLight(candidate))
+                    continue;
+
+                var candidateColor = VividLightRenderDatabase.EvaluateLightColor(candidate);
+                var candidateIntensity = Mathf.Max(candidateColor.r, candidateColor.g, candidateColor.b);
+                if (candidateIntensity <= brightestIntensity)
+                    continue;
+
+                brightestIntensity = candidateIntensity;
+                sunLight = candidate;
+            }
+
+            return sunLight != null;
+        }
+
+        private static bool IsUsableSkyDirectionalLight(Light light)
+        {
+            if (!light
+                || !light.enabled
+                || !light.gameObject.activeInHierarchy
+                || light.type != LightType.Directional)
+            {
+                return false;
+            }
+
+            if (light.TryGetComponent(out VividAdditionalLightData additionalData)
+                && !additionalData.interactsWithSky)
+            {
+                return false;
+            }
+
+            var color = VividLightRenderDatabase.EvaluateLightColor(light);
+            return color.maxColorComponent > 0.0f;
+        }
+
+        private static bool HasPositiveColor(Vector3 color)
+        {
+            return Mathf.Max(color.x, color.y, color.z) > 0.0f;
         }
 
         internal static Vector3 ResolveCameraPosition(in SkyRendererContext context, float planetRadius)
@@ -507,6 +632,30 @@ namespace VividRP.Runtime
         private bool CanBakeSky()
         {
             return m_SkyMaterial != null && m_SkyBakingPass >= 0;
+        }
+
+        private void LogRuntimeSkyTextureBakeOnce(
+            SkyRebuildReason rebuildReason,
+            bool attempted,
+            bool succeeded,
+            bool canRebuild,
+            bool hasCommandBuffer,
+            int resolution,
+            int viewSampleCount,
+            int skyHash,
+            bool forceRebuild)
+        {
+            if (m_RuntimeSkyTextureBakeLogged)
+                return;
+
+            m_RuntimeSkyTextureBakeLogged = true;
+            Debug.Log(
+                $"[VividRP][SkyTextureBake] attempted={attempted}, succeeded={succeeded}, " +
+                $"reason={rebuildReason}, canRebuild={canRebuild}, hasCommandBuffer={hasCommandBuffer}, " +
+                $"resolution={resolution}, viewSampleCount={viewSampleCount}, skyHash={skyHash}, forceRebuild={forceRebuild}, " +
+                $"material={(m_SkyMaterial != null)}, pass={m_SkyBakingPass}, " +
+                $"runtimeCubemapCreated={(m_RuntimeSkyCubemap != null && m_RuntimeSkyCubemap.IsCreated())}, " +
+                $"runtimeSkyHash={m_RuntimeSkyHash}, runtimeViewSampleCount={m_RuntimeSkyViewSampleCount}");
         }
 
         private SkyRebuildReason ResolveRuntimeCubemapRebuildReason(
@@ -1070,6 +1219,7 @@ namespace VividRP.Runtime
                 SkyRebuildReason.ResolutionChanged => s_RuntimeCubemapResolutionChangedSampler,
                 SkyRebuildReason.QualityChanged => s_RuntimeCubemapQualityChangedSampler,
                 SkyRebuildReason.ParametersChanged => s_RuntimeCubemapParametersChangedSampler,
+                SkyRebuildReason.FrameRefresh => s_RuntimeCubemapFrameRefreshSampler,
                 _ => s_RuntimeCubemapMissingTextureSampler,
             };
         }

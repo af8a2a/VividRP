@@ -366,6 +366,7 @@ namespace VividRP.Runtime
                 && context.lightData.hasDirectionalLights
                 && context.lightData.directionalLights != null)
             {
+                var initialCelestialLightCount = celestialLightCount;
                 var directionalLightCount = Mathf.Min(
                     context.lightData.directionalLightCount,
                     Mathf.Min(context.lightData.directionalLights.Length, MaxCelestialBodies));
@@ -387,19 +388,20 @@ namespace VividRP.Runtime
                     celestialBodyCount++;
                 }
 
-                return celestialLightHash;
+                if (celestialLightCount > initialCelestialLightCount)
+                    return celestialLightHash;
             }
 
-            if (!RenderSettings.sun)
+            if (!PhysicallyBasedSkyRenderer.TryResolveFallbackSunLight(out var sunLight))
                 return DefaultHash;
 
-            var sunColor = PhysicallyBasedSkyRenderer.ResolveSunColor(context);
+            var sunColor = VividLightRenderDatabase.EvaluateLightColor(sunLight);
             var sunColorVector = new Vector3(sunColor.r, sunColor.g, sunColor.b);
             if (GetMaxColorChannel(sunColorVector) <= 0.0f)
                 return DefaultHash;
 
             var fallbackCelestialBody = CreateApproximateCelestialBody(
-                PhysicallyBasedSkyRenderer.ResolveSunDirection(context),
+                (-sunLight.transform.forward).normalized,
                 sunColorVector);
 
             if (celestialBodies != null)

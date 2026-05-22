@@ -620,7 +620,7 @@ namespace VividRP.Runtime
         internal const float DefaultRayTracedShadowRayLength = 1000f;
         internal const float DefaultRayTracedShadowRayBias = 0.001f;
         internal const float DefaultRayTracedShadowDistantRayBias = 0.001f;
-        internal const float DefaultRayTracedShadowSunAngularDiameter = 0.533f;
+        private const float LegacyRayTracedShadowSunAngularDiameterDefault = 0.533f;
         internal const int DefaultShadowAtlasResolution = 4096;
         internal const CSMScreenSpaceShadowQuality DefaultScreenSpaceShadowQuality = CSMScreenSpaceShadowQuality.Low;
         internal const float DefaultShadowDepthBias = 1.0f;
@@ -648,6 +648,7 @@ namespace VividRP.Runtime
         internal const float DefaultVolumetricFadeDistance = 10000.0f;
         internal const float DefaultVolumetricShadowDimmer = 1.0f;
         internal const float DefaultCelestialBodyAngularDiameter = 0.5f;
+        internal const float DefaultRayTracedShadowSunAngularDiameter = DefaultCelestialBodyAngularDiameter;
         internal const float DefaultCelestialBodyDistance = 149597870700.0f;
         internal const float DefaultManualSunIntensity = 130000.0f;
         internal const float DefaultTimeOfDay = 12.0f;
@@ -679,8 +680,11 @@ namespace VividRP.Runtime
         [SerializeField]
         private float m_RayTracedShadowDistantRayBias = DefaultRayTracedShadowDistantRayBias;
 
-        [SerializeField]
+        [SerializeField, HideInInspector]
         private float m_RayTracedShadowSunAngularDiameter = DefaultRayTracedShadowSunAngularDiameter;
+
+        [SerializeField, HideInInspector]
+        private bool m_MigratedRayTracedShadowSunAngularDiameter;
 
         [SerializeField]
         private CSMScreenSpaceShadowQuality m_ScreenSpaceShadowQuality = DefaultScreenSpaceShadowQuality;
@@ -754,14 +758,17 @@ namespace VividRP.Runtime
         [SerializeField, Range(0.0f, 90.0f)]
         private float m_AngularDiameter = DefaultCelestialBodyAngularDiameter;
 
-        [SerializeField]
+        [SerializeField, HideInInspector]
         private bool m_DiameterMultiplierMode;
 
-        [SerializeField, Min(0.0f)]
+        [SerializeField, HideInInspector, Min(0.0f)]
         private float m_DiameterMultiplier = 1.0f;
 
-        [SerializeField, Min(0.0f)]
+        [SerializeField, HideInInspector, Min(0.0f)]
         private float m_DiameterOverride = DefaultCelestialBodyAngularDiameter;
+
+        [SerializeField, HideInInspector]
+        private bool m_MigratedCelestialBodyAngularDiameter;
 
         [SerializeField]
         private CelestialBodyShadingSource m_CelestialBodyShadingSource = CelestialBodyShadingSource.Emission;
@@ -911,13 +918,11 @@ namespace VividRP.Runtime
                 DefaultRayTracedShadowDistantRayBias);
         }
 
+        [Obsolete("Use angularDiameter instead.")]
         public float rayTracedShadowSunAngularDiameter
         {
-            get => m_RayTracedShadowSunAngularDiameter;
-            set => SetRayTracedShadowFloat(
-                ref m_RayTracedShadowSunAngularDiameter,
-                value,
-                DefaultRayTracedShadowSunAngularDiameter);
+            get => angularDiameter;
+            set => angularDiameter = value;
         }
 
         public CSMScreenSpaceShadowQuality screenSpaceShadowQuality
@@ -1174,32 +1179,28 @@ namespace VividRP.Runtime
         public float angularDiameter
         {
             get => m_AngularDiameter;
-            set => SetClampedFloat(ref m_AngularDiameter, value, 0.0f, 90.0f, DefaultCelestialBodyAngularDiameter);
+            set => SetAngularDiameter(value);
         }
 
+        [Obsolete("Use angularDiameter instead.")]
         public bool diameterMultiplierMode
         {
-            get => m_DiameterMultiplierMode;
-            set
-            {
-                if (m_DiameterMultiplierMode == value)
-                    return;
-
-                m_DiameterMultiplierMode = value;
-                NotifyLightDataChanged();
-            }
+            get => false;
+            set { }
         }
 
+        [Obsolete("Use angularDiameter instead.")]
         public float diameterMultiplier
         {
-            get => m_DiameterMultiplier;
-            set => SetNonNegativeFloat(ref m_DiameterMultiplier, value, 1.0f);
+            get => 1.0f;
+            set { }
         }
 
+        [Obsolete("Use angularDiameter instead.")]
         public float diameterOverride
         {
-            get => m_DiameterOverride;
-            set => SetNonNegativeFloat(ref m_DiameterOverride, value, DefaultCelestialBodyAngularDiameter);
+            get => angularDiameter;
+            set => angularDiameter = value;
         }
 
         public CelestialBodyShadingSource celestialBodyShadingSource
@@ -1328,9 +1329,7 @@ namespace VividRP.Runtime
             set => SetNonNegativeFloat(ref m_Distance, value, DefaultCelestialBodyDistance);
         }
 
-        internal float resolvedAngularDiameter => m_DiameterMultiplierMode
-            ? m_DiameterMultiplier * m_AngularDiameter
-            : m_DiameterOverride;
+        internal float resolvedAngularDiameter => m_AngularDiameter;
 
         internal bool supportsRayTracedShadow => light != null && light.type == LightType.Directional;
 
@@ -1405,6 +1404,7 @@ namespace VividRP.Runtime
         private void OnValidate()
         {
             m_Light = light;
+            MigrateLegacyAngularDiameterSettings();
             ConstrainRayTracedShadowSettings();
             ConstrainShadowBiasSettings();
             ConstrainAreaLightSettings();
@@ -1512,6 +1512,22 @@ namespace VividRP.Runtime
             NotifyLightDataChanged();
         }
 
+        private void SetAngularDiameter(float value)
+        {
+            var sanitizedValue = SanitizeClampedFloat(value, 0.0f, 90.0f, DefaultCelestialBodyAngularDiameter);
+            if (Mathf.Approximately(m_AngularDiameter, sanitizedValue))
+            {
+                m_RayTracedShadowSunAngularDiameter = sanitizedValue;
+                m_DiameterOverride = sanitizedValue;
+                return;
+            }
+
+            m_AngularDiameter = sanitizedValue;
+            m_RayTracedShadowSunAngularDiameter = sanitizedValue;
+            m_DiameterOverride = sanitizedValue;
+            NotifyLightDataChanged();
+        }
+
         private void SetNonNegativeFloat(ref float field, float value, float defaultValue)
         {
             var sanitizedValue = SanitizeNonNegativeFloat(value, defaultValue);
@@ -1563,9 +1579,6 @@ namespace VividRP.Runtime
             m_RayTracedShadowDistantRayBias = SanitizeRayTracedShadowFloat(
                 m_RayTracedShadowDistantRayBias,
                 DefaultRayTracedShadowDistantRayBias);
-            m_RayTracedShadowSunAngularDiameter = SanitizeRayTracedShadowFloat(
-                m_RayTracedShadowSunAngularDiameter,
-                DefaultRayTracedShadowSunAngularDiameter);
         }
 
         private void ConstrainShadowBiasSettings()
@@ -1675,8 +1688,10 @@ namespace VividRP.Runtime
         private void ConstrainCelestialBodySettings()
         {
             m_AngularDiameter = SanitizeClampedFloat(m_AngularDiameter, 0.0f, 90.0f, DefaultCelestialBodyAngularDiameter);
-            m_DiameterMultiplier = SanitizeNonNegativeFloat(m_DiameterMultiplier, 1.0f);
-            m_DiameterOverride = SanitizeNonNegativeFloat(m_DiameterOverride, DefaultCelestialBodyAngularDiameter);
+            m_RayTracedShadowSunAngularDiameter = m_AngularDiameter;
+            m_DiameterMultiplierMode = false;
+            m_DiameterMultiplier = 1.0f;
+            m_DiameterOverride = m_AngularDiameter;
             m_SunIntensity = SanitizeNonNegativeFloat(m_SunIntensity, DefaultManualSunIntensity);
             m_MoonPhase = SanitizeClampedFloat(m_MoonPhase, 0.0f, 1.0f, 0.2f);
             m_MoonPhaseRotation = SanitizeWrappedAngle(m_MoonPhaseRotation);
@@ -1685,6 +1700,45 @@ namespace VividRP.Runtime
             m_FlareFalloff = SanitizeNonNegativeFloat(m_FlareFalloff, 4.0f);
             m_FlareMultiplier = SanitizeClampedFloat(m_FlareMultiplier, 0.0f, 1.0f, 1.0f);
             m_Distance = SanitizeNonNegativeFloat(m_Distance, DefaultCelestialBodyDistance);
+        }
+
+        private void MigrateLegacyAngularDiameterSettings()
+        {
+            MigrateLegacyCelestialBodyAngularDiameter();
+            MigrateLegacyRayTracedShadowSunAngularDiameter();
+        }
+
+        private void MigrateLegacyCelestialBodyAngularDiameter()
+        {
+            if (m_MigratedCelestialBodyAngularDiameter)
+                return;
+
+            var legacyAngularDiameter = m_DiameterMultiplierMode
+                ? SanitizeNonNegativeFloat(m_DiameterMultiplier, 1.0f) * m_AngularDiameter
+                : m_DiameterOverride;
+            if (Mathf.Approximately(m_AngularDiameter, DefaultCelestialBodyAngularDiameter)
+                && !Mathf.Approximately(legacyAngularDiameter, DefaultCelestialBodyAngularDiameter))
+            {
+                m_AngularDiameter = legacyAngularDiameter;
+            }
+
+            m_MigratedCelestialBodyAngularDiameter = true;
+        }
+
+        private void MigrateLegacyRayTracedShadowSunAngularDiameter()
+        {
+            if (m_MigratedRayTracedShadowSunAngularDiameter)
+                return;
+
+            if (Mathf.Approximately(m_AngularDiameter, DefaultCelestialBodyAngularDiameter)
+                && !Mathf.Approximately(
+                    m_RayTracedShadowSunAngularDiameter,
+                    LegacyRayTracedShadowSunAngularDiameterDefault))
+            {
+                m_AngularDiameter = m_RayTracedShadowSunAngularDiameter;
+            }
+
+            m_MigratedRayTracedShadowSunAngularDiameter = true;
         }
 
         internal static TimeOfDaySunState EvaluateTimeOfDaySun(float timeOfDay, float maximumLux)

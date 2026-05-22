@@ -6,6 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -138,7 +139,6 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.rayTracedShadowRayLength, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowRayBias, Is.Not.Null);
             Assert.That(serializedLight.rayTracedShadowDistantRayBias, Is.Not.Null);
-            Assert.That(serializedLight.rayTracedShadowSunAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.screenSpaceShadowQuality, Is.Not.Null);
             Assert.That(serializedLight.shadowAtlasResolution, Is.Not.Null);
             Assert.That(serializedLight.depthBias, Is.Not.Null);
@@ -162,9 +162,6 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.enableTimeOfDay, Is.Not.Null);
             Assert.That(serializedLight.timeOfDay, Is.Not.Null);
             Assert.That(serializedLight.angularDiameter, Is.Not.Null);
-            Assert.That(serializedLight.diameterMultiplierMode, Is.Not.Null);
-            Assert.That(serializedLight.diameterMultiplier, Is.Not.Null);
-            Assert.That(serializedLight.diameterOverride, Is.Not.Null);
             Assert.That(serializedLight.celestialBodyShadingSource, Is.Not.Null);
             Assert.That(serializedLight.sunLightOverride, Is.Not.Null);
             Assert.That(serializedLight.sunColor, Is.Not.Null);
@@ -314,8 +311,8 @@ namespace VividRP.Editor.Tests
                 additionalData.rayTracedShadowDistantRayBias,
                 Is.EqualTo(VividAdditionalLightData.DefaultRayTracedShadowDistantRayBias));
             Assert.That(
-                additionalData.rayTracedShadowSunAngularDiameter,
-                Is.EqualTo(VividAdditionalLightData.DefaultRayTracedShadowSunAngularDiameter));
+                VividAdditionalLightData.DefaultRayTracedShadowSunAngularDiameter,
+                Is.EqualTo(VividAdditionalLightData.DefaultCelestialBodyAngularDiameter));
             Assert.That(additionalData.supportsRayTracedShadow, Is.True);
             Assert.That(additionalData.isRayTracedShadowActive, Is.False);
         }
@@ -331,15 +328,131 @@ namespace VividRP.Editor.Tests
             additionalData.rayTracedShadowRayLength = 24.0f;
             additionalData.rayTracedShadowRayBias = 0.02f;
             additionalData.rayTracedShadowDistantRayBias = 0.08f;
-            additionalData.rayTracedShadowSunAngularDiameter = 1.2f;
+            additionalData.angularDiameter = 1.2f;
 
             Assert.That(additionalData.enableRayTracedShadow, Is.True);
             Assert.That(additionalData.rayTracedShadowRayLength, Is.EqualTo(24.0f));
             Assert.That(additionalData.rayTracedShadowRayBias, Is.EqualTo(0.02f));
             Assert.That(additionalData.rayTracedShadowDistantRayBias, Is.EqualTo(0.08f));
-            Assert.That(additionalData.rayTracedShadowSunAngularDiameter, Is.EqualTo(1.2f));
+            Assert.That(additionalData.angularDiameter, Is.EqualTo(1.2f));
             Assert.That(additionalData.supportsRayTracedShadow, Is.False);
             Assert.That(additionalData.isRayTracedShadowActive, Is.False);
+        }
+
+        [Test]
+        public void RayTracedShadowSunAngularDiameter_AliasesSharedAngularDiameter()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+#pragma warning disable CS0618
+            additionalData.rayTracedShadowSunAngularDiameter = 1.2f;
+            Assert.That(additionalData.angularDiameter, Is.EqualTo(1.2f));
+
+            additionalData.angularDiameter = 2.4f;
+            Assert.That(additionalData.rayTracedShadowSunAngularDiameter, Is.EqualTo(2.4f));
+#pragma warning restore CS0618
+        }
+
+        [Test]
+        public void LegacyCelestialBodyDiameterOverride_AliasesSharedAngularDiameter()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+#pragma warning disable CS0618
+            additionalData.diameterOverride = 3.0f;
+            Assert.That(additionalData.angularDiameter, Is.EqualTo(3.0f));
+
+            additionalData.angularDiameter = 4.0f;
+            Assert.That(additionalData.diameterOverride, Is.EqualTo(4.0f));
+#pragma warning restore CS0618
+        }
+
+        [Test]
+        public void DirectionalRayTracedShadowRequest_UsesSharedAngularDiameter()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            light.shadows = LightShadows.Hard;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.enableRayTracedShadow = true;
+            additionalData.angularDiameter = 1.7f;
+
+            var lightData = new VividLightData
+            {
+                directionalLights = new[]
+                {
+                    new VividLightData.DirectionalLightData
+                    {
+                        directionWS = Vector3.down
+                    }
+                },
+                directionalLightCount = 1,
+                mainDirectionalLightIndex = 0,
+                mainDirectionalLightEntityId = light.GetEntityId()
+            };
+
+            var request = DirectionalRayTracedShadowPass.ResolveShadowRequest(lightData, true, true);
+
+            Assert.That(request.ShouldTrace, Is.True);
+            Assert.That(request.SunAngularDiameter, Is.EqualTo(1.7f));
+        }
+
+        [Test]
+        public void OnValidate_MigratesLegacyRayTracedShadowSunAngularDiameter_ToSharedAngularDiameter()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            var legacyAngularDiameterField = typeof(VividAdditionalLightData).GetField(
+                "m_RayTracedShadowSunAngularDiameter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var migratedField = typeof(VividAdditionalLightData).GetField(
+                "m_MigratedRayTracedShadowSunAngularDiameter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(legacyAngularDiameterField, Is.Not.Null);
+            Assert.That(migratedField, Is.Not.Null);
+            additionalData.angularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
+            legacyAngularDiameterField.SetValue(additionalData, 1.2f);
+            migratedField.SetValue(additionalData, false);
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(additionalData.angularDiameter, Is.EqualTo(1.2f));
+        }
+
+        [Test]
+        public void OnValidate_MigratesLegacyCelestialBodyDiameterOverride_ToSharedAngularDiameter()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            var legacyOverrideField = typeof(VividAdditionalLightData).GetField(
+                "m_DiameterOverride",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var migratedField = typeof(VividAdditionalLightData).GetField(
+                "m_MigratedCelestialBodyAngularDiameter",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(legacyOverrideField, Is.Not.Null);
+            Assert.That(migratedField, Is.Not.Null);
+            additionalData.angularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
+            legacyOverrideField.SetValue(additionalData, 1.4f);
+            migratedField.SetValue(additionalData, false);
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(additionalData.angularDiameter, Is.EqualTo(1.4f));
+            Assert.That(additionalData.resolvedAngularDiameter, Is.EqualTo(1.4f));
         }
 
         [Test]
@@ -446,10 +559,8 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 additionalData.angularDiameter,
                 Is.EqualTo(VividAdditionalLightData.DefaultCelestialBodyAngularDiameter));
-            Assert.That(additionalData.diameterMultiplierMode, Is.False);
-            Assert.That(additionalData.diameterMultiplier, Is.EqualTo(1.0f));
             Assert.That(
-                additionalData.diameterOverride,
+                additionalData.resolvedAngularDiameter,
                 Is.EqualTo(VividAdditionalLightData.DefaultCelestialBodyAngularDiameter));
             Assert.That(
                 additionalData.celestialBodyShadingSource,
@@ -839,20 +950,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividLightEditor_UsesHdrpStyleCelestialBodyPanel()
+        public void VividLightEditor_UsesSharedAngularDiameterCelestialBodyPanel()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLightEditor.cs"));
 
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Celestial Body\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Affect Physically Based Sky\""));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Angular Diameter Multiplier\""));
+            Assert.That(source, Does.Not.Contain("Angular Diameter Multiplier"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Shading\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Phase\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Phase Rotation\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Surface Color\""));
-            Assert.That(source, Does.Contain("private static readonly string[] s_DiameterModeNames = { \"Multiply\", \"Override\" };"));
+            Assert.That(source, Does.Not.Contain("s_DiameterModeNames"));
             Assert.That(source, Does.Contain("EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);"));
-            Assert.That(source, Does.Contain("DrawCelestialBodyAngularDiameterField();"));
+            Assert.That(source, Does.Not.Contain("DrawCelestialBodyAngularDiameterField"));
             Assert.That(source, Does.Contain("DrawCelestialBodySurfaceColorField();"));
             Assert.That(source, Does.Contain("The Celestial Body cannot receive lighting from itself."));
             Assert.That(source, Does.Contain("The Sun Light needs to be a directional light."));

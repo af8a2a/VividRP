@@ -510,7 +510,7 @@ namespace VividRP.Runtime
             var up = Normalize(transform.up, Vector3.up);
 
             var angularDiameter = additionalData != null
-                ? additionalData.resolvedAngularDiameter
+                ? additionalData.angularDiameter
                 : VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             var angularRadius = Mathf.Max(angularDiameter, 0.0f) * 0.5f * Mathf.Deg2Rad;
             var distanceFromCamera = additionalData != null

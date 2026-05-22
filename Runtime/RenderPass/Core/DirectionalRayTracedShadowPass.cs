@@ -341,7 +341,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 additionalLightData.usePipelineSettings,
                 additionalLightData.rayTracedShadowRayBias,
                 additionalLightData.rayTracedShadowDistantRayBias,
-                additionalLightData.rayTracedShadowSunAngularDiameter);
+                additionalLightData.angularDiameter);
         }
 
         internal static bool TryResolveMainDirectionalLight(

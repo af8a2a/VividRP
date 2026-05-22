@@ -24,7 +24,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("CoreUtils.DivRoundUp(width, ThreadGroupSizeX);"));
             Assert.That(source, Does.Contain("TryResolveMainDirectionalLight(lightData, out _, out var additionalLightData)"));
             Assert.That(source, Does.Contain("m_ShadowQuality = (int)additionalLightData.screenSpaceShadowQuality;"));
-            Assert.That(source, Does.Contain("m_LightAngularDiameter = Mathf.Max(additionalLightData.resolvedAngularDiameter, 0.0f);"));
+            Assert.That(source, Does.Contain("m_LightAngularDiameter = Mathf.Max(additionalLightData.angularDiameter, 0.0f);"));
             Assert.That(source, Does.Contain("m_PCSSBlockerSampleCount = additionalLightData.dirLightPCSSBlockerSampleCount;"));
             Assert.That(source, Does.Contain("m_PCSSFilterSampleCount = additionalLightData.dirLightPCSSFilterSampleCount;"));
             Assert.That(source, Does.Contain("m_PCSSMaxPenumbraSize = additionalLightData.dirLightPCSSMaxPenumbraSize;"));

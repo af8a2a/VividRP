@@ -238,7 +238,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     && additionalLightData != null)
                 {
                     m_ShadowQuality = (int)additionalLightData.screenSpaceShadowQuality;
-                    m_LightAngularDiameter = Mathf.Max(additionalLightData.resolvedAngularDiameter, 0.0f);
+                    m_LightAngularDiameter = Mathf.Max(additionalLightData.angularDiameter, 0.0f);
                     m_PCSSBlockerSampleCount = additionalLightData.dirLightPCSSBlockerSampleCount;
                     m_PCSSFilterSampleCount = additionalLightData.dirLightPCSSFilterSampleCount;
                     m_PCSSMaxPenumbraSize = additionalLightData.dirLightPCSSMaxPenumbraSize;

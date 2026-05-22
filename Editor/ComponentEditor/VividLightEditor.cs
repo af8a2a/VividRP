@@ -79,7 +79,6 @@ namespace VividRP.Editor
         private static readonly GUIContent s_RayTracedShadowRayLengthLabel = EditorGUIUtility.TrTextContent("Ray Length");
         private static readonly GUIContent s_RayTracedShadowRayBiasLabel = EditorGUIUtility.TrTextContent("Ray Bias");
         private static readonly GUIContent s_RayTracedShadowDistantRayBiasLabel = EditorGUIUtility.TrTextContent("Distant Ray Bias");
-        private static readonly GUIContent s_RayTracedShadowSunAngularDiameterLabel = EditorGUIUtility.TrTextContent("Sun Angular Diameter (Unused in MVP)");
         private static readonly GUIContent s_BarnDoorLabel = EditorGUIUtility.TrTextContent("Barn Door");
         private static readonly GUIContent s_BarnDoorAngleLabel = EditorGUIUtility.TrTextContent("Angle", "Angle in degrees of the rectangular area light barn doors.");
         private static readonly GUIContent s_BarnDoorLengthLabel = EditorGUIUtility.TrTextContent("Length", "Length of the rectangular area light barn door blades.");
@@ -94,8 +93,6 @@ namespace VividRP.Editor
         private static readonly GUIContent s_CelestialBodyLabel = EditorGUIUtility.TrTextContent("Celestial Body");
         private static readonly GUIContent s_InteractsWithSkyLabel = EditorGUIUtility.TrTextContent("Affect Physically Based Sky", "Check this option to make the light and the Physically Based sky affect one another.");
         private static readonly GUIContent s_AngularDiameterLabel = EditorGUIUtility.TrTextContent("Angular Diameter", "Angular diameter of the emissive celestial body represented by the light as seen from the camera (in degrees). Used to render the sun/moon disk and affects the sharpness of shadows.");
-        private static readonly GUIContent s_DiameterMultiplierLabel = EditorGUIUtility.TrTextContent("Angular Diameter Multiplier", "Angular diameter used to render the celestial body in the sky without affecting the sharpness of shadows. This value is multiplied by the Angular Diameter set in the Shape section.");
-        private static readonly GUIContent s_DiameterOverrideLabel = EditorGUIUtility.TrTextContent("Angular Diameter", "Angular diameter used to render the celestial body in the sky without affecting the sharpness of shadows.");
         private static readonly GUIContent s_ShadingSourceLabel = EditorGUIUtility.TrTextContent("Shading", "Specify the light source used for shading of the Celestial Body.\nIt can either emit it's own light, receive it from a Light in the scene, or using manual settings.");
         private static readonly GUIContent s_SunLightOverrideLabel = EditorGUIUtility.TrTextContent("Sun Light Override", "Specifiy the Directional Light that should illuminate this Celestial Body.\nIf not specified, VividRP will use the directional light in the scene with the highest intensity.");
         private static readonly GUIContent s_SunColorLabel = EditorGUIUtility.TrTextContent("Sun Color", "Color of the light source.");
@@ -110,7 +107,6 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SurfaceColorLabel = EditorGUIUtility.TrTextContent("Surface Color", "Texture of the surface of the celestial body.");
         private static readonly GUIContent s_SurfaceTintLabel = EditorGUIUtility.TrTextContent("Tint");
         private static readonly GUIContent s_DistanceLabel = EditorGUIUtility.TrTextContent("Distance", "Distance from the camera (in meters) to the emissive celestial body represented by the light. This value is only used for sorting.");
-        private static readonly string[] s_DiameterModeNames = { "Multiply", "Override" };
         private static readonly GUIContent[] s_ScreenSpaceShadowQualityOptionLabels =
         {
             EditorGUIUtility.TrTextContent("Low (PCF 3x3)"),
@@ -141,8 +137,6 @@ namespace VividRP.Editor
             4096,
             8192
         };
-
-        private const int DiameterModePopupWidth = 70;
 
         private VividSerializedLight m_SerializedLight;
         private bool m_ShouldApplyTimeOfDay;
@@ -537,7 +531,6 @@ namespace VividRP.Editor
                            !m_SerializedLight.interactsWithSky.hasMultipleDifferentValues
                            && !m_SerializedLight.interactsWithSky.boolValue))
                 {
-                    DrawCelestialBodyAngularDiameterField();
                     EditorGUILayout.PropertyField(m_SerializedLight.distance, s_DistanceLabel);
                     DrawCelestialBodySurfaceColorField();
                     EditorGUILayout.PropertyField(m_SerializedLight.celestialBodyShadingSource, s_ShadingSourceLabel);
@@ -548,37 +541,6 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedLight.flareMultiplier, s_FlareMultiplierLabel);
                 }
             }
-        }
-
-        private void DrawCelestialBodyAngularDiameterField()
-        {
-            var rect = EditorGUILayout.GetControlRect();
-            rect.xMax -= DiameterModePopupWidth + 2;
-
-            var popupRect = rect;
-            popupRect.x = rect.xMax + 2 - EditorGUI.indentLevel * 15;
-            popupRect.width = DiameterModePopupWidth + EditorGUI.indentLevel * 15;
-
-            var mode = m_SerializedLight.diameterMultiplierMode.boolValue ? 0 : 1;
-            EditorGUI.showMixedValue = m_SerializedLight.diameterMultiplierMode.hasMultipleDifferentValues;
-            EditorGUI.BeginChangeCheck();
-            mode = EditorGUI.Popup(popupRect, mode, s_DiameterModeNames);
-            if (EditorGUI.EndChangeCheck())
-                m_SerializedLight.diameterMultiplierMode.boolValue = mode == 0;
-
-            EditorGUI.showMixedValue = false;
-            EditorGUI.BeginProperty(rect, GUIContent.none, m_SerializedLight.diameterMultiplierMode);
-            if (m_SerializedLight.diameterMultiplierMode.hasMultipleDifferentValues
-                || m_SerializedLight.diameterMultiplierMode.boolValue)
-            {
-                EditorGUI.PropertyField(rect, m_SerializedLight.diameterMultiplier, s_DiameterMultiplierLabel);
-            }
-            else
-            {
-                EditorGUI.PropertyField(rect, m_SerializedLight.diameterOverride, s_DiameterOverrideLabel);
-            }
-
-            EditorGUI.EndProperty();
         }
 
         private void DrawCelestialBodyShadingFields()
@@ -707,12 +669,6 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayLength, s_RayTracedShadowRayLengthLabel);
                 EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowRayBias, s_RayTracedShadowRayBiasLabel);
                 EditorGUILayout.PropertyField(m_SerializedLight.rayTracedShadowDistantRayBias, s_RayTracedShadowDistantRayBiasLabel);
-                EditorGUILayout.PropertyField(
-                    m_SerializedLight.rayTracedShadowSunAngularDiameter,
-                    s_RayTracedShadowSunAngularDiameterLabel);
-                EditorGUILayout.HelpBox(
-                    "Current hard-shadow MVP stores Sun Angular Diameter for a future soft-shadow path and does not sample it yet.",
-                    MessageType.Info);
             }
         }
 

@@ -18,7 +18,6 @@ namespace VividRP.Editor
         internal SerializedProperty rayTracedShadowRayLength { get; }
         internal SerializedProperty rayTracedShadowRayBias { get; }
         internal SerializedProperty rayTracedShadowDistantRayBias { get; }
-        internal SerializedProperty rayTracedShadowSunAngularDiameter { get; }
         internal SerializedProperty screenSpaceShadowQuality { get; }
         internal SerializedProperty shadowAtlasResolution { get; }
         internal SerializedProperty depthBias { get; }
@@ -42,9 +41,6 @@ namespace VividRP.Editor
         internal SerializedProperty enableTimeOfDay { get; }
         internal SerializedProperty timeOfDay { get; }
         internal SerializedProperty angularDiameter { get; }
-        internal SerializedProperty diameterMultiplierMode { get; }
-        internal SerializedProperty diameterMultiplier { get; }
-        internal SerializedProperty diameterOverride { get; }
         internal SerializedProperty celestialBodyShadingSource { get; }
         internal SerializedProperty sunLightOverride { get; }
         internal SerializedProperty sunColor { get; }
@@ -90,7 +86,6 @@ namespace VividRP.Editor
             rayTracedShadowRayLength = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayLength");
             rayTracedShadowRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowRayBias");
             rayTracedShadowDistantRayBias = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowDistantRayBias");
-            rayTracedShadowSunAngularDiameter = serializedAdditionalDataObject.FindProperty("m_RayTracedShadowSunAngularDiameter");
             screenSpaceShadowQuality = serializedAdditionalDataObject.FindProperty("m_ScreenSpaceShadowQuality");
             shadowAtlasResolution = serializedAdditionalDataObject.FindProperty("m_ShadowAtlasResolution");
             depthBias = serializedAdditionalDataObject.FindProperty("m_DepthBias");
@@ -114,9 +109,6 @@ namespace VividRP.Editor
             enableTimeOfDay = serializedAdditionalDataObject.FindProperty("m_EnableTimeOfDay");
             timeOfDay = serializedAdditionalDataObject.FindProperty("m_TimeOfDay");
             angularDiameter = serializedAdditionalDataObject.FindProperty("m_AngularDiameter");
-            diameterMultiplierMode = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplierMode");
-            diameterMultiplier = serializedAdditionalDataObject.FindProperty("m_DiameterMultiplier");
-            diameterOverride = serializedAdditionalDataObject.FindProperty("m_DiameterOverride");
             celestialBodyShadingSource = serializedAdditionalDataObject.FindProperty("m_CelestialBodyShadingSource");
             sunLightOverride = serializedAdditionalDataObject.FindProperty("m_SunLightOverride");
             sunColor = serializedAdditionalDataObject.FindProperty("m_SunColor");

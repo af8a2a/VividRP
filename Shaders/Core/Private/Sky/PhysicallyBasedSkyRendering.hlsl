@@ -4,6 +4,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
 #include "CelestialBodyData.hlsl"
 #include "PhysicallyBasedSkyCommon.hlsl"
 #include "SkyUtils.hlsl"
@@ -210,6 +211,29 @@ void EvaluatePbrAtmosphere(float3 positionPS, float3 V, float distAlongRay, bool
         CelestialBodyData light = _CelestialBodyDatas[i];
         float3 L = -light.forward.xyz;
 
+        // The sun disk hack causes some issues when applied to nearby geometry, so don't do that.
+        if (renderSunDisk && asint(light.angularRadius) != 0 && light.distanceFromCamera <= tFrag)
+        {
+            float c = dot(L, -V);
+
+            if (-0.99999 < c && c < 0.99999)
+            {
+                float alpha = light.angularRadius;
+                float beta  = acos(c);
+                float gamma = min(alpha, beta);
+
+                // Make sure that if (beta = Pi), no rotation is performed.
+                gamma *= (PI - beta) * rcp(PI - gamma);
+
+                // Perform a shortest arc rotation.
+                float3   A = normalize(cross(L, -V));
+                float3x3 R = RotationFromAxisAngle(A, sin(gamma), cos(gamma));
+
+                // Rotate the light direction.
+                L = mul(R, L);
+            }
+        }
+        // TODO: solve in spherical coords?
         float height = r - R;
         float NdotL = dot(N, L);
         float3 projL = L - N * NdotL;
@@ -217,49 +241,63 @@ void EvaluatePbrAtmosphere(float3 positionPS, float3 V, float distAlongRay, bool
         float phiL = acos(clamp(dot(projL, projV) * rsqrt(max(dot(projL, projL) * dot(projV, projV), FLT_EPS)), -1.0f, 1.0f));
 
         TexCoord4D texCoord = ConvertPositionAndOrientationToTexCoords(height, NdotV, NdotL, phiL);
-        float LdotV = dot(L, V);
         float3 radiance = 0.0f;
 
-        radiance += lerp(
-            SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
-            SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
-            texCoord.a) * AirPhase(LdotV);
+        // Single scattering does not contain the phase function.
+        float LdotV = dot(L, V);
 
-        radiance += lerp(
-            SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
-            SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
-            texCoord.a) * AerosolPhase(LdotV);
+        // Air.
+        radiance += lerp(SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture,     s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+                         SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture,     s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+                         texCoord.a) * AirPhase(LdotV);
 
-        radiance += lerp(
-            SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
-            SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
-            texCoord.a) * MS_EXPOSURE_INV;
+        // Aerosols.
+        // TODO: since aerosols are in a separate texture,
+        // they could use a different max height value for improved precision.
+        radiance += lerp(SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+                         SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+                         texCoord.a) * AerosolPhase(LdotV);
+
+        // MS.
+        radiance += lerp(SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture,      s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+                         SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture,      s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+                         texCoord.a) * MS_EXPOSURE_INV;
 
         if (rayEndsInsideAtmosphere)
         {
-            float height1 = r1 - R;
-            float NdotV1 = -cosChi1;
-            float NdotL1 = dot(N1, L);
-            float3 projL1 = L - N1 * NdotL1;
-            float3 projV1 = V - N1 * NdotV1;
-            float phiL1 = acos(clamp(dot(projL1, projV1) * rsqrt(max(dot(projL1, projL1) * dot(projV1, projV1), FLT_EPS)), -1.0f, 1.0f));
-            texCoord = ConvertPositionAndOrientationToTexCoords(height1, NdotV1, NdotL1, phiL1);
+                float3 radiance1 = 0; // from 'tFrag' to 'tExit'
 
-            float3 radiance1 = 0.0f;
-            radiance1 += lerp(
-                SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
-                SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
-                texCoord.a) * AirPhase(LdotV);
-            radiance1 += lerp(
-                SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
-                SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
-                texCoord.a) * AerosolPhase(LdotV);
-            radiance1 += lerp(
-                SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
-                SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
-                texCoord.a) * MS_EXPOSURE_INV;
+                // TODO: solve in spherical coords?
+                float height1 = r1 - R;
+                float  NdotV1 = -cosChi1;
+                float  NdotL1 = dot(N1, L);
+                float3 projL1 = L - N1 * NdotL1;
+                float3 projV1 = V - N1 * NdotV1;
+                float  phiL1  = acos(clamp(dot(projL1, projV1) * rsqrt(max(dot(projL1, projL1) * dot(projV1, projV1), FLT_EPS)), -1, 1));
 
-            radiance = max(0.0f, radiance - (1.0f - skyOpacity) * radiance1);
+                texCoord = ConvertPositionAndOrientationToTexCoords(height1, NdotV1, NdotL1, phiL1);
+
+                // Single scattering does not contain the phase function.
+
+                // Air.
+                radiance1 += lerp(SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture,     s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+                                  SAMPLE_TEXTURE3D_LOD(_AirSingleScatteringTexture,     s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+                                  texCoord.a) * AirPhase(LdotV);
+
+                // Aerosols.
+                // TODO: since aerosols are in a separate texture,
+                // they could use a different max height value for improved precision.
+                radiance1 += lerp(SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+                                  SAMPLE_TEXTURE3D_LOD(_AerosolSingleScatteringTexture, s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+                                  texCoord.a) * AerosolPhase(LdotV);
+
+                // MS.
+                radiance1 += lerp(SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture,      s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w0), 0).rgb,
+                                  SAMPLE_TEXTURE3D_LOD(_MultipleScatteringTexture,      s_linear_clamp_sampler, float3(texCoord.u, texCoord.v, texCoord.w1), 0).rgb,
+                                  texCoord.a) * MS_EXPOSURE_INV;
+
+                // L(tEntry, tFrag) = L(tEntry, tExit) - T(tEntry, tFrag) * L(tFrag, tExit)
+                radiance = max(0, radiance - (1 - skyOpacity) * radiance1);
         }
 
         skyColor += radiance * light.color.rgb;

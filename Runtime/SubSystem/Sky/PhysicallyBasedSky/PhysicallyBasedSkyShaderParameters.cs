@@ -246,7 +246,7 @@ namespace VividRP.Runtime
                 aerosolExtinction,
                 aerosolExtinction,
                 aerosolExtinction,
-                Mathf.Clamp(volume.aerosolAnisotropy.value, -0.95f, 0.95f));
+                volume.aerosolAnisotropy.value);
             parameters.skyOzoneExtinction = new Vector4(
                 ozoneExtinction.x,
                 ozoneExtinction.y,
@@ -299,7 +299,7 @@ namespace VividRP.Runtime
             var atmosphericDepth = Mathf.Max(volume.GetMaximumAltitude(), 1.0f);
             var airScaleHeight = Mathf.Max(volume.GetAirScaleHeight(), 1.0f);
             var aerosolScaleHeight = Mathf.Max(volume.GetAerosolScaleHeight(), 1.0f);
-            var aerosolAnisotropy = Mathf.Clamp(volume.aerosolAnisotropy.value, -0.95f, 0.95f);
+            var aerosolAnisotropy = volume.aerosolAnisotropy.value;
             var ozoneLayerMinimumAltitude = volume.GetOzoneLayerMinimumAltitude();
             var ozoneLayerWidth = Mathf.Max(volume.GetOzoneLayerWidth(), 1.0f);
             var atmosphericRadius = planetRadius + atmosphericDepth;

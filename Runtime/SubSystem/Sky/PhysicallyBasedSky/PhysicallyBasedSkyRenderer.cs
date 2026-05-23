@@ -102,23 +102,22 @@ namespace VividRP.Runtime
 
         public void Build(VividRPCoreResources resources)
         {
-            var shader = resources?.PhysicallyBasedSkyShader;
-            shader ??= Shader.Find(PhysicallyBasedSkyShaderName);
+            var shader = resources.PhysicallyBasedSkyShader;
             m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;
             m_GroundIrradiancePrecomputationCompute = resources?.GroundIrradiancePrecomputationCompute;
             m_InScatteredRadiancePrecomputationCompute = resources?.InScatteredRadiancePrecomputationCompute;
             m_AtmosphereLutCache.Build(resources);
-            if (shader != null)
+            if (shader)
             {
                 m_SkyMaterial = CoreUtils.CreateEngineMaterial(shader);
                 m_SkyBakingPass = m_SkyMaterial.FindPass("PhysicallyBasedSkyBaking");
             }
 
-            if (m_AtmosphereLutCompute != null && m_AtmosphereLutCompute.HasKernel("MultiScatteringLUT"))
+            if (m_AtmosphereLutCompute && m_AtmosphereLutCompute.HasKernel("MultiScatteringLUT"))
                 m_MultiScatteringKernel = m_AtmosphereLutCompute.FindKernel("MultiScatteringLUT");
-            if (m_GroundIrradiancePrecomputationCompute != null && m_GroundIrradiancePrecomputationCompute.HasKernel("main"))
+            if (m_GroundIrradiancePrecomputationCompute && m_GroundIrradiancePrecomputationCompute.HasKernel("main"))
                 m_GroundIrradiancePrecomputationKernel = m_GroundIrradiancePrecomputationCompute.FindKernel("main");
-            if (m_InScatteredRadiancePrecomputationCompute != null && m_InScatteredRadiancePrecomputationCompute.HasKernel("main"))
+            if (m_InScatteredRadiancePrecomputationCompute && m_InScatteredRadiancePrecomputationCompute.HasKernel("main"))
                 m_InScatteredRadiancePrecomputationKernel = m_InScatteredRadiancePrecomputationCompute.FindKernel("main");
         }
 

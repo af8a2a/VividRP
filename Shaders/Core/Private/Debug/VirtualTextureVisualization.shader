@@ -23,6 +23,7 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             #define VIVID_VT_VISUALIZATION_NONE 1
             #define VIVID_VT_VISUALIZATION_PHYSICAL_CACHE 2
             #define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY 3
+            #define VIVID_VT_VISUALIZATION_PHYSICAL_CACHE_AND_PAGE_TABLE_RESIDENCY 4
 
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
@@ -161,6 +162,14 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
 
                 if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY)
                     return EvaluatePageTableResidencyColor(overlayUv);
+
+                if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PHYSICAL_CACHE_AND_PAGE_TABLE_RESIDENCY)
+                {
+                    if (overlayUv.y >= 0.5)
+                        return EvaluatePhysicalCacheColor(float2(overlayUv.x, overlayUv.y * 2.0 - 1.0));
+
+                    return EvaluatePageTableResidencyColor(float2(overlayUv.x, overlayUv.y * 2.0));
+                }
 
                 return 0;
             }

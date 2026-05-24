@@ -134,7 +134,7 @@ namespace VividRP.Runtime
             {
                 for (int requestIndex = 0; requestIndex < m_RequestCount; requestIndex++)
                 {
-                    if (m_Requests[requestIndex].Equals(request))
+                    if (IsSameUploadIdentity(m_Requests[requestIndex], request))
                         return true;
                 }
 
@@ -176,6 +176,14 @@ namespace VividRP.Runtime
                 if (m_StagingTexture != null)
                     CoreUtils.Destroy(m_StagingTexture);
             }
+
+            private static bool IsSameUploadIdentity(in VTRequest left, in VTRequest right)
+            {
+                return left.SpaceId == right.SpaceId
+                       && left.PageCoord.Equals(right.PageCoord)
+                       && left.PhysicalPageId == right.PhysicalPageId
+                       && left.Generation == right.Generation;
+            }
         }
 
         private static IVTUploadFenceFactory s_FenceFactory = GraphicsFenceFactory.Instance;
@@ -185,6 +193,8 @@ namespace VividRP.Runtime
         private readonly Texture2DArray m_PhysicalCache;
         private readonly UploadBatch[] m_Batches;
         private readonly Color32[] m_ScratchPixels;
+        private int m_LastDuplicateUploadCount;
+        private int m_LastSkippedUploadCount;
 
         internal VTUploadScheduler(
             string spaceName,
@@ -204,6 +214,25 @@ namespace VividRP.Runtime
         }
 
         internal bool IsEnabled => m_RuntimeProducer != null && m_PhysicalCache != null;
+
+        internal int InFlightBatchCount
+        {
+            get
+            {
+                int count = 0;
+                for (int batchIndex = 0; batchIndex < m_Batches.Length; batchIndex++)
+                {
+                    if (m_Batches[batchIndex].InFlight)
+                        count += 1;
+                }
+
+                return count;
+            }
+        }
+
+        internal int LastDuplicateUploadCount => m_LastDuplicateUploadCount;
+
+        internal int LastSkippedUploadCount => m_LastSkippedUploadCount;
 
         internal static void SetFenceFactoryForTesting(IVTUploadFenceFactory fenceFactory)
         {
@@ -241,19 +270,40 @@ namespace VividRP.Runtime
 
         internal bool SchedulePendingUploads(IReadOnlyList<VTRequest> pendingRequests, CommandBuffer cmd)
         {
-            if (!IsEnabled || pendingRequests == null || pendingRequests.Count == 0 || cmd == null)
+            ResetLastScheduleStats();
+
+            if (pendingRequests == null || pendingRequests.Count == 0)
                 return false;
+
+            if (!IsEnabled || cmd == null)
+            {
+                m_LastSkippedUploadCount = pendingRequests.Count;
+                return false;
+            }
 
             UploadBatch batch = FindAvailableBatch();
+            CountInFlightDuplicates(pendingRequests);
             if (batch == null)
+            {
+                m_LastSkippedUploadCount = pendingRequests.Count;
                 return false;
+            }
 
             int requestCount = 0;
-            for (int requestIndex = 0; requestIndex < pendingRequests.Count && requestCount < batch.Capacity; requestIndex++)
+            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
             {
                 VTRequest request = pendingRequests[requestIndex];
                 if (IsRequestInFlight(request))
+                {
+                    m_LastSkippedUploadCount += 1;
                     continue;
+                }
+
+                if (requestCount >= batch.Capacity)
+                {
+                    m_LastSkippedUploadCount += 1;
+                    continue;
+                }
 
                 VTPageUploadUtility.WritePageToStagingTexture(
                     batch.StagingTexture,
@@ -297,6 +347,21 @@ namespace VividRP.Runtime
             }
 
             return null;
+        }
+
+        private void ResetLastScheduleStats()
+        {
+            m_LastDuplicateUploadCount = 0;
+            m_LastSkippedUploadCount = 0;
+        }
+
+        private void CountInFlightDuplicates(IReadOnlyList<VTRequest> pendingRequests)
+        {
+            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+            {
+                if (IsRequestInFlight(pendingRequests[requestIndex]))
+                    m_LastDuplicateUploadCount += 1;
+            }
         }
 
         private bool IsRequestInFlight(in VTRequest request)

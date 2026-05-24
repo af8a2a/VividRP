@@ -32,6 +32,8 @@ int _VTFeedbackEnabled;
 #define VT_CACHE_PAGE_COUNT       ((int)_VTSpaceParams[7])
 #define VT_FEEDBACK_CAPACITY      ((int)_VTSpaceParams[8])
 #define VT_PAGE_TABLE_ENTRY_COUNT ((int)_VTSpaceParams[9])
+#define VT_FEEDBACK_REQUEST_COUNTER_INDEX 0
+#define VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX 1
 
 struct VTResolvedAddress
 {
@@ -58,6 +60,15 @@ uint2 VTGetPageCoord(float2 virtualUv, uint mip)
     pageCoord.x = min((uint)(clampedUv.x * pageCountX), pageCountX - 1u);
     pageCoord.y = min((uint)(clampedUv.y * pageCountY), pageCountY - 1u);
     return pageCoord;
+}
+
+float2 VTComputePageLocalUv(float2 virtualUv, uint mip, uint2 pageCoord)
+{
+    float2 pageCount = float2(
+        VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_X, mip),
+        VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_Y, mip));
+    float2 pageUv = saturate(virtualUv) * pageCount;
+    return saturate(pageUv - float2(pageCoord.x, pageCoord.y));
 }
 
 uint VTGetFlatPageIndex(uint2 pageCoord, uint mip)
@@ -107,10 +118,7 @@ float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
         return float3(0.0, 0.0, 0.0);
 
     uint2 resolvedPageCoord = VTGetPageCoord(virtualUv, resolved.resolvedMip);
-    float2 resolvedPageCount = float2(
-        VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_X, resolved.resolvedMip),
-        VTGetPageCount((uint)VT_VIRTUAL_PAGE_COUNT_Y, resolved.resolvedMip));
-    float2 localUv = frac(saturate(virtualUv) * resolvedPageCount);
+    float2 localUv = VTComputePageLocalUv(virtualUv, resolved.resolvedMip, resolvedPageCoord);
     float2 texelCoord = localUv * VT_PAGE_SIZE + VT_BORDER_SIZE + 0.5;
     float2 physicalUv = texelCoord / max((float)VT_PHYSICAL_PAGE_SIZE, 1.0);
     return float3(physicalUv, (float)resolved.physicalPageId);
@@ -141,9 +149,23 @@ void VTWriteFeedback(float2 virtualUv, uint requestedMip)
     uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
     uint2 pageCoord = VTGetPageCoord(virtualUv, clampedMip);
     uint requestIndex = 0u;
-    InterlockedAdd(_VTFeedbackCounter[0], 1u, requestIndex);
+    InterlockedAdd(_VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX], 1u, requestIndex);
     if (requestIndex < (uint)VT_FEEDBACK_CAPACITY)
         _VTFeedbackRequests[requestIndex] = VTEncodeFeedbackKey(pageCoord, clampedMip);
+#endif
+}
+
+void VTWriteFallbackSample(VTResolvedAddress resolved)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (_VTFeedbackEnabled == 0 || !resolved.fallback)
+        return;
+
+    uint previousFallbackSampleCount = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
+        1u,
+        previousFallbackSampleCount);
 #endif
 }
 

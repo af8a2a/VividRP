@@ -116,6 +116,63 @@ namespace VividRP.Runtime
         }
     }
 
+    internal sealed class VTCheckerSourcePageProducer : IVTRuntimePageProducer
+    {
+        internal static readonly VTCheckerSourcePageProducer Instance = new();
+
+        private VTCheckerSourcePageProducer()
+        {
+        }
+
+        public string Name => nameof(VTCheckerSourcePageProducer);
+
+        public void WritePage(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            Color32[] outputPixels)
+        {
+            if (outputPixels == null)
+                throw new ArgumentNullException(nameof(outputPixels));
+
+            int physicalPageSize = desc.PhysicalPageSize;
+            int pixelCount = physicalPageSize * physicalPageSize;
+            if (outputPixels.Length < pixelCount)
+                throw new ArgumentException("Output pixel buffer is smaller than the physical VT page.", nameof(outputPixels));
+
+            VirtualTexturePageCoord coord = request.PageCoord;
+            int pageOriginX = coord.X * desc.PageSize;
+            int pageOriginY = coord.Y * desc.PageSize;
+            for (int y = 0; y < physicalPageSize; y++)
+            {
+                int sourceY = pageOriginY + y - desc.BorderSize;
+                for (int x = 0; x < physicalPageSize; x++)
+                {
+                    int sourceX = pageOriginX + x - desc.BorderSize;
+                    outputPixels[y * physicalPageSize + x] = EvaluateSourceTexel(desc, coord.Mip, sourceX, sourceY);
+                }
+            }
+        }
+
+        internal static Color32 EvaluateSourceTexel(
+            in VirtualTextureSpaceDesc desc,
+            int mip,
+            int sourceX,
+            int sourceY)
+        {
+            int sourceWidth = VirtualTextureSpaceUtility.GetPageCountX(desc.VirtualPageCountX, mip) * desc.PageSize;
+            int sourceHeight = VirtualTextureSpaceUtility.GetPageCountY(desc.VirtualPageCountY, mip) * desc.PageSize;
+            int clampedX = Mathf.Clamp(sourceX, 0, Mathf.Max(0, sourceWidth - 1));
+            int clampedY = Mathf.Clamp(sourceY, 0, Mathf.Max(0, sourceHeight - 1));
+            int checkerSize = Mathf.Max(1, desc.PageSize / 4);
+            bool checker = ((clampedX / checkerSize) + (clampedY / checkerSize) + mip) % 2 == 0;
+            byte baseValue = checker ? (byte)210 : (byte)52;
+            byte red = (byte)Mathf.Clamp(baseValue + mip * 9, 0, 255);
+            byte green = (byte)(32 + ((clampedX * 11 + mip * 23) & 0x7F));
+            byte blue = (byte)(32 + ((clampedY * 13 + mip * 29) & 0x7F));
+            return new Color32(red, green, blue, 255);
+        }
+    }
+
     internal sealed class VTNullProducer : VTProducer
     {
         internal static readonly VTNullProducer Instance = new();

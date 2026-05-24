@@ -47,7 +47,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.TryGetDefaultVisualizationMode(out VirtualTextureVisualizationMode visualizationMode), Is.True);
                 Assert.That(overlayAmount, Is.EqualTo(0f));
                 Assert.That(opacity, Is.EqualTo(1f));
-                Assert.That(visualizationMode, Is.EqualTo(VirtualTextureVisualizationMode.PhysicalCache));
+                Assert.That(visualizationMode, Is.EqualTo(VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency));
             }
             finally
             {
@@ -77,7 +77,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(result.Passes[0].EnumParameters.Single().FieldName, Is.EqualTo("m_DefaultVisualizationMode"));
                 Assert.That(
                     result.Passes[0].EnumParameters.Single().Value,
-                    Is.EqualTo((int)VirtualTextureVisualizationMode.PhysicalCache));
+                    Is.EqualTo((int)VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency));
             }
             finally
             {

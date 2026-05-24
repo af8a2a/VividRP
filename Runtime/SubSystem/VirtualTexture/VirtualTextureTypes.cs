@@ -287,6 +287,11 @@ namespace VividRP.Runtime
             int evictionCount,
             int faultCount,
             int deduplicatedRequestCount,
+            int feedbackOverflowCount,
+            int inFlightUploadBatchCount,
+            int duplicateUploadCount,
+            int skippedUploadCount,
+            int fallbackSampleCount,
             int lastReadbackFrame,
             string statusMessage)
         {
@@ -298,6 +303,11 @@ namespace VividRP.Runtime
                 evictionCount,
                 faultCount,
                 deduplicatedRequestCount,
+                feedbackOverflowCount,
+                inFlightUploadBatchCount,
+                duplicateUploadCount,
+                skippedUploadCount,
+                fallbackSampleCount,
                 lastReadbackFrame,
                 statusMessage);
         }
@@ -322,6 +332,16 @@ namespace VividRP.Runtime
         internal int FaultCount => m_Stats.FaultCount;
 
         internal int DeduplicatedRequestCount => m_Stats.DeduplicatedRequestCount;
+
+        internal int FeedbackOverflowCount => m_Stats.FeedbackOverflowCount;
+
+        internal int InFlightUploadBatchCount => m_Stats.InFlightUploadBatchCount;
+
+        internal int DuplicateUploadCount => m_Stats.DuplicateUploadCount;
+
+        internal int SkippedUploadCount => m_Stats.SkippedUploadCount;
+
+        internal int FallbackSampleCount => m_Stats.FallbackSampleCount;
 
         internal int LastReadbackFrame => m_Stats.LastReadbackFrame;
 
@@ -404,6 +424,78 @@ namespace VividRP.Runtime
                    && coord.Y >= 0
                    && coord.X < GetPageCountX(desc.VirtualPageCountX, coord.Mip)
                    && coord.Y < GetPageCountY(desc.VirtualPageCountY, coord.Mip);
+        }
+
+        internal static VirtualTexturePageCoord GetPageCoord(
+            int virtualPageCountX,
+            int virtualPageCountY,
+            int mip,
+            Vector2 virtualUv)
+        {
+            int pageCountX = GetPageCountX(virtualPageCountX, mip);
+            int pageCountY = GetPageCountY(virtualPageCountY, mip);
+            float clampedX = Mathf.Clamp01(virtualUv.x);
+            float clampedY = Mathf.Clamp01(virtualUv.y);
+            return new VirtualTexturePageCoord(
+                Mathf.Min((int)(clampedX * pageCountX), pageCountX - 1),
+                Mathf.Min((int)(clampedY * pageCountY), pageCountY - 1),
+                mip);
+        }
+
+        internal static Vector2 ComputePageLocalUv(
+            int virtualPageCountX,
+            int virtualPageCountY,
+            int mip,
+            Vector2 virtualUv)
+        {
+            VirtualTexturePageCoord pageCoord = GetPageCoord(
+                virtualPageCountX,
+                virtualPageCountY,
+                mip,
+                virtualUv);
+            return ComputePageLocalUv(
+                virtualPageCountX,
+                virtualPageCountY,
+                pageCoord,
+                virtualUv);
+        }
+
+        internal static Vector2 ComputePageLocalUv(
+            int virtualPageCountX,
+            int virtualPageCountY,
+            in VirtualTexturePageCoord pageCoord,
+            Vector2 virtualUv)
+        {
+            int pageCountX = GetPageCountX(virtualPageCountX, pageCoord.Mip);
+            int pageCountY = GetPageCountY(virtualPageCountY, pageCoord.Mip);
+            float pageUvX = Mathf.Clamp01(virtualUv.x) * pageCountX;
+            float pageUvY = Mathf.Clamp01(virtualUv.y) * pageCountY;
+            return new Vector2(
+                Mathf.Clamp01(pageUvX - pageCoord.X),
+                Mathf.Clamp01(pageUvY - pageCoord.Y));
+        }
+
+        internal static Vector3 ComputePhysicalUVW(
+            in VirtualTextureSpaceDesc desc,
+            Vector2 virtualUv,
+            in VirtualTexturePageTableEntry resolvedEntry)
+        {
+            if (!resolvedEntry.IsMapped)
+                return Vector3.zero;
+
+            Vector2 localUv = ComputePageLocalUv(
+                desc.VirtualPageCountX,
+                desc.VirtualPageCountY,
+                resolvedEntry.ResolvedMip,
+                virtualUv);
+            Vector2 texelCoord = localUv * desc.PageSize
+                                  + Vector2.one * desc.BorderSize
+                                  + new Vector2(0.5f, 0.5f);
+            float physicalPageSize = Mathf.Max(desc.PhysicalPageSize, 1);
+            return new Vector3(
+                texelCoord.x / physicalPageSize,
+                texelCoord.y / physicalPageSize,
+                resolvedEntry.PhysicalPageId);
         }
 
         internal static int GetFlatIndex(

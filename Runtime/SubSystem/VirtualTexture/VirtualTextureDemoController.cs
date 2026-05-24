@@ -11,6 +11,12 @@ namespace VividRP.Runtime
         private const string DemoSurfaceName = "VT Demo Surface";
         private const string DemoShaderName = "VividRP/Material/VirtualTextureDemo";
 
+        private enum DemoProducerMode
+        {
+            CheckerSource = 0,
+            ProceduralPageDebug = 1,
+        }
+
         [SerializeField]
         private string m_SpaceName = "VT Demo Space";
 
@@ -37,6 +43,9 @@ namespace VividRP.Runtime
 
         [SerializeField, Min(16)]
         private int m_FeedbackCapacity = 512;
+
+        [SerializeField]
+        private DemoProducerMode m_ProducerMode = DemoProducerMode.CheckerSource;
 
         [SerializeField]
         private bool m_CreateDemoSurface = true;
@@ -77,7 +86,9 @@ namespace VividRP.Runtime
         {
             try
             {
-                m_SpaceId = VirtualTextureSystem.RegisterAddressSpace(CreateDescriptor(), VTProceduralPageProducer.Instance);
+                m_SpaceId = VirtualTextureSystem.RegisterOrReconfigureAddressSpace(
+                    CreateDescriptor(),
+                    ResolveProducer());
             }
             catch (System.Exception exception)
             {
@@ -151,6 +162,13 @@ namespace VividRP.Runtime
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
                 feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity));
+        }
+
+        private VTProducer ResolveProducer()
+        {
+            return m_ProducerMode == DemoProducerMode.ProceduralPageDebug
+                ? VTProceduralPageProducer.Instance
+                : VTCheckerSourcePageProducer.Instance;
         }
     }
 }

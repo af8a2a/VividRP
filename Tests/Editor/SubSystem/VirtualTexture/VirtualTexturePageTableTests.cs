@@ -73,6 +73,59 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SpaceUtility_ComputePageLocalUv_UsesLastPageEdge_WhenUvIsOne()
+        {
+            var uv = new Vector2(1f, 1f);
+
+            VirtualTexturePageCoord pageCoord = VirtualTextureSpaceUtility.GetPageCoord(4, 4, 0, uv);
+            Vector2 localUv = VirtualTextureSpaceUtility.ComputePageLocalUv(4, 4, pageCoord, uv);
+
+            Assert.That(pageCoord, Is.EqualTo(new VirtualTexturePageCoord(3, 3, 0)));
+            Assert.That(localUv.x, Is.EqualTo(1f).Within(0.0001f));
+            Assert.That(localUv.y, Is.EqualTo(1f).Within(0.0001f));
+        }
+
+        [Test]
+        public void SpaceUtility_ComputePhysicalUVW_UsesNextPageStartAtTileBoundary()
+        {
+            var desc = CreateDesc("Addressing", 4, 4, 3, 4, 4);
+            var entry = new VirtualTexturePageTableEntry(
+                physicalPageId: 7,
+                resolvedMip: 0,
+                resident: true,
+                fallback: false,
+                pendingUpload: false,
+                locked: false);
+
+            Vector3 uvw = VirtualTextureSpaceUtility.ComputePhysicalUVW(desc, new Vector2(0.25f, 0.25f), entry);
+
+            float expectedStart = (desc.BorderSize + 0.5f) / desc.PhysicalPageSize;
+            Assert.That(uvw.x, Is.EqualTo(expectedStart).Within(0.0001f));
+            Assert.That(uvw.y, Is.EqualTo(expectedStart).Within(0.0001f));
+            Assert.That(uvw.z, Is.EqualTo(7f));
+        }
+
+        [Test]
+        public void SpaceUtility_ComputePhysicalUVW_DoesNotWrapAtMaxUv()
+        {
+            var desc = CreateDesc("AddressEdge", 4, 4, 3, 4, 4);
+            var entry = new VirtualTexturePageTableEntry(
+                physicalPageId: 5,
+                resolvedMip: 0,
+                resident: true,
+                fallback: false,
+                pendingUpload: false,
+                locked: false);
+
+            Vector3 uvw = VirtualTextureSpaceUtility.ComputePhysicalUVW(desc, new Vector2(1f, 1f), entry);
+
+            float expectedEnd = (desc.BorderSize + desc.PageSize + 0.5f) / desc.PhysicalPageSize;
+            Assert.That(uvw.x, Is.EqualTo(expectedEnd).Within(0.0001f));
+            Assert.That(uvw.y, Is.EqualTo(expectedEnd).Within(0.0001f));
+            Assert.That(uvw.z, Is.EqualTo(5f));
+        }
+
+        [Test]
         public void PageTable_MaterializesBestAncestorFallbackWithoutShaderRecursion()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Fallback", 4, 4, 3, 4, 4));

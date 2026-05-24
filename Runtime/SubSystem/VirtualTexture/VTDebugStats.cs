@@ -10,6 +10,11 @@ namespace VividRP.Runtime
             int evictionCount,
             int faultCount,
             int deduplicatedRequestCount,
+            int feedbackOverflowCount,
+            int inFlightUploadBatchCount,
+            int duplicateUploadCount,
+            int skippedUploadCount,
+            int fallbackSampleCount,
             int lastReadbackFrame,
             string statusMessage)
         {
@@ -20,6 +25,11 @@ namespace VividRP.Runtime
             EvictionCount = evictionCount;
             FaultCount = faultCount;
             DeduplicatedRequestCount = deduplicatedRequestCount;
+            FeedbackOverflowCount = feedbackOverflowCount;
+            InFlightUploadBatchCount = inFlightUploadBatchCount;
+            DuplicateUploadCount = duplicateUploadCount;
+            SkippedUploadCount = skippedUploadCount;
+            FallbackSampleCount = fallbackSampleCount;
             LastReadbackFrame = lastReadbackFrame;
             StatusMessage = statusMessage;
         }
@@ -37,6 +47,16 @@ namespace VividRP.Runtime
         internal int FaultCount { get; }
 
         internal int DeduplicatedRequestCount { get; }
+
+        internal int FeedbackOverflowCount { get; }
+
+        internal int InFlightUploadBatchCount { get; }
+
+        internal int DuplicateUploadCount { get; }
+
+        internal int SkippedUploadCount { get; }
+
+        internal int FallbackSampleCount { get; }
 
         internal int LastReadbackFrame { get; }
 

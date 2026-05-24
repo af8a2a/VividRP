@@ -20,6 +20,7 @@ namespace VividRP.Runtime
         None = 1,
         PhysicalCache = 2,
         PageTableResidency = 3,
+        PhysicalCacheAndPageTableResidency = 4,
     }
 
     internal sealed class VividRenderingDebugDisplaySettings
@@ -736,6 +737,12 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Pending Uploads", () => VirtualTextureStatsRegistry.LastStats.PendingUploadCount));
                 foldout.children.Add(CreateStatsValue("Evictions", () => VirtualTextureStatsRegistry.LastStats.EvictionCount));
                 foldout.children.Add(CreateStatsValue("Faults", () => VirtualTextureStatsRegistry.LastStats.FaultCount));
+                foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => VirtualTextureStatsRegistry.LastStats.DeduplicatedRequestCount));
+                foldout.children.Add(CreateStatsValue("Feedback Overflow", () => VirtualTextureStatsRegistry.LastStats.FeedbackOverflowCount));
+                foldout.children.Add(CreateStatsValue("In-Flight Upload Batches", () => VirtualTextureStatsRegistry.LastStats.InFlightUploadBatchCount));
+                foldout.children.Add(CreateStatsValue("Duplicate Uploads", () => VirtualTextureStatsRegistry.LastStats.DuplicateUploadCount));
+                foldout.children.Add(CreateStatsValue("Skipped Uploads", () => VirtualTextureStatsRegistry.LastStats.SkippedUploadCount));
+                foldout.children.Add(CreateStatsValue("Fallback Samples", () => VirtualTextureStatsRegistry.LastStats.FallbackSampleCount));
                 foldout.children.Add(new DebugUI.Value
                 {
                     displayName = "Status",

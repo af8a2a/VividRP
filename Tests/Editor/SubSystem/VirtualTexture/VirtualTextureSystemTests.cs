@@ -52,6 +52,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.PhysicalCache.height, Is.EqualTo(desc.PhysicalPageSize));
                 Assert.That(binding.PhysicalCache.depth, Is.EqualTo(desc.CachePageCount));
                 Assert.That(binding.HasFeedback, Is.True);
+                Assert.That(binding.FeedbackCounter.count, Is.EqualTo(2));
                 Assert.That(binding.ShaderParams.SpaceId, Is.EqualTo(spaceId));
                 Assert.That(binding.ShaderParams.PageSize, Is.EqualTo(desc.PageSize));
                 Assert.That(binding.MipOffsets, Is.EqualTo(VirtualTextureSpaceUtility.BuildMipOffsets(
@@ -134,6 +135,38 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.EvictionCount, Is.EqualTo(0));
             Assert.That(stats.FaultCount, Is.EqualTo(3));
             Assert.That(stats.DeduplicatedRequestCount, Is.EqualTo(2));
+            Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(0));
+            Assert.That(stats.InFlightUploadBatchCount, Is.EqualTo(0));
+            Assert.That(stats.DuplicateUploadCount, Is.EqualTo(0));
+            Assert.That(stats.SkippedUploadCount, Is.EqualTo(1));
+            Assert.That(stats.FallbackSampleCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Update_ReportsFeedbackOverflowAndFallbackSamples_WhenReadbackCountersIncludeDebugValues()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FeedbackCounters", cachePageCount: 2, maxUploadsPerFrame: 1));
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    CameraType.Game,
+                    3,
+                    11,
+                    requestKey);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(stats.FaultCount, Is.EqualTo(1));
+            Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(3));
+            Assert.That(stats.FallbackSampleCount, Is.EqualTo(11));
         }
 
         [Test]
@@ -160,6 +193,68 @@ namespace VividRP.Editor.Tests
             finally
             {
                 commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void RegisterOrReconfigureAddressSpace_RebuildsExistingSpace_WhenDescriptorChanges()
+        {
+            var producer = new TestProducer();
+            VirtualTextureSpaceDesc initialDesc = CreateDesc("Reconfigure", cachePageCount: 2, maxUploadsPerFrame: 1);
+            int spaceId = VirtualTextureSystem.RegisterOrReconfigureAddressSpace(initialDesc, producer);
+
+            var cameraGameObject = new GameObject("VTReconfigureCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera camera = cameraGameObject.AddComponent<Camera>();
+                ContextContainer frameData = CreateFrameData(camera, frameIndex: 17);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+                VirtualTextureSpaceBinding initialBinding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                GraphicsBuffer oldPageTableBuffer = initialBinding.PageTableBuffer;
+                Texture2DArray oldPhysicalCache = initialBinding.PhysicalCache;
+                ComputeBuffer oldFeedbackRequests = initialBinding.FeedbackRequests;
+                ComputeBuffer oldFeedbackCounter = initialBinding.FeedbackCounter;
+
+                var updatedDesc = new VirtualTextureSpaceDesc(
+                    initialDesc.SpaceName,
+                    pageSize: 64,
+                    borderSize: 2,
+                    virtualPageCountX: 8,
+                    virtualPageCountY: 4,
+                    mipCount: 4,
+                    cachePageCount: 6,
+                    graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                    maxUploadsPerFrame: 2,
+                    feedbackCapacity: 64);
+
+                int reconfiguredSpaceId = VirtualTextureSystem.RegisterOrReconfigureAddressSpace(updatedDesc, producer);
+
+                Assert.That(reconfiguredSpaceId, Is.EqualTo(spaceId));
+                Assert.That(oldPageTableBuffer.IsValid(), Is.False);
+                Assert.That(oldPhysicalCache == null, Is.True);
+                Assert.That(oldFeedbackRequests.IsValid(), Is.False);
+                Assert.That(oldFeedbackCounter.IsValid(), Is.False);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+                VirtualTextureSpaceBinding updatedBinding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+
+                Assert.That(updatedBinding.SpaceId, Is.EqualTo(spaceId));
+                Assert.That(updatedBinding.SpaceName, Is.EqualTo(updatedDesc.SpaceName));
+                Assert.That(updatedBinding.PageTableBuffer.count, Is.EqualTo(updatedBinding.ShaderParams.PageTableEntryCount));
+                Assert.That(updatedBinding.PhysicalCache.width, Is.EqualTo(updatedDesc.PhysicalPageSize));
+                Assert.That(updatedBinding.PhysicalCache.height, Is.EqualTo(updatedDesc.PhysicalPageSize));
+                Assert.That(updatedBinding.PhysicalCache.depth, Is.EqualTo(updatedDesc.CachePageCount));
+                Assert.That(updatedBinding.ShaderParams.PageSize, Is.EqualTo(updatedDesc.PageSize));
+                Assert.That(updatedBinding.ShaderParams.FeedbackCapacity, Is.EqualTo(updatedDesc.FeedbackCapacity));
+                Assert.That(updatedBinding.HasFeedback, Is.True);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(cameraGameObject);
             }
         }
 

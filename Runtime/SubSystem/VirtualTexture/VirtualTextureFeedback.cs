@@ -8,12 +8,20 @@ namespace VividRP.Runtime
 {
     internal readonly struct VirtualTextureFeedbackBatch
     {
-        internal VirtualTextureFeedbackBatch(CameraType cameraType, ulong[] requests, int requestCount, int frameIndex)
+        internal VirtualTextureFeedbackBatch(
+            CameraType cameraType,
+            ulong[] requests,
+            int requestCount,
+            int frameIndex,
+            int feedbackOverflowCount = 0,
+            int fallbackSampleCount = 0)
         {
             CameraType = cameraType;
             Requests = requests ?? Array.Empty<ulong>();
             RequestCount = Mathf.Clamp(requestCount, 0, Requests.Length);
             FrameIndex = frameIndex;
+            FeedbackOverflowCount = Mathf.Max(0, feedbackOverflowCount);
+            FallbackSampleCount = Mathf.Max(0, fallbackSampleCount);
         }
 
         internal CameraType CameraType { get; }
@@ -23,6 +31,10 @@ namespace VividRP.Runtime
         internal int RequestCount { get; }
 
         internal int FrameIndex { get; }
+
+        internal int FeedbackOverflowCount { get; }
+
+        internal int FallbackSampleCount { get; }
     }
 
     internal readonly struct VirtualTextureAggregatedFeedbackRequest
@@ -233,6 +245,16 @@ namespace VividRP.Runtime
             return m_SpaceStates;
         }
 
+        internal bool RemoveSpaceState(int spaceId)
+        {
+            if (!m_SpaceStates.TryGetValue(spaceId, out VirtualTextureFeedbackBufferState state))
+                return false;
+
+            state.Dispose();
+            m_SpaceStates.Remove(spaceId);
+            return true;
+        }
+
         public override void Dispose()
         {
             foreach (VirtualTextureFeedbackBufferState state in m_SpaceStates.Values)
@@ -247,6 +269,12 @@ namespace VividRP.Runtime
         internal Dictionary<Camera, VirtualTextureFeedbackCameraState> EnumerateStates()
         {
             return m_CameraStates;
+        }
+
+        internal void RemoveSpaceState(int spaceId)
+        {
+            foreach (VirtualTextureFeedbackCameraState state in m_CameraStates.Values)
+                state.RemoveSpaceState(spaceId);
         }
     }
 
@@ -267,6 +295,7 @@ namespace VividRP.Runtime
             public int ScheduledFrameIndex = -1;
             public ulong[] CompletedRequests = Array.Empty<ulong>();
             public uint CompletedCount;
+            public int CompletedFallbackSampleCount;
 
             public BufferPairState()
             {
@@ -287,6 +316,7 @@ namespace VividRP.Runtime
                 HasCompletedReadback = false;
                 CompletedRequests = Array.Empty<ulong>();
                 CompletedCount = 0u;
+                CompletedFallbackSampleCount = 0;
                 ScheduledFrameIndex = -1;
             }
 
@@ -303,6 +333,7 @@ namespace VividRP.Runtime
                 {
                     CompletedRequests = Array.Empty<ulong>();
                     CompletedCount = 0u;
+                    CompletedFallbackSampleCount = 0;
                 }
 
                 CompleteReadbackIfReady();
@@ -315,10 +346,12 @@ namespace VividRP.Runtime
                 {
                     NativeArray<uint> data = request.GetData<uint>();
                     CompletedCount = data.Length > 0 ? data[0] : 0u;
+                    CompletedFallbackSampleCount = data.Length > 1 ? SaturatingUIntToInt(data[1]) : 0;
                 }
                 else
                 {
                     CompletedCount = 0u;
+                    CompletedFallbackSampleCount = 0;
                 }
 
                 CompleteReadbackIfReady();
@@ -346,7 +379,8 @@ namespace VividRP.Runtime
             }
         }
 
-        private static readonly uint[] s_ZeroCounterData = { 0u };
+        private const int FeedbackCounterElementCount = 2;
+        private static readonly uint[] s_ZeroCounterData = { 0u, 0u };
 
         private readonly BufferPairState[] m_BufferPairs = { new(), new() };
         private readonly int m_SpaceId;
@@ -412,15 +446,20 @@ namespace VividRP.Runtime
                 if (!pair.HasCompletedReadback)
                     continue;
 
-                int requestCount = Mathf.Min(pair.CompletedRequests.Length, (int)pair.CompletedCount);
+                int completedRequestCount = SaturatingUIntToInt(pair.CompletedCount);
+                int requestCount = Mathf.Min(pair.CompletedRequests.Length, completedRequestCount);
+                int overflowCount = Mathf.Max(0, completedRequestCount - pair.CompletedRequests.Length);
                 output.Add(new VirtualTextureFeedbackBatch(
                     pair.LastCameraType,
                     pair.CompletedRequests,
                     requestCount,
-                    pair.ScheduledFrameIndex));
+                    pair.ScheduledFrameIndex,
+                    overflowCount,
+                    pair.CompletedFallbackSampleCount));
                 lastReadbackFrame = Mathf.Max(lastReadbackFrame, pair.ScheduledFrameIndex);
                 pair.HasCompletedReadback = false;
                 pair.CompletedCount = 0u;
+                pair.CompletedFallbackSampleCount = 0;
             }
         }
 
@@ -457,7 +496,7 @@ namespace VividRP.Runtime
                 BufferPairState pair = m_BufferPairs[bufferIndex];
                 pair.RequestsBuffer = new ComputeBuffer(feedbackCapacity, sizeof(ulong), ComputeBufferType.Structured);
                 pair.RequestsBuffer.name = $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackRequests_{bufferIndex}";
-                pair.CounterBuffer = new ComputeBuffer(1, sizeof(uint), ComputeBufferType.Structured);
+                pair.CounterBuffer = new ComputeBuffer(FeedbackCounterElementCount, sizeof(uint), ComputeBufferType.Structured);
                 pair.CounterBuffer.name = $"VividVT_{spaceName}_Space{m_SpaceId}_FeedbackCounter_{bufferIndex}";
             }
         }
@@ -474,6 +513,11 @@ namespace VividRP.Runtime
 
             AsyncGPUReadback.Request(pair.RequestsBuffer, pair.RequestsReadbackCallback);
             AsyncGPUReadback.Request(pair.CounterBuffer, pair.CounterReadbackCallback);
+        }
+
+        private static int SaturatingUIntToInt(uint value)
+        {
+            return value > int.MaxValue ? int.MaxValue : (int)value;
         }
     }
 }

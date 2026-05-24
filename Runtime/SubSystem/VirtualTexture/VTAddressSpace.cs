@@ -47,6 +47,12 @@ namespace VividRP.Runtime
 
         internal int PendingRequestCount => m_ResidencyManager.PendingRequestCount;
 
+        internal int InFlightUploadBatchCount => m_UploadScheduler.InFlightBatchCount;
+
+        internal int LastDuplicateUploadCount => m_UploadScheduler.LastDuplicateUploadCount;
+
+        internal int LastSkippedUploadCount => m_UploadScheduler.LastSkippedUploadCount;
+
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
         internal int[] MipOffsets => m_MipOffsets;

@@ -129,6 +129,7 @@ Shader "VividRP/Material/VirtualTextureDemo"
 
                     uint requestedMip = VTComputeRequestedMip(input.uv);
                     VTResolvedAddress resolved = VTResolveAddress(input.uv, requestedMip);
+                    VTWriteFallbackSample(resolved);
                     if (!resolved.resident)
                         VTWriteFeedback(input.uv, requestedMip);
 

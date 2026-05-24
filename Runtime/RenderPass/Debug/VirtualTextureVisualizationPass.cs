@@ -35,14 +35,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_Opacity = 1f;
 
         [SerializeField]
-        private VirtualTextureVisualizationMode m_DefaultVisualizationMode = VirtualTextureVisualizationMode.PhysicalCache;
+        private VirtualTextureVisualizationMode m_DefaultVisualizationMode = VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency;
 
         private readonly float[] m_SpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_MipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
 
         private Material m_Material;
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
-        private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.PhysicalCache;
+        private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private float m_ResolvedOpacity = 1f;
         private bool m_ShouldSkipExecution;

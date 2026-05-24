@@ -115,6 +115,35 @@ namespace VividRP.Editor.Tests
             Assert.That(requests, Has.Count.EqualTo(3));
         }
 
+        [Test]
+        public void Uploads_DoNotRescheduleInFlightPage_WhenPendingPriorityIncreases()
+        {
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(CreateDesc("PriorityUpdate"), new TestRuntimeProducer());
+            var pageCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+            IssueFeedback(spaceId, pageCoord);
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out IReadOnlyList<VirtualTextureUploadRequest> initialRequests), Is.True);
+            Assert.That(initialRequests, Has.Count.EqualTo(1));
+            Assert.That(initialRequests[0].Priority, Is.EqualTo(1));
+
+            IssueFeedback(spaceId, pageCoord, pageCoord);
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out IReadOnlyList<VirtualTextureUploadRequest> updatedRequests), Is.True);
+            Assert.That(updatedRequests, Has.Count.EqualTo(1));
+            Assert.That(updatedRequests[0].PageCoord, Is.EqualTo(pageCoord));
+            Assert.That(updatedRequests[0].PhysicalPageId, Is.EqualTo(initialRequests[0].PhysicalPageId));
+            Assert.That(updatedRequests[0].Generation, Is.EqualTo(initialRequests[0].Generation));
+            Assert.That(updatedRequests[0].Priority, Is.EqualTo(2));
+
+            VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(stats.InFlightUploadBatchCount, Is.EqualTo(1));
+            Assert.That(stats.DuplicateUploadCount, Is.EqualTo(1));
+            Assert.That(stats.SkippedUploadCount, Is.EqualTo(1));
+        }
+
         private static VirtualTextureSpaceDesc CreateDesc(string name)
         {
             return new VirtualTextureSpaceDesc(

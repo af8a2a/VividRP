@@ -3,7 +3,9 @@ Shader "VividRP/Material/VirtualTextureDemo"
     Properties
     {
         [Main(SurfaceInputs, _, on, off)] _SurfaceInputs("Surface Inputs", Float) = 1
+        [MainTexture] [Tex(SurfaceInputs, _BaseTint)] _BaseMap("SVT Source Map", 2D) = "white" {}
         [MainColor] _BaseTint("Base Tint", Color) = (1, 1, 1, 1)
+        [HideInInspector] _MainTex("BaseMap", 2D) = "white" {}
     }
 
     SubShader
@@ -41,6 +43,7 @@ Shader "VividRP/Material/VirtualTextureDemo"
 
                 CBUFFER_START(UnityPerMaterial)
                     float4 _BaseTint;
+                    float4 _BaseMap_ST;
                 CBUFFER_END
 
                 struct Attributes
@@ -72,7 +75,7 @@ Shader "VividRP/Material/VirtualTextureDemo"
                     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
                     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
-                    output.uv = input.uv;
+                    output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
                     return output;
                 }
 
@@ -85,7 +88,7 @@ Shader "VividRP/Material/VirtualTextureDemo"
                     return saturate(0.2 + seed * 0.8);
                 }
 
-                float3 ResolveDebugColor(uint requestedMip, VTResolvedAddress resolved, float4 sampledColor)
+                float3 ResolveDebugColor(float requestedMipLevel, VTResolvedAddress resolved, float4 sampledColor)
                 {
                     if (_VTDebugMode == VirtualTextureDebugMode_Residency)
                     {
@@ -106,7 +109,7 @@ Shader "VividRP/Material/VirtualTextureDemo"
                         if (!resolved.valid)
                             return float3(1.0, 0.0, 1.0);
 
-                        float mipBias = saturate(abs((float)requestedMip - (float)resolved.resolvedMip) / max((float)VT_MIP_COUNT - 1.0, 1.0));
+                        float mipBias = saturate(abs(requestedMipLevel - (float)resolved.resolvedMip) / max((float)VT_MIP_COUNT - 1.0, 1.0));
                         return lerp(float3(0.1, 0.9, 0.2), float3(1.0, 0.15, 0.1), mipBias);
                     }
 
@@ -127,14 +130,26 @@ Shader "VividRP/Material/VirtualTextureDemo"
                     UNITY_SETUP_INSTANCE_ID(input);
                     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-                    uint requestedMip = VTComputeRequestedMip(input.uv);
-                    VTResolvedAddress resolved = VTResolveAddress(input.uv, requestedMip);
-                    VTWriteFallbackSample(resolved);
-                    if (!resolved.resident)
-                        VTWriteFeedback(input.uv, requestedMip);
+                    VTMipRange requestedMips = VTComputeRequestedMipRange(input.uv);
+                    VTResolvedAddress lowerResolved = VTResolveAddress(input.uv, requestedMips.lowerMip);
+                    VTResolvedAddress upperResolved = VTResolveAddress(input.uv, requestedMips.upperMip);
+                    bool resolvedMipsDiffer = !VTResolvedAddressMatches(lowerResolved, upperResolved);
 
-                    float4 sampledColor = VTSamplePhysicalCache(input.uv, resolved) * _BaseTint;
-                    sampledColor.rgb = ResolveDebugColor(requestedMip, resolved, sampledColor);
+                    VTWriteFallbackSample(lowerResolved);
+                    if (resolvedMipsDiffer)
+                        VTWriteFallbackSample(upperResolved);
+
+                    if (!lowerResolved.resident)
+                        VTWriteFeedback(input.uv, requestedMips.lowerMip);
+                    if (requestedMips.upperMip != requestedMips.lowerMip && !upperResolved.resident)
+                        VTWriteFeedback(input.uv, requestedMips.upperMip);
+
+                    float4 sampledColor = VTSamplePhysicalCacheTrilinear(
+                        input.uv,
+                        lowerResolved,
+                        upperResolved,
+                        requestedMips.blend) * _BaseTint;
+                    sampledColor.rgb = ResolveDebugColor(requestedMips.level, lowerResolved, sampledColor);
                     return sampledColor;
                 }
             ENDHLSL

@@ -10,11 +10,15 @@ namespace VividRP.Runtime
     {
         private const string DemoSurfaceName = "VT Demo Surface";
         private const string DemoShaderName = "VividRP/Material/VirtualTextureDemo";
+        private const string DefaultSourceTextureAssetPath = "Assets/vt/UVTest.jpg";
+        private static readonly int s_BaseMapId = Shader.PropertyToID("_BaseMap");
+        private static readonly int s_MainTexId = Shader.PropertyToID("_MainTex");
 
         private enum DemoProducerMode
         {
             CheckerSource = 0,
             ProceduralPageDebug = 1,
+            SourceTexture = 2,
         }
 
         [SerializeField]
@@ -45,7 +49,16 @@ namespace VividRP.Runtime
         private int m_FeedbackCapacity = 512;
 
         [SerializeField]
-        private DemoProducerMode m_ProducerMode = DemoProducerMode.CheckerSource;
+        private DemoProducerMode m_ProducerMode = DemoProducerMode.SourceTexture;
+
+        [SerializeField]
+        private Texture2D m_SourceTexture;
+
+        [SerializeField]
+        private string m_SourceTextureAssetPath = DefaultSourceTextureAssetPath;
+
+        [SerializeField]
+        private bool m_AutoSizeFromSourceTexture = true;
 
         [SerializeField]
         private bool m_CreateDemoSurface = true;
@@ -57,6 +70,7 @@ namespace VividRP.Runtime
         private MeshRenderer m_DemoRenderer;
 
         private Material m_RuntimeMaterial;
+        private VTTexture2DPageProducer m_TextureProducer;
         private int m_SpaceId;
 
         public int SpaceId => m_SpaceId;
@@ -69,12 +83,23 @@ namespace VividRP.Runtime
 
         private void OnValidate()
         {
+            if (!isActiveAndEnabled)
+                return;
+
             EnsureRegisteredSpace();
             EnsureDemoSurface();
         }
 
         private void OnDisable()
         {
+            if (m_SpaceId > 0)
+            {
+                VirtualTextureSystem.UnregisterAddressSpace(m_SpaceId);
+                m_SpaceId = 0;
+            }
+
+            m_TextureProducer = null;
+
             if (m_RuntimeMaterial != null)
             {
                 CoreUtils.Destroy(m_RuntimeMaterial);
@@ -147,17 +172,34 @@ namespace VividRP.Runtime
 
             if (m_DemoRenderer.sharedMaterial != m_RuntimeMaterial)
                 m_DemoRenderer.sharedMaterial = m_RuntimeMaterial;
+
+            SyncSourceTextureToMaterial();
         }
 
         private VirtualTextureSpaceDesc CreateDescriptor()
         {
+            int pageSize = Mathf.Max(16, m_PageSize);
+            int virtualPageCountX = Mathf.Max(1, m_VirtualPageCountX);
+            int virtualPageCountY = Mathf.Max(1, m_VirtualPageCountY);
+            int mipCount = Mathf.Max(1, m_MipCount);
+            Texture2D sourceTexture = ResolveSourceTexture();
+
+            if (m_ProducerMode == DemoProducerMode.SourceTexture
+                && m_AutoSizeFromSourceTexture
+                && sourceTexture != null)
+            {
+                virtualPageCountX = Mathf.Max(1, Mathf.CeilToInt(sourceTexture.width / (float)pageSize));
+                virtualPageCountY = Mathf.Max(1, Mathf.CeilToInt(sourceTexture.height / (float)pageSize));
+                mipCount = ComputeMipCount(virtualPageCountX, virtualPageCountY);
+            }
+
             return new VirtualTextureSpaceDesc(
                 string.IsNullOrWhiteSpace(m_SpaceName) ? "VT Demo Space" : m_SpaceName,
-                pageSize: Mathf.Max(16, m_PageSize),
+                pageSize: pageSize,
                 borderSize: Mathf.Max(0, m_BorderSize),
-                virtualPageCountX: Mathf.Max(1, m_VirtualPageCountX),
-                virtualPageCountY: Mathf.Max(1, m_VirtualPageCountY),
-                mipCount: Mathf.Max(1, m_MipCount),
+                virtualPageCountX: virtualPageCountX,
+                virtualPageCountY: virtualPageCountY,
+                mipCount: mipCount,
                 cachePageCount: Mathf.Max(2, m_CachePageCount),
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
@@ -166,9 +208,59 @@ namespace VividRP.Runtime
 
         private VTProducer ResolveProducer()
         {
-            return m_ProducerMode == DemoProducerMode.ProceduralPageDebug
-                ? VTProceduralPageProducer.Instance
-                : VTCheckerSourcePageProducer.Instance;
+            if (m_ProducerMode == DemoProducerMode.ProceduralPageDebug)
+                return VTProceduralPageProducer.Instance;
+
+            if (m_ProducerMode == DemoProducerMode.CheckerSource)
+                return VTCheckerSourcePageProducer.Instance;
+
+            Texture2D sourceTexture = ResolveSourceTexture();
+            if (sourceTexture == null)
+                return VTCheckerSourcePageProducer.Instance;
+
+            if (m_TextureProducer == null || !ReferenceEquals(m_TextureProducer.SourceTexture, sourceTexture))
+                m_TextureProducer = new VTTexture2DPageProducer(sourceTexture);
+
+            return m_TextureProducer;
+        }
+
+        private Texture2D ResolveSourceTexture()
+        {
+            if (m_SourceTexture != null)
+                return m_SourceTexture;
+
+#if UNITY_EDITOR
+            if (!string.IsNullOrWhiteSpace(m_SourceTextureAssetPath))
+                return UnityEditor.AssetDatabase.LoadAssetAtPath<Texture2D>(m_SourceTextureAssetPath);
+#endif
+
+            return null;
+        }
+
+        private void SyncSourceTextureToMaterial()
+        {
+            if (m_RuntimeMaterial == null)
+                return;
+
+            Texture2D sourceTexture = m_ProducerMode == DemoProducerMode.SourceTexture
+                ? ResolveSourceTexture()
+                : null;
+
+            if (m_RuntimeMaterial.HasProperty(s_BaseMapId))
+                m_RuntimeMaterial.SetTexture(s_BaseMapId, sourceTexture);
+
+            if (m_RuntimeMaterial.HasProperty(s_MainTexId))
+                m_RuntimeMaterial.SetTexture(s_MainTexId, sourceTexture);
+        }
+
+        private static int ComputeMipCount(int virtualPageCountX, int virtualPageCountY)
+        {
+            int maxPageCount = Mathf.Max(1, Mathf.Max(virtualPageCountX, virtualPageCountY));
+            int mipCount = 1;
+            while ((maxPageCount >>= 1) > 0 && mipCount < VirtualTextureFeedbackProcessor.MaxMipCount)
+                mipCount += 1;
+
+            return mipCount;
         }
     }
 }

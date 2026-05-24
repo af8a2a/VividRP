@@ -27,11 +27,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float _VTMipOffsets[VIVID_VT_MAX_MIPS];"));
             Assert.That(source, Does.Contain("int _VTDebugMode;"));
             Assert.That(source, Does.Contain("int _VTFeedbackEnabled;"));
+            Assert.That(source, Does.Contain("struct VTMipRange"));
             Assert.That(source, Does.Contain("float VTComputeRequestedMipLevel"));
             Assert.That(source, Does.Contain("uint VTComputeRequestedMip"));
+            Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRange"));
             Assert.That(source, Does.Contain("VTResolvedAddress VTResolveAddress"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVW"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCache"));
+            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheTrilinear"));
             Assert.That(source, Does.Contain("void VTWriteFeedback"));
         }
 
@@ -57,9 +60,14 @@ namespace VividRP.Editor.Tests
                 "VirtualTextureDemo.shader"));
 
             Assert.That(source, Does.Contain("Shader \"VividRP/Material/VirtualTextureDemo\""));
+            Assert.That(source, Does.Contain("[MainTexture] [Tex(SurfaceInputs, _BaseTint)] _BaseMap"));
+            Assert.That(source, Does.Contain("[HideInInspector] _MainTex"));
             Assert.That(source, Does.Contain("Tags { \"LightMode\" = \"VividVT\" }"));
             Assert.That(source, Does.Contain("#define VIVID_VT_ENABLE_FEEDBACK_RW 1"));
-            Assert.That(source, Does.Contain("VTComputeRequestedMip"));
+            Assert.That(source, Does.Contain("float4 _BaseMap_ST;"));
+            Assert.That(source, Does.Contain("output.uv = input.uv * _BaseMap_ST.xy + _BaseMap_ST.zw;"));
+            Assert.That(source, Does.Contain("VTComputeRequestedMipRange"));
+            Assert.That(source, Does.Contain("VTSamplePhysicalCacheTrilinear"));
             Assert.That(source, Does.Contain("VTWriteFeedback"));
         }
 

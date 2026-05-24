@@ -46,6 +46,14 @@ struct VTResolvedAddress
     bool valid;
 };
 
+struct VTMipRange
+{
+    float level;
+    uint lowerMip;
+    uint upperMip;
+    float blend;
+};
+
 uint VTGetPageCount(uint baseCount, uint mip)
 {
     return max(1u, baseCount >> mip);
@@ -91,7 +99,22 @@ float VTComputeRequestedMipLevel(float2 virtualUv)
 
 uint VTComputeRequestedMip(float2 virtualUv)
 {
-    return (uint)round(VTComputeRequestedMipLevel(virtualUv));
+    return (uint)floor(VTComputeRequestedMipLevel(virtualUv));
+}
+
+VTMipRange VTComputeRequestedMipRange(float2 virtualUv)
+{
+    float mipLevel = VTComputeRequestedMipLevel(virtualUv);
+    uint maxMip = (uint)max(VT_MIP_COUNT - 1, 0);
+    uint lowerMip = min((uint)floor(mipLevel), maxMip);
+    uint upperMip = min(lowerMip + 1u, maxMip);
+
+    VTMipRange range;
+    range.level = mipLevel;
+    range.lowerMip = lowerMip;
+    range.upperMip = upperMip;
+    range.blend = upperMip == lowerMip ? 0.0 : saturate(mipLevel - (float)lowerMip);
+    return range;
 }
 
 VTResolvedAddress VTResolveAddress(float2 virtualUv, uint requestedMip)
@@ -131,6 +154,37 @@ float4 VTSamplePhysicalCache(float2 virtualUv, VTResolvedAddress resolved)
 
     float3 uvw = VTComputePhysicalUVW(virtualUv, resolved);
     return SAMPLE_TEXTURE2D_ARRAY(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z);
+}
+
+bool VTResolvedAddressMatches(VTResolvedAddress left, VTResolvedAddress right)
+{
+    return left.valid == right.valid
+        && left.physicalPageId == right.physicalPageId
+        && left.resolvedMip == right.resolvedMip
+        && left.resident == right.resident
+        && left.fallback == right.fallback
+        && left.pendingUpload == right.pendingUpload
+        && left.locked == right.locked;
+}
+
+float4 VTSamplePhysicalCacheTrilinear(
+    float2 virtualUv,
+    VTResolvedAddress lowerResolved,
+    VTResolvedAddress upperResolved,
+    float mipBlend)
+{
+    if (VTResolvedAddressMatches(lowerResolved, upperResolved))
+        return VTSamplePhysicalCache(virtualUv, lowerResolved);
+
+    float4 lowerColor = VTSamplePhysicalCache(virtualUv, lowerResolved);
+    float4 upperColor = VTSamplePhysicalCache(virtualUv, upperResolved);
+
+    if (!lowerResolved.valid)
+        lowerColor = upperColor;
+    if (!upperResolved.valid)
+        upperColor = lowerColor;
+
+    return lerp(lowerColor, upperColor, saturate(mipBlend));
 }
 
 uint2 VTEncodeFeedbackKey(uint2 pageCoord, uint mip)

@@ -132,6 +132,69 @@ namespace VividRP.Editor.Tests
             Assert.That(third.PhysicalPageId, Is.EqualTo(first.PhysicalPageId));
         }
 
+        [Test]
+        public void Cache_PreservesActiveViewPages_WhenEvictingSharedCache()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("ViewAffinity", cachePageCount: 3));
+            var activeCameraObject = new GameObject("VTActiveAffinityCamera");
+            var backgroundCameraObject = new GameObject("VTBackgroundAffinityCamera");
+
+            try
+            {
+                Camera activeCamera = activeCameraObject.AddComponent<Camera>();
+                Camera backgroundCamera = backgroundCameraObject.AddComponent<Camera>();
+                var activeCoord = new VirtualTexturePageCoord(3, 0, 0);
+                var backgroundCoord = new VirtualTexturePageCoord(1, 0, 0);
+                var replacementCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+                VirtualTextureUploadRequest activePage = RequestPage(activeCamera, 1, spaceId, activeCoord);
+                VirtualTextureUploadRequest backgroundPage = RequestPage(backgroundCamera, 2, spaceId, backgroundCoord);
+                VirtualTextureUploadRequest replacement = GetLastPendingUpload(activeCamera, 3, spaceId, replacementCoord);
+
+                Assert.That(replacement.PhysicalPageId, Is.EqualTo(backgroundPage.PhysicalPageId));
+                Assert.That(replacement.PhysicalPageId, Is.Not.EqualTo(activePage.PhysicalPageId));
+            }
+            finally
+            {
+                Object.DestroyImmediate(activeCameraObject);
+                Object.DestroyImmediate(backgroundCameraObject);
+            }
+        }
+
+        [Test]
+        public void Cache_PreservesFocusedViewPages_WhenBackgroundCameraRenders()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FocusedViewAffinity", cachePageCount: 3));
+            var focusedCameraObject = new GameObject("VTFocusedAffinityCamera");
+            var backgroundCameraObject = new GameObject("VTBackgroundFocusedAffinityCamera");
+
+            try
+            {
+                Camera focusedCamera = focusedCameraObject.AddComponent<Camera>();
+                Camera backgroundCamera = backgroundCameraObject.AddComponent<Camera>();
+                var focusedCoord = new VirtualTexturePageCoord(3, 0, 0);
+                var backgroundCoord = new VirtualTexturePageCoord(1, 0, 0);
+                var replacementCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+                VirtualTextureStatsRegistry.SetFocusedViewOverrideForTesting(
+                    VirtualTextureViewId.FromCamera(focusedCamera),
+                    focusedCamera.cameraType);
+
+                VirtualTextureUploadRequest focusedPage = RequestPage(focusedCamera, 1, spaceId, focusedCoord);
+                VirtualTextureUploadRequest backgroundPage = RequestPage(backgroundCamera, 2, spaceId, backgroundCoord);
+                VirtualTextureUploadRequest replacement = GetLastPendingUpload(backgroundCamera, 3, spaceId, replacementCoord);
+
+                Assert.That(replacement.PhysicalPageId, Is.EqualTo(backgroundPage.PhysicalPageId));
+                Assert.That(replacement.PhysicalPageId, Is.Not.EqualTo(focusedPage.PhysicalPageId));
+            }
+            finally
+            {
+                VirtualTextureStatsRegistry.ClearFocusedViewOverrideForTesting();
+                Object.DestroyImmediate(focusedCameraObject);
+                Object.DestroyImmediate(backgroundCameraObject);
+            }
+        }
+
         private static VirtualTextureSpaceDesc CreateDesc(string name, int cachePageCount)
         {
             return new VirtualTextureSpaceDesc(
@@ -154,9 +217,32 @@ namespace VividRP.Editor.Tests
             return request;
         }
 
+        private static VirtualTextureUploadRequest RequestPage(
+            Camera camera,
+            int frameIndex,
+            int spaceId,
+            VirtualTexturePageCoord coord)
+        {
+            VirtualTextureUploadRequest request = GetLastPendingUpload(camera, frameIndex, spaceId, coord);
+            Assert.That(VirtualTextureSystem.CommitUpload(request), Is.True);
+            return request;
+        }
+
         private static VirtualTextureUploadRequest GetLastPendingUpload(int spaceId, VirtualTexturePageCoord coord)
         {
             IssueFeedback(spaceId, coord);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests.Count, Is.GreaterThan(0));
+            return requests.Last();
+        }
+
+        private static VirtualTextureUploadRequest GetLastPendingUpload(
+            Camera camera,
+            int frameIndex,
+            int spaceId,
+            VirtualTexturePageCoord coord)
+        {
+            IssueFeedback(camera, frameIndex, spaceId, coord);
             Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
             Assert.That(requests.Count, Is.GreaterThan(0));
             return requests.Last();
@@ -178,6 +264,44 @@ namespace VividRP.Editor.Tests
             {
                 commandBuffer.Dispose();
             }
+        }
+
+        private static void IssueFeedback(
+            Camera camera,
+            int frameIndex,
+            int spaceId,
+            params VirtualTexturePageCoord[] coords)
+        {
+            var commandBuffer = new CommandBuffer();
+            ContextContainer frameData = CreateFrameData(camera, frameIndex);
+
+            try
+            {
+                foreach (VirtualTexturePageCoord coord in coords)
+                    VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                        camera,
+                        VirtualTextureFeedbackProcessor.EncodeKey(spaceId, coord));
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        private static ContextContainer CreateFrameData(Camera camera, int frameIndex)
+        {
+            var frameData = new ContextContainer();
+            VividCameraData cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.camera = camera;
+            cameraData.actualWidth = 512;
+            cameraData.actualHeight = 512;
+            cameraData.pixelWidth = 512;
+            cameraData.pixelHeight = 512;
+            cameraData.pixelRect = new Rect(0f, 0f, 512f, 512f);
+            cameraData.frameIndex = frameIndex;
+            return frameData;
         }
     }
 }

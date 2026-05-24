@@ -42,6 +42,72 @@ namespace VividRP.Runtime
         }
     }
 
+    internal readonly struct VirtualTextureViewId : IEquatable<VirtualTextureViewId>
+    {
+        internal static readonly VirtualTextureViewId Invalid = new(EntityId.None, default, false);
+
+        internal VirtualTextureViewId(EntityId cameraId, CameraType cameraType)
+            : this(cameraId, cameraType, false)
+        {
+        }
+
+        private VirtualTextureViewId(EntityId cameraId, CameraType cameraType, bool isCameraTypeOnly)
+        {
+            CameraId = cameraId;
+            CameraType = cameraType;
+            m_IsCameraTypeOnly = isCameraTypeOnly && SupportsCameraTypeOnly(cameraType);
+        }
+
+        private readonly bool m_IsCameraTypeOnly;
+
+        internal EntityId CameraId { get; }
+
+        internal CameraType CameraType { get; }
+
+        internal bool IsValid => !CameraId.Equals(EntityId.None);
+
+        internal bool IsCameraTypeOnly => !IsValid && m_IsCameraTypeOnly;
+
+        internal static VirtualTextureViewId FromCamera(Camera camera)
+        {
+            return camera != null
+                ? new VirtualTextureViewId(camera.GetEntityId(), camera.cameraType)
+                : Invalid;
+        }
+
+        internal static VirtualTextureViewId FromCameraType(CameraType cameraType)
+        {
+            return new VirtualTextureViewId(EntityId.None, cameraType, true);
+        }
+
+        public bool Equals(VirtualTextureViewId other)
+        {
+            return CameraId.Equals(other.CameraId)
+                   && CameraType == other.CameraType
+                   && m_IsCameraTypeOnly == other.m_IsCameraTypeOnly;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VirtualTextureViewId other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(CameraId, CameraType, m_IsCameraTypeOnly);
+        }
+
+        public override string ToString()
+        {
+            return IsValid ? $"{CameraType}:{CameraId}" : $"{CameraType}:<none>";
+        }
+
+        private static bool SupportsCameraTypeOnly(CameraType cameraType)
+        {
+            return cameraType == CameraType.Game || cameraType == CameraType.SceneView;
+        }
+    }
+
     public readonly struct VirtualTextureUploadRequest : IEquatable<VirtualTextureUploadRequest>
     {
         private readonly VTRequest m_Request;
@@ -346,11 +412,48 @@ namespace VividRP.Runtime
         internal int LastReadbackFrame => m_Stats.LastReadbackFrame;
 
         internal string StatusMessage => m_Stats.StatusMessage;
+
+        internal VirtualTextureViewId ViewId => m_Stats.ViewId;
+
+        internal CameraType CameraType => m_Stats.CameraType;
+
+        internal string CameraName => m_Stats.CameraName;
+
+        internal int CameraFrameIndex => m_Stats.CameraFrameIndex;
+
+        internal int ActualWidth => m_Stats.ActualWidth;
+
+        internal int ActualHeight => m_Stats.ActualHeight;
+
+        internal int PixelWidth => m_Stats.PixelWidth;
+
+        internal int PixelHeight => m_Stats.PixelHeight;
+
+        internal bool FeedbackSupported => m_Stats.FeedbackSupported;
+
+        internal int FeedbackCapacity => m_Stats.FeedbackCapacity;
+
+        internal bool IsViewSpecific => m_Stats.IsViewSpecific;
+
+        internal string ViewLabel => m_Stats.ViewLabel;
+
+        internal string RenderSizeLabel => m_Stats.RenderSizeLabel;
+
+        internal string PixelSizeLabel => m_Stats.PixelSizeLabel;
     }
 
     internal static class VirtualTextureStatsRegistry
     {
         internal static VirtualTextureStats LastStats => new(VTDebugStatsRegistry.LastStats);
+
+        internal static VirtualTextureStats DisplayStats => new(VTDebugStatsRegistry.DisplayStats);
+
+        internal static VirtualTextureStats GetDisplayStats(
+            VirtualTextureStatsViewMode viewMode,
+            Camera selectedCamera)
+        {
+            return new VirtualTextureStats(VTDebugStatsRegistry.GetDisplayStats(viewMode, selectedCamera));
+        }
 
         internal static void Report(VirtualTextureStats stats)
         {
@@ -362,9 +465,26 @@ namespace VividRP.Runtime
             VTDebugStatsRegistry.Report(stats);
         }
 
+        internal static void ReportView(in VTDebugStats stats)
+        {
+            VTDebugStatsRegistry.ReportView(stats);
+        }
+
         internal static void Clear()
         {
             VTDebugStatsRegistry.Clear();
+        }
+
+        internal static void SetFocusedViewOverrideForTesting(
+            VirtualTextureViewId viewId,
+            CameraType cameraType)
+        {
+            VTDebugStatsRegistry.SetFocusedViewOverrideForTesting(viewId, cameraType);
+        }
+
+        internal static void ClearFocusedViewOverrideForTesting()
+        {
+            VTDebugStatsRegistry.ClearFocusedViewOverrideForTesting();
         }
     }
 

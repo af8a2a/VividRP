@@ -115,6 +115,12 @@ namespace VividRP.Runtime
         [SerializeField]
         private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
 
+        [SerializeField]
+        private VirtualTextureStatsViewMode m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
+
+        [NonSerialized]
+        private Camera m_VirtualTextureStatsCamera;
+
         internal TileClusterDebug tileClusterDebug
         {
             get => m_TileClusterDebug;
@@ -259,6 +265,18 @@ namespace VividRP.Runtime
             set => m_VirtualTextureVisualizationMode = value;
         }
 
+        internal VirtualTextureStatsViewMode virtualTextureStatsViewMode
+        {
+            get => m_VirtualTextureStatsViewMode;
+            set => m_VirtualTextureStatsViewMode = value;
+        }
+
+        internal Camera virtualTextureStatsCamera
+        {
+            get => m_VirtualTextureStatsCamera;
+            set => m_VirtualTextureStatsCamera = value;
+        }
+
         public bool AreAnySettingsActive =>
             m_TileClusterDebug != TileClusterDebug.None
             || tileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
@@ -283,7 +301,9 @@ namespace VividRP.Runtime
             || m_ForceMeshletCullingFromMainCamera
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
-            || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings;
+            || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings
+            || m_VirtualTextureStatsViewMode != VirtualTextureStatsViewMode.Auto
+            || m_VirtualTextureStatsCamera != null;
 
         public IDebugDisplaySettingsPanelDisposable CreatePanel()
         {
@@ -316,6 +336,8 @@ namespace VividRP.Runtime
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
+            m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
+            m_VirtualTextureStatsCamera = null;
         }
 
         private static TileClusterCategoryDebug NormalizeTileClusterCategory(TileClusterCategoryDebug value)
@@ -484,6 +506,18 @@ namespace VividRP.Runtime
             {
                 name = "Overlay Mode",
                 tooltip = "Override the virtual texture visualization pass mode, or keep the pass-defined setting."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureStatsViewMode = new()
+            {
+                name = "Stats Source",
+                tooltip = "Select which camera view supplies the virtual texture statistics."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureStatsCamera = new()
+            {
+                name = "Stats Camera",
+                tooltip = "Camera used when the virtual texture stats source is set to Selected Camera."
             };
         }
 
@@ -732,27 +766,51 @@ namespace VividRP.Runtime
                     Strings.VirtualTextureVisualizationMode,
                     () => data.virtualTextureVisualizationMode,
                     value => data.virtualTextureVisualizationMode = value));
-                foldout.children.Add(CreateStatsValue("Resident Pages", () => VirtualTextureStatsRegistry.LastStats.ResidentPageCount));
-                foldout.children.Add(CreateStatsValue("Free Pages", () => VirtualTextureStatsRegistry.LastStats.FreePageCount));
-                foldout.children.Add(CreateStatsValue("Pending Uploads", () => VirtualTextureStatsRegistry.LastStats.PendingUploadCount));
-                foldout.children.Add(CreateStatsValue("Evictions", () => VirtualTextureStatsRegistry.LastStats.EvictionCount));
-                foldout.children.Add(CreateStatsValue("Faults", () => VirtualTextureStatsRegistry.LastStats.FaultCount));
-                foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => VirtualTextureStatsRegistry.LastStats.DeduplicatedRequestCount));
-                foldout.children.Add(CreateStatsValue("Feedback Overflow", () => VirtualTextureStatsRegistry.LastStats.FeedbackOverflowCount));
-                foldout.children.Add(CreateStatsValue("In-Flight Upload Batches", () => VirtualTextureStatsRegistry.LastStats.InFlightUploadBatchCount));
-                foldout.children.Add(CreateStatsValue("Duplicate Uploads", () => VirtualTextureStatsRegistry.LastStats.DuplicateUploadCount));
-                foldout.children.Add(CreateStatsValue("Skipped Uploads", () => VirtualTextureStatsRegistry.LastStats.SkippedUploadCount));
-                foldout.children.Add(CreateStatsValue("Fallback Samples", () => VirtualTextureStatsRegistry.LastStats.FallbackSampleCount));
+                foldout.children.Add(CreateEnumField(
+                    Strings.VirtualTextureStatsViewMode,
+                    () => data.virtualTextureStatsViewMode,
+                    value => data.virtualTextureStatsViewMode = value));
+                foldout.children.Add(CreateVirtualTextureStatsCameraSelector(data));
+                foldout.children.Add(CreateStatsValue("View", () => GetVirtualTextureDisplayStats(data).ViewLabel));
+                foldout.children.Add(CreateStatsValue("Camera Frame", () => FormatFrameIndex(GetVirtualTextureDisplayStats(data).CameraFrameIndex)));
+                foldout.children.Add(CreateStatsValue("Last Readback Frame", () => FormatFrameIndex(GetVirtualTextureDisplayStats(data).LastReadbackFrame)));
+                foldout.children.Add(CreateStatsValue("Render Size", () => GetVirtualTextureDisplayStats(data).RenderSizeLabel));
+                foldout.children.Add(CreateStatsValue("Pixel Size", () => GetVirtualTextureDisplayStats(data).PixelSizeLabel));
+                foldout.children.Add(CreateStatsValue("Feedback Supported", () => GetVirtualTextureDisplayStats(data).FeedbackSupported));
+                foldout.children.Add(CreateStatsValue("Feedback Capacity", () => GetVirtualTextureDisplayStats(data).FeedbackCapacity));
+                foldout.children.Add(CreateStatsValue("Resident Pages", () => GetVirtualTextureDisplayStats(data).ResidentPageCount));
+                foldout.children.Add(CreateStatsValue("Free Pages", () => GetVirtualTextureDisplayStats(data).FreePageCount));
+                foldout.children.Add(CreateStatsValue("Pending Uploads", () => GetVirtualTextureDisplayStats(data).PendingUploadCount));
+                foldout.children.Add(CreateStatsValue("Evictions", () => GetVirtualTextureDisplayStats(data).EvictionCount));
+                foldout.children.Add(CreateStatsValue("Faults", () => GetVirtualTextureDisplayStats(data).FaultCount));
+                foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => GetVirtualTextureDisplayStats(data).DeduplicatedRequestCount));
+                foldout.children.Add(CreateStatsValue("Feedback Overflow", () => GetVirtualTextureDisplayStats(data).FeedbackOverflowCount));
+                foldout.children.Add(CreateStatsValue("In-Flight Upload Batches", () => GetVirtualTextureDisplayStats(data).InFlightUploadBatchCount));
+                foldout.children.Add(CreateStatsValue("Duplicate Uploads", () => GetVirtualTextureDisplayStats(data).DuplicateUploadCount));
+                foldout.children.Add(CreateStatsValue("Skipped Uploads", () => GetVirtualTextureDisplayStats(data).SkippedUploadCount));
+                foldout.children.Add(CreateStatsValue("Fallback Samples", () => GetVirtualTextureDisplayStats(data).FallbackSampleCount));
                 foldout.children.Add(new DebugUI.Value
                 {
                     displayName = "Status",
                     getter = () =>
                     {
-                        string status = VirtualTextureStatsRegistry.LastStats.StatusMessage;
+                        string status = GetVirtualTextureDisplayStats(data).StatusMessage;
                         return string.IsNullOrEmpty(status) ? "OK" : status;
                     },
                 });
                 return foldout;
+            }
+
+            private static DebugUI.CameraSelector CreateVirtualTextureStatsCameraSelector(
+                VividRenderingDebugSettingsData data)
+            {
+                return new DebugUI.CameraSelector
+                {
+                    nameAndTooltip = Strings.VirtualTextureStatsCamera,
+                    getter = () => data.virtualTextureStatsCamera,
+                    setter = value => data.virtualTextureStatsCamera = value as Camera,
+                    isHiddenCallback = () => data.virtualTextureStatsViewMode != VirtualTextureStatsViewMode.SelectedCamera,
+                };
             }
 
             private static DebugUI.EnumField CreateEnumField<TEnum>(
@@ -770,6 +828,19 @@ namespace VividRP.Runtime
                     getIndex = () => Convert.ToInt32(getter()),
                     setIndex = value => setter((TEnum)Enum.ToObject(typeof(TEnum), value)),
                 };
+            }
+
+            private static object FormatFrameIndex(int frameIndex)
+            {
+                return frameIndex >= 0 ? frameIndex : "N/A";
+            }
+
+            private static VirtualTextureStats GetVirtualTextureDisplayStats(
+                VividRenderingDebugSettingsData data)
+            {
+                return VirtualTextureStatsRegistry.GetDisplayStats(
+                    data.virtualTextureStatsViewMode,
+                    data.virtualTextureStatsCamera);
             }
 
             private static DebugUI.Value CreateStatsValue(string displayName, Func<object> getter)

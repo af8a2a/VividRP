@@ -57,7 +57,11 @@ namespace VividRP.Runtime
 
         internal int[] MipOffsets => m_MipOffsets;
 
-        internal int ProcessRequests(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests, int frameIndex, CommandBuffer cmd)
+        internal int ProcessRequests(
+            IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
+            VirtualTextureViewId activeViewId,
+            int frameIndex,
+            CommandBuffer cmd)
         {
             bool pageTableChanged = m_UploadScheduler.CommitCompletedUploads(this);
 
@@ -66,6 +70,7 @@ namespace VividRP.Runtime
                 m_MipOffsets,
                 SpaceId,
                 requests,
+                activeViewId,
                 frameIndex);
 
             pageTableChanged |= result.PageTableChanged;
@@ -147,6 +152,7 @@ namespace VividRP.Runtime
                                 m_MipOffsets,
                                 SpaceId,
                                 coord,
+                                VirtualTextureViewId.Invalid,
                                 frameIndex: 0,
                                 locked: true,
                                 out VTRequest request))

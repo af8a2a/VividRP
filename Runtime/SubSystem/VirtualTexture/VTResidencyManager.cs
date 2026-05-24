@@ -67,6 +67,8 @@ namespace VividRP.Runtime
             public int VirtualPageIndex;
             public int Generation;
             public int LastAllocationFrame;
+            public VirtualTextureViewId AffinityViewId;
+            public int LastAffinityFrame;
         }
 
         private readonly VTPageRuntimeState[] m_PageStates;
@@ -95,7 +97,11 @@ namespace VividRP.Runtime
 
             m_PhysicalSlots = new VTPhysicalPageSlotState[desc.CachePageCount];
             for (int slotIndex = 0; slotIndex < m_PhysicalSlots.Length; slotIndex++)
+            {
                 m_PhysicalSlots[slotIndex].VirtualPageIndex = -1;
+                m_PhysicalSlots[slotIndex].AffinityViewId = VirtualTextureViewId.Invalid;
+                m_PhysicalSlots[slotIndex].LastAffinityFrame = -1;
+            }
 
             m_LruNodes = new LinkedListNode<int>[desc.CachePageCount];
             m_FreePhysicalPages = new Stack<int>(desc.CachePageCount);
@@ -132,6 +138,7 @@ namespace VividRP.Runtime
             int[] mipOffsets,
             int spaceId,
             in VirtualTexturePageCoord coord,
+            VirtualTextureViewId viewId,
             int frameIndex,
             bool locked,
             out VTRequest request)
@@ -151,6 +158,7 @@ namespace VividRP.Runtime
                     pageState.Generation,
                     int.MaxValue,
                     frameIndex);
+                TouchPhysicalPage(pageState.PhysicalPageId, viewId, frameIndex, viewId.IsValid);
                 return true;
             }
 
@@ -161,6 +169,9 @@ namespace VividRP.Runtime
                     desc,
                     mipOffsets,
                     pageIndex,
+                    viewId,
+                    viewId,
+                    viewId.IsValid,
                     frameIndex,
                     out int physicalPageId,
                     out int generation,
@@ -177,7 +188,7 @@ namespace VividRP.Runtime
             pageState.Locked = locked;
             m_PageStates[pageIndex] = pageState;
             m_ResidentPageCount += 1;
-            TouchPhysicalPage(physicalPageId);
+            TouchPhysicalPage(physicalPageId, viewId, frameIndex, viewId.IsValid);
             request = new VTRequest(
                 spaceId,
                 coord,
@@ -193,6 +204,7 @@ namespace VividRP.Runtime
             int[] mipOffsets,
             int spaceId,
             IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
+            VirtualTextureViewId activeViewId,
             int frameIndex)
         {
             int evictionCount = 0;
@@ -212,13 +224,24 @@ namespace VividRP.Runtime
                 VTPageRuntimeState pageState = m_PageStates[pageIndex];
                 if (pageState.Resident)
                 {
-                    TouchPhysicalPage(pageState.PhysicalPageId);
+                    TouchPhysicalPage(
+                        pageState.PhysicalPageId,
+                        request.ViewId,
+                        frameIndex,
+                        request.IsActiveView);
                     continue;
                 }
 
                 if (pageState.PendingUpload)
                 {
-                    UpdatePendingRequestPriority(desc, mipOffsets, pageIndex, request.HitCount, frameIndex);
+                    UpdatePendingRequestPriority(
+                        desc,
+                        mipOffsets,
+                        pageIndex,
+                        request.HitCount,
+                        request.ViewId,
+                        request.IsActiveView,
+                        frameIndex);
                     continue;
                 }
 
@@ -229,6 +252,9 @@ namespace VividRP.Runtime
                         desc,
                         mipOffsets,
                         pageIndex,
+                        activeViewId,
+                        request.ViewId,
+                        request.IsActiveView,
                         frameIndex,
                         out int physicalPageId,
                         out int generation,
@@ -280,7 +306,11 @@ namespace VividRP.Runtime
             m_PageStates[pageIndex] = pageState;
             m_ResidentPageCount += 1;
             RemovePendingRequest(pageIndex, request.Generation, desc, mipOffsets);
-            TouchPhysicalPage(pageState.PhysicalPageId);
+            TouchPhysicalPage(
+                pageState.PhysicalPageId,
+                VirtualTextureViewId.Invalid,
+                request.RequestFrame,
+                updateAffinity: false);
             return true;
         }
 
@@ -329,6 +359,9 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
             int pageIndex,
+            VirtualTextureViewId activeViewId,
+            VirtualTextureViewId allocationViewId,
+            bool updateAffinity,
             int frameIndex,
             out int physicalPageId,
             out int generation,
@@ -344,7 +377,7 @@ namespace VividRP.Runtime
             }
             else
             {
-                physicalPageId = FindEvictionCandidate(frameIndex);
+                physicalPageId = FindEvictionCandidate(frameIndex, activeViewId);
                 if (physicalPageId < 0)
                     return false;
 
@@ -357,7 +390,7 @@ namespace VividRP.Runtime
             slotState.Generation = generation;
             slotState.LastAllocationFrame = frameIndex;
             m_PhysicalSlots[physicalPageId] = slotState;
-            TouchPhysicalPage(physicalPageId);
+            TouchPhysicalPage(physicalPageId, allocationViewId, frameIndex, updateAffinity);
             return true;
         }
 
@@ -380,14 +413,18 @@ namespace VividRP.Runtime
 
             slotState.VirtualPageIndex = -1;
             slotState.LastAllocationFrame = -1;
+            slotState.AffinityViewId = VirtualTextureViewId.Invalid;
+            slotState.LastAffinityFrame = -1;
             m_PhysicalSlots[physicalPageId] = slotState;
             return true;
         }
 
-        private int FindEvictionCandidate(int frameIndex)
+        private int FindEvictionCandidate(int frameIndex, VirtualTextureViewId activeViewId)
         {
             int candidatePhysicalPageId = -1;
             int candidateMip = int.MaxValue;
+            int fallbackPhysicalPageId = -1;
+            int fallbackMip = int.MaxValue;
 
             LinkedListNode<int> node = m_LruPhysicalPages.First;
             while (node != null)
@@ -403,6 +440,19 @@ namespace VividRP.Runtime
                 int pageMip = pageIndex >= 0 && pageIndex < m_PageMips.Length
                     ? m_PageMips[pageIndex]
                     : int.MaxValue;
+
+                if (fallbackPhysicalPageId < 0 || pageMip < fallbackMip)
+                {
+                    fallbackPhysicalPageId = physicalPageId;
+                    fallbackMip = pageMip;
+                }
+
+                if (IsProtectedByActiveViewAffinity(physicalPageId, activeViewId))
+                {
+                    node = node.Next;
+                    continue;
+                }
+
                 if (candidatePhysicalPageId < 0 || pageMip < candidateMip)
                 {
                     candidatePhysicalPageId = physicalPageId;
@@ -414,7 +464,7 @@ namespace VividRP.Runtime
                 node = node.Next;
             }
 
-            return candidatePhysicalPageId;
+            return candidatePhysicalPageId >= 0 ? candidatePhysicalPageId : fallbackPhysicalPageId;
         }
 
         private bool CanEvict(int physicalPageId, int frameIndex)
@@ -430,10 +480,42 @@ namespace VividRP.Runtime
             return !pageState.PendingUpload && !pageState.Locked;
         }
 
-        private void TouchPhysicalPage(int physicalPageId)
+        private bool IsProtectedByActiveViewAffinity(
+            int physicalPageId,
+            VirtualTextureViewId activeViewId)
+        {
+            if ((!activeViewId.IsValid && !activeViewId.IsCameraTypeOnly)
+                || physicalPageId < 0
+                || physicalPageId >= m_PhysicalSlots.Length)
+            {
+                return false;
+            }
+
+            VTPhysicalPageSlotState slotState = m_PhysicalSlots[physicalPageId];
+            if (slotState.LastAffinityFrame < 0)
+                return false;
+
+            return activeViewId.IsValid
+                ? slotState.AffinityViewId.Equals(activeViewId)
+                : slotState.AffinityViewId.CameraType == activeViewId.CameraType;
+        }
+
+        private void TouchPhysicalPage(
+            int physicalPageId,
+            VirtualTextureViewId viewId,
+            int frameIndex,
+            bool updateAffinity)
         {
             if (physicalPageId < 0 || physicalPageId >= m_LruNodes.Length)
                 return;
+
+            if (updateAffinity && viewId.IsValid)
+            {
+                VTPhysicalPageSlotState slotState = m_PhysicalSlots[physicalPageId];
+                slotState.AffinityViewId = viewId;
+                slotState.LastAffinityFrame = frameIndex;
+                m_PhysicalSlots[physicalPageId] = slotState;
+            }
 
             LinkedListNode<int> node = m_LruNodes[physicalPageId];
             if (node == null)
@@ -456,6 +538,8 @@ namespace VividRP.Runtime
             int[] mipOffsets,
             int pageIndex,
             int priority,
+            VirtualTextureViewId viewId,
+            bool updateAffinity,
             int frameIndex)
         {
             for (int requestIndex = 0; requestIndex < m_PendingRequests.Count; requestIndex++)
@@ -464,6 +548,7 @@ namespace VividRP.Runtime
                 if (VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord) != pageIndex)
                     continue;
 
+                TouchPhysicalPage(request.PhysicalPageId, viewId, frameIndex, updateAffinity);
                 if (priority <= request.Priority)
                     return;
 

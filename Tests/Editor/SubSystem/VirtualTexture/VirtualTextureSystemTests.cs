@@ -143,6 +143,81 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_PrioritizesActiveViewFeedback_WhenBackgroundViewHasMoreHits()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("ActiveViewPriority", cachePageCount: 4, maxUploadsPerFrame: 1));
+            ulong activeViewRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            ulong backgroundViewRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(1, 0, 0));
+
+            var activeCameraObject = new GameObject("VTActiveViewCamera");
+            var backgroundCameraObject = new GameObject("VTBackgroundViewCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera activeCamera = activeCameraObject.AddComponent<Camera>();
+                Camera backgroundCamera = backgroundCameraObject.AddComponent<Camera>();
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    backgroundCamera,
+                    backgroundViewRequest,
+                    backgroundViewRequest,
+                    backgroundViewRequest);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(activeCamera, activeViewRequest);
+
+                VirtualTextureSystem.Update(CreateFrameData(activeCamera, frameIndex: 29), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+                Assert.That(requests.Count, Is.EqualTo(1));
+                Assert.That(requests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
+                Assert.That(requests[0].Priority, Is.EqualTo(1));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(activeCameraObject);
+                Object.DestroyImmediate(backgroundCameraObject);
+            }
+        }
+
+        [Test]
+        public void Update_DefersBackgroundViewFeedback_UntilBackgroundCameraRenders()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("ViewFeedbackIsolation", cachePageCount: 4, maxUploadsPerFrame: 2));
+            ulong backgroundViewRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(1, 0, 0));
+
+            var activeCameraObject = new GameObject("VTActiveIsolationCamera");
+            var backgroundCameraObject = new GameObject("VTBackgroundIsolationCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera activeCamera = activeCameraObject.AddComponent<Camera>();
+                Camera backgroundCamera = backgroundCameraObject.AddComponent<Camera>();
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(backgroundCamera, backgroundViewRequest);
+                VirtualTextureSystem.Update(CreateFrameData(activeCamera, frameIndex: 31), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var activeRequests), Is.True);
+                Assert.That(activeRequests.Count, Is.EqualTo(0));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(0));
+
+                VirtualTextureSystem.Update(CreateFrameData(backgroundCamera, frameIndex: 32), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var backgroundRequests), Is.True);
+                Assert.That(backgroundRequests.Count, Is.EqualTo(1));
+                Assert.That(backgroundRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(activeCameraObject);
+                Object.DestroyImmediate(backgroundCameraObject);
+            }
+        }
+
+        [Test]
         public void Update_ReportsFeedbackOverflowAndFallbackSamples_WhenReadbackCountersIncludeDebugValues()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FeedbackCounters", cachePageCount: 2, maxUploadsPerFrame: 1));
@@ -167,6 +242,130 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.FaultCount, Is.EqualTo(1));
             Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(3));
             Assert.That(stats.FallbackSampleCount, Is.EqualTo(11));
+        }
+
+        [Test]
+        public void DisplayStats_UsesFocusedViewSnapshot_WhenLastRenderedCameraDiffers()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FocusedStats", cachePageCount: 4, maxUploadsPerFrame: 2));
+            ulong focusedRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            ulong backgroundRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(1, 0, 0));
+
+            var focusedCameraObject = new GameObject("VTFocusedStatsCamera");
+            var backgroundCameraObject = new GameObject("VTBackgroundStatsCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera focusedCamera = focusedCameraObject.AddComponent<Camera>();
+                Camera backgroundCamera = backgroundCameraObject.AddComponent<Camera>();
+
+                VirtualTextureStatsRegistry.SetFocusedViewOverrideForTesting(
+                    VirtualTextureViewId.FromCamera(focusedCamera),
+                    focusedCamera.cameraType);
+
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    focusedCamera,
+                    1,
+                    3,
+                    focusedRequest);
+                VirtualTextureSystem.Update(CreateFrameData(focusedCamera, frameIndex: 41), commandBuffer);
+
+                VirtualTextureStats focusedStats = VirtualTextureStatsRegistry.DisplayStats;
+                Assert.That(focusedStats.ViewId, Is.EqualTo(VirtualTextureViewId.FromCamera(focusedCamera)));
+                Assert.That(focusedStats.ViewLabel, Does.Contain("VTFocusedStatsCamera"));
+                Assert.That(focusedStats.CameraFrameIndex, Is.EqualTo(41));
+                Assert.That(focusedStats.RenderSizeLabel, Is.EqualTo("512 x 512"));
+                Assert.That(focusedStats.PixelSizeLabel, Is.EqualTo("512 x 512"));
+                Assert.That(focusedStats.FeedbackSupported, Is.True);
+                Assert.That(focusedStats.FeedbackCapacity, Is.EqualTo(32));
+                Assert.That(focusedStats.FaultCount, Is.EqualTo(1));
+                Assert.That(focusedStats.DeduplicatedRequestCount, Is.EqualTo(1));
+                Assert.That(focusedStats.FeedbackOverflowCount, Is.EqualTo(1));
+                Assert.That(focusedStats.FallbackSampleCount, Is.EqualTo(3));
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    backgroundCamera,
+                    backgroundRequest,
+                    backgroundRequest);
+                VirtualTextureSystem.Update(CreateFrameData(backgroundCamera, frameIndex: 42), commandBuffer);
+
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(2));
+
+                VirtualTextureStats displayStats = VirtualTextureStatsRegistry.DisplayStats;
+                Assert.That(displayStats.ViewId, Is.EqualTo(VirtualTextureViewId.FromCamera(focusedCamera)));
+                Assert.That(displayStats.CameraFrameIndex, Is.EqualTo(41));
+                Assert.That(displayStats.FaultCount, Is.EqualTo(1));
+                Assert.That(displayStats.FallbackSampleCount, Is.EqualTo(3));
+            }
+            finally
+            {
+                VirtualTextureStatsRegistry.ClearFocusedViewOverrideForTesting();
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(focusedCameraObject);
+                Object.DestroyImmediate(backgroundCameraObject);
+            }
+        }
+
+        [Test]
+        public void DisplayStats_UsesSelectedCameraSnapshot_WhenStatsSourceIsSelectedCamera()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("SelectedStats", cachePageCount: 4, maxUploadsPerFrame: 2));
+            ulong selectedRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            ulong backgroundRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(1, 0, 0));
+
+            var selectedCameraObject = new GameObject("VTSelectedStatsCamera");
+            var backgroundCameraObject = new GameObject("VTSelectedStatsBackgroundCamera");
+            var unrenderedCameraObject = new GameObject("VTSelectedStatsUnrenderedCamera");
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Camera selectedCamera = selectedCameraObject.AddComponent<Camera>();
+                Camera backgroundCamera = backgroundCameraObject.AddComponent<Camera>();
+                Camera unrenderedCamera = unrenderedCameraObject.AddComponent<Camera>();
+
+                VirtualTextureSystem.InjectCompletedReadbackStatsForTesting(
+                    selectedCamera,
+                    2,
+                    5,
+                    selectedRequest);
+                VirtualTextureSystem.Update(CreateFrameData(selectedCamera, frameIndex: 51), commandBuffer);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    backgroundCamera,
+                    backgroundRequest,
+                    backgroundRequest);
+                VirtualTextureSystem.Update(CreateFrameData(backgroundCamera, frameIndex: 52), commandBuffer);
+
+                VirtualTextureStats globalStats = VirtualTextureStatsRegistry.GetDisplayStats(
+                    VirtualTextureStatsViewMode.Global,
+                    null);
+                Assert.That(globalStats.FaultCount, Is.EqualTo(2));
+
+                VirtualTextureStats selectedStats = VirtualTextureStatsRegistry.GetDisplayStats(
+                    VirtualTextureStatsViewMode.SelectedCamera,
+                    selectedCamera);
+                Assert.That(selectedStats.ViewId, Is.EqualTo(VirtualTextureViewId.FromCamera(selectedCamera)));
+                Assert.That(selectedStats.ViewLabel, Does.Contain("VTSelectedStatsCamera"));
+                Assert.That(selectedStats.CameraFrameIndex, Is.EqualTo(51));
+                Assert.That(selectedStats.FaultCount, Is.EqualTo(1));
+                Assert.That(selectedStats.FeedbackOverflowCount, Is.EqualTo(2));
+                Assert.That(selectedStats.FallbackSampleCount, Is.EqualTo(5));
+
+                VirtualTextureStats unavailableStats = VirtualTextureStatsRegistry.GetDisplayStats(
+                    VirtualTextureStatsViewMode.SelectedCamera,
+                    unrenderedCamera);
+                Assert.That(unavailableStats.ViewLabel, Does.Contain("VTSelectedStatsUnrenderedCamera"));
+                Assert.That(unavailableStats.StatusMessage, Does.Contain("No VT stats"));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+                Object.DestroyImmediate(selectedCameraObject);
+                Object.DestroyImmediate(backgroundCameraObject);
+                Object.DestroyImmediate(unrenderedCameraObject);
+            }
         }
 
         [Test]
@@ -347,7 +546,8 @@ namespace VividRP.Editor.Tests
 
             Assert.That(systemSource, Does.Contain("private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();"));
             Assert.That(systemSource, Does.Contain("private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();"));
-            Assert.That(systemSource, Does.Contain("VirtualTextureFeedbackProcessor.Aggregate(s_CompletedReadbacks, s_AggregationScratch, s_AggregatedRequests);"));
+            Assert.That(systemSource, Does.Contain("VirtualTextureFeedbackProcessor.Aggregate("));
+            Assert.That(systemSource, Does.Contain("cachePriorityViewId);"));
             Assert.That(systemSource, Does.Contain("ClearGroupedRequests();"));
             Assert.That(feedbackSource, Does.Contain("internal sealed class Scratch"));
             Assert.That(feedbackSource, Does.Contain("private static readonly IComparer<VirtualTextureAggregatedFeedbackRequest> s_RequestComparer = AggregatedRequestComparer.Instance;"));

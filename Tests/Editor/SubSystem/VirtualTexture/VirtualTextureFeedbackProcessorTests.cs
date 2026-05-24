@@ -78,5 +78,80 @@ namespace VividRP.Editor.Tests
 
             Assert.That(output.Count, Is.EqualTo(0));
         }
+
+        [Test]
+        public void ShouldScheduleReadback_SkipsStableEmptyStaticView_UntilHeartbeatInterval()
+        {
+            var signature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.identity,
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: false,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 100 + VirtualTextureFeedbackBufferState.StableReadbackIntervalFrames - 1,
+                    signature,
+                    signature),
+                Is.False);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: false,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 100 + VirtualTextureFeedbackBufferState.StableReadbackIntervalFrames,
+                    signature,
+                    signature),
+                Is.True);
+        }
+
+        [Test]
+        public void ShouldScheduleReadback_KeepsFastPath_WhenViewChangesOrUploadWorkIsActive()
+        {
+            var firstSignature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.identity,
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+            var secondSignature = new VirtualTextureFeedbackViewSignature(
+                Matrix4x4.Translate(Vector3.forward),
+                Matrix4x4.Perspective(60f, 1f, 0.1f, 100f),
+                actualWidth: 1920,
+                actualHeight: 1080,
+                pixelWidth: 1920,
+                pixelHeight: 1080);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: false,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 101,
+                    secondSignature,
+                    firstSignature),
+                Is.True);
+
+            Assert.That(
+                VirtualTextureFeedbackBufferState.ShouldScheduleReadbackForTesting(
+                    forceImmediateReadback: true,
+                    hasCompletedReadbackResult: true,
+                    lastCompletedReadbackWasEmpty: true,
+                    lastScheduledReadbackFrame: 100,
+                    frameIndex: 101,
+                    firstSignature,
+                    firstSignature),
+                Is.True);
+        }
     }
 }

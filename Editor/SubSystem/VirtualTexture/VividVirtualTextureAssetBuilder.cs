@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
@@ -17,6 +18,7 @@ namespace VividRP.Editor
             public int BorderSize;
             public int MipCount;
             public Color32 FallbackColor;
+            public string StreamDataPath;
             public Action<string> LogErrorHandler;
         }
 
@@ -102,6 +104,22 @@ namespace VividRP.Editor
                     codec: VividVirtualTextureCodec.RawRGBA32));
             }
 
+            byte[] rawBytes = rawData.ToArray();
+            byte[] inlineRawData = rawBytes;
+            string streamDataPath = string.Empty;
+            int streamDataByteSize = 0;
+            if (!string.IsNullOrWhiteSpace(parameters.StreamDataPath))
+            {
+                streamDataPath = parameters.StreamDataPath.Replace('\\', '/');
+                string directory = Path.GetDirectoryName(streamDataPath);
+                if (!string.IsNullOrWhiteSpace(directory))
+                    Directory.CreateDirectory(directory);
+
+                File.WriteAllBytes(streamDataPath, rawBytes);
+                inlineRawData = Array.Empty<byte>();
+                streamDataByteSize = rawBytes.Length;
+            }
+
             builtData.Initialize(
                 parameters.SourceTextureGUID,
                 parameters.SourceTexturePath,
@@ -120,7 +138,9 @@ namespace VividRP.Editor
                 chunks.ToArray(),
                 tiles.ToArray(),
                 mipTileOffsets,
-                rawData.ToArray());
+                inlineRawData,
+                streamDataPath,
+                streamDataByteSize);
             asset.Initialize(builtData);
         }
 

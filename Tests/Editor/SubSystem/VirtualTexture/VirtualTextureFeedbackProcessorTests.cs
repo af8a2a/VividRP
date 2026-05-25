@@ -45,13 +45,34 @@ namespace VividRP.Editor.Tests
             Assert.That(aggregated[0].HitCount, Is.EqualTo(2));
 
             Assert.That(aggregated[1].SpaceId, Is.EqualTo(1));
-            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
-            Assert.That(aggregated[1].HitCount, Is.EqualTo(1));
+            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 1)));
+            Assert.That(aggregated[1].HitCount, Is.EqualTo(2));
+            Assert.That(aggregated[1].CameraPriority, Is.EqualTo(0));
 
             Assert.That(aggregated[2].SpaceId, Is.EqualTo(1));
-            Assert.That(aggregated[2].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 1)));
-            Assert.That(aggregated[2].HitCount, Is.EqualTo(2));
-            Assert.That(aggregated[2].CameraPriority, Is.EqualTo(0));
+            Assert.That(aggregated[2].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
+            Assert.That(aggregated[2].HitCount, Is.EqualTo(1));
+            Assert.That(aggregated[2].CameraPriority, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Aggregate_PrioritizesGameCameraBeforeSceneView_AcrossMipAndHitCount()
+        {
+            ulong sceneFine = VirtualTextureFeedbackProcessor.EncodeKey(1, new VirtualTexturePageCoord(0, 0, 0));
+            ulong gameCoarse = VirtualTextureFeedbackProcessor.EncodeKey(1, new VirtualTexturePageCoord(0, 0, 1));
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(CameraType.SceneView, new[] { sceneFine, sceneFine, sceneFine }, 3, 11),
+                new(CameraType.Game, new[] { gameCoarse }, 1, 11),
+            };
+
+            List<VirtualTextureAggregatedFeedbackRequest> aggregated = VirtualTextureFeedbackProcessor.Aggregate(batches);
+
+            Assert.That(aggregated.Count, Is.EqualTo(2));
+            Assert.That(aggregated[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 1)));
+            Assert.That(aggregated[0].CameraPriority, Is.EqualTo(0));
+            Assert.That(aggregated[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
+            Assert.That(aggregated[1].CameraPriority, Is.EqualTo(1));
         }
 
         [Test]

@@ -218,6 +218,24 @@ namespace VividRP.Runtime
         internal bool IsValid => Data != null && ByteOffset >= 0 && ByteSize >= 0 && ByteOffset <= Data.Length - ByteSize;
     }
 
+    internal readonly struct VividVirtualTextureTilePayloadLocation
+    {
+        internal VividVirtualTextureTilePayloadLocation(int byteOffset, int byteSize, VividVirtualTextureCodec codec)
+        {
+            ByteOffset = byteOffset;
+            ByteSize = byteSize;
+            Codec = codec;
+        }
+
+        internal int ByteOffset { get; }
+
+        internal int ByteSize { get; }
+
+        internal VividVirtualTextureCodec Codec { get; }
+
+        internal bool IsValid => ByteOffset >= 0 && ByteSize >= 0;
+    }
+
     public sealed class VividVirtualTextureAsset : ScriptableObject, VTProducer
     {
         [SerializeField]

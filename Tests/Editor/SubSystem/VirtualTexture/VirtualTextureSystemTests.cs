@@ -168,10 +168,12 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(CreateFrameData(activeCamera, frameIndex: 29), commandBuffer);
 
                 Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
-                Assert.That(requests.Count, Is.EqualTo(1));
-                Assert.That(requests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
-                Assert.That(requests[0].Priority, Is.EqualTo(1));
-            }
+            Assert.That(requests.Count, Is.EqualTo(1));
+            Assert.That(requests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
+            Assert.That(requests[0].Priority, Is.EqualTo(1));
+            Assert.That(requests[0].CameraPriority, Is.EqualTo(0));
+            Assert.That(requests[0].IsActiveView, Is.True);
+        }
             finally
             {
                 commandBuffer.Dispose();

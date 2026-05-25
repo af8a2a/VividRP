@@ -239,6 +239,8 @@ namespace VividRP.Runtime
                         mipOffsets,
                         pageIndex,
                         request.HitCount,
+                        request.CameraPriority,
+                        request.IsActiveView,
                         request.ViewId,
                         request.IsActiveView,
                         frameIndex);
@@ -277,7 +279,9 @@ namespace VividRP.Runtime
                     physicalPageId,
                     generation,
                     request.HitCount,
-                    frameIndex));
+                    frameIndex,
+                    request.CameraPriority,
+                    request.IsActiveView));
                 allocatedThisFrame += 1;
                 pageTableChanged = true;
             }
@@ -553,6 +557,8 @@ namespace VividRP.Runtime
             int[] mipOffsets,
             int pageIndex,
             int priority,
+            int cameraPriority,
+            bool isActiveView,
             VirtualTextureViewId viewId,
             bool updateAffinity,
             int frameIndex)
@@ -564,7 +570,7 @@ namespace VividRP.Runtime
                     continue;
 
                 TouchPhysicalPage(request.PhysicalPageId, viewId, frameIndex, updateAffinity);
-                if (priority <= request.Priority)
+                if (!IsPendingRequestPriorityImproved(request, priority, cameraPriority, isActiveView))
                     return;
 
                 m_PendingRequests[requestIndex] = new VTRequest(
@@ -573,9 +579,26 @@ namespace VividRP.Runtime
                     request.PhysicalPageId,
                     request.Generation,
                     priority,
-                    Mathf.Min(request.RequestFrame, frameIndex));
+                    Mathf.Min(request.RequestFrame, frameIndex),
+                    cameraPriority,
+                    isActiveView);
                 return;
             }
+        }
+
+        private static bool IsPendingRequestPriorityImproved(
+            in VTRequest request,
+            int priority,
+            int cameraPriority,
+            bool isActiveView)
+        {
+            if (isActiveView != request.IsActiveView)
+                return isActiveView;
+
+            if (cameraPriority != request.CameraPriority)
+                return cameraPriority < request.CameraPriority;
+
+            return priority > request.Priority;
         }
 
         private void RemovePendingRequest(

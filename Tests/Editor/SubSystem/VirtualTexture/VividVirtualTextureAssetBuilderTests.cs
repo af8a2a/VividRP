@@ -1,21 +1,36 @@
+using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Editor;
 using VividRP.Runtime;
+using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
 {
     public sealed class VividVirtualTextureAssetBuilderTests
     {
         private const string TempFolder = "Assets/VividVirtualTextureImporterTests";
+        private readonly List<string> m_TempFiles = new();
 
         [TearDown]
         public void TearDown()
         {
+            VividVirtualTextureAssetProducer.ResetStreamReadHandlersForTesting();
             AssetDatabase.DeleteAsset(TempFolder);
+            for (int index = 0; index < m_TempFiles.Count; index++)
+            {
+                string path = m_TempFiles[index];
+                if (File.Exists(path))
+                    File.Delete(path);
+            }
+
+            m_TempFiles.Clear();
         }
 
         [Test]
@@ -77,6 +92,207 @@ namespace VividRP.Editor.Tests
                     VividVirtualTextureChunkDescriptor chunk = builtData.Chunks[builtTile.ChunkIndex];
                     Assert.That(chunk.ContainsMip(builtTile.Mip), Is.True);
                     Assert.That(chunk.ContainsByteRange(builtTile.ByteOffset, builtTile.ByteSize), Is.True);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
+        public void Generate_WritesStreamDataToExternalFile_WhenStreamPathProvided()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    SourceTextureGUID = "stream-source-guid",
+                    SourceTexturePath = "Assets/StreamSource.png",
+                    PageSize = 2,
+                    BorderSize = 1,
+                    MipCount = 2,
+                    FallbackColor = new Color32(1, 2, 3, 255),
+                    StreamDataPath = streamDataPath,
+                });
+
+                Assert.That(File.Exists(streamDataPath), Is.True);
+                Assert.That(new FileInfo(streamDataPath).Length, Is.EqualTo(builtData.RawDataByteSize));
+                Assert.That(builtData.HasStreamData, Is.True);
+                Assert.That(builtData.HasInlineRawData, Is.False);
+                Assert.That(builtData.StreamDataPath, Is.EqualTo(streamDataPath.Replace('\\', '/')));
+                Assert.That(builtData.StreamDataByteSize, Is.EqualTo(builtData.RawDataByteSize));
+                Assert.That(builtData.TryGetTilePayload(new VirtualTexturePageCoord(0, 0, 0), out _), Is.False);
+                Assert.That(builtData.TryGetTilePayloadLocation(
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    out VividVirtualTextureTilePayloadLocation location), Is.True);
+
+                int tileByteSize = builtData.PhysicalPageSize * builtData.PhysicalPageSize * 4;
+                Assert.That(location.ByteOffset, Is.EqualTo(tileByteSize));
+                Assert.That(location.ByteSize, Is.EqualTo(tileByteSize));
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
+        public void AssetProducer_StreamsTilePayloadAsynchronously_AndDeduplicatesRequests()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+            var coord = new VirtualTexturePageCoord(1, 0, 0);
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    PageSize = 2,
+                    BorderSize = 1,
+                    MipCount = 2,
+                    FallbackColor = new Color32(0, 0, 0, 255),
+                    StreamDataPath = streamDataPath,
+                });
+
+                VirtualTextureSpaceDesc desc = builtData.CreateSpaceDesc(
+                    "AsyncStreamProducer",
+                    cachePageCount: 2,
+                    maxUploadsPerFrame: 1,
+                    feedbackCapacity: 16);
+                var expectedProducer = new VTTexture2DPageProducer(sourceTexture);
+                var request = new VTRequest(1, coord, 0, 1, 7, 0);
+                var expectedPixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
+                expectedProducer.WritePage(desc, request, expectedPixels);
+                byte[] expectedBytes = ToRGBA32Bytes(expectedPixels);
+                Object.DestroyImmediate(sourceTexture);
+                sourceTexture = null;
+
+                int readCount = 0;
+                var completionSource = new TaskCompletionSource<byte[]>();
+                VividVirtualTextureAssetProducer.SetStreamReadHandlersForTesting(
+                    (path, byteOffset, byteSize, cancellationToken) =>
+                    {
+                        readCount += 1;
+                        Assert.That(path, Is.EqualTo(Path.GetFullPath(streamDataPath)));
+                        Assert.That(byteSize, Is.EqualTo(expectedBytes.Length));
+                        cancellationToken.Register(() => completionSource.TrySetCanceled());
+                        return completionSource.Task;
+                    });
+
+                var producer = new VividVirtualTextureAssetProducer(asset);
+                Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Pending));
+                Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Pending));
+                Assert.That(readCount, Is.EqualTo(1));
+                Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(1));
+
+                var tasks = new List<IVTPageProducerTask>();
+                producer.GatherTasks(tasks);
+                Assert.That(tasks, Has.Count.EqualTo(1));
+                Assert.That(tasks[0].IsCompleted, Is.False);
+
+                completionSource.SetResult(expectedBytes);
+                Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Available));
+                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                Assert.That(finalizer, Is.Not.Null);
+                Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(0));
+
+                var stagingTexture = new Texture2DArray(
+                    desc.PhysicalPageSize,
+                    desc.PhysicalPageSize,
+                    1,
+                    desc.GraphicsFormat,
+                    TextureCreationFlags.None);
+                var scratchPixels = new Color32[expectedPixels.Length];
+
+                try
+                {
+                    finalizer.FinalizeUpload(stagingTexture, 0, scratchPixels);
+                    stagingTexture.Apply(false, false);
+                    Assert.That(stagingTexture.GetPixels32(0, 0), Is.EqualTo(expectedPixels));
+                }
+                finally
+                {
+                    finalizer.Dispose();
+                    producer.Dispose();
+                    Object.DestroyImmediate(stagingTexture);
+                }
+            }
+            finally
+            {
+                if (sourceTexture != null)
+                    Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
+        public void AssetProducer_RetiresStaleStreamTasks()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    PageSize = 2,
+                    BorderSize = 1,
+                    MipCount = 2,
+                    FallbackColor = new Color32(0, 0, 0, 255),
+                    StreamDataPath = streamDataPath,
+                });
+
+                var pendingTasks = new List<TaskCompletionSource<byte[]>>();
+                VividVirtualTextureAssetProducer.SetStreamReadHandlersForTesting(
+                    (path, byteOffset, byteSize, cancellationToken) =>
+                    {
+                        var completionSource = new TaskCompletionSource<byte[]>();
+                        cancellationToken.Register(() => completionSource.TrySetCanceled());
+                        pendingTasks.Add(completionSource);
+                        return completionSource.Task;
+                    });
+
+                VirtualTextureSpaceDesc desc = builtData.CreateSpaceDesc(
+                    "RetireStreamProducer",
+                    cachePageCount: 2,
+                    maxUploadsPerFrame: 1,
+                    feedbackCapacity: 16);
+                var producer = new VividVirtualTextureAssetProducer(asset);
+                var liveRequest = new VTRequest(1, new VirtualTexturePageCoord(0, 0, 0), 0, 1, 1, 0);
+                var staleRequest = new VTRequest(1, new VirtualTexturePageCoord(1, 0, 0), 1, 2, 1, 0);
+
+                try
+                {
+                    Assert.That(producer.RequestPageData(desc, liveRequest), Is.EqualTo(VTPageRequestStatus.Pending));
+                    Assert.That(producer.RequestPageData(desc, staleRequest), Is.EqualTo(VTPageRequestStatus.Pending));
+                    Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(2));
+
+                    producer.RetireRequests(new[] { liveRequest });
+
+                    Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(1));
+                    Assert.That(pendingTasks[1].Task.IsCanceled, Is.True);
+                }
+                finally
+                {
+                    producer.Dispose();
                 }
             }
             finally
@@ -217,6 +433,9 @@ namespace VividRP.Editor.Tests
             Assert.That(vtAsset.BorderSize, Is.EqualTo(1));
             Assert.That(vtAsset.MipCount, Is.EqualTo(2));
             Assert.That(vtAsset.TileCount, Is.EqualTo(5));
+            Assert.That(vtAsset.BuiltData.HasStreamData, Is.True);
+            Assert.That(vtAsset.BuiltData.HasInlineRawData, Is.False);
+            Assert.That(File.Exists(vtAsset.BuiltData.StreamDataPath), Is.True);
         }
 
         private static Texture2D CreateSourceTexture(int width, int height, bool readable)
@@ -232,6 +451,29 @@ namespace VividRP.Editor.Tests
             texture.SetPixels32(pixels, 0);
             texture.Apply(updateMipmaps: true, makeNoLongerReadable: !readable);
             return texture;
+        }
+
+        private string CreateTempStreamDataPath()
+        {
+            string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
+            m_TempFiles.Add(path);
+            return path;
+        }
+
+        private static byte[] ToRGBA32Bytes(Color32[] pixels)
+        {
+            var bytes = new byte[pixels.Length * 4];
+            for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
+            {
+                int byteIndex = pixelIndex * 4;
+                Color32 pixel = pixels[pixelIndex];
+                bytes[byteIndex] = pixel.r;
+                bytes[byteIndex + 1] = pixel.g;
+                bytes[byteIndex + 2] = pixel.b;
+                bytes[byteIndex + 3] = pixel.a;
+            }
+
+            return bytes;
         }
     }
 }

@@ -41,6 +41,12 @@ namespace VividRP.Runtime
         private int[] m_MipTileOffsets = Array.Empty<int>();
 
         [SerializeField]
+        private string m_StreamDataPath = string.Empty;
+
+        [SerializeField]
+        private int m_StreamDataByteSize;
+
+        [SerializeField]
         private byte[] m_RawData = Array.Empty<byte>();
 
         public string SourceTextureGUID => m_SourceTextureGUID;
@@ -65,7 +71,15 @@ namespace VividRP.Runtime
 
         public int TileCount => m_Tiles?.Length ?? 0;
 
-        public int RawDataByteSize => m_RawData?.Length ?? 0;
+        public int RawDataByteSize => HasInlineRawData ? m_RawData.Length : m_StreamDataByteSize;
+
+        public string StreamDataPath => m_StreamDataPath;
+
+        public int StreamDataByteSize => m_StreamDataByteSize;
+
+        public bool HasInlineRawData => m_RawData != null && m_RawData.Length > 0;
+
+        public bool HasStreamData => !string.IsNullOrWhiteSpace(m_StreamDataPath) && m_StreamDataByteSize > 0;
 
         public IReadOnlyList<VividVirtualTextureLayerDescriptor> Layers => m_Layers;
 
@@ -89,7 +103,9 @@ namespace VividRP.Runtime
             VividVirtualTextureChunkDescriptor[] chunks,
             VividVirtualTextureTileDescriptor[] tiles,
             int[] mipTileOffsets,
-            byte[] rawData)
+            byte[] rawData,
+            string streamDataPath = null,
+            int streamDataByteSize = 0)
         {
             m_SourceTextureGUID = sourceTextureGUID ?? string.Empty;
             m_SourceTexturePath = sourceTexturePath ?? string.Empty;
@@ -103,6 +119,8 @@ namespace VividRP.Runtime
             m_Tiles = tiles ?? Array.Empty<VividVirtualTextureTileDescriptor>();
             m_MipTileOffsets = mipTileOffsets ?? Array.Empty<int>();
             m_RawData = rawData ?? Array.Empty<byte>();
+            m_StreamDataPath = streamDataPath ?? string.Empty;
+            m_StreamDataByteSize = Mathf.Max(0, streamDataByteSize);
         }
 
         internal VirtualTextureSpaceDesc CreateSpaceDesc(
@@ -147,17 +165,30 @@ namespace VividRP.Runtime
             out VividVirtualTextureTilePayload payload)
         {
             payload = default;
-            if (!TryGetTileDescriptor(coord, out VividVirtualTextureTileDescriptor tile))
-                return false;
-
-            if (m_Chunks == null
-                || tile.ChunkIndex < 0
-                || tile.ChunkIndex >= m_Chunks.Length
-                || m_RawData == null)
+            if (!HasInlineRawData
+                || !TryGetTilePayloadLocation(coord, out VividVirtualTextureTilePayloadLocation location))
             {
                 return false;
             }
 
+            payload = new VividVirtualTextureTilePayload(m_RawData, location.ByteOffset, location.ByteSize);
+            return payload.IsValid;
+        }
+
+        internal bool TryGetTilePayloadLocation(
+            in VirtualTexturePageCoord coord,
+            out VividVirtualTextureTilePayloadLocation location)
+        {
+            location = default;
+            if (!TryGetTileDescriptor(coord, out VividVirtualTextureTileDescriptor tile))
+            {
+                return false;
+            }
+
+            if (m_Chunks == null || tile.ChunkIndex < 0 || tile.ChunkIndex >= m_Chunks.Length)
+                return false;
+
+            int dataByteSize = RawDataByteSize;
             VividVirtualTextureChunkDescriptor chunk = m_Chunks[tile.ChunkIndex];
             if (chunk.Codec != VividVirtualTextureCodec.RawRGBA32
                 || !chunk.ContainsMip(tile.Mip)
@@ -167,8 +198,11 @@ namespace VividRP.Runtime
             }
 
             int absoluteOffset = chunk.ByteOffset + tile.ByteOffset;
-            payload = new VividVirtualTextureTilePayload(m_RawData, absoluteOffset, tile.ByteSize);
-            return payload.IsValid;
+            if (absoluteOffset < 0 || tile.ByteSize < 0 || absoluteOffset > dataByteSize - tile.ByteSize)
+                return false;
+
+            location = new VividVirtualTextureTilePayloadLocation(absoluteOffset, tile.ByteSize, chunk.Codec);
+            return true;
         }
 
         internal bool Matches(in VirtualTextureSpaceDesc desc)

@@ -131,9 +131,19 @@ namespace VividRP.Runtime
             int physicalPageId,
             int generation,
             int priority,
-            int requestFrame)
+            int requestFrame,
+            int cameraPriority = int.MaxValue,
+            bool isActiveView = false)
         {
-            m_Request = new VTRequest(spaceId, pageCoord, physicalPageId, generation, priority, requestFrame);
+            m_Request = new VTRequest(
+                spaceId,
+                pageCoord,
+                physicalPageId,
+                generation,
+                priority,
+                requestFrame,
+                cameraPriority,
+                isActiveView);
         }
 
         internal VirtualTextureUploadRequest(in VTRequest request)
@@ -154,6 +164,10 @@ namespace VividRP.Runtime
         public int Priority => m_Request.Priority;
 
         public int RequestFrame => m_Request.RequestFrame;
+
+        public int CameraPriority => m_Request.CameraPriority;
+
+        public bool IsActiveView => m_Request.IsActiveView;
 
         public bool Equals(VirtualTextureUploadRequest other)
         {

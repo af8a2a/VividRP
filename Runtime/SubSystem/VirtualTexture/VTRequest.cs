@@ -10,7 +10,9 @@ namespace VividRP.Runtime
             int physicalPageId,
             int generation,
             int priority,
-            int requestFrame)
+            int requestFrame,
+            int cameraPriority = int.MaxValue,
+            bool isActiveView = false)
         {
             SpaceId = spaceId;
             PageCoord = pageCoord;
@@ -18,6 +20,8 @@ namespace VividRP.Runtime
             Generation = generation;
             Priority = priority;
             RequestFrame = requestFrame;
+            CameraPriority = cameraPriority;
+            IsActiveView = isActiveView;
         }
 
         public int SpaceId { get; }
@@ -32,6 +36,10 @@ namespace VividRP.Runtime
 
         public int RequestFrame { get; }
 
+        public int CameraPriority { get; }
+
+        public bool IsActiveView { get; }
+
         public bool Equals(VTRequest other)
         {
             return SpaceId == other.SpaceId
@@ -39,7 +47,9 @@ namespace VividRP.Runtime
                    && PhysicalPageId == other.PhysicalPageId
                    && Generation == other.Generation
                    && Priority == other.Priority
-                   && RequestFrame == other.RequestFrame;
+                   && RequestFrame == other.RequestFrame
+                   && CameraPriority == other.CameraPriority
+                   && IsActiveView == other.IsActiveView;
         }
 
         public override bool Equals(object obj)
@@ -49,7 +59,15 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(SpaceId, PageCoord, PhysicalPageId, Generation, Priority, RequestFrame);
+            return HashCode.Combine(
+                SpaceId,
+                PageCoord,
+                PhysicalPageId,
+                Generation,
+                Priority,
+                RequestFrame,
+                CameraPriority,
+                IsActiveView);
         }
     }
 }

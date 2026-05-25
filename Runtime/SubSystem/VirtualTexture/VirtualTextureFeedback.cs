@@ -355,20 +355,20 @@ namespace VividRP.Runtime
             VirtualTextureAggregatedFeedbackRequest left,
             VirtualTextureAggregatedFeedbackRequest right)
         {
-            int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
-            if (mipCompare != 0)
-                return mipCompare;
-
             if (left.IsActiveView != right.IsActiveView)
                 return left.IsActiveView ? -1 : 1;
+
+            int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
+            if (cameraCompare != 0)
+                return cameraCompare;
 
             int hitCompare = right.HitCount.CompareTo(left.HitCount);
             if (hitCompare != 0)
                 return hitCompare;
 
-            int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
-            if (cameraCompare != 0)
-                return cameraCompare;
+            int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
+            if (mipCompare != 0)
+                return mipCompare;
 
             int spaceCompare = left.SpaceId.CompareTo(right.SpaceId);
             if (spaceCompare != 0)

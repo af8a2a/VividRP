@@ -15,6 +15,7 @@ namespace VividRP.Runtime
         private readonly VTUploadScheduler m_UploadScheduler;
         private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
+        private readonly List<VTRequest> m_SortedPendingRequests = new();
 
         internal VTAddressSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
         {
@@ -127,6 +128,8 @@ namespace VividRP.Runtime
             m_UploadScheduler.Dispose();
             m_PageTableUpdater.Dispose();
             m_ResidencyManager.Dispose();
+            if (m_PageProducer is IDisposable disposableProducer)
+                disposableProducer.Dispose();
         }
 
         private void BootstrapLowestMip()
@@ -208,7 +211,10 @@ namespace VividRP.Runtime
 
             IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
             if (pendingRequests == null || pendingRequests.Count == 0)
+            {
+                RetireProducerRequests(Array.Empty<VTRequest>());
                 return;
+            }
 
             if (m_PageProducer == null || cmd == null || !m_UploadScheduler.IsEnabled)
             {
@@ -216,6 +222,7 @@ namespace VividRP.Runtime
                 return;
             }
 
+            RetireProducerRequests(pendingRequests);
             m_ProducerTasks.Clear();
             m_PageProducer.GatherTasks(m_ProducerTasks);
             m_ProducerTasks.Clear();
@@ -229,9 +236,10 @@ namespace VividRP.Runtime
             }
 
             int skippedUploadCount = 0;
-            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+            IReadOnlyList<VTRequest> orderedRequests = GetOrderedPendingRequests(pendingRequests);
+            for (int requestIndex = 0; requestIndex < orderedRequests.Count; requestIndex++)
             {
-                VTRequest request = pendingRequests[requestIndex];
+                VTRequest request = orderedRequests[requestIndex];
                 if (m_UploadScheduler.IsRequestInFlight(request))
                 {
                     skippedUploadCount += 1;
@@ -290,6 +298,62 @@ namespace VividRP.Runtime
 
             payload = new VTPageUploadPayload(request, finalizer);
             return true;
+        }
+
+        private void RetireProducerRequests(IReadOnlyList<VTRequest> liveRequests)
+        {
+            if (m_PageProducer is IVTPageRequestRetirement retirement)
+                retirement.RetireRequests(liveRequests);
+        }
+
+        private IReadOnlyList<VTRequest> GetOrderedPendingRequests(IReadOnlyList<VTRequest> pendingRequests)
+        {
+            if (pendingRequests == null || pendingRequests.Count <= 1)
+                return pendingRequests ?? Array.Empty<VTRequest>();
+
+            m_SortedPendingRequests.Clear();
+            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+                m_SortedPendingRequests.Add(pendingRequests[requestIndex]);
+
+            m_SortedPendingRequests.Sort(PendingUploadRequestComparer.Instance);
+            return m_SortedPendingRequests;
+        }
+
+        private sealed class PendingUploadRequestComparer : IComparer<VTRequest>
+        {
+            internal static readonly PendingUploadRequestComparer Instance = new();
+
+            private PendingUploadRequestComparer()
+            {
+            }
+
+            public int Compare(VTRequest left, VTRequest right)
+            {
+                if (left.IsActiveView != right.IsActiveView)
+                    return left.IsActiveView ? -1 : 1;
+
+                int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
+                if (cameraCompare != 0)
+                    return cameraCompare;
+
+                int priorityCompare = right.Priority.CompareTo(left.Priority);
+                if (priorityCompare != 0)
+                    return priorityCompare;
+
+                int frameCompare = left.RequestFrame.CompareTo(right.RequestFrame);
+                if (frameCompare != 0)
+                    return frameCompare;
+
+                int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
+                if (mipCompare != 0)
+                    return mipCompare;
+
+                int yCompare = left.PageCoord.Y.CompareTo(right.PageCoord.Y);
+                if (yCompare != 0)
+                    return yCompare;
+
+                return left.PageCoord.X.CompareTo(right.PageCoord.X);
+            }
         }
 
         private bool TryCommitRequestInternal(in VTRequest request, bool rebuildPageTable)

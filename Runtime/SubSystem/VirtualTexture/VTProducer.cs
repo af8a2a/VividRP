@@ -159,6 +159,11 @@ namespace VividRP.Runtime
         bool IsCompleted { get; }
     }
 
+    internal interface IVTPageRequestRetirement
+    {
+        void RetireRequests(IReadOnlyList<VTRequest> liveRequests);
+    }
+
     internal interface IVTPageFinalizer : IDisposable
     {
         void FinalizeRender(CommandBuffer cmd);

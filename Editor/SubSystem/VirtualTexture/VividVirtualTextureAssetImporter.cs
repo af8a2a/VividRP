@@ -56,6 +56,7 @@ namespace VividRP.Editor
                 BorderSize = BorderSize,
                 MipCount = MipCount,
                 FallbackColor = (Color32)FallbackColor,
+                StreamDataPath = ctx.assetPath + ".stream",
                 LogErrorHandler = message => ctx.LogImportError(message),
             });
 

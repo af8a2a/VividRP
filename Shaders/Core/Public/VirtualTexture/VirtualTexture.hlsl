@@ -142,7 +142,9 @@ float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
 
     uint2 resolvedPageCoord = VTGetPageCoord(virtualUv, resolved.resolvedMip);
     float2 localUv = VTComputePageLocalUv(virtualUv, resolved.resolvedMip, resolvedPageCoord);
-    float2 texelCoord = localUv * VT_PAGE_SIZE + VT_BORDER_SIZE + 0.5;
+    // Hardware texture filtering already applies the half-texel center convention.
+    // Address page edges on the gutter boundary so bilinear sampling spans baked borders.
+    float2 texelCoord = localUv * VT_PAGE_SIZE + VT_BORDER_SIZE;
     float2 physicalUv = texelCoord / max((float)VT_PHYSICAL_PAGE_SIZE, 1.0);
     return float3(physicalUv, (float)resolved.physicalPageId);
 }
@@ -153,7 +155,7 @@ float4 VTSamplePhysicalCache(float2 virtualUv, VTResolvedAddress resolved)
         return float4(1.0, 0.0, 1.0, 1.0);
 
     float3 uvw = VTComputePhysicalUVW(virtualUv, resolved);
-    return SAMPLE_TEXTURE2D_ARRAY(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z);
+    return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
 }
 
 bool VTResolvedAddressMatches(VTResolvedAddress left, VTResolvedAddress right)

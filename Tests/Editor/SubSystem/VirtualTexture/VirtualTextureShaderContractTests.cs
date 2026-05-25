@@ -34,6 +34,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VTResolvedAddress VTResolveAddress"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVW"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCache"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0)"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheTrilinear"));
             Assert.That(source, Does.Contain("void VTWriteFeedback"));
         }

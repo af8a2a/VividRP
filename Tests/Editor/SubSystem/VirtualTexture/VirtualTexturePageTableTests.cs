@@ -99,7 +99,7 @@ namespace VividRP.Editor.Tests
 
             Vector3 uvw = VirtualTextureSpaceUtility.ComputePhysicalUVW(desc, new Vector2(0.25f, 0.25f), entry);
 
-            float expectedStart = (desc.BorderSize + 0.5f) / desc.PhysicalPageSize;
+            float expectedStart = (float)desc.BorderSize / desc.PhysicalPageSize;
             Assert.That(uvw.x, Is.EqualTo(expectedStart).Within(0.0001f));
             Assert.That(uvw.y, Is.EqualTo(expectedStart).Within(0.0001f));
             Assert.That(uvw.z, Is.EqualTo(7f));
@@ -119,7 +119,7 @@ namespace VividRP.Editor.Tests
 
             Vector3 uvw = VirtualTextureSpaceUtility.ComputePhysicalUVW(desc, new Vector2(1f, 1f), entry);
 
-            float expectedEnd = (desc.BorderSize + desc.PageSize + 0.5f) / desc.PhysicalPageSize;
+            float expectedEnd = (float)(desc.BorderSize + desc.PageSize) / desc.PhysicalPageSize;
             Assert.That(uvw.x, Is.EqualTo(expectedEnd).Within(0.0001f));
             Assert.That(uvw.y, Is.EqualTo(expectedEnd).Within(0.0001f));
             Assert.That(uvw.z, Is.EqualTo(5f));

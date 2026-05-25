@@ -621,9 +621,9 @@ namespace VividRP.Runtime
                 desc.VirtualPageCountY,
                 resolvedEntry.ResolvedMip,
                 virtualUv);
+            // Match shader sampling: normalized hardware filtering owns the half-texel offset.
             Vector2 texelCoord = localUv * desc.PageSize
-                                  + Vector2.one * desc.BorderSize
-                                  + new Vector2(0.5f, 0.5f);
+                                  + Vector2.one * desc.BorderSize;
             float physicalPageSize = Mathf.Max(desc.PhysicalPageSize, 1);
             return new Vector3(
                 texelCoord.x / physicalPageSize,

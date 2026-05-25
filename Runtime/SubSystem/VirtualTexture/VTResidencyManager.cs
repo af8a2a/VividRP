@@ -158,7 +158,7 @@ namespace VividRP.Runtime
                     pageState.Generation,
                     int.MaxValue,
                     frameIndex);
-                TouchPhysicalPage(pageState.PhysicalPageId, viewId, frameIndex, viewId.IsValid);
+                TouchPhysicalPage(pageState.PhysicalPageId, viewId, frameIndex, HasViewAffinity(viewId));
                 return true;
             }
 
@@ -171,7 +171,7 @@ namespace VividRP.Runtime
                     pageIndex,
                     viewId,
                     viewId,
-                    viewId.IsValid,
+                    HasViewAffinity(viewId),
                     frameIndex,
                     out int physicalPageId,
                     out int generation,
@@ -188,7 +188,7 @@ namespace VividRP.Runtime
             pageState.Locked = locked;
             m_PageStates[pageIndex] = pageState;
             m_ResidentPageCount += 1;
-            TouchPhysicalPage(physicalPageId, viewId, frameIndex, viewId.IsValid);
+            TouchPhysicalPage(physicalPageId, viewId, frameIndex, HasViewAffinity(viewId));
             request = new VTRequest(
                 spaceId,
                 coord,
@@ -248,13 +248,14 @@ namespace VividRP.Runtime
                 if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
                     continue;
 
+                VirtualTextureViewId evictionViewId = ResolveEvictionViewId(activeViewId, request);
                 if (!TryAllocatePhysicalPage(
                         desc,
                         mipOffsets,
                         pageIndex,
-                        activeViewId,
+                        evictionViewId,
                         request.ViewId,
-                        request.IsActiveView,
+                        HasViewAffinity(request.ViewId),
                         frameIndex,
                         out int physicalPageId,
                         out int generation,
@@ -394,6 +395,20 @@ namespace VividRP.Runtime
             return true;
         }
 
+        private static VirtualTextureViewId ResolveEvictionViewId(
+            VirtualTextureViewId activeViewId,
+            in VirtualTextureAggregatedFeedbackRequest request)
+        {
+            return request.IsActiveView && HasViewAffinity(request.ViewId)
+                ? request.ViewId
+                : activeViewId;
+        }
+
+        private static bool HasViewAffinity(VirtualTextureViewId viewId)
+        {
+            return viewId.IsValid || viewId.IsCameraTypeOnly;
+        }
+
         private bool EvictPhysicalPage(int physicalPageId, in VirtualTextureSpaceDesc desc, int[] mipOffsets)
         {
             VTPhysicalPageSlotState slotState = m_PhysicalSlots[physicalPageId];
@@ -509,7 +524,7 @@ namespace VividRP.Runtime
             if (physicalPageId < 0 || physicalPageId >= m_LruNodes.Length)
                 return;
 
-            if (updateAffinity && viewId.IsValid)
+            if (updateAffinity && HasViewAffinity(viewId))
             {
                 VTPhysicalPageSlotState slotState = m_PhysicalSlots[physicalPageId];
                 slotState.AffinityViewId = viewId;

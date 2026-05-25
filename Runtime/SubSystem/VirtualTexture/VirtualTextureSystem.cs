@@ -332,9 +332,9 @@ namespace VividRP.Runtime
             if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
             {
                 IReadOnlyList<VTRequest> pendingRequests = addressSpace.PendingRequests;
-                var uploadRequests = new VirtualTextureUploadRequest[pendingRequests.Count];
+                var uploadRequests = new List<VirtualTextureUploadRequest>(pendingRequests.Count);
                 for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
-                    uploadRequests[requestIndex] = new VirtualTextureUploadRequest(pendingRequests[requestIndex]);
+                    uploadRequests.Add(new VirtualTextureUploadRequest(pendingRequests[requestIndex]));
 
                 requests = uploadRequests;
                 return true;

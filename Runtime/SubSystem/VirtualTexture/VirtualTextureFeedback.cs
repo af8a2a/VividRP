@@ -293,7 +293,7 @@ namespace VividRP.Runtime
                         if (isActiveViewBatch)
                         {
                             accumulator.IsActiveView = true;
-                            accumulator.ViewId = activeViewId;
+                            accumulator.ViewId = ResolveFeedbackViewId(batch, activeViewId);
                         }
                         else if (!accumulator.IsActiveView && cameraPriority < accumulator.CameraPriority)
                         {
@@ -309,7 +309,7 @@ namespace VividRP.Runtime
                         {
                             HitCount = 1,
                             CameraPriority = cameraPriority,
-                            ViewId = isActiveViewBatch ? activeViewId : batch.ViewId,
+                            ViewId = isActiveViewBatch ? ResolveFeedbackViewId(batch, activeViewId) : batch.ViewId,
                             IsActiveView = isActiveViewBatch,
                         };
                     }
@@ -329,6 +329,13 @@ namespace VividRP.Runtime
             }
 
             output.Sort(s_RequestComparer);
+        }
+
+        private static VirtualTextureViewId ResolveFeedbackViewId(
+            in VirtualTextureFeedbackBatch batch,
+            in VirtualTextureViewId activeViewId)
+        {
+            return activeViewId.IsValid ? activeViewId : batch.ViewId;
         }
 
         private static bool IsActiveViewBatch(
@@ -764,7 +771,10 @@ namespace VividRP.Runtime
         private void PollReadbacks()
         {
             for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
-                m_BufferPairs[bufferIndex].PollReadback();
+            {
+                BufferPairState pair = m_BufferPairs[bufferIndex];
+                pair.PollReadback();
+            }
         }
 
         private void EnsureCapacity(string spaceName, int feedbackCapacity)

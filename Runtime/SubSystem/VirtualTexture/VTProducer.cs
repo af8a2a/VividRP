@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
@@ -7,6 +9,195 @@ namespace VividRP.Runtime
     public interface VTProducer
     {
         string Name { get; }
+    }
+
+    public readonly struct VTProducerDesc : IEquatable<VTProducerDesc>
+    {
+        public VTProducerDesc(
+            string name,
+            int tileSize,
+            int borderSize,
+            int virtualPageCountX,
+            int virtualPageCountY,
+            int mipCount,
+            int layerCount,
+            GraphicsFormat format,
+            bool sRGB,
+            Color32 fallbackColor,
+            int producerPriority,
+            bool continuousUpdate,
+            bool persistentLowestMip)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                throw new ArgumentException("Producer name must be non-empty.", nameof(name));
+            if (tileSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(tileSize));
+            if (borderSize < 0)
+                throw new ArgumentOutOfRangeException(nameof(borderSize));
+            if (virtualPageCountX <= 0)
+                throw new ArgumentOutOfRangeException(nameof(virtualPageCountX));
+            if (virtualPageCountY <= 0)
+                throw new ArgumentOutOfRangeException(nameof(virtualPageCountY));
+            if (mipCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(mipCount));
+            if (layerCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(layerCount));
+
+            Name = name;
+            TileSize = tileSize;
+            BorderSize = borderSize;
+            VirtualPageCountX = virtualPageCountX;
+            VirtualPageCountY = virtualPageCountY;
+            MipCount = mipCount;
+            LayerCount = layerCount;
+            Format = format;
+            SRGB = sRGB;
+            FallbackColor = fallbackColor;
+            ProducerPriority = producerPriority;
+            ContinuousUpdate = continuousUpdate;
+            PersistentLowestMip = persistentLowestMip;
+        }
+
+        public string Name { get; }
+
+        public int TileSize { get; }
+
+        public int BorderSize { get; }
+
+        public int VirtualPageCountX { get; }
+
+        public int VirtualPageCountY { get; }
+
+        public int MipCount { get; }
+
+        public int LayerCount { get; }
+
+        public GraphicsFormat Format { get; }
+
+        public bool SRGB { get; }
+
+        public Color32 FallbackColor { get; }
+
+        public int ProducerPriority { get; }
+
+        public bool ContinuousUpdate { get; }
+
+        public bool PersistentLowestMip { get; }
+
+        internal static VTProducerDesc FromSpaceDesc(string producerName, in VirtualTextureSpaceDesc desc)
+        {
+            return new VTProducerDesc(
+                producerName,
+                desc.PageSize,
+                desc.BorderSize,
+                desc.VirtualPageCountX,
+                desc.VirtualPageCountY,
+                desc.MipCount,
+                1,
+                desc.GraphicsFormat,
+                GraphicsFormatUtility.IsSRGBFormat(desc.GraphicsFormat),
+                new Color32(0, 0, 0, 255),
+                producerPriority: 0,
+                continuousUpdate: false,
+                persistentLowestMip: true);
+        }
+
+        public bool Equals(VTProducerDesc other)
+        {
+            return string.Equals(Name, other.Name, StringComparison.Ordinal)
+                   && TileSize == other.TileSize
+                   && BorderSize == other.BorderSize
+                   && VirtualPageCountX == other.VirtualPageCountX
+                   && VirtualPageCountY == other.VirtualPageCountY
+                   && MipCount == other.MipCount
+                   && LayerCount == other.LayerCount
+                   && Format == other.Format
+                   && SRGB == other.SRGB
+                   && FallbackColor.Equals(other.FallbackColor)
+                   && ProducerPriority == other.ProducerPriority
+                   && ContinuousUpdate == other.ContinuousUpdate
+                   && PersistentLowestMip == other.PersistentLowestMip;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VTProducerDesc other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hashCode = StringComparer.Ordinal.GetHashCode(Name);
+                hashCode = (hashCode * 397) ^ TileSize;
+                hashCode = (hashCode * 397) ^ BorderSize;
+                hashCode = (hashCode * 397) ^ VirtualPageCountX;
+                hashCode = (hashCode * 397) ^ VirtualPageCountY;
+                hashCode = (hashCode * 397) ^ MipCount;
+                hashCode = (hashCode * 397) ^ LayerCount;
+                hashCode = (hashCode * 397) ^ (int)Format;
+                hashCode = (hashCode * 397) ^ SRGB.GetHashCode();
+                hashCode = (hashCode * 397) ^ FallbackColor.GetHashCode();
+                hashCode = (hashCode * 397) ^ ProducerPriority;
+                hashCode = (hashCode * 397) ^ ContinuousUpdate.GetHashCode();
+                hashCode = (hashCode * 397) ^ PersistentLowestMip.GetHashCode();
+                return hashCode;
+            }
+        }
+    }
+
+    public enum VTPageRequestStatus
+    {
+        Invalid,
+        Saturated,
+        Pending,
+        Available,
+    }
+
+    internal interface IVTPageProducerTask
+    {
+        bool IsCompleted { get; }
+    }
+
+    internal interface IVTPageFinalizer : IDisposable
+    {
+        void FinalizeRender(CommandBuffer cmd);
+
+        void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels);
+    }
+
+    internal readonly struct VTPageUploadPayload
+    {
+        internal VTPageUploadPayload(in VTRequest request, IVTPageFinalizer finalizer)
+        {
+            Request = request;
+            Finalizer = finalizer ?? throw new ArgumentNullException(nameof(finalizer));
+        }
+
+        internal VTRequest Request { get; }
+
+        internal IVTPageFinalizer Finalizer { get; }
+
+        internal bool IsValid => Finalizer != null;
+    }
+
+    internal interface IVTPageProducer : VTProducer
+    {
+        VTProducerDesc ProducerDesc { get; }
+
+        VTPageRequestStatus RequestPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request);
+
+        IVTPageFinalizer ProducePageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request);
+
+        void GatherTasks(List<IVTPageProducerTask> tasks);
+
+        void CancelRequest(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request);
     }
 
     internal interface IVTRuntimePageProducer : VTProducer
@@ -19,9 +210,105 @@ namespace VividRP.Runtime
 
     internal static class VTRuntimeProducerUtility
     {
-        internal static IVTRuntimePageProducer Resolve(VTProducer producer)
+        internal static IVTPageProducer Resolve(VTProducer producer, in VirtualTextureSpaceDesc desc)
         {
-            return producer as IVTRuntimePageProducer;
+            if (producer is IVTPageProducer pageProducer)
+                return pageProducer;
+
+            return producer is IVTRuntimePageProducer runtimeProducer
+                ? CreateAdapter(runtimeProducer, desc)
+                : null;
+        }
+
+        internal static IVTPageProducer CreateAdapter(
+            IVTRuntimePageProducer runtimeProducer,
+            in VirtualTextureSpaceDesc desc)
+        {
+            return runtimeProducer != null
+                ? new VTSynchronousPageProducerAdapter(runtimeProducer, desc)
+                : null;
+        }
+    }
+
+    internal sealed class VTSynchronousPageProducerAdapter : IVTPageProducer
+    {
+        private sealed class Finalizer : IVTPageFinalizer
+        {
+            private readonly IVTRuntimePageProducer m_Producer;
+            private readonly VirtualTextureSpaceDesc m_Desc;
+            private readonly VTRequest m_Request;
+
+            internal Finalizer(
+                IVTRuntimePageProducer producer,
+                in VirtualTextureSpaceDesc desc,
+                in VTRequest request)
+            {
+                m_Producer = producer ?? throw new ArgumentNullException(nameof(producer));
+                m_Desc = desc;
+                m_Request = request;
+            }
+
+            public void FinalizeRender(CommandBuffer cmd)
+            {
+            }
+
+            public void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels)
+            {
+                if (stagingTexture == null)
+                    throw new ArgumentNullException(nameof(stagingTexture));
+                if (scratchPixels == null)
+                    throw new ArgumentNullException(nameof(scratchPixels));
+
+                m_Producer.WritePage(m_Desc, m_Request, scratchPixels);
+                stagingTexture.SetPixels32(scratchPixels, slice, 0);
+            }
+
+            public void Dispose()
+            {
+            }
+        }
+
+        private readonly IVTRuntimePageProducer m_RuntimeProducer;
+
+        internal VTSynchronousPageProducerAdapter(
+            IVTRuntimePageProducer runtimeProducer,
+            in VirtualTextureSpaceDesc desc)
+        {
+            m_RuntimeProducer = runtimeProducer ?? throw new ArgumentNullException(nameof(runtimeProducer));
+            ProducerDesc = VTProducerDesc.FromSpaceDesc(m_RuntimeProducer.Name, desc);
+        }
+
+        public string Name => m_RuntimeProducer.Name;
+
+        public VTProducerDesc ProducerDesc { get; }
+
+        public VTPageRequestStatus RequestPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request)
+        {
+            return VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord)
+                ? VTPageRequestStatus.Available
+                : VTPageRequestStatus.Invalid;
+        }
+
+        public IVTPageFinalizer ProducePageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                return null;
+
+            return new Finalizer(m_RuntimeProducer, desc, request);
+        }
+
+        public void GatherTasks(List<IVTPageProducerTask> tasks)
+        {
+        }
+
+        public void CancelRequest(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request)
+        {
         }
     }
 

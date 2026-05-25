@@ -11,8 +11,10 @@ namespace VividRP.Runtime
         private readonly VTResidencyManager m_ResidencyManager;
         private readonly VTPageTableUpdater m_PageTableUpdater;
         private readonly VirtualTextureSpaceShaderParams m_ShaderParams;
-        private readonly IVTRuntimePageProducer m_RuntimeProducer;
+        private readonly IVTPageProducer m_PageProducer;
         private readonly VTUploadScheduler m_UploadScheduler;
+        private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
+        private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
 
         internal VTAddressSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
         {
@@ -24,8 +26,8 @@ namespace VividRP.Runtime
             m_ShaderParams = new VirtualTextureSpaceShaderParams(spaceId, desc, TotalPageCount);
             m_ResidencyManager = new VTResidencyManager(desc.SpaceName, desc, TotalPageCount, m_MipOffsets);
             m_PageTableUpdater = new VTPageTableUpdater(desc.SpaceName, TotalPageCount);
-            m_RuntimeProducer = VTRuntimeProducerUtility.Resolve(Producer);
-            m_UploadScheduler = new VTUploadScheduler(desc.SpaceName, desc, m_ResidencyManager.PhysicalCache, m_RuntimeProducer);
+            m_PageProducer = VTRuntimeProducerUtility.Resolve(Producer, desc);
+            m_UploadScheduler = new VTUploadScheduler(desc.SpaceName, desc, m_ResidencyManager.PhysicalCache);
             BootstrapLowestMip();
             m_PageTableUpdater.Rebuild(desc, m_MipOffsets, m_ResidencyManager);
             m_PageTableUpdater.RefreshBuffer();
@@ -77,7 +79,7 @@ namespace VividRP.Runtime
             if (pageTableChanged)
                 m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
 
-            m_UploadScheduler.SchedulePendingUploads(PendingRequests, cmd);
+            SchedulePendingUploads(cmd);
             return result.EvictionCount;
         }
 
@@ -132,7 +134,8 @@ namespace VividRP.Runtime
             int lowestMip = Descriptor.MipCount - 1;
             int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(Descriptor.VirtualPageCountX, lowestMip);
             int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(Descriptor.VirtualPageCountY, lowestMip);
-            IVTRuntimePageProducer bootstrapProducer = m_RuntimeProducer ?? VTProceduralPageProducer.Instance;
+            IVTPageProducer bootstrapProducer = m_PageProducer;
+            IVTPageProducer fallbackBootstrapProducer = null;
             Texture2DArray bootstrapTexture = VTPageUploadUtility.CreateStagingTexture(
                 Descriptor.SpaceName,
                 Descriptor.PhysicalPageSize,
@@ -161,13 +164,32 @@ namespace VividRP.Runtime
                                 $"[VividRP] Failed to seed VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
                         }
 
-                        VTPageUploadUtility.WritePageToStagingTexture(
-                            bootstrapTexture,
-                            0,
-                            scratchPixels,
-                            bootstrapProducer,
-                            Descriptor,
-                            request);
+                        if (!TryProduceUploadPayload(bootstrapProducer, request, out VTPageUploadPayload payload))
+                        {
+                            fallbackBootstrapProducer ??=
+                                VTRuntimeProducerUtility.CreateAdapter(VTProceduralPageProducer.Instance, Descriptor);
+
+                            if (!TryProduceUploadPayload(fallbackBootstrapProducer, request, out payload))
+                            {
+                                throw new InvalidOperationException(
+                                    $"[VividRP] Failed to produce VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
+                            }
+                        }
+
+                        try
+                        {
+                            VTPageUploadUtility.WritePayloadToStagingTexture(
+                                bootstrapTexture,
+                                0,
+                                scratchPixels,
+                                payload,
+                                null);
+                        }
+                        finally
+                        {
+                            payload.Finalizer?.Dispose();
+                        }
+
                         bootstrapTexture.Apply(false, false);
                         Graphics.CopyTexture(bootstrapTexture, 0, 0, m_ResidencyManager.PhysicalCache, request.PhysicalPageId, 0);
                     }
@@ -177,6 +199,97 @@ namespace VividRP.Runtime
             {
                 CoreUtils.Destroy(bootstrapTexture);
             }
+        }
+
+        private void SchedulePendingUploads(CommandBuffer cmd)
+        {
+            m_UploadScheduler.ResetLastScheduleStats();
+            m_UploadPayloads.Clear();
+
+            IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
+            if (pendingRequests == null || pendingRequests.Count == 0)
+                return;
+
+            if (m_PageProducer == null || cmd == null || !m_UploadScheduler.IsEnabled)
+            {
+                m_UploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
+                return;
+            }
+
+            m_ProducerTasks.Clear();
+            m_PageProducer.GatherTasks(m_ProducerTasks);
+            m_ProducerTasks.Clear();
+
+            m_UploadScheduler.CountInFlightDuplicates(pendingRequests);
+            int capacity = m_UploadScheduler.GetAvailableBatchCapacity();
+            if (capacity <= 0)
+            {
+                m_UploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
+                return;
+            }
+
+            int skippedUploadCount = 0;
+            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+            {
+                VTRequest request = pendingRequests[requestIndex];
+                if (m_UploadScheduler.IsRequestInFlight(request))
+                {
+                    skippedUploadCount += 1;
+                    continue;
+                }
+
+                if (m_UploadPayloads.Count >= capacity)
+                {
+                    skippedUploadCount += 1;
+                    continue;
+                }
+
+                VTPageRequestStatus status = m_PageProducer.RequestPageData(Descriptor, request);
+                if (status != VTPageRequestStatus.Available)
+                {
+                    if (status == VTPageRequestStatus.Invalid)
+                        m_PageProducer.CancelRequest(Descriptor, request);
+
+                    skippedUploadCount += 1;
+                    continue;
+                }
+
+                IVTPageFinalizer finalizer = m_PageProducer.ProducePageData(Descriptor, request);
+                if (finalizer == null)
+                {
+                    skippedUploadCount += 1;
+                    continue;
+                }
+
+                m_UploadPayloads.Add(new VTPageUploadPayload(request, finalizer));
+            }
+
+            m_UploadScheduler.AddSkippedUploadCount(skippedUploadCount);
+            if (m_UploadPayloads.Count == 0)
+                return;
+
+            m_UploadScheduler.ScheduleUploads(m_UploadPayloads, cmd);
+            m_UploadPayloads.Clear();
+        }
+
+        private bool TryProduceUploadPayload(
+            IVTPageProducer producer,
+            in VTRequest request,
+            out VTPageUploadPayload payload)
+        {
+            payload = default;
+            if (producer == null)
+                return false;
+
+            if (producer.RequestPageData(Descriptor, request) != VTPageRequestStatus.Available)
+                return false;
+
+            IVTPageFinalizer finalizer = producer.ProducePageData(Descriptor, request);
+            if (finalizer == null)
+                return false;
+
+            payload = new VTPageUploadPayload(request, finalizer);
+            return true;
         }
 
         private bool TryCommitRequestInternal(in VTRequest request, bool rebuildPageTable)

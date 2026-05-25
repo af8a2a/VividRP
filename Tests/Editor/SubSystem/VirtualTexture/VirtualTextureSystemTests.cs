@@ -460,7 +460,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Update_AdvancesFallbackFrameIndex_WhenCameraDataIsMissing()
         {
-            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FallbackFrame", cachePageCount: 1, maxUploadsPerFrame: 1));
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FallbackFrame", cachePageCount: 2, maxUploadsPerFrame: 1));
             ulong firstKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
             ulong secondKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(1, 0, 0));
             var commandBuffer = new CommandBuffer();

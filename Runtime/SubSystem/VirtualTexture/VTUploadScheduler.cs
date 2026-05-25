@@ -41,23 +41,22 @@ namespace VividRP.Runtime
             return stagingTexture;
         }
 
-        internal static void WritePageToStagingTexture(
+        internal static void WritePayloadToStagingTexture(
             Texture2DArray stagingTexture,
             int slice,
             Color32[] scratchPixels,
-            IVTRuntimePageProducer producer,
-            in VirtualTextureSpaceDesc desc,
-            in VTRequest request)
+            in VTPageUploadPayload payload,
+            CommandBuffer cmd)
         {
             if (stagingTexture == null)
                 throw new ArgumentNullException(nameof(stagingTexture));
             if (scratchPixels == null)
                 throw new ArgumentNullException(nameof(scratchPixels));
-            if (producer == null)
-                throw new ArgumentNullException(nameof(producer));
+            if (!payload.IsValid)
+                throw new ArgumentException("Upload payload must include a page finalizer.", nameof(payload));
 
-            producer.WritePage(desc, request, scratchPixels);
-            stagingTexture.SetPixels32(scratchPixels, slice, 0);
+            payload.Finalizer.FinalizeRender(cmd);
+            payload.Finalizer.FinalizeUpload(stagingTexture, slice, scratchPixels);
         }
     }
 
@@ -188,8 +187,6 @@ namespace VividRP.Runtime
 
         private static IVTUploadFenceFactory s_FenceFactory = GraphicsFenceFactory.Instance;
 
-        private readonly VirtualTextureSpaceDesc m_Desc;
-        private readonly IVTRuntimePageProducer m_RuntimeProducer;
         private readonly Texture2DArray m_PhysicalCache;
         private readonly UploadBatch[] m_Batches;
         private readonly Color32[] m_ScratchPixels;
@@ -199,11 +196,8 @@ namespace VividRP.Runtime
         internal VTUploadScheduler(
             string spaceName,
             in VirtualTextureSpaceDesc desc,
-            Texture2DArray physicalCache,
-            IVTRuntimePageProducer runtimeProducer)
+            Texture2DArray physicalCache)
         {
-            m_Desc = desc;
-            m_RuntimeProducer = runtimeProducer;
             m_PhysicalCache = physicalCache;
             m_Batches = new[]
             {
@@ -213,7 +207,7 @@ namespace VividRP.Runtime
             m_ScratchPixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
         }
 
-        internal bool IsEnabled => m_RuntimeProducer != null && m_PhysicalCache != null;
+        internal bool IsEnabled => m_PhysicalCache != null;
 
         internal int InFlightBatchCount
         {
@@ -268,52 +262,97 @@ namespace VividRP.Runtime
             return committedAny;
         }
 
-        internal bool SchedulePendingUploads(IReadOnlyList<VTRequest> pendingRequests, CommandBuffer cmd)
+        internal int GetAvailableBatchCapacity()
         {
-            ResetLastScheduleStats();
+            UploadBatch batch = FindAvailableBatch();
+            return batch?.Capacity ?? 0;
+        }
 
-            if (pendingRequests == null || pendingRequests.Count == 0)
+        internal void ResetLastScheduleStats()
+        {
+            m_LastDuplicateUploadCount = 0;
+            m_LastSkippedUploadCount = 0;
+        }
+
+        internal void AddSkippedUploadCount(int skippedUploadCount)
+        {
+            m_LastSkippedUploadCount += Mathf.Max(0, skippedUploadCount);
+        }
+
+        internal void CountInFlightDuplicates(IReadOnlyList<VTRequest> pendingRequests)
+        {
+            if (pendingRequests == null)
+                return;
+
+            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+            {
+                if (IsRequestInFlight(pendingRequests[requestIndex]))
+                    m_LastDuplicateUploadCount += 1;
+            }
+        }
+
+        internal bool IsRequestInFlight(in VTRequest request)
+        {
+            for (int batchIndex = 0; batchIndex < m_Batches.Length; batchIndex++)
+            {
+                if (m_Batches[batchIndex].InFlight && m_Batches[batchIndex].HasRequest(request))
+                    return true;
+            }
+
+            return false;
+        }
+
+        internal bool ScheduleUploads(IReadOnlyList<VTPageUploadPayload> uploads, CommandBuffer cmd)
+        {
+            if (uploads == null || uploads.Count == 0)
                 return false;
 
             if (!IsEnabled || cmd == null)
             {
-                m_LastSkippedUploadCount = pendingRequests.Count;
+                AddSkippedUploadCount(uploads.Count);
+                DisposePayloads(uploads);
                 return false;
             }
 
             UploadBatch batch = FindAvailableBatch();
-            CountInFlightDuplicates(pendingRequests);
             if (batch == null)
             {
-                m_LastSkippedUploadCount = pendingRequests.Count;
+                AddSkippedUploadCount(uploads.Count);
+                DisposePayloads(uploads);
                 return false;
             }
 
             int requestCount = 0;
-            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+            try
             {
-                VTRequest request = pendingRequests[requestIndex];
-                if (IsRequestInFlight(request))
+                for (int uploadIndex = 0; uploadIndex < uploads.Count; uploadIndex++)
                 {
-                    m_LastSkippedUploadCount += 1;
-                    continue;
-                }
+                    VTPageUploadPayload payload = uploads[uploadIndex];
+                    if (!payload.IsValid)
+                    {
+                        m_LastSkippedUploadCount += 1;
+                        continue;
+                    }
 
-                if (requestCount >= batch.Capacity)
-                {
-                    m_LastSkippedUploadCount += 1;
-                    continue;
-                }
+                    if (requestCount >= batch.Capacity)
+                    {
+                        m_LastSkippedUploadCount += 1;
+                        continue;
+                    }
 
-                VTPageUploadUtility.WritePageToStagingTexture(
-                    batch.StagingTexture,
-                    requestCount,
-                    m_ScratchPixels,
-                    m_RuntimeProducer,
-                    m_Desc,
-                    request);
-                batch.SetRequest(requestCount, request);
-                requestCount += 1;
+                    VTPageUploadUtility.WritePayloadToStagingTexture(
+                        batch.StagingTexture,
+                        requestCount,
+                        m_ScratchPixels,
+                        payload,
+                        cmd);
+                    batch.SetRequest(requestCount, payload.Request);
+                    requestCount += 1;
+                }
+            }
+            finally
+            {
+                DisposePayloads(uploads);
             }
 
             if (requestCount == 0)
@@ -349,30 +388,13 @@ namespace VividRP.Runtime
             return null;
         }
 
-        private void ResetLastScheduleStats()
+        private static void DisposePayloads(IReadOnlyList<VTPageUploadPayload> uploads)
         {
-            m_LastDuplicateUploadCount = 0;
-            m_LastSkippedUploadCount = 0;
-        }
+            if (uploads == null)
+                return;
 
-        private void CountInFlightDuplicates(IReadOnlyList<VTRequest> pendingRequests)
-        {
-            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
-            {
-                if (IsRequestInFlight(pendingRequests[requestIndex]))
-                    m_LastDuplicateUploadCount += 1;
-            }
-        }
-
-        private bool IsRequestInFlight(in VTRequest request)
-        {
-            for (int batchIndex = 0; batchIndex < m_Batches.Length; batchIndex++)
-            {
-                if (m_Batches[batchIndex].InFlight && m_Batches[batchIndex].HasRequest(request))
-                    return true;
-            }
-
-            return false;
+            for (int uploadIndex = 0; uploadIndex < uploads.Count; uploadIndex++)
+                uploads[uploadIndex].Finalizer?.Dispose();
         }
     }
 }

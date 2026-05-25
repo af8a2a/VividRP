@@ -328,13 +328,9 @@ namespace VividRP.Runtime
                 return true;
             }
 
-#if UNITY_EDITOR
-            return TryGetEditorFocusedView(out viewId, out cameraType);
-#else
             viewId = VirtualTextureViewId.Invalid;
             cameraType = default;
             return false;
-#endif
         }
 
         private static bool TryGetDisplayStats(out VTDebugStats stats)

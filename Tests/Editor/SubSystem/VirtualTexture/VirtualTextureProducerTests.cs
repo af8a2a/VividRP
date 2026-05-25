@@ -2,6 +2,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using VividRP.Editor;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -121,6 +122,81 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(sourceTexture);
+            }
+        }
+
+        [Test]
+        public void VirtualTextureAssetProducer_ReplaysBakedTileWithoutSourceTexture()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(4, 4);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            var coord = new VirtualTexturePageCoord(1, 0, 0);
+
+            try
+            {
+                asset.name = "BakedProducer";
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    SourceTextureGUID = "source-guid",
+                    SourceTexturePath = "Assets/Source.png",
+                    PageSize = 2,
+                    BorderSize = 1,
+                    MipCount = 2,
+                    FallbackColor = new Color32(9, 8, 7, 255),
+                });
+
+                VirtualTextureSpaceDesc desc = builtData.CreateSpaceDesc(
+                    "BakedProducer",
+                    cachePageCount: 2,
+                    maxUploadsPerFrame: 1,
+                    feedbackCapacity: 16);
+                var expectedProducer = new VTTexture2DPageProducer(sourceTexture);
+                var request = new VTRequest(1, coord, 0, 1, 1, 0);
+                var expectedPixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
+                expectedProducer.WritePage(desc, request, expectedPixels);
+
+                Object.DestroyImmediate(sourceTexture);
+                sourceTexture = null;
+
+                IVTPageProducer producer = VTRuntimeProducerUtility.Resolve(asset, desc);
+                Assert.That(producer, Is.Not.Null);
+                Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Available));
+
+                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                Assert.That(finalizer, Is.Not.Null);
+
+                var stagingTexture = new Texture2DArray(
+                    desc.PhysicalPageSize,
+                    desc.PhysicalPageSize,
+                    1,
+                    desc.GraphicsFormat,
+                    TextureCreationFlags.None);
+                var scratchPixels = new Color32[expectedPixels.Length];
+
+                try
+                {
+                    finalizer.FinalizeUpload(stagingTexture, 0, scratchPixels);
+                    stagingTexture.Apply(false, false);
+
+                    Assert.That(stagingTexture.GetPixels32(0, 0), Is.EqualTo(expectedPixels));
+                    Assert.That(asset.SourceTextureGUID, Is.EqualTo("source-guid"));
+                    Assert.That(builtData.FallbackColor, Is.EqualTo(new Color32(9, 8, 7, 255)));
+                    Assert.That(builtData.Chunks[0].ContainsByteRange(0, builtData.Tiles[0].ByteSize), Is.True);
+                }
+                finally
+                {
+                    finalizer.Dispose();
+                    Object.DestroyImmediate(stagingTexture);
+                }
+            }
+            finally
+            {
+                if (sourceTexture != null)
+                    Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
             }
         }
 

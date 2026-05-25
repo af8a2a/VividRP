@@ -19,6 +19,7 @@ namespace VividRP.Runtime
             CheckerSource = 0,
             ProceduralPageDebug = 1,
             SourceTexture = 2,
+            VirtualTextureAsset = 3,
         }
 
         [SerializeField]
@@ -53,6 +54,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private Texture2D m_SourceTexture;
+
+        [SerializeField]
+        private VividVirtualTextureAsset m_VirtualTextureAsset;
 
         [SerializeField]
         private string m_SourceTextureAssetPath = DefaultSourceTextureAssetPath;
@@ -179,12 +183,23 @@ namespace VividRP.Runtime
         private VirtualTextureSpaceDesc CreateDescriptor()
         {
             int pageSize = Mathf.Max(16, m_PageSize);
+            int borderSize = Mathf.Max(0, m_BorderSize);
             int virtualPageCountX = Mathf.Max(1, m_VirtualPageCountX);
             int virtualPageCountY = Mathf.Max(1, m_VirtualPageCountY);
             int mipCount = Mathf.Max(1, m_MipCount);
             Texture2D sourceTexture = ResolveSourceTexture();
+            VividVirtualTextureBuiltData builtData = ResolveBuiltData();
+            bool useBuiltData = m_ProducerMode == DemoProducerMode.VirtualTextureAsset && builtData != null;
 
-            if (m_ProducerMode == DemoProducerMode.SourceTexture
+            if (useBuiltData && m_AutoSizeFromSourceTexture)
+            {
+                pageSize = builtData.PageSize;
+                borderSize = builtData.BorderSize;
+                virtualPageCountX = builtData.VirtualPageCountX;
+                virtualPageCountY = builtData.VirtualPageCountY;
+                mipCount = builtData.MipCount;
+            }
+            else if (m_ProducerMode == DemoProducerMode.SourceTexture
                 && m_AutoSizeFromSourceTexture
                 && sourceTexture != null)
             {
@@ -196,12 +211,12 @@ namespace VividRP.Runtime
             return new VirtualTextureSpaceDesc(
                 string.IsNullOrWhiteSpace(m_SpaceName) ? "VT Demo Space" : m_SpaceName,
                 pageSize: pageSize,
-                borderSize: Mathf.Max(0, m_BorderSize),
+                borderSize: borderSize,
                 virtualPageCountX: virtualPageCountX,
                 virtualPageCountY: virtualPageCountY,
                 mipCount: mipCount,
                 cachePageCount: Mathf.Max(2, m_CachePageCount),
-                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                graphicsFormat: useBuiltData ? builtData.GraphicsFormat : GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
                 feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity));
         }
@@ -214,6 +229,14 @@ namespace VividRP.Runtime
             if (m_ProducerMode == DemoProducerMode.CheckerSource)
                 return VTCheckerSourcePageProducer.Instance;
 
+            if (m_ProducerMode == DemoProducerMode.VirtualTextureAsset)
+            {
+                if (m_VirtualTextureAsset?.BuiltData == null)
+                    return VTCheckerSourcePageProducer.Instance;
+
+                return m_VirtualTextureAsset;
+            }
+
             Texture2D sourceTexture = ResolveSourceTexture();
             if (sourceTexture == null)
                 return VTCheckerSourcePageProducer.Instance;
@@ -222,6 +245,11 @@ namespace VividRP.Runtime
                 m_TextureProducer = new VTTexture2DPageProducer(sourceTexture);
 
             return m_TextureProducer;
+        }
+
+        private VividVirtualTextureBuiltData ResolveBuiltData()
+        {
+            return m_VirtualTextureAsset != null ? m_VirtualTextureAsset.BuiltData : null;
         }
 
         private Texture2D ResolveSourceTexture()

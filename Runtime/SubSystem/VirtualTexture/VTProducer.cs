@@ -215,6 +215,11 @@ namespace VividRP.Runtime
             if (producer is IVTPageProducer pageProducer)
                 return pageProducer;
 
+            if (producer is VividVirtualTextureAsset virtualTextureAsset)
+                return virtualTextureAsset.BuiltData != null
+                    ? new VividVirtualTextureAssetProducer(virtualTextureAsset)
+                    : null;
+
             return producer is IVTRuntimePageProducer runtimeProducer
                 ? CreateAdapter(runtimeProducer, desc)
                 : null;

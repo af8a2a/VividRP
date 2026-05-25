@@ -16,6 +16,7 @@ namespace VividRP.Runtime
         public Rect pixelRect;
         internal int frameIndex = -1;
         internal string cameraName;
+        internal EntityId cameraEntityId = EntityId.None;
         private Camera m_CameraNameSource;
 
         public Matrix4x4 viewMatrix => GetViewMatrix();
@@ -37,6 +38,7 @@ namespace VividRP.Runtime
 
             m_CameraNameSource = value;
             cameraName = value != null ? value.name : null;
+            cameraEntityId = value != null ? value.GetEntityId() : EntityId.None;
         }
 
         public Matrix4x4 GetViewMatrix(int viewIndex = 0)
@@ -172,6 +174,7 @@ namespace VividRP.Runtime
             pixelRect = default;
             frameIndex = -1;
             cameraName = null;
+            cameraEntityId = EntityId.None;
             m_CameraNameSource = null;
         }
 

@@ -75,6 +75,19 @@ namespace VividRP.Runtime
                 : Invalid;
         }
 
+        internal static VirtualTextureViewId FromCameraData(VividCameraData cameraData)
+        {
+            Camera camera = cameraData?.camera;
+            if (camera == null)
+                return Invalid;
+
+            EntityId cameraId = cameraData.cameraEntityId;
+            if (cameraId.Equals(EntityId.None))
+                cameraId = camera.GetEntityId();
+
+            return new VirtualTextureViewId(cameraId, camera.cameraType);
+        }
+
         internal static VirtualTextureViewId FromCameraType(CameraType cameraType)
         {
             return new VirtualTextureViewId(EntityId.None, cameraType, true);

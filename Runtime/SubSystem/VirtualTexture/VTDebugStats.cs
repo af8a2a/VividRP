@@ -233,6 +233,7 @@ namespace VividRP.Runtime
 #if UNITY_EDITOR
         private static VirtualTextureViewId s_LastEditorFocusedViewId = VirtualTextureViewId.Invalid;
         private static CameraType? s_LastEditorFocusedCameraType;
+        private static readonly Dictionary<Type, bool> s_EditorGameViewTypeCache = new();
 #endif
 
         internal static VTDebugStats LastStats => s_LastStats;
@@ -485,16 +486,29 @@ namespace VividRP.Runtime
             }
 
             Type windowType = window.GetType();
-            string typeName = windowType.Name;
-            if (string.Equals(typeName, "GameView", StringComparison.Ordinal)
-                || string.Equals(typeName, "PlayModeView", StringComparison.Ordinal)
-                || typeName.EndsWith("GameView", StringComparison.Ordinal))
+            if (IsEditorGameViewType(windowType))
             {
                 cameraType = CameraType.Game;
                 return true;
             }
 
             return false;
+        }
+
+        private static bool IsEditorGameViewType(Type windowType)
+        {
+            if (windowType == null)
+                return false;
+
+            if (s_EditorGameViewTypeCache.TryGetValue(windowType, out bool isGameViewType))
+                return isGameViewType;
+
+            string typeName = windowType.Name;
+            isGameViewType = string.Equals(typeName, "GameView", StringComparison.Ordinal)
+                             || string.Equals(typeName, "PlayModeView", StringComparison.Ordinal)
+                             || typeName.EndsWith("GameView", StringComparison.Ordinal);
+            s_EditorGameViewTypeCache.Add(windowType, isGameViewType);
+            return isGameViewType;
         }
 #endif
     }

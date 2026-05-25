@@ -35,8 +35,8 @@ namespace VividRP.Runtime
 
         protected override void OnDeinitialize()
         {
-            foreach (VTAddressSpace addressSpace in s_AddressSpaces.Values)
-                addressSpace.Dispose();
+            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+                pair.Value.Dispose();
 
             s_AddressSpaces.Clear();
             s_SpaceIdsByName.Clear();
@@ -141,7 +141,7 @@ namespace VividRP.Runtime
 
             VividCameraData cameraData = TryGetCameraData(frameData);
             Camera camera = cameraData?.camera;
-            VirtualTextureViewId activeViewId = VirtualTextureViewId.FromCamera(camera);
+            VirtualTextureViewId activeViewId = VirtualTextureViewId.FromCameraData(cameraData);
             CameraType activeCameraType = camera != null ? camera.cameraType : default;
             VirtualTextureViewId cachePriorityViewId = ResolveCachePriorityViewId(activeViewId, activeCameraType);
             VirtualTextureFeedbackViewSignature activeViewSignature =
@@ -190,8 +190,9 @@ namespace VividRP.Runtime
             int inFlightUploadBatchCount = 0;
             int duplicateUploadCount = 0;
             int skippedUploadCount = 0;
-            foreach (VTAddressSpace addressSpace in s_AddressSpaces.Values)
+            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
             {
+                VTAddressSpace addressSpace = pair.Value;
                 if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
                     evictionCount += addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, frameIndex, cmd);
                 else
@@ -218,8 +219,9 @@ namespace VividRP.Runtime
             int feedbackCapacity = 0;
             string statusMessage = s_AddressSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
 
-            foreach (VTAddressSpace addressSpace in s_AddressSpaces.Values)
+            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
             {
+                VTAddressSpace addressSpace = pair.Value;
                 ComputeBuffer feedbackRequests = null;
                 ComputeBuffer feedbackCounter = null;
                 feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
@@ -641,8 +643,8 @@ namespace VividRP.Runtime
 
         private static void ClearGroupedRequests()
         {
-            foreach (List<VirtualTextureAggregatedFeedbackRequest> requests in s_GroupedRequests.Values)
-                requests.Clear();
+            foreach (KeyValuePair<int, List<VirtualTextureAggregatedFeedbackRequest>> pair in s_GroupedRequests)
+                pair.Value.Clear();
         }
 
         private static bool IsBatchFromView(

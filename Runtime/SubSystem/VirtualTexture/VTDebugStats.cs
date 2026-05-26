@@ -87,7 +87,12 @@ namespace VividRP.Runtime
             int pixelHeight,
             bool feedbackSupported,
             int feedbackCapacity,
-            bool isViewSpecific)
+            bool isViewSpecific,
+            int physicalPoolCount = 0,
+            int physicalPoolResidentPageCount = 0,
+            int physicalPoolFreePageCount = 0,
+            int physicalPoolLockedPageCount = 0,
+            int physicalPoolEvictedPageCount = 0)
         {
             ActiveSpaceCount = activeSpaceCount;
             ResidentPageCount = residentPageCount;
@@ -114,6 +119,11 @@ namespace VividRP.Runtime
             FeedbackSupported = feedbackSupported;
             FeedbackCapacity = feedbackCapacity;
             IsViewSpecific = isViewSpecific;
+            PhysicalPoolCount = physicalPoolCount;
+            PhysicalPoolResidentPageCount = physicalPoolResidentPageCount;
+            PhysicalPoolFreePageCount = physicalPoolFreePageCount;
+            PhysicalPoolLockedPageCount = physicalPoolLockedPageCount;
+            PhysicalPoolEvictedPageCount = physicalPoolEvictedPageCount;
         }
 
         internal int ActiveSpaceCount { get; }
@@ -166,6 +176,16 @@ namespace VividRP.Runtime
 
         internal bool IsViewSpecific { get; }
 
+        internal int PhysicalPoolCount { get; }
+
+        internal int PhysicalPoolResidentPageCount { get; }
+
+        internal int PhysicalPoolFreePageCount { get; }
+
+        internal int PhysicalPoolLockedPageCount { get; }
+
+        internal int PhysicalPoolEvictedPageCount { get; }
+
         internal string ViewLabel
         {
             get
@@ -216,7 +236,12 @@ namespace VividRP.Runtime
                 PixelHeight,
                 FeedbackSupported,
                 FeedbackCapacity,
-                IsViewSpecific);
+                IsViewSpecific,
+                PhysicalPoolCount,
+                PhysicalPoolResidentPageCount,
+                PhysicalPoolFreePageCount,
+                PhysicalPoolLockedPageCount,
+                PhysicalPoolEvictedPageCount);
         }
     }
 
@@ -414,7 +439,12 @@ namespace VividRP.Runtime
                 camera != null ? camera.pixelHeight : 0,
                 IsFeedbackSupported(cameraType),
                 s_LastStats.FeedbackCapacity,
-                true);
+                true,
+                s_LastStats.PhysicalPoolCount,
+                s_LastStats.PhysicalPoolResidentPageCount,
+                s_LastStats.PhysicalPoolFreePageCount,
+                s_LastStats.PhysicalPoolLockedPageCount,
+                s_LastStats.PhysicalPoolEvictedPageCount);
         }
 
         private static int ResolveCameraActualWidth(Camera camera)

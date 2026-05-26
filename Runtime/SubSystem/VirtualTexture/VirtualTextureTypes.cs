@@ -460,6 +460,16 @@ namespace VividRP.Runtime
 
         internal int FeedbackCapacity => m_Stats.FeedbackCapacity;
 
+        internal int PhysicalPoolCount => m_Stats.PhysicalPoolCount;
+
+        internal int PhysicalPoolResidentPageCount => m_Stats.PhysicalPoolResidentPageCount;
+
+        internal int PhysicalPoolFreePageCount => m_Stats.PhysicalPoolFreePageCount;
+
+        internal int PhysicalPoolLockedPageCount => m_Stats.PhysicalPoolLockedPageCount;
+
+        internal int PhysicalPoolEvictedPageCount => m_Stats.PhysicalPoolEvictedPageCount;
+
         internal bool IsViewSpecific => m_Stats.IsViewSpecific;
 
         internal string ViewLabel => m_Stats.ViewLabel;

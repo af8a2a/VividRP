@@ -16,7 +16,7 @@ namespace VividRP.Runtime
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
 
-        internal VTAddressSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
+        internal VTAddressSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer, VTPhysicalPool physicalPool)
         {
             SpaceId = spaceId;
             Descriptor = desc;
@@ -24,11 +24,13 @@ namespace VividRP.Runtime
             m_MipOffsets = VirtualTextureSpaceUtility.BuildMipOffsets(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
             TotalPageCount = VirtualTextureSpaceUtility.GetTotalPageCount(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
             m_ShaderParams = new VirtualTextureSpaceShaderParams(spaceId, desc, TotalPageCount);
-            m_ResidencyManager = new VTResidencyManager(desc.SpaceName, desc, TotalPageCount, m_MipOffsets);
+            PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));
+            m_ResidencyManager = new VTResidencyManager(spaceId, Producer, desc.SpaceName, desc, TotalPageCount, m_MipOffsets, PhysicalPool);
             m_PageTableUpdater = new VTPageTableUpdater(desc.SpaceName, TotalPageCount);
             m_PageProducer = VTRuntimeProducerUtility.Resolve(Producer, desc);
             BootstrapLowestMip();
             m_PageTableUpdater.Rebuild(desc, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
             m_PageTableUpdater.RefreshBuffer();
         }
 
@@ -37,6 +39,8 @@ namespace VividRP.Runtime
         internal VTProducer Producer { get; }
 
         internal VirtualTextureSpaceDesc Descriptor { get; }
+
+        internal VTPhysicalPool PhysicalPool { get; }
 
         internal VTStackDesc StackDesc => Descriptor.StackDesc;
 
@@ -66,7 +70,15 @@ namespace VividRP.Runtime
                 frameIndex);
 
             if (result.PageTableChanged)
+            {
+                m_ResidencyManager.ConsumePageTableDirtyFlag();
                 m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+                m_ResidencyManager.ClearDirtyPageTableUpdates();
+            }
+            else
+            {
+                RebuildPageTableIfDirty();
+            }
 
             return result.EvictionCount;
         }
@@ -87,6 +99,7 @@ namespace VividRP.Runtime
                 return false;
 
             m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
             return true;
         }
 
@@ -98,6 +111,27 @@ namespace VividRP.Runtime
         internal void RefreshPageTableBuffer()
         {
             m_PageTableUpdater.RefreshBuffer();
+        }
+
+        internal bool RebuildPageTableIfDirty()
+        {
+            if (!m_ResidencyManager.ConsumePageTableDirtyFlag())
+                return false;
+
+            m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
+            return true;
+        }
+
+        internal int FlushRegion(int mip, RectInt pageRegion)
+        {
+            int flushedCount = m_ResidencyManager.FlushRegion(mip, pageRegion);
+            if (flushedCount <= 0)
+                return 0;
+
+            m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
+            return flushedCount;
         }
 
         internal VirtualTextureSpaceBinding CreateBinding(
@@ -368,7 +402,10 @@ namespace VividRP.Runtime
                 return false;
 
             if (rebuildPageTable)
+            {
                 m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+                m_ResidencyManager.ClearDirtyPageTableUpdates();
+            }
 
             return true;
         }

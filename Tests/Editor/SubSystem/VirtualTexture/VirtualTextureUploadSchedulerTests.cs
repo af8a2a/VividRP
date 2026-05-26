@@ -301,7 +301,7 @@ namespace VividRP.Editor.Tests
         public void Uploads_GrowSharedPool_WhenLaterSpaceNeedsLargerBatch()
         {
             int smallSpaceId = VirtualTextureSystem.RegisterAddressSpace(
-                CreateDesc("SmallSharedPool"),
+                CreateDesc("SmallSharedPool", cachePageCount: 5),
                 new TestRuntimeProducer());
             IssueFeedback(smallSpaceId, new VirtualTexturePageCoord(0, 0, 0));
 
@@ -414,7 +414,10 @@ namespace VividRP.Editor.Tests
             Assert.That(residentEntry.PendingUpload, Is.False);
         }
 
-        private static VirtualTextureSpaceDesc CreateDesc(string name, int maxUploadsPerFrame = 1)
+        private static VirtualTextureSpaceDesc CreateDesc(
+            string name,
+            int maxUploadsPerFrame = 1,
+            int cachePageCount = 4)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -423,7 +426,7 @@ namespace VividRP.Editor.Tests
                 virtualPageCountX: 4,
                 virtualPageCountY: 4,
                 mipCount: 3,
-                cachePageCount: 4,
+                cachePageCount: cachePageCount,
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
                 feedbackCapacity: 32);

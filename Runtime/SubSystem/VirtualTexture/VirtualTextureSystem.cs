@@ -9,6 +9,7 @@ namespace VividRP.Runtime
     {
         private static readonly Dictionary<int, VTAddressSpace> s_AddressSpaces = new();
         private static readonly Dictionary<string, int> s_SpaceIdsByName = new(StringComparer.Ordinal);
+        private static readonly Dictionary<VTPhysicalPoolDesc, VTPhysicalPool> s_PhysicalPools = new();
         private static readonly VirtualTextureFeedbackCameraSystem s_FeedbackCameraSystem = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_CompletedReadbacks = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
@@ -40,8 +41,12 @@ namespace VividRP.Runtime
             foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
                 pair.Value.Dispose();
 
+            foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
+                pool.Dispose();
+
             s_AddressSpaces.Clear();
             s_SpaceIdsByName.Clear();
+            s_PhysicalPools.Clear();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
             s_AggregatedRequests.Clear();
@@ -83,7 +88,7 @@ namespace VividRP.Runtime
             }
 
             int spaceId = s_NextSpaceId++;
-            var addressSpace = new VTAddressSpace(spaceId, desc, producer);
+            VTAddressSpace addressSpace = CreateAddressSpace(spaceId, desc, producer);
             s_AddressSpaces.Add(spaceId, addressSpace);
             s_SpaceIdsByName.Add(desc.SpaceName, spaceId);
             return spaceId;
@@ -209,7 +214,10 @@ namespace VividRP.Runtime
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
             foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            {
+                pair.Value.RebuildPageTableIfDirty();
                 pair.Value.RefreshPageTableBuffer();
+            }
 
             ClearGroupedRequests();
             s_AggregatedRequests.Clear();
@@ -263,6 +271,10 @@ namespace VividRP.Runtime
                 virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(feedbackRequests, feedbackCounter));
             }
 
+            VTPhysicalPoolStats physicalPoolStats = CollectPhysicalPoolStats();
+            residentPageCount = physicalPoolStats.ResidentPageCount;
+            freePageCount = physicalPoolStats.FreePageCount;
+
             var globalStats = new VTDebugStats(
                 s_AddressSpaces.Count,
                 residentPageCount,
@@ -288,7 +300,12 @@ namespace VividRP.Runtime
                 0,
                 false,
                 feedbackCapacity,
-                false);
+                false,
+                physicalPoolStats.PoolCount,
+                physicalPoolStats.ResidentPageCount,
+                physicalPoolStats.FreePageCount,
+                physicalPoolStats.LockedPageCount,
+                physicalPoolStats.EvictedPageCount);
             VirtualTextureStatsRegistry.Report(globalStats);
 
             if (camera != null)
@@ -318,7 +335,12 @@ namespace VividRP.Runtime
                     cameraData?.pixelHeight ?? 0,
                     supportsFeedback,
                     feedbackCapacity,
-                    true);
+                    true,
+                    physicalPoolStats.PoolCount,
+                    physicalPoolStats.ResidentPageCount,
+                    physicalPoolStats.FreePageCount,
+                    physicalPoolStats.LockedPageCount,
+                    physicalPoolStats.EvictedPageCount);
                 VirtualTextureStatsRegistry.ReportView(viewStats);
             }
         }
@@ -361,6 +383,39 @@ namespace VividRP.Runtime
         internal static bool CommitUpload(in VirtualTextureUploadRequest request)
         {
             return CommitRequest(request.Request);
+        }
+
+        internal static int FlushProducer(VTProducer producer)
+        {
+            Initialize();
+
+            VTProducer resolvedProducer = ResolveStoredProducer(producer);
+            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            {
+                if (IsSameProducer(pair.Value.Producer, resolvedProducer))
+                    s_UploadScheduler.CancelUploadsForSpace(pair.Key);
+            }
+
+            int flushedCount = 0;
+            foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
+                flushedCount += pool.FlushProducer(resolvedProducer);
+
+            if (flushedCount > 0)
+            {
+                foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+                    pair.Value.RebuildPageTableIfDirty();
+            }
+
+            return flushedCount;
+        }
+
+        internal static int FlushRegion(int spaceId, int mip, RectInt pageRegion)
+        {
+            if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+                return 0;
+
+            s_UploadScheduler.CancelUploadsForSpace(spaceId);
+            return addressSpace.FlushRegion(mip, pageRegion);
         }
 
         internal static bool SetPageLocked(int spaceId, in VirtualTexturePageCoord coord, bool locked = true)
@@ -473,6 +528,28 @@ namespace VividRP.Runtime
                 : 0;
         }
 
+        internal static int GetPhysicalPoolCountForTesting()
+        {
+            return s_PhysicalPools.Count;
+        }
+
+        internal static VTPhysicalPoolStats GetPhysicalPoolStatsForTesting()
+        {
+            return CollectPhysicalPoolStats();
+        }
+
+        internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2DArray physicalCache)
+        {
+            if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            {
+                physicalCache = addressSpace.PhysicalPool.Texture;
+                return true;
+            }
+
+            physicalCache = null;
+            return false;
+        }
+
         internal static bool IsCameraFeedbackStateCreatedForTesting(Camera camera)
         {
             if (camera == null)
@@ -524,15 +601,89 @@ namespace VividRP.Runtime
             return producer ?? VTNullProducer.Instance;
         }
 
+        private static bool IsSameProducer(VTProducer left, VTProducer right)
+        {
+            if (ReferenceEquals(left, right))
+                return true;
+
+            if (left == null || right == null)
+                return false;
+
+            return string.Equals(left.Name, right.Name, StringComparison.Ordinal);
+        }
+
+        private static VTPhysicalPool AcquirePhysicalPool(in VirtualTextureSpaceDesc desc)
+        {
+            VTPhysicalPoolDesc poolDesc = VTPhysicalPoolDesc.FromSpaceDesc(desc);
+            if (!s_PhysicalPools.TryGetValue(poolDesc, out VTPhysicalPool pool))
+            {
+                pool = new VTPhysicalPool(desc.SpaceName, poolDesc);
+                s_PhysicalPools.Add(poolDesc, pool);
+            }
+
+            pool.AddRef();
+            return pool;
+        }
+
+        private static VTAddressSpace CreateAddressSpace(
+            int spaceId,
+            in VirtualTextureSpaceDesc desc,
+            VTProducer producer)
+        {
+            VTPhysicalPool physicalPool = AcquirePhysicalPool(desc);
+            try
+            {
+                return new VTAddressSpace(spaceId, desc, producer, physicalPool);
+            }
+            catch
+            {
+                ReleasePhysicalPool(physicalPool);
+                throw;
+            }
+        }
+
+        private static void ReleasePhysicalPool(VTPhysicalPool pool)
+        {
+            if (pool == null || pool.ReleaseRef() > 0)
+                return;
+
+            s_PhysicalPools.Remove(pool.Desc);
+            pool.Dispose();
+        }
+
+        private static VTPhysicalPoolStats CollectPhysicalPoolStats()
+        {
+            int residentPageCount = 0;
+            int freePageCount = 0;
+            int lockedPageCount = 0;
+            int evictedPageCount = 0;
+            foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
+            {
+                residentPageCount += pool.ResidentPageCount;
+                freePageCount += pool.FreePageCount;
+                lockedPageCount += pool.LockedPageCount;
+                evictedPageCount += pool.EvictedPageCount;
+            }
+
+            return new VTPhysicalPoolStats(
+                s_PhysicalPools.Count,
+                residentPageCount,
+                freePageCount,
+                lockedPageCount,
+                evictedPageCount);
+        }
+
         private static void ReplaceAddressSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
         {
             if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace existingAddressSpace))
                 return;
 
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
+            VTPhysicalPool oldPhysicalPool = existingAddressSpace.PhysicalPool;
             existingAddressSpace.Dispose();
+            ReleasePhysicalPool(oldPhysicalPool);
             RemoveFeedbackStateForSpace(spaceId);
-            s_AddressSpaces[spaceId] = new VTAddressSpace(spaceId, desc, producer);
+            s_AddressSpaces[spaceId] = CreateAddressSpace(spaceId, desc, producer);
         }
 
         private static void RemoveAddressSpace(int spaceId)
@@ -543,7 +694,9 @@ namespace VividRP.Runtime
             s_AddressSpaces.Remove(spaceId);
             s_SpaceIdsByName.Remove(addressSpace.Descriptor.SpaceName);
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
+            VTPhysicalPool physicalPool = addressSpace.PhysicalPool;
             addressSpace.Dispose();
+            ReleasePhysicalPool(physicalPool);
             RemoveFeedbackStateForSpace(spaceId);
         }
 

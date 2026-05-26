@@ -778,6 +778,11 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Pixel Size", () => GetVirtualTextureDisplayStats(data).PixelSizeLabel));
                 foldout.children.Add(CreateStatsValue("Feedback Supported", () => GetVirtualTextureDisplayStats(data).FeedbackSupported));
                 foldout.children.Add(CreateStatsValue("Feedback Capacity", () => GetVirtualTextureDisplayStats(data).FeedbackCapacity));
+                foldout.children.Add(CreateStatsValue("Physical Pools", () => GetVirtualTextureDisplayStats(data).PhysicalPoolCount));
+                foldout.children.Add(CreateStatsValue("Pool Resident Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolResidentPageCount));
+                foldout.children.Add(CreateStatsValue("Pool Free Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolFreePageCount));
+                foldout.children.Add(CreateStatsValue("Pool Locked Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolLockedPageCount));
+                foldout.children.Add(CreateStatsValue("Pool Evicted Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolEvictedPageCount));
                 foldout.children.Add(CreateStatsValue("Resident Pages", () => GetVirtualTextureDisplayStats(data).ResidentPageCount));
                 foldout.children.Add(CreateStatsValue("Free Pages", () => GetVirtualTextureDisplayStats(data).FreePageCount));
                 foldout.children.Add(CreateStatsValue("Pending Uploads", () => GetVirtualTextureDisplayStats(data).PendingUploadCount));

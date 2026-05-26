@@ -422,6 +422,7 @@ namespace VividRP.Editor.Tests
             importer.PageSize = 2;
             importer.BorderSize = 1;
             importer.MipCount = 2;
+            EditorUtility.SetDirty(importer);
             importer.SaveAndReimport();
 
             VividVirtualTextureAsset vtAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(vtAssetPath);

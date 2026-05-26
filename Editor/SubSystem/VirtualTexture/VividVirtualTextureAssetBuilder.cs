@@ -43,7 +43,7 @@ namespace VividRP.Editor
                 : ComputeMipCount(virtualPageCountX, virtualPageCountY);
 
             var desc = new VirtualTextureSpaceDesc(
-                string.IsNullOrWhiteSpace(asset.name) ? parameters.SourceTexture.name : asset.name,
+                ResolveSpaceName(asset, parameters),
                 pageSize,
                 borderSize,
                 virtualPageCountX,
@@ -142,6 +142,22 @@ namespace VividRP.Editor
                 streamDataPath,
                 streamDataByteSize);
             asset.Initialize(builtData);
+        }
+
+        private static string ResolveSpaceName(
+            VividVirtualTextureAsset asset,
+            in Parameters parameters)
+        {
+            if (!string.IsNullOrWhiteSpace(asset.name))
+                return asset.name;
+
+            if (!string.IsNullOrWhiteSpace(parameters.SourceTexture.name))
+                return parameters.SourceTexture.name;
+
+            if (!string.IsNullOrWhiteSpace(parameters.SourceTexturePath))
+                return Path.GetFileNameWithoutExtension(parameters.SourceTexturePath);
+
+            return nameof(VividVirtualTextureAsset);
         }
 
         internal static int ComputeMipCount(int virtualPageCountX, int virtualPageCountY)

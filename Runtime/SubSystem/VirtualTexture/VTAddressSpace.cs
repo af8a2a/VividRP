@@ -11,6 +11,7 @@ namespace VividRP.Runtime
         private readonly VTResidencyManager m_ResidencyManager;
         private readonly VTPageTableUpdater m_PageTableUpdater;
         private readonly VirtualTextureSpaceShaderParams m_ShaderParams;
+        private readonly Vector4[] m_LayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
         private readonly IVTPageProducer m_PageProducer;
         private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
@@ -24,6 +25,7 @@ namespace VividRP.Runtime
             m_MipOffsets = VirtualTextureSpaceUtility.BuildMipOffsets(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
             TotalPageCount = VirtualTextureSpaceUtility.GetTotalPageCount(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
             m_ShaderParams = new VirtualTextureSpaceShaderParams(spaceId, desc, TotalPageCount);
+            BuildLayerFallbacks(desc, m_LayerFallbacks);
             PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));
             m_ResidencyManager = new VTResidencyManager(spaceId, Producer, desc.SpaceName, desc, TotalPageCount, m_MipOffsets, PhysicalPool);
             m_PageTableUpdater = new VTPageTableUpdater(desc.SpaceName, TotalPageCount);
@@ -56,9 +58,10 @@ namespace VividRP.Runtime
 
         internal int[] MipOffsets => m_MipOffsets;
 
-        internal int ProcessRequests(
+        internal VTResidencyProcessResult ProcessRequests(
             IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
+            Vector2Int prefetchBias,
             int frameIndex)
         {
             VTResidencyProcessResult result = m_ResidencyManager.ProcessRequests(
@@ -67,6 +70,7 @@ namespace VividRP.Runtime
                 SpaceId,
                 requests,
                 activeViewId,
+                prefetchBias,
                 frameIndex);
 
             if (result.PageTableChanged)
@@ -80,7 +84,7 @@ namespace VividRP.Runtime
                 RebuildPageTableIfDirty();
             }
 
-            return result.EvictionCount;
+            return result;
         }
 
         internal void CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)
@@ -146,7 +150,8 @@ namespace VividRP.Runtime
                 feedbackRequests,
                 feedbackCounter,
                 m_ShaderParams,
-                m_MipOffsets);
+                m_MipOffsets,
+                m_LayerFallbacks);
         }
 
         public void Dispose()
@@ -167,7 +172,7 @@ namespace VividRP.Runtime
             Texture2DArray bootstrapTexture = VTPageUploadUtility.CreateStagingTexture(
                 Descriptor.SpaceName,
                 Descriptor.PhysicalPageSize,
-                1,
+                StackDesc.LayerCount,
                 "Bootstrap");
             var scratchPixels = new Color32[Descriptor.PhysicalPageSize * Descriptor.PhysicalPageSize];
 
@@ -206,12 +211,16 @@ namespace VividRP.Runtime
 
                         try
                         {
-                            VTPageUploadUtility.WritePayloadToStagingTexture(
-                                bootstrapTexture,
-                                0,
-                                scratchPixels,
-                                payload,
-                                null);
+                            VTPageUploadUtility.FinalizePayloadRender(payload, null);
+                            for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
+                            {
+                                VTPageUploadUtility.WritePayloadLayerToStagingTexture(
+                                    bootstrapTexture,
+                                    layerIndex,
+                                    scratchPixels,
+                                    payload,
+                                    layerIndex);
+                            }
                         }
                         finally
                         {
@@ -219,13 +228,41 @@ namespace VividRP.Runtime
                         }
 
                         bootstrapTexture.Apply(false, false);
-                        Graphics.CopyTexture(bootstrapTexture, 0, 0, m_ResidencyManager.PhysicalCache, request.PhysicalPageId, 0);
+                        int destinationBaseSlice = request.PhysicalPageId * StackDesc.LayerCount;
+                        for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
+                        {
+                            Graphics.CopyTexture(
+                                bootstrapTexture,
+                                layerIndex,
+                                0,
+                                m_ResidencyManager.PhysicalCache,
+                                destinationBaseSlice + layerIndex,
+                                0);
+                        }
                     }
                 }
             }
             finally
             {
                 CoreUtils.Destroy(bootstrapTexture);
+            }
+        }
+
+        private static void BuildLayerFallbacks(in VirtualTextureSpaceDesc desc, Vector4[] output)
+        {
+            if (output == null)
+                return;
+
+            for (int layerIndex = 0; layerIndex < output.Length; layerIndex++)
+            {
+                Color32 fallbackColor = layerIndex < desc.StackDesc.LayerCount
+                    ? desc.StackDesc.GetLayer(layerIndex).FallbackColor
+                    : new Color32(0, 0, 0, 255);
+                output[layerIndex] = new Vector4(
+                    fallbackColor.r / 255f,
+                    fallbackColor.g / 255f,
+                    fallbackColor.b / 255f,
+                    fallbackColor.a / 255f);
             }
         }
 

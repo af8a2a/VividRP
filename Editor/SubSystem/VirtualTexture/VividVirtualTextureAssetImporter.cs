@@ -17,6 +17,10 @@ namespace VividRP.Editor
 
         public Texture2D SourceTexture;
 
+        public Texture2D NormalTexture;
+
+        public Texture2D MaskTexture;
+
         [Min(1)]
         public int PageSize = 128;
 
@@ -27,6 +31,10 @@ namespace VividRP.Editor
         public int MipCount;
 
         public Color FallbackColor = Color.black;
+
+        public Color NormalFallbackColor = new(0.5f, 0.5f, 1f, 1f);
+
+        public Color MaskFallbackColor = Color.white;
 
         public override void OnImportAsset(AssetImportContext ctx)
         {
@@ -41,6 +49,19 @@ namespace VividRP.Editor
             string sourceTexturePath = AssetDatabase.GetAssetPath(SourceTexture);
             if (!string.IsNullOrEmpty(sourceTexturePath))
                 ctx.DependsOnSourceAsset(sourceTexturePath);
+            if (NormalTexture != null)
+            {
+                string normalTexturePath = AssetDatabase.GetAssetPath(NormalTexture);
+                if (!string.IsNullOrEmpty(normalTexturePath))
+                    ctx.DependsOnSourceAsset(normalTexturePath);
+            }
+
+            if (MaskTexture != null)
+            {
+                string maskTexturePath = AssetDatabase.GetAssetPath(MaskTexture);
+                if (!string.IsNullOrEmpty(maskTexturePath))
+                    ctx.DependsOnSourceAsset(maskTexturePath);
+            }
 
             var builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
             builtData.name = $"{asset.name}_BuiltData";
@@ -50,12 +71,16 @@ namespace VividRP.Editor
             VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
             {
                 SourceTexture = SourceTexture,
+                NormalTexture = NormalTexture,
+                MaskTexture = MaskTexture,
                 SourceTextureGUID = AssetDatabase.AssetPathToGUID(sourceTexturePath),
                 SourceTexturePath = sourceTexturePath,
                 PageSize = PageSize,
                 BorderSize = BorderSize,
                 MipCount = MipCount,
                 FallbackColor = (Color32)FallbackColor,
+                NormalFallbackColor = (Color32)NormalFallbackColor,
+                MaskFallbackColor = (Color32)MaskFallbackColor,
                 StreamDataPath = ctx.assetPath + ".stream",
                 LogErrorHandler = message => ctx.LogImportError(message),
             });

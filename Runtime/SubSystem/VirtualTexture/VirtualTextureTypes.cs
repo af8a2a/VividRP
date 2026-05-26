@@ -250,7 +250,7 @@ namespace VividRP.Runtime
 
     public readonly struct VirtualTextureSpaceShaderParams
     {
-        internal const int IntCount = 12;
+        internal const int IntCount = 20;
 
         public VirtualTextureSpaceShaderParams(
             int spaceId,
@@ -269,6 +269,18 @@ namespace VividRP.Runtime
             PageTableEntryCount = pageTableEntryCount;
             PhysicalPageWidth = desc.PhysicalPageSize;
             PhysicalPageHeight = desc.PhysicalPageSize;
+            LayerCount = Mathf.Max(1, desc.StackDesc.LayerCount);
+            BaseColorLayerIndex = desc.StackDesc.GetLayerIndexOrDefault(VTLayerSemantic.BaseColor, 0);
+            NormalLayerIndex = desc.StackDesc.TryGetLayerIndex(VTLayerSemantic.Normal, out int normalLayerIndex)
+                ? normalLayerIndex
+                : -1;
+            MaskLayerIndex = desc.StackDesc.TryGetLayerIndex(VTLayerSemantic.Mask, out int maskLayerIndex)
+                ? maskLayerIndex
+                : -1;
+            Layer0SRGB = GetLayerSRGBFlag(desc.StackDesc, 0);
+            Layer1SRGB = GetLayerSRGBFlag(desc.StackDesc, 1);
+            Layer2SRGB = GetLayerSRGBFlag(desc.StackDesc, 2);
+            Layer3SRGB = GetLayerSRGBFlag(desc.StackDesc, 3);
         }
 
         public int SpaceId { get; }
@@ -295,6 +307,22 @@ namespace VividRP.Runtime
 
         public int PhysicalPageHeight { get; }
 
+        public int LayerCount { get; }
+
+        public int BaseColorLayerIndex { get; }
+
+        public int NormalLayerIndex { get; }
+
+        public int MaskLayerIndex { get; }
+
+        public int Layer0SRGB { get; }
+
+        public int Layer1SRGB { get; }
+
+        public int Layer2SRGB { get; }
+
+        public int Layer3SRGB { get; }
+
         public int[] ToIntArray()
         {
             return new[]
@@ -311,6 +339,14 @@ namespace VividRP.Runtime
                 PageTableEntryCount,
                 PhysicalPageWidth,
                 PhysicalPageHeight,
+                LayerCount,
+                BaseColorLayerIndex,
+                NormalLayerIndex,
+                MaskLayerIndex,
+                Layer0SRGB,
+                Layer1SRGB,
+                Layer2SRGB,
+                Layer3SRGB,
             };
         }
 
@@ -322,6 +358,13 @@ namespace VividRP.Runtime
                 floats[index] = ints[index];
 
             return floats;
+        }
+
+        private static int GetLayerSRGBFlag(in VTStackDesc stackDesc, int layerIndex)
+        {
+            return layerIndex >= 0 && layerIndex < stackDesc.LayerCount && stackDesc.GetLayer(layerIndex).SRGB
+                ? 1
+                : 0;
         }
     }
 
@@ -335,7 +378,8 @@ namespace VividRP.Runtime
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
             VirtualTextureSpaceShaderParams shaderParams,
-            int[] mipOffsets)
+            int[] mipOffsets,
+            Vector4[] layerFallbacks)
         {
             SpaceId = spaceId;
             SpaceName = spaceName;
@@ -345,6 +389,7 @@ namespace VividRP.Runtime
             FeedbackCounter = feedbackCounter;
             ShaderParams = shaderParams;
             MipOffsets = mipOffsets;
+            LayerFallbacks = layerFallbacks ?? Array.Empty<Vector4>();
         }
 
         public int SpaceId { get; }
@@ -362,6 +407,8 @@ namespace VividRP.Runtime
         public VirtualTextureSpaceShaderParams ShaderParams { get; }
 
         public int[] MipOffsets { get; }
+
+        public Vector4[] LayerFallbacks { get; }
 
         public bool HasFeedback => FeedbackRequests != null && FeedbackCounter != null;
 
@@ -470,6 +517,16 @@ namespace VividRP.Runtime
 
         internal int PhysicalPoolEvictedPageCount => m_Stats.PhysicalPoolEvictedPageCount;
 
+        internal int PendingMipGapSum => m_Stats.PendingMipGapSum;
+
+        internal int PendingMipGapMax => m_Stats.PendingMipGapMax;
+
+        internal int PendingMipGapSampleCount => m_Stats.PendingMipGapSampleCount;
+
+        internal float PendingMipGapAverage => m_Stats.PendingMipGapAverage;
+
+        internal int PrefetchRequestCount => m_Stats.PrefetchRequestCount;
+
         internal bool IsViewSpecific => m_Stats.IsViewSpecific;
 
         internal string ViewLabel => m_Stats.ViewLabel;
@@ -535,7 +592,10 @@ namespace VividRP.Runtime
         public static readonly int _VTFeedbackEnabled = Shader.PropertyToID(nameof(_VTFeedbackEnabled));
         public static readonly int _VTSpaceParams = Shader.PropertyToID(nameof(_VTSpaceParams));
         public static readonly int _VTMipOffsets = Shader.PropertyToID(nameof(_VTMipOffsets));
+        public static readonly int _VTLayerFallbacks = Shader.PropertyToID(nameof(_VTLayerFallbacks));
         public static readonly int _VTDebugMode = Shader.PropertyToID(nameof(_VTDebugMode));
+        public static readonly int _VTFeedbackFrameIndex = Shader.PropertyToID(nameof(_VTFeedbackFrameIndex));
+        public static readonly int _VTFeedbackSampleRate = Shader.PropertyToID(nameof(_VTFeedbackSampleRate));
     }
 
     internal static class VirtualTextureSpaceUtility
@@ -637,6 +697,15 @@ namespace VividRP.Runtime
             Vector2 virtualUv,
             in VirtualTexturePageTableEntry resolvedEntry)
         {
+            return ComputePhysicalUVW(desc, virtualUv, resolvedEntry, layerIndex: 0);
+        }
+
+        internal static Vector3 ComputePhysicalUVW(
+            in VirtualTextureSpaceDesc desc,
+            Vector2 virtualUv,
+            in VirtualTexturePageTableEntry resolvedEntry,
+            int layerIndex)
+        {
             if (!resolvedEntry.IsMapped)
                 return Vector3.zero;
 
@@ -649,10 +718,12 @@ namespace VividRP.Runtime
             Vector2 texelCoord = localUv * desc.PageSize
                                   + Vector2.one * desc.BorderSize;
             float physicalPageSize = Mathf.Max(desc.PhysicalPageSize, 1);
+            int physicalSlice = resolvedEntry.PhysicalPageId * Mathf.Max(1, desc.StackDesc.LayerCount)
+                                + Mathf.Clamp(layerIndex, 0, Mathf.Max(0, desc.StackDesc.LayerCount - 1));
             return new Vector3(
                 texelCoord.x / physicalPageSize,
                 texelCoord.y / physicalPageSize,
-                resolvedEntry.PhysicalPageId);
+                physicalSlice);
         }
 
         internal static int GetFlatIndex(

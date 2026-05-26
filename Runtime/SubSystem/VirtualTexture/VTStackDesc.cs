@@ -1,17 +1,108 @@
 using System;
+using System.Collections.Generic;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum VTLayerSemantic
+    {
+        BaseColor = 0,
+        Normal = 1,
+        ORM = 2,
+        Height = 3,
+        Mask = 4,
+    }
+
+    public readonly struct VTLayerDesc : IEquatable<VTLayerDesc>
+    {
+        public VTLayerDesc(
+            VTLayerSemantic semantic,
+            GraphicsFormat graphicsFormat,
+            bool sRGB,
+            Color32 fallbackColor,
+            int physicalGroup = 0)
+        {
+            if (graphicsFormat == GraphicsFormat.None)
+                throw new ArgumentException("Layer graphics format must be valid.", nameof(graphicsFormat));
+            if (physicalGroup < 0)
+                throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+            Semantic = semantic;
+            GraphicsFormat = graphicsFormat;
+            SRGB = sRGB;
+            FallbackColor = fallbackColor;
+            PhysicalGroup = physicalGroup;
+        }
+
+        public VTLayerSemantic Semantic { get; }
+
+        public GraphicsFormat GraphicsFormat { get; }
+
+        public bool SRGB { get; }
+
+        public Color32 FallbackColor { get; }
+
+        public int PhysicalGroup { get; }
+
+        public bool Equals(VTLayerDesc other)
+        {
+            return Semantic == other.Semantic
+                   && GraphicsFormat == other.GraphicsFormat
+                   && SRGB == other.SRGB
+                   && FallbackColor.Equals(other.FallbackColor)
+                   && PhysicalGroup == other.PhysicalGroup;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VTLayerDesc other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Semantic, GraphicsFormat, SRGB, FallbackColor, PhysicalGroup);
+        }
+    }
+
     public readonly struct VTStackDesc : IEquatable<VTStackDesc>
     {
+        public const int MaxLayerCount = 4;
+
         public VTStackDesc(
             int pageSize,
             int borderSize,
             int cachePageCount,
             GraphicsFormat graphicsFormat,
             int maxUploadsPerFrame,
-            int feedbackCapacity)
+            int feedbackCapacity,
+            int neighborPrefetchCount = 0)
+            : this(
+                pageSize,
+                borderSize,
+                cachePageCount,
+                new[]
+                {
+                    new VTLayerDesc(
+                        VTLayerSemantic.BaseColor,
+                        graphicsFormat,
+                        GraphicsFormatUtility.IsSRGBFormat(graphicsFormat),
+                        new Color32(0, 0, 0, 255)),
+                },
+                maxUploadsPerFrame,
+                feedbackCapacity,
+                neighborPrefetchCount)
+        {
+        }
+
+        public VTStackDesc(
+            int pageSize,
+            int borderSize,
+            int cachePageCount,
+            VTLayerDesc[] layers,
+            int maxUploadsPerFrame,
+            int feedbackCapacity,
+            int neighborPrefetchCount = 0)
         {
             if (pageSize <= 0)
                 throw new ArgumentOutOfRangeException(nameof(pageSize));
@@ -19,8 +110,10 @@ namespace VividRP.Runtime
                 throw new ArgumentOutOfRangeException(nameof(borderSize));
             if (cachePageCount <= 0 || cachePageCount > VirtualTexturePageTableEntry.MaxPhysicalPageCount)
                 throw new ArgumentOutOfRangeException(nameof(cachePageCount));
-            if (graphicsFormat == GraphicsFormat.None)
-                throw new ArgumentException("Graphics format must be valid.", nameof(graphicsFormat));
+            if (layers == null || layers.Length == 0)
+                throw new ArgumentException("Virtual texture stack must contain at least one layer.", nameof(layers));
+            if (layers.Length > MaxLayerCount)
+                throw new ArgumentOutOfRangeException(nameof(layers), $"Virtual texture stack supports at most {MaxLayerCount} layers.");
             if (maxUploadsPerFrame <= 0)
                 throw new ArgumentOutOfRangeException(nameof(maxUploadsPerFrame));
             if (feedbackCapacity <= 0)
@@ -29,10 +122,22 @@ namespace VividRP.Runtime
             PageSize = pageSize;
             BorderSize = borderSize;
             CachePageCount = cachePageCount;
-            GraphicsFormat = graphicsFormat;
+            m_Layers = new VTLayerDesc[layers.Length];
+            for (int layerIndex = 0; layerIndex < layers.Length; layerIndex++)
+            {
+                if (layers[layerIndex].GraphicsFormat == GraphicsFormat.None)
+                    throw new ArgumentException("Layer graphics format must be valid.", nameof(layers));
+
+                m_Layers[layerIndex] = layers[layerIndex];
+            }
+
+            GraphicsFormat = m_Layers[0].GraphicsFormat;
             MaxUploadsPerFrame = maxUploadsPerFrame;
             FeedbackCapacity = feedbackCapacity;
+            NeighborPrefetchCount = Mathf.Clamp(neighborPrefetchCount, 0, 4);
         }
+
+        private readonly VTLayerDesc[] m_Layers;
 
         public int PageSize { get; }
 
@@ -40,22 +145,75 @@ namespace VividRP.Runtime
 
         public int CachePageCount { get; }
 
+        public int LayerCount => m_Layers?.Length ?? 0;
+
+        public IReadOnlyList<VTLayerDesc> Layers => m_Layers ?? Array.Empty<VTLayerDesc>();
+
         public GraphicsFormat GraphicsFormat { get; }
+
+        public bool SRGB => LayerCount > 0 && m_Layers[0].SRGB;
+
+        public Color32 FallbackColor => LayerCount > 0 ? m_Layers[0].FallbackColor : new Color32(0, 0, 0, 255);
 
         public int MaxUploadsPerFrame { get; }
 
         public int FeedbackCapacity { get; }
 
+        public int NeighborPrefetchCount { get; }
+
         public int PhysicalPageSize => PageSize + BorderSize * 2;
+
+        public VTLayerDesc GetLayer(int layerIndex)
+        {
+            if (m_Layers == null || layerIndex < 0 || layerIndex >= m_Layers.Length)
+                throw new ArgumentOutOfRangeException(nameof(layerIndex));
+
+            return m_Layers[layerIndex];
+        }
+
+        public bool TryGetLayerIndex(VTLayerSemantic semantic, out int layerIndex)
+        {
+            if (m_Layers != null)
+            {
+                for (int index = 0; index < m_Layers.Length; index++)
+                {
+                    if (m_Layers[index].Semantic != semantic)
+                        continue;
+
+                    layerIndex = index;
+                    return true;
+                }
+            }
+
+            layerIndex = -1;
+            return false;
+        }
+
+        public int GetLayerIndexOrDefault(VTLayerSemantic semantic, int defaultLayerIndex = 0)
+        {
+            return TryGetLayerIndex(semantic, out int layerIndex) ? layerIndex : defaultLayerIndex;
+        }
 
         public bool Equals(VTStackDesc other)
         {
-            return PageSize == other.PageSize
-                   && BorderSize == other.BorderSize
-                   && CachePageCount == other.CachePageCount
-                   && GraphicsFormat == other.GraphicsFormat
-                   && MaxUploadsPerFrame == other.MaxUploadsPerFrame
-                   && FeedbackCapacity == other.FeedbackCapacity;
+            if (PageSize != other.PageSize
+                || BorderSize != other.BorderSize
+                || CachePageCount != other.CachePageCount
+                || MaxUploadsPerFrame != other.MaxUploadsPerFrame
+                || FeedbackCapacity != other.FeedbackCapacity
+                || NeighborPrefetchCount != other.NeighborPrefetchCount
+                || LayerCount != other.LayerCount)
+            {
+                return false;
+            }
+
+            for (int layerIndex = 0; layerIndex < LayerCount; layerIndex++)
+            {
+                if (!m_Layers[layerIndex].Equals(other.m_Layers[layerIndex]))
+                    return false;
+            }
+
+            return true;
         }
 
         public override bool Equals(object obj)
@@ -65,13 +223,17 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(
-                PageSize,
-                BorderSize,
-                CachePageCount,
-                GraphicsFormat,
-                MaxUploadsPerFrame,
-                FeedbackCapacity);
+            var hashCode = new HashCode();
+            hashCode.Add(PageSize);
+            hashCode.Add(BorderSize);
+            hashCode.Add(CachePageCount);
+            hashCode.Add(MaxUploadsPerFrame);
+            hashCode.Add(FeedbackCapacity);
+            hashCode.Add(NeighborPrefetchCount);
+            for (int layerIndex = 0; layerIndex < LayerCount; layerIndex++)
+                hashCode.Add(m_Layers[layerIndex]);
+
+            return hashCode.ToHashCode();
         }
     }
 }

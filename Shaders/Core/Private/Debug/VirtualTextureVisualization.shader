@@ -98,7 +98,9 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                     return float4(0.05, 0.05, 0.05, 1.0);
 
                 float2 localUv = frac(scaledUv);
-                float4 pageColor = SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, localUv, (float)pageId, 0.0);
+                uint layerIndex = VTResolveLayerIndex(VT_BASE_COLOR_LAYER, 0u);
+                uint physicalSlice = pageId * max((uint)VT_LAYER_COUNT, 1u) + layerIndex;
+                float4 pageColor = SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, localUv, (float)physicalSlice, 0.0);
                 return lerp(pageColor, float4(1.0, 1.0, 1.0, 1.0), GridBorderMask(localUv));
             }
 

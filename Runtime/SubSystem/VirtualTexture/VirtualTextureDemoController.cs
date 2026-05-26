@@ -49,6 +49,9 @@ namespace VividRP.Runtime
         [SerializeField, Min(16)]
         private int m_FeedbackCapacity = 512;
 
+        [SerializeField, Range(0, 4)]
+        private int m_NeighborPrefetchCount = 2;
+
         [SerializeField]
         private DemoProducerMode m_ProducerMode = DemoProducerMode.SourceTexture;
 
@@ -208,6 +211,16 @@ namespace VividRP.Runtime
                 mipCount = ComputeMipCount(virtualPageCountX, virtualPageCountY);
             }
 
+            if (useBuiltData)
+            {
+                return builtData.CreateSpaceDesc(
+                    string.IsNullOrWhiteSpace(m_SpaceName) ? "VT Demo Space" : m_SpaceName,
+                    cachePageCount: Mathf.Max(2, m_CachePageCount),
+                    maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
+                    feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity),
+                    neighborPrefetchCount: Mathf.Clamp(m_NeighborPrefetchCount, 0, 4));
+            }
+
             return new VirtualTextureSpaceDesc(
                 string.IsNullOrWhiteSpace(m_SpaceName) ? "VT Demo Space" : m_SpaceName,
                 pageSize: pageSize,
@@ -218,7 +231,8 @@ namespace VividRP.Runtime
                 cachePageCount: Mathf.Max(2, m_CachePageCount),
                 graphicsFormat: useBuiltData ? builtData.GraphicsFormat : GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: Mathf.Max(1, m_MaxUploadsPerFrame),
-                feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity));
+                feedbackCapacity: Mathf.Max(16, m_FeedbackCapacity),
+                neighborPrefetchCount: Mathf.Clamp(m_NeighborPrefetchCount, 0, 4));
         }
 
         private VTProducer ResolveProducer()

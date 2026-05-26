@@ -22,11 +22,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField]
         private VirtualTextureDebugMode m_DefaultDebugMode = VirtualTextureDebugMode.None;
 
+        [SerializeField, Min(1)]
+        private int m_FeedbackSampleRate = 4;
+
         private readonly float[] m_SpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_MipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_LayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
 
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
         private VirtualTextureDebugMode m_ResolvedDebugMode;
+        private int m_FrameIndex;
         private bool m_ShouldSkipExecution;
 
         public VirtualTextureDemoPass()
@@ -55,6 +60,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 : m_DefaultDebugMode;
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
+            m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             int width = cameraData != null
                 ? Mathf.Max(1, cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth)
@@ -113,6 +121,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_VirtualTextureFrameData = null;
+            m_FrameIndex = 0;
             m_ShouldSkipExecution = false;
         }
 
@@ -120,6 +129,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             Array.Clear(m_SpaceParams, 0, m_SpaceParams.Length);
             Array.Clear(m_MipOffsets, 0, m_MipOffsets.Length);
+            Array.Clear(m_LayerFallbacks, 0, m_LayerFallbacks.Length);
 
             float[] shaderParams = binding.ShaderParams.ToFloatArray();
             for (int paramIndex = 0; paramIndex < shaderParams.Length && paramIndex < m_SpaceParams.Length; paramIndex++)
@@ -132,11 +142,21 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_MipOffsets[mipIndex] = mipOffsets[mipIndex];
             }
 
+            Vector4[] layerFallbacks = binding.LayerFallbacks;
+            if (layerFallbacks != null)
+            {
+                for (int layerIndex = 0; layerIndex < layerFallbacks.Length && layerIndex < m_LayerFallbacks.Length; layerIndex++)
+                    m_LayerFallbacks[layerIndex] = layerFallbacks[layerIndex];
+            }
+
             cmd.SetGlobalBuffer(VirtualTextureShaderIDs._VTPageTable, binding.PageTableBuffer);
             cmd.SetGlobalTexture(VirtualTextureShaderIDs._VTPhysicalCache, binding.PhysicalCache);
             cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTSpaceParams, m_SpaceParams);
             cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTMipOffsets, m_MipOffsets);
+            cmd.SetGlobalVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, m_LayerFallbacks);
             cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackEnabled, binding.HasFeedback ? 1 : 0);
+            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackFrameIndex, m_FrameIndex);
+            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackSampleRate, Mathf.Max(1, m_FeedbackSampleRate));
             cmd.SetGlobalInt(VirtualTextureShaderIDs._VTDebugMode, (int)m_ResolvedDebugMode);
         }
     }

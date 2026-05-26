@@ -148,6 +148,98 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Generate_BuildsBaseColorAndNormalLayers()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);
+            Texture2D normalTexture = CreateOffsetSourceTexture(4, 4, readable: true, offset: 80);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            var baseFallback = new Color32(9, 8, 7, 255);
+            var normalFallback = new Color32(128, 128, 255, 255);
+            var coord = new VirtualTexturePageCoord(1, 0, 0);
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    NormalTexture = normalTexture,
+                    PageSize = 2,
+                    BorderSize = 1,
+                    MipCount = 2,
+                    FallbackColor = baseFallback,
+                    NormalFallbackColor = normalFallback,
+                });
+
+                Assert.That(builtData.LayerCount, Is.EqualTo(2));
+                Assert.That(builtData.Layers[0].Semantic, Is.EqualTo(VTLayerSemantic.BaseColor));
+                Assert.That(builtData.Layers[0].FallbackColor, Is.EqualTo(baseFallback));
+                Assert.That(builtData.Layers[1].Semantic, Is.EqualTo(VTLayerSemantic.Normal));
+                Assert.That(builtData.Layers[1].SRGB, Is.False);
+                Assert.That(builtData.Layers[1].FallbackColor, Is.EqualTo(normalFallback));
+
+                int layerByteSize = builtData.PhysicalPageSize * builtData.PhysicalPageSize * 4;
+                Assert.That(builtData.RawDataByteSize, Is.EqualTo(asset.TileCount * layerByteSize * 2));
+                Assert.That(builtData.TryGetTileDescriptor(coord, out VividVirtualTextureTileDescriptor tile), Is.True);
+                Assert.That(tile.ByteSize, Is.EqualTo(layerByteSize * 2));
+
+                VirtualTextureSpaceDesc desc = builtData.CreateSpaceDesc(
+                    "LayeredRuntimeProducer",
+                    cachePageCount: 2,
+                    maxUploadsPerFrame: 1,
+                    feedbackCapacity: 16);
+                Assert.That(desc.StackDesc.LayerCount, Is.EqualTo(2));
+                Assert.That(desc.StackDesc.TryGetLayerIndex(VTLayerSemantic.Normal, out int normalLayerIndex), Is.True);
+                Assert.That(normalLayerIndex, Is.EqualTo(1));
+
+                var request = new VTRequest(1, coord, 0, 1, 1, 0);
+                var expectedBaseProducer = new VTTexture2DPageProducer(sourceTexture);
+                var expectedNormalProducer = new VTTexture2DPageProducer(normalTexture);
+                var expectedBasePixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
+                var expectedNormalPixels = new Color32[expectedBasePixels.Length];
+                expectedBaseProducer.WritePage(desc, request, expectedBasePixels);
+                expectedNormalProducer.WritePage(desc, request, expectedNormalPixels);
+
+                var producer = new VividVirtualTextureAssetProducer(asset);
+                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                Assert.That(finalizer, Is.InstanceOf<IVTMultiLayerPageFinalizer>());
+                var multiLayerFinalizer = (IVTMultiLayerPageFinalizer)finalizer;
+                Assert.That(multiLayerFinalizer.LayerCount, Is.EqualTo(2));
+
+                var stagingTexture = new Texture2DArray(
+                    desc.PhysicalPageSize,
+                    desc.PhysicalPageSize,
+                    2,
+                    desc.GraphicsFormat,
+                    TextureCreationFlags.None);
+                var scratchPixels = new Color32[expectedBasePixels.Length];
+
+                try
+                {
+                    multiLayerFinalizer.FinalizeUploadLayer(stagingTexture, 0, 0, scratchPixels);
+                    multiLayerFinalizer.FinalizeUploadLayer(stagingTexture, 1, 1, scratchPixels);
+                    stagingTexture.Apply(false, false);
+
+                    Assert.That(stagingTexture.GetPixels32(0, 0), Is.EqualTo(expectedBasePixels));
+                    Assert.That(stagingTexture.GetPixels32(1, 0), Is.EqualTo(expectedNormalPixels));
+                }
+                finally
+                {
+                    finalizer.Dispose();
+                    producer.Dispose();
+                    Object.DestroyImmediate(stagingTexture);
+                }
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(normalTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
         public void AssetProducer_StreamsTilePayloadAsynchronously_AndDeduplicatesRequests()
         {
             Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);
@@ -447,6 +539,27 @@ namespace VividRP.Editor.Tests
             {
                 for (int x = 0; x < width; x++)
                     pixels[y * width + x] = new Color32((byte)(16 + x * 40), (byte)(32 + y * 40), (byte)(x + y), 255);
+            }
+
+            texture.SetPixels32(pixels, 0);
+            texture.Apply(updateMipmaps: true, makeNoLongerReadable: !readable);
+            return texture;
+        }
+
+        private static Texture2D CreateOffsetSourceTexture(int width, int height, bool readable, byte offset)
+        {
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: true);
+            var pixels = new Color32[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    pixels[y * width + x] = new Color32(
+                        (byte)(offset + x * 16),
+                        (byte)(offset + y * 16),
+                        (byte)(offset + x + y),
+                        255);
+                }
             }
 
             texture.SetPixels32(pixels, 0);

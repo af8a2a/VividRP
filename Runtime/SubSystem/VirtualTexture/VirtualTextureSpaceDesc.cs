@@ -15,7 +15,8 @@ namespace VividRP.Runtime
             int cachePageCount,
             GraphicsFormat graphicsFormat,
             int maxUploadsPerFrame,
-            int feedbackCapacity)
+            int feedbackCapacity,
+            int neighborPrefetchCount = 0)
             : this(
                 spaceName,
                 virtualPageCountX,
@@ -27,7 +28,8 @@ namespace VividRP.Runtime
                     cachePageCount,
                     graphicsFormat,
                     maxUploadsPerFrame,
-                    feedbackCapacity))
+                    feedbackCapacity,
+                    neighborPrefetchCount))
         {
         }
 
@@ -75,6 +77,8 @@ namespace VividRP.Runtime
         public int MaxUploadsPerFrame => StackDesc.MaxUploadsPerFrame;
 
         public int FeedbackCapacity => StackDesc.FeedbackCapacity;
+
+        public int NeighborPrefetchCount => StackDesc.NeighborPrefetchCount;
 
         public int PhysicalPageSize => StackDesc.PhysicalPageSize;
 

@@ -72,22 +72,47 @@ namespace VividRP.Runtime
             }
         }
 
-        private sealed class Finalizer : IVTPageFinalizer
+        private sealed class Finalizer : IVTMultiLayerPageFinalizer
         {
             private readonly VividVirtualTextureTilePayload m_Payload;
             private readonly int m_ExpectedPixelCount;
+            private readonly VTLayerDesc[] m_Layers;
 
-            internal Finalizer(in VividVirtualTextureTilePayload payload, int expectedPixelCount)
+            internal Finalizer(
+                in VividVirtualTextureTilePayload payload,
+                int expectedPixelCount,
+                VTLayerDesc[] layers)
             {
                 m_Payload = payload;
                 m_ExpectedPixelCount = expectedPixelCount;
+                m_Layers = layers != null && layers.Length > 0
+                    ? layers
+                    : new[]
+                    {
+                        new VTLayerDesc(
+                            VTLayerSemantic.BaseColor,
+                            UnityEngine.Experimental.Rendering.GraphicsFormat.R8G8B8A8_UNorm,
+                            false,
+                            new Color32(0, 0, 0, 255)),
+                    };
             }
 
             public void FinalizeRender(CommandBuffer cmd)
             {
             }
 
+            public int LayerCount => m_Layers.Length;
+
             public void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels)
+            {
+                FinalizeUploadLayer(stagingTexture, slice, 0, scratchPixels);
+            }
+
+            public void FinalizeUploadLayer(
+                Texture2DArray stagingTexture,
+                int slice,
+                int layerIndex,
+                Color32[] scratchPixels)
             {
                 if (stagingTexture == null)
                     throw new ArgumentNullException(nameof(stagingTexture));
@@ -96,12 +121,21 @@ namespace VividRP.Runtime
                 if (!m_Payload.IsValid)
                     throw new InvalidOperationException("[VividRP] Invalid virtual texture tile payload.");
 
+                if (layerIndex < 0 || layerIndex >= m_Layers.Length)
+                    throw new ArgumentOutOfRangeException(nameof(layerIndex));
+
                 int pixelCount = Mathf.Min(m_ExpectedPixelCount, scratchPixels.Length);
-                if (m_Payload.ByteSize < pixelCount * 4)
-                    throw new InvalidOperationException("[VividRP] Virtual texture tile payload is smaller than the target page.");
+                int layerByteSize = pixelCount * 4;
+                int relativeLayerByteOffset = layerIndex * layerByteSize;
+                if (m_Payload.ByteSize < relativeLayerByteOffset + layerByteSize)
+                {
+                    FillFallback(layerIndex, scratchPixels, pixelCount);
+                    stagingTexture.SetPixels32(scratchPixels, slice, 0);
+                    return;
+                }
 
                 byte[] data = m_Payload.Data;
-                int byteOffset = m_Payload.ByteOffset;
+                int byteOffset = m_Payload.ByteOffset + relativeLayerByteOffset;
                 for (int pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++)
                 {
                     int sourceIndex = byteOffset + pixelIndex * 4;
@@ -117,6 +151,13 @@ namespace VividRP.Runtime
 
             public void Dispose()
             {
+            }
+
+            private void FillFallback(int layerIndex, Color32[] scratchPixels, int pixelCount)
+            {
+                Color32 fallbackColor = m_Layers[layerIndex].FallbackColor;
+                for (int pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++)
+                    scratchPixels[pixelIndex] = fallbackColor;
             }
         }
 
@@ -224,7 +265,7 @@ namespace VividRP.Runtime
             }
 
             int pixelCount = desc.PhysicalPageSize * desc.PhysicalPageSize;
-            return new Finalizer(payload, pixelCount);
+            return new Finalizer(payload, pixelCount, CopyLayers(desc.StackDesc));
         }
 
         public void GatherTasks(List<IVTPageProducerTask> tasks)
@@ -359,6 +400,15 @@ namespace VividRP.Runtime
 
             string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             return Path.GetFullPath(Path.Combine(projectRoot, normalizedPath));
+        }
+
+        private static VTLayerDesc[] CopyLayers(in VTStackDesc stackDesc)
+        {
+            var layers = new VTLayerDesc[Mathf.Max(1, stackDesc.LayerCount)];
+            for (int layerIndex = 0; layerIndex < layers.Length; layerIndex++)
+                layers[layerIndex] = stackDesc.GetLayer(layerIndex);
+
+            return layers;
         }
 
         private static byte[] ReadRange(string path, int byteOffset, int byteSize)

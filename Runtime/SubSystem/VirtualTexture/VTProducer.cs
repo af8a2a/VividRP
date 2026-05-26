@@ -93,10 +93,10 @@ namespace VividRP.Runtime
                 desc.VirtualPageCountX,
                 desc.VirtualPageCountY,
                 desc.MipCount,
-                1,
+                desc.StackDesc.LayerCount,
                 desc.GraphicsFormat,
-                GraphicsFormatUtility.IsSRGBFormat(desc.GraphicsFormat),
-                new Color32(0, 0, 0, 255),
+                desc.StackDesc.SRGB,
+                desc.StackDesc.FallbackColor,
                 producerPriority: 0,
                 continuousUpdate: false,
                 persistentLowestMip: true);
@@ -171,6 +171,17 @@ namespace VividRP.Runtime
         void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels);
     }
 
+    internal interface IVTMultiLayerPageFinalizer : IVTPageFinalizer
+    {
+        int LayerCount { get; }
+
+        void FinalizeUploadLayer(
+            Texture2DArray stagingTexture,
+            int slice,
+            int layerIndex,
+            Color32[] scratchPixels);
+    }
+
     internal readonly struct VTPageUploadPayload
     {
         internal VTPageUploadPayload(in VTRequest request, IVTPageFinalizer finalizer)
@@ -242,7 +253,7 @@ namespace VividRP.Runtime
 
     internal sealed class VTSynchronousPageProducerAdapter : IVTPageProducer
     {
-        private sealed class Finalizer : IVTPageFinalizer
+        private sealed class Finalizer : IVTMultiLayerPageFinalizer
         {
             private readonly IVTRuntimePageProducer m_Producer;
             private readonly VirtualTextureSpaceDesc m_Desc;
@@ -262,19 +273,41 @@ namespace VividRP.Runtime
             {
             }
 
+            public int LayerCount => Mathf.Max(1, m_Desc.StackDesc.LayerCount);
+
             public void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels)
+            {
+                FinalizeUploadLayer(stagingTexture, slice, 0, scratchPixels);
+            }
+
+            public void FinalizeUploadLayer(
+                Texture2DArray stagingTexture,
+                int slice,
+                int layerIndex,
+                Color32[] scratchPixels)
             {
                 if (stagingTexture == null)
                     throw new ArgumentNullException(nameof(stagingTexture));
                 if (scratchPixels == null)
                     throw new ArgumentNullException(nameof(scratchPixels));
 
-                m_Producer.WritePage(m_Desc, m_Request, scratchPixels);
+                if (layerIndex == 0)
+                    m_Producer.WritePage(m_Desc, m_Request, scratchPixels);
+                else
+                    FillLayerFallback(layerIndex, scratchPixels);
+
                 stagingTexture.SetPixels32(scratchPixels, slice, 0);
             }
 
             public void Dispose()
             {
+            }
+
+            private void FillLayerFallback(int layerIndex, Color32[] scratchPixels)
+            {
+                Color32 fallbackColor = m_Desc.StackDesc.GetLayer(layerIndex).FallbackColor;
+                for (int pixelIndex = 0; pixelIndex < scratchPixels.Length; pixelIndex++)
+                    scratchPixels[pixelIndex] = fallbackColor;
             }
         }
 

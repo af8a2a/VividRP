@@ -92,7 +92,11 @@ namespace VividRP.Runtime
             int physicalPoolResidentPageCount = 0,
             int physicalPoolFreePageCount = 0,
             int physicalPoolLockedPageCount = 0,
-            int physicalPoolEvictedPageCount = 0)
+            int physicalPoolEvictedPageCount = 0,
+            int pendingMipGapSum = 0,
+            int pendingMipGapMax = 0,
+            int pendingMipGapSampleCount = 0,
+            int prefetchRequestCount = 0)
         {
             ActiveSpaceCount = activeSpaceCount;
             ResidentPageCount = residentPageCount;
@@ -124,6 +128,10 @@ namespace VividRP.Runtime
             PhysicalPoolFreePageCount = physicalPoolFreePageCount;
             PhysicalPoolLockedPageCount = physicalPoolLockedPageCount;
             PhysicalPoolEvictedPageCount = physicalPoolEvictedPageCount;
+            PendingMipGapSum = pendingMipGapSum;
+            PendingMipGapMax = pendingMipGapMax;
+            PendingMipGapSampleCount = pendingMipGapSampleCount;
+            PrefetchRequestCount = prefetchRequestCount;
         }
 
         internal int ActiveSpaceCount { get; }
@@ -186,6 +194,18 @@ namespace VividRP.Runtime
 
         internal int PhysicalPoolEvictedPageCount { get; }
 
+        internal int PendingMipGapSum { get; }
+
+        internal int PendingMipGapMax { get; }
+
+        internal int PendingMipGapSampleCount { get; }
+
+        internal int PrefetchRequestCount { get; }
+
+        internal float PendingMipGapAverage => PendingMipGapSampleCount > 0
+            ? PendingMipGapSum / (float)PendingMipGapSampleCount
+            : 0f;
+
         internal string ViewLabel
         {
             get
@@ -241,7 +261,11 @@ namespace VividRP.Runtime
                 PhysicalPoolResidentPageCount,
                 PhysicalPoolFreePageCount,
                 PhysicalPoolLockedPageCount,
-                PhysicalPoolEvictedPageCount);
+                PhysicalPoolEvictedPageCount,
+                PendingMipGapSum,
+                PendingMipGapMax,
+                PendingMipGapSampleCount,
+                PrefetchRequestCount);
         }
     }
 
@@ -444,7 +468,11 @@ namespace VividRP.Runtime
                 s_LastStats.PhysicalPoolResidentPageCount,
                 s_LastStats.PhysicalPoolFreePageCount,
                 s_LastStats.PhysicalPoolLockedPageCount,
-                s_LastStats.PhysicalPoolEvictedPageCount);
+                s_LastStats.PhysicalPoolEvictedPageCount,
+                s_LastStats.PendingMipGapSum,
+                s_LastStats.PendingMipGapMax,
+                s_LastStats.PendingMipGapSampleCount,
+                s_LastStats.PrefetchRequestCount);
         }
 
         private static int ResolveCameraActualWidth(Camera camera)

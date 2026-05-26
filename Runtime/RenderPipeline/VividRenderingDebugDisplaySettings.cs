@@ -790,6 +790,9 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Faults", () => GetVirtualTextureDisplayStats(data).FaultCount));
                 foldout.children.Add(CreateStatsValue("Deduplicated Requests", () => GetVirtualTextureDisplayStats(data).DeduplicatedRequestCount));
                 foldout.children.Add(CreateStatsValue("Feedback Overflow", () => GetVirtualTextureDisplayStats(data).FeedbackOverflowCount));
+                foldout.children.Add(CreateStatsValue("Pending Mip Gap Avg", () => GetVirtualTextureDisplayStats(data).PendingMipGapAverage));
+                foldout.children.Add(CreateStatsValue("Pending Mip Gap Max", () => GetVirtualTextureDisplayStats(data).PendingMipGapMax));
+                foldout.children.Add(CreateStatsValue("Prefetch Requests", () => GetVirtualTextureDisplayStats(data).PrefetchRequestCount));
                 foldout.children.Add(CreateStatsValue("In-Flight Upload Batches", () => GetVirtualTextureDisplayStats(data).InFlightUploadBatchCount));
                 foldout.children.Add(CreateStatsValue("Duplicate Uploads", () => GetVirtualTextureDisplayStats(data).DuplicateUploadCount));
                 foldout.children.Add(CreateStatsValue("Skipped Uploads", () => GetVirtualTextureDisplayStats(data).SkippedUploadCount));

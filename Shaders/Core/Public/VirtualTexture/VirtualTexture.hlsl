@@ -8,6 +8,7 @@
 StructuredBuffer<uint> _VTPageTable;
 TEXTURE2D_ARRAY(_VTPhysicalCache);
 SAMPLER(sampler_VTPhysicalCache);
+float4 _VTLayerFallbacks[4];
 
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
 RWStructuredBuffer<uint2> _VTFeedbackRequests : register(u1);
@@ -17,10 +18,12 @@ StructuredBuffer<uint2> _VTFeedbackRequests;
 StructuredBuffer<uint> _VTFeedbackCounter;
 #endif
 
-float _VTSpaceParams[12];
+float _VTSpaceParams[20];
 float _VTMipOffsets[VIVID_VT_MAX_MIPS];
 int _VTDebugMode;
 int _VTFeedbackEnabled;
+int _VTFeedbackFrameIndex;
+int _VTFeedbackSampleRate;
 
 #define VT_SPACE_ID               ((int)_VTSpaceParams[0])
 #define VT_PAGE_SIZE              ((int)_VTSpaceParams[1])
@@ -32,6 +35,16 @@ int _VTFeedbackEnabled;
 #define VT_CACHE_PAGE_COUNT       ((int)_VTSpaceParams[7])
 #define VT_FEEDBACK_CAPACITY      ((int)_VTSpaceParams[8])
 #define VT_PAGE_TABLE_ENTRY_COUNT ((int)_VTSpaceParams[9])
+#define VT_PHYSICAL_PAGE_WIDTH    ((int)_VTSpaceParams[10])
+#define VT_PHYSICAL_PAGE_HEIGHT   ((int)_VTSpaceParams[11])
+#define VT_LAYER_COUNT            ((int)_VTSpaceParams[12])
+#define VT_BASE_COLOR_LAYER       ((int)_VTSpaceParams[13])
+#define VT_NORMAL_LAYER           ((int)_VTSpaceParams[14])
+#define VT_MASK_LAYER             ((int)_VTSpaceParams[15])
+#define VT_LAYER0_SRGB            ((int)_VTSpaceParams[16])
+#define VT_LAYER1_SRGB            ((int)_VTSpaceParams[17])
+#define VT_LAYER2_SRGB            ((int)_VTSpaceParams[18])
+#define VT_LAYER3_SRGB            ((int)_VTSpaceParams[19])
 #define VT_FEEDBACK_REQUEST_COUNTER_INDEX 0
 #define VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX 1
 
@@ -135,7 +148,7 @@ VTResolvedAddress VTResolveAddress(float2 virtualUv, uint requestedMip)
     return resolved;
 }
 
-float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
+float3 VTComputePhysicalUVWLayer(float2 virtualUv, VTResolvedAddress resolved, uint layerIndex)
 {
     if (!resolved.valid)
         return float3(0.0, 0.0, 0.0);
@@ -146,7 +159,14 @@ float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
     // Address page edges on the gutter boundary so bilinear sampling spans baked borders.
     float2 texelCoord = localUv * VT_PAGE_SIZE + VT_BORDER_SIZE;
     float2 physicalUv = texelCoord / max((float)VT_PHYSICAL_PAGE_SIZE, 1.0);
-    return float3(physicalUv, (float)resolved.physicalPageId);
+    uint layerCount = max((uint)VT_LAYER_COUNT, 1u);
+    uint physicalSlice = resolved.physicalPageId * layerCount + min(layerIndex, layerCount - 1u);
+    return float3(physicalUv, (float)physicalSlice);
+}
+
+float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
+{
+    return VTComputePhysicalUVWLayer(virtualUv, resolved, 0u);
 }
 
 float4 VTSamplePhysicalCache(float2 virtualUv, VTResolvedAddress resolved)
@@ -155,6 +175,46 @@ float4 VTSamplePhysicalCache(float2 virtualUv, VTResolvedAddress resolved)
         return float4(1.0, 0.0, 1.0, 1.0);
 
     float3 uvw = VTComputePhysicalUVW(virtualUv, resolved);
+    return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+}
+
+float4 VTGetLayerFallback(uint layerIndex)
+{
+    return _VTLayerFallbacks[min(layerIndex, 3u)];
+}
+
+int VTGetLayerSRGB(uint layerIndex)
+{
+    uint clampedLayer = min(layerIndex, 3u);
+    if (clampedLayer == 0u)
+        return VT_LAYER0_SRGB;
+    if (clampedLayer == 1u)
+        return VT_LAYER1_SRGB;
+    if (clampedLayer == 2u)
+        return VT_LAYER2_SRGB;
+
+    return VT_LAYER3_SRGB;
+}
+
+float3 VTSRGBToLinear(float3 value)
+{
+    float3 low = value / 12.92;
+    float3 high = pow((value + 0.055) / 1.055, 2.4);
+    float3 useLow = step(value, float3(0.04045, 0.04045, 0.04045));
+    return lerp(high, low, useLow);
+}
+
+float3 VTApplyLayerColorSpace(float3 value, uint layerIndex)
+{
+    return VTGetLayerSRGB(layerIndex) != 0 ? VTSRGBToLinear(saturate(value)) : value;
+}
+
+float4 VTSamplePhysicalCacheLayer(float2 virtualUv, VTResolvedAddress resolved, uint layerIndex)
+{
+    if (!resolved.valid)
+        return VTGetLayerFallback(layerIndex);
+
+    float3 uvw = VTComputePhysicalUVWLayer(virtualUv, resolved, layerIndex);
     return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
 }
 
@@ -189,11 +249,117 @@ float4 VTSamplePhysicalCacheTrilinear(
     return lerp(lowerColor, upperColor, saturate(mipBlend));
 }
 
+float4 VTSamplePhysicalCacheTrilinearLayer(
+    float2 virtualUv,
+    VTResolvedAddress lowerResolved,
+    VTResolvedAddress upperResolved,
+    float mipBlend,
+    uint layerIndex)
+{
+    if (VTResolvedAddressMatches(lowerResolved, upperResolved))
+        return VTSamplePhysicalCacheLayer(virtualUv, lowerResolved, layerIndex);
+
+    float4 lowerColor = VTSamplePhysicalCacheLayer(virtualUv, lowerResolved, layerIndex);
+    float4 upperColor = VTSamplePhysicalCacheLayer(virtualUv, upperResolved, layerIndex);
+
+    if (!lowerResolved.valid)
+        lowerColor = upperColor;
+    if (!upperResolved.valid)
+        upperColor = lowerColor;
+
+    return lerp(lowerColor, upperColor, saturate(mipBlend));
+}
+
+uint VTResolveLayerIndex(int configuredLayerIndex, uint fallbackLayerIndex)
+{
+    if (configuredLayerIndex < 0)
+        return fallbackLayerIndex;
+
+    uint layerIndex = (uint)configuredLayerIndex;
+    return min(layerIndex, max((uint)VT_LAYER_COUNT, 1u) - 1u);
+}
+
+float4 VTSampleBaseColor(
+    float2 virtualUv,
+    VTResolvedAddress lowerResolved,
+    VTResolvedAddress upperResolved,
+    float mipBlend)
+{
+    uint layerIndex = VTResolveLayerIndex(VT_BASE_COLOR_LAYER, 0u);
+    float4 color = VTSamplePhysicalCacheTrilinearLayer(
+        virtualUv,
+        lowerResolved,
+        upperResolved,
+        mipBlend,
+        layerIndex);
+    color.rgb = VTApplyLayerColorSpace(color.rgb, layerIndex);
+    return color;
+}
+
+float3 VTSampleNormal(
+    float2 virtualUv,
+    VTResolvedAddress lowerResolved,
+    VTResolvedAddress upperResolved,
+    float mipBlend)
+{
+    if (VT_NORMAL_LAYER < 0)
+        return float3(0.0, 0.0, 1.0);
+
+    uint layerIndex = VTResolveLayerIndex(VT_NORMAL_LAYER, 0u);
+    float3 encodedNormal = VTSamplePhysicalCacheTrilinearLayer(
+        virtualUv,
+        lowerResolved,
+        upperResolved,
+        mipBlend,
+        layerIndex).xyz;
+    return normalize(encodedNormal * 2.0 - 1.0);
+}
+
+float4 VTSampleMask(
+    float2 virtualUv,
+    VTResolvedAddress lowerResolved,
+    VTResolvedAddress upperResolved,
+    float mipBlend)
+{
+    if (VT_MASK_LAYER < 0)
+        return float4(1.0, 1.0, 1.0, 1.0);
+
+    uint layerIndex = VTResolveLayerIndex(VT_MASK_LAYER, 0u);
+    return VTSamplePhysicalCacheTrilinearLayer(virtualUv, lowerResolved, upperResolved, mipBlend, layerIndex);
+}
+
 uint2 VTEncodeFeedbackKey(uint2 pageCoord, uint mip)
 {
     uint low = (uint)(VT_SPACE_ID & 0xFFFF) | ((pageCoord.x & 0xFFFFu) << 16u);
     uint high = ((pageCoord.x >> 16u) & 0xFu) | ((pageCoord.y & 0xFFFFFu) << 4u) | ((mip & 0xFFu) << 24u);
     return uint2(low, high);
+}
+
+uint VTFeedbackHash(uint2 virtualTexel, uint mip)
+{
+    uint hash = virtualTexel.x * 73856093u;
+    hash ^= virtualTexel.y * 19349663u;
+    hash ^= mip * 83492791u;
+    hash ^= (uint)max(_VTFeedbackFrameIndex, 0) * 2654435761u;
+    return hash;
+}
+
+bool VTShouldWriteFeedback(float2 virtualUv, uint requestedMip)
+{
+    uint sampleRate = (uint)max(_VTFeedbackSampleRate, 1);
+    if (sampleRate <= 1u)
+        return true;
+
+    uint2 virtualTexelCount = uint2(
+        max(VT_VIRTUAL_PAGE_COUNT_X * VT_PAGE_SIZE, 1),
+        max(VT_VIRTUAL_PAGE_COUNT_Y * VT_PAGE_SIZE, 1));
+    float2 virtualTexelCountFloat = float2(
+        (float)virtualTexelCount.x,
+        (float)virtualTexelCount.y);
+    uint2 virtualTexel = min(
+        (uint2)(saturate(virtualUv) * virtualTexelCountFloat),
+        virtualTexelCount - 1u);
+    return (VTFeedbackHash(virtualTexel, requestedMip) % sampleRate) == 0u;
 }
 
 void VTWriteFeedback(float2 virtualUv, uint requestedMip)
@@ -203,6 +369,9 @@ void VTWriteFeedback(float2 virtualUv, uint requestedMip)
         return;
 
     uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    if (!VTShouldWriteFeedback(virtualUv, clampedMip))
+        return;
+
     uint2 pageCoord = VTGetPageCoord(virtualUv, clampedMip);
     uint requestIndex = 0u;
     InterlockedAdd(_VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX], 1u, requestIndex);
@@ -221,6 +390,25 @@ void VTWriteFallbackSample(VTResolvedAddress resolved)
     InterlockedAdd(
         _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
         1u,
+        previousFallbackSampleCount);
+#endif
+}
+
+void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddress resolved)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (_VTFeedbackEnabled == 0 || !resolved.fallback)
+        return;
+
+    uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    uint sampleRate = (uint)max(_VTFeedbackSampleRate, 1);
+    if (!VTShouldWriteFeedback(virtualUv, clampedMip))
+        return;
+
+    uint previousFallbackSampleCount = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
+        sampleRate,
         previousFallbackSampleCount);
 #endif
 }

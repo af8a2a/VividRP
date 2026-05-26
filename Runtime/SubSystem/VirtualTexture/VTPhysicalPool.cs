@@ -12,6 +12,7 @@ namespace VividRP.Runtime
             int pageSize,
             int borderSize,
             int pageCount,
+            int layerCount,
             GraphicsFormat graphicsFormat,
             string layerGroup)
         {
@@ -19,7 +20,8 @@ namespace VividRP.Runtime
             BorderSize = borderSize;
             PhysicalPageSize = pageSize + borderSize * 2;
             PageCount = pageCount;
-            GraphicsFormat = graphicsFormat;
+            LayerCount = Mathf.Max(1, layerCount);
+            GraphicsFormat = ResolveStorageFormat(graphicsFormat);
             LayerGroup = string.IsNullOrWhiteSpace(layerGroup) ? "Default" : layerGroup;
         }
 
@@ -31,6 +33,8 @@ namespace VividRP.Runtime
 
         internal int PageCount { get; }
 
+        internal int LayerCount { get; }
+
         internal GraphicsFormat GraphicsFormat { get; }
 
         internal string LayerGroup { get; }
@@ -41,8 +45,16 @@ namespace VividRP.Runtime
                 desc.PageSize,
                 desc.BorderSize,
                 desc.CachePageCount,
+                desc.StackDesc.LayerCount,
                 desc.GraphicsFormat,
                 "Default");
+        }
+
+        internal static GraphicsFormat ResolveStorageFormat(GraphicsFormat graphicsFormat)
+        {
+            return GraphicsFormatUtility.IsSRGBFormat(graphicsFormat)
+                ? GraphicsFormatUtility.GetLinearFormat(graphicsFormat)
+                : graphicsFormat;
         }
 
         public bool Equals(VTPhysicalPoolDesc other)
@@ -50,6 +62,7 @@ namespace VividRP.Runtime
             return PageSize == other.PageSize
                    && BorderSize == other.BorderSize
                    && PageCount == other.PageCount
+                   && LayerCount == other.LayerCount
                    && GraphicsFormat == other.GraphicsFormat
                    && string.Equals(LayerGroup, other.LayerGroup, StringComparison.Ordinal);
         }
@@ -61,7 +74,7 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(PageSize, BorderSize, PageCount, GraphicsFormat, LayerGroup);
+            return HashCode.Combine(PageSize, BorderSize, PageCount, LayerCount, GraphicsFormat, LayerGroup);
         }
     }
 
@@ -194,7 +207,7 @@ namespace VividRP.Runtime
             m_Texture = new Texture2DArray(
                 desc.PhysicalPageSize,
                 desc.PhysicalPageSize,
-                m_Slots.Length,
+                m_Slots.Length * desc.LayerCount,
                 desc.GraphicsFormat,
                 TextureCreationFlags.None)
             {

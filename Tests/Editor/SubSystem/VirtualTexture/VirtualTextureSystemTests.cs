@@ -183,6 +183,56 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_PopulatesLayerStackBinding_ForBaseColorAndNormal()
+        {
+            var baseFallback = new Color32(4, 8, 12, 255);
+            var normalFallback = new Color32(128, 128, 255, 255);
+            var stackDesc = new VTStackDesc(
+                pageSize: 128,
+                borderSize: 4,
+                cachePageCount: 2,
+                layers: new[]
+                {
+                    new VTLayerDesc(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: true,
+                        baseFallback),
+                    new VTLayerDesc(
+                        VTLayerSemantic.Normal,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: false,
+                        normalFallback),
+                },
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32);
+            var desc = new VirtualTextureSpaceDesc("LayerBinding", 4, 4, 3, stackDesc);
+            int spaceId = VirtualTextureSystem.RegisterSpace(desc);
+            var frameData = new ContextContainer();
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VirtualTextureSpaceBinding binding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                Assert.That(binding.SpaceId, Is.EqualTo(spaceId));
+                Assert.That(binding.PhysicalCache.depth, Is.EqualTo(desc.CachePageCount * stackDesc.LayerCount));
+                Assert.That(binding.ShaderParams.LayerCount, Is.EqualTo(2));
+                Assert.That(binding.ShaderParams.BaseColorLayerIndex, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.NormalLayerIndex, Is.EqualTo(1));
+                Assert.That(binding.ShaderParams.Layer0SRGB, Is.EqualTo(1));
+                Assert.That(binding.ShaderParams.Layer1SRGB, Is.EqualTo(0));
+                Assert.That(binding.LayerFallbacks[0], Is.EqualTo(ToVector(baseFallback)));
+                Assert.That(binding.LayerFallbacks[1], Is.EqualTo(ToVector(normalFallback)));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
         public void Update_DefersBackgroundViewFeedback_UntilBackgroundCameraRenders()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("ViewFeedbackIsolation", cachePageCount: 4, maxUploadsPerFrame: 2));
@@ -244,6 +294,76 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.FaultCount, Is.EqualTo(1));
             Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(3));
             Assert.That(stats.FallbackSampleCount, Is.EqualTo(11));
+        }
+
+        [Test]
+        public void Update_SchedulesNeighborPrefetchWithinUploadBudget_WhenEnabled()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "NeighborPrefetch",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 3,
+                neighborPrefetchCount: 2));
+            var requestedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, requestedCoord);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKey);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests.Count, Is.EqualTo(3));
+            Assert.That(requests.Any(request => request.PageCoord.Equals(requestedCoord) && request.Priority == 1), Is.True);
+            Assert.That(requests.Any(request => request.PageCoord.Equals(new VirtualTexturePageCoord(0, 1, 0)) && request.Priority == 0), Is.True);
+            Assert.That(requests.Any(request => request.PageCoord.Equals(new VirtualTexturePageCoord(2, 1, 0)) && request.Priority == 0), Is.True);
+
+            VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(stats.PrefetchRequestCount, Is.EqualTo(2));
+            Assert.That(stats.PendingMipGapSampleCount, Is.EqualTo(1));
+            Assert.That(stats.PendingMipGapSum, Is.EqualTo(2));
+            Assert.That(stats.PendingMipGapMax, Is.EqualTo(2));
+            Assert.That(stats.PendingMipGapAverage, Is.EqualTo(2f));
+        }
+
+        [Test]
+        public void Update_BiasesNeighborPrefetchTowardFeedbackMotion_WhenCentroidMoves()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "MotionPrefetch",
+                cachePageCount: 8,
+                maxUploadsPerFrame: 2,
+                neighborPrefetchCount: 1));
+            ulong firstKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(1, 1, 0));
+            ulong secondKey = VirtualTextureFeedbackProcessor.EncodeKey(
+                spaceId,
+                new VirtualTexturePageCoord(2, 1, 0));
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, firstKey);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, secondKey);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests.Any(request => request.PageCoord.Equals(new VirtualTexturePageCoord(3, 1, 0))), Is.True);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.EqualTo(1));
         }
 
         [Test]
@@ -623,7 +743,11 @@ namespace VividRP.Editor.Tests
             return frameData;
         }
 
-        private static VirtualTextureSpaceDesc CreateDesc(string name, int cachePageCount, int maxUploadsPerFrame)
+        private static VirtualTextureSpaceDesc CreateDesc(
+            string name,
+            int cachePageCount,
+            int maxUploadsPerFrame,
+            int neighborPrefetchCount = 0)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -635,7 +759,17 @@ namespace VividRP.Editor.Tests
                 cachePageCount: cachePageCount,
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
-                feedbackCapacity: 32);
+                feedbackCapacity: 32,
+                neighborPrefetchCount: neighborPrefetchCount);
+        }
+
+        private static Vector4 ToVector(Color32 color)
+        {
+            return new Vector4(
+                color.r / 255f,
+                color.g / 255f,
+                color.b / 255f,
+                color.a / 255f);
         }
 
         private static string GetPackageFilePath(params string[] parts)

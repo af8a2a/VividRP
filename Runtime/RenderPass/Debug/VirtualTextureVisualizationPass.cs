@@ -39,6 +39,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private readonly float[] m_SpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_MipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_LayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
 
         private Material m_Material;
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
@@ -160,6 +161,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             Array.Clear(m_SpaceParams, 0, m_SpaceParams.Length);
             Array.Clear(m_MipOffsets, 0, m_MipOffsets.Length);
+            Array.Clear(m_LayerFallbacks, 0, m_LayerFallbacks.Length);
 
             float[] shaderParams = binding.ShaderParams.ToFloatArray();
             for (int paramIndex = 0; paramIndex < shaderParams.Length && paramIndex < m_SpaceParams.Length; paramIndex++)
@@ -172,10 +174,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_MipOffsets[mipIndex] = mipOffsets[mipIndex];
             }
 
+            Vector4[] layerFallbacks = binding.LayerFallbacks;
+            if (layerFallbacks != null)
+            {
+                for (int layerIndex = 0; layerIndex < layerFallbacks.Length && layerIndex < m_LayerFallbacks.Length; layerIndex++)
+                    m_LayerFallbacks[layerIndex] = layerFallbacks[layerIndex];
+            }
+
             mpb.SetBuffer(VirtualTextureShaderIDs._VTPageTable, binding.PageTableBuffer);
             mpb.SetTexture(VirtualTextureShaderIDs._VTPhysicalCache, binding.PhysicalCache);
             mpb.SetFloatArray(VirtualTextureShaderIDs._VTSpaceParams, m_SpaceParams);
             mpb.SetFloatArray(VirtualTextureShaderIDs._VTMipOffsets, m_MipOffsets);
+            mpb.SetVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, m_LayerFallbacks);
         }
 
         private void ConfigureOutputTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)

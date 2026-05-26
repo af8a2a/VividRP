@@ -16,11 +16,52 @@ namespace VividRP.Runtime
         private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();
         private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();
         private static readonly Dictionary<int, List<VirtualTextureAggregatedFeedbackRequest>> s_GroupedRequests = new();
+        private static readonly Dictionary<FeedbackMotionKey, FeedbackMotionState> s_FeedbackMotionStates = new();
+        private static readonly Dictionary<int, Vector2Int> s_PrefetchBiasBySpace = new();
+        private static readonly List<FeedbackMotionKey> s_FeedbackMotionKeysToRemove = new();
         private static readonly UploadCommitterResolver s_UploadCommitterResolver = new();
         private static VTUploadScheduler s_UploadScheduler = new();
 
         private static int s_NextSpaceId = 1;
         private static int s_FallbackFrameIndex = -1;
+
+        private readonly struct FeedbackMotionKey : IEquatable<FeedbackMotionKey>
+        {
+            internal FeedbackMotionKey(int spaceId, VirtualTextureViewId viewId)
+            {
+                SpaceId = spaceId;
+                ViewId = viewId;
+            }
+
+            internal int SpaceId { get; }
+
+            private VirtualTextureViewId ViewId { get; }
+
+            public bool Equals(FeedbackMotionKey other)
+            {
+                return SpaceId == other.SpaceId && ViewId.Equals(other.ViewId);
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is FeedbackMotionKey other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                return HashCode.Combine(SpaceId, ViewId);
+            }
+        }
+
+        private readonly struct FeedbackMotionState
+        {
+            internal FeedbackMotionState(Vector2 centroid)
+            {
+                Centroid = centroid;
+            }
+
+            internal Vector2 Centroid { get; }
+        }
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
@@ -52,6 +93,9 @@ namespace VividRP.Runtime
             s_AggregatedRequests.Clear();
             ClearGroupedRequests();
             s_GroupedRequests.Clear();
+            s_FeedbackMotionStates.Clear();
+            s_PrefetchBiasBySpace.Clear();
+            s_FeedbackMotionKeysToRemove.Clear();
             s_FeedbackCameraSystem.Dispose();
             s_NextSpaceId = 1;
             s_FallbackFrameIndex = -1;
@@ -193,19 +237,31 @@ namespace VividRP.Runtime
                 activeViewId,
                 activeCameraType);
             GroupRequestsBySpace(s_AggregatedRequests);
+            ResolvePrefetchBiasBySpace(cachePriorityViewId);
 
             int frameIndex = ResolveFrameIndex(frameData);
             int evictionCount = 0;
+            int pendingMipGapSum = 0;
+            int pendingMipGapMax = 0;
+            int pendingMipGapSampleCount = 0;
+            int prefetchRequestCount = 0;
             s_UploadScheduler.BeginFrame();
             s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);
             foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
             {
                 VTAddressSpace addressSpace = pair.Value;
+                VTResidencyProcessResult residencyResult;
+                s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
                 if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
-                    evictionCount += addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, frameIndex);
+                    residencyResult = addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, prefetchBias, frameIndex);
                 else
-                    evictionCount += addressSpace.ProcessRequests(null, cachePriorityViewId, frameIndex);
+                    residencyResult = addressSpace.ProcessRequests(null, cachePriorityViewId, prefetchBias, frameIndex);
 
+                evictionCount += residencyResult.EvictionCount;
+                pendingMipGapSum += residencyResult.PendingMipGapSum;
+                pendingMipGapMax = Mathf.Max(pendingMipGapMax, residencyResult.PendingMipGapMax);
+                pendingMipGapSampleCount += residencyResult.PendingMipGapSampleCount;
+                prefetchRequestCount += residencyResult.PrefetchRequestCount;
                 addressSpace.CollectPendingUploads(s_UploadScheduler, cmd);
             }
 
@@ -222,6 +278,7 @@ namespace VividRP.Runtime
             ClearGroupedRequests();
             s_AggregatedRequests.Clear();
             s_CompletedReadbacks.Clear();
+            s_PrefetchBiasBySpace.Clear();
 
             bool supportsFeedback = IsFeedbackSupported(camera);
             VirtualTextureFeedbackCameraState cameraFeedbackState = supportsFeedback
@@ -305,7 +362,11 @@ namespace VividRP.Runtime
                 physicalPoolStats.ResidentPageCount,
                 physicalPoolStats.FreePageCount,
                 physicalPoolStats.LockedPageCount,
-                physicalPoolStats.EvictedPageCount);
+                physicalPoolStats.EvictedPageCount,
+                pendingMipGapSum,
+                pendingMipGapMax,
+                pendingMipGapSampleCount,
+                prefetchRequestCount);
             VirtualTextureStatsRegistry.Report(globalStats);
 
             if (camera != null)
@@ -340,7 +401,11 @@ namespace VividRP.Runtime
                     physicalPoolStats.ResidentPageCount,
                     physicalPoolStats.FreePageCount,
                     physicalPoolStats.LockedPageCount,
-                    physicalPoolStats.EvictedPageCount);
+                    physicalPoolStats.EvictedPageCount,
+                    pendingMipGapSum,
+                    pendingMipGapMax,
+                    pendingMipGapSampleCount,
+                    prefetchRequestCount);
                 VirtualTextureStatsRegistry.ReportView(viewStats);
             }
         }
@@ -707,6 +772,22 @@ namespace VividRP.Runtime
             RemoveQueuedFeedbackForSpace(s_InjectedReadbacks, spaceId);
             s_AggregatedRequests.RemoveAll(request => request.SpaceId == spaceId);
             s_GroupedRequests.Remove(spaceId);
+            RemoveFeedbackMotionStateForSpace(spaceId);
+        }
+
+        private static void RemoveFeedbackMotionStateForSpace(int spaceId)
+        {
+            s_FeedbackMotionKeysToRemove.Clear();
+            foreach (FeedbackMotionKey key in s_FeedbackMotionStates.Keys)
+            {
+                if (key.SpaceId != spaceId)
+                    continue;
+
+                s_FeedbackMotionKeysToRemove.Add(key);
+            }
+
+            for (int keyIndex = 0; keyIndex < s_FeedbackMotionKeysToRemove.Count; keyIndex++)
+                s_FeedbackMotionStates.Remove(s_FeedbackMotionKeysToRemove[keyIndex]);
         }
 
         private static void CollectCompletedReadbacks(
@@ -817,6 +898,57 @@ namespace VividRP.Runtime
 
                 requests.Add(request);
             }
+        }
+
+        private static void ResolvePrefetchBiasBySpace(VirtualTextureViewId viewId)
+        {
+            s_PrefetchBiasBySpace.Clear();
+            foreach (KeyValuePair<int, List<VirtualTextureAggregatedFeedbackRequest>> pair in s_GroupedRequests)
+            {
+                List<VirtualTextureAggregatedFeedbackRequest> requests = pair.Value;
+                if (requests == null || requests.Count == 0)
+                    continue;
+
+                FeedbackMotionKey key = new(pair.Key, viewId);
+                Vector2 centroid = ComputeFeedbackCentroid(requests);
+                Vector2Int bias = Vector2Int.zero;
+                if (s_FeedbackMotionStates.TryGetValue(key, out FeedbackMotionState previousState))
+                    bias = QuantizePrefetchBias(centroid - previousState.Centroid);
+
+                s_FeedbackMotionStates[key] = new FeedbackMotionState(centroid);
+                if (bias != Vector2Int.zero)
+                    s_PrefetchBiasBySpace[pair.Key] = bias;
+            }
+        }
+
+        private static Vector2 ComputeFeedbackCentroid(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests)
+        {
+            Vector2 weightedSum = Vector2.zero;
+            int totalWeight = 0;
+            for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+            {
+                VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
+                int mipScale = 1 << Mathf.Clamp(request.PageCoord.Mip, 0, 20);
+                int weight = Mathf.Max(1, request.HitCount);
+                weightedSum += new Vector2(
+                    (request.PageCoord.X + 0.5f) * mipScale,
+                    (request.PageCoord.Y + 0.5f) * mipScale) * weight;
+                totalWeight += weight;
+            }
+
+            return totalWeight > 0 ? weightedSum / totalWeight : Vector2.zero;
+        }
+
+        private static Vector2Int QuantizePrefetchBias(Vector2 delta)
+        {
+            const float Threshold = 0.25f;
+            int x = Mathf.Abs(delta.x) >= Threshold
+                ? (delta.x > 0f ? 1 : -1)
+                : 0;
+            int y = Mathf.Abs(delta.y) >= Threshold
+                ? (delta.y > 0f ? 1 : -1)
+                : 0;
+            return new Vector2Int(x, y);
         }
 
         private static void ClearGroupedRequests()

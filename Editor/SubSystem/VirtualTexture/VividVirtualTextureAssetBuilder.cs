@@ -12,12 +12,16 @@ namespace VividRP.Editor
         internal struct Parameters
         {
             public Texture2D SourceTexture;
+            public Texture2D NormalTexture;
+            public Texture2D MaskTexture;
             public string SourceTextureGUID;
             public string SourceTexturePath;
             public int PageSize;
             public int BorderSize;
             public int MipCount;
             public Color32 FallbackColor;
+            public Color32 NormalFallbackColor;
+            public Color32 MaskFallbackColor;
             public string StreamDataPath;
             public Action<string> LogErrorHandler;
         }
@@ -41,26 +45,29 @@ namespace VividRP.Editor
             int mipCount = parameters.MipCount > 0
                 ? Mathf.Clamp(parameters.MipCount, 1, VirtualTextureFeedbackProcessor.MaxMipCount)
                 : ComputeMipCount(virtualPageCountX, virtualPageCountY);
+            VividVirtualTextureLayerDescriptor[] layers = CreateLayerDescriptors(parameters);
+            VTLayerDesc[] stackLayers = CreateStackLayers(layers);
 
             var desc = new VirtualTextureSpaceDesc(
                 ResolveSpaceName(asset, parameters),
-                pageSize,
-                borderSize,
                 virtualPageCountX,
                 virtualPageCountY,
                 mipCount,
-                cachePageCount: 2,
-                graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
-                maxUploadsPerFrame: 1,
-                feedbackCapacity: 16);
+                new VTStackDesc(
+                    pageSize,
+                    borderSize,
+                    cachePageCount: 2,
+                    layers: stackLayers,
+                    maxUploadsPerFrame: 1,
+                    feedbackCapacity: 16));
 
             int totalTileCount = VirtualTextureSpaceUtility.GetTotalPageCount(virtualPageCountX, virtualPageCountY, mipCount);
             var tiles = new List<VividVirtualTextureTileDescriptor>(totalTileCount);
             var chunks = new List<VividVirtualTextureChunkDescriptor>(mipCount);
-            var rawData = new List<byte>(totalTileCount * desc.PhysicalPageSize * desc.PhysicalPageSize * 4);
+            var rawData = new List<byte>(totalTileCount * desc.PhysicalPageSize * desc.PhysicalPageSize * 4 * layers.Length);
             var mipTileOffsets = new int[mipCount];
             var pagePixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
-            var producer = new VTTexture2DPageProducer(parameters.SourceTexture);
+            VTTexture2DPageProducer[] producers = CreateLayerProducers(parameters);
 
             for (int mip = 0; mip < mipCount; mip++)
             {
@@ -84,15 +91,19 @@ namespace VividRP.Editor
                             priority: 0,
                             requestFrame: 0);
 
-                        producer.WritePage(desc, request, pagePixels);
-                        AppendRGBA32(pagePixels, rawData);
+                        for (int layerIndex = 0; layerIndex < producers.Length; layerIndex++)
+                        {
+                            producers[layerIndex].WritePage(desc, request, pagePixels);
+                            AppendRGBA32(pagePixels, rawData);
+                        }
+
                         tiles.Add(new VividVirtualTextureTileDescriptor(
                             mip,
                             x,
                             y,
                             chunkIndex,
                             tileByteOffset,
-                            pagePixels.Length * 4));
+                            pagePixels.Length * 4 * producers.Length));
                     }
                 }
 
@@ -128,13 +139,7 @@ namespace VividRP.Editor
                 virtualPageCountX,
                 virtualPageCountY,
                 mipCount,
-                new[]
-                {
-                    new VividVirtualTextureLayerDescriptor(
-                        GraphicsFormat.R8G8B8A8_UNorm,
-                        GraphicsFormatUtility.IsSRGBFormat(parameters.SourceTexture.graphicsFormat),
-                        parameters.FallbackColor),
-                },
+                layers,
                 chunks.ToArray(),
                 tiles.ToArray(),
                 mipTileOffsets,
@@ -142,6 +147,80 @@ namespace VividRP.Editor
                 streamDataPath,
                 streamDataByteSize);
             asset.Initialize(builtData);
+        }
+
+        private static VividVirtualTextureLayerDescriptor[] CreateLayerDescriptors(in Parameters parameters)
+        {
+            var layers = new List<VividVirtualTextureLayerDescriptor>
+            {
+                new(
+                    VTLayerSemantic.BaseColor,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    GraphicsFormatUtility.IsSRGBFormat(parameters.SourceTexture.graphicsFormat),
+                    parameters.FallbackColor,
+                    physicalGroup: 0),
+            };
+
+            if (parameters.NormalTexture != null)
+            {
+                layers.Add(new VividVirtualTextureLayerDescriptor(
+                    VTLayerSemantic.Normal,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    sRGB: false,
+                    ResolveFallback(parameters.NormalFallbackColor, new Color32(128, 128, 255, 255)),
+                    physicalGroup: 0));
+            }
+
+            if (parameters.MaskTexture != null)
+            {
+                layers.Add(new VividVirtualTextureLayerDescriptor(
+                    VTLayerSemantic.Mask,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    sRGB: false,
+                    ResolveFallback(parameters.MaskFallbackColor, new Color32(255, 255, 255, 255)),
+                    physicalGroup: 0));
+            }
+
+            return layers.ToArray();
+        }
+
+        private static VTLayerDesc[] CreateStackLayers(VividVirtualTextureLayerDescriptor[] layerDescriptors)
+        {
+            var stackLayers = new VTLayerDesc[layerDescriptors.Length];
+            for (int layerIndex = 0; layerIndex < layerDescriptors.Length; layerIndex++)
+            {
+                VividVirtualTextureLayerDescriptor layer = layerDescriptors[layerIndex];
+                stackLayers[layerIndex] = new VTLayerDesc(
+                    layer.Semantic,
+                    layer.Format,
+                    layer.SRGB,
+                    layer.FallbackColor,
+                    layer.PhysicalGroup);
+            }
+
+            return stackLayers;
+        }
+
+        private static VTTexture2DPageProducer[] CreateLayerProducers(in Parameters parameters)
+        {
+            var producers = new List<VTTexture2DPageProducer>
+            {
+                new(parameters.SourceTexture),
+            };
+
+            if (parameters.NormalTexture != null)
+                producers.Add(new VTTexture2DPageProducer(parameters.NormalTexture));
+            if (parameters.MaskTexture != null)
+                producers.Add(new VTTexture2DPageProducer(parameters.MaskTexture));
+
+            return producers.ToArray();
+        }
+
+        private static Color32 ResolveFallback(Color32 configured, Color32 defaultColor)
+        {
+            return configured.a == 0 && configured.r == 0 && configured.g == 0 && configured.b == 0
+                ? defaultColor
+                : configured;
         }
 
         private static string ResolveSpaceName(

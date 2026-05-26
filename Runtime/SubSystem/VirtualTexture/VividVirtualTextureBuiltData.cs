@@ -127,7 +127,8 @@ namespace VividRP.Runtime
             string spaceName,
             int cachePageCount,
             int maxUploadsPerFrame,
-            int feedbackCapacity)
+            int feedbackCapacity,
+            int neighborPrefetchCount = 0)
         {
             return new VirtualTextureSpaceDesc(
                 string.IsNullOrWhiteSpace(spaceName) ? name : spaceName,
@@ -138,9 +139,10 @@ namespace VividRP.Runtime
                     m_PageSize,
                     m_BorderSize,
                     cachePageCount,
-                    GraphicsFormat,
+                    CreateStackLayers(),
                     maxUploadsPerFrame,
-                    feedbackCapacity));
+                    feedbackCapacity,
+                    neighborPrefetchCount));
         }
 
         internal bool TryGetTileDescriptor(
@@ -212,7 +214,61 @@ namespace VividRP.Runtime
                    && desc.VirtualPageCountX == m_VirtualPageCountX
                    && desc.VirtualPageCountY == m_VirtualPageCountY
                    && desc.MipCount == m_MipCount
-                   && desc.GraphicsFormat == GraphicsFormat;
+                   && MatchesStack(desc.StackDesc);
+        }
+
+        private VTLayerDesc[] CreateStackLayers()
+        {
+            if (m_Layers == null || m_Layers.Length == 0)
+            {
+                return new[]
+                {
+                    new VTLayerDesc(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        false,
+                        new Color32(0, 0, 0, 255)),
+                };
+            }
+
+            var layers = new VTLayerDesc[m_Layers.Length];
+            for (int layerIndex = 0; layerIndex < m_Layers.Length; layerIndex++)
+            {
+                VividVirtualTextureLayerDescriptor layer = m_Layers[layerIndex];
+                layers[layerIndex] = new VTLayerDesc(
+                    layer.Semantic,
+                    layer.Format,
+                    layer.SRGB,
+                    layer.FallbackColor,
+                    layer.PhysicalGroup);
+            }
+
+            return layers;
+        }
+
+        private bool MatchesStack(in VTStackDesc stackDesc)
+        {
+            if (stackDesc.LayerCount != Mathf.Max(1, LayerCount))
+                return false;
+
+            if (m_Layers == null || m_Layers.Length == 0)
+                return stackDesc.GraphicsFormat == GraphicsFormat.R8G8B8A8_UNorm;
+
+            for (int layerIndex = 0; layerIndex < m_Layers.Length; layerIndex++)
+            {
+                VTLayerDesc stackLayer = stackDesc.GetLayer(layerIndex);
+                VividVirtualTextureLayerDescriptor builtLayer = m_Layers[layerIndex];
+                if (stackLayer.Semantic != builtLayer.Semantic
+                    || stackLayer.GraphicsFormat != builtLayer.Format
+                    || stackLayer.SRGB != builtLayer.SRGB
+                    || !stackLayer.FallbackColor.Equals(builtLayer.FallbackColor)
+                    || stackLayer.PhysicalGroup != builtLayer.PhysicalGroup)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private bool IsCoordValid(in VirtualTexturePageCoord coord)

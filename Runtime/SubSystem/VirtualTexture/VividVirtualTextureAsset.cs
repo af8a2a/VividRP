@@ -13,6 +13,9 @@ namespace VividRP.Runtime
     public struct VividVirtualTextureLayerDescriptor : IEquatable<VividVirtualTextureLayerDescriptor>
     {
         [SerializeField]
+        private VTLayerSemantic m_Semantic;
+
+        [SerializeField]
         private GraphicsFormat m_Format;
 
         [SerializeField]
@@ -21,15 +24,32 @@ namespace VividRP.Runtime
         [SerializeField]
         private Color32 m_FallbackColor;
 
+        [SerializeField]
+        private int m_PhysicalGroup;
+
         public VividVirtualTextureLayerDescriptor(
             GraphicsFormat format,
             bool sRGB,
             Color32 fallbackColor)
+            : this(VTLayerSemantic.BaseColor, format, sRGB, fallbackColor, 0)
         {
+        }
+
+        public VividVirtualTextureLayerDescriptor(
+            VTLayerSemantic semantic,
+            GraphicsFormat format,
+            bool sRGB,
+            Color32 fallbackColor,
+            int physicalGroup = 0)
+        {
+            m_Semantic = semantic;
             m_Format = format;
             m_SRGB = sRGB;
             m_FallbackColor = fallbackColor;
+            m_PhysicalGroup = Mathf.Max(0, physicalGroup);
         }
+
+        public VTLayerSemantic Semantic => m_Semantic;
 
         public GraphicsFormat Format => m_Format;
 
@@ -37,11 +57,15 @@ namespace VividRP.Runtime
 
         public Color32 FallbackColor => m_FallbackColor;
 
+        public int PhysicalGroup => m_PhysicalGroup;
+
         public bool Equals(VividVirtualTextureLayerDescriptor other)
         {
-            return m_Format == other.m_Format
+            return m_Semantic == other.m_Semantic
+                   && m_Format == other.m_Format
                    && m_SRGB == other.m_SRGB
-                   && m_FallbackColor.Equals(other.m_FallbackColor);
+                   && m_FallbackColor.Equals(other.m_FallbackColor)
+                   && m_PhysicalGroup == other.m_PhysicalGroup;
         }
 
         public override bool Equals(object obj)
@@ -51,7 +75,7 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(m_Format, m_SRGB, m_FallbackColor);
+            return HashCode.Combine(m_Semantic, m_Format, m_SRGB, m_FallbackColor, m_PhysicalGroup);
         }
     }
 
@@ -272,12 +296,18 @@ namespace VividRP.Runtime
             string spaceName,
             int cachePageCount,
             int maxUploadsPerFrame,
-            int feedbackCapacity)
+            int feedbackCapacity,
+            int neighborPrefetchCount = 0)
         {
             if (m_BuiltData == null)
                 throw new InvalidOperationException($"[VividRP] Virtual texture asset '{name}' has no built data.");
 
-            return m_BuiltData.CreateSpaceDesc(spaceName, cachePageCount, maxUploadsPerFrame, feedbackCapacity);
+            return m_BuiltData.CreateSpaceDesc(
+                spaceName,
+                cachePageCount,
+                maxUploadsPerFrame,
+                feedbackCapacity,
+                neighborPrefetchCount);
         }
     }
 }

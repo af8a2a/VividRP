@@ -39,19 +39,45 @@ namespace VividRP.Runtime
 
     internal readonly struct VTResidencyProcessResult
     {
-        internal VTResidencyProcessResult(int evictionCount, bool pageTableChanged)
+        internal VTResidencyProcessResult(
+            int evictionCount,
+            bool pageTableChanged,
+            int pendingMipGapSum = 0,
+            int pendingMipGapMax = 0,
+            int pendingMipGapSampleCount = 0,
+            int prefetchRequestCount = 0)
         {
             EvictionCount = evictionCount;
             PageTableChanged = pageTableChanged;
+            PendingMipGapSum = pendingMipGapSum;
+            PendingMipGapMax = pendingMipGapMax;
+            PendingMipGapSampleCount = pendingMipGapSampleCount;
+            PrefetchRequestCount = prefetchRequestCount;
         }
 
         internal int EvictionCount { get; }
 
         internal bool PageTableChanged { get; }
+
+        internal int PendingMipGapSum { get; }
+
+        internal int PendingMipGapMax { get; }
+
+        internal int PendingMipGapSampleCount { get; }
+
+        internal int PrefetchRequestCount { get; }
     }
 
     internal sealed class VTResidencyManager : IDisposable, IVTPhysicalPoolOwner
     {
+        private static readonly Vector2Int[] s_NeighborOffsets =
+        {
+            new(-1, 0),
+            new(1, 0),
+            new(0, -1),
+            new(0, 1),
+        };
+
         private struct VTPageRuntimeState
         {
             public int PhysicalPageId;
@@ -216,10 +242,15 @@ namespace VividRP.Runtime
             int spaceId,
             IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
+            Vector2Int prefetchBias,
             int frameIndex)
         {
             int evictionCount = 0;
             int allocatedThisFrame = 0;
+            int pendingMipGapSum = 0;
+            int pendingMipGapMax = 0;
+            int pendingMipGapSampleCount = 0;
+            int prefetchRequestCount = 0;
             bool pageTableChanged = false;
 
             if (requests == null)
@@ -231,102 +262,59 @@ namespace VividRP.Runtime
                 if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                     continue;
 
-                int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord);
-                VTPageRuntimeState pageState = m_PageStates[pageIndex];
-                if (pageState.Resident)
-                {
-                    m_PhysicalPool.Touch(
-                        pageState.PhysicalPageId,
-                        request.ViewId,
-                        frameIndex,
-                        request.IsActiveView);
-                    continue;
-                }
-
-                if (pageState.PendingUpload)
-                {
-                    UpdatePendingRequestPriority(
-                        desc,
-                        mipOffsets,
-                        pageIndex,
-                        request.HitCount,
-                        request.CameraPriority,
-                        request.IsActiveView,
-                        request.ViewId,
-                        request.IsActiveView,
-                        frameIndex);
-                    continue;
-                }
-
-                if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
-                    continue;
-
-                if (m_PhysicalPool.TryAttachResidentPage(
-                        this,
-                        m_Producer,
-                        pageIndex,
-                        request.PageCoord,
-                        request.ViewId,
-                        frameIndex,
-                        locked: false,
-                        out int sharedPhysicalPageId,
-                        out int sharedGeneration))
-                {
-                    pageState.PhysicalPageId = sharedPhysicalPageId;
-                    pageState.Generation = sharedGeneration;
-                    pageState.LastAllocationFrame = frameIndex;
-                    pageState.PendingUpload = false;
-                    pageState.Resident = true;
-                    pageState.Locked = false;
-                    m_PageStates[pageIndex] = pageState;
-                    m_ResidentPageCount += 1;
-                    MarkPageTableDirty(pageIndex);
-                    pageTableChanged = true;
-                    continue;
-                }
-
-                VirtualTextureViewId evictionViewId = ResolveEvictionViewId(activeViewId, request);
-                if (!m_PhysicalPool.TryAllocatePage(
-                        this,
-                        m_Producer,
-                        pageIndex,
-                        m_PageMips[pageIndex],
-                        request.PageCoord,
-                        evictionViewId,
-                        request.ViewId,
-                        HasViewAffinity(request.ViewId),
-                        frameIndex,
-                        locked: false,
-                        pendingUpload: true,
-                        out int physicalPageId,
-                        out int generation,
-                        out bool evicted))
-                    continue;
-
-                if (evicted)
-                    evictionCount += 1;
-
-                pageState.PhysicalPageId = physicalPageId;
-                pageState.Generation = generation;
-                pageState.LastAllocationFrame = frameIndex;
-                pageState.PendingUpload = true;
-                pageState.Resident = false;
-                m_PageStates[pageIndex] = pageState;
-                MarkPageTableDirty(pageIndex);
-                m_PendingRequests.Add(new VTRequest(
-                    spaceId,
+                AccumulatePendingMipGap(
+                    desc,
+                    mipOffsets,
                     request.PageCoord,
-                    physicalPageId,
-                    generation,
-                    request.HitCount,
+                    ref pendingMipGapSum,
+                    ref pendingMipGapMax,
+                    ref pendingMipGapSampleCount);
+
+                TryProcessRequest(
+                    desc,
+                    mipOffsets,
+                    spaceId,
+                    request,
+                    activeViewId,
                     frameIndex,
-                    request.CameraPriority,
-                    request.IsActiveView));
-                allocatedThisFrame += 1;
-                pageTableChanged = true;
+                    isPrefetch: false,
+                    ref allocatedThisFrame,
+                    ref evictionCount,
+                    ref pageTableChanged);
             }
 
-            return new VTResidencyProcessResult(evictionCount, pageTableChanged);
+            if (desc.NeighborPrefetchCount > 0 && allocatedThisFrame < desc.MaxUploadsPerFrame)
+            {
+                for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+                {
+                    VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
+                    if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                        continue;
+
+                    prefetchRequestCount += ProcessNeighborPrefetchRequests(
+                        desc,
+                        mipOffsets,
+                        spaceId,
+                        request,
+                        activeViewId,
+                        prefetchBias,
+                        frameIndex,
+                        ref allocatedThisFrame,
+                        ref evictionCount,
+                        ref pageTableChanged);
+
+                    if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
+                        break;
+                }
+            }
+
+            return new VTResidencyProcessResult(
+                evictionCount,
+                pageTableChanged,
+                pendingMipGapSum,
+                pendingMipGapMax,
+                pendingMipGapSampleCount,
+                prefetchRequestCount);
         }
 
         internal bool TryCommitRequest(
@@ -461,9 +449,326 @@ namespace VividRP.Runtime
                 : activeViewId;
         }
 
+        private static VirtualTextureAggregatedFeedbackRequest CreatePrefetchRequest(
+            in VirtualTextureAggregatedFeedbackRequest sourceRequest,
+            in VirtualTexturePageCoord pageCoord)
+        {
+            return new VirtualTextureAggregatedFeedbackRequest(
+                sourceRequest.SpaceId,
+                pageCoord,
+                hitCount: 0,
+                ResolvePrefetchCameraPriority(sourceRequest.CameraPriority),
+                sourceRequest.ViewId,
+                isActiveView: false);
+        }
+
+        private static int ResolvePrefetchCameraPriority(int sourceCameraPriority)
+        {
+            return sourceCameraPriority == int.MaxValue
+                ? int.MaxValue
+                : sourceCameraPriority + 1;
+        }
+
         private static bool HasViewAffinity(VirtualTextureViewId viewId)
         {
             return viewId.IsValid || viewId.IsCameraTypeOnly;
+        }
+
+        private bool TryProcessRequest(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int spaceId,
+            in VirtualTextureAggregatedFeedbackRequest request,
+            VirtualTextureViewId activeViewId,
+            int frameIndex,
+            bool isPrefetch,
+            ref int allocatedThisFrame,
+            ref int evictionCount,
+            ref bool pageTableChanged)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord);
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            if (pageState.Resident)
+            {
+                m_PhysicalPool.Touch(
+                    pageState.PhysicalPageId,
+                    request.ViewId,
+                    frameIndex,
+                    !isPrefetch && request.IsActiveView);
+                return false;
+            }
+
+            if (pageState.PendingUpload)
+            {
+                if (!isPrefetch)
+                {
+                    UpdatePendingRequestPriority(
+                        desc,
+                        mipOffsets,
+                        pageIndex,
+                        request.HitCount,
+                        request.CameraPriority,
+                        request.IsActiveView,
+                        request.ViewId,
+                        request.IsActiveView,
+                        frameIndex);
+                }
+
+                return false;
+            }
+
+            if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
+                return false;
+
+            VirtualTextureViewId attachViewId = isPrefetch ? VirtualTextureViewId.Invalid : request.ViewId;
+            if (m_PhysicalPool.TryAttachResidentPage(
+                    this,
+                    m_Producer,
+                    pageIndex,
+                    request.PageCoord,
+                    attachViewId,
+                    frameIndex,
+                    locked: false,
+                    out int sharedPhysicalPageId,
+                    out int sharedGeneration))
+            {
+                pageState.PhysicalPageId = sharedPhysicalPageId;
+                pageState.Generation = sharedGeneration;
+                pageState.LastAllocationFrame = frameIndex;
+                pageState.PendingUpload = false;
+                pageState.Resident = true;
+                pageState.Locked = false;
+                m_PageStates[pageIndex] = pageState;
+                m_ResidentPageCount += 1;
+                MarkPageTableDirty(pageIndex);
+                pageTableChanged = true;
+                return false;
+            }
+
+            VirtualTextureViewId evictionViewId = isPrefetch
+                ? activeViewId
+                : ResolveEvictionViewId(activeViewId, request);
+            VirtualTextureViewId allocationViewId = isPrefetch
+                ? VirtualTextureViewId.Invalid
+                : request.ViewId;
+            bool updateAffinity = !isPrefetch && HasViewAffinity(request.ViewId);
+            if (!m_PhysicalPool.TryAllocatePage(
+                    this,
+                    m_Producer,
+                    pageIndex,
+                    m_PageMips[pageIndex],
+                    request.PageCoord,
+                    evictionViewId,
+                    allocationViewId,
+                    updateAffinity,
+                    frameIndex,
+                    locked: false,
+                    pendingUpload: true,
+                    out int physicalPageId,
+                    out int generation,
+                    out bool evicted))
+            {
+                return false;
+            }
+
+            if (evicted)
+                evictionCount += 1;
+
+            pageState.PhysicalPageId = physicalPageId;
+            pageState.Generation = generation;
+            pageState.LastAllocationFrame = frameIndex;
+            pageState.PendingUpload = true;
+            pageState.Resident = false;
+            m_PageStates[pageIndex] = pageState;
+            MarkPageTableDirty(pageIndex);
+            m_PendingRequests.Add(new VTRequest(
+                spaceId,
+                request.PageCoord,
+                physicalPageId,
+                generation,
+                request.HitCount,
+                frameIndex,
+                request.CameraPriority,
+                !isPrefetch && request.IsActiveView));
+            allocatedThisFrame += 1;
+            pageTableChanged = true;
+            return isPrefetch;
+        }
+
+        private int ProcessNeighborPrefetchRequests(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int spaceId,
+            in VirtualTextureAggregatedFeedbackRequest request,
+            VirtualTextureViewId activeViewId,
+            Vector2Int prefetchBias,
+            int frameIndex,
+            ref int allocatedThisFrame,
+            ref int evictionCount,
+            ref bool pageTableChanged)
+        {
+            int scheduledPrefetchCount = 0;
+            int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(desc.VirtualPageCountX, request.PageCoord.Mip);
+            int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(desc.VirtualPageCountY, request.PageCoord.Mip);
+            TryProcessNeighborPrefetchOffset(
+                desc,
+                mipOffsets,
+                spaceId,
+                request,
+                activeViewId,
+                frameIndex,
+                prefetchBias.x,
+                0,
+                pageCountX,
+                pageCountY,
+                ref allocatedThisFrame,
+                ref evictionCount,
+                ref pageTableChanged,
+                ref scheduledPrefetchCount);
+            TryProcessNeighborPrefetchOffset(
+                desc,
+                mipOffsets,
+                spaceId,
+                request,
+                activeViewId,
+                frameIndex,
+                0,
+                prefetchBias.y,
+                pageCountX,
+                pageCountY,
+                ref allocatedThisFrame,
+                ref evictionCount,
+                ref pageTableChanged,
+                ref scheduledPrefetchCount);
+
+            for (int offsetIndex = 0; offsetIndex < s_NeighborOffsets.Length; offsetIndex++)
+            {
+                if (allocatedThisFrame >= desc.MaxUploadsPerFrame
+                    || scheduledPrefetchCount >= desc.NeighborPrefetchCount)
+                {
+                    break;
+                }
+
+                Vector2Int offset = s_NeighborOffsets[offsetIndex];
+                if ((offset.x == prefetchBias.x && offset.y == 0)
+                    || (offset.x == 0 && offset.y == prefetchBias.y))
+                {
+                    continue;
+                }
+
+                TryProcessNeighborPrefetchOffset(
+                    desc,
+                    mipOffsets,
+                    spaceId,
+                    request,
+                    activeViewId,
+                    frameIndex,
+                    offset.x,
+                    offset.y,
+                    pageCountX,
+                    pageCountY,
+                    ref allocatedThisFrame,
+                    ref evictionCount,
+                    ref pageTableChanged,
+                    ref scheduledPrefetchCount);
+            }
+
+            return scheduledPrefetchCount;
+        }
+
+        private void TryProcessNeighborPrefetchOffset(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            int spaceId,
+            in VirtualTextureAggregatedFeedbackRequest request,
+            VirtualTextureViewId activeViewId,
+            int frameIndex,
+            int offsetX,
+            int offsetY,
+            int pageCountX,
+            int pageCountY,
+            ref int allocatedThisFrame,
+            ref int evictionCount,
+            ref bool pageTableChanged,
+            ref int scheduledPrefetchCount)
+        {
+            if ((offsetX == 0 && offsetY == 0)
+                || allocatedThisFrame >= desc.MaxUploadsPerFrame
+                || scheduledPrefetchCount >= desc.NeighborPrefetchCount)
+            {
+                return;
+            }
+
+            int neighborX = request.PageCoord.X + offsetX;
+            int neighborY = request.PageCoord.Y + offsetY;
+            if (neighborX < 0 || neighborX >= pageCountX || neighborY < 0 || neighborY >= pageCountY)
+                return;
+
+            var prefetchRequest = CreatePrefetchRequest(
+                request,
+                new VirtualTexturePageCoord(neighborX, neighborY, request.PageCoord.Mip));
+            if (TryProcessRequest(
+                    desc,
+                    mipOffsets,
+                    spaceId,
+                    prefetchRequest,
+                    activeViewId,
+                    frameIndex,
+                    isPrefetch: true,
+                    ref allocatedThisFrame,
+                    ref evictionCount,
+                    ref pageTableChanged))
+            {
+                scheduledPrefetchCount += 1;
+            }
+        }
+
+        private void AccumulatePendingMipGap(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            in VirtualTexturePageCoord coord,
+            ref int pendingMipGapSum,
+            ref int pendingMipGapMax,
+            ref int pendingMipGapSampleCount)
+        {
+            if (!TryResolveResidentMip(desc, mipOffsets, coord, out int resolvedMip))
+                return;
+
+            int mipGap = Mathf.Max(0, resolvedMip - coord.Mip);
+            pendingMipGapSum += mipGap;
+            pendingMipGapMax = Mathf.Max(pendingMipGapMax, mipGap);
+            pendingMipGapSampleCount += 1;
+        }
+
+        private bool TryResolveResidentMip(
+            in VirtualTextureSpaceDesc desc,
+            int[] mipOffsets,
+            in VirtualTexturePageCoord coord,
+            out int resolvedMip)
+        {
+            resolvedMip = 0;
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, coord))
+                return false;
+
+            for (int mip = coord.Mip; mip < desc.MipCount; mip++)
+            {
+                int mipDelta = mip - coord.Mip;
+                var ancestorCoord = new VirtualTexturePageCoord(coord.X >> mipDelta, coord.Y >> mipDelta, mip);
+                if (!VirtualTextureSpaceUtility.IsCoordValid(desc, ancestorCoord))
+                    continue;
+
+                int ancestorIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, ancestorCoord);
+                if (!m_PageStates[ancestorIndex].Resident)
+                    continue;
+
+                resolvedMip = mip;
+                return true;
+            }
+
+            return false;
         }
 
         private void UpdatePendingRequestPriority(

@@ -15,6 +15,8 @@ namespace VividRP.Runtime
         private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();
         private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();
         private static readonly Dictionary<int, List<VirtualTextureAggregatedFeedbackRequest>> s_GroupedRequests = new();
+        private static readonly UploadCommitterResolver s_UploadCommitterResolver = new();
+        private static VTUploadScheduler s_UploadScheduler = new();
 
         private static int s_NextSpaceId = 1;
         private static int s_FallbackFrameIndex = -1;
@@ -48,6 +50,8 @@ namespace VividRP.Runtime
             s_FeedbackCameraSystem.Dispose();
             s_NextSpaceId = 1;
             s_FallbackFrameIndex = -1;
+            s_UploadScheduler.Dispose();
+            s_UploadScheduler = new VTUploadScheduler();
             VTUploadScheduler.ResetFenceFactory();
         }
 
@@ -187,22 +191,25 @@ namespace VividRP.Runtime
 
             int frameIndex = ResolveFrameIndex(frameData);
             int evictionCount = 0;
-            int inFlightUploadBatchCount = 0;
-            int duplicateUploadCount = 0;
-            int skippedUploadCount = 0;
+            s_UploadScheduler.BeginFrame();
+            s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);
             foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
             {
                 VTAddressSpace addressSpace = pair.Value;
                 if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
-                    evictionCount += addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, frameIndex, cmd);
+                    evictionCount += addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, frameIndex);
                 else
-                    evictionCount += addressSpace.ProcessRequests(null, cachePriorityViewId, frameIndex, cmd);
+                    evictionCount += addressSpace.ProcessRequests(null, cachePriorityViewId, frameIndex);
 
-                inFlightUploadBatchCount += addressSpace.InFlightUploadBatchCount;
-                duplicateUploadCount += addressSpace.LastDuplicateUploadCount;
-                skippedUploadCount += addressSpace.LastSkippedUploadCount;
-                addressSpace.RefreshPageTableBuffer();
+                addressSpace.CollectPendingUploads(s_UploadScheduler, cmd);
             }
+
+            s_UploadScheduler.FinalizeUploads(cmd);
+            int inFlightUploadBatchCount = s_UploadScheduler.InFlightBatchCount;
+            int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
+            int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
+            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+                pair.Value.RefreshPageTableBuffer();
 
             ClearGroupedRequests();
             s_AggregatedRequests.Clear();
@@ -238,7 +245,8 @@ namespace VividRP.Runtime
                             activeViewSignature,
                             addressSpace.StackDesc.FeedbackCapacity,
                             frameIndex,
-                            addressSpace.PendingRequestCount > 0 || addressSpace.InFlightUploadBatchCount > 0,
+                            addressSpace.PendingRequestCount > 0
+                            || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId),
                             out feedbackRequests,
                             out feedbackCounter,
                             out string feedbackStatus)
@@ -496,6 +504,21 @@ namespace VividRP.Runtime
             VTUploadScheduler.SetFenceFactoryForTesting(fenceFactory);
         }
 
+        internal static void SetUploadMemoryBudgetForTesting(int maxUploadBytesPerFrame)
+        {
+            s_UploadScheduler.MaxUploadBytesPerFrame = maxUploadBytesPerFrame;
+        }
+
+        private sealed class UploadCommitterResolver : IVTUploadRequestCommitterResolver
+        {
+            public IVTUploadRequestCommitter ResolveCommitter(int spaceId)
+            {
+                return s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace)
+                    ? addressSpace
+                    : null;
+            }
+        }
+
         private static VTProducer ResolveStoredProducer(VTProducer producer)
         {
             return producer ?? VTNullProducer.Instance;
@@ -506,6 +529,7 @@ namespace VividRP.Runtime
             if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace existingAddressSpace))
                 return;
 
+            s_UploadScheduler.CancelUploadsForSpace(spaceId);
             existingAddressSpace.Dispose();
             RemoveFeedbackStateForSpace(spaceId);
             s_AddressSpaces[spaceId] = new VTAddressSpace(spaceId, desc, producer);
@@ -518,6 +542,7 @@ namespace VividRP.Runtime
 
             s_AddressSpaces.Remove(spaceId);
             s_SpaceIdsByName.Remove(addressSpace.Descriptor.SpaceName);
+            s_UploadScheduler.CancelUploadsForSpace(spaceId);
             addressSpace.Dispose();
             RemoveFeedbackStateForSpace(spaceId);
         }

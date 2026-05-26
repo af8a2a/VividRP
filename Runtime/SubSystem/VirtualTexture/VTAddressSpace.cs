@@ -12,7 +12,6 @@ namespace VividRP.Runtime
         private readonly VTPageTableUpdater m_PageTableUpdater;
         private readonly VirtualTextureSpaceShaderParams m_ShaderParams;
         private readonly IVTPageProducer m_PageProducer;
-        private readonly VTUploadScheduler m_UploadScheduler;
         private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
@@ -28,7 +27,6 @@ namespace VividRP.Runtime
             m_ResidencyManager = new VTResidencyManager(desc.SpaceName, desc, TotalPageCount, m_MipOffsets);
             m_PageTableUpdater = new VTPageTableUpdater(desc.SpaceName, TotalPageCount);
             m_PageProducer = VTRuntimeProducerUtility.Resolve(Producer, desc);
-            m_UploadScheduler = new VTUploadScheduler(desc.SpaceName, desc, m_ResidencyManager.PhysicalCache);
             BootstrapLowestMip();
             m_PageTableUpdater.Rebuild(desc, m_MipOffsets, m_ResidencyManager);
             m_PageTableUpdater.RefreshBuffer();
@@ -50,12 +48,6 @@ namespace VividRP.Runtime
 
         internal int PendingRequestCount => m_ResidencyManager.PendingRequestCount;
 
-        internal int InFlightUploadBatchCount => m_UploadScheduler.InFlightBatchCount;
-
-        internal int LastDuplicateUploadCount => m_UploadScheduler.LastDuplicateUploadCount;
-
-        internal int LastSkippedUploadCount => m_UploadScheduler.LastSkippedUploadCount;
-
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
         internal int[] MipOffsets => m_MipOffsets;
@@ -63,11 +55,8 @@ namespace VividRP.Runtime
         internal int ProcessRequests(
             IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
-            int frameIndex,
-            CommandBuffer cmd)
+            int frameIndex)
         {
-            bool pageTableChanged = m_UploadScheduler.CommitCompletedUploads(this);
-
             VTResidencyProcessResult result = m_ResidencyManager.ProcessRequests(
                 Descriptor,
                 m_MipOffsets,
@@ -76,12 +65,15 @@ namespace VividRP.Runtime
                 activeViewId,
                 frameIndex);
 
-            pageTableChanged |= result.PageTableChanged;
-            if (pageTableChanged)
+            if (result.PageTableChanged)
                 m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
 
-            SchedulePendingUploads(cmd);
             return result.EvictionCount;
+        }
+
+        internal void CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)
+        {
+            SchedulePendingUploads(uploadScheduler, cmd);
         }
 
         internal bool TryCommitRequest(in VTRequest request)
@@ -125,7 +117,6 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
-            m_UploadScheduler.Dispose();
             m_PageTableUpdater.Dispose();
             m_ResidencyManager.Dispose();
             if (m_PageProducer is IDisposable disposableProducer)
@@ -204,9 +195,8 @@ namespace VividRP.Runtime
             }
         }
 
-        private void SchedulePendingUploads(CommandBuffer cmd)
+        private void SchedulePendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)
         {
-            m_UploadScheduler.ResetLastScheduleStats();
             m_UploadPayloads.Clear();
 
             IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
@@ -216,9 +206,9 @@ namespace VividRP.Runtime
                 return;
             }
 
-            if (m_PageProducer == null || cmd == null || !m_UploadScheduler.IsEnabled)
+            if (uploadScheduler == null || m_PageProducer == null || cmd == null || !uploadScheduler.IsEnabled)
             {
-                m_UploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
+                uploadScheduler?.AddSkippedUploadCount(pendingRequests.Count);
                 return;
             }
 
@@ -227,11 +217,11 @@ namespace VividRP.Runtime
             m_PageProducer.GatherTasks(m_ProducerTasks);
             m_ProducerTasks.Clear();
 
-            m_UploadScheduler.CountInFlightDuplicates(pendingRequests);
-            int capacity = m_UploadScheduler.GetAvailableBatchCapacity();
+            uploadScheduler.CountInFlightDuplicates(pendingRequests);
+            int capacity = uploadScheduler.GetAvailableBatchCapacity(Descriptor.SpaceName, Descriptor);
             if (capacity <= 0)
             {
-                m_UploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
+                uploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
                 return;
             }
 
@@ -240,7 +230,7 @@ namespace VividRP.Runtime
             for (int requestIndex = 0; requestIndex < orderedRequests.Count; requestIndex++)
             {
                 VTRequest request = orderedRequests[requestIndex];
-                if (m_UploadScheduler.IsRequestInFlight(request))
+                if (uploadScheduler.IsRequestInFlight(request))
                 {
                     skippedUploadCount += 1;
                     continue;
@@ -262,9 +252,16 @@ namespace VividRP.Runtime
                     continue;
                 }
 
+                if (!uploadScheduler.TryReserveUpload(Descriptor.SpaceName, Descriptor))
+                {
+                    skippedUploadCount += 1;
+                    continue;
+                }
+
                 IVTPageFinalizer finalizer = m_PageProducer.ProducePageData(Descriptor, request);
                 if (finalizer == null)
                 {
+                    uploadScheduler.ReleaseUploadReservation(Descriptor);
                     skippedUploadCount += 1;
                     continue;
                 }
@@ -272,11 +269,17 @@ namespace VividRP.Runtime
                 m_UploadPayloads.Add(new VTPageUploadPayload(request, finalizer));
             }
 
-            m_UploadScheduler.AddSkippedUploadCount(skippedUploadCount);
-            if (m_UploadPayloads.Count == 0)
-                return;
+            uploadScheduler.AddSkippedUploadCount(skippedUploadCount);
 
-            m_UploadScheduler.ScheduleUploads(m_UploadPayloads, cmd);
+            for (int payloadIndex = 0; payloadIndex < m_UploadPayloads.Count; payloadIndex++)
+            {
+                uploadScheduler.EnqueueReservedUpload(
+                    Descriptor.SpaceName,
+                    Descriptor,
+                    m_ResidencyManager.PhysicalCache,
+                    m_UploadPayloads[payloadIndex]);
+            }
+
             m_UploadPayloads.Clear();
         }
 
@@ -372,7 +375,7 @@ namespace VividRP.Runtime
 
         bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request)
         {
-            return TryCommitRequestInternal(request, rebuildPageTable: false);
+            return TryCommitRequestInternal(request, rebuildPageTable: true);
         }
     }
 }

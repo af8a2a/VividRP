@@ -576,9 +576,10 @@ namespace VividRP.Editor.Tests
             Assert.That(feedbackSource, Does.Not.Contain("cmd.SetBufferData(writePair.CounterBuffer, s_ZeroCounterData);"));
             Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.TryGetValue"));
             Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.Add"));
-            Assert.That(addressSpaceSource, Does.Contain("CommitCompletedUploads(this);"));
+            Assert.That(systemSource, Does.Contain("s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);"));
+            Assert.That(addressSpaceSource, Does.Contain("CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)"));
             Assert.That(addressSpaceSource, Does.Not.Contain("request => TryCommitRequestInternal"));
-            Assert.That(uploadSchedulerSource, Does.Contain("CommitCompletedUploads(IVTUploadRequestCommitter committer)"));
+            Assert.That(uploadSchedulerSource, Does.Contain("CommitCompletedUploads(IVTUploadRequestCommitterResolver committerResolver)"));
             Assert.That(uploadSchedulerSource, Does.Not.Contain("Func<VTRequest"));
         }
 

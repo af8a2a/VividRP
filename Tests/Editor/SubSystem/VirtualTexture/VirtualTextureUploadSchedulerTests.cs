@@ -229,6 +229,137 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.SkippedUploadCount, Is.EqualTo(1));
         }
 
+        [Test]
+        public void Uploads_RespectFrameMemoryBudget_AndKeepPageTablePending()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("MemoryBudget");
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new TestRuntimeProducer());
+            var pageCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+            VirtualTextureSystem.SetUploadMemoryBudgetForTesting(1);
+            IssueFeedback(spaceId, pageCoord);
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(0));
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                pageCoord,
+                out VirtualTexturePageTableEntry pendingEntry), Is.True);
+            Assert.That(pendingEntry.PendingUpload, Is.True);
+            Assert.That(pendingEntry.Resident, Is.False);
+            Assert.That(pendingEntry.Fallback, Is.True);
+
+            VirtualTextureStats budgetStats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(budgetStats.SkippedUploadCount, Is.EqualTo(1));
+
+            VirtualTextureSystem.SetUploadMemoryBudgetForTesting(int.MaxValue);
+            UpdateOnce();
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            m_FenceFactory.Handles[0].IsPassed = true;
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(0));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                pageCoord,
+                out VirtualTexturePageTableEntry residentEntry), Is.True);
+            Assert.That(residentEntry.Resident, Is.True);
+            Assert.That(residentEntry.PendingUpload, Is.False);
+        }
+
+        [Test]
+        public void Uploads_FinalizeMultipleTilesInOneFrame_WhenBatchCapacityAllows()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("MultiFinalize", maxUploadsPerFrame: 3);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Available);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetCounters();
+
+            IssueFeedback(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0),
+                new VirtualTexturePageCoord(2, 0, 0));
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(producer.RequestCount, Is.EqualTo(3));
+            Assert.That(producer.ProduceCount, Is.EqualTo(3));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(3));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.InFlightUploadBatchCount, Is.EqualTo(1));
+
+            m_FenceFactory.Handles[0].IsPassed = true;
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(0));
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(4));
+        }
+
+        [Test]
+        public void Uploads_GrowSharedPool_WhenLaterSpaceNeedsLargerBatch()
+        {
+            int smallSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("SmallSharedPool"),
+                new TestRuntimeProducer());
+            IssueFeedback(smallSpaceId, new VirtualTexturePageCoord(0, 0, 0));
+
+            VirtualTextureSpaceDesc largeDesc = CreateDesc("LargeSharedPool", maxUploadsPerFrame: 3);
+            var largeProducer = new StatusPageProducer(largeDesc, VTPageRequestStatus.Available);
+            int largeSpaceId = VirtualTextureSystem.RegisterAddressSpace(largeDesc, largeProducer);
+            largeProducer.ResetCounters();
+
+            IssueFeedback(
+                largeSpaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0),
+                new VirtualTexturePageCoord(2, 0, 0));
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            Assert.That(largeProducer.RequestCount, Is.EqualTo(3));
+            Assert.That(largeProducer.ProduceCount, Is.EqualTo(3));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(largeSpaceId), Is.EqualTo(3));
+        }
+
+        [Test]
+        public void Uploads_CancelStaleInFlightRequest_WhenAddressSpaceIsReconfigured()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("ReconfigureSpace");
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new TestRuntimeProducer());
+            var pageCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+            IssueFeedback(spaceId, pageCoord);
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+
+            var newProducer = new TestRuntimeProducer();
+            Assert.That(VirtualTextureSystem.RegisterOrReconfigureAddressSpace(desc, newProducer), Is.EqualTo(spaceId));
+            IssueFeedback(spaceId, pageCoord);
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+            m_FenceFactory.Handles[0].IsPassed = true;
+            UpdateOnce();
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                pageCoord,
+                out VirtualTexturePageTableEntry pendingEntry), Is.True);
+            Assert.That(pendingEntry.PendingUpload, Is.True);
+            Assert.That(pendingEntry.Resident, Is.False);
+            Assert.That(pendingEntry.Fallback, Is.True);
+
+            m_FenceFactory.Handles[1].IsPassed = true;
+            UpdateOnce();
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(0));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                pageCoord,
+                out VirtualTexturePageTableEntry residentEntry), Is.True);
+            Assert.That(residentEntry.Resident, Is.True);
+        }
+
         [TestCase(VTPageRequestStatus.Pending)]
         [TestCase(VTPageRequestStatus.Saturated)]
         public void Uploads_DeferProducerRequests_UntilPageDataIsAvailable(VTPageRequestStatus unavailableStatus)
@@ -283,7 +414,7 @@ namespace VividRP.Editor.Tests
             Assert.That(residentEntry.PendingUpload, Is.False);
         }
 
-        private static VirtualTextureSpaceDesc CreateDesc(string name)
+        private static VirtualTextureSpaceDesc CreateDesc(string name, int maxUploadsPerFrame = 1)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -294,7 +425,7 @@ namespace VividRP.Editor.Tests
                 mipCount: 3,
                 cachePageCount: 4,
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
-                maxUploadsPerFrame: 1,
+                maxUploadsPerFrame: maxUploadsPerFrame,
                 feedbackCapacity: 32);
         }
 

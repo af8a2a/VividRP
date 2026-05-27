@@ -4,6 +4,9 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
+#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
+#endif
 #if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
 #endif
@@ -87,9 +90,34 @@ Varyings Vert(Attributes input)
     return output;
 }
 
+#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)
+float4 SampleVirtualTextureBase(float2 uv)
+{
+    VTMipRange requestedMips = VTComputeRequestedMipRange(uv);
+    VTResolvedAddress lowerResolved = VTResolveAddress(uv, requestedMips.lowerMip);
+    VTResolvedAddress upperResolved = VTResolveAddress(uv, requestedMips.upperMip);
+
+    if (!lowerResolved.resident)
+        VTWriteFeedback(uv, requestedMips.lowerMip);
+
+    if (requestedMips.upperMip != requestedMips.lowerMip && !upperResolved.resident)
+        VTWriteFeedback(uv, requestedMips.upperMip);
+
+    VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved);
+    if (!VTResolvedAddressMatches(lowerResolved, upperResolved))
+        VTWriteFallbackSample(uv, requestedMips.upperMip, upperResolved);
+
+    return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);
+}
+#endif
+
 float4 SampleBase(float2 uv)
 {
+#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)
+    float4 baseSample = SampleVirtualTextureBase(uv) * _BaseColor;
+#else
     float4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv) * _BaseColor;
+#endif
 #if defined(_OPACITYMAP)
     baseSample.a *= SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, uv).r;
 #endif

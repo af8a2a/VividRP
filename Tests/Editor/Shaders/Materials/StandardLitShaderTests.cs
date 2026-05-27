@@ -13,6 +13,7 @@ namespace VividRP.Editor.Tests
     public sealed class StandardLitShaderTests
     {
         private const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit.shader";
+        private const string StandardLayeredLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLayeredLit.shader";
 
         [Test]
         public void StandardLitShader_DeclaresRequiredPasses_ForDrawObjectPass()
@@ -26,6 +27,35 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("Name \"VividGBufferGPUDrivenDecal\""));
             Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"VividGBufferGPUDrivenDecal\""));
             Assert.That(shaderSource, Does.Contain("Name \"SRPDefaultUnlit\""));
+        }
+
+        [Test]
+        public void StandardLitShader_DoesNotDeclareVirtualTextureGBufferPasses_ForNonSvtMaterials()
+        {
+            string shaderSource = File.ReadAllText(GetShaderSourcePath());
+
+            Assert.That(shaderSource, Does.Not.Contain("Name \"VividVTGBuffer\""));
+            Assert.That(shaderSource, Does.Not.Contain("\"LightMode\" = \"VividVTGBuffer\""));
+            Assert.That(shaderSource, Does.Not.Contain("#define VIVID_VT_ENABLE_FEEDBACK_RW 1"));
+        }
+
+        [Test]
+        public void StandardLayeredLitShader_DeclaresVirtualTextureGBufferPasses_ForSvtBaseColor()
+        {
+            string shaderSource = File.ReadAllText(GetStandardLayeredLitShaderSourcePath());
+
+            Assert.That(shaderSource, Does.Contain("Shader \"VividRP/Material/StandardLayeredLit\""));
+            Assert.That(shaderSource, Does.Contain("_UseVirtualTextureBaseColor"));
+            Assert.That(shaderSource, Does.Contain("Name \"VividVTGBuffer\""));
+            Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"VividVTGBuffer\""));
+            Assert.That(shaderSource, Does.Contain("Name \"VividVTGBufferGPUDrivenDecal\""));
+            Assert.That(shaderSource, Does.Contain("\"LightMode\" = \"VividVTGBufferGPUDrivenDecal\""));
+            Assert.That(shaderSource, Does.Contain("#pragma target 5.0"));
+            Assert.That(shaderSource, Does.Contain("#pragma require randomwrite"));
+            Assert.That(shaderSource, Does.Contain("#pragma shader_feature_local_fragment _VIRTUAL_TEXTURE_BASE_COLOR"));
+            Assert.That(shaderSource, Does.Contain("#define VIVIDRP_STANDARD_LIT_VIRTUAL_TEXTURE 1"));
+            Assert.That(shaderSource, Does.Contain("#define VIVID_VT_ENABLE_FEEDBACK_RW 1"));
+            Assert.That(shaderSource, Does.Contain("CustomEditor \"VividRP.Editor.StandardLayeredLitShaderGUI\""));
         }
 
         [Test]
@@ -251,10 +281,45 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void SetupMaterial_SyncsVirtualTextureBaseColorKeyword_WhenLayeredLitToggleChanges()
+        {
+            UnityEngine.Material material = CreateStandardLayeredLitMaterial();
+
+            try
+            {
+                material.SetFloat("_UseVirtualTextureBaseColor", 1.0f);
+
+                StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.IsKeywordEnabled("_VIRTUAL_TEXTURE_BASE_COLOR"), Is.True);
+
+                material.SetFloat("_UseVirtualTextureBaseColor", 0.0f);
+
+                StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.IsKeywordEnabled("_VIRTUAL_TEXTURE_BASE_COLOR"), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
         private static UnityEngine.Material CreateMaterial()
         {
             Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(StandardLitShaderAssetPath);
             Assert.That(shader, Is.Not.Null, $"Expected shader asset at '{StandardLitShaderAssetPath}'.");
+            return new UnityEngine.Material(shader)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+        }
+
+        private static UnityEngine.Material CreateStandardLayeredLitMaterial()
+        {
+            Shader shader = AssetDatabase.LoadAssetAtPath<Shader>(StandardLayeredLitShaderAssetPath);
+            Assert.That(shader, Is.Not.Null, $"Expected shader asset at '{StandardLayeredLitShaderAssetPath}'.");
             return new UnityEngine.Material(shader)
             {
                 hideFlags = HideFlags.HideAndDontSave,
@@ -279,11 +344,17 @@ namespace VividRP.Editor.Tests
             return GetPackageFilePath("Shaders", "Material", "ShaderPass", "IndirectDiffuse.hlsl");
         }
 
+        private static string GetStandardLayeredLitShaderSourcePath()
+        {
+            return GetPackageFilePath("Shaders", "Material", "StandardLayeredLit.shader");
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             string[] packageRoots =
             {
+                Path.Combine(projectRoot, "Packages", "Custom_URP"),
                 Path.Combine(projectRoot, "Packages", "VividRP"),
                 Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
             };

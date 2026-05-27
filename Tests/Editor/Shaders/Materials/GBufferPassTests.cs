@@ -23,7 +23,7 @@ namespace VividRP.Editor.Tests
                 .ToArray();
             var depthEntry = resources.Textures.Single(entry => entry.IsDepthAttachment);
 
-            Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
+            Assert.That(resources.RenderLists, Has.Length.EqualTo(2));
             Assert.That(resources.Buffers.Select(entry => entry.Name), Has.Member("DecalData"));
             Assert.That(resources.Buffers.Select(entry => entry.Name), Has.Member("LayeredOffset"));
             Assert.That(resources.Buffers.Select(entry => entry.Name), Has.Member("LayeredLightList"));
@@ -31,6 +31,8 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures, Has.Length.EqualTo(6));
             Assert.That(resources.RenderLists[0].RenderList.desc.ShaderTagNames, Is.EqualTo(new[] { "VividGBuffer" }));
             Assert.That(resources.RenderLists[0].RenderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.Lightmaps));
+            Assert.That(resources.RenderLists[1].RenderList.desc.ShaderTagNames, Is.EqualTo(new[] { "VividVTGBuffer" }));
+            Assert.That(resources.RenderLists[1].RenderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.Lightmaps));
 
             Assert.That(colorEntries, Has.Length.EqualTo(5));
             Assert.That(colorEntries.Select(entry => entry.AttachmentIndex), Is.EqualTo(new[] { 0, 1, 2, 3, 4 }));
@@ -73,7 +75,11 @@ namespace VividRP.Editor.Tests
             pass.Prepare(frameData);
 
             var renderList = GetFieldValue<RenderGraphRenderList>(pass, "m_RenderList");
+            var virtualTextureRenderList = GetFieldValue<RenderGraphRenderList>(pass, "m_VirtualTextureRenderList");
             Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[] { GBufferPass.GPUDrivenDecalGBufferShaderTagName }));
+            Assert.That(
+                virtualTextureRenderList.desc.ShaderTagNames,
+                Is.EqualTo(new[] { GBufferPass.VirtualTextureGPUDrivenDecalGBufferShaderTagName }));
         }
 
         [Test]
@@ -86,7 +92,11 @@ namespace VividRP.Editor.Tests
             pass.Prepare(frameData);
 
             var renderList = GetFieldValue<RenderGraphRenderList>(pass, "m_RenderList");
+            var virtualTextureRenderList = GetFieldValue<RenderGraphRenderList>(pass, "m_VirtualTextureRenderList");
             Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[] { GBufferPass.GBufferShaderTagName }));
+            Assert.That(
+                virtualTextureRenderList.desc.ShaderTagNames,
+                Is.EqualTo(new[] { GBufferPass.VirtualTextureGBufferShaderTagName }));
         }
 
         [Test]

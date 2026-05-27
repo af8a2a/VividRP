@@ -24,6 +24,21 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitGBufferPass_UsesVirtualTextureBaseColorBranch_WhenKeywordIsEnabled()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+
+            Assert.That(source, Does.Contain("#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)"));
+            Assert.That(source, Does.Contain("VirtualTexture/VirtualTexture.hlsl"));
+            Assert.That(source, Does.Contain("float4 SampleVirtualTextureBase(float2 uv)"));
+            Assert.That(source, Does.Contain("VTMipRange requestedMips = VTComputeRequestedMipRange(uv);"));
+            Assert.That(source, Does.Contain("VTResolvedAddress lowerResolved = VTResolveAddress(uv, requestedMips.lowerMip);"));
+            Assert.That(source, Does.Contain("VTWriteFeedback(uv, requestedMips.lowerMip);"));
+            Assert.That(source, Does.Contain("VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved);"));
+            Assert.That(source, Does.Contain("return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);"));
+        }
+
+        [Test]
         public void SimpleDeferredLitPass_UsesLoadBasedSampling_ForGBufferAndDepth()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl"));
@@ -44,6 +59,7 @@ namespace VividRP.Editor.Tests
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             string[] packageRoots =
             {
+                Path.Combine(projectRoot, "Packages", "Custom_URP"),
                 Path.Combine(projectRoot, "Packages", "VividRP"),
                 Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
             };

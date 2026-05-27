@@ -1,6 +1,7 @@
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime;
 
 namespace VividRP.Editor
 {
@@ -16,6 +17,113 @@ namespace VividRP.Editor
         {
             base.ValidateMaterial(material);
             StandardLitMaterialUtility.SetupMaterial(material, null, true);
+        }
+    }
+
+    public sealed class StandardLayeredLitShaderGUI : LWGUI.LWGUI
+    {
+        internal const string VirtualTextureAssetGuidTag = "VividVirtualTextureAssetGuid";
+
+        public override void AssignNewShaderToMaterial(Material material, Shader oldShader, Shader newShader)
+        {
+            base.AssignNewShaderToMaterial(material, oldShader, newShader);
+            StandardLitMaterialUtility.SetupMaterial(material, oldShader, true);
+        }
+
+        public override void ValidateMaterial(Material material)
+        {
+            base.ValidateMaterial(material);
+            StandardLitMaterialUtility.SetupMaterial(material, null, true);
+        }
+
+        public override void OnGUI(MaterialEditor materialEditor, MaterialProperty[] properties)
+        {
+            base.OnGUI(materialEditor, properties);
+            DrawVirtualTextureBinding(materialEditor);
+        }
+
+        private static void DrawVirtualTextureBinding(MaterialEditor materialEditor)
+        {
+            if (materialEditor == null || materialEditor.targets == null || materialEditor.targets.Length == 0)
+                return;
+
+            Material primaryMaterial = materialEditor.target as Material;
+            if (primaryMaterial == null)
+                return;
+
+            bool mixedValue = HasMixedVirtualTextureAsset(materialEditor.targets, primaryMaterial);
+            VividVirtualTextureAsset currentAsset = LoadVirtualTextureAsset(primaryMaterial);
+
+            EditorGUILayout.Space();
+            EditorGUILayout.LabelField("Virtual Texture", EditorStyles.boldLabel);
+
+            EditorGUI.showMixedValue = mixedValue;
+            EditorGUI.BeginChangeCheck();
+            var nextAsset = (VividVirtualTextureAsset)EditorGUILayout.ObjectField(
+                "SVT Asset",
+                currentAsset,
+                typeof(VividVirtualTextureAsset),
+                false);
+            EditorGUI.showMixedValue = false;
+
+            if (!EditorGUI.EndChangeCheck())
+                return;
+
+            string nextGuid = GetAssetGuid(nextAsset);
+            foreach (Object target in materialEditor.targets)
+            {
+                if (target is not Material material)
+                    continue;
+
+                Undo.RecordObject(material, "Set Virtual Texture Asset");
+                material.SetOverrideTag(VirtualTextureAssetGuidTag, nextGuid);
+                EditorUtility.SetDirty(material);
+            }
+        }
+
+        private static bool HasMixedVirtualTextureAsset(Object[] targets, Material primaryMaterial)
+        {
+            string primaryGuid = GetVirtualTextureAssetGuid(primaryMaterial);
+            foreach (Object target in targets)
+            {
+                if (target is Material material
+                    && !string.Equals(GetVirtualTextureAssetGuid(material), primaryGuid, System.StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static VividVirtualTextureAsset LoadVirtualTextureAsset(Material material)
+        {
+            string guid = GetVirtualTextureAssetGuid(material);
+            if (string.IsNullOrEmpty(guid))
+                return null;
+
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            return string.IsNullOrEmpty(path)
+                ? null
+                : AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(path);
+        }
+
+        private static string GetAssetGuid(VividVirtualTextureAsset asset)
+        {
+            if (asset == null)
+                return string.Empty;
+
+            string assetPath = AssetDatabase.GetAssetPath(asset);
+            return string.IsNullOrEmpty(assetPath)
+                ? string.Empty
+                : AssetDatabase.AssetPathToGUID(assetPath);
+        }
+
+        private static string GetVirtualTextureAssetGuid(Material material)
+        {
+            return material != null
+                ? material.GetTag(VirtualTextureAssetGuidTag, false, string.Empty)
+                : string.Empty;
         }
     }
 
@@ -47,6 +155,7 @@ namespace VividRP.Editor
         private const string ReceiveShadowsOffKeyword = "_RECEIVE_SHADOWS_OFF";
         private const string SurfaceTypeTransparentKeyword = "_SURFACE_TYPE_TRANSPARENT";
         private const string SpecularSetupKeyword = "_SPECULAR_SETUP";
+        private const string VirtualTextureBaseColorKeyword = "_VIRTUAL_TEXTURE_BASE_COLOR";
 
         internal static void SetupMaterial(Material material, Shader oldShader, bool logWarnings)
         {
@@ -149,6 +258,7 @@ namespace VividRP.Editor
             CoreUtils.SetKeyword(material, ReceiveShadowsOffKeyword, GetFloat(material, "_ReceiveShadows") <= AlphaClipThreshold);
             CoreUtils.SetKeyword(material, SurfaceTypeTransparentKeyword, false);
             CoreUtils.SetKeyword(material, SpecularSetupKeyword, false);
+            CoreUtils.SetKeyword(material, VirtualTextureBaseColorKeyword, GetFloat(material, "_UseVirtualTextureBaseColor") > EnabledThreshold);
         }
 
         private static void SyncRenderQueue(Material material)

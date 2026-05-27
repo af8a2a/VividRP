@@ -6,10 +6,12 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class GBufferPass : RasterPass, IAllowGlobalStateModificationPass
+    public class GBufferPass : UnsafePass, IAllowGlobalStateModificationPass
     {
         internal const string GBufferShaderTagName = "VividGBuffer";
         internal const string GPUDrivenDecalGBufferShaderTagName = "VividGBufferGPUDrivenDecal";
+        internal const string VirtualTextureGBufferShaderTagName = "VividVTGBuffer";
+        internal const string VirtualTextureGPUDrivenDecalGBufferShaderTagName = "VividVTGBufferGPUDrivenDecal";
 
         private static readonly string[] s_DefaultGBufferShaderTagNames =
         {
@@ -19,6 +21,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly string[] s_GPUDrivenDecalGBufferShaderTagNames =
         {
             GPUDrivenDecalGBufferShaderTagName,
+        };
+
+        private static readonly string[] s_DefaultVirtualTextureGBufferShaderTagNames =
+        {
+            VirtualTextureGBufferShaderTagName,
+        };
+
+        private static readonly string[] s_GPUDrivenDecalVirtualTextureGBufferShaderTagNames =
+        {
+            VirtualTextureGPUDrivenDecalGBufferShaderTagName,
         };
 
         private static readonly int DecalDataId = Shader.PropertyToID("_DecalData");
@@ -56,6 +68,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
+
+        [RenderGraphResource(Name = "VirtualTextureRenderList", Access = AccessFlags.Read)]
+        private RenderGraphRenderList m_VirtualTextureRenderList;
 
         [RenderGraphResource(Name = "DecalData", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_DecalDataBuffer;
@@ -111,13 +126,21 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredLightListBuffer;
         private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
+        private readonly float[] m_VTSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
+        private readonly float[] m_VTMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_VTLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
+        private readonly RenderTargetIdentifier[] m_GBufferColorTargets = new RenderTargetIdentifier[5];
         private RenderGraphBuffer m_ResolvedDecalDataBuffer;
         private RenderGraphBuffer m_ResolvedLayeredOffsetBuffer;
         private RenderGraphBuffer m_ResolvedLayeredLightListBuffer;
         private RenderGraphBuffer m_ResolvedLogBaseBuffer;
+        [SerializeField, Min(1)]
+        private int m_VirtualTextureFeedbackSampleRate = 4;
+        private VividVirtualTextureFrameData m_VirtualTextureFrameData;
         private bool m_GPUDrivenDecalEnabled;
         private bool m_SupportsClusteredDecals;
         private bool m_IsLogBaseBufferEnabled;
+        private int m_FrameIndex;
         private int m_ClusterTileSize = LightGridPass.ClusterTileSize;
         private int m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
         private int m_ClusterTileCountX = 1;
@@ -136,6 +159,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 desc = RenderGraphRenderListDesc.CreateOpaque(GBufferShaderTagName)
             };
             m_RenderList.desc.RendererConfiguration = PerObjectData.Lightmaps;
+            m_VirtualTextureRenderList = new RenderGraphRenderList
+            {
+                desc = RenderGraphRenderListDesc.CreateOpaque(VirtualTextureGBufferShaderTagName)
+            };
+            m_VirtualTextureRenderList.desc.RendererConfiguration = PerObjectData.Lightmaps;
 
             m_LocalDecalDataBuffer = RenderGraphBuffer.CreateStructured("DecalData", VividLightData.DecalClusterData.Stride);
             m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
@@ -166,6 +194,11 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.Get<VividCameraData>();
+            m_VirtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
+            m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+
             var width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             var height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
 
@@ -187,13 +220,41 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareClusteredDecalParameters(frameData, width, height);
         }
 
-        public override void Record(RasterPassContext context)
+        public override void Record(UnsafePassContext context)
         {
-            if (m_RenderList == null || !m_RenderList.IsValid)
+            if (!AreGBufferTargetsValid())
                 return;
 
-            ApplyClusteredDecalProperties(context.cmd);
-            context.cmd.DrawRendererList(m_RenderList);
+            var nativeCmd = context.GetNativeCommandBuffer();
+            BindGBufferTargets(nativeCmd);
+            nativeCmd.ClearRenderTarget(clearDepth: false, clearColor: true, Color.clear);
+            ApplyClusteredDecalProperties(nativeCmd);
+
+            if (m_RenderList != null && m_RenderList.IsValid)
+                nativeCmd.DrawRendererList(m_RenderList);
+
+            if (m_VirtualTextureRenderList == null
+                || !m_VirtualTextureRenderList.IsValid
+                || m_VirtualTextureFrameData == null
+                || !m_VirtualTextureFrameData.TryGetPrimaryBinding(out VirtualTextureSpaceBinding binding)
+                || !binding.IsValid)
+            {
+                return;
+            }
+
+            BindVirtualTextureGlobals(nativeCmd, binding);
+
+            bool hasFeedback = binding.HasFeedback;
+            if (hasFeedback)
+            {
+                nativeCmd.SetRandomWriteTarget(1, binding.FeedbackRequests, preserveCounterValue: false);
+                nativeCmd.SetRandomWriteTarget(2, binding.FeedbackCounter, preserveCounterValue: true);
+            }
+
+            nativeCmd.DrawRendererList(m_VirtualTextureRenderList);
+
+            if (hasFeedback)
+                nativeCmd.ClearRandomWriteTargets();
         }
 
         public override void Dispose()
@@ -202,10 +263,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedLayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_ResolvedLayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_ResolvedLogBaseBuffer = m_LocalLogBaseBuffer;
+            m_VirtualTextureFrameData = null;
             m_LocalDecalDataBuffer?.ClearImportedBuffer();
             m_LocalLayeredOffsetBuffer?.ClearImportedBuffer();
             m_LocalLayeredLightListBuffer?.ClearImportedBuffer();
             m_LocalLogBaseBuffer?.ClearImportedBuffer();
+            m_FrameIndex = 0;
             m_GPUDrivenDecalEnabled = false;
             m_SupportsClusteredDecals = false;
             m_IsLogBaseBufferEnabled = false;
@@ -236,6 +299,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderList.desc.ShaderTagNames = ShouldUseGPUDrivenDecalShaderTag(frameData)
                 ? (string[])s_GPUDrivenDecalGBufferShaderTagNames.Clone()
                 : (string[])s_DefaultGBufferShaderTagNames.Clone();
+
+            if (m_VirtualTextureRenderList?.desc == null)
+                return;
+
+            m_VirtualTextureRenderList.desc.ShaderTagNames = ShouldUseGPUDrivenDecalShaderTag(frameData)
+                ? (string[])s_GPUDrivenDecalVirtualTextureGBufferShaderTagNames.Clone()
+                : (string[])s_DefaultVirtualTextureGBufferShaderTagNames.Clone();
         }
 
         private void PrepareClusteredDecalParameters(ContextContainer frameData, int width, int height)
@@ -302,7 +372,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(m_ResolvedLogBaseBuffer, m_LocalLogBaseBuffer);
         }
 
-        private void ApplyClusteredDecalProperties(RasterCommandBuffer cmd)
+        private void ApplyClusteredDecalProperties(CommandBuffer cmd)
         {
             if (cmd == null)
                 return;
@@ -390,7 +460,7 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private static void SetGlobalBuffer(
-            RasterCommandBuffer cmd,
+            CommandBuffer cmd,
             int propertyId,
             RenderGraphBuffer buffer,
             RenderGraphBuffer fallbackBuffer,
@@ -410,6 +480,63 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (graphicsBuffer != null)
                 cmd.SetGlobalBuffer(propertyId, graphicsBuffer);
+        }
+
+        private bool AreGBufferTargetsValid()
+        {
+            return m_GBuffer0?.IsValid() == true
+                && m_GBuffer1?.IsValid() == true
+                && m_GBuffer2?.IsValid() == true
+                && m_GBuffer3?.IsValid() == true
+                && m_GBuffer4?.IsValid() == true
+                && m_GBufferDepth?.IsValid() == true;
+        }
+
+        private void BindGBufferTargets(CommandBuffer cmd)
+        {
+            m_GBufferColorTargets[0] = m_GBuffer0;
+            m_GBufferColorTargets[1] = m_GBuffer1;
+            m_GBufferColorTargets[2] = m_GBuffer2;
+            m_GBufferColorTargets[3] = m_GBuffer3;
+            m_GBufferColorTargets[4] = m_GBuffer4;
+            cmd.SetRenderTarget(m_GBufferColorTargets, m_GBufferDepth);
+        }
+
+        private void BindVirtualTextureGlobals(CommandBuffer cmd, in VirtualTextureSpaceBinding binding)
+        {
+            Array.Clear(m_VTSpaceParams, 0, m_VTSpaceParams.Length);
+            Array.Clear(m_VTMipOffsets, 0, m_VTMipOffsets.Length);
+            Array.Clear(m_VTLayerFallbacks, 0, m_VTLayerFallbacks.Length);
+
+            float[] shaderParams = binding.ShaderParams.ToFloatArray();
+            for (int paramIndex = 0; paramIndex < shaderParams.Length && paramIndex < m_VTSpaceParams.Length; paramIndex++)
+                m_VTSpaceParams[paramIndex] = shaderParams[paramIndex];
+
+            int[] mipOffsets = binding.MipOffsets;
+            if (mipOffsets != null)
+            {
+                for (int mipIndex = 0; mipIndex < mipOffsets.Length && mipIndex < m_VTMipOffsets.Length; mipIndex++)
+                    m_VTMipOffsets[mipIndex] = mipOffsets[mipIndex];
+            }
+
+            Vector4[] layerFallbacks = binding.LayerFallbacks;
+            if (layerFallbacks != null)
+            {
+                for (int layerIndex = 0; layerIndex < layerFallbacks.Length && layerIndex < m_VTLayerFallbacks.Length; layerIndex++)
+                    m_VTLayerFallbacks[layerIndex] = layerFallbacks[layerIndex];
+            }
+
+            cmd.SetGlobalBuffer(VirtualTextureShaderIDs._VTPageTable, binding.PageTableBuffer);
+            cmd.SetGlobalTexture(VirtualTextureShaderIDs._VTPhysicalCache, binding.PhysicalCache);
+            cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTSpaceParams, m_VTSpaceParams);
+            cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTMipOffsets, m_VTMipOffsets);
+            cmd.SetGlobalVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, m_VTLayerFallbacks);
+            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackEnabled, binding.HasFeedback ? 1 : 0);
+            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackFrameIndex, m_FrameIndex);
+            cmd.SetGlobalInt(
+                VirtualTextureShaderIDs._VTFeedbackSampleRate,
+                Mathf.Max(1, m_VirtualTextureFeedbackSampleRate));
+            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTDebugMode, (int)VirtualTextureDebugMode.None);
         }
     }
 }

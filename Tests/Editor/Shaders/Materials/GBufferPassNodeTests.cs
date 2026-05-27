@@ -32,6 +32,7 @@ namespace VividRP.Editor.Tests
             var node = new AutoRegisteredGBufferPassNode();
 
             Assert.That(node.GetInputPortByName("m_RenderList"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_VirtualTextureRenderList"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_DecalDataBuffer"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_LayeredOffsetBuffer"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_LayeredLightListBuffer"), Is.Not.Null);

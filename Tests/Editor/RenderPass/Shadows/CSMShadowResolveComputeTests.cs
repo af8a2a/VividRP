@@ -78,6 +78,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("case kCSMShadowQualityMedium:"));
             Assert.That(source, Does.Contain("case kCSMShadowQualityHigh:"));
             Assert.That(source, Does.Contain("case kCSMShadowQualityVeryHigh:"));
+            Assert.That(source, Does.Contain("case kCSMShadowQualityUnreal:"));
             Assert.That(source, Does.Contain("float cascadeBlendAlpha = ComputeCascadeBlendAlpha(positionWS, cascadeIndex, relDistance);"));
             Assert.That(source, Does.Contain("shadow = lerp(shadowCurrent, shadowNext, cascadeBlendAlpha);"));
             Assert.That(source, Does.Contain("if (!IsWithinCascadeBlendSamplingBounds(shadowCoord))"));
@@ -120,6 +121,46 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("void CSMShadowBilateralFilterV("));
         }
 
+        [Test]
+        public void CSMShadowResolveCompute_ContainsBendCompositeKernels()
+        {
+            var source = File.ReadAllText(GetComputeShaderSourcePath());
+            var includeSource = File.ReadAllText(GetBendShaderIncludeSourcePath());
+
+            Assert.That(source, Does.Contain("#pragma use_dxc"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowBendCompositeLow VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=24 HARD_SHADOW_SAMPLES=2 FADE_OUT_SAMPLES=4 TRACK_HIT_UV=0"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowBendCompositeMedium VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=40 HARD_SHADOW_SAMPLES=4 FADE_OUT_SAMPLES=6 TRACK_HIT_UV=0"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowBendCompositeHigh VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=60 HARD_SHADOW_SAMPLES=4 FADE_OUT_SAMPLES=8 TRACK_HIT_UV=0"));
+            Assert.That(source, Does.Contain("#pragma kernel CSMShadowBendCompositeVeryHigh VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=80 HARD_SHADOW_SAMPLES=6 FADE_OUT_SAMPLES=10 TRACK_HIT_UV=0"));
+            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Private/Shadows/VividBendScreenSpaceShadow.hlsl\""));
+            Assert.That(source, Does.Contain("float4   _CSMBendLightCoordinate;"));
+            Assert.That(source, Does.Contain("float4   _CSMBendWaveOffset;"));
+            Assert.That(source, Does.Contain("float4   _CSMBendDepthTextureSize;"));
+            Assert.That(source, Does.Contain("float    _CSMBendSurfaceThickness;"));
+            Assert.That(source, Does.Contain("float    _CSMBendBilinearThreshold;"));
+            Assert.That(source, Does.Contain("float    _CSMBendShadowContrast;"));
+            Assert.That(source, Does.Contain("int      _CSMBendIgnoreEdgePixels;"));
+            Assert.That(source, Does.Contain("int      _CSMBendUsePrecisionOffset;"));
+            Assert.That(source, Does.Contain("int      _CSMBendBilinearSamplingOffsetMode;"));
+            Assert.That(source, Does.Contain("parameters.FarDepthValue = UNITY_RAW_FAR_CLIP_VALUE;"));
+            Assert.That(source, Does.Contain("parameters.NearDepthValue = UNITY_NEAR_CLIP_VALUE;"));
+            Assert.That(source, Does.Contain("parameters.IgnoreEdgePixels = _CSMBendIgnoreEdgePixels != 0;"));
+            Assert.That(source, Does.Contain("parameters.UsePrecisionOffset = _CSMBendUsePrecisionOffset != 0;"));
+            Assert.That(source, Does.Contain("parameters.BilinearSamplingOffsetMode = _CSMBendBilinearSamplingOffsetMode != 0;"));
+            Assert.That(source, Does.Contain("WriteScreenSpaceShadow("));
+            Assert.That(source, Does.Contain("IsCSMBendOutputPixelValid(pixelCoord)"));
+            Assert.That(source, Does.Contain("_DirectionalShadowTexture[outputCoord] = saturate(csmShadow) * saturate(bendShadow);"));
+
+            Assert.That(includeSource, Does.Contain("Adapted from Bend Studio's common screen space shadow projection code:"));
+            Assert.That(includeSource, Does.Contain("E:/UnrealEngine/Engine/Shaders/Private/bend_sss_gpu.ush"));
+            Assert.That(includeSource, Does.Contain("Licensed under the Apache License, Version 2.0"));
+            Assert.That(includeSource, Does.Contain("struct DispatchParameters"));
+            Assert.That(includeSource, Does.Contain("static void ComputeWavefrontExtents("));
+            Assert.That(includeSource, Does.Contain("groupshared float DepthData"));
+            Assert.That(includeSource, Does.Contain("static float SampleDepthTexture("));
+            Assert.That(includeSource, Does.Contain("void WriteScreenSpaceShadow("));
+        }
+
         private static string GetComputeShaderSourcePath()
         {
             var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "CSMShadowResolve.compute");
@@ -128,11 +169,20 @@ namespace VividRP.Editor.Tests
             return shaderPath;
         }
 
+        private static string GetBendShaderIncludeSourcePath()
+        {
+            var shaderPath = GetPackageFilePath("Shaders", "Core", "Private", "Shadows", "VividBendScreenSpaceShadow.hlsl");
+
+            Assert.That(File.Exists(shaderPath), Is.True, $"Expected Bend shader include source at '{shaderPath}'.");
+            return shaderPath;
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
             string[] packageRoots =
             {
+                Path.Combine(projectRoot, "Packages", "Custom_URP"),
                 Path.Combine(projectRoot, "Packages", "VividRP"),
                 Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
             };

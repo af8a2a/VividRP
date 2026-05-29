@@ -5,7 +5,12 @@
 #pragma kernel CSMShadowCopyFilterSource
 #pragma kernel CSMShadowBilateralFilterH CSM_SHADOW_BILATERAL_FILTER_H
 #pragma kernel CSMShadowBilateralFilterV CSM_SHADOW_BILATERAL_FILTER_V
-#pragma enable_d3d11_debug_symbols
+#pragma kernel CSMShadowBendCompositeLow VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=24 HARD_SHADOW_SAMPLES=2 FADE_OUT_SAMPLES=4 TRACK_HIT_UV=0
+#pragma kernel CSMShadowBendCompositeMedium VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=40 HARD_SHADOW_SAMPLES=4 FADE_OUT_SAMPLES=6 TRACK_HIT_UV=0
+#pragma kernel CSMShadowBendCompositeHigh VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=60 HARD_SHADOW_SAMPLES=4 FADE_OUT_SAMPLES=8 TRACK_HIT_UV=0
+#pragma kernel CSMShadowBendCompositeVeryHigh VIVID_BEND_ENABLED WAVE_SIZE=64 SAMPLE_COUNT=80 HARD_SHADOW_SAMPLES=6 FADE_OUT_SAMPLES=10 TRACK_HIT_UV=0
+#pragma use_dxc
+// #pragma enable_d3d11_debug_symbols
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
@@ -45,11 +50,21 @@ float    _CSMPCSSMinFilterSizeTexels;
 float    _CSMPCSSMinFilterMaxAngularDiameter;
 float    _CSMPCSSBlockerSearchAngularDiameter;
 float    _CSMPCSSBlockerSamplingClumpExponent;
+float4   _CSMBendLightCoordinate;
+float4   _CSMBendWaveOffset;
+float4   _CSMBendDepthTextureSize;
+float    _CSMBendSurfaceThickness;
+float    _CSMBendBilinearThreshold;
+float    _CSMBendShadowContrast;
+int      _CSMBendIgnoreEdgePixels;
+int      _CSMBendUsePrecisionOffset;
+int      _CSMBendBilinearSamplingOffsetMode;
 
 static const int kCSMShadowQualityLow = 0;
 static const int kCSMShadowQualityMedium = 1;
 static const int kCSMShadowQualityHigh = 2;
 static const int kCSMShadowQualityVeryHigh = 3;
+static const int kCSMShadowQualityUnreal = 4;
 static const int kPCSSMaxSampleCount = 64;
 static const float kPCSSGoldenAngle = 2.39996323;
 static const float kPCSSTwoPi = 6.28318531;
@@ -59,6 +74,86 @@ bool IsSkyPixel(float deviceDepth)
 {
     return deviceDepth == UNITY_RAW_FAR_CLIP_VALUE;
 }
+
+#if defined(VIVID_BEND_ENABLED)
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Shadows/VividBendScreenSpaceShadow.hlsl"
+
+DispatchParameters SetupCSMBendDispatchParameters()
+{
+    DispatchParameters parameters;
+    parameters.SurfaceThickness = _CSMBendSurfaceThickness;
+    parameters.BilinearThreshold = _CSMBendBilinearThreshold;
+    parameters.ShadowContrast = _CSMBendShadowContrast;
+    parameters.IgnoreEdgePixels = _CSMBendIgnoreEdgePixels != 0;
+    parameters.UsePrecisionOffset = _CSMBendUsePrecisionOffset != 0;
+    parameters.BilinearSamplingOffsetMode = _CSMBendBilinearSamplingOffsetMode != 0;
+    parameters.DebugOutputEdgeMask = false;
+    parameters.DebugOutputThreadIndex = false;
+    parameters.DebugOutputWaveIndex = false;
+    parameters.DepthBounds = float2(0.0, 1.0);
+    parameters.UseEarlyOut = false;
+    parameters.LightCoordinate = _CSMBendLightCoordinate;
+    parameters.WaveOffset = (int2)_CSMBendWaveOffset.xy;
+    parameters.FarDepthValue = UNITY_RAW_FAR_CLIP_VALUE;
+    parameters.NearDepthValue = UNITY_NEAR_CLIP_VALUE;
+    parameters.InvDepthTextureSize = _CSMBendDepthTextureSize.xy;
+    return parameters;
+}
+
+bool IsCSMBendOutputPixelValid(int2 pixelCoord)
+{
+    return all(pixelCoord >= int2(0, 0))
+        && pixelCoord.x < _CSMOutputWidth
+        && pixelCoord.y < _CSMOutputHeight;
+}
+
+void CSMShadowBendCompositeCommon(uint3 groupID, uint3 groupThreadID)
+{
+    DispatchParameters parameters = SetupCSMBendDispatchParameters();
+
+    float bendShadow;
+    int2 pixelCoord;
+    float2 hitUV;
+    WriteScreenSpaceShadow(
+        parameters,
+        (int3)groupID,
+        groupThreadID.x,
+        bendShadow,
+        pixelCoord,
+        hitUV);
+
+    if (!IsCSMBendOutputPixelValid(pixelCoord))
+        return;
+
+    uint2 outputCoord = (uint2)pixelCoord;
+    float csmShadow = _DirectionalShadowTexture[outputCoord];
+    _DirectionalShadowTexture[outputCoord] = saturate(csmShadow) * saturate(bendShadow);
+}
+
+[numthreads(64, 1, 1)]
+void CSMShadowBendCompositeLow(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID)
+{
+    CSMShadowBendCompositeCommon(groupID, groupThreadID);
+}
+
+[numthreads(64, 1, 1)]
+void CSMShadowBendCompositeMedium(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID)
+{
+    CSMShadowBendCompositeCommon(groupID, groupThreadID);
+}
+
+[numthreads(64, 1, 1)]
+void CSMShadowBendCompositeHigh(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID)
+{
+    CSMShadowBendCompositeCommon(groupID, groupThreadID);
+}
+
+[numthreads(64, 1, 1)]
+void CSMShadowBendCompositeVeryHigh(uint3 groupID : SV_GroupID, uint3 groupThreadID : SV_GroupThreadID)
+{
+    CSMShadowBendCompositeCommon(groupID, groupThreadID);
+}
+#endif
 
 float3 ReconstructWorldPosition(uint2 pixelCoord, float deviceDepth)
 {
@@ -477,6 +572,8 @@ float EvaluateShadow(float2 atlasUV, float receiverDepth, int cascadeIndex, uint
             return SampleShadowPCF7x7(atlasUV, receiverDepth, cascadeIndex);
         case kCSMShadowQualityVeryHigh:
             return SampleShadowPCSS(atlasUV, receiverDepth, cascadeIndex, pixelCoord);
+        case kCSMShadowQualityUnreal:
+            return SampleShadowPCF7x7(atlasUV, receiverDepth, cascadeIndex);
         default:
             return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);
     }

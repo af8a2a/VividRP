@@ -29,6 +29,7 @@ namespace VividRP.Editor
             CelestialBody = 1 << 10,
             RayTracedShadow = 1 << 11,
             TimeOfDay = 1 << 12,
+            BendSSS = 1 << 13,
         }
 
         private const Expandable DefaultExpandedState =
@@ -44,7 +45,8 @@ namespace VividRP.Editor
             | Expandable.Volumetric
             | Expandable.CelestialBody
             | Expandable.RayTracedShadow
-            | Expandable.TimeOfDay;
+            | Expandable.TimeOfDay
+            | Expandable.BendSSS;
 
         private static ExpandedState<Expandable, VividLightEditor> s_ExpandedState;
 
@@ -74,6 +76,13 @@ namespace VividRP.Editor
         private static readonly GUIContent s_DirLightPCSSBlockerSamplingClumpExponentLabel = EditorGUIUtility.TrTextContent("Blocker Sampling Clump Exponent", "Affects how blocker search samples are distributed. Sample distance to center is elevated to this power.");
         private static readonly GUIContent s_DirLightPCSSBlockerSampleCountLabel = EditorGUIUtility.TrTextContent("Blocker Sample Count", "Controls the number of samples used to determine average blocker distance. Higher values reduce noise at additional cost.");
         private static readonly GUIContent s_DirLightPCSSFilterSampleCountLabel = EditorGUIUtility.TrTextContent("Filter Sample Count", "Controls the number of samples used to filter the penumbra. Higher values reduce noise at additional cost.");
+        private static readonly GUIContent s_BendSSSSettingsLabel = EditorGUIUtility.TrTextContent("Bend SSS");
+        private static readonly GUIContent s_DirLightBendSSSSurfaceThicknessLabel = EditorGUIUtility.TrTextContent("Surface Thickness", "Assumed screen-space caster thickness as a percentage of non-linear depth remaining to the far plane.");
+        private static readonly GUIContent s_DirLightBendSSSBilinearThresholdLabel = EditorGUIUtility.TrTextContent("Bilinear Threshold", "Depth-difference threshold used to stop interpolation across detected edges.");
+        private static readonly GUIContent s_DirLightBendSSSShadowContrastLabel = EditorGUIUtility.TrTextContent("Shadow Contrast", "Contrast boost applied to Bend screen-space shadow samples. Values greater than one darken contact transitions.");
+        private static readonly GUIContent s_DirLightBendSSSIgnoreEdgePixelsLabel = EditorGUIUtility.TrTextContent("Ignore Edge Pixels", "Prevents detected edge pixels from casting Bend screen-space shadows.");
+        private static readonly GUIContent s_DirLightBendSSSUsePrecisionOffsetLabel = EditorGUIUtility.TrTextContent("Precision Offset", "Applies Bend's small depth precision offset before tracing.");
+        private static readonly GUIContent s_DirLightBendSSSBilinearSamplingOffsetModeLabel = EditorGUIUtility.TrTextContent("Bilinear Offset Mode", "Uses Bend's alternate bilinear sampling mode that offsets samples to the shared wavefront ray.");
         private static readonly GUIContent s_RayTracedShadowLabel = EditorGUIUtility.TrTextContent("Ray Traced Shadow");
         private static readonly GUIContent s_EnableRayTracedShadowLabel = EditorGUIUtility.TrTextContent("Enable");
         private static readonly GUIContent s_RayTracedShadowRayLengthLabel = EditorGUIUtility.TrTextContent("Ray Length");
@@ -112,7 +121,8 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Low (PCF 3x3)"),
             EditorGUIUtility.TrTextContent("Medium (PCF 5x5)"),
             EditorGUIUtility.TrTextContent("High (PCF 7x7)"),
-            EditorGUIUtility.TrTextContent("Very High (PCSS)")
+            EditorGUIUtility.TrTextContent("Very High (VividRP PCSS)"),
+            EditorGUIUtility.TrTextContent("Very High (Unreal SSS)")
         };
 
         private static readonly int[] s_ScreenSpaceShadowQualityOptionValues =
@@ -120,7 +130,8 @@ namespace VividRP.Editor
             (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low,
             (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium,
             (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.High,
-            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh,
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal
         };
         private static readonly GUIContent[] s_ShadowAtlasResolutionOptionLabels =
         {
@@ -350,6 +361,7 @@ namespace VividRP.Editor
             {
                 DrawDirectionalScreenSpaceShadowQualityField();
                 DrawDirectionalPCSSFields();
+                DrawDirectionalBendSSSFields();
                 DrawDirectionalShadowAtlasResolutionField();
                 EditorGUILayout.Slider(m_SerializedLight.depthBias, 0.0f, 10.0f, s_DepthBiasLabel);
                 EditorGUILayout.Slider(m_SerializedLight.normalBias, 0.0f, 10.0f, s_NormalBiasLabel);
@@ -437,6 +449,39 @@ namespace VividRP.Editor
             }
         }
 
+        private void DrawDirectionalBendSSSFields()
+        {
+            if (!ShouldShowDirectionalBendSSSControls(m_SerializedLight))
+                return;
+
+            if (!DrawLightSubFoldout(Expandable.BendSSS, s_BendSSSSettingsLabel))
+                return;
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                EditorGUILayout.Slider(
+                    m_SerializedLight.dirLightBendSSSSurfaceThickness,
+                    VividAdditionalLightData.MinDirLightBendSSSSurfaceThickness,
+                    VividAdditionalLightData.MaxDirLightBendSSSSurfaceThickness,
+                    s_DirLightBendSSSSurfaceThicknessLabel);
+                EditorGUILayout.Slider(
+                    m_SerializedLight.dirLightBendSSSBilinearThreshold,
+                    VividAdditionalLightData.MinDirLightBendSSSBilinearThreshold,
+                    VividAdditionalLightData.MaxDirLightBendSSSBilinearThreshold,
+                    s_DirLightBendSSSBilinearThresholdLabel);
+                EditorGUILayout.Slider(
+                    m_SerializedLight.dirLightBendSSSShadowContrast,
+                    VividAdditionalLightData.MinDirLightBendSSSShadowContrast,
+                    VividAdditionalLightData.MaxDirLightBendSSSShadowContrast,
+                    s_DirLightBendSSSShadowContrastLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightBendSSSIgnoreEdgePixels, s_DirLightBendSSSIgnoreEdgePixelsLabel);
+                EditorGUILayout.PropertyField(m_SerializedLight.dirLightBendSSSUsePrecisionOffset, s_DirLightBendSSSUsePrecisionOffsetLabel);
+                EditorGUILayout.PropertyField(
+                    m_SerializedLight.dirLightBendSSSBilinearSamplingOffsetMode,
+                    s_DirLightBendSSSBilinearSamplingOffsetModeLabel);
+            }
+        }
+
         private void DrawDirectionalShadowAtlasResolutionField()
         {
             var property = m_SerializedLight.shadowAtlasResolution;
@@ -461,6 +506,14 @@ namespace VividRP.Editor
                 && serializedLight?.screenSpaceShadowQuality != null
                 && (serializedLight.screenSpaceShadowQuality.hasMultipleDifferentValues
                     || serializedLight.screenSpaceShadowQuality.intValue == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh);
+        }
+
+        internal static bool ShouldShowDirectionalBendSSSControls(VividSerializedLight serializedLight)
+        {
+            return ShouldShowDirectionalShadowBiasControls(serializedLight)
+                && serializedLight?.screenSpaceShadowQuality != null
+                && (serializedLight.screenSpaceShadowQuality.hasMultipleDifferentValues
+                    || serializedLight.screenSpaceShadowQuality.intValue == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal);
         }
 
         internal static bool ShouldShowAreaBarnDoorControls(VividSerializedLight serializedLight)

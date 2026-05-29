@@ -114,7 +114,7 @@ namespace VividRP.Editor
 
             DrawSectionHeader("Per Light");
             EditorGUILayout.HelpBox(
-                "Screen Space Quality, Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light. When Screen Space Quality is set to Very High (PCSS), blocker and filter tuning also lives on that light.",
+                "Screen Space Quality, Atlas Resolution, Depth Bias, Normal Bias, and Slope-Scale Depth Bias are configured on the shadow-casting directional light. When Screen Space Quality is set to Very High (VividRP PCSS), blocker and filter tuning also lives on that light.",
                 MessageType.Info);
         }
 

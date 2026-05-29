@@ -58,6 +58,7 @@ static const int kCSMShadowQualityLow = 0;
 static const int kCSMShadowQualityMedium = 1;
 static const int kCSMShadowQualityHigh = 2;
 static const int kCSMShadowQualityVeryHigh = 3;
+static const int kCSMShadowQualityUnreal = 4;
 static const float kFixedUniformDepthBias = 1.0 / 65536.0;
 
 groupshared float4 gs_VBufferFilterCache[VBUFFER_FILTER_LDS_SIZE];
@@ -273,6 +274,7 @@ float EvaluateCSMShadow(float2 atlasUV, float receiverDepth, int cascadeIndex)
             return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);
         case kCSMShadowQualityHigh:
         case kCSMShadowQualityVeryHigh:
+        case kCSMShadowQualityUnreal:
             return SampleShadowPCF7x7(atlasUV, receiverDepth, cascadeIndex);
         default:
             return SampleShadowPCF5x5(atlasUV, receiverDepth, cascadeIndex);

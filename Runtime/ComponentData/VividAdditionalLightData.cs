@@ -581,6 +581,7 @@ namespace VividRP.Runtime
             Medium = 1,
             High = 2,
             VeryHigh = 3,
+            Unreal = 4,
         }
 
         public enum CSMShadowAtlasResolution
@@ -641,6 +642,18 @@ namespace VividRP.Runtime
         internal const float MinDirLightPCSSBlockerSamplingClumpExponent = 1.0f;
         internal const float MaxDirLightPCSSBlockerSamplingClumpExponent = 6.0f;
         internal const float DefaultDirLightPCSSBlockerSamplingClumpExponent = 2.0f;
+        internal const float MinDirLightBendSSSSurfaceThickness = 0.0f;
+        internal const float MaxDirLightBendSSSSurfaceThickness = 0.05f;
+        internal const float DefaultDirLightBendSSSSurfaceThickness = 0.004f;
+        internal const float MinDirLightBendSSSBilinearThreshold = 0.0f;
+        internal const float MaxDirLightBendSSSBilinearThreshold = 0.25f;
+        internal const float DefaultDirLightBendSSSBilinearThreshold = 0.018f;
+        internal const float MinDirLightBendSSSShadowContrast = 1.0f;
+        internal const float MaxDirLightBendSSSShadowContrast = 8.0f;
+        internal const float DefaultDirLightBendSSSShadowContrast = 4.0f;
+        internal const bool DefaultDirLightBendSSSIgnoreEdgePixels = false;
+        internal const bool DefaultDirLightBendSSSUsePrecisionOffset = false;
+        internal const bool DefaultDirLightBendSSSBilinearSamplingOffsetMode = false;
         internal const float DefaultBarnDoorAngle = 90.0f;
         internal const float DefaultBarnDoorLength = 0.05f;
         internal const float DefaultVolumetricDimmer = 1.0f;
@@ -724,6 +737,24 @@ namespace VividRP.Runtime
 
         [SerializeField, Range(MinDirLightPCSSBlockerSamplingClumpExponent, MaxDirLightPCSSBlockerSamplingClumpExponent)]
         private float m_DirLightPCSSBlockerSamplingClumpExponent = DefaultDirLightPCSSBlockerSamplingClumpExponent;
+
+        [SerializeField, Range(MinDirLightBendSSSSurfaceThickness, MaxDirLightBendSSSSurfaceThickness)]
+        private float m_DirLightBendSSSSurfaceThickness = DefaultDirLightBendSSSSurfaceThickness;
+
+        [SerializeField, Range(MinDirLightBendSSSBilinearThreshold, MaxDirLightBendSSSBilinearThreshold)]
+        private float m_DirLightBendSSSBilinearThreshold = DefaultDirLightBendSSSBilinearThreshold;
+
+        [SerializeField, Range(MinDirLightBendSSSShadowContrast, MaxDirLightBendSSSShadowContrast)]
+        private float m_DirLightBendSSSShadowContrast = DefaultDirLightBendSSSShadowContrast;
+
+        [SerializeField]
+        private bool m_DirLightBendSSSIgnoreEdgePixels = DefaultDirLightBendSSSIgnoreEdgePixels;
+
+        [SerializeField]
+        private bool m_DirLightBendSSSUsePrecisionOffset = DefaultDirLightBendSSSUsePrecisionOffset;
+
+        [SerializeField]
+        private bool m_DirLightBendSSSBilinearSamplingOffsetMode = DefaultDirLightBendSSSBilinearSamplingOffsetMode;
 
         [SerializeField, Range(0.0f, 90.0f)]
         private float m_BarnDoorAngle = DefaultBarnDoorAngle;
@@ -1064,6 +1095,78 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+        }
+
+        public float dirLightBendSSSSurfaceThickness
+        {
+            get => m_DirLightBendSSSSurfaceThickness;
+            set => SetClampedFloat(
+                ref m_DirLightBendSSSSurfaceThickness,
+                value,
+                MinDirLightBendSSSSurfaceThickness,
+                MaxDirLightBendSSSSurfaceThickness,
+                DefaultDirLightBendSSSSurfaceThickness);
+        }
+
+        public float dirLightBendSSSBilinearThreshold
+        {
+            get => m_DirLightBendSSSBilinearThreshold;
+            set => SetClampedFloat(
+                ref m_DirLightBendSSSBilinearThreshold,
+                value,
+                MinDirLightBendSSSBilinearThreshold,
+                MaxDirLightBendSSSBilinearThreshold,
+                DefaultDirLightBendSSSBilinearThreshold);
+        }
+
+        public float dirLightBendSSSShadowContrast
+        {
+            get => m_DirLightBendSSSShadowContrast;
+            set => SetClampedFloat(
+                ref m_DirLightBendSSSShadowContrast,
+                value,
+                MinDirLightBendSSSShadowContrast,
+                MaxDirLightBendSSSShadowContrast,
+                DefaultDirLightBendSSSShadowContrast);
+        }
+
+        public bool dirLightBendSSSIgnoreEdgePixels
+        {
+            get => m_DirLightBendSSSIgnoreEdgePixels;
+            set
+            {
+                if (m_DirLightBendSSSIgnoreEdgePixels == value)
+                    return;
+
+                m_DirLightBendSSSIgnoreEdgePixels = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public bool dirLightBendSSSUsePrecisionOffset
+        {
+            get => m_DirLightBendSSSUsePrecisionOffset;
+            set
+            {
+                if (m_DirLightBendSSSUsePrecisionOffset == value)
+                    return;
+
+                m_DirLightBendSSSUsePrecisionOffset = value;
+                NotifyLightDataChanged();
+            }
+        }
+
+        public bool dirLightBendSSSBilinearSamplingOffsetMode
+        {
+            get => m_DirLightBendSSSBilinearSamplingOffsetMode;
+            set
+            {
+                if (m_DirLightBendSSSBilinearSamplingOffsetMode == value)
+                    return;
+
+                m_DirLightBendSSSBilinearSamplingOffsetMode = value;
+                NotifyLightDataChanged();
+            }
         }
 
         public bool interactsWithSky
@@ -1630,6 +1733,21 @@ namespace VividRP.Runtime
                 MinDirLightPCSSBlockerSamplingClumpExponent,
                 MaxDirLightPCSSBlockerSamplingClumpExponent,
                 DefaultDirLightPCSSBlockerSamplingClumpExponent);
+            m_DirLightBendSSSSurfaceThickness = SanitizeClampedFloat(
+                m_DirLightBendSSSSurfaceThickness,
+                MinDirLightBendSSSSurfaceThickness,
+                MaxDirLightBendSSSSurfaceThickness,
+                DefaultDirLightBendSSSSurfaceThickness);
+            m_DirLightBendSSSBilinearThreshold = SanitizeClampedFloat(
+                m_DirLightBendSSSBilinearThreshold,
+                MinDirLightBendSSSBilinearThreshold,
+                MaxDirLightBendSSSBilinearThreshold,
+                DefaultDirLightBendSSSBilinearThreshold);
+            m_DirLightBendSSSShadowContrast = SanitizeClampedFloat(
+                m_DirLightBendSSSShadowContrast,
+                MinDirLightBendSSSShadowContrast,
+                MaxDirLightBendSSSShadowContrast,
+                DefaultDirLightBendSSSShadowContrast);
         }
 
         private void ConstrainAreaLightSettings()
@@ -1669,6 +1787,7 @@ namespace VividRP.Runtime
                 CSMScreenSpaceShadowQuality.Medium => CSMScreenSpaceShadowQuality.Medium,
                 CSMScreenSpaceShadowQuality.High => CSMScreenSpaceShadowQuality.High,
                 CSMScreenSpaceShadowQuality.VeryHigh => CSMScreenSpaceShadowQuality.VeryHigh,
+                CSMScreenSpaceShadowQuality.Unreal => CSMScreenSpaceShadowQuality.Unreal,
                 _ => DefaultScreenSpaceShadowQuality
             };
         }

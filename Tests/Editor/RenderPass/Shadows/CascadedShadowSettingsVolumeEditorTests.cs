@@ -87,7 +87,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Screen Space Denoise\""));
             Assert.That(source, Does.Contain("m_ScreenSpaceShadowDenoise = Unpack(fetcher.Find(x => x.screenSpaceShadowDenoise));"));
             Assert.That(source, Does.Contain("PropertyField(m_ScreenSpaceShadowDenoise, s_ScreenSpaceShadowDenoiseLabel);"));
-            Assert.That(source, Does.Contain("When Screen Space Quality is set to Very High (PCSS), blocker and filter tuning also lives on that light."));
+            Assert.That(source, Does.Contain("When Screen Space Quality is set to Very High (VividRP PCSS), blocker and filter tuning also lives on that light."));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

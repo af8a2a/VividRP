@@ -31,6 +31,12 @@ namespace VividRP.Editor
         internal SerializedProperty dirLightPCSSMinFilterMaxAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSearchAngularDiameter { get; }
         internal SerializedProperty dirLightPCSSBlockerSamplingClumpExponent { get; }
+        internal SerializedProperty dirLightBendSSSSurfaceThickness { get; }
+        internal SerializedProperty dirLightBendSSSBilinearThreshold { get; }
+        internal SerializedProperty dirLightBendSSSShadowContrast { get; }
+        internal SerializedProperty dirLightBendSSSIgnoreEdgePixels { get; }
+        internal SerializedProperty dirLightBendSSSUsePrecisionOffset { get; }
+        internal SerializedProperty dirLightBendSSSBilinearSamplingOffsetMode { get; }
         internal SerializedProperty barnDoorAngle { get; }
         internal SerializedProperty barnDoorLength { get; }
         internal SerializedProperty affectsVolumetric { get; }
@@ -99,6 +105,12 @@ namespace VividRP.Editor
             dirLightPCSSMinFilterMaxAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSMinFilterMaxAngularDiameter");
             dirLightPCSSBlockerSearchAngularDiameter = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSearchAngularDiameter");
             dirLightPCSSBlockerSamplingClumpExponent = serializedAdditionalDataObject.FindProperty("m_DirLightPCSSBlockerSamplingClumpExponent");
+            dirLightBendSSSSurfaceThickness = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSSurfaceThickness");
+            dirLightBendSSSBilinearThreshold = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSBilinearThreshold");
+            dirLightBendSSSShadowContrast = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSShadowContrast");
+            dirLightBendSSSIgnoreEdgePixels = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSIgnoreEdgePixels");
+            dirLightBendSSSUsePrecisionOffset = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSUsePrecisionOffset");
+            dirLightBendSSSBilinearSamplingOffsetMode = serializedAdditionalDataObject.FindProperty("m_DirLightBendSSSBilinearSamplingOffsetMode");
             barnDoorAngle = serializedAdditionalDataObject.FindProperty("m_BarnDoorAngle");
             barnDoorLength = serializedAdditionalDataObject.FindProperty("m_BarnDoorLength");
             affectsVolumetric = serializedAdditionalDataObject.FindProperty("m_AffectsVolumetric");

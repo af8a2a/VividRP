@@ -152,6 +152,12 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedLight.dirLightPCSSMinFilterMaxAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSearchAngularDiameter, Is.Not.Null);
             Assert.That(serializedLight.dirLightPCSSBlockerSamplingClumpExponent, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSSurfaceThickness, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSBilinearThreshold, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSShadowContrast, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSIgnoreEdgePixels, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSUsePrecisionOffset, Is.Not.Null);
+            Assert.That(serializedLight.dirLightBendSSSBilinearSamplingOffsetMode, Is.Not.Null);
             Assert.That(serializedLight.barnDoorAngle, Is.Not.Null);
             Assert.That(serializedLight.barnDoorLength, Is.Not.Null);
             Assert.That(serializedLight.affectsVolumetric, Is.Not.Null);
@@ -499,6 +505,24 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 additionalData.dirLightPCSSBlockerSamplingClumpExponent,
                 Is.EqualTo(VividAdditionalLightData.DefaultDirLightPCSSBlockerSamplingClumpExponent));
+            Assert.That(
+                additionalData.dirLightBendSSSSurfaceThickness,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSSurfaceThickness));
+            Assert.That(
+                additionalData.dirLightBendSSSBilinearThreshold,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSBilinearThreshold));
+            Assert.That(
+                additionalData.dirLightBendSSSShadowContrast,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSShadowContrast));
+            Assert.That(
+                additionalData.dirLightBendSSSIgnoreEdgePixels,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSIgnoreEdgePixels));
+            Assert.That(
+                additionalData.dirLightBendSSSUsePrecisionOffset,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSUsePrecisionOffset));
+            Assert.That(
+                additionalData.dirLightBendSSSBilinearSamplingOffsetMode,
+                Is.EqualTo(VividAdditionalLightData.DefaultDirLightBendSSSBilinearSamplingOffsetMode));
         }
 
         [Test]
@@ -519,6 +543,12 @@ namespace VividRP.Editor.Tests
             additionalData.dirLightPCSSMinFilterMaxAngularDiameter = -1.0f;
             additionalData.dirLightPCSSBlockerSearchAngularDiameter = -1.0f;
             additionalData.dirLightPCSSBlockerSamplingClumpExponent = 999.0f;
+            additionalData.dirLightBendSSSSurfaceThickness = 999.0f;
+            additionalData.dirLightBendSSSBilinearThreshold = -1.0f;
+            additionalData.dirLightBendSSSShadowContrast = -1.0f;
+            additionalData.dirLightBendSSSIgnoreEdgePixels = true;
+            additionalData.dirLightBendSSSUsePrecisionOffset = true;
+            additionalData.dirLightBendSSSBilinearSamplingOffsetMode = true;
 
             additionalData.shadowAtlasResolution = (VividAdditionalLightData.CSMShadowAtlasResolution)12345;
             additionalData.screenSpaceShadowQuality = (VividAdditionalLightData.CSMScreenSpaceShadowQuality)12345;
@@ -545,6 +575,32 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 additionalData.dirLightPCSSBlockerSamplingClumpExponent,
                 Is.EqualTo(VividAdditionalLightData.MaxDirLightPCSSBlockerSamplingClumpExponent));
+            Assert.That(
+                additionalData.dirLightBendSSSSurfaceThickness,
+                Is.EqualTo(VividAdditionalLightData.MaxDirLightBendSSSSurfaceThickness));
+            Assert.That(
+                additionalData.dirLightBendSSSBilinearThreshold,
+                Is.EqualTo(VividAdditionalLightData.MinDirLightBendSSSBilinearThreshold));
+            Assert.That(
+                additionalData.dirLightBendSSSShadowContrast,
+                Is.EqualTo(VividAdditionalLightData.MinDirLightBendSSSShadowContrast));
+            Assert.That(additionalData.dirLightBendSSSIgnoreEdgePixels, Is.True);
+            Assert.That(additionalData.dirLightBendSSSUsePrecisionOffset, Is.True);
+            Assert.That(additionalData.dirLightBendSSSBilinearSamplingOffsetMode, Is.True);
+        }
+
+        [Test]
+        public void ShadowBiasSettings_AcceptsUnrealScreenSpaceShadowQuality()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.screenSpaceShadowQuality = VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal;
+
+            Assert.That(
+                additionalData.screenSpaceShadowQuality,
+                Is.EqualTo(VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal));
         }
 
         [Test]
@@ -928,6 +984,13 @@ namespace VividRP.Editor.Tests
                 VividLightEditor.ShouldShowDirectionalPCSSControls(serializedDirectionalLight),
                 Is.True);
 
+            serializedDirectionalLight.screenSpaceShadowQuality.intValue =
+                (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal;
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalPCSSControls(serializedDirectionalLight),
+                Is.False);
+
             var pointLightObject = new GameObject("Vivid Point Light PCSS Test");
 
             try
@@ -941,6 +1004,53 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(
                     VividLightEditor.ShouldShowDirectionalPCSSControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsDirectionalBendSSSControls_OnlyForDirectionalLightsUsingUnrealQuality()
+        {
+            var directionalLight = m_GameObject.AddComponent<Light>();
+            directionalLight.type = LightType.Directional;
+
+            var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalBendSSSControls(serializedDirectionalLight),
+                Is.False);
+
+            serializedDirectionalLight.screenSpaceShadowQuality.intValue =
+                (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal;
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalBendSSSControls(serializedDirectionalLight),
+                Is.True);
+
+            serializedDirectionalLight.screenSpaceShadowQuality.intValue =
+                (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh;
+
+            Assert.That(
+                VividLightEditor.ShouldShowDirectionalBendSSSControls(serializedDirectionalLight),
+                Is.False);
+
+            var pointLightObject = new GameObject("Vivid Point Light Bend SSS Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+                serializedPointLight.screenSpaceShadowQuality.intValue =
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal;
+
+                Assert.That(
+                    VividLightEditor.ShouldShowDirectionalBendSSSControls(serializedPointLight),
                     Is.False);
             }
             finally
@@ -1026,7 +1136,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("Low (PCF 3x3)"));
             Assert.That(source, Does.Contain("Medium (PCF 5x5)"));
             Assert.That(source, Does.Contain("High (PCF 7x7)"));
-            Assert.That(source, Does.Contain("Very High (PCSS)"));
+            Assert.That(source, Does.Contain("Very High (VividRP PCSS)"));
+            Assert.That(source, Does.Contain("Very High (Unreal SSS)"));
+            Assert.That(source, Does.Contain("CSMScreenSpaceShadowQuality.Unreal"));
             Assert.That(source, Does.Contain("DrawDirectionalScreenSpaceShadowQualityField();"));
             Assert.That(source, Does.Contain("m_SerializedLight.screenSpaceShadowQuality"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Atlas Resolution\""));
@@ -1043,6 +1155,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("DrawDirectionalPCSSFields();"));
             Assert.That(source, Does.Contain("m_SerializedLight.dirLightPCSSMaxPenumbraSize"));
             Assert.That(source, Does.Contain("m_SerializedLight.dirLightPCSSFilterSampleCount"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Bend SSS\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Surface Thickness\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Bilinear Threshold\""));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Shadow Contrast\""));
+            Assert.That(source, Does.Contain("DrawDirectionalBendSSSFields();"));
+            Assert.That(source, Does.Contain("ShouldShowDirectionalBendSSSControls(m_SerializedLight)"));
+            Assert.That(source, Does.Contain("m_SerializedLight.dirLightBendSSSSurfaceThickness"));
+            Assert.That(source, Does.Contain("m_SerializedLight.dirLightBendSSSBilinearSamplingOffsetMode"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Depth Bias\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Normal Bias\""));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Slope-Scale Depth Bias\""));

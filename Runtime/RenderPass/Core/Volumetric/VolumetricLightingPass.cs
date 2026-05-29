@@ -495,7 +495,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Shader, CSMCascadeResolutionId, m_CSMCascadeResolution);
             cmd.SetComputeVectorParam(m_Shader, CSMCascadeWorldTexelSizesId, m_CSMCascadeWorldTexelSizes);
             cmd.SetComputeVectorParam(m_Shader, CSMCascadeBordersId, m_CSMCascadeBorders);
-            cmd.SetComputeIntParam(m_Shader, CSMShadowQualityId, m_CSMShadowQuality);
+            cmd.SetComputeIntParam(m_Shader, CSMShadowQualityId, CSMShadowResolvePass.ResolveCSMFilteringQuality(m_CSMShadowQuality));
         }
 
         private void BindVBufferHistory(ComputeCommandBuffer cmd, int kernel)

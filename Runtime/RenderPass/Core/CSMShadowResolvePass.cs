@@ -11,6 +11,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int ThreadGroupSizeY = 8;
         private const int ScreenSpaceShadowTileSize = 16;
         private const int IndirectDispatchArgsElementCount = 3;
+        private const int BendWaveSize = 64;
+        private const int BendMaxDispatchCount = 8;
         private const string KernelName = "CSMShadowResolve";
         private const string ClearTilesKernelName = "CSMShadowClearTiles";
         private const string ClassifyTilesKernelName = "CSMShadowClassifyTiles";
@@ -18,6 +20,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string CopyFilterSourceKernelName = "CSMShadowCopyFilterSource";
         private const string BilateralFilterHKernelName = "CSMShadowBilateralFilterH";
         private const string BilateralFilterVKernelName = "CSMShadowBilateralFilterV";
+        private const string BendCompositeLowKernelName = "CSMShadowBendCompositeLow";
+        private const string BendCompositeMediumKernelName = "CSMShadowBendCompositeMedium";
+        private const string BendCompositeHighKernelName = "CSMShadowBendCompositeHigh";
+        private const string BendCompositeVeryHighKernelName = "CSMShadowBendCompositeVeryHigh";
 
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
@@ -52,6 +58,76 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CSMPCSSMinFilterMaxAngularDiameterId = Shader.PropertyToID("_CSMPCSSMinFilterMaxAngularDiameter");
         private static readonly int CSMPCSSBlockerSearchAngularDiameterId = Shader.PropertyToID("_CSMPCSSBlockerSearchAngularDiameter");
         private static readonly int CSMPCSSBlockerSamplingClumpExponentId = Shader.PropertyToID("_CSMPCSSBlockerSamplingClumpExponent");
+        private static readonly int CSMBendLightCoordinateId = Shader.PropertyToID("_CSMBendLightCoordinate");
+        private static readonly int CSMBendWaveOffsetId = Shader.PropertyToID("_CSMBendWaveOffset");
+        private static readonly int CSMBendDepthTextureSizeId = Shader.PropertyToID("_CSMBendDepthTextureSize");
+        private static readonly int CSMBendSurfaceThicknessId = Shader.PropertyToID("_CSMBendSurfaceThickness");
+        private static readonly int CSMBendBilinearThresholdId = Shader.PropertyToID("_CSMBendBilinearThreshold");
+        private static readonly int CSMBendShadowContrastId = Shader.PropertyToID("_CSMBendShadowContrast");
+        private static readonly int CSMBendIgnoreEdgePixelsId = Shader.PropertyToID("_CSMBendIgnoreEdgePixels");
+        private static readonly int CSMBendUsePrecisionOffsetId = Shader.PropertyToID("_CSMBendUsePrecisionOffset");
+        private static readonly int CSMBendBilinearSamplingOffsetModeId = Shader.PropertyToID("_CSMBendBilinearSamplingOffsetMode");
+
+        private static readonly string[] s_BendCompositeKernelNames =
+        {
+            BendCompositeLowKernelName,
+            BendCompositeMediumKernelName,
+            BendCompositeHighKernelName,
+            BendCompositeVeryHighKernelName
+        };
+
+        internal struct BendDispatchData
+        {
+            public Vector3Int WaveCount;
+            public Vector2Int WaveOffset;
+        }
+
+        internal readonly struct BendDispatchList
+        {
+            public BendDispatchList(Vector4 lightCoordinate, BendDispatchData[] dispatches, int dispatchCount)
+            {
+                LightCoordinate = lightCoordinate;
+                Dispatches = dispatches;
+                DispatchCount = dispatchCount;
+            }
+
+            public Vector4 LightCoordinate { get; }
+
+            public BendDispatchData[] Dispatches { get; }
+
+            public int DispatchCount { get; }
+        }
+
+        internal readonly struct BendQualitySettings
+        {
+            public BendQualitySettings(
+                float surfaceThickness,
+                float bilinearThreshold,
+                float shadowContrast,
+                bool ignoreEdgePixels = false,
+                bool usePrecisionOffset = false,
+                bool bilinearSamplingOffsetMode = false)
+            {
+                SurfaceThickness = surfaceThickness;
+                BilinearThreshold = bilinearThreshold;
+                ShadowContrast = shadowContrast;
+                IgnoreEdgePixels = ignoreEdgePixels;
+                UsePrecisionOffset = usePrecisionOffset;
+                BilinearSamplingOffsetMode = bilinearSamplingOffsetMode;
+            }
+
+            public float SurfaceThickness { get; }
+
+            public float BilinearThreshold { get; }
+
+            public float ShadowContrast { get; }
+
+            public bool IgnoreEdgePixels { get; }
+
+            public bool UsePrecisionOffset { get; }
+
+            public bool BilinearSamplingOffsetMode { get; }
+        }
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
@@ -85,14 +161,20 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_CopyFilterSourceKernel = -1;
         private int m_BilateralFilterHKernel = -1;
         private int m_BilateralFilterVKernel = -1;
+        private readonly int[] m_BendCompositeKernels = { -1, -1, -1, -1 };
         private bool m_IsActive;
         private bool m_EnableTiledResolve;
         private bool m_EnableBilateralDenoise;
+        private bool m_EnableBendComposite;
         private int m_DispatchGroupCountX = 1;
         private int m_DispatchGroupCountY = 1;
         private int m_TileCountX = 1;
         private int m_TileCountY = 1;
         private Matrix4x4 m_InvViewProjMatrix = Matrix4x4.identity;
+        private BendDispatchList m_BendDispatchList = new(Vector4.zero, new BendDispatchData[BendMaxDispatchCount], 0);
+        private BendQualitySettings m_BendQualitySettings = ResolveBendQualitySettings(
+            (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low);
+        private Vector4 m_BendDepthTextureSize = Vector4.zero;
         private Vector4 m_LightDirectionWS;
 
         // Cached shadow data for shader upload
@@ -168,6 +250,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CopyFilterSourceKernel = FindKernelOrInvalid(m_ResolveCompute, CopyFilterSourceKernelName);
             m_BilateralFilterHKernel = FindKernelOrInvalid(m_ResolveCompute, BilateralFilterHKernelName);
             m_BilateralFilterVKernel = FindKernelOrInvalid(m_ResolveCompute, BilateralFilterVKernelName);
+
+            for (var i = 0; i < s_BendCompositeKernelNames.Length; i++)
+                m_BendCompositeKernels[i] = FindKernelOrInvalid(m_ResolveCompute, s_BendCompositeKernelNames[i]);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -175,8 +260,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsActive = false;
             m_EnableTiledResolve = false;
             m_EnableBilateralDenoise = false;
+            m_EnableBendComposite = false;
             m_LightDirectionWS = Vector4.zero;
+            m_BendDispatchList = new BendDispatchList(Vector4.zero, new BendDispatchData[BendMaxDispatchCount], 0);
+            m_BendDepthTextureSize = Vector4.zero;
             m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
+            m_BendQualitySettings = ResolveBendQualitySettings(m_ShadowQuality);
             m_LightAngularDiameter = VividAdditionalLightData.DefaultCelestialBodyAngularDiameter;
             m_FrameIndex = 0;
             m_CascadeWorldTexelSizes = Vector4.zero;
@@ -196,6 +285,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_DirectionalShadowTexture.Resize(width, height);
             m_FilterTexture.Resize(width, height);
+            m_BendDepthTextureSize = CreateBendDepthTextureSize(width, height);
             m_DispatchGroupCountX = CoreUtils.DivRoundUp(width, ThreadGroupSizeX);
             m_DispatchGroupCountY = CoreUtils.DivRoundUp(height, ThreadGroupSizeY);
             m_TileCountX = CoreUtils.DivRoundUp(width, ScreenSpaceShadowTileSize);
@@ -247,12 +337,38 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PCSSMinFilterMaxAngularDiameter = additionalLightData.dirLightPCSSMinFilterMaxAngularDiameter;
                     m_PCSSBlockerSearchAngularDiameter = additionalLightData.dirLightPCSSBlockerSearchAngularDiameter;
                     m_PCSSBlockerSamplingClumpExponent = additionalLightData.dirLightPCSSBlockerSamplingClumpExponent;
+                    if (IsUnrealScreenSpaceShadowQuality(m_ShadowQuality))
+                    {
+                        m_BendQualitySettings = new BendQualitySettings(
+                            additionalLightData.dirLightBendSSSSurfaceThickness,
+                            additionalLightData.dirLightBendSSSBilinearThreshold,
+                            additionalLightData.dirLightBendSSSShadowContrast,
+                            additionalLightData.dirLightBendSSSIgnoreEdgePixels,
+                            additionalLightData.dirLightBendSSSUsePrecisionOffset,
+                            additionalLightData.dirLightBendSSSBilinearSamplingOffsetMode);
+                    }
+                }
+
+                if (!IsUnrealScreenSpaceShadowQuality(m_ShadowQuality))
+                    m_BendQualitySettings = ResolveBendQualitySettings(m_ShadowQuality);
+                if (IsUnrealScreenSpaceShadowQuality(m_ShadowQuality))
+                {
+                    m_BendDispatchList = BuildBendDispatchList(
+                        cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true) * m_LightDirectionWS,
+                        new Vector2Int(width, height),
+                        Vector2Int.zero,
+                        new Vector2Int(width, height));
+                    m_EnableBendComposite = m_BendDispatchList.DispatchCount > 0
+                        && GetBendCompositeKernel() >= 0
+                        && width > 0
+                        && height > 0
+                        && m_LightDirectionWS.sqrMagnitude > 1.0e-6f;
                 }
             }
 
             var csmSettings = VividVolumeManagerUtility.GetCascadedShadowSettingsVolume();
             m_EnableBilateralDenoise = csmSettings != null && csmSettings.screenSpaceShadowDenoise.value;
-            m_EnableTiledResolve = m_ShadowQuality == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh
+            m_EnableTiledResolve = IsVividTiledPCSSQuality(m_ShadowQuality)
                 && CanUseTiledResolveKernels();
         }
 
@@ -274,18 +390,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true)
             {
                 RecordTiledScreenSpaceResolve(cmd);
-                return;
+            }
+            else
+            {
+                RecordFullScreenCSMResolve(cmd);
             }
 
-            cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, DepthTextureId, m_DepthTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, GBuffer1Id, m_GBuffer1.innerHandle);
-            cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, CSMShadowAtlasId, m_CSMShadowAtlas.innerHandle);
-            cmd.SetComputeTextureParam(m_ResolveCompute, m_Kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
-
-            BindShadowParameters(cmd);
-
-            cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
-                m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
+            RecordBendScreenSpaceContactShadow(cmd);
         }
 
         public override void Dispose()
@@ -298,16 +409,30 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CopyFilterSourceKernel = -1;
             m_BilateralFilterHKernel = -1;
             m_BilateralFilterVKernel = -1;
+            for (var i = 0; i < m_BendCompositeKernels.Length; i++)
+                m_BendCompositeKernels[i] = -1;
             m_IsActive = false;
             m_EnableTiledResolve = false;
             m_EnableBilateralDenoise = false;
+            m_EnableBendComposite = false;
             m_DispatchGroupCountX = 1;
             m_DispatchGroupCountY = 1;
             m_TileCountX = 1;
             m_TileCountY = 1;
             m_FrameIndex = 0;
+            m_BendDispatchList = new BendDispatchList(Vector4.zero, new BendDispatchData[BendMaxDispatchCount], 0);
+            m_BendDepthTextureSize = Vector4.zero;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
+        }
+
+        private void RecordFullScreenCSMResolve(ComputeCommandBuffer cmd)
+        {
+            BindCommonTextures(cmd, m_Kernel);
+            BindShadowParameters(cmd);
+
+            cmd.DispatchCompute(m_ResolveCompute, m_Kernel,
+                m_DispatchGroupCountX, m_DispatchGroupCountY, 1);
         }
 
         private void RecordTiledScreenSpaceResolve(ComputeCommandBuffer cmd)
@@ -338,6 +463,52 @@ namespace VividRP.Runtime.RenderPass.Core
             BindFilterTextures(cmd, m_BilateralFilterVKernel, m_FilterTexture, m_DirectionalShadowTexture);
             BindTileBuffers(cmd, m_BilateralFilterVKernel);
             cmd.DispatchCompute(m_ResolveCompute, m_BilateralFilterVKernel, m_DispatchIndirectArgsBuffer, 0);
+        }
+
+        private void RecordBendScreenSpaceContactShadow(ComputeCommandBuffer cmd)
+        {
+            if (!m_EnableBendComposite || m_BendDispatchList.DispatchCount <= 0)
+                return;
+
+            var kernel = GetBendCompositeKernel();
+            if (kernel < 0)
+                return;
+
+            BindBendCompositeParameters(cmd, kernel);
+
+            for (var dispatchIndex = 0; dispatchIndex < m_BendDispatchList.DispatchCount; dispatchIndex++)
+            {
+                var dispatch = m_BendDispatchList.Dispatches[dispatchIndex];
+                if (dispatch.WaveCount.x <= 0 || dispatch.WaveCount.y <= 0 || dispatch.WaveCount.z <= 0)
+                    continue;
+
+                cmd.SetComputeVectorParam(
+                    m_ResolveCompute,
+                    CSMBendWaveOffsetId,
+                    new Vector4(dispatch.WaveOffset.x, dispatch.WaveOffset.y, 0.0f, 0.0f));
+                cmd.DispatchCompute(
+                    m_ResolveCompute,
+                    kernel,
+                    dispatch.WaveCount.x,
+                    dispatch.WaveCount.y,
+                    dispatch.WaveCount.z);
+            }
+        }
+
+        private void BindBendCompositeParameters(ComputeCommandBuffer cmd, int kernel)
+        {
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ResolveCompute, kernel, DirectionalShadowTextureId, m_DirectionalShadowTexture.innerHandle);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMOutputWidthId, m_DirectionalShadowTexture.desc.Width);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMOutputHeightId, m_DirectionalShadowTexture.desc.Height);
+            cmd.SetComputeVectorParam(m_ResolveCompute, CSMBendLightCoordinateId, m_BendDispatchList.LightCoordinate);
+            cmd.SetComputeVectorParam(m_ResolveCompute, CSMBendDepthTextureSizeId, m_BendDepthTextureSize);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendSurfaceThicknessId, m_BendQualitySettings.SurfaceThickness);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendBilinearThresholdId, m_BendQualitySettings.BilinearThreshold);
+            cmd.SetComputeFloatParam(m_ResolveCompute, CSMBendShadowContrastId, m_BendQualitySettings.ShadowContrast);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMBendIgnoreEdgePixelsId, m_BendQualitySettings.IgnoreEdgePixels ? 1 : 0);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMBendUsePrecisionOffsetId, m_BendQualitySettings.UsePrecisionOffset ? 1 : 0);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMBendBilinearSamplingOffsetModeId, m_BendQualitySettings.BilinearSamplingOffsetMode ? 1 : 0);
         }
 
         private void BindCommonTextures(ComputeCommandBuffer cmd, int kernel)
@@ -386,7 +557,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_ResolveCompute, CSMCascadeResolutionId, m_CascadeResolution);
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeWorldTexelSizesId, m_CascadeWorldTexelSizes);
             cmd.SetComputeVectorParam(m_ResolveCompute, CSMCascadeBordersId, m_CascadeBorders);
-            cmd.SetComputeIntParam(m_ResolveCompute, CSMShadowQualityId, m_ShadowQuality);
+            cmd.SetComputeIntParam(m_ResolveCompute, CSMShadowQualityId, ResolveCSMFilteringQuality(m_ShadowQuality));
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMLightAngularDiameterId, m_LightAngularDiameter);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMFrameIndexId, m_FrameIndex);
             cmd.SetComputeIntParam(m_ResolveCompute, CSMPCSSBlockerSampleCountId, m_PCSSBlockerSampleCount);
@@ -397,6 +568,231 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSMinFilterMaxAngularDiameterId, m_PCSSMinFilterMaxAngularDiameter);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSearchAngularDiameterId, m_PCSSBlockerSearchAngularDiameter);
             cmd.SetComputeFloatParam(m_ResolveCompute, CSMPCSSBlockerSamplingClumpExponentId, m_PCSSBlockerSamplingClumpExponent);
+        }
+
+        private int GetBendCompositeKernel()
+        {
+            return IsUnrealScreenSpaceShadowQuality(m_ShadowQuality)
+                ? m_BendCompositeKernels[(int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh]
+                : -1;
+        }
+
+        internal static BendQualitySettings ResolveBendQualitySettings(int quality)
+        {
+            return (VividAdditionalLightData.CSMScreenSpaceShadowQuality)quality switch
+            {
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low =>
+                    new BendQualitySettings(0.0080f, 0.030f, 3.0f),
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium =>
+                    new BendQualitySettings(0.0060f, 0.025f, 3.5f),
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.High =>
+                    new BendQualitySettings(0.0050f, 0.020f, 4.0f),
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh =>
+                    new BendQualitySettings(0.0050f, 0.020f, 4.0f),
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal =>
+                    new BendQualitySettings(
+                        VividAdditionalLightData.DefaultDirLightBendSSSSurfaceThickness,
+                        VividAdditionalLightData.DefaultDirLightBendSSSBilinearThreshold,
+                        VividAdditionalLightData.DefaultDirLightBendSSSShadowContrast,
+                        VividAdditionalLightData.DefaultDirLightBendSSSIgnoreEdgePixels,
+                        VividAdditionalLightData.DefaultDirLightBendSSSUsePrecisionOffset,
+                        VividAdditionalLightData.DefaultDirLightBendSSSBilinearSamplingOffsetMode),
+                _ => new BendQualitySettings(0.0080f, 0.030f, 3.0f)
+            };
+        }
+
+        internal static int ResolveCSMFilteringQuality(int quality)
+        {
+            return (VividAdditionalLightData.CSMScreenSpaceShadowQuality)quality switch
+            {
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low =>
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low,
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium =>
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium,
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.High =>
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.High,
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh =>
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh,
+                VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal =>
+                    (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.High,
+                _ => (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Medium
+            };
+        }
+
+        internal static bool IsVividTiledPCSSQuality(int quality)
+        {
+            return quality == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.VeryHigh;
+        }
+
+        internal static bool IsUnrealScreenSpaceShadowQuality(int quality)
+        {
+            return quality == (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Unreal;
+        }
+
+        internal static Vector4 CreateBendDepthTextureSize(int width, int height)
+        {
+            var safeWidth = Mathf.Max(1, width);
+            var safeHeight = Mathf.Max(1, height);
+            return new Vector4(
+                1.0f / safeWidth,
+                1.0f / safeHeight,
+                safeWidth,
+                safeHeight);
+        }
+
+        internal static BendDispatchList BuildBendDispatchList(
+            Vector4 lightProjection,
+            Vector2Int viewportSize,
+            Vector2Int minRenderBounds,
+            Vector2Int maxRenderBounds,
+            bool expandedZRange = false,
+            int waveSize = BendWaveSize)
+        {
+            var dispatches = new BendDispatchData[BendMaxDispatchCount];
+            var dispatchCount = 0;
+            var safeWaveSize = Mathf.Max(1, waveSize);
+            var safeViewportWidth = Mathf.Max(1, viewportSize.x);
+            var safeViewportHeight = Mathf.Max(1, viewportSize.y);
+
+            var xyLightW = lightProjection.w;
+            var floatingPointLimit = 0.000002f * safeWaveSize;
+            if (xyLightW >= 0.0f && xyLightW < floatingPointLimit)
+                xyLightW = floatingPointLimit;
+            else if (xyLightW < 0.0f && xyLightW > -floatingPointLimit)
+                xyLightW = -floatingPointLimit;
+
+            var lightCoordinate = new Vector4(
+                ((lightProjection.x / xyLightW) * 0.5f + 0.5f) * safeViewportWidth,
+                ((lightProjection.y / xyLightW) * -0.5f + 0.5f) * safeViewportHeight,
+                lightProjection.w == 0.0f ? 0.0f : lightProjection.z / lightProjection.w,
+                lightProjection.w > 0.0f ? 1.0f : -1.0f);
+
+            if (expandedZRange)
+                lightCoordinate.z = lightCoordinate.z * 0.5f + 0.5f;
+
+            var lightXY = new Vector2Int(
+                (int)(lightCoordinate.x + 0.5f),
+                (int)(lightCoordinate.y + 0.5f));
+
+            var biasedBounds = new[]
+            {
+                minRenderBounds.x - lightXY.x,
+                -(maxRenderBounds.y - lightXY.y),
+                maxRenderBounds.x - lightXY.x,
+                -(minRenderBounds.y - lightXY.y)
+            };
+
+            for (var quadrant = 0; quadrant < 4; quadrant++)
+            {
+                var vertical = quadrant == 0 || quadrant == 3;
+                var bounds = new[]
+                {
+                    BendMax(0, ((quadrant & 1) != 0 ? biasedBounds[0] : -biasedBounds[2])) / safeWaveSize,
+                    BendMax(0, ((quadrant & 2) != 0 ? biasedBounds[1] : -biasedBounds[3])) / safeWaveSize,
+                    BendMax(0, (((quadrant & 1) != 0 ? biasedBounds[2] : -biasedBounds[0])
+                        + safeWaveSize * (vertical ? 1 : 2) - 1)) / safeWaveSize,
+                    BendMax(0, (((quadrant & 2) != 0 ? biasedBounds[3] : -biasedBounds[1])
+                        + safeWaveSize * (vertical ? 2 : 1) - 1)) / safeWaveSize
+                };
+
+                if ((bounds[2] - bounds[0]) <= 0 || (bounds[3] - bounds[1]) <= 0)
+                    continue;
+
+                var biasX = quadrant == 2 || quadrant == 3 ? 1 : 0;
+                var biasY = quadrant == 1 || quadrant == 3 ? 1 : 0;
+                var dispatch = new BendDispatchData
+                {
+                    WaveCount = new Vector3Int(safeWaveSize, bounds[2] - bounds[0], bounds[3] - bounds[1]),
+                    WaveOffset = new Vector2Int(
+                        ((quadrant & 1) != 0 ? bounds[0] : -bounds[2]) + biasX,
+                        ((quadrant & 2) != 0 ? -bounds[3] : bounds[1]) + biasY)
+                };
+
+                var axisDelta = biasedBounds[0] - biasedBounds[1];
+                if (quadrant == 1)
+                    axisDelta = biasedBounds[2] + biasedBounds[1];
+                if (quadrant == 2)
+                    axisDelta = -biasedBounds[0] - biasedBounds[3];
+                if (quadrant == 3)
+                    axisDelta = -biasedBounds[2] + biasedBounds[3];
+
+                axisDelta = (axisDelta + safeWaveSize - 1) / safeWaveSize;
+
+                if (axisDelta > 0)
+                {
+                    var splitDispatch = dispatch;
+
+                    if (quadrant == 0)
+                    {
+                        splitDispatch.WaveCount.z = BendMin(dispatch.WaveCount.z, axisDelta);
+                        dispatch.WaveCount.z -= splitDispatch.WaveCount.z;
+                        splitDispatch.WaveOffset.y = dispatch.WaveOffset.y + dispatch.WaveCount.z;
+                        splitDispatch.WaveOffset.x--;
+                        splitDispatch.WaveCount.y++;
+                    }
+                    else if (quadrant == 1)
+                    {
+                        splitDispatch.WaveCount.y = BendMin(dispatch.WaveCount.y, axisDelta);
+                        dispatch.WaveCount.y -= splitDispatch.WaveCount.y;
+                        splitDispatch.WaveOffset.x = dispatch.WaveOffset.x + dispatch.WaveCount.y;
+                        splitDispatch.WaveCount.z++;
+                    }
+                    else if (quadrant == 2)
+                    {
+                        splitDispatch.WaveCount.y = BendMin(dispatch.WaveCount.y, axisDelta);
+                        dispatch.WaveCount.y -= splitDispatch.WaveCount.y;
+                        dispatch.WaveOffset.x += splitDispatch.WaveCount.y;
+                        splitDispatch.WaveCount.z++;
+                        splitDispatch.WaveOffset.y--;
+                    }
+                    else if (quadrant == 3)
+                    {
+                        splitDispatch.WaveCount.z = BendMin(dispatch.WaveCount.z, axisDelta);
+                        dispatch.WaveCount.z -= splitDispatch.WaveCount.z;
+                        dispatch.WaveOffset.y += splitDispatch.WaveCount.z;
+                        splitDispatch.WaveCount.y++;
+                    }
+
+                    AddBendDispatch(dispatches, ref dispatchCount, dispatch);
+                    AddBendDispatch(dispatches, ref dispatchCount, splitDispatch);
+                }
+                else
+                {
+                    AddBendDispatch(dispatches, ref dispatchCount, dispatch);
+                }
+            }
+
+            for (var i = 0; i < dispatchCount; i++)
+            {
+                var dispatch = dispatches[i];
+                dispatch.WaveOffset = new Vector2Int(
+                    dispatch.WaveOffset.x * safeWaveSize,
+                    dispatch.WaveOffset.y * safeWaveSize);
+                dispatches[i] = dispatch;
+            }
+
+            return new BendDispatchList(lightCoordinate, dispatches, dispatchCount);
+        }
+
+        private static void AddBendDispatch(BendDispatchData[] dispatches, ref int dispatchCount, BendDispatchData dispatch)
+        {
+            if (dispatch.WaveCount.x <= 0 || dispatch.WaveCount.y <= 0 || dispatch.WaveCount.z <= 0)
+                return;
+
+            if (dispatchCount >= BendMaxDispatchCount)
+                return;
+
+            dispatches[dispatchCount++] = dispatch;
+        }
+
+        private static int BendMin(int a, int b)
+        {
+            return a > b ? b : a;
+        }
+
+        private static int BendMax(int a, int b)
+        {
+            return a > b ? a : b;
         }
 
         private bool CanUseTiledResolveKernels()

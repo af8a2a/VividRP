@@ -145,6 +145,7 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
             punctualLight),
             aggregateLighting);
     }
+    _LightingDebugTexture[pixelCoord]=aggregateLighting.direct.specular.xyzz;
 
     uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
 
@@ -251,8 +252,6 @@ void DeferredLit(
         + screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;
     float3 lighting = diffuseLighting + specularLighting;
     float3 indirectLighting = VividApplyPreExposure(max(indirectDiffuseLighting + indirectSpecularLighting, 0.0));
-    _LightingDebugTexture[pixelCoord] = float4(indirectLighting, reflectionWeight);
-
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

@@ -8,7 +8,9 @@
         "Unity.GraphToolkit.Editor",
         "Unity.GraphToolkit.Common.Editor",
         "Unity.Burst",
-        "Unity.Collections"
+        "Unity.Collections",
+        "Unity.RenderPipelines.Core.Editor",
+        "Unity.RenderPipelines.Core.Editor.Shared"
     ],
     "includePlatforms": [
         "Editor"

@@ -164,6 +164,7 @@ namespace VividRP.Editor.Tests
             clusteredLightingData.clusterLog2SliceCount = 5;
             clusteredLightingData.punctualLightCount = 2;
             clusteredLightingData.areaLightCount = 3;
+            clusteredLightingData.reflectionProbeCount = 4;
             clusteredLightingData.decalCount = 1;
             clusteredLightingData.supportsClusteredPunctualLights = true;
             clusteredLightingData.isLogBaseBufferEnabled = true;
@@ -179,6 +180,7 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<RenderGraphBuffer>(pass, "m_LogBaseBuffer"), Is.SameAs(clusteredLightingData.logBaseBuffer));
             Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(2));
             Assert.That(GetFieldValue<int>(pass, "m_AreaLightCount"), Is.EqualTo(3));
+            Assert.That(GetFieldValue<int>(pass, "m_ReflectionProbeCount"), Is.EqualTo(4));
             Assert.That(GetFieldValue<int>(pass, "m_DecalCount"), Is.EqualTo(1));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterTileSize"), Is.EqualTo(32));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(32));
@@ -194,6 +196,7 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_ClusterLog2SliceCount"), Is.EqualTo(5));
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredPunctualLights"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredAreaLights"), Is.True);
+            Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredReflectionProbes"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredDecals"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsBigTileLightList"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.True);
@@ -208,6 +211,8 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("ApplyClusteredLightingProperties();"));
             Assert.That(passSource, Does.Contain("BigTileLightListId = Shader.PropertyToID(\"g_vBigTileLightList\")"));
             Assert.That(passSource, Does.Contain("m_Material.SetInt(ClusteredPunctualLightGridEnabledId"));
+            Assert.That(passSource, Does.Contain("m_Material.SetInt(ClusteredReflectionProbeGridEnabledId"));
+            Assert.That(passSource, Does.Contain("m_Material.SetInt(ReflectionProbeCountId"));
             Assert.That(passSource, Does.Contain("m_Material.SetInt(BigTileLightListEnabledId"));
             Assert.That(passSource, Does.Contain("m_Material.SetInt(NumTileBigTileXId"));
             Assert.That(passSource, Does.Contain("m_Material.SetInt(ClusterTileSizeId"));
@@ -229,10 +234,12 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::CreateBigTile"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTilePunctualLightCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileAreaLightCount"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileReflectionProbeCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetBigTileDecalCount"));
             Assert.That(shaderSource, Does.Contain("VividClusteredLighting::GetBigTileSize"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetPunctualLightCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetAreaLightCount"));
+            Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetReflectionProbeCount"));
             Assert.That(shaderSource, Does.Contain("VividLightingLoop::GetDecalCount"));
             Assert.That(shaderSource, Does.Contain("_BigTileLightListEnabled"));
             Assert.That(shaderSource, Does.Contain("_NumTileBigTileX"));
@@ -240,6 +247,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Not.Contain("FetchBigTileLightIndex"));
             Assert.That(shaderSource, Does.Contain("_ClusteredPunctualLightGridEnabled"));
             Assert.That(shaderSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
+            Assert.That(shaderSource, Does.Contain("_ClusteredReflectionProbeGridEnabled"));
+            Assert.That(shaderSource, Does.Contain("_ReflectionProbeCount"));
             Assert.That(shaderSource, Does.Contain("_ClusteredDecalGridEnabled"));
             Assert.That(shaderSource, Does.Contain("float2 pixelUv = (float2(pixelCoord) + 0.5) * _ClusterDebugLightViewportSize.zw;"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r"));

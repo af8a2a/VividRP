@@ -7,6 +7,7 @@ namespace VividRP.Runtime
         public RenderGraphBuffer directionalLights;
         public RenderGraphBuffer punctualLights;
         public RenderGraphBuffer areaLights;
+        public RenderGraphBuffer reflectionProbes;
         public RenderGraphBuffer decalData;
         public RenderGraphBuffer bigTileLightList;
         public RenderGraphBuffer bigTileVolumetricLightList;
@@ -16,6 +17,7 @@ namespace VividRP.Runtime
         public int directionalLightCount;
         public int punctualLightCount;
         public int areaLightCount;
+        public int reflectionProbeCount;
         public int decalCount;
         public int mainDirectionalLightIndex;
         public int clusterTileSize;
@@ -38,6 +40,7 @@ namespace VividRP.Runtime
             directionalLights = null;
             punctualLights = null;
             areaLights = null;
+            reflectionProbes = null;
             decalData = null;
             bigTileLightList = null;
             bigTileVolumetricLightList = null;
@@ -47,6 +50,7 @@ namespace VividRP.Runtime
             directionalLightCount = 0;
             punctualLightCount = 0;
             areaLightCount = 0;
+            reflectionProbeCount = 0;
             decalCount = 0;
             mainDirectionalLightIndex = -1;
             clusterTileSize = 0;

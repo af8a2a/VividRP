@@ -8,6 +8,7 @@ struct VividLightingLoopContext
 {
     VividClusteredLightCell punctualLightCell;
     VividClusteredLightCell areaLightCell;
+    VividClusteredLightCell reflectionProbeCell;
     VividClusteredLightCell decalCell;
 };
 
@@ -27,6 +28,7 @@ struct VividLightingLoop
         VividLightingLoopContext context = (VividLightingLoopContext)0;
         context.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, viewDepth);
         context.areaLightCell = VividClusteredLighting::LoadAreaLightCell(pixelCoord, viewDepth);
+        context.reflectionProbeCell = VividClusteredLighting::LoadReflectionProbeCell(pixelCoord, viewDepth);
         context.decalCell = VividClusteredLighting::LoadDecalCell(pixelCoord, viewDepth);
         return context;
     }
@@ -43,6 +45,7 @@ struct VividLightingLoop
         VividLightingLoopContext context = (VividLightingLoopContext)0;
         context.punctualLightCell = VividClusteredLighting::LoadPunctualLightCell(pixelCoord, positionWS);
         context.areaLightCell = VividClusteredLighting::LoadAreaLightCell(pixelCoord, positionWS);
+        context.reflectionProbeCell = VividClusteredLighting::LoadReflectionProbeCell(pixelCoord, positionWS);
         context.decalCell = VividClusteredLighting::LoadDecalCell(pixelCoord, positionWS);
         return context;
     }
@@ -77,6 +80,22 @@ struct VividLightingLoop
     {
         uint lightIndex = GetAreaLightIndex(context, localLightIndex);
         return GetAreaLight(lightIndex);
+    }
+
+    static uint GetReflectionProbeCount(VividLightingLoopContext context)
+    {
+        return context.reflectionProbeCell.count;
+    }
+
+    static uint GetReflectionProbeIndex(VividLightingLoopContext context, uint localLightIndex)
+    {
+        return VividClusteredLighting::LoadLightIndex(context.reflectionProbeCell, localLightIndex);
+    }
+
+    static ReflectionProbeData LoadReflectionProbe(VividLightingLoopContext context, uint localLightIndex)
+    {
+        uint lightIndex = GetReflectionProbeIndex(context, localLightIndex);
+        return GetReflectionProbe(lightIndex);
     }
 
     static uint GetDecalCount(VividLightingLoopContext context)
@@ -121,22 +140,37 @@ struct VividLightingLoop
         return GetAreaLight(lightIndex);
     }
 
-    static uint GetBigTileDecalIndex(VividBigTileLightingLoopContext context, uint localLightIndex)
+    static uint GetBigTileReflectionProbeIndex(VividBigTileLightingLoopContext context, uint localLightIndex)
     {
         return GetBigTileLightIndex(context, localLightIndex) - _PunctualLightCount - _AreaLightCount;
+    }
+
+    static ReflectionProbeData LoadBigTileReflectionProbe(VividBigTileLightingLoopContext context, uint localLightIndex)
+    {
+        uint lightIndex = GetBigTileReflectionProbeIndex(context, localLightIndex);
+        return GetReflectionProbe(lightIndex);
+    }
+
+    static uint GetBigTileDecalIndex(VividBigTileLightingLoopContext context, uint localLightIndex)
+    {
+        return GetBigTileLightIndex(context, localLightIndex) - _PunctualLightCount - _AreaLightCount - _ReflectionProbeCount;
     }
 
     static uint GetBigTileLightCategory(uint lightIndex)
     {
         uint areaLightStart = _PunctualLightCount;
-        uint decalStart = areaLightStart + _AreaLightCount;
+        uint reflectionProbeStart = areaLightStart + _AreaLightCount;
+        uint decalStart = reflectionProbeStart + _ReflectionProbeCount;
         uint finiteLightEnd = decalStart + _DecalCount;
 
         if (lightIndex < areaLightStart)
             return LIGHTCATEGORY_PUNCTUAL;
 
-        if (lightIndex < decalStart)
+        if (lightIndex < reflectionProbeStart)
             return LIGHTCATEGORY_AREA;
+
+        if (lightIndex < decalStart)
+            return LIGHTCATEGORY_ENV;
 
         if (lightIndex < finiteLightEnd)
             return LIGHTCATEGORY_DECAL;
@@ -167,6 +201,11 @@ struct VividLightingLoop
     static uint GetBigTileAreaLightCount(VividBigTileLightingLoopContext context)
     {
         return CountBigTileLightsByCategory(context, LIGHTCATEGORY_AREA);
+    }
+
+    static uint GetBigTileReflectionProbeCount(VividBigTileLightingLoopContext context)
+    {
+        return CountBigTileLightsByCategory(context, LIGHTCATEGORY_ENV);
     }
 
     static uint GetBigTileDecalCount(VividBigTileLightingLoopContext context)

@@ -84,7 +84,8 @@ namespace VividRP.Runtime
 
                 EmitGeometryForCamera(camera);
                 ApplyShadowDistanceOverride(camera, ref cullingParameters);
-                cullingParameters.cullingOptions |= CullingOptions.DisablePerObjectCulling;
+                cullingParameters.cullingOptions |= CullingOptions.DisablePerObjectCulling
+                    | CullingOptions.NeedsReflectionProbes;
 
                 var cullingResults = context.Cull(ref cullingParameters);
 

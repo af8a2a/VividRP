@@ -20,6 +20,14 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cullingParameters.shadowDistance = Mathf.Max(0.0f, shadowDistance);"));
         }
 
+        [Test]
+        public void VividRenderPipeline_RequestsReflectionProbeCullingResults()
+        {
+            var source = File.ReadAllText(GetPipelineSourcePath());
+
+            Assert.That(source, Does.Contain("CullingOptions.NeedsReflectionProbes"));
+        }
+
         private static string GetPipelineSourcePath()
         {
             var pipelinePath = GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipeline.cs");

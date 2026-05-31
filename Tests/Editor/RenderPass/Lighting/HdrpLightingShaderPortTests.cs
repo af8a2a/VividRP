@@ -195,8 +195,8 @@ namespace VividRP.Editor.Tests
 
             // Fine-cull outer loop bounded by groupMaxBinEnd; inner body gated by fineCullEnd.
             Assert.That(source, Does.Contain("const int cullRange   = (int)groupMaxBinEnd;"));
-            Assert.That(source, Does.Contain("for(int ll=0; ll<cullRange; ll+=4)"));
-            Assert.That(source, Does.Contain("if(l < fineCullEnd && offs<(start+iSpaceAvail)"));
+            Assert.That(source, Does.Contain("for(int ll=0; ll<cullRange; ll+=8)"));
+            Assert.That(source, Does.Contain("if(l < fineCullEnd && i<nrClusters && acceptedCount < (uint)iSpaceAvail"));
 
             // Must NOT contain the old unbounded counting loop over all coarse lights.
             Assert.That(source, Does.Not.Contain("for(int l=0; l<iNrCoarseLights; l++)"));
@@ -286,6 +286,19 @@ namespace VividRP.Editor.Tests
 
             Assert.That(lightLoopSource, Does.Contain("uint _AreaLightIndexShift;"));
             Assert.That(clusteredSource, Does.Contain("WriteShiftIndex(t, LIGHTCATEGORY_AREA, _AreaLightIndexShift);"));
+        }
+
+        [Test]
+        public void ClusteredLightListGen_WritesLayeredListAsContiguousCategorySpans()
+        {
+            var source = File.ReadAllText(GetLightingPath("lightlistbuild-clustered.compute"));
+
+            Assert.That(source, Does.Contain("uint categoryWriteCursor[LIGHTCATEGORY_COUNT];"));
+            Assert.That(source, Does.Contain("categoryWriteCursor[categoryIndex] = categoryWriteOffset;"));
+            Assert.That(source, Does.Contain("categoryWriteOffset += (uint)ReadCategoryListCount(t, categoryIndex);"));
+            Assert.That(source, Does.Contain("uint localCategoryOffset = categoryWriteCursor[lightCategory]++;"));
+            Assert.That(source, Does.Contain("g_vLayeredLightList[start + localCategoryOffset] = coarseList[l] - ReadShiftIndex(t, lightCategory);"));
+            Assert.That(source, Does.Not.Contain("g_vLayeredLightList[offs++] = coarseList[l] - ReadShiftIndex(t, lightCategory);"));
         }
 
         [Test]

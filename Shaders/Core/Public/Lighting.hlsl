@@ -64,10 +64,27 @@ struct AreaLightData
     uint affectVolumetric;
 };
 
+struct ReflectionProbeData
+{
+    float3 positionWS;
+    float blendDistance;
+    float3 extents;
+    uint isBoxProjection;
+    float3 rightWS;
+    float importance;
+    float3 upWS;
+    float weight;
+    float3 forwardWS;
+    float padding;
+    float4 hdrData;
+};
+
 StructuredBuffer<DirectionalLightData> _DirectionalLights;
 StructuredBuffer<PunctualLightData> _PunctualLights;
 StructuredBuffer<AreaLightData> _AreaLights;
+StructuredBuffer<ReflectionProbeData> _ReflectionProbes;
 uint _DirectionalLightCount;
+uint _ReflectionProbeCount;
 int _MainDirectionalLightIndex;
 
 bool HasDirectionalLights()
@@ -93,6 +110,11 @@ PunctualLightData GetPunctualLight(int lightIndex)
 AreaLightData GetAreaLight(int lightIndex)
 {
     return _AreaLights[lightIndex];
+}
+
+ReflectionProbeData GetReflectionProbe(int lightIndex)
+{
+    return _ReflectionProbes[lightIndex];
 }
 
 DirectionalLightData GetDirectionalLightDefault()

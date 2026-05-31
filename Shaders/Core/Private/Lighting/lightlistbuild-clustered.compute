@@ -9,7 +9,7 @@
 #pragma kernel TileLightListGen_DepthRT_MSAA_Oblique                LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_Oblique                  ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED            USE_OBLIQUE_MODE
 #pragma kernel TileLightListGen_DepthRT_SrcBigTile_Oblique          LIGHTLISTGEN=TileLightListGen_DepthRT_SrcBigTile_Oblique            ENABLE_DEPTH_TEXTURE_BACKPLANE          USE_TWO_PASS_TILED_LIGHTING             USE_OBLIQUE_MODE
 #pragma kernel TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique     LIGHTLISTGEN=TileLightListGen_DepthRT_MSAA_SrcBigTile_Oblique       ENABLE_DEPTH_TEXTURE_BACKPLANE          MSAA_ENABLED        USE_TWO_PASS_TILED_LIGHTING         USE_OBLIQUE_MODE
-#pragma use_dxc
+#pragma require Native16Bit //force SM6.2
 // #pragma enable_d3d11_debug_symbols
 
 // Wave intrinsics audit — compile-time verification.
@@ -618,7 +618,7 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
     const int cullRange   = iNrCoarseLights;
 #endif
 
-    uint offs = start;
+    uint acceptedCount = 0u;
     for(int ll=0; ll<cullRange; ll+=8)
     {
         // Cooperatively fetch 8 lights x 6 planes = 48 float4 entries.
@@ -637,12 +637,56 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
         for(int l=ll; l<min(cullRange,(ll+8)); l++)
         {
-            if(l < fineCullEnd && offs<(start+iSpaceAvail) && i<nrClusters && CheckIntersection(l, i, clusterVerts) )
+            if(l < fineCullEnd && i<nrClusters && acceptedCount < (uint)iSpaceAvail && CheckIntersection(l, i, clusterVerts))
             {
                 const int lightVolIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
                 uint lightCategory = _LightVolumeData[lightVolIndex].lightCategory;
                 IncrementCategoryListCount(t, lightCategory);
-                g_vLayeredLightList[offs++] = coarseList[l] - ReadShiftIndex(t, lightCategory);
+                acceptedCount++;
+            }
+        }
+
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        GroupMemoryBarrierWithGroupSync();
+#endif
+    }
+
+    // Layered offsets expose one contiguous span per category. The coarse list is depth-sorted,
+    // so write category-local spans after the count pass instead of preserving mixed depth order.
+    uint categoryWriteCursor[LIGHTCATEGORY_COUNT];
+    uint categoryWriteOffset = 0u;
+    for(int categoryIndex=0; categoryIndex<LIGHTCATEGORY_COUNT; categoryIndex++)
+    {
+        categoryWriteCursor[categoryIndex] = categoryWriteOffset;
+        categoryWriteOffset += (uint)ReadCategoryListCount(t, categoryIndex);
+    }
+
+    acceptedCount = 0u;
+    for(int ll=0; ll<cullRange; ll+=8)
+    {
+        // Cooperatively fetch 8 lights x 6 planes = 48 float4 entries.
+        // NR_THREADS >= 48: single round, threads [0..47] each load one plane.
+        // NR_THREADS < 48 (e.g. 32 on Switch): two rounds to cover all 48 entries.
+        for(uint fetchIdx = t; fetchIdx < 48u; fetchIdx += NR_THREADS)
+        {
+            uint m = fetchIdx / 6u;   // light slot within batch [0..7]
+            uint p = fetchIdx - m*6u; // plane index [0..5]
+            lightPlanes[6*m+p] = FetchPlane(min(cullRange-1, ll+(int)m), (int)p, eyeIndex);
+        }
+
+#if NR_THREADS > PLATFORM_LANE_COUNT
+        GroupMemoryBarrierWithGroupSync();
+#endif
+
+        for(int l=ll; l<min(cullRange,(ll+8)); l++)
+        {
+            if(l < fineCullEnd && i<nrClusters && acceptedCount < (uint)iSpaceAvail && CheckIntersection(l, i, clusterVerts))
+            {
+                const int lightVolIndex = GenerateLightCullDataIndex(coarseList[l], g_iNrVisibLights, eyeIndex);
+                uint lightCategory = _LightVolumeData[lightVolIndex].lightCategory;
+                uint localCategoryOffset = categoryWriteCursor[lightCategory]++;
+                g_vLayeredLightList[start + localCategoryOffset] = coarseList[l] - ReadShiftIndex(t, lightCategory);
+                acceptedCount++;
             }
         }
 
@@ -653,7 +697,7 @@ void LIGHTLISTGEN(uint threadID : SV_GroupIndex, uint3 u3GroupID : SV_GroupID)
 
     uint localOffs=0;
 
-    offs = GenerateLayeredOffsetBufferIndex(0, tileIDX, i, nrTilesX, nrTilesY, nrClusters, eyeIndex);
+    uint offs = GenerateLayeredOffsetBufferIndex(0, tileIDX, i, nrTilesX, nrTilesY, nrClusters, eyeIndex);
     for(int category=0; category<LIGHTCATEGORY_COUNT; category++)
     {
         int numLights = ReadCategoryListCount(t, category);

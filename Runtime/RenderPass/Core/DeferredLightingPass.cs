@@ -36,8 +36,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int MainDirectionalLightIndexId = Shader.PropertyToID("_MainDirectionalLightIndex");
         private static readonly int PunctualLightsId = Shader.PropertyToID("_PunctualLights");
         private static readonly int AreaLightsId = Shader.PropertyToID("_AreaLights");
+        private static readonly int ReflectionProbesId = Shader.PropertyToID("_ReflectionProbes");
+        private static readonly int ReflectionProbeCountId = Shader.PropertyToID("_ReflectionProbeCount");
         private static readonly int ClusteredPunctualLightGridEnabledId = Shader.PropertyToID("_ClusteredPunctualLightGridEnabled");
         private static readonly int ClusteredAreaLightGridEnabledId = Shader.PropertyToID("_ClusteredAreaLightGridEnabled");
+        private static readonly int ClusteredReflectionProbeGridEnabledId = Shader.PropertyToID("_ClusteredReflectionProbeGridEnabled");
         private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
         private static readonly int LogBaseBufferId = Shader.PropertyToID("g_logBaseBuffer");
@@ -137,6 +140,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphBuffer m_AreaLightBuffer;
 
         [RenderGraphResource(
+            Name = "ReflectionProbes",
+            Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_ReflectionProbeBuffer;
+
+        [RenderGraphResource(
             Name = "LayeredOffset",
             Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LayeredOffsetBuffer;
@@ -172,6 +180,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_AreaLightCount;
+        private int m_ReflectionProbeCount;
         private int m_MainDirectionalLightIndex = -1;
         private int m_ClusterTileSize = LightGridPass.ClusterTileSize;
         private int m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
@@ -185,6 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
         private bool m_SupportsClusteredPunctualLights;
         private bool m_SupportsClusteredAreaLights;
+        private bool m_SupportsClusteredReflectionProbes;
         private bool m_IsLogBaseBufferEnabled;
         private bool m_IsPassResourceLayoutDirty;
         private readonly RenderGraphTexture m_LocalGBuffer4;
@@ -194,6 +204,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphBuffer m_LocalDirectionalLightBuffer;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
         private readonly RenderGraphBuffer m_LocalAreaLightBuffer;
+        private readonly RenderGraphBuffer m_LocalReflectionProbeBuffer;
+        private RenderGraphBuffer m_ResolvedReflectionProbeBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredLightListBuffer;
         private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
@@ -263,12 +275,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalDirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", VividLightData.DirectionalLightData.Stride);
             m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride);
             m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride);
+            m_LocalReflectionProbeBuffer = RenderGraphBuffer.CreateStructured("ReflectionProbes", VividLightData.ReflectionProbeData.Stride);
             m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
             m_LocalLayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint));
             m_LocalLogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float));
             m_DirectionalLightBuffer = m_LocalDirectionalLightBuffer;
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
+            m_ReflectionProbeBuffer = m_LocalReflectionProbeBuffer;
+            m_ResolvedReflectionProbeBuffer = m_LocalReflectionProbeBuffer;
             m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
@@ -374,6 +389,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_AreaLightCount = 0;
+            m_ReflectionProbeCount = 0;
+            m_ResolvedReflectionProbeBuffer = m_LocalReflectionProbeBuffer;
             m_MainDirectionalLightIndex = -1;
             m_ClusterTileSize = LightGridPass.ClusterTileSize;
             m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
@@ -387,6 +404,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
             m_SupportsClusteredPunctualLights = false;
             m_SupportsClusteredAreaLights = false;
+            m_SupportsClusteredReflectionProbes = false;
             m_IsLogBaseBufferEnabled = false;
             m_PixelCoordToViewDirWS = Matrix4x4.identity;
         }
@@ -523,8 +541,10 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeIntParam(m_DeferredLitCompute, DirectionalLightCountId, m_DirectionalLightCount);
             cmd.SetComputeIntParam(m_DeferredLitCompute, MainDirectionalLightIndexId, m_MainDirectionalLightIndex);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, ReflectionProbeCountId, m_ReflectionProbeCount);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusteredAreaLightGridEnabledId, m_SupportsClusteredAreaLights ? 1 : 0);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, ClusteredReflectionProbeGridEnabledId, m_SupportsClusteredReflectionProbes ? 1 : 0);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusterTileSizeId, m_ClusterTileSize);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusterSliceCountId, m_ClusterSliceCount);
             cmd.SetComputeIntParam(m_DeferredLitCompute, ClusterTileCountXId, m_ClusterTileCountX);
@@ -544,6 +564,7 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, DirectionalLightsId, m_DirectionalLightBuffer);
             SetLightLoopBuffer(cmd, kernel, PunctualLightsId, m_PunctualLightBuffer);
             SetLightLoopBuffer(cmd, kernel, AreaLightsId, m_AreaLightBuffer);
+            SetLightLoopBuffer(cmd, kernel, ReflectionProbesId, m_ResolvedReflectionProbeBuffer);
             SetLightLoopBuffer(cmd, kernel, LayeredOffsetId, m_LayeredOffsetBuffer);
             SetLightLoopBuffer(cmd, kernel, LayeredLightListId, m_LayeredLightListBuffer);
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
@@ -561,9 +582,14 @@ namespace VividRP.Runtime.RenderPass.Core
             var clusteredLightingData = frameData.GetOrCreate<VividClusteredLightingData>();
             var camera = cameraData.camera;
 
+            m_ResolvedReflectionProbeBuffer = ResolveClusteredBuffer(
+                m_ReflectionProbeBuffer,
+                m_LocalReflectionProbeBuffer,
+                clusteredLightingData.reflectionProbes);
             m_DirectionalLightCount = 0;
             m_PunctualLightCount = 0;
             m_AreaLightCount = 0;
+            m_ReflectionProbeCount = 0;
             m_MainDirectionalLightIndex = -1;
             m_ClusterTileSize = LightGridPass.ClusterTileSize;
             m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
@@ -577,6 +603,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
             m_SupportsClusteredPunctualLights = false;
             m_SupportsClusteredAreaLights = false;
+            m_SupportsClusteredReflectionProbes = false;
             m_IsLogBaseBufferEnabled = false;
 
             if (!HasClusteredLightingData(clusteredLightingData))
@@ -628,6 +655,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AreaLightCount = m_SupportsClusteredAreaLights
                 ? Mathf.Max(0, clusteredLightingData.areaLightCount)
                 : 0;
+            m_SupportsClusteredReflectionProbes = supportsClusteredFiniteLights
+                && clusteredLightingData.reflectionProbeCount > 0
+                && HasBoundReflectionProbeResources();
+            m_ReflectionProbeCount = m_SupportsClusteredReflectionProbes
+                ? Mathf.Max(0, clusteredLightingData.reflectionProbeCount)
+                : 0;
             m_IsLogBaseBufferEnabled = supportsClusteredFiniteLights
                 && clusteredLightingData.isLogBaseBufferEnabled
                 && !ReferenceEquals(m_LogBaseBuffer, m_LocalLogBaseBuffer);
@@ -653,15 +686,35 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(m_LayeredLightListBuffer, m_LocalLayeredLightListBuffer);
         }
 
+        private bool HasBoundReflectionProbeResources()
+        {
+            return !ReferenceEquals(m_ResolvedReflectionProbeBuffer, m_LocalReflectionProbeBuffer)
+                && !ReferenceEquals(m_LayeredOffsetBuffer, m_LocalLayeredOffsetBuffer)
+                && !ReferenceEquals(m_LayeredLightListBuffer, m_LocalLayeredLightListBuffer);
+        }
+
         private static bool HasClusteredLightingData(VividClusteredLightingData clusteredLightingData)
         {
             return clusteredLightingData != null
                 && (clusteredLightingData.directionalLights != null
                     || clusteredLightingData.punctualLights != null
                     || clusteredLightingData.areaLights != null
+                    || clusteredLightingData.reflectionProbes != null
                     || clusteredLightingData.clusterTileSize > 0
                     || clusteredLightingData.clusterSliceCount > 0
+                    || clusteredLightingData.reflectionProbeCount > 0
                     || clusteredLightingData.areaLightCount > 0);
+        }
+
+        private static RenderGraphBuffer ResolveClusteredBuffer(
+            RenderGraphBuffer graphBuffer,
+            RenderGraphBuffer localFallback,
+            RenderGraphBuffer frameBuffer)
+        {
+            if (graphBuffer != null && !ReferenceEquals(graphBuffer, localFallback))
+                return graphBuffer;
+
+            return frameBuffer ?? localFallback;
         }
 
         private void SetLightLoopBuffer(ComputeCommandBuffer cmd, int kernel, int propertyId, RenderGraphBuffer buffer)

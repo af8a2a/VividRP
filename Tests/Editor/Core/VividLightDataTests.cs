@@ -252,6 +252,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdateReflectionProbeClusteredCullData_BuildsHdrpEnvBoxBoundsAndVolume_ForReflectionProbe()
+        {
+            var lightData = new VividLightData
+            {
+                reflectionProbes = new[]
+                {
+                    new VividLightData.ReflectionProbeData
+                    {
+                        positionWS = new Vector3(1.0f, -2.0f, 6.0f),
+                        extents = new Vector3(3.0f, 2.0f, 4.0f),
+                        rightWS = Vector3.right,
+                        upWS = Vector3.up,
+                        forwardWS = Vector3.forward,
+                    }
+                },
+                reflectionProbeCount = 1,
+            };
+
+            lightData.UpdateReflectionProbeClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.reflectionProbeBounds[0];
+            var volume = lightData.reflectionProbeVolumeData[0];
+            var extents = new Vector3(3.0f, 2.0f, 4.0f);
+            var radius = extents.magnitude;
+
+            AssertVector3(bound.center, new Vector3(1.0f, -2.0f, 6.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(extents.x, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, extents.y, 0.0f, radius), 0.001f);
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, extents.z));
+            Assert.That(volume.lightVolume, Is.EqualTo(2u));
+            Assert.That(volume.lightCategory, Is.EqualTo(2u));
+            Assert.That(volume.featureFlags, Is.EqualTo(32768u));
+            Assert.That(volume.radiusSq, Is.EqualTo(radius * radius).Within(0.001f));
+            AssertVector3(volume.lightPos, new Vector3(1.0f, -2.0f, 6.0f));
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
+            AssertVector3(volume.boxInnerDist, new Vector3(2.99f, 1.99f, 3.99f), 0.001f);
+            AssertVector3(volume.boxInvRange, new Vector3(100.0f, 100.0f, 100.0f));
+            Assert.That(volume.affectVolumetric, Is.Zero);
+        }
+
+        [Test]
         public void UpdateFiniteLightClusteredCullData_BuildsBoxBoundsAndVolume_ForDecal()
         {
             var position = new Vector3(1.0f, -2.0f, 6.0f);
@@ -305,15 +348,19 @@ namespace VividRP.Editor.Tests
                 lightData.directionalLightCount = 2;
                 lightData.punctualLightCount = 3;
                 lightData.areaLightCount = 1;
+                lightData.reflectionProbeCount = 1;
                 lightData.reGIRLightCount = 1;
                 lightData.mainDirectionalLightIndex = 1;
                 lightData.mainDirectionalLightEntityId = EntityId.FromULong(84);
                 lightData.areaLights = new[] { default(VividLightData.AreaLightData) };
+                lightData.reflectionProbes = new[] { default(VividLightData.ReflectionProbeData) };
                 lightData.reGIRLights = new[] { default(VividReGIRLightData) };
                 lightData.punctualLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
                 lightData.punctualLightVolumeData = new[] { default(VividLightData.LightVolumeData) };
                 lightData.areaLightBounds = new[] { default(VividLightData.SFiniteLightBound) };
                 lightData.areaLightVolumeData = new[] { default(VividLightData.LightVolumeData) };
+                lightData.reflectionProbeBounds = new[] { default(VividLightData.SFiniteLightBound) };
+                lightData.reflectionProbeVolumeData = new[] { default(VividLightData.LightVolumeData) };
 
                 lightData.Reset();
 
@@ -324,15 +371,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightData.directionalLightCount, Is.Zero);
                 Assert.That(lightData.punctualLightCount, Is.Zero);
                 Assert.That(lightData.areaLightCount, Is.Zero);
+                Assert.That(lightData.reflectionProbeCount, Is.Zero);
                 Assert.That(lightData.reGIRLightCount, Is.Zero);
                 Assert.That(lightData.mainDirectionalLightIndex, Is.EqualTo(-1));
                 Assert.That(lightData.mainDirectionalLightEntityId, Is.EqualTo(EntityId.None));
                 Assert.That(lightData.areaLights, Is.Empty);
+                Assert.That(lightData.reflectionProbes, Is.Empty);
                 Assert.That(lightData.reGIRLights, Is.Empty);
                 Assert.That(lightData.punctualLightBounds, Is.Empty);
                 Assert.That(lightData.punctualLightVolumeData, Is.Empty);
                 Assert.That(lightData.areaLightBounds, Is.Empty);
                 Assert.That(lightData.areaLightVolumeData, Is.Empty);
+                Assert.That(lightData.reflectionProbeBounds, Is.Empty);
+                Assert.That(lightData.reflectionProbeVolumeData, Is.Empty);
             }
             finally
             {

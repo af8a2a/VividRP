@@ -15,6 +15,8 @@ namespace VividRP.Editor.Tests
 
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<PunctualLightData> _PunctualLights;"));
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<AreaLightData> _AreaLights;"));
+            Assert.That(lightingSource, Does.Contain("StructuredBuffer<ReflectionProbeData> _ReflectionProbes;"));
+            Assert.That(lightingSource, Does.Contain("GetReflectionProbe"));
             Assert.That(lightingSource, Does.Not.Contain("_PunctualLightCount"));
             Assert.That(lightingSource, Does.Not.Contain("_AreaLightCount"));
             Assert.That(lightingSource, Does.Not.Contain("ClusteredLighting.hlsl"));
@@ -22,8 +24,10 @@ namespace VividRP.Editor.Tests
             Assert.That(clusteredLightingSource, Does.Contain("struct VividClusteredLightCell"));
             Assert.That(clusteredLightingSource, Does.Contain("_ClusteredPunctualLightGridEnabled"));
             Assert.That(clusteredLightingSource, Does.Contain("_ClusteredAreaLightGridEnabled"));
+            Assert.That(clusteredLightingSource, Does.Contain("_ClusteredReflectionProbeGridEnabled"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadPunctualLightCell"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadAreaLightCell"));
+            Assert.That(clusteredLightingSource, Does.Contain("LoadReflectionProbeCell"));
             Assert.That(clusteredLightingSource, Does.Contain("struct VividBigTileLightCell"));
             Assert.That(clusteredLightingSource, Does.Contain("StructuredBuffer<uint> g_vBigTileLightList"));
             Assert.That(clusteredLightingSource, Does.Contain("LoadBigTileLightCell"));
@@ -37,14 +41,18 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingLoopSource, Does.Contain("LoadPunctualLight"));
             Assert.That(lightingLoopSource, Does.Contain("GetAreaLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("LoadAreaLight"));
+            Assert.That(lightingLoopSource, Does.Contain("GetReflectionProbeCount"));
+            Assert.That(lightingLoopSource, Does.Contain("LoadReflectionProbe"));
             Assert.That(lightingLoopSource, Does.Contain("CreateBigTile"));
             Assert.That(lightingLoopSource, Does.Contain("GetBigTileLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("GetBigTileLightIndex"));
             Assert.That(lightingLoopSource, Does.Contain("LoadBigTilePunctualLight"));
             Assert.That(lightingLoopSource, Does.Contain("LoadBigTileAreaLight"));
+            Assert.That(lightingLoopSource, Does.Contain("LoadBigTileReflectionProbe"));
             Assert.That(lightingLoopSource, Does.Contain("GetBigTileDecalIndex"));
             Assert.That(lightingLoopSource, Does.Contain("GetBigTilePunctualLightCount"));
             Assert.That(lightingLoopSource, Does.Contain("GetBigTileAreaLightCount"));
+            Assert.That(lightingLoopSource, Does.Contain("GetBigTileReflectionProbeCount"));
             Assert.That(lightingLoopSource, Does.Contain("GetBigTileDecalCount"));
             Assert.That(lightingLoopSource, Does.Not.Contain("HasPunctualLights"));
             Assert.That(lightingLoopSource, Does.Not.Contain("HasAreaLights"));

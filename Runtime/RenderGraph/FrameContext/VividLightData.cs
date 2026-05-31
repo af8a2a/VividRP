@@ -81,6 +81,24 @@ namespace VividRP.Runtime
         }
 
         [StructLayout(LayoutKind.Sequential)]
+        public struct ReflectionProbeData
+        {
+            public Vector3 positionWS;
+            public float blendDistance;
+            public Vector3 extents;
+            public uint isBoxProjection;
+            public Vector3 rightWS;
+            public float importance;
+            public Vector3 upWS;
+            public float weight;
+            public Vector3 forwardWS;
+            public float padding;
+            public Vector4 hdrData;
+
+            internal static int Stride => Marshal.SizeOf<ReflectionProbeData>();
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
         public struct PunctualLightCullData
         {
             public Vector3 positionWS;
@@ -145,13 +163,16 @@ namespace VividRP.Runtime
 
         private const uint HdrpLightCategoryPunctual = 0u;
         private const uint HdrpLightCategoryArea = 1u;
+        private const uint HdrpLightCategoryEnv = 2u;
         private const uint HdrpLightCategoryDecal = 3u;
         private const uint HdrpLightFeatureFlagsPunctual = 4096u;
         private const uint HdrpLightFeatureFlagsArea = 8192u;
+        private const uint HdrpLightFeatureFlagsEnv = 32768u;
         private const uint HdrpLightFeatureFlagsDecal = 524288u;
         private const uint HdrpLightVolumeTypeCone = 0u;
         private const uint HdrpLightVolumeTypeSphere = 1u;
         private const uint HdrpLightVolumeTypeBox = 2u;
+        private const float HdrpBoxCullingExtentThreshold = 0.01f;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct VisibleLightRenderDataRecord
@@ -271,11 +292,14 @@ namespace VividRP.Runtime
         public DirectionalLightData[] directionalLights = Array.Empty<DirectionalLightData>();
         public PunctualLightData[] punctualLights = Array.Empty<PunctualLightData>();
         public AreaLightData[] areaLights = Array.Empty<AreaLightData>();
+        public ReflectionProbeData[] reflectionProbes = Array.Empty<ReflectionProbeData>();
         public PunctualLightCullData[] punctualLightCullData = Array.Empty<PunctualLightCullData>();
         public SFiniteLightBound[] punctualLightBounds = Array.Empty<SFiniteLightBound>();
         public LightVolumeData[] punctualLightVolumeData = Array.Empty<LightVolumeData>();
         public SFiniteLightBound[] areaLightBounds = Array.Empty<SFiniteLightBound>();
         public LightVolumeData[] areaLightVolumeData = Array.Empty<LightVolumeData>();
+        public SFiniteLightBound[] reflectionProbeBounds = Array.Empty<SFiniteLightBound>();
+        public LightVolumeData[] reflectionProbeVolumeData = Array.Empty<LightVolumeData>();
         public VividReGIRLightData[] reGIRLights = Array.Empty<VividReGIRLightData>();
         public DecalClusterData[] decalClusterData = Array.Empty<DecalClusterData>();
         public SFiniteLightBound[] decalBounds = Array.Empty<SFiniteLightBound>();
@@ -286,6 +310,7 @@ namespace VividRP.Runtime
         public int directionalLightCount;
         public int punctualLightCount;
         public int areaLightCount;
+        public int reflectionProbeCount;
         public int reGIRLightCount;
         public int mainDirectionalLightIndex;
         public EntityId mainDirectionalLightEntityId;
@@ -318,6 +343,8 @@ namespace VividRP.Runtime
 
         public bool hasAreaLights => areaLightCount > 0;
 
+        public bool hasReflectionProbes => reflectionProbeCount > 0;
+
         public bool hasMainDirectionalLight => IsValidDirectionalLightIndex(mainDirectionalLightIndex);
 
         public int visibleLightCount => hasVisibleLights ? visibleLights.Length : 0;
@@ -343,6 +370,7 @@ namespace VividRP.Runtime
             visibleLights = cullingResults.visibleLights;
             visibleReflectionProbes = cullingResults.visibleReflectionProbes;
             UpdateVisibleLightData(visibleLights, RenderSettings.sun, worldToViewMatrix);
+            UpdateVisibleReflectionProbeData(visibleReflectionProbes);
         }
 
         internal void Update(CullingResults cullingResults)
@@ -450,6 +478,7 @@ namespace VividRP.Runtime
                 BuildAreaLightClusteredCullingData(worldToViewMatrix);
             }
 
+            BuildReflectionProbeClusteredCullingData(worldToViewMatrix);
             BuildDecalClusteredCullingData(worldToViewMatrix);
         }
 
@@ -466,6 +495,11 @@ namespace VividRP.Runtime
         internal void UpdateAreaLightClusteredCullData(Matrix4x4 worldToViewMatrix)
         {
             BuildAreaLightClusteredCullingData(worldToViewMatrix);
+        }
+
+        internal void UpdateReflectionProbeClusteredCullData(Matrix4x4 worldToViewMatrix)
+        {
+            BuildReflectionProbeClusteredCullingData(worldToViewMatrix);
         }
 
         private void BuildPunctualLightClusteredCullingData(Matrix4x4 worldToViewMatrix)
@@ -539,6 +573,27 @@ namespace VividRP.Runtime
             {
                 areaLightBounds[lightIndex] = buildContext.areaLightBounds[lightIndex];
                 areaLightVolumeData[lightIndex] = buildContext.areaLightVolumeData[lightIndex];
+            }
+        }
+
+        private void BuildReflectionProbeClusteredCullingData(Matrix4x4 worldToViewMatrix)
+        {
+            EnsureReflectionProbeCapacity(reflectionProbeCount);
+
+            if (reflectionProbeCount <= 0)
+                return;
+
+            var viewMatrix = (float4x4)worldToViewMatrix;
+
+            for (var probeIndex = 0; probeIndex < reflectionProbeCount; probeIndex++)
+            {
+                BuildReflectionProbeVolumeDataAndBound(
+                    reflectionProbes[probeIndex],
+                    viewMatrix,
+                    out var lightVolumeData,
+                    out var lightBound);
+                reflectionProbeVolumeData[probeIndex] = lightVolumeData;
+                reflectionProbeBounds[probeIndex] = lightBound;
             }
         }
 
@@ -624,15 +679,19 @@ namespace VividRP.Runtime
             directionalLightCount = 0;
             punctualLightCount = 0;
             areaLightCount = 0;
+            reflectionProbeCount = 0;
             reGIRLightCount = 0;
             mainDirectionalLightIndex = -1;
             mainDirectionalLightEntityId = EntityId.None;
             areaLights = Array.Empty<AreaLightData>();
+            reflectionProbes = Array.Empty<ReflectionProbeData>();
             reGIRLights = Array.Empty<VividReGIRLightData>();
             punctualLightBounds = Array.Empty<SFiniteLightBound>();
             punctualLightVolumeData = Array.Empty<LightVolumeData>();
             areaLightBounds = Array.Empty<SFiniteLightBound>();
             areaLightVolumeData = Array.Empty<LightVolumeData>();
+            reflectionProbeBounds = Array.Empty<SFiniteLightBound>();
+            reflectionProbeVolumeData = Array.Empty<LightVolumeData>();
             decalClusterData = Array.Empty<DecalClusterData>();
             decalBounds = Array.Empty<SFiniteLightBound>();
             decalVolumeData = Array.Empty<LightVolumeData>();
@@ -682,6 +741,18 @@ namespace VividRP.Runtime
 
             if (requiredCapacity > areaLightVolumeData.Length)
                 areaLightVolumeData = new LightVolumeData[requiredCapacity];
+        }
+
+        private void EnsureReflectionProbeCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity > reflectionProbes.Length)
+                reflectionProbes = new ReflectionProbeData[requiredCapacity];
+
+            if (requiredCapacity > reflectionProbeBounds.Length)
+                reflectionProbeBounds = new SFiniteLightBound[requiredCapacity];
+
+            if (requiredCapacity > reflectionProbeVolumeData.Length)
+                reflectionProbeVolumeData = new LightVolumeData[requiredCapacity];
         }
 
         private void EnsureReGIRLightCapacity(int requiredCapacity)
@@ -762,6 +833,26 @@ namespace VividRP.Runtime
             m_LightGridJobHandle = buildLightGridJob.Schedule(collectReGIRJobHandle);
             m_LightGridJobScheduled = true;
             JobHandle.ScheduleBatchedJobs();
+        }
+
+        private void UpdateVisibleReflectionProbeData(NativeArray<VisibleReflectionProbe> visibleReflectionProbes)
+        {
+            reflectionProbeCount = 0;
+            m_LightGridClusteredCullDataPrepared = false;
+
+            if (!visibleReflectionProbes.IsCreated || visibleReflectionProbes.Length == 0)
+                return;
+
+            EnsureReflectionProbeCapacity(visibleReflectionProbes.Length);
+
+            for (var probeIndex = 0; probeIndex < visibleReflectionProbes.Length; probeIndex++)
+            {
+                if (!TryCreateReflectionProbeData(visibleReflectionProbes[probeIndex], out var reflectionProbeData))
+                    continue;
+
+                reflectionProbes[reflectionProbeCount] = reflectionProbeData;
+                reflectionProbeCount++;
+            }
         }
 
         private void EnsureLightGridBufferCapacity(int lightCapacity)
@@ -1037,6 +1128,34 @@ namespace VividRP.Runtime
             {
                 lightData = CreateAreaLightData(trackedLightData),
             };
+        }
+
+        private static bool TryCreateReflectionProbeData(
+            VisibleReflectionProbe visibleReflectionProbe,
+            out ReflectionProbeData reflectionProbeData)
+        {
+            reflectionProbeData = default;
+
+            var bounds = visibleReflectionProbe.bounds;
+            var extents = bounds.extents;
+            if (extents.x <= 0.0f || extents.y <= 0.0f || extents.z <= 0.0f)
+                return false;
+
+            reflectionProbeData = new ReflectionProbeData
+            {
+                positionWS = bounds.center,
+                blendDistance = Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f),
+                extents = extents,
+                isBoxProjection = visibleReflectionProbe.isBoxProjection ? 1u : 0u,
+                rightWS = Vector3.right,
+                importance = visibleReflectionProbe.importance,
+                upWS = Vector3.up,
+                weight = 1.0f,
+                forwardWS = Vector3.forward,
+                padding = 0.0f,
+                hdrData = visibleReflectionProbe.hdrData,
+            };
+            return true;
         }
 
         private static bool IsPunctualLightSupported(VividLightRenderData trackedLightData)
@@ -1395,6 +1514,62 @@ namespace VividRP.Runtime
                 1.0f / math.max(rectangleExtents.x, 1e-4f),
                 1.0f / math.max(rectangleExtents.y, 1e-4f),
                 1.0f / math.max(rectangleExtents.z, 1e-4f));
+        }
+
+        private static void BuildReflectionProbeVolumeDataAndBound(
+            ReflectionProbeData source,
+            float4x4 worldToViewMatrix,
+            out LightVolumeData lightVolumeData,
+            out SFiniteLightBound lightBound)
+        {
+            lightVolumeData = default;
+            lightBound = default;
+
+            var positionVS = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(
+                worldToViewMatrix,
+                source.positionWS);
+            var axisXVS = NormalizeDirection(
+                TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.rightWS),
+                new float3(1.0f, 0.0f, 0.0f));
+            var axisYVS = NormalizeDirection(
+                TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.upWS),
+                new float3(0.0f, 1.0f, 0.0f));
+            var axisZVS = NormalizeDirection(
+                TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.forwardWS),
+                new float3(0.0f, 0.0f, 1.0f));
+            var extents = new float3(
+                math.max(source.extents.x, 1e-4f),
+                math.max(source.extents.y, 1e-4f),
+                math.max(source.extents.z, 1e-4f));
+            var radius = math.length(extents);
+            var cullingThreshold = new Vector3(
+                HdrpBoxCullingExtentThreshold,
+                HdrpBoxCullingExtentThreshold,
+                HdrpBoxCullingExtentThreshold);
+
+            lightBound.center = new Vector3(positionVS.x, positionVS.y, positionVS.z);
+            lightBound.boxAxisX = new Vector4(axisXVS.x * extents.x, axisXVS.y * extents.x, axisXVS.z * extents.x, 1.0f);
+            lightBound.boxAxisY = new Vector4(axisYVS.x * extents.y, axisYVS.y * extents.y, axisYVS.z * extents.y, radius);
+            lightBound.boxAxisZ = new Vector3(axisZVS.x * extents.z, axisZVS.y * extents.z, axisZVS.z * extents.z);
+
+            lightVolumeData.lightPos = lightBound.center;
+            lightVolumeData.lightVolume = HdrpLightVolumeTypeBox;
+            lightVolumeData.lightAxisX = new Vector3(axisXVS.x, axisXVS.y, axisXVS.z);
+            lightVolumeData.lightCategory = HdrpLightCategoryEnv;
+            lightVolumeData.lightAxisY = new Vector3(axisYVS.x, axisYVS.y, axisYVS.z);
+            lightVolumeData.radiusSq = radius * radius;
+            lightVolumeData.lightAxisZ = new Vector3(axisZVS.x, axisZVS.y, axisZVS.z);
+            lightVolumeData.cotan = 0.0f;
+            lightVolumeData.boxInnerDist = new Vector3(
+                math.max(extents.x - HdrpBoxCullingExtentThreshold, 0.0f),
+                math.max(extents.y - HdrpBoxCullingExtentThreshold, 0.0f),
+                math.max(extents.z - HdrpBoxCullingExtentThreshold, 0.0f));
+            lightVolumeData.featureFlags = HdrpLightFeatureFlagsEnv;
+            lightVolumeData.boxInvRange = new Vector3(
+                1.0f / cullingThreshold.x,
+                1.0f / cullingThreshold.y,
+                1.0f / cullingThreshold.z);
+            lightVolumeData.affectVolumetric = 0;
         }
 
         // Matches HDRP's rectangle clustered bounds: barn door is a shading-time crop of the source

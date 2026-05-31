@@ -241,7 +241,7 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "LightGridPass.cs"));
 
-            Assert.That(source, Does.Contain("m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_DecalCount;"));
+            Assert.That(source, Does.Contain("m_FiniteLightCount = m_PunctualLightCount + m_AreaLightCount + m_ReflectionProbeCount + m_DecalCount;"));
             Assert.That(source, Does.Contain("lightData.UpdateFiniteLightClusteredCullData(worldToViewMatrix);"));
             Assert.That(source, Does.Contain("UpdateFiniteLightUploadData(lightData);"));
             Assert.That(source, Does.Not.Contain("UploadAreaLightGridData();"));

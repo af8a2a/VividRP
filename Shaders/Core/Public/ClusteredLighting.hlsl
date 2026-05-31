@@ -12,6 +12,7 @@ StructuredBuffer<float> g_logBaseBuffer;
 StructuredBuffer<uint> g_vBigTileLightList;
 uint _ClusteredPunctualLightGridEnabled;
 uint _ClusteredAreaLightGridEnabled;
+uint _ClusteredReflectionProbeGridEnabled;
 uint _ClusteredDecalGridEnabled;
 uint _NumTileBigTileX;
 uint _NumTileBigTileY;
@@ -251,6 +252,30 @@ struct VividClusteredLighting
     static VividClusteredLightCell LoadAreaLightCell(uint2 pixelCoord, float3 positionWS)
     {
         return LoadAreaLightCell(pixelCoord, GetViewDepthWS(positionWS));
+    }
+
+    static VividClusteredLightCell LoadReflectionProbeCell(uint2 tileCoord, uint sliceIndex)
+    {
+        if (_ClusteredReflectionProbeGridEnabled == 0u)
+            return GetEmptyLightCell();
+
+        uint packedOffset = g_LayeredOffset[GetLayeredOffsetBufferIndex(LIGHTCATEGORY_ENV, tileCoord, sliceIndex)];
+        return UnpackLightCell(packedOffset);
+    }
+
+    static VividClusteredLightCell LoadReflectionProbeCell(uint2 pixelCoord, float viewDepth)
+    {
+        if (_ClusteredReflectionProbeGridEnabled == 0u)
+            return GetEmptyLightCell();
+
+        uint2 tileCoord = GetTileCoord(pixelCoord);
+        uint sliceIndex = GetSliceIndex(pixelCoord, viewDepth);
+        return LoadReflectionProbeCell(tileCoord, sliceIndex);
+    }
+
+    static VividClusteredLightCell LoadReflectionProbeCell(uint2 pixelCoord, float3 positionWS)
+    {
+        return LoadReflectionProbeCell(pixelCoord, GetViewDepthWS(positionWS));
     }
 
     static VividClusteredLightCell LoadDecalCell(uint2 tileCoord, uint sliceIndex)

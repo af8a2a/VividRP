@@ -77,6 +77,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VolumetricUseBigTileLightListId = Shader.PropertyToID("_VolumetricUseBigTileLightList");
         private static readonly int ClusteredPunctualLightGridEnabledId = Shader.PropertyToID("_ClusteredPunctualLightGridEnabled");
         private static readonly int ClusteredAreaLightGridEnabledId = Shader.PropertyToID("_ClusteredAreaLightGridEnabled");
+        private static readonly int ClusteredReflectionProbeGridEnabledId = Shader.PropertyToID("_ClusteredReflectionProbeGridEnabled");
         private static readonly int ClusteredDecalGridEnabledId = Shader.PropertyToID("_ClusteredDecalGridEnabled");
         private static readonly int LayeredLightListId = Shader.PropertyToID("g_vLayeredLightList");
         private static readonly int LayeredOffsetId = Shader.PropertyToID("g_LayeredOffset");
@@ -551,6 +552,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeIntParam(m_Shader, VolumetricUseBigTileLightListId, m_SupportsVolumetricBigTileLightList ? 1 : 0);
             cmd.SetComputeIntParam(m_Shader, ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);
             cmd.SetComputeIntParam(m_Shader, ClusteredAreaLightGridEnabledId, m_SupportsClusteredAreaLights ? 1 : 0);
+            cmd.SetComputeIntParam(m_Shader, ClusteredReflectionProbeGridEnabledId, 0);
             cmd.SetComputeIntParam(m_Shader, ClusteredDecalGridEnabledId, 0);
             cmd.SetComputeIntParam(m_Shader, ClusterTileSizeId, m_ClusterTileSize);
             cmd.SetComputeIntParam(m_Shader, BigTileSizeId, LightGridPass.ClusterBigTileSize);

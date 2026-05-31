@@ -65,6 +65,7 @@ namespace VividRP.Editor.Tests
                 "LayeredOffset",
                 "LogBaseBuffer",
                 "PunctualLights",
+                "ReflectionProbes",
                 "StandardIndirectArgs",
                 "StandardMaterialIndices"
             }));
@@ -102,6 +103,7 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_DirectionalLightCount"), Is.EqualTo(0));
             Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(0));
             Assert.That(GetFieldValue<int>(pass, "m_AreaLightCount"), Is.EqualTo(0));
+            Assert.That(GetFieldValue<int>(pass, "m_ReflectionProbeCount"), Is.EqualTo(0));
 
             var outputTexture = GetFieldValue<RenderGraphTexture>(pass, "m_ColorTexture");
             Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
@@ -262,6 +264,7 @@ namespace VividRP.Editor.Tests
             SetFieldValue(pass, "m_DirectionalLightBuffer", RenderGraphBuffer.CreateStructured("DirectionalLights", VividLightData.DirectionalLightData.Stride));
             SetFieldValue(pass, "m_PunctualLightBuffer", RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride));
             SetFieldValue(pass, "m_AreaLightBuffer", RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride));
+            SetFieldValue(pass, "m_ReflectionProbeBuffer", RenderGraphBuffer.CreateStructured("ReflectionProbes", VividLightData.ReflectionProbeData.Stride));
             SetFieldValue(pass, "m_LayeredOffsetBuffer", RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint)));
             SetFieldValue(pass, "m_LayeredLightListBuffer", RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint)));
             SetFieldValue(pass, "m_LogBaseBuffer", RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float)));
@@ -270,6 +273,7 @@ namespace VividRP.Editor.Tests
             clusteredLightingData.directionalLightCount = 3;
             clusteredLightingData.punctualLightCount = 7;
             clusteredLightingData.areaLightCount = 2;
+            clusteredLightingData.reflectionProbeCount = 4;
             clusteredLightingData.mainDirectionalLightIndex = 1;
             clusteredLightingData.clusterTileSize = 64;
             clusteredLightingData.clusterSliceCount = 32;
@@ -289,6 +293,7 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_DirectionalLightCount"), Is.EqualTo(3));
             Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(7));
             Assert.That(GetFieldValue<int>(pass, "m_AreaLightCount"), Is.EqualTo(2));
+            Assert.That(GetFieldValue<int>(pass, "m_ReflectionProbeCount"), Is.EqualTo(4));
             Assert.That(GetFieldValue<int>(pass, "m_MainDirectionalLightIndex"), Is.EqualTo(1));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterTileSize"), Is.EqualTo(64));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(32));
@@ -302,6 +307,7 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_ClusterLog2SliceCount"), Is.EqualTo(5));
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredPunctualLights"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredAreaLights"), Is.True);
+            Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredReflectionProbes"), Is.True);
             Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.True);
         }
 
@@ -340,6 +346,7 @@ namespace VividRP.Editor.Tests
             clusteredLightingData.directionalLightCount = 2;
             clusteredLightingData.punctualLightCount = 5;
             clusteredLightingData.areaLightCount = 4;
+            clusteredLightingData.reflectionProbeCount = 3;
             clusteredLightingData.mainDirectionalLightIndex = 0;
             clusteredLightingData.clusterTileSize = 32;
             clusteredLightingData.clusterSliceCount = 64;
@@ -358,9 +365,11 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_DirectionalLightCount"), Is.EqualTo(0));
             Assert.That(GetFieldValue<int>(pass, "m_PunctualLightCount"), Is.EqualTo(0));
             Assert.That(GetFieldValue<int>(pass, "m_AreaLightCount"), Is.EqualTo(0));
+            Assert.That(GetFieldValue<int>(pass, "m_ReflectionProbeCount"), Is.EqualTo(0));
             Assert.That(GetFieldValue<int>(pass, "m_MainDirectionalLightIndex"), Is.EqualTo(-1));
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredPunctualLights"), Is.False);
             Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredAreaLights"), Is.False);
+            Assert.That(GetFieldValue<bool>(pass, "m_SupportsClusteredReflectionProbes"), Is.False);
             Assert.That(GetFieldValue<bool>(pass, "m_IsLogBaseBufferEnabled"), Is.False);
             Assert.That(GetFieldValue<int>(pass, "m_ClusterTileSize"), Is.EqualTo(32));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(64));

@@ -32,6 +32,7 @@ namespace VividRP.Editor.Tests
             AssertBindingMode("m_DirectionalLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_PunctualLightBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_AreaLightBuffer", RenderGraphResourceBindingMode.External);
+            AssertBindingMode("m_ReflectionProbeBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_DecalDataBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_BigTileLightListBuffer", RenderGraphResourceBindingMode.External);
             AssertBindingMode("m_BigTileVolumetricLightListBuffer", RenderGraphResourceBindingMode.External);
@@ -46,6 +47,7 @@ namespace VividRP.Editor.Tests
             AssertNativeArrayField("m_DirectionalLightUploadNativeData", typeof(VividLightData.DirectionalLightData));
             AssertNativeArrayField("m_PunctualLightUploadNativeData", typeof(VividLightData.PunctualLightData));
             AssertNativeArrayField("m_AreaLightUploadNativeData", typeof(VividLightData.AreaLightData));
+            AssertNativeArrayField("m_ReflectionProbeUploadNativeData", typeof(VividLightData.ReflectionProbeData));
             AssertNativeArrayField("m_DecalDataUploadNativeData", typeof(VividLightData.DecalClusterData));
             AssertNativeArrayField("m_FiniteLightBoundUploadNativeData", typeof(VividLightData.SFiniteLightBound));
             AssertNativeArrayField("m_LightVolumeDataUploadNativeData", typeof(VividLightData.LightVolumeData));

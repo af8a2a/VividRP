@@ -173,6 +173,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 428f3d9c861c4de4b90532919bf8a752, type: 3}
   - ResourceName: Shaders/Core/Private/TemporalAA
     ResourceObject: {fileID: 7200000, guid: e30d483061855394891ca96699b7d9ba, type: 3}
+  - ResourceName: Shaders/Core/Private/Tools/ColorChecker
+    ResourceObject: {fileID: 4800000, guid: ea32e3929a990f349874f27a0e2858d8, type: 3}
   - ResourceName: Shaders/Core/Private/Volumetric/LocalVolumetricFogVoxelize
     ResourceObject: {fileID: 4800000, guid: 9c6d7eaf1b78d6340b9bfa881a13e069, type: 3}
   - ResourceName: Shaders/Core/Private/Volumetric/VolumetricDensity.compute

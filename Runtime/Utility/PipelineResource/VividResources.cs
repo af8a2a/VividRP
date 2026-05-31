@@ -219,6 +219,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/Debug/ExposureDebug")]
         public Shader ExposureDebugShader;
 
+        [VividResourcePath("Shaders/Core/Private/Tools/ColorChecker")]
+        public Shader ColorCheckerShader;
+
         [VividResourcePath("Shaders/Core/Private/Debug/RTASInstanceDebug")]
         public ComputeShader RTASInstanceDebugCompute;
 

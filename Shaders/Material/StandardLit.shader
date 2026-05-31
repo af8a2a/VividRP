@@ -197,37 +197,6 @@ Shader "VividRP/Material/StandardLit"
             ENDHLSL
         }
 
-        Pass
-        {
-            Name "SRPDefaultUnlit"
-            Tags { "LightMode" = "SRPDefaultUnlit" }
-
-            Blend One Zero
-            ZWrite [_ZWrite]
-            ZTest LEqual
-            Cull [_Cull]
-
-            HLSLPROGRAM
-                #pragma target 4.5
-                #pragma multi_compile_instancing
-                #pragma instancing_options renderinglayer
-                #pragma multi_compile _ LIGHTMAP_ON
-                #pragma multi_compile _ DIRLIGHTMAP_COMBINED
-                #pragma shader_feature_local_fragment _ALPHATEST_ON
-                #pragma shader_feature_local_fragment _OPACITYMAP
-                #pragma shader_feature_local_fragment _NORMALMAP
-                #pragma shader_feature_local_fragment _METALLICSPECGLOSSMAP
-                #pragma shader_feature_local_fragment _ROUGHNESSMAP
-                #pragma shader_feature_local_fragment _OCCLUSIONMAP
-                #pragma shader_feature_local_fragment _EMISSION
-                #pragma shader_feature_local_fragment _CLEARCOAT
-                #pragma shader_feature_local_fragment _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
-                #pragma vertex Vert
-                #pragma fragment FragDebug
-
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
-            ENDHLSL
-        }
 
         Pass
         {

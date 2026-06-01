@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.RenderPass.Core;
@@ -886,15 +888,38 @@ namespace VividRP.Runtime
                 Action<TEnum> setter)
                 where TEnum : Enum
             {
+                var enumType = typeof(TEnum);
+                var values = GetEnumValuesInDisplayOrder<TEnum>();
+
                 return new DebugUI.EnumField
                 {
                     nameAndTooltip = nameAndTooltip,
-                    autoEnum = typeof(TEnum),
+                    autoEnum = enumType,
                     getter = () => Convert.ToInt32(getter()),
-                    setter = value => setter((TEnum)Enum.ToObject(typeof(TEnum), value)),
-                    getIndex = () => Convert.ToInt32(getter()),
-                    setIndex = value => setter((TEnum)Enum.ToObject(typeof(TEnum), value)),
+                    setter = value => setter((TEnum)Enum.ToObject(enumType, value)),
+                    getIndex = () => Mathf.Max(0, Array.IndexOf(values, getter())),
+                    setIndex = value => setter(values[Mathf.Clamp(value, 0, values.Length - 1)]),
                 };
+            }
+
+            private static TEnum[] GetEnumValuesInDisplayOrder<TEnum>()
+                where TEnum : Enum
+            {
+                var enumType = typeof(TEnum);
+                var values = new List<TEnum>();
+                var fields = enumType.GetFields(BindingFlags.Public | BindingFlags.Static);
+                foreach (var field in fields)
+                {
+                    if (field.IsDefined(typeof(ObsoleteAttribute), false)
+                        || field.IsDefined(typeof(HideInInspector), false))
+                    {
+                        continue;
+                    }
+
+                    values.Add((TEnum)field.GetValue(null));
+                }
+
+                return values.ToArray();
             }
 
             private static object FormatFrameIndex(int frameIndex)

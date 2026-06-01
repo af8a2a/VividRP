@@ -8,20 +8,29 @@ namespace VividRP.Runtime.RenderPass.Core
     public enum MaterialDebugVisualizationMode
     {
         None = 0,
+        Depth = 14,
+        BakeDiffuseLightingWithAlbedoPlusEmissive = 15,
         BaseColor = 1,
+        DiffuseColor = 16,
         NormalWS = 2,
+        NormalViewSpace = 17,
         LinearRoughness = 3,
         PerceptualRoughness = 4,
         Smoothness = 5,
         Metallic = 6,
         AmbientOcclusion = 7,
+        SpecularOcclusion = 18,
+        Fresnel0 = 19,
+        Fresnel90 = 20,
+        CoatMask = 21,
+        CoatRoughness = 22,
+        MaterialFeatures = 23,
         CustomData = 8,
         CustomData1 = 9,
         MaterialId = 10,
         Emissive = 11,
         BakedGI = 12,
         HasBakedGI = 13,
-        Depth = 14,
     }
 
     public sealed class MaterialDebugPass : RasterPass
@@ -203,6 +212,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
+            m_ResolvedSettings = ResolveSettings(
+                VividRenderingDebugDisplaySettings.Data,
+                m_VisualizationMode,
+                m_Exposure);
+            var resolvedMode = (int)m_ResolvedSettings.visualizationMode;
+            var resolvedExposure = m_ResolvedSettings.exposure;
+
+            m_Material.SetInt(MaterialDebugModeId, resolvedMode);
+            m_Material.SetFloat(MaterialDebugExposureId, resolvedExposure);
+
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture);
             mpb.SetTexture(CameraDepthTextureId, depthTexture);
@@ -218,8 +237,8 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetVector(GBuffer2ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer2.innerHandle));
             mpb.SetVector(GBuffer3ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer3.innerHandle));
             mpb.SetVector(GBuffer4ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer4.innerHandle));
-            mpb.SetInt(MaterialDebugModeId, (int)m_ResolvedSettings.visualizationMode);
-            mpb.SetFloat(MaterialDebugExposureId, m_ResolvedSettings.exposure);
+            mpb.SetInt(MaterialDebugModeId, resolvedMode);
+            mpb.SetFloat(MaterialDebugExposureId, resolvedExposure);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }

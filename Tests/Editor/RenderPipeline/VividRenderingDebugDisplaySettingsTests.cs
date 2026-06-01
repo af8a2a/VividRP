@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
@@ -92,6 +93,27 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.materialDebugMode,
                 Is.EqualTo(MaterialDebugVisualizationMode.None));
             Assert.That(VividRenderingDebugDisplaySettings.Data.materialDebugExposure, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void MaterialDebugModeWidget_MapsDropdownIndexToEnumValue()
+        {
+            var widget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode")
+                as DebugUI.EnumField;
+
+            Assert.That(widget, Is.Not.Null);
+            var baseColorIndex = Array.IndexOf(
+                widget.enumValues,
+                (int)MaterialDebugVisualizationMode.BaseColor);
+            Assert.That(baseColorIndex, Is.GreaterThanOrEqualTo(0));
+
+            widget.setIndex(baseColorIndex);
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.materialDebugMode,
+                Is.EqualTo(MaterialDebugVisualizationMode.BaseColor));
+            Assert.That(widget.getIndex(), Is.EqualTo(baseColorIndex));
+            Assert.That(widget.getter(), Is.EqualTo((int)MaterialDebugVisualizationMode.BaseColor));
         }
 
         [Test]

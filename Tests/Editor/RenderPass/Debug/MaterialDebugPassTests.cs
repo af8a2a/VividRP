@@ -1,3 +1,4 @@
+using System;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -62,11 +63,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VisualizationMode_IncludesHdrpGBufferDerivedModes()
+        {
+            var modeNames = Enum.GetNames(typeof(MaterialDebugVisualizationMode));
+
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.BakeDiffuseLightingWithAlbedoPlusEmissive)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.DiffuseColor)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.NormalViewSpace)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.SpecularOcclusion)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.Fresnel0)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.Fresnel90)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.CoatMask)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.CoatRoughness)));
+            Assert.That(modeNames, Does.Contain(nameof(MaterialDebugVisualizationMode.MaterialFeatures)));
+        }
+
+        [Test]
         public void ResolveSettings_UsesRenderingDebuggerValues()
         {
             var data = new VividRenderingDebugSettingsData
             {
-                materialDebugMode = MaterialDebugVisualizationMode.BakedGI,
+                materialDebugMode = MaterialDebugVisualizationMode.BakeDiffuseLightingWithAlbedoPlusEmissive,
                 materialDebugExposure = 2.5f,
             };
 
@@ -75,7 +92,9 @@ namespace VividRP.Editor.Tests
                 MaterialDebugVisualizationMode.BaseColor,
                 0f);
 
-            Assert.That(settings.visualizationMode, Is.EqualTo(MaterialDebugVisualizationMode.BakedGI));
+            Assert.That(
+                settings.visualizationMode,
+                Is.EqualTo(MaterialDebugVisualizationMode.BakeDiffuseLightingWithAlbedoPlusEmissive));
             Assert.That(settings.exposure, Is.EqualTo(2.5f));
         }
 

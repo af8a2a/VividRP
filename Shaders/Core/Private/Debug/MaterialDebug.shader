@@ -34,6 +34,18 @@ Shader "Hidden/VividRP/MaterialDebug"
             #define VIVID_MATERIAL_DEBUG_BAKED_GI 12
             #define VIVID_MATERIAL_DEBUG_HAS_BAKED_GI 13
             #define VIVID_MATERIAL_DEBUG_DEPTH 14
+            #define VIVID_MATERIAL_DEBUG_BAKE_DIFFUSE_LIGHTING_WITH_ALBEDO_PLUS_EMISSIVE 15
+            #define VIVID_MATERIAL_DEBUG_DIFFUSE_COLOR 16
+            #define VIVID_MATERIAL_DEBUG_NORMAL_VIEW_SPACE 17
+            #define VIVID_MATERIAL_DEBUG_SPECULAR_OCCLUSION 18
+            #define VIVID_MATERIAL_DEBUG_FRESNEL0 19
+            #define VIVID_MATERIAL_DEBUG_FRESNEL90 20
+            #define VIVID_MATERIAL_DEBUG_COAT_MASK 21
+            #define VIVID_MATERIAL_DEBUG_COAT_ROUGHNESS 22
+            #define VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES 23
+
+            static const float3 kVividMaterialDebugDielectricF0 = float3(0.04, 0.04, 0.04);
+            static const float kVividMaterialDebugClearCoatRoughness = 0.01;
 
             TEXTURE2D(_SourceTexture);
             SAMPLER(sampler_SourceTexture);
@@ -105,6 +117,53 @@ Shader "Hidden/VividRP/MaterialDebug"
                 return HashColor(materialId);
             }
 
+            float3 EvaluateMaterialFeatureColor(uint materialId)
+            {
+                if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
+                    return float3(0.0, 0.45, 1.0);
+
+                if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+                    return float3(0.8, 0.2, 0.95);
+
+                if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+                    return float3(1.0, 0.65, 0.0);
+
+                return HashColor(1u << (materialId & 7u));
+            }
+
+            float3 EncodeDirectionDebug(float3 direction)
+            {
+                return IsNormalized(direction) ? direction * 0.5 + 0.5 : float3(1.0, 0.0, 0.0);
+            }
+
+            float3 EvaluateDiffuseColor(VividGBufferSurfaceData surfaceData)
+            {
+                return surfaceData.baseColor * (1.0 - surfaceData.metallic);
+            }
+
+            real Luminance(real3 linearRgb)
+            {
+                return dot(linearRgb, real3(0.2126729, 0.7151522, 0.0721750));
+            }
+
+            float3 EvaluateFresnel0(VividGBufferSurfaceData surfaceData)
+            {
+                float3 baseSpecular = lerp(kVividMaterialDebugDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+                if (surfaceData.materialId != VIVID_GBUFFER_MATERIAL_FABRIC)
+                    return baseSpecular;
+
+                float luminance = Luminance(surfaceData.baseColor);
+                float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
+                return lerp(baseSpecular, sheenTint, saturate(surfaceData.customData));
+            }
+
+            float EvaluateCoatMask(VividGBufferSurfaceData surfaceData)
+            {
+                return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT
+                    ? saturate(surfaceData.customData)
+                    : 0.0;
+            }
+
             float3 EvaluateMaterialDebugColor(
                 VividGBufferSurfaceData surfaceData,
                 float deviceDepth,
@@ -112,11 +171,23 @@ Shader "Hidden/VividRP/MaterialDebug"
             {
                 float exposureMultiplier = exp2(_MaterialDebugExposure);
 
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_DEPTH)
+                    return Linear01Depth(deviceDepth, _ZBufferParams).xxx;
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BAKE_DIFFUSE_LIGHTING_WITH_ALBEDO_PLUS_EMISSIVE)
+                    return (surfaceData.bakedGI * EvaluateDiffuseColor(surfaceData) + surfaceData.emissive) * exposureMultiplier;
+
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BASE_COLOR)
                     return surfaceData.baseColor;
 
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_DIFFUSE_COLOR)
+                    return EvaluateDiffuseColor(surfaceData);
+
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_NORMAL_WS)
-                    return surfaceData.normalWS * 0.5 + 0.5;
+                    return EncodeDirectionDebug(surfaceData.normalWS);
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_NORMAL_VIEW_SPACE)
+                    return EncodeDirectionDebug(TransformWorldToViewDir(surfaceData.normalWS, true));
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_LINEAR_ROUGHNESS)
                     return surfaceData.linearRoughness.xxx;
@@ -132,6 +203,29 @@ Shader "Hidden/VividRP/MaterialDebug"
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_AMBIENT_OCCLUSION)
                     return surfaceData.ambientOcclusion.xxx;
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_SPECULAR_OCCLUSION)
+                    return surfaceData.ambientOcclusion.xxx;
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_FRESNEL0)
+                    return EvaluateFresnel0(surfaceData);
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_FRESNEL90)
+                    return float3(1.0, 1.0, 1.0);
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_COAT_MASK)
+                    return EvaluateCoatMask(surfaceData).xxx;
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_COAT_ROUGHNESS)
+                {
+                    float coatRoughness = EvaluateCoatMask(surfaceData) > 0.0
+                        ? kVividMaterialDebugClearCoatRoughness
+                        : 0.0;
+                    return coatRoughness.xxx;
+                }
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES)
+                    return EvaluateMaterialFeatureColor(surfaceData.materialId);
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_CUSTOM_DATA)
                     return surfaceData.customData.xxx;
@@ -150,9 +244,6 @@ Shader "Hidden/VividRP/MaterialDebug"
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_HAS_BAKED_GI)
                     return surfaceData.hasBakedGI.xxx;
-
-                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_DEPTH)
-                    return Linear01Depth(deviceDepth, _ZBufferParams).xxx;
 
                 return sourceColor.rgb;
             }

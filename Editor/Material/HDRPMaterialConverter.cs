@@ -15,6 +15,8 @@ namespace VividRP.Editor
         private const string LegacyHDRPLitShaderName = "HDRenderPipeline/Lit";
         private const string HDRPLitTessellationShaderName = "HDRP/LitTessellation";
         private const string LegacyHDRPLitTessellationShaderName = "HDRenderPipeline/LitTessellation";
+        private const string HDRPUnlitShaderName = "HDRP/Unlit";
+        private const string LegacyHDRPUnlitShaderName = "HDRenderPipeline/Unlit";
 
         protected override List<MaterialUpgrader> upgraders
         {
@@ -25,6 +27,8 @@ namespace VividRP.Editor
                 list.Add(CreateHDRPLitUpgrader(LegacyHDRPLitShaderName));
                 list.Add(CreateHDRPLitUpgrader(HDRPLitTessellationShaderName));
                 list.Add(CreateHDRPLitUpgrader(LegacyHDRPLitTessellationShaderName));
+                list.Add(CreateHDRPUnlitUpgrader(HDRPUnlitShaderName));
+                list.Add(CreateHDRPUnlitUpgrader(LegacyHDRPUnlitShaderName));
                 return list;
             }
         }
@@ -64,6 +68,41 @@ namespace VividRP.Editor
 
             return upgrader;
         }
+
+        internal static MaterialUpgrader CreateHDRPUnlitUpgrader(string sourceShaderName)
+        {
+            var upgrader = new HDRPUnlitToUnlitUpgrader();
+            upgrader.RenameShader(
+                sourceShaderName,
+                UnlitMaterialUtility.UnlitShaderName,
+                UnlitMaterialUtility.SetupMaterialFinalizer);
+
+            upgrader.RenameTexture("_UnlitColorMap", "_UnlitColorMap");
+            upgrader.RenameTexture("_EmissiveColorMap", "_EmissiveColorMap");
+            upgrader.RenameTexture("_MainTex", "_MainTex");
+
+            upgrader.RenameColor("_UnlitColor", "_UnlitColor");
+            upgrader.RenameColor("_EmissiveColor", "_EmissiveColor");
+            upgrader.RenameColor("_EmissiveColorLDR", "_EmissiveColorLDR");
+            upgrader.RenameColor("_Color", "_Color");
+
+            upgrader.RenameFloat("_AlphaCutoff", "_AlphaCutoff");
+            upgrader.RenameFloat("_AlphaCutoffEnable", "_AlphaCutoffEnable");
+            upgrader.RenameFloat("_AlphaRemapMin", "_AlphaRemapMin");
+            upgrader.RenameFloat("_AlphaRemapMax", "_AlphaRemapMax");
+            upgrader.RenameFloat("_SurfaceType", "_SurfaceType");
+            upgrader.RenameFloat("_BlendMode", "_BlendMode");
+            upgrader.RenameFloat("_CullMode", "_CullMode");
+            upgrader.RenameFloat("_DoubleSidedEnable", "_DoubleSidedEnable");
+            upgrader.RenameFloat("_TransparentZWrite", "_TransparentZWrite");
+            upgrader.RenameFloat("_TransparentSortPriority", "_TransparentSortPriority");
+            upgrader.RenameFloat("_AlbedoAffectEmissive", "_AlbedoAffectEmissive");
+            upgrader.RenameFloat("_EmissiveExposureWeight", "_EmissiveExposureWeight");
+            upgrader.RenameFloat("_UseEmissiveIntensity", "_UseEmissiveIntensity");
+            upgrader.RenameFloat("_EmissiveIntensity", "_EmissiveIntensity");
+
+            return upgrader;
+        }
     }
 
     internal sealed class HDRPLitToStandardLitUpgrader : MaterialUpgrader
@@ -78,10 +117,22 @@ namespace VividRP.Editor
         }
     }
 
+    internal sealed class HDRPUnlitToUnlitUpgrader : MaterialUpgrader
+    {
+        public override void Convert(Material srcMaterial, Material dstMaterial)
+        {
+            HDRPMaterialPropertySnapshot snapshot = HDRPMaterialPropertySnapshot.Capture(srcMaterial);
+
+            base.Convert(srcMaterial, dstMaterial);
+
+            HDRPMaterialConversionUtility.ApplySnapshotToUnlit(snapshot, dstMaterial);
+        }
+    }
+
     internal static class HDRPMaterialConversionUtility
     {
-        private const string AssetsMenuPath = "Assets/VividRP/Convert Selected HDRP Lit Materials to StandardLit";
-        private const string ToolsMenuPath = "Tools/VividRP/Material/Convert Selected HDRP Lit Materials to StandardLit";
+        private const string AssetsMenuPath = "Assets/VividRP/Convert Selected HDRP Materials to VividRP";
+        private const string ToolsMenuPath = "Tools/VividRP/Material/Convert Selected HDRP Materials to VividRP";
         private const float EnabledThreshold = 0.001f;
 
         [MenuItem(AssetsMenuPath, false, 2200)]
@@ -128,12 +179,14 @@ namespace VividRP.Editor
 
         internal static bool CanConvertMaterial(Material material)
         {
-            if (material == null || StandardLitMaterialImportUtility.GetStandardLitShader() == null)
+            if (material == null)
             {
                 return false;
             }
 
-            return HDRPMaterialPropertySnapshot.Capture(material).LooksLikeHDRPLit;
+            HDRPMaterialPropertySnapshot snapshot = HDRPMaterialPropertySnapshot.Capture(material);
+            return (snapshot.LooksLikeHDRPLit && StandardLitMaterialImportUtility.GetStandardLitShader() != null)
+                || (snapshot.LooksLikeHDRPUnlit && UnlitMaterialUtility.GetUnlitShader() != null);
         }
 
         internal static bool TryConvertMaterial(Material material, bool recordUndo, bool saveAsset)
@@ -144,9 +197,34 @@ namespace VividRP.Editor
             }
 
             HDRPMaterialPropertySnapshot snapshot = HDRPMaterialPropertySnapshot.Capture(material);
-            if (!snapshot.LooksLikeHDRPLit)
+            if (!snapshot.LooksLikeHDRPLit && !snapshot.LooksLikeHDRPUnlit)
             {
                 return false;
+            }
+
+            if (snapshot.LooksLikeHDRPUnlit)
+            {
+                Shader unlitShader = UnlitMaterialUtility.GetUnlitShader();
+                if (unlitShader == null)
+                {
+                    return false;
+                }
+
+                if (recordUndo)
+                {
+                    Undo.RecordObject(material, "Convert HDRP Unlit Material to VividRP Unlit");
+                }
+
+                material.shader = unlitShader;
+                ApplySnapshotToUnlit(snapshot, material);
+                EditorUtility.SetDirty(material);
+
+                if (saveAsset)
+                {
+                    AssetDatabase.SaveAssetIfDirty(material);
+                }
+
+                return true;
             }
 
             Shader standardLitShader = StandardLitMaterialImportUtility.GetStandardLitShader();
@@ -213,6 +291,40 @@ namespace VividRP.Editor
             SetColorIfPresent(material, "_EmissionColor", emissionColor);
 
             StandardLitMaterialUtility.SetupMaterial(material, null, false);
+        }
+
+        internal static void ApplySnapshotToUnlit(HDRPMaterialPropertySnapshot snapshot, Material material)
+        {
+            if (material == null)
+            {
+                return;
+            }
+
+            CopyTexture(snapshot, material, "_UnlitColorMap", "_UnlitColorMap", false);
+            CopyFallbackTexture(snapshot, material, "_MainTex", "_UnlitColorMap");
+            CopyTexture(snapshot, material, "_EmissiveColorMap", "_EmissiveColorMap", false);
+
+            CopyColor(snapshot, material, "_UnlitColor", "_UnlitColor");
+            CopyFallbackColor(snapshot, material, "_Color", "_UnlitColor");
+            CopyColor(snapshot, material, "_EmissiveColor", "_EmissiveColor");
+            CopyColor(snapshot, material, "_EmissiveColorLDR", "_EmissiveColorLDR");
+
+            SetFloatIfPresent(material, "_AlphaCutoff", snapshot.GetFloat("_AlphaCutoff", snapshot.GetFloat("_Cutoff", 0.5f)));
+            SetFloatIfPresent(material, "_AlphaCutoffEnable", snapshot.GetFloat("_AlphaCutoffEnable", 0.0f) > EnabledThreshold ? 1.0f : 0.0f);
+            SetFloatIfPresent(material, "_AlphaRemapMin", snapshot.GetFloat("_AlphaRemapMin", 0.0f));
+            SetFloatIfPresent(material, "_AlphaRemapMax", snapshot.GetFloat("_AlphaRemapMax", 1.0f));
+            SetFloatIfPresent(material, "_SurfaceType", snapshot.GetFloat("_SurfaceType", UnlitMaterialUtility.OpaqueSurface));
+            SetFloatIfPresent(material, "_BlendMode", snapshot.GetFloat("_BlendMode", 0.0f));
+            SetFloatIfPresent(material, "_CullMode", ResolveUnlitCullMode(snapshot));
+            SetFloatIfPresent(material, "_DoubleSidedEnable", snapshot.GetFloat("_DoubleSidedEnable", 0.0f));
+            SetFloatIfPresent(material, "_TransparentZWrite", snapshot.GetFloat("_TransparentZWrite", 0.0f));
+            SetFloatIfPresent(material, "_TransparentSortPriority", snapshot.GetFloat("_TransparentSortPriority", 0.0f));
+            SetFloatIfPresent(material, "_AlbedoAffectEmissive", snapshot.GetFloat("_AlbedoAffectEmissive", 0.0f));
+            SetFloatIfPresent(material, "_EmissiveExposureWeight", snapshot.GetFloat("_EmissiveExposureWeight", 1.0f));
+            SetFloatIfPresent(material, "_UseEmissiveIntensity", snapshot.GetFloat("_UseEmissiveIntensity", 0.0f));
+            SetFloatIfPresent(material, "_EmissiveIntensity", snapshot.GetFloat("_EmissiveIntensity", 1.0f));
+
+            UnlitMaterialUtility.SetupMaterial(material, null, false);
         }
 
         private static List<Material> GetSelectedMaterials()
@@ -301,6 +413,13 @@ namespace VividRP.Editor
                 : snapshot.GetFloat("_CullMode", (float)UnityEngine.Rendering.CullMode.Back);
         }
 
+        private static float ResolveUnlitCullMode(HDRPMaterialPropertySnapshot snapshot)
+        {
+            return snapshot.GetFloat("_DoubleSidedEnable", 0.0f) > EnabledThreshold
+                ? (float)UnityEngine.Rendering.CullMode.Off
+                : snapshot.GetFloat("_CullMode", snapshot.GetFloat("_OpaqueCullMode", (float)UnityEngine.Rendering.CullMode.Back));
+        }
+
         private static void SetFloatIfPresent(Material material, string propertyName, float value)
         {
             if (material.HasProperty(propertyName))
@@ -329,14 +448,19 @@ namespace VividRP.Editor
         private readonly Dictionary<string, Color> m_Colors =
             new Dictionary<string, Color>(StringComparer.Ordinal);
 
+        internal bool LooksLikeHDRPUnlit =>
+            m_Textures.ContainsKey("_UnlitColorMap")
+            || m_Colors.ContainsKey("_UnlitColor");
+
         internal bool LooksLikeHDRPLit =>
-            m_Textures.ContainsKey("_BaseColorMap")
-            || m_Textures.ContainsKey("_MaskMap")
-            || m_Textures.ContainsKey("_NormalMap")
-            || m_Textures.ContainsKey("_EmissiveColorMap")
-            || m_Floats.ContainsKey("_MaterialID")
-            || m_Floats.ContainsKey("_SurfaceType")
-            || m_Colors.ContainsKey("_EmissiveColor");
+            !LooksLikeHDRPUnlit &&
+            (m_Textures.ContainsKey("_BaseColorMap")
+                || m_Textures.ContainsKey("_MaskMap")
+                || m_Textures.ContainsKey("_NormalMap")
+                || m_Textures.ContainsKey("_EmissiveColorMap")
+                || m_Floats.ContainsKey("_MaterialID")
+                || m_Floats.ContainsKey("_SurfaceType")
+                || m_Colors.ContainsKey("_EmissiveColor"));
 
         internal static HDRPMaterialPropertySnapshot Capture(Material material)
         {

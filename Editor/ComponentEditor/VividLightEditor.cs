@@ -61,6 +61,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
+        private static readonly GUIContent s_LightRadiusLabel = EditorGUIUtility.TrTextContent("Radius", "Sets the radius of the light source. This affects the falloff of diffuse lighting, the spread of the specular highlight, and the softness of Ray Traced shadows.");
         private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
         private static readonly GUIContent s_ScreenSpaceShadowQualityLabel = EditorGUIUtility.TrTextContent("Screen Space Quality", "Quality tier used by the screen-space CSM resolve for this directional light.");
         private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
@@ -224,12 +225,17 @@ namespace VividRP.Editor
 
             switch (settings.light.type)
             {
+                case LightType.Point:
+                    DrawPunctualShapeRadiusInspector();
+                    break;
                 case LightType.Spot:
                     var oldSpotAngle = settings.spotAngle.floatValue;
                     EditorGUI.BeginChangeCheck();
                     settings.DrawInnerAndOuterSpotAngle();
                     if (EditorGUI.EndChangeCheck())
                         VividLightIntensityUnitUtility.PreserveSpotLightLumenIntensity(settings, oldSpotAngle);
+
+                    DrawPunctualShapeRadiusInspector();
                     break;
                 case LightType.Directional:
                     EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);
@@ -286,10 +292,6 @@ namespace VividRP.Editor
             {
                 switch (settings.light.type)
                 {
-                    case LightType.Point:
-                    case LightType.Spot:
-                        settings.DrawShapeRadius();
-                        break;
                     case LightType.Directional:
                         settings.DrawBakedShadowAngle();
                         break;
@@ -298,6 +300,14 @@ namespace VividRP.Editor
 
             settings.DrawRuntimeShadow();
             DrawDirectionalShadowBiasInspector();
+        }
+
+        private void DrawPunctualShapeRadiusInspector()
+        {
+            if (!ShouldShowPunctualShapeRadiusControls(m_SerializedLight))
+                return;
+
+            EditorGUILayout.PropertyField(settings.shapeRadius, s_LightRadiusLabel);
         }
 
         private void DrawVividInspector()
@@ -523,6 +533,16 @@ namespace VividRP.Editor
                 && !serializedLight.settings.lightType.hasMultipleDifferentValues
                 && serializedLight.settings.light != null
                 && serializedLight.settings.light.type == LightType.Rectangle;
+        }
+
+        internal static bool ShouldShowPunctualShapeRadiusControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && (serializedLight.settings.light.type == LightType.Point
+                    || serializedLight.settings.light.type == LightType.Spot);
         }
 
         internal static bool ShouldShowDirectionalShadowBiasControls(VividSerializedLight serializedLight)

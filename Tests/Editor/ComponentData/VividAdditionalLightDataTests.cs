@@ -966,6 +966,46 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLightEditor_ShowsPunctualShapeRadiusControls_ForPointAndConeSpotLights()
+        {
+            var spotLight = m_GameObject.AddComponent<Light>();
+            spotLight.type = LightType.Spot;
+
+            var serializedSpotLight = new VividSerializedLight(new SerializedObject(spotLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowPunctualShapeRadiusControls(serializedSpotLight),
+                Is.True);
+
+            var pointLightObject = new GameObject("Vivid Point Light Shape Radius Test");
+            var directionalLightObject = new GameObject("Vivid Directional Light Shape Radius Test");
+
+            try
+            {
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowPunctualShapeRadiusControls(serializedPointLight),
+                    Is.True);
+
+                var directionalLight = directionalLightObject.AddComponent<Light>();
+                directionalLight.type = LightType.Directional;
+                var serializedDirectionalLight = new VividSerializedLight(new SerializedObject(directionalLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowPunctualShapeRadiusControls(serializedDirectionalLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(pointLightObject);
+                Object.DestroyImmediate(directionalLightObject);
+            }
+        }
+
+        [Test]
         public void VividLightEditor_ShowsDirectionalPCSSControls_OnlyForDirectionalLightsUsingVeryHighQuality()
         {
             var directionalLight = m_GameObject.AddComponent<Light>();

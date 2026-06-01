@@ -97,6 +97,12 @@ namespace VividRP.Runtime
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
         [SerializeField]
+        private MaterialDebugVisualizationMode m_MaterialDebugMode = MaterialDebugVisualizationMode.None;
+
+        [SerializeField]
+        private float m_MaterialDebugExposure;
+
+        [SerializeField]
         private VisibilityBufferDebugVisualizationMode m_VisibilityBufferDebugMode =
             VisibilityBufferDebugVisualizationMode.Cluster;
 
@@ -229,6 +235,18 @@ namespace VividRP.Runtime
             set => m_DepthMode = value;
         }
 
+        internal MaterialDebugVisualizationMode materialDebugMode
+        {
+            get => m_MaterialDebugMode;
+            set => m_MaterialDebugMode = value;
+        }
+
+        internal float materialDebugExposure
+        {
+            get => m_MaterialDebugExposure;
+            set => m_MaterialDebugExposure = value;
+        }
+
         internal VisibilityBufferDebugVisualizationMode visibilityBufferDebugMode
         {
             get => m_VisibilityBufferDebugMode;
@@ -296,6 +314,8 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_OverlayOpacity, 1f)
             || visualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
+            || m_MaterialDebugMode != MaterialDebugVisualizationMode.None
+            || !Mathf.Approximately(m_MaterialDebugExposure, 0f)
             || m_VisibilityBufferDebugMode != VisibilityBufferDebugVisualizationMode.Cluster
             || !Mathf.Approximately(m_VisibilityBufferDebugExposure, 0f)
             || m_ForceMeshletCullingFromMainCamera
@@ -330,6 +350,8 @@ namespace VividRP.Runtime
             m_OverlayOpacity = 1f;
             m_VisualizationMode = OverlayDebugVisualizationMode.Auto;
             m_DepthMode = OverlayDebugDepthMode.Raw;
+            m_MaterialDebugMode = MaterialDebugVisualizationMode.None;
+            m_MaterialDebugExposure = 0f;
             m_VisibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.Cluster;
             m_VisibilityBufferDebugExposure = 0f;
             m_ForceMeshletCullingFromMainCamera = false;
@@ -360,6 +382,7 @@ namespace VividRP.Runtime
             public const string ReGIRName = "ReGIR";
             public const string ExposureName = "Exposure";
             public const string OverlayName = "Overlay";
+            public const string MaterialName = "Material";
             public const string VisibilityBufferName = "Visibility Buffer";
             public const string SliderName = "Slider";
             public const string VirtualTextureName = "Virtual Texture";
@@ -472,6 +495,18 @@ namespace VividRP.Runtime
                 tooltip = "Select how depth textures are visualized in the overlay."
             };
 
+            public static readonly NameAndTooltip MaterialDebugMode = new()
+            {
+                name = "Mode",
+                tooltip = "Select the material GBuffer value to visualize."
+            };
+
+            public static readonly NameAndTooltip MaterialDebugExposure = new()
+            {
+                name = "Exposure",
+                tooltip = "Exposure compensation applied to HDR material debug values."
+            };
+
             public static readonly NameAndTooltip VisibilityBufferDebugMode = new()
             {
                 name = "Mode",
@@ -543,6 +578,7 @@ namespace VividRP.Runtime
                 root.children.Add(CreateReGIRFoldout(data));
                 root.children.Add(CreateExposureFoldout(data));
                 root.children.Add(CreateOverlayFoldout(data));
+                root.children.Add(CreateMaterialFoldout(data));
                 root.children.Add(CreateVisibilityBufferFoldout(data));
                 root.children.Add(CreateSliderFoldout(data));
                 root.children.Add(CreateVirtualTextureFoldout(data));
@@ -699,6 +735,29 @@ namespace VividRP.Runtime
                     Strings.DepthMode,
                     () => data.depthMode,
                     value => data.depthMode = value));
+                return foldout;
+            }
+
+            private static DebugUI.Foldout CreateMaterialFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.MaterialName,
+                    opened = true,
+                };
+
+                foldout.children.Add(CreateEnumField(
+                    Strings.MaterialDebugMode,
+                    () => data.materialDebugMode,
+                    value => data.materialDebugMode = value));
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.MaterialDebugExposure,
+                    getter = () => data.materialDebugExposure,
+                    setter = value => data.materialDebugExposure = value,
+                    min = () => -16f,
+                    max = () => 16f,
+                });
                 return foldout;
             }
 

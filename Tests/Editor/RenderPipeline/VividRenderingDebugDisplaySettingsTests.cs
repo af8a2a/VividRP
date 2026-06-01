@@ -36,6 +36,9 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Opacity"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Visibility Buffer"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Slider"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
@@ -78,6 +81,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Reset_RestoresMaterialDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.materialDebugMode = MaterialDebugVisualizationMode.Emissive;
+            VividRenderingDebugDisplaySettings.Data.materialDebugExposure = 3f;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.materialDebugMode,
+                Is.EqualTo(MaterialDebugVisualizationMode.None));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.materialDebugExposure, Is.EqualTo(0f));
+        }
+
+        [Test]
         public void Reset_RestoresVisibilityBufferDebugDefaults()
         {
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
@@ -109,6 +126,21 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.reGIRDebugOpacity,
                 Is.EqualTo(VividRenderingDebugSettingsData.DefaultReGIRDebugOpacity));
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksMaterialDebugOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.materialDebugMode = MaterialDebugVisualizationMode.NormalWS;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.materialDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }
 
         [Test]

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -273,6 +274,37 @@ namespace VividRP.Editor.Tests
             }
         }
 #endif
+
+        [Test]
+        public void CreateFinalFrameScreenshotFileName_SanitizesCameraName()
+        {
+            var gameObject = new GameObject("Main:Camera/Comparison?");
+            var camera = gameObject.AddComponent<Camera>();
+
+            try
+            {
+                var fileName = VividAdditionalCameraData.CreateFinalFrameScreenshotFileName(camera);
+
+                Assert.That(Path.GetExtension(fileName), Is.EqualTo(".png"));
+                Assert.That(fileName.IndexOfAny(Path.GetInvalidFileNameChars()), Is.EqualTo(-1));
+                Assert.That(fileName, Does.StartWith("Main_Camera_Comparison_"));
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void ClampFinalFrameScreenshotReadbackRect_ClampsToTargetBounds()
+        {
+            var rect = VividAdditionalCameraData.ClampFinalFrameScreenshotReadbackRect(
+                new Rect(-4f, 5f, 20f, 30f),
+                10,
+                16);
+
+            Assert.That(rect, Is.EqualTo(new Rect(0f, 5f, 10f, 11f)));
+        }
 
         private static void SetPrivateField(object target, string fieldName, object value)
         {

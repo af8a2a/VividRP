@@ -311,6 +311,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetViewport(m_Viewport);
 
             Blitter.BlitTexture(unsafeCmd, sourceHandle, scaleBias, m_Material, 0);
+
+#if UNITY_EDITOR
+            var camera = context.Get<VividCameraData>()?.camera;
+            if (VividAdditionalCameraData.TryGetFinalFrameScreenshotCaptureTarget(camera, out var screenshotTarget))
+            {
+                var screenshotScaleBias = TextureScaleBiasUtility.GetScaleBias(
+                    sourceHandle,
+                    sourceTextureUVOrigin,
+                    TextureUVOrigin.BottomLeft);
+
+                cmd.SetRenderTarget(screenshotTarget);
+                cmd.SetViewport(new Rect(0f, 0f, screenshotTarget.width, screenshotTarget.height));
+                Blitter.BlitTexture(unsafeCmd, sourceHandle, screenshotScaleBias, m_Material, 0);
+                VividAdditionalCameraData.MarkFinalFrameScreenshotCaptureTargetWritten(camera);
+
+                cmd.SetRenderTarget(m_CameraBackBufferTarget);
+                if (m_ShouldSetViewport)
+                    cmd.SetViewport(m_Viewport);
+            }
+#endif
         }
 
         public override void Dispose()

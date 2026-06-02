@@ -49,8 +49,13 @@ namespace VividRP.Editor
         private static readonly GUIContent s_DitheringLabel = EditorGUIUtility.TrTextContent("Dithering");
         private static readonly GUIContent s_VolumeLayerMaskLabel = EditorGUIUtility.TrTextContent("Volume Layer Mask");
         private static readonly GUIContent s_AntialiasingLabel = EditorGUIUtility.TrTextContent("Anti-Aliasing");
+        private static readonly GUIContent s_ExportFinalFrameScreenshotLabel = EditorGUIUtility.TrTextContent(
+            VividAdditionalCameraData.ExportFinalFrameScreenshotButtonText,
+            "Save the selected camera's next final VividRP render as a PNG.");
         private const string AntialiasingPassRequiredMessage =
             "Camera anti-aliasing requires an AntialiasingPass node connected in the active RenderGraph.";
+        private const string SingleCameraScreenshotMessage =
+            "Select a single camera to export a final frame screenshot.";
         private static readonly GUIContent s_TAALabel = EditorGUIUtility.TrTextContent("Temporal Anti-Aliasing");
         private static readonly GUIContent s_TAAJitterSpreadLabel = EditorGUIUtility.TrTextContent("Jitter Spread");
         private static readonly GUIContent s_TAASampleCountLabel = EditorGUIUtility.TrTextContent("Sample Count");
@@ -230,6 +235,7 @@ namespace VividRP.Editor
 
                 DrawFSR3Inspector();
                 DrawTSRInspector();
+                DrawFinalFrameScreenshotInspector();
             }
         }
 
@@ -310,6 +316,33 @@ namespace VividRP.Editor
                     EditorGUILayout.PropertyField(m_SerializedCamera.tsrSharpness, s_TSRSharpnessLabel);
                 }
             }
+        }
+
+        private void DrawFinalFrameScreenshotInspector()
+        {
+            EditorGUILayout.Space(2.0f);
+
+            var additionalData = GetSingleAdditionalCameraData();
+            var isPending = additionalData != null && additionalData.IsFinalFrameScreenshotPending();
+
+            using (new EditorGUI.DisabledScope(additionalData == null || isPending))
+            {
+                if (GUILayout.Button(s_ExportFinalFrameScreenshotLabel))
+                    additionalData.TryPromptAndRequestFinalFrameScreenshot();
+            }
+
+            if (targets.Length > 1)
+                EditorGUILayout.HelpBox(SingleCameraScreenshotMessage, MessageType.Info);
+            else if (isPending)
+                EditorGUILayout.HelpBox(VividAdditionalCameraData.ExportFinalFrameScreenshotPendingText, MessageType.Info);
+        }
+
+        private VividAdditionalCameraData GetSingleAdditionalCameraData()
+        {
+            var additionalData = m_SerializedCamera?.camerasAdditionalData;
+            return additionalData != null && additionalData.Length == 1
+                ? additionalData[0]
+                : null;
         }
 
         private bool ShouldDisableClearDepthField()
@@ -441,9 +474,35 @@ namespace VividRP.Editor
     [CanEditMultipleObjects]
     internal sealed class VividAdditionalCameraDataEditor : UnityEditor.Editor
     {
+        private static readonly GUIContent s_ExportFinalFrameScreenshotLabel = EditorGUIUtility.TrTextContent(
+            VividAdditionalCameraData.ExportFinalFrameScreenshotButtonText,
+            "Save this camera's next final VividRP render as a PNG.");
+        private const string SingleCameraScreenshotMessage =
+            "Select a single Vivid Additional Camera Data component to export a final frame screenshot.";
+
         public override void OnInspectorGUI()
         {
             EditorGUILayout.HelpBox("Managed by the Camera inspector.", MessageType.None);
+            DrawFinalFrameScreenshotInspector();
+        }
+
+        private void DrawFinalFrameScreenshotInspector()
+        {
+            var additionalData = targets.Length == 1
+                ? target as VividAdditionalCameraData
+                : null;
+            var isPending = additionalData != null && additionalData.IsFinalFrameScreenshotPending();
+
+            using (new EditorGUI.DisabledScope(additionalData == null || isPending))
+            {
+                if (GUILayout.Button(s_ExportFinalFrameScreenshotLabel))
+                    additionalData.TryPromptAndRequestFinalFrameScreenshot();
+            }
+
+            if (targets.Length > 1)
+                EditorGUILayout.HelpBox(SingleCameraScreenshotMessage, MessageType.Info);
+            else if (isPending)
+                EditorGUILayout.HelpBox(VividAdditionalCameraData.ExportFinalFrameScreenshotPendingText, MessageType.Info);
         }
     }
 

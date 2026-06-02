@@ -1093,6 +1093,88 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLightEditor_DrawsBoxSpotLightGizmo_OnlyForPositiveRangeBoxLights()
+        {
+            var boxLight = m_GameObject.AddComponent<Light>();
+            boxLight.type = LightType.Box;
+            boxLight.range = 10.0f;
+
+            Assert.That(
+                VividLightEditor.ShouldDrawBoxSpotLightGizmo(boxLight),
+                Is.True);
+
+            boxLight.range = 0.0f;
+
+            Assert.That(
+                VividLightEditor.ShouldDrawBoxSpotLightGizmo(boxLight),
+                Is.False);
+
+            var spotLightObject = new GameObject("Vivid Spot Light Gizmo Test");
+
+            try
+            {
+                var spotLight = spotLightObject.AddComponent<Light>();
+                spotLight.type = LightType.Spot;
+                spotLight.range = 10.0f;
+
+                Assert.That(
+                    VividLightEditor.ShouldDrawBoxSpotLightGizmo(spotLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(spotLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_BoxSpotLightGizmoCorners_UseAreaSizeAndRange()
+        {
+            var corners = VividLightEditor.GetBoxSpotLightGizmoLocalCorners(4.0f, 2.0f, 10.0f);
+
+            Assert.That(corners, Has.Length.EqualTo(8));
+            AssertVector3(corners[0], new Vector3(2.0f, 1.0f, 0.0f));
+            AssertVector3(corners[1], new Vector3(-2.0f, 1.0f, 0.0f));
+            AssertVector3(corners[2], new Vector3(-2.0f, -1.0f, 0.0f));
+            AssertVector3(corners[3], new Vector3(2.0f, -1.0f, 0.0f));
+            AssertVector3(corners[4], new Vector3(2.0f, 1.0f, 10.0f));
+            AssertVector3(corners[5], new Vector3(-2.0f, 1.0f, 10.0f));
+            AssertVector3(corners[6], new Vector3(-2.0f, -1.0f, 10.0f));
+            AssertVector3(corners[7], new Vector3(2.0f, -1.0f, 10.0f));
+        }
+
+        [Test]
+        public void VividLightEditor_SanitizesBoxSpotLightHandleValues_ToPositiveDimensions()
+        {
+            var sanitizedValues = VividLightEditor.SanitizeBoxSpotLightHandleValues(
+                new Vector3(-1.0f, 0.0f, -2.0f));
+
+            Assert.That(sanitizedValues.x, Is.GreaterThan(0.0f));
+            Assert.That(sanitizedValues.y, Is.GreaterThan(0.0f));
+            Assert.That(sanitizedValues.z, Is.GreaterThan(0.0f));
+        }
+
+        [Test]
+        public void VividLightEditor_AppliesBoxSpotLightHandleValues_ToAreaSizeAndRange()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Box;
+            light.areaSize = new Vector2(1.0f, 1.0f);
+            light.range = 1.0f;
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            VividLightEditor.ApplyBoxSpotLightHandleValues(light, new Vector3(4.0f, 2.0f, 10.0f));
+
+            Assert.That(light.areaSize.x, Is.EqualTo(4.0f).Within(0.0001f));
+            Assert.That(light.areaSize.y, Is.EqualTo(2.0f).Within(0.0001f));
+            Assert.That(light.range, Is.EqualTo(10.0f).Within(0.0001f));
+            Assert.That(additionalData, Is.Not.Null);
+            Assert.That(light.useBoundingSphereOverride, Is.True);
+            Assert.That(light.boundingSphereOverride.w, Is.EqualTo(Mathf.Sqrt(105.0f)).Within(0.0001f));
+        }
+
+        [Test]
         public void VividLightEditor_ShowsDirectionalPCSSControls_OnlyForDirectionalLightsUsingVeryHighQuality()
         {
             var directionalLight = m_GameObject.AddComponent<Light>();
@@ -1564,6 +1646,13 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(s_LateUpdateMethod, Is.Not.Null);
             s_LateUpdateMethod.Invoke(additionalData, null);
+        }
+
+        private static void AssertVector3(Vector3 actual, Vector3 expected)
+        {
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(0.0001f));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(0.0001f));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(0.0001f));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

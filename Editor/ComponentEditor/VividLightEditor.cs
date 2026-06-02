@@ -71,6 +71,9 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SpotLightShapeLabel = EditorGUIUtility.TrTextContent("Shape", "Sets the shape of the spot light.");
         private static readonly GUIContent s_BoxShapeWidthLabel = EditorGUIUtility.TrTextContent("Width", "Sets the width of the box spot light.");
         private static readonly GUIContent s_BoxShapeHeightLabel = EditorGUIUtility.TrTextContent("Height", "Sets the height of the box spot light.");
+        private static readonly Color s_BoxSpotGizmoColor = new(1.0f, 0.84f, 0.22f, 0.45f);
+        private static readonly Color s_BoxSpotGizmoBehindColor = new(1.0f, 0.84f, 0.22f, 0.14f);
+        private const float k_MinBoxSpotLightHandleValue = 0.0001f;
         private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
         private static readonly GUIContent s_ScreenSpaceShadowQualityLabel = EditorGUIUtility.TrTextContent("Screen Space Quality", "Quality tier used by the screen-space CSM resolve for this directional light.");
         private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
@@ -176,6 +179,20 @@ namespace VividRP.Editor
         protected void OnDisable()
         {
             Undo.undoRedoPerformed -= RebuildSerializedState;
+        }
+
+        protected override void OnSceneGUI()
+        {
+            if (target is not Light light)
+                return;
+
+            if (light.type != LightType.Box)
+            {
+                base.OnSceneGUI();
+                return;
+            }
+
+            DrawBoxSpotLightSceneHandle(light);
         }
 
         public override void OnInspectorGUI()
@@ -314,6 +331,207 @@ namespace VividRP.Editor
             EditorGUILayout.PropertyField(settings.shapeRadius, s_LightRadiusLabel);
         }
 
+        [DrawGizmo(GizmoType.NonSelected | GizmoType.Pickable)]
+        private static void DrawBoxSpotLightGizmo(Light light, GizmoType gizmoType)
+        {
+            if ((gizmoType & (GizmoType.Selected | GizmoType.Active)) != 0)
+                return;
+
+            if (!ShouldDrawBoxSpotLightGizmo(light))
+                return;
+
+            var colorScale = light.enabled && light.gameObject.activeInHierarchy ? 1.0f : 0.35f;
+            var wireColor = s_BoxSpotGizmoColor * colorScale;
+            var behindColor = s_BoxSpotGizmoBehindColor * colorScale;
+            var previousColor = Handles.color;
+            var previousZTest = Handles.zTest;
+
+            using (new Handles.DrawingScope(Matrix4x4.TRS(light.transform.position, light.transform.rotation, Vector3.one)))
+            {
+                Handles.zTest = CompareFunction.Greater;
+                Handles.color = behindColor;
+                DrawBoxSpotLightGizmoWireframe(light.areaSize.x, light.areaSize.y, light.range);
+
+                Handles.zTest = CompareFunction.LessEqual;
+                Handles.color = wireColor;
+                DrawBoxSpotLightGizmoWireframe(light.areaSize.x, light.areaSize.y, light.range);
+            }
+
+            Handles.color = previousColor;
+            Handles.zTest = previousZTest;
+        }
+
+        private static void DrawBoxSpotLightSceneHandle(Light light)
+        {
+            if (!ShouldDrawBoxSpotLightGizmo(light))
+                return;
+
+            var wireframeColor = light.enabled ? LightEditor.kGizmoLight : LightEditor.kGizmoDisabledLight;
+            var wireframeColorBehind = GetBoxSpotLightBehindObjectWireframeColor(wireframeColor);
+            var handleColor = GetBoxSpotLightHandleColor(wireframeColor);
+            var handleColorBehind = GetBoxSpotLightHandleColor(wireframeColorBehind);
+            var handleValues = new Vector3(light.areaSize.x, light.areaSize.y, light.range);
+            var previousColor = Handles.color;
+            var previousZTest = Handles.zTest;
+
+            using (new Handles.DrawingScope(Matrix4x4.TRS(light.transform.position, light.transform.rotation, Vector3.one)))
+            {
+                Handles.zTest = CompareFunction.Greater;
+                Handles.color = wireframeColorBehind;
+                DrawBoxSpotLightGizmoWireframe(handleValues.x, handleValues.y, handleValues.z);
+
+                Handles.zTest = CompareFunction.LessEqual;
+                Handles.color = wireframeColor;
+                DrawBoxSpotLightGizmoWireframe(handleValues.x, handleValues.y, handleValues.z);
+
+                EditorGUI.BeginChangeCheck();
+                Handles.zTest = CompareFunction.Greater;
+                Handles.color = handleColorBehind;
+                handleValues = DrawBoxSpotLightHandleSliders(handleValues);
+
+                Handles.zTest = CompareFunction.LessEqual;
+                Handles.color = handleColor;
+                handleValues = DrawBoxSpotLightHandleSliders(handleValues);
+
+                if (EditorGUI.EndChangeCheck())
+                {
+                    Undo.RecordObject(light, "Adjust Box Spot Light");
+                    ApplyBoxSpotLightHandleValues(light, handleValues);
+                }
+            }
+
+            Handles.color = previousColor;
+            Handles.zTest = previousZTest;
+        }
+
+        internal static bool ShouldDrawBoxSpotLightGizmo(Light light)
+        {
+            return light != null
+                && light.transform != null
+                && light.type == LightType.Box
+                && light.range > 0.0f;
+        }
+
+        internal static Vector3[] GetBoxSpotLightGizmoLocalCorners(float width, float height, float range)
+        {
+            var values = SanitizeBoxSpotLightHandleValues(new Vector3(width, height, range));
+            var halfWidth = values.x * 0.5f;
+            var halfHeight = values.y * 0.5f;
+            var maxRange = values.z;
+            var sizeX = new Vector3(halfWidth, 0.0f, 0.0f);
+            var sizeY = new Vector3(0.0f, halfHeight, 0.0f);
+            var nearCenter = Vector3.zero;
+            var farCenter = new Vector3(0.0f, 0.0f, maxRange);
+
+            return new[]
+            {
+                nearCenter + sizeX + sizeY,
+                nearCenter - sizeX + sizeY,
+                nearCenter - sizeX - sizeY,
+                nearCenter + sizeX - sizeY,
+                farCenter + sizeX + sizeY,
+                farCenter - sizeX + sizeY,
+                farCenter - sizeX - sizeY,
+                farCenter + sizeX - sizeY
+            };
+        }
+
+        internal static Vector3 SanitizeBoxSpotLightHandleValues(Vector3 widthHeightRange)
+        {
+            return new Vector3(
+                Mathf.Max(widthHeightRange.x, k_MinBoxSpotLightHandleValue),
+                Mathf.Max(widthHeightRange.y, k_MinBoxSpotLightHandleValue),
+                Mathf.Max(widthHeightRange.z, k_MinBoxSpotLightHandleValue));
+        }
+
+        internal static void ApplyBoxSpotLightHandleValues(Light light, Vector3 widthHeightRange)
+        {
+            if (light == null)
+                return;
+
+            var sanitizedValues = SanitizeBoxSpotLightHandleValues(widthHeightRange);
+            light.areaSize = new Vector2(sanitizedValues.x, sanitizedValues.y);
+            light.range = sanitizedValues.z;
+
+            if (light.TryGetComponent<VividAdditionalLightData>(out var additionalData))
+                additionalData.NotifyLightDataChanged();
+
+            EditorUtility.SetDirty(light);
+        }
+
+        private static Vector3 DrawBoxSpotLightHandleSliders(Vector3 widthHeightRange)
+        {
+            var sanitizedValues = SanitizeBoxSpotLightHandleValues(widthHeightRange);
+            var halfWidth = sanitizedValues.x * 0.5f;
+            var halfHeight = sanitizedValues.y * 0.5f;
+            var range = SliderLineHandle(Vector3.zero, Vector3.forward, sanitizedValues.z);
+            var farEnd = new Vector3(0.0f, 0.0f, Mathf.Max(range, k_MinBoxSpotLightHandleValue));
+
+            EditorGUI.BeginChangeCheck();
+            halfWidth = SliderLineHandle(farEnd, Vector3.right, halfWidth);
+            halfWidth = SliderLineHandle(farEnd, Vector3.left, halfWidth);
+            if (EditorGUI.EndChangeCheck())
+                halfWidth = Mathf.Max(halfWidth, k_MinBoxSpotLightHandleValue * 0.5f);
+
+            EditorGUI.BeginChangeCheck();
+            halfHeight = SliderLineHandle(farEnd, Vector3.up, halfHeight);
+            halfHeight = SliderLineHandle(farEnd, Vector3.down, halfHeight);
+            if (EditorGUI.EndChangeCheck())
+                halfHeight = Mathf.Max(halfHeight, k_MinBoxSpotLightHandleValue * 0.5f);
+
+            return SanitizeBoxSpotLightHandleValues(new Vector3(halfWidth * 2.0f, halfHeight * 2.0f, range));
+        }
+
+        private static float SliderLineHandle(Vector3 position, Vector3 direction, float value)
+        {
+            var id = GUIUtility.GetControlID(FocusType.Passive);
+            var handlePosition = position + direction * value;
+            var handleSize = HandleUtility.GetHandleSize(handlePosition) * 0.03f;
+            var guiChanged = GUI.changed;
+
+            GUI.changed = false;
+            handlePosition = Handles.Slider(id, handlePosition, direction, handleSize, Handles.DotHandleCap, 0.0f);
+            if (GUI.changed)
+                value = Vector3.Dot(handlePosition - position, direction);
+
+            GUI.changed |= guiChanged;
+            return value;
+        }
+
+        private static Color GetBoxSpotLightHandleColor(Color wireframeColor)
+        {
+            var color = wireframeColor;
+            color.a = Mathf.Clamp01(color.a * 2.0f);
+            return QualitySettings.activeColorSpace == ColorSpace.Linear ? color.linear : color;
+        }
+
+        private static Color GetBoxSpotLightBehindObjectWireframeColor(Color wireframeColor)
+        {
+            var color = wireframeColor;
+            color.a = 0.2f;
+            return color;
+        }
+
+        private static void DrawBoxSpotLightGizmoWireframe(float width, float height, float range)
+        {
+            var corners = GetBoxSpotLightGizmoLocalCorners(width, height, range);
+
+            Handles.DrawLine(corners[0], corners[1]);
+            Handles.DrawLine(corners[1], corners[2]);
+            Handles.DrawLine(corners[2], corners[3]);
+            Handles.DrawLine(corners[3], corners[0]);
+
+            Handles.DrawLine(corners[4], corners[5]);
+            Handles.DrawLine(corners[5], corners[6]);
+            Handles.DrawLine(corners[6], corners[7]);
+            Handles.DrawLine(corners[7], corners[4]);
+
+            Handles.DrawLine(corners[0], corners[4]);
+            Handles.DrawLine(corners[1], corners[5]);
+            Handles.DrawLine(corners[2], corners[6]);
+            Handles.DrawLine(corners[3], corners[7]);
+        }
+
         private void DrawSpotShapeInspector()
         {
             if (!ShouldShowSpotShapeControls(m_SerializedLight))
@@ -364,7 +582,7 @@ namespace VividRP.Editor
             if (property == null || property.hasMultipleDifferentValues)
                 return;
 
-            var clampedValue = Mathf.Max(0.0001f, property.floatValue);
+            var clampedValue = Mathf.Max(k_MinBoxSpotLightHandleValue, property.floatValue);
             if (!Mathf.Approximately(property.floatValue, clampedValue))
                 property.floatValue = clampedValue;
         }

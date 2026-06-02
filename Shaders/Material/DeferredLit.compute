@@ -113,19 +113,10 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     for (uint lightIndex = 0; lightIndex < _DirectionalLightCount; lightIndex++)
     {
         DirectionalLightData directionalLight = GetDirectionalLight(lightIndex);
-        float shadowAttenuation = EvaluateDeferredDirectionalShadowAttenuation(
-            pixelCoord,
-            lightIndex,
-            directionalLight);
-        AccumulateDirectLighting(
-            EvaluateBSDF_Directional(
-                surfaceData,
-                bsdfData,
-                preLightData,
-                viewDirectionWS,
-                directionalLight,
-                shadowAttenuation),
-            aggregateLighting);
+        float shadowAttenuation = EvaluateDeferredDirectionalShadowAttenuation(pixelCoord, lightIndex, directionalLight);
+
+        VividDirectLighting lighting = EvaluateBSDF_Directional(surfaceData, bsdfData, preLightData, viewDirectionWS, directionalLight, shadowAttenuation);
+        AccumulateDirectLighting(lighting, aggregateLighting);
     }
 
     VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
@@ -135,17 +126,10 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     for (uint localLightIndex = 0; localLightIndex < punctualLightCount; localLightIndex++)
     {
         PunctualLightData punctualLight = VividLightingLoop::LoadPunctualLight(lightLoop, localLightIndex);
-        AccumulateDirectLighting(
-            EvaluateBSDF_Punctual(
-                surfaceData,
-                bsdfData,
-                preLightData,
-                positionWS,
-                viewDirectionWS,
-            punctualLight),
-            aggregateLighting);
+        VividDirectLighting lighting = EvaluateBSDF_Punctual(surfaceData, bsdfData, preLightData, positionWS, viewDirectionWS, punctualLight);
+        AccumulateDirectLighting(lighting, aggregateLighting);
     }
-    _LightingDebugTexture[pixelCoord]=aggregateLighting.direct.specular.xyzz;
+    _LightingDebugTexture[pixelCoord] = aggregateLighting.direct.specular.xyzz;
 
     uint areaLightCount = VividLightingLoop::GetAreaLightCount(lightLoop);
 

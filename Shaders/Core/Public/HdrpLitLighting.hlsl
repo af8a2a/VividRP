@@ -267,33 +267,48 @@ VividCBSDF EvaluateVividLitBSDF(
     float invLenLV = 0.0;
     GetBSDFAngle(viewDirectionWS, lightDirectionWS, nDotL, preLightData.NdotV, lDotV, nDotH, lDotH, invLenLV);
 
-    float3 fresnel = F_Schlick(bsdfData.fresnel0, bsdfData.fresnel90, lDotH);
-    float3 specular = fresnel * DV_SmithJointGGX(
-        nDotH,
-        clampedNdotL,
-        clampedNdotV,
-        bsdfData.roughness,
-        preLightData.partLambdaV);
-    float diffuse = DisneyDiffuse(clampedNdotV, clampedNdotL, lDotV, bsdfData.perceptualRoughness);
+    float3 F = F_Schlick(bsdfData.fresnel0, bsdfData.fresnel90, lDotH);
+    float DV = DV_SmithJointGGX(nDotH, clampedNdotL, clampedNdotV, bsdfData.roughness, preLightData.partLambdaV);
+    float3 specTerm = F * DV;
+    // A note on subsurface scattering: [SSS-NOTE-TRSM]
+    // The correct way to handle SSS is to transmit light inside the surface, perform SSS,
+    // and then transmit it outside towards the viewer.
+    // Transmit(X) = F_Transm_Schlick(F0, F90, NdotX), where F0 = 0, F90 = 1.
+    // Therefore, the diffuse BSDF should be decomposed as follows:
+    // f_d = A / Pi * F_Transm_Schlick(0, 1, NdotL) * F_Transm_Schlick(0, 1, NdotV) + f_d_reflection,
+    // with F_Transm_Schlick(0, 1, NdotV) applied after the SSS pass.
+    // The alternative (artistic) formulation of Disney is to set F90 = 0.5:
+    // f_d = A / Pi * F_Transm_Schlick(0, 0.5, NdotL) * F_Transm_Schlick(0, 0.5, NdotV) + f_retro_reflection.
+    // That way, darkening at grading angles is reduced to 0.5.
+    // In practice, applying F_Transm_Schlick(F0, F90, NdotV) after the SSS pass is expensive,
+    // as it forces us to read the normal buffer at the end of the SSS pass.
+    // Separating f_retro_reflection also has a small cost (mostly due to energy compensation
+    // for multi-bounce GGX), and the visual difference is negligible.
+    // Therefore, we choose not to separate diffuse lighting into reflected and transmitted.
+
+    // Use abs NdotL to evaluate diffuse term also for transmission
+    // TODO: See with Evgenii about the clampedNdotV here. This is what we use before the refactor
+    // but now maybe we want to revisit it for transmission
+    float diffTerm = DisneyDiffuse(clampedNdotV, abs(nDotL), lDotV, bsdfData.perceptualRoughness);
 
     if (bsdfData.coatMask > 0.0)
     {
         float coatFresnel = F_Schlick(kVividClearCoatF0, 1.0, lDotH) * bsdfData.coatMask;
-        specular *= Sq(1.0 - coatFresnel);
+        specTerm *= Sq(1.0 - coatFresnel);
 
         float coatPartLambdaV = GetSmithJointGGXPartLambdaV(clampedNdotV, bsdfData.coatRoughness);
-        specular += coatFresnel * DV_SmithJointGGX(
+        specTerm += coatFresnel * DV_SmithJointGGX(
             nDotH,
             clampedNdotL,
             clampedNdotV,
             bsdfData.coatRoughness,
             coatPartLambdaV);
 
-        diffuse *= lerp(1.0, 1.0 - coatFresnel, bsdfData.coatMask);
+        diffTerm *= lerp(1.0, 1.0 - coatFresnel, bsdfData.coatMask);
     }
 
-    cbsdf.diffuse = diffuse * clampedNdotL;
-    cbsdf.specular = specular * clampedNdotL;
+    cbsdf.diffuse = diffTerm * clampedNdotL;
+    cbsdf.specular = specTerm * clampedNdotL;
     return cbsdf;
 }
 

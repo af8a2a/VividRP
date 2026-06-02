@@ -36,14 +36,8 @@ float VividPunctualLightAttenuationWithDistanceModification(PunctualLightData pu
     float spotCosine = distances.w * rsqrt(max(distanceSquared, 1e-12));
 
     float attenuation = min(inverseDistance, 1.0 / PUNCTUAL_LIGHT_THRESHOLD);
-    attenuation *= DistanceWindowing(
-        distanceSquared,
-        punctualLight.rangeAttenuationScale,
-        punctualLight.rangeAttenuationBias);
-    attenuation *= AngleAttenuation(
-        spotCosine,
-        punctualLight.angleScale,
-        punctualLight.angleOffset);
+    attenuation *= DistanceWindowing(distanceSquared,punctualLight.rangeAttenuationScale, punctualLight.rangeAttenuationBias);
+    attenuation *= AngleAttenuation(spotCosine, punctualLight.angleScale, punctualLight.angleOffset);
 
     return attenuation * attenuation;
 }

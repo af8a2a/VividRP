@@ -5,6 +5,7 @@
 
 #define VIVID_PUNCTUAL_LIGHT_TYPE_POINT 0u
 #define VIVID_PUNCTUAL_LIGHT_TYPE_SPOT  1u
+#define VIVID_PUNCTUAL_LIGHT_TYPE_PROJECTOR_BOX 2u
 #define VIVID_AREA_LIGHT_TYPE_TUBE      0u
 #define VIVID_AREA_LIGHT_TYPE_RECTANGLE 1u
 
@@ -32,6 +33,7 @@ struct PunctualLightData
     float angleOffset;
     float3 upWS;
     float shapeRadiusSquared;
+    float2 projectorSize;
     float rangeAttenuationScale;
     float rangeAttenuationBias;
     float shadowStrength;
@@ -40,6 +42,8 @@ struct PunctualLightData
     float volumetricShadowDimmer;
     float volumetricFadeDistance;
     uint affectVolumetric;
+    float padding0;
+    float padding1;
 };
 
 struct AreaLightData

@@ -43,6 +43,7 @@ namespace VividRP.Runtime
             public float angleOffset;
             public Vector3 upWS;
             public float shapeRadiusSquared;
+            public Vector2 projectorSize;
             public float rangeAttenuationScale;
             public float rangeAttenuationBias;
             public float shadowStrength;
@@ -51,6 +52,7 @@ namespace VividRP.Runtime
             public float volumetricShadowDimmer;
             public float volumetricFadeDistance;
             public uint affectVolumetric;
+            public Vector2 padding;
 
             internal static int Stride => Marshal.SizeOf<PunctualLightData>();
         }
@@ -107,6 +109,10 @@ namespace VividRP.Runtime
             public uint lightType;
             public float cosOuterAngle;
             public float radiusAtRange;
+            public Vector3 rightWS;
+            public float projectorWidth;
+            public Vector3 upWS;
+            public float projectorHeight;
             public Vector3 cullingCenterWS;
             public float cullingRadius;
             public uint affectVolumetric;
@@ -173,6 +179,9 @@ namespace VividRP.Runtime
         private const uint HdrpLightVolumeTypeSphere = 1u;
         private const uint HdrpLightVolumeTypeBox = 2u;
         private const float HdrpBoxCullingExtentThreshold = 0.01f;
+        private const uint VividPunctualLightTypePoint = 0u;
+        private const uint VividPunctualLightTypeSpot = 1u;
+        private const uint VividPunctualLightTypeProjectorBox = 2u;
 
         [StructLayout(LayoutKind.Sequential)]
         private struct VisibleLightRenderDataRecord
@@ -214,6 +223,10 @@ namespace VividRP.Runtime
             public float cullingRadius;
             public uint lightType;
             public float radiusAtRange;
+            public float3 rightVS;
+            public float projectorWidth;
+            public float3 upVS;
+            public float projectorHeight;
         }
 
         private struct PunctualLightClusteredCullBuildContext : IDisposable
@@ -1160,8 +1173,15 @@ namespace VividRP.Runtime
 
         private static bool IsPunctualLightSupported(VividLightRenderData trackedLightData)
         {
-            return (trackedLightData.lightType == LightType.Point || trackedLightData.lightType == LightType.Spot)
-                   && trackedLightData.range > 0.0f;
+            return trackedLightData.lightType switch
+            {
+                LightType.Point => trackedLightData.range > 0.0f,
+                LightType.Spot => trackedLightData.range > 0.0f,
+                LightType.Box => trackedLightData.range > 0.0f
+                    && trackedLightData.areaSize.x > 0.0f
+                    && trackedLightData.areaSize.y > 0.0f,
+                _ => false,
+            };
         }
 
         private static bool IsAreaLightSupported(VividLightRenderData trackedLightData)
@@ -1179,8 +1199,14 @@ namespace VividRP.Runtime
 
         private static bool IsReGIRLightSupported(VividLightRenderData trackedLightData)
         {
-            return IsPunctualLightSupported(trackedLightData)
+            return IsReGIRPunctualLightSupported(trackedLightData)
                    || IsAreaLightSupported(trackedLightData);
+        }
+
+        private static bool IsReGIRPunctualLightSupported(VividLightRenderData trackedLightData)
+        {
+            return (trackedLightData.lightType == LightType.Point || trackedLightData.lightType == LightType.Spot)
+                   && trackedLightData.range > 0.0f;
         }
 
         private static bool IsLightEnabledAndActive(VividLightRenderData trackedLightData)
@@ -1242,7 +1268,12 @@ namespace VividRP.Runtime
 
         private static uint GetPunctualLightType(LightType lightType)
         {
-            return lightType == LightType.Spot ? 1u : 0u;
+            return lightType switch
+            {
+                LightType.Spot => VividPunctualLightTypeSpot,
+                LightType.Box => VividPunctualLightTypeProjectorBox,
+                _ => VividPunctualLightTypePoint,
+            };
         }
 
         private static uint GetAreaLightType(LightType lightType)
@@ -1271,7 +1302,7 @@ namespace VividRP.Runtime
             cosOuterAngle = 1.0f;
             radiusAtRange = 0.0f;
 
-            if (source.lightType != 1u)
+            if (source.lightType != VividPunctualLightTypeSpot)
                 return;
 
             cosOuterAngle = Mathf.Clamp01(-source.angleOffset / Mathf.Max(source.angleScale, 1e-6f));
@@ -1284,7 +1315,19 @@ namespace VividRP.Runtime
             cullingCenterWS = source.positionWS;
             cullingRadius = source.range;
 
-            if (source.lightType != 1u)
+            if (source.lightType == VividPunctualLightTypeProjectorBox)
+            {
+                GetPunctualLightCullingShapeData(source, out var projectorDirectionWS, out _, out _);
+                var extents = new Vector3(
+                    0.5f * Mathf.Max(source.projectorSize.x, 0.0f),
+                    0.5f * Mathf.Max(source.projectorSize.y, 0.0f),
+                    0.5f * Mathf.Max(source.range, 0.0f));
+                cullingCenterWS = source.positionWS + projectorDirectionWS * extents.z;
+                cullingRadius = extents.magnitude;
+                return;
+            }
+
+            if (source.lightType != VividPunctualLightTypeSpot)
                 return;
 
             GetPunctualLightCullingShapeData(source, out var directionWS, out _, out var radiusAtRange);
@@ -1335,6 +1378,35 @@ namespace VividRP.Runtime
             angleOffset = -cosOuter * angleScale;
         }
 
+        private static Vector2 GetProjectorBoxSize(VividLightRenderData trackedLightData)
+        {
+            if (trackedLightData.lightType != LightType.Box)
+                return Vector2.zero;
+
+            return new Vector2(
+                Mathf.Max(trackedLightData.areaSize.x, 0.0f),
+                Mathf.Max(trackedLightData.areaSize.y, 0.0f));
+        }
+
+        private static void GetPunctualLightAxisScales(
+            LightType lightType,
+            float innerSpotAngle,
+            float outerSpotAngle,
+            Vector2 projectorSize,
+            out float rightAxisScale,
+            out float upAxisScale)
+        {
+            if (lightType == LightType.Box)
+            {
+                rightAxisScale = 2.0f / Mathf.Max(projectorSize.x, 0.001f);
+                upAxisScale = 2.0f / Mathf.Max(projectorSize.y, 0.001f);
+                return;
+            }
+
+            rightAxisScale = GetSpotConeAxisScale(lightType, innerSpotAngle, outerSpotAngle);
+            upAxisScale = rightAxisScale;
+        }
+
         private static float GetSpotConeAxisScale(LightType lightType, float innerSpotAngle, float outerSpotAngle)
         {
             if (lightType != LightType.Spot)
@@ -1369,6 +1441,8 @@ namespace VividRP.Runtime
         {
             var positionVS = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(worldToViewMatrix, source.positionWS);
             var directionVS = NormalizeDirection(TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.directionWS), new float3(0.0f, 0.0f, 1.0f));
+            var rightVS = NormalizeDirection(TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.rightWS), new float3(1.0f, 0.0f, 0.0f));
+            var upVS = NormalizeDirection(TransformWorldVectorToPositiveViewSpace(worldToViewMatrix, source.upWS), new float3(0.0f, 1.0f, 0.0f));
             var cullingCenterVS = BoundProxyClusterProjectionUtility.TransformWorldToPositiveViewSpace(worldToViewMatrix, source.cullingCenterWS);
 
             return new PunctualLightViewSpaceCullDataRecord
@@ -1381,6 +1455,10 @@ namespace VividRP.Runtime
                 cullingRadius = source.cullingRadius,
                 lightType = source.lightType,
                 radiusAtRange = source.radiusAtRange,
+                rightVS = rightVS,
+                projectorWidth = source.projectorWidth,
+                upVS = upVS,
+                projectorHeight = source.projectorHeight,
             };
         }
 
@@ -1400,7 +1478,36 @@ namespace VividRP.Runtime
             lightVolumeData.featureFlags = HdrpLightFeatureFlagsPunctual;
             lightVolumeData.radiusSq = range * range;
 
-            if (source.lightType == 1u)
+            if (source.lightType == VividPunctualLightTypeProjectorBox)
+            {
+                var axisX = NormalizeDirection(viewSpaceCullData.rightVS, new float3(1.0f, 0.0f, 0.0f));
+                var axisY = NormalizeDirection(viewSpaceCullData.upVS, new float3(0.0f, 1.0f, 0.0f));
+                var axisZ = NormalizeDirection(viewSpaceCullData.directionVS, new float3(0.0f, 0.0f, 1.0f));
+                var extents = new float3(
+                    0.5f * math.max(viewSpaceCullData.projectorWidth, 1e-4f),
+                    0.5f * math.max(viewSpaceCullData.projectorHeight, 1e-4f),
+                    0.5f * range);
+                var center = viewSpaceCullData.positionVS + axisZ * extents.z;
+                var radius = math.length(extents);
+
+                lightBound.center = new Vector3(center.x, center.y, center.z);
+                lightBound.boxAxisX = new Vector4(axisX.x * extents.x, axisX.y * extents.x, axisX.z * extents.x, 1.0f);
+                lightBound.boxAxisY = new Vector4(axisY.x * extents.y, axisY.y * extents.y, axisY.z * extents.y, radius);
+                lightBound.boxAxisZ = new Vector3(axisZ.x * extents.z, axisZ.y * extents.z, axisZ.z * extents.z);
+
+                lightVolumeData.lightVolume = HdrpLightVolumeTypeBox;
+                lightVolumeData.lightAxisX = new Vector3(axisX.x, axisX.y, axisX.z);
+                lightVolumeData.lightAxisY = new Vector3(axisY.x, axisY.y, axisY.z);
+                lightVolumeData.lightAxisZ = new Vector3(axisZ.x, axisZ.y, axisZ.z);
+                lightVolumeData.lightPos = lightBound.center;
+                lightVolumeData.boxInvRange = new Vector3(
+                    1.0f / math.max(extents.x, 1e-4f),
+                    1.0f / math.max(extents.y, 1e-4f),
+                    1.0f / math.max(extents.z, 1e-4f));
+                return;
+            }
+
+            if (source.lightType == VividPunctualLightTypeSpot)
             {
                 CreatePerpendicularBasis(viewSpaceCullData.directionVS, out var axisX, out var axisY);
                 var axisZ = NormalizeDirection(viewSpaceCullData.directionVS, new float3(0.0f, 0.0f, 1.0f));

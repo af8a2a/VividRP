@@ -127,6 +127,51 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UpdatePunctualLightClusteredCullData_BuildsBoxBoundsAndVolume_ForProjectorBoxLight()
+        {
+            var lightData = new VividLightData
+            {
+                punctualLightCullData = new[]
+                {
+                    new VividLightData.PunctualLightCullData
+                    {
+                        positionWS = new Vector3(1.0f, 2.0f, 3.0f),
+                        range = 10.0f,
+                        directionWS = Vector3.forward,
+                        lightType = 2u,
+                        rightWS = Vector3.right,
+                        projectorWidth = 4.0f,
+                        upWS = Vector3.up,
+                        projectorHeight = 2.0f,
+                        cullingCenterWS = new Vector3(1.0f, 2.0f, 8.0f),
+                        cullingRadius = Mathf.Sqrt(30.0f),
+                    }
+                },
+                punctualLightCount = 1,
+            };
+
+            lightData.UpdatePunctualLightClusteredCullData(Matrix4x4.identity);
+
+            var bound = lightData.punctualLightBounds[0];
+            var volume = lightData.punctualLightVolumeData[0];
+            var expectedRadius = Mathf.Sqrt(30.0f);
+
+            AssertVector3(bound.center, new Vector3(1.0f, 2.0f, 8.0f));
+            AssertVector4(bound.boxAxisX, new Vector4(2.0f, 0.0f, 0.0f, 1.0f));
+            AssertVector4(bound.boxAxisY, new Vector4(0.0f, 1.0f, 0.0f, expectedRadius), 0.001f);
+            AssertVector3(bound.boxAxisZ, new Vector3(0.0f, 0.0f, 5.0f));
+            Assert.That(volume.lightVolume, Is.EqualTo(2u));
+            Assert.That(volume.lightCategory, Is.Zero);
+            Assert.That(volume.featureFlags, Is.EqualTo(4096u));
+            Assert.That(volume.radiusSq, Is.EqualTo(100.0f).Within(0.0001f));
+            AssertVector3(volume.lightPos, new Vector3(1.0f, 2.0f, 8.0f));
+            AssertVector3(volume.lightAxisX, Vector3.right);
+            AssertVector3(volume.lightAxisY, Vector3.up);
+            AssertVector3(volume.lightAxisZ, Vector3.forward);
+            AssertVector3(volume.boxInvRange, new Vector3(0.5f, 1.0f, 0.2f));
+        }
+
+        [Test]
         public void UpdateAreaLightClusteredCullData_BuildsBoxBoundsAndVolume_ForRectangleLight()
         {
             var lightData = new VividLightData
@@ -471,6 +516,71 @@ namespace VividRP.Editor.Tests
                 UnityEngine.Object.DestroyImmediate(pointLightObject);
                 UnityEngine.Object.DestroyImmediate(spotLightObject);
                 UnityEngine.Object.DestroyImmediate(areaLightObject);
+            }
+        }
+
+        [Test]
+        public void UpdateVisibleLightData_BuildsPunctualLightAndSkipsReGIR_ForProjectorBoxLight()
+        {
+            var lightData = new VividLightData();
+            var visibleLights = new NativeArray<VisibleLight>(1, Allocator.TempJob);
+            var boxLightObject = new GameObject("Projector Box Light");
+
+            try
+            {
+                VividLightRenderDatabase.instance.Clear();
+
+                var boxLight = CreateRegisteredLight(
+                    boxLightObject,
+                    LightType.Box,
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    range: 10.0f,
+                    color: Color.white,
+                    areaSize: new Vector2(4.0f, 2.0f));
+
+                visibleLights[0] = CreateVisibleLight(
+                    LightType.Box,
+                    Color.white,
+                    Matrix4x4.TRS(boxLightObject.transform.position, Quaternion.identity, Vector3.one),
+                    range: 10.0f,
+                    light: boxLight);
+
+                InvokeUpdateVisibleLightData(lightData, visibleLights);
+                lightData.CompleteReGIRPrepare();
+                lightData.CompleteLightGridPrepare();
+
+                Assert.That(lightData.punctualLightCount, Is.EqualTo(1));
+                Assert.That(lightData.reGIRLightCount, Is.Zero);
+                Assert.That(lightData.areaLightCount, Is.Zero);
+                AssertPunctualLight(
+                    lightData.punctualLights[0],
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    Vector3.one,
+                    10.0f,
+                    2u,
+                    Vector3.forward);
+                Assert.That(lightData.punctualLights[0].shapeRadiusSquared, Is.Zero);
+                AssertVector3(lightData.punctualLights[0].rightWS, new Vector3(0.5f, 0.0f, 0.0f));
+                AssertVector3(lightData.punctualLights[0].upWS, new Vector3(0.0f, 1.0f, 0.0f));
+                Assert.That(lightData.punctualLights[0].projectorSize.x, Is.EqualTo(4.0f).Within(0.0001f));
+                Assert.That(lightData.punctualLights[0].projectorSize.y, Is.EqualTo(2.0f).Within(0.0001f));
+                AssertPunctualLightCullData(
+                    lightData.punctualLightCullData[0],
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    Vector3.forward,
+                    10.0f,
+                    2u,
+                    1.0f,
+                    0.0f,
+                    new Vector3(1.0f, 2.0f, 8.0f),
+                    Mathf.Sqrt(30.0f));
+            }
+            finally
+            {
+                lightData.ReleaseLightGridNativeResources();
+                VividLightRenderDatabase.instance.Clear();
+                visibleLights.Dispose();
+                UnityEngine.Object.DestroyImmediate(boxLightObject);
             }
         }
 
@@ -864,7 +974,7 @@ namespace VividRP.Editor.Tests
             light.spotAngle = spotAngle;
             light.innerSpotAngle = innerSpotAngle;
 
-            if (lightType == LightType.Rectangle || lightType == LightType.Tube)
+            if (lightType == LightType.Box || lightType == LightType.Rectangle || lightType == LightType.Tube)
                 light.areaSize = areaSize;
 
             VividLightRenderDatabase.instance.UpdateLightData(light, light.GetVividAdditionalLightData());

@@ -749,7 +749,10 @@ VividDirectLighting EvaluateBSDF_Punctual(
     if (nDotL <= 0.0)
         return lighting;
 
-    float attenuation = VividPunctualLightAttenuationWithDistanceModification(punctualLight, distances);
+    float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+        punctualLight,
+        positionWS - punctualLight.positionWS,
+        distances);
 
     if (attenuation <= 0.0)
         return lighting;

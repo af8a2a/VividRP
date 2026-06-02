@@ -28,9 +28,16 @@ namespace VividRP.Runtime
             var range = Mathf.Max(trackedLightData.range, 0.001f);
             GetSpotAngleParameters(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle, out var angleScale, out var angleOffset);
             var directionWS = NormalizeDirection(trackedLightData.forwardWS, Vector3.forward);
-            var coneAxisScale = GetSpotConeAxisScale(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle);
-            var rightWS = NormalizeDirection(trackedLightData.rightWS, Vector3.right) * coneAxisScale;
-            var upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up) * coneAxisScale;
+            var projectorSize = GetProjectorBoxSize(trackedLightData);
+            GetPunctualLightAxisScales(
+                trackedLightData.lightType,
+                trackedLightData.innerSpotAngle,
+                trackedLightData.spotAngle,
+                projectorSize,
+                out var rightAxisScale,
+                out var upAxisScale);
+            var rightWS = NormalizeDirection(trackedLightData.rightWS, Vector3.right) * rightAxisScale;
+            var upWS = NormalizeDirection(trackedLightData.upWS, Vector3.up) * upAxisScale;
             var shapeRadius = Mathf.Max(trackedLightData.shapeRadius, 0.0f);
 
             return new PunctualLightData
@@ -44,7 +51,8 @@ namespace VividRP.Runtime
                 rightWS = rightWS,
                 angleOffset = angleOffset,
                 upWS = upWS,
-                shapeRadiusSquared = shapeRadius * shapeRadius,
+                shapeRadiusSquared = trackedLightData.lightType == LightType.Box ? 0.0f : shapeRadius * shapeRadius,
+                projectorSize = projectorSize,
                 rangeAttenuationScale = trackedLightData.rangeAttenuationScale > 0.0f
                     ? trackedLightData.rangeAttenuationScale
                     : 1.0f / Mathf.Max(range * range, 1e-6f),
@@ -150,6 +158,10 @@ namespace VividRP.Runtime
                 lightType = source.lightType,
                 cosOuterAngle = cosOuterAngle,
                 radiusAtRange = radiusAtRange,
+                rightWS = NormalizeDirection(source.rightWS, Vector3.right),
+                projectorWidth = Mathf.Max(source.projectorSize.x, 0.0f),
+                upWS = NormalizeDirection(source.upWS, Vector3.up),
+                projectorHeight = Mathf.Max(source.projectorSize.y, 0.0f),
                 cullingCenterWS = cullingCenterWS,
                 cullingRadius = cullingRadius,
                 affectVolumetric = source.affectVolumetric != 0u && source.volumetricDimmer > 0.0f ? 1u : 0u,

@@ -32,6 +32,12 @@ namespace VividRP.Editor
             BendSSS = 1 << 13,
         }
 
+        internal enum SpotLightShape
+        {
+            Cone,
+            Box
+        }
+
         private const Expandable DefaultExpandedState =
             Expandable.General
             | Expandable.Shape
@@ -62,6 +68,9 @@ namespace VividRP.Editor
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
         private static readonly GUIContent s_LightRadiusLabel = EditorGUIUtility.TrTextContent("Radius", "Sets the radius of the light source. This affects the falloff of diffuse lighting, the spread of the specular highlight, and the softness of Ray Traced shadows.");
+        private static readonly GUIContent s_SpotLightShapeLabel = EditorGUIUtility.TrTextContent("Shape", "Sets the shape of the spot light.");
+        private static readonly GUIContent s_BoxShapeWidthLabel = EditorGUIUtility.TrTextContent("Width", "Sets the width of the box spot light.");
+        private static readonly GUIContent s_BoxShapeHeightLabel = EditorGUIUtility.TrTextContent("Height", "Sets the height of the box spot light.");
         private static readonly GUIContent s_CSMShadowLabel = EditorGUIUtility.TrTextContent("CSM Shadow");
         private static readonly GUIContent s_ScreenSpaceShadowQualityLabel = EditorGUIUtility.TrTextContent("Screen Space Quality", "Quality tier used by the screen-space CSM resolve for this directional light.");
         private static readonly GUIContent s_ShadowAtlasResolutionLabel = EditorGUIUtility.TrTextContent("Atlas Resolution", "Fixed resolution used for the full 2x2 CSM atlas rendered by this directional light.");
@@ -229,13 +238,8 @@ namespace VividRP.Editor
                     DrawPunctualShapeRadiusInspector();
                     break;
                 case LightType.Spot:
-                    var oldSpotAngle = settings.spotAngle.floatValue;
-                    EditorGUI.BeginChangeCheck();
-                    settings.DrawInnerAndOuterSpotAngle();
-                    if (EditorGUI.EndChangeCheck())
-                        VividLightIntensityUnitUtility.PreserveSpotLightLumenIntensity(settings, oldSpotAngle);
-
-                    DrawPunctualShapeRadiusInspector();
+                case LightType.Box:
+                    DrawSpotShapeInspector();
                     break;
                 case LightType.Directional:
                     EditorGUILayout.PropertyField(m_SerializedLight.angularDiameter, s_AngularDiameterLabel);
@@ -308,6 +312,61 @@ namespace VividRP.Editor
                 return;
 
             EditorGUILayout.PropertyField(settings.shapeRadius, s_LightRadiusLabel);
+        }
+
+        private void DrawSpotShapeInspector()
+        {
+            if (!ShouldShowSpotShapeControls(m_SerializedLight))
+                return;
+
+            var shape = GetSpotLightShape(settings.light.type);
+
+            EditorGUI.BeginChangeCheck();
+            shape = (SpotLightShape)EditorGUILayout.EnumPopup(s_SpotLightShapeLabel, shape);
+            if (EditorGUI.EndChangeCheck())
+                settings.lightType.SetEnumValue(GetLightTypeForSpotLightShape(shape));
+
+            using (new EditorGUI.IndentLevelScope())
+            {
+                switch (shape)
+                {
+                    case SpotLightShape.Cone:
+                        DrawSpotConeShapeInspector();
+                        break;
+                    case SpotLightShape.Box:
+                        DrawProjectorBoxShapeInspector();
+                        break;
+                }
+            }
+        }
+
+        private void DrawSpotConeShapeInspector()
+        {
+            var oldSpotAngle = settings.spotAngle.floatValue;
+            EditorGUI.BeginChangeCheck();
+            settings.DrawInnerAndOuterSpotAngle();
+            if (EditorGUI.EndChangeCheck())
+                VividLightIntensityUnitUtility.PreserveSpotLightLumenIntensity(settings, oldSpotAngle);
+
+            EditorGUILayout.PropertyField(settings.shapeRadius, s_LightRadiusLabel);
+        }
+
+        private void DrawProjectorBoxShapeInspector()
+        {
+            EditorGUILayout.PropertyField(settings.areaSizeX, s_BoxShapeWidthLabel);
+            EditorGUILayout.PropertyField(settings.areaSizeY, s_BoxShapeHeightLabel);
+            ClampProjectorBoxSize(settings.areaSizeX);
+            ClampProjectorBoxSize(settings.areaSizeY);
+        }
+
+        private static void ClampProjectorBoxSize(SerializedProperty property)
+        {
+            if (property == null || property.hasMultipleDifferentValues)
+                return;
+
+            var clampedValue = Mathf.Max(0.0001f, property.floatValue);
+            if (!Mathf.Approximately(property.floatValue, clampedValue))
+                property.floatValue = clampedValue;
         }
 
         private void DrawVividInspector()
@@ -543,6 +602,30 @@ namespace VividRP.Editor
                 && serializedLight.settings.light != null
                 && (serializedLight.settings.light.type == LightType.Point
                     || serializedLight.settings.light.type == LightType.Spot);
+        }
+
+        internal static bool ShouldShowSpotShapeControls(VividSerializedLight serializedLight)
+        {
+            return serializedLight != null
+                && serializedLight.settings != null
+                && !serializedLight.settings.lightType.hasMultipleDifferentValues
+                && serializedLight.settings.light != null
+                && IsSpotShapeLightType(serializedLight.settings.light.type);
+        }
+
+        internal static SpotLightShape GetSpotLightShape(LightType lightType)
+        {
+            return lightType == LightType.Box ? SpotLightShape.Box : SpotLightShape.Cone;
+        }
+
+        internal static LightType GetLightTypeForSpotLightShape(SpotLightShape shape)
+        {
+            return shape == SpotLightShape.Box ? LightType.Box : LightType.Spot;
+        }
+
+        private static bool IsSpotShapeLightType(LightType lightType)
+        {
+            return lightType == LightType.Spot || lightType == LightType.Box;
         }
 
         internal static bool ShouldShowDirectionalShadowBiasControls(VividSerializedLight serializedLight)

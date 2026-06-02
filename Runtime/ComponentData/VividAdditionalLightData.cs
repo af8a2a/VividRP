@@ -543,6 +543,9 @@ namespace VividRP.Runtime
 
             return light.type switch
             {
+                LightType.Box => new Vector2(
+                    Mathf.Max(light.areaSize.x, 0.0f),
+                    Mathf.Max(light.areaSize.y, 0.0f)),
                 LightType.Rectangle => new Vector2(
                     Mathf.Max(light.areaSize.x, 0.0f),
                     Mathf.Max(light.areaSize.y, 0.0f)),
@@ -1532,6 +1535,9 @@ namespace VividRP.Runtime
 
             switch (targetLight.type)
             {
+                case LightType.Box:
+                    UpdateBoxLightBounds(targetLight);
+                    break;
                 case LightType.Rectangle:
                     UpdateRectangleLightBounds(targetLight);
                     break;
@@ -1545,6 +1551,24 @@ namespace VividRP.Runtime
                     ClearLightBoundsOverride(targetLight);
                     break;
             }
+        }
+
+        private static void UpdateBoxLightBounds(Light targetLight)
+        {
+            targetLight.useBoundingSphereOverride = true;
+            targetLight.boundingSphereOverride = new Vector4(
+                0.0f,
+                0.0f,
+                0.0f,
+                GetBoxLightBoundsRadius(targetLight));
+        }
+
+        private static float GetBoxLightBoundsRadius(Light targetLight)
+        {
+            var halfWidth = 0.5f * Mathf.Max(targetLight.areaSize.x, 0.0f);
+            var halfHeight = 0.5f * Mathf.Max(targetLight.areaSize.y, 0.0f);
+            var range = Mathf.Max(targetLight.range, 0.0f);
+            return Mathf.Sqrt(halfWidth * halfWidth + halfHeight * halfHeight + range * range);
         }
 
         private static void UpdateRectangleLightBounds(Light targetLight)

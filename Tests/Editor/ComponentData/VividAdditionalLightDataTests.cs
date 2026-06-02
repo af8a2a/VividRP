@@ -66,6 +66,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void OnValidate_SetsBoundingSphereOverride_ForProjectorBoxLight()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Box;
+            light.range = 10.0f;
+            light.areaSize = new Vector2(4.0f, 2.0f);
+
+            var additionalData = light.GetVividAdditionalLightData();
+
+            Assert.That(s_OnValidateMethod, Is.Not.Null);
+            s_OnValidateMethod.Invoke(additionalData, null);
+
+            Assert.That(light.useBoundingSphereOverride, Is.True);
+            Assert.That(light.boundingSphereOverride.x, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.z, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(light.boundingSphereOverride.w, Is.EqualTo(Mathf.Sqrt(105.0f)).Within(0.0001f));
+        }
+
+        [Test]
         public void OnValidate_SetsBoundingSphereOverride_ForTubeAreaLight()
         {
             var light = m_GameObject.AddComponent<Light>();
@@ -979,6 +999,7 @@ namespace VividRP.Editor.Tests
 
             var pointLightObject = new GameObject("Vivid Point Light Shape Radius Test");
             var directionalLightObject = new GameObject("Vivid Directional Light Shape Radius Test");
+            var boxLightObject = new GameObject("Vivid Box Light Shape Radius Test");
 
             try
             {
@@ -997,12 +1018,78 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     VividLightEditor.ShouldShowPunctualShapeRadiusControls(serializedDirectionalLight),
                     Is.False);
+
+                var boxLight = boxLightObject.AddComponent<Light>();
+                boxLight.type = LightType.Box;
+                var serializedBoxLight = new VividSerializedLight(new SerializedObject(boxLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowPunctualShapeRadiusControls(serializedBoxLight),
+                    Is.False);
             }
             finally
             {
                 Object.DestroyImmediate(pointLightObject);
                 Object.DestroyImmediate(directionalLightObject);
+                Object.DestroyImmediate(boxLightObject);
             }
+        }
+
+        [Test]
+        public void VividLightEditor_ShowsSpotShapeControls_ForConeAndBoxSpotLights()
+        {
+            var spotLight = m_GameObject.AddComponent<Light>();
+            spotLight.type = LightType.Spot;
+
+            var serializedSpotLight = new VividSerializedLight(new SerializedObject(spotLight));
+
+            Assert.That(
+                VividLightEditor.ShouldShowSpotShapeControls(serializedSpotLight),
+                Is.True);
+
+            var boxLightObject = new GameObject("Vivid Box Light Spot Shape Test");
+            var pointLightObject = new GameObject("Vivid Point Light Spot Shape Test");
+
+            try
+            {
+                var boxLight = boxLightObject.AddComponent<Light>();
+                boxLight.type = LightType.Box;
+                var serializedBoxLight = new VividSerializedLight(new SerializedObject(boxLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowSpotShapeControls(serializedBoxLight),
+                    Is.True);
+
+                var pointLight = pointLightObject.AddComponent<Light>();
+                pointLight.type = LightType.Point;
+                var serializedPointLight = new VividSerializedLight(new SerializedObject(pointLight));
+
+                Assert.That(
+                    VividLightEditor.ShouldShowSpotShapeControls(serializedPointLight),
+                    Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(boxLightObject);
+                Object.DestroyImmediate(pointLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_MapsSpotLightShape_ToUnityLightType()
+        {
+            Assert.That(
+                VividLightEditor.GetSpotLightShape(LightType.Spot),
+                Is.EqualTo(VividLightEditor.SpotLightShape.Cone));
+            Assert.That(
+                VividLightEditor.GetSpotLightShape(LightType.Box),
+                Is.EqualTo(VividLightEditor.SpotLightShape.Box));
+            Assert.That(
+                VividLightEditor.GetLightTypeForSpotLightShape(VividLightEditor.SpotLightShape.Cone),
+                Is.EqualTo(LightType.Spot));
+            Assert.That(
+                VividLightEditor.GetLightTypeForSpotLightShape(VividLightEditor.SpotLightShape.Box),
+                Is.EqualTo(LightType.Box));
         }
 
         [Test]

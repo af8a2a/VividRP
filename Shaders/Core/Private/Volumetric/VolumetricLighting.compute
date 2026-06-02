@@ -615,7 +615,10 @@ float3 EvaluatePunctualLightRadiance(PunctualLightData light, float3 positionWS)
     if (distances.y <= 1e-6)
         return 0.0;
 
-    float attenuation = VividPunctualLightAttenuationWithDistanceModification(light, distances);
+    float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+        light,
+        positionWS - light.positionWS,
+        distances);
 
     if (attenuation <= 0.0)
         return 0.0;
@@ -684,6 +687,40 @@ bool IntersectRaySpotConeRange(float3 rayOriginWS, float3 rayDirectionWS, Punctu
         tMax,
         tEntr,
         tExit);
+}
+
+bool IntersectRaySlab(float origin, float direction, float slabMin, float slabMax, inout float tEntr, inout float tExit)
+{
+    if (abs(direction) <= 1e-6)
+        return origin >= slabMin && origin <= slabMax;
+
+    float invDirection = rcp(direction);
+    float slabT0 = (slabMin - origin) * invDirection;
+    float slabT1 = (slabMax - origin) * invDirection;
+    float slabEntry = min(slabT0, slabT1);
+    float slabExit = max(slabT0, slabT1);
+
+    tEntr = max(tEntr, slabEntry);
+    tExit = min(tExit, slabExit);
+    return tEntr <= tExit;
+}
+
+bool IntersectRayProjectorBoxRange(float3 rayOriginWS, float3 rayDirectionWS, PunctualLightData light, float tMin, float tMax, out float tEntr, out float tExit)
+{
+    float3x3 lightToWorld = float3x3(light.rightWS, light.upWS, light.directionWS);
+    float3 originLS = mul(rayOriginWS - light.positionWS, transpose(lightToWorld));
+    float3 directionLS = mul(rayDirectionWS, transpose(lightToWorld));
+
+    tEntr = tMin;
+    tExit = tMax;
+
+    if (!IntersectRaySlab(originLS.x, directionLS.x, -1.0, 1.0, tEntr, tExit))
+        return false;
+
+    if (!IntersectRaySlab(originLS.y, directionLS.y, -1.0, 1.0, tEntr, tExit))
+        return false;
+
+    return IntersectRaySlab(originLS.z, directionLS.z, 0.0, light.range, tEntr, tExit);
 }
 
 // Computes the light integral (in-scattered radiance) within the voxel.
@@ -769,7 +806,34 @@ VoxelLighting EvaluateVoxelLightingLocal(uint3 voxelCoord, uint2 vBufferPixel, f
             float tEntr = t0;
             float tExit = t1;
 
-            // Perform ray-cone intersection for pyramid and spot lights.
+            if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_PROJECTOR_BOX)
+            {
+                sampleLight = IntersectRayProjectorBoxRange(ray.originWS, ray.jitterDirWS, light, t0, t1, tEntr, tExit);
+
+                if (!sampleLight || tEntr >= tExit)
+                    continue;
+
+                float tOffset;
+                float weight;
+                ImportanceSampleHomogeneousMedium(rndVal, extinction, tExit - tEntr, tOffset, weight);
+                weight *= TransmittanceHomogeneousMedium(extinction, tEntr - t0);
+
+                float t = tEntr + tOffset;
+                float3 samplePosWS = ray.originWS + ray.jitterDirWS * t;
+                float3 lightRadiance = EvaluatePunctualLightRadiance(light, samplePosWS);
+                if (max(max(lightRadiance.x, lightRadiance.y), lightRadiance.z) <= 0.0)
+                    continue;
+
+                float3 centerToLight = light.positionWS - centerWS;
+                float cosTheta = dot(centerToLight, ray.centerDirWS) * rsqrt(max(dot(centerToLight, centerToLight), 1e-6));
+                float phaseVarying = CornetteShanksPhasePartVarying(g, cosTheta);
+
+                lighting.radianceNoPhase += weight * lightRadiance;
+                lighting.radianceComplete += weight * lightRadiance * phaseVarying;
+                continue;
+            }
+
+            // Perform ray-cone intersection for spot lights.
             if (light.lightType == VIVID_PUNCTUAL_LIGHT_TYPE_SPOT)
             {
                 float coneEntry;

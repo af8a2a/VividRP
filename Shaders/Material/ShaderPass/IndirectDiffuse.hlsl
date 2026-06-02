@@ -4,6 +4,7 @@
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
 
 #define ATTRIBUTES_NEED_TEXCOORD0
@@ -364,27 +365,27 @@ float3 VividIndirectDiffuseEvaluatePunctual(
     out float3 lightDirectionWS,
     out float lightDistance)
 {
-    float3 lightVectorWS = punctualLight.positionWS - geometry.positionWS;
-    float distanceSquared = dot(lightVectorWS, lightVectorWS);
+    float4 distances = 0.0;
     lightDirectionWS = float3(0.0, 0.0, 0.0);
     lightDistance = 0.0;
+    GetVividPunctualLightVectors(geometry.positionWS, punctualLight, lightDirectionWS, distances);
 
-    if (distanceSquared <= 1e-6)
+    if (distances.y <= 1e-6)
     {
         return float3(0.0, 0.0, 0.0);
     }
 
-    float inverseDistance = rsqrt(distanceSquared);
-    lightDistance = distanceSquared * inverseDistance;
-    lightDirectionWS = lightVectorWS * inverseDistance;
+    lightDistance = distances.x;
     float nDotL = saturate(dot(surfaceData.normalWS, lightDirectionWS));
     if (nDotL <= 0.0)
     {
         return float3(0.0, 0.0, 0.0);
     }
 
-    float attenuation = VividIndirectDiffuseEvaluatePunctualDistanceAttenuation(punctualLight, distanceSquared)
-        * VividIndirectDiffuseEvaluatePunctualSpotAttenuation(punctualLight, lightDirectionWS);
+    float attenuation = VividPunctualLightAttenuationWithDistanceModification(
+        punctualLight,
+        geometry.positionWS - punctualLight.positionWS,
+        distances);
 
     return diffuseColor * (INV_PI * nDotL) * punctualLight.color * attenuation;
 }

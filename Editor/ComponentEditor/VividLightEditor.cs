@@ -38,6 +38,16 @@ namespace VividRP.Editor
             Box
         }
 
+        internal enum GeneralLightType
+        {
+            Spot,
+            Directional,
+            Point,
+            Rectangle,
+            Disc,
+            Tube
+        }
+
         private const Expandable DefaultExpandedState =
             Expandable.General
             | Expandable.Shape
@@ -67,6 +77,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_UsePipelineSettingsLabel = EditorGUIUtility.TrTextContent("Use Pipeline Settings");
         private static readonly GUIContent s_CustomShadowLayersLabel = EditorGUIUtility.TrTextContent("Custom Shadow Layers");
         private static readonly GUIContent s_ShadowRenderingLayersLabel = EditorGUIUtility.TrTextContent("Shadow Rendering Layers");
+        private static readonly GUIContent s_LightTypeLabel = EditorGUIUtility.TrTextContent("Type");
         private static readonly GUIContent s_LightRadiusLabel = EditorGUIUtility.TrTextContent("Radius", "Sets the radius of the light source. This affects the falloff of diffuse lighting, the spread of the specular highlight, and the softness of Ray Traced shadows.");
         private static readonly GUIContent s_SpotLightShapeLabel = EditorGUIUtility.TrTextContent("Shape", "Sets the shape of the spot light.");
         private static readonly GUIContent s_BoxShapeWidthLabel = EditorGUIUtility.TrTextContent("Width", "Sets the width of the box spot light.");
@@ -161,6 +172,25 @@ namespace VividRP.Editor
             4096,
             8192
         };
+        private static readonly GUIContent[] s_GeneralLightTypeOptionLabels =
+        {
+            EditorGUIUtility.TrTextContent("Spot"),
+            EditorGUIUtility.TrTextContent("Directional"),
+            EditorGUIUtility.TrTextContent("Point"),
+            EditorGUIUtility.TrTextContent("Rectangle"),
+            EditorGUIUtility.TrTextContent("Disc"),
+            EditorGUIUtility.TrTextContent("Tube")
+        };
+
+        private static readonly int[] s_GeneralLightTypeOptionValues =
+        {
+            (int)GeneralLightType.Spot,
+            (int)GeneralLightType.Directional,
+            (int)GeneralLightType.Point,
+            (int)GeneralLightType.Rectangle,
+            (int)GeneralLightType.Disc,
+            (int)GeneralLightType.Tube
+        };
 
         private VividSerializedLight m_SerializedLight;
         private bool m_ShouldApplyTimeOfDay;
@@ -199,6 +229,7 @@ namespace VividRP.Editor
         {
             m_SerializedLight.Update();
             m_ShouldApplyTimeOfDay = false;
+            NormalizeSerializedLightIntensityUnit(applyImmediately: true);
             DrawBuiltInLightInspector();
             DrawVividInspector();
             m_SerializedLight.Apply();
@@ -233,15 +264,56 @@ namespace VividRP.Editor
 
         private void DrawGeneralInspector()
         {
-            settings.DrawLightType();
+            DrawGeneralLightTypeInspector();
             settings.DrawLightmapping();
+        }
+
+        private void DrawGeneralLightTypeInspector()
+        {
+            var currentLightType = settings.lightType.hasMultipleDifferentValues
+                ? LightType.Spot
+                : settings.lightType.GetEnumValue<LightType>();
+            var generalLightType = GetGeneralLightType(currentLightType);
+            var oldMixedValue = EditorGUI.showMixedValue;
+            EditorGUI.showMixedValue = settings.lightType.hasMultipleDifferentValues;
+
+            EditorGUI.BeginChangeCheck();
+            var selectedLightType = (GeneralLightType)EditorGUILayout.IntPopup(
+                s_LightTypeLabel,
+                (int)generalLightType,
+                s_GeneralLightTypeOptionLabels,
+                s_GeneralLightTypeOptionValues);
+            EditorGUI.showMixedValue = oldMixedValue;
+
+            if (!EditorGUI.EndChangeCheck())
+                return;
+
+            settings.lightType.SetEnumValue(GetLightTypeForGeneralLightType(selectedLightType));
+            NormalizeSerializedLightIntensityUnit(applyImmediately: true, forceApply: true);
         }
 
         private void DrawEmissionHeaderFields()
         {
             LightUI.DrawColor(m_SerializedLight, this);
+            if (ShouldDrawBoxSpotLightIntensity(settings))
+                DrawBoxSpotLightIntensityField();
+            else
+                LightUI.DrawIntensity(m_SerializedLight, this);
+
+            if (ShouldDrawCoreLightIntensityModifiers(settings))
+                LightUI.DrawIntensityModifiers(m_SerializedLight);
+        }
+
+        private void DrawBoxSpotLightIntensityField()
+        {
+            if (VividLightIntensityUnitUtility.NormalizeBoxSpotLightUnit(settings))
+            {
+                settings.ApplyModifiedProperties();
+                settings.Update();
+                m_SerializedLight.Update();
+            }
+
             LightUI.DrawIntensity(m_SerializedLight, this);
-            LightUI.DrawIntensityModifiers(m_SerializedLight);
         }
 
         private void DrawShapeInspector()
@@ -249,7 +321,7 @@ namespace VividRP.Editor
             if (settings.lightType.hasMultipleDifferentValues)
                 return;
 
-            switch (settings.light.type)
+            switch (settings.lightType.GetEnumValue<LightType>())
             {
                 case LightType.Point:
                     DrawPunctualShapeRadiusInspector();
@@ -408,8 +480,26 @@ namespace VividRP.Editor
         {
             return light != null
                 && light.transform != null
-                && light.type == LightType.Box
-                && light.range > 0.0f;
+                && light.type == LightType.Box;
+        }
+
+        internal static bool ShouldDrawBoxSpotLightIntensity(LightEditor.Settings settings)
+        {
+            if (settings == null)
+                return false;
+
+            if (settings.lightType.hasMultipleDifferentValues)
+                return false;
+
+            if (settings.light != null && settings.light.type == LightType.Box)
+                return true;
+
+            return settings.lightType.GetEnumValue<LightType>() == LightType.Box;
+        }
+
+        internal static bool ShouldDrawCoreLightIntensityModifiers(LightEditor.Settings settings)
+        {
+            return !ShouldDrawBoxSpotLightIntensity(settings);
         }
 
         internal static Vector3[] GetBoxSpotLightGizmoLocalCorners(float width, float height, float range)
@@ -537,12 +627,15 @@ namespace VividRP.Editor
             if (!ShouldShowSpotShapeControls(m_SerializedLight))
                 return;
 
-            var shape = GetSpotLightShape(settings.light.type);
+            var shape = GetSpotLightShape(settings.lightType.GetEnumValue<LightType>());
 
             EditorGUI.BeginChangeCheck();
             shape = (SpotLightShape)EditorGUILayout.EnumPopup(s_SpotLightShapeLabel, shape);
             if (EditorGUI.EndChangeCheck())
+            {
                 settings.lightType.SetEnumValue(GetLightTypeForSpotLightShape(shape));
+                NormalizeSerializedLightIntensityUnit(applyImmediately: true, forceApply: true);
+            }
 
             using (new EditorGUI.IndentLevelScope())
             {
@@ -814,12 +907,16 @@ namespace VividRP.Editor
 
         internal static bool ShouldShowPunctualShapeRadiusControls(VividSerializedLight serializedLight)
         {
-            return serializedLight != null
-                && serializedLight.settings != null
-                && !serializedLight.settings.lightType.hasMultipleDifferentValues
-                && serializedLight.settings.light != null
-                && (serializedLight.settings.light.type == LightType.Point
-                    || serializedLight.settings.light.type == LightType.Spot);
+            if (serializedLight == null
+                || serializedLight.settings == null
+                || serializedLight.settings.lightType.hasMultipleDifferentValues
+                || serializedLight.settings.light == null)
+            {
+                return false;
+            }
+
+            var lightType = serializedLight.settings.lightType.GetEnumValue<LightType>();
+            return lightType == LightType.Point || lightType == LightType.Spot;
         }
 
         internal static bool ShouldShowSpotShapeControls(VividSerializedLight serializedLight)
@@ -828,7 +925,7 @@ namespace VividRP.Editor
                 && serializedLight.settings != null
                 && !serializedLight.settings.lightType.hasMultipleDifferentValues
                 && serializedLight.settings.light != null
-                && IsSpotShapeLightType(serializedLight.settings.light.type);
+                && IsSpotShapeLightType(serializedLight.settings.lightType.GetEnumValue<LightType>());
         }
 
         internal static SpotLightShape GetSpotLightShape(LightType lightType)
@@ -839,6 +936,32 @@ namespace VividRP.Editor
         internal static LightType GetLightTypeForSpotLightShape(SpotLightShape shape)
         {
             return shape == SpotLightShape.Box ? LightType.Box : LightType.Spot;
+        }
+
+        internal static GeneralLightType GetGeneralLightType(LightType lightType)
+        {
+            return lightType switch
+            {
+                LightType.Directional => GeneralLightType.Directional,
+                LightType.Point => GeneralLightType.Point,
+                LightType.Rectangle => GeneralLightType.Rectangle,
+                LightType.Disc => GeneralLightType.Disc,
+                LightType.Tube => GeneralLightType.Tube,
+                _ => GeneralLightType.Spot,
+            };
+        }
+
+        internal static LightType GetLightTypeForGeneralLightType(GeneralLightType lightType)
+        {
+            return lightType switch
+            {
+                GeneralLightType.Directional => LightType.Directional,
+                GeneralLightType.Point => LightType.Point,
+                GeneralLightType.Rectangle => LightType.Rectangle,
+                GeneralLightType.Disc => LightType.Disc,
+                GeneralLightType.Tube => LightType.Tube,
+                _ => LightType.Spot,
+            };
         }
 
         private static bool IsSpotShapeLightType(LightType lightType)
@@ -1108,6 +1231,18 @@ namespace VividRP.Editor
             }
         }
 
+        private bool NormalizeSerializedLightIntensityUnit(bool applyImmediately, bool forceApply = false)
+        {
+            var changed = VividLightIntensityUnitUtility.NormalizeUnsupportedLightUnit(settings);
+            if ((changed || forceApply) && applyImmediately)
+            {
+                settings.ApplyModifiedProperties();
+                settings.Update();
+            }
+
+            return changed;
+        }
+
         private void ApplyTimeOfDayToSelectedLights()
         {
             if (m_SerializedLight?.lightsAdditionalData == null)
@@ -1217,6 +1352,56 @@ namespace VividRP.Editor
                 light.luxAtDistance = 1.0f;
 
             EditorUtility.SetDirty(light);
+        }
+
+        internal static bool NormalizeUnsupportedLightUnit(LightEditor.Settings settings)
+        {
+            if (settings == null || settings.lightType.hasMultipleDifferentValues)
+                return false;
+
+            if (settings.lightUnit.hasMultipleDifferentValues)
+                return false;
+
+            var lightType = settings.lightType.GetEnumValue<LightType>();
+            var lightUnit = settings.lightUnit.GetEnumValue<LightUnit>();
+            if (LightUnitUtils.IsLightUnitSupported(lightType, lightUnit))
+                return false;
+
+            settings.lightUnit.SetEnumValue(LightUnitUtils.GetNativeLightUnit(lightType));
+            if (lightType == LightType.Directional || lightType == LightType.Box)
+                settings.luxAtDistance.floatValue = 1.0f;
+
+            return true;
+        }
+
+        internal static bool NormalizeBoxSpotLightUnit(LightEditor.Settings settings)
+        {
+            if (settings == null)
+                return false;
+
+            var isBoxSpotLight = settings.light != null && settings.light.type == LightType.Box;
+            if (!settings.lightType.hasMultipleDifferentValues)
+                isBoxSpotLight |= settings.lightType.GetEnumValue<LightType>() == LightType.Box;
+
+            if (!isBoxSpotLight)
+                return false;
+
+            var changed = false;
+            if (settings.lightUnit.hasMultipleDifferentValues
+                || settings.lightUnit.GetEnumValue<LightUnit>() != LightUnit.Lux)
+            {
+                settings.lightUnit.SetEnumValue(LightUnit.Lux);
+                changed = true;
+            }
+
+            if (settings.luxAtDistance.hasMultipleDifferentValues
+                || !Mathf.Approximately(settings.luxAtDistance.floatValue, 1.0f))
+            {
+                settings.luxAtDistance.floatValue = 1.0f;
+                changed = true;
+            }
+
+            return changed;
         }
 
         internal static void PreserveSpotLightLumenIntensity(LightEditor.Settings settings, float oldSpotAngle)

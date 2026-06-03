@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor;
+using UnityEditor.Rendering;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
@@ -246,6 +247,46 @@ namespace VividRP.Editor.Tests
 
             Assert.That(light.lightUnit, Is.EqualTo(unit));
             Assert.That(light.luxAtDistance, Is.EqualTo(5.0f));
+        }
+
+        [Test]
+        public void NormalizeUnsupportedLightUnit_ResetsSerializedBoxLightsToLux()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Box;
+            light.lightUnit = LightUnit.Lumen;
+            light.luxAtDistance = 12.0f;
+            var serializedObject = new SerializedObject(light);
+            var settings = new LightEditor.Settings(serializedObject);
+            settings.OnEnable();
+            settings.Update();
+
+            var changed = VividLightIntensityUnitUtility.NormalizeUnsupportedLightUnit(settings);
+            settings.ApplyModifiedProperties();
+
+            Assert.That(changed, Is.True);
+            Assert.That(light.lightUnit, Is.EqualTo(LightUnit.Lux));
+            Assert.That(light.luxAtDistance, Is.EqualTo(1.0f));
+        }
+
+        [Test]
+        public void NormalizeBoxSpotLightUnit_ResetsUnitWhenSerializedTypeHasNotSynced()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Box;
+            light.lightUnit = LightUnit.Lumen;
+            light.luxAtDistance = 12.0f;
+            var serializedObject = new SerializedObject(light);
+            var settings = new LightEditor.Settings(serializedObject);
+            settings.OnEnable();
+            settings.Update();
+            settings.lightType.SetEnumValue(LightType.Spot);
+
+            var changed = VividLightIntensityUnitUtility.NormalizeBoxSpotLightUnit(settings);
+
+            Assert.That(changed, Is.True);
+            Assert.That(settings.lightUnit.GetEnumValue<LightUnit>(), Is.EqualTo(LightUnit.Lux));
+            Assert.That(settings.luxAtDistance.floatValue, Is.EqualTo(1.0f));
         }
 
         [Test]
@@ -1093,7 +1134,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VividLightEditor_DrawsBoxSpotLightGizmo_OnlyForPositiveRangeBoxLights()
+        public void VividLightEditor_MapsBoxLightType_ToSpotGeneralType()
+        {
+            Assert.That(
+                VividLightEditor.GetGeneralLightType(LightType.Box),
+                Is.EqualTo(VividLightEditor.GeneralLightType.Spot));
+            Assert.That(
+                VividLightEditor.GetGeneralLightType(LightType.Spot),
+                Is.EqualTo(VividLightEditor.GeneralLightType.Spot));
+            Assert.That(
+                VividLightEditor.GetGeneralLightType(LightType.Directional),
+                Is.EqualTo(VividLightEditor.GeneralLightType.Directional));
+        }
+
+        [Test]
+        public void VividLightEditor_MapsGeneralLightType_ToUnityLightType()
+        {
+            Assert.That(
+                VividLightEditor.GetLightTypeForGeneralLightType(VividLightEditor.GeneralLightType.Spot),
+                Is.EqualTo(LightType.Spot));
+            Assert.That(
+                VividLightEditor.GetLightTypeForGeneralLightType(VividLightEditor.GeneralLightType.Directional),
+                Is.EqualTo(LightType.Directional));
+            Assert.That(
+                VividLightEditor.GetLightTypeForGeneralLightType(VividLightEditor.GeneralLightType.Point),
+                Is.EqualTo(LightType.Point));
+            Assert.That(
+                VividLightEditor.GetLightTypeForGeneralLightType(VividLightEditor.GeneralLightType.Rectangle),
+                Is.EqualTo(LightType.Rectangle));
+            Assert.That(
+                VividLightEditor.GetLightTypeForGeneralLightType(VividLightEditor.GeneralLightType.Disc),
+                Is.EqualTo(LightType.Disc));
+            Assert.That(
+                VividLightEditor.GetLightTypeForGeneralLightType(VividLightEditor.GeneralLightType.Tube),
+                Is.EqualTo(LightType.Tube));
+        }
+
+        [Test]
+        public void VividLightEditor_DrawsBoxSpotLightGizmo_ForBoxLightsEvenWhenRangeIsZero()
         {
             var boxLight = m_GameObject.AddComponent<Light>();
             boxLight.type = LightType.Box;
@@ -1107,7 +1185,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(
                 VividLightEditor.ShouldDrawBoxSpotLightGizmo(boxLight),
-                Is.False);
+                Is.True);
 
             var spotLightObject = new GameObject("Vivid Spot Light Gizmo Test");
 
@@ -1120,6 +1198,46 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     VividLightEditor.ShouldDrawBoxSpotLightGizmo(spotLight),
                     Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(spotLightObject);
+            }
+        }
+
+        [Test]
+        public void VividLightEditor_SkipsCoreIntensityModifiers_ForBoxSpotLights()
+        {
+            var boxLight = m_GameObject.AddComponent<Light>();
+            boxLight.type = LightType.Box;
+            var settings = new LightEditor.Settings(new SerializedObject(boxLight));
+            settings.OnEnable();
+            settings.Update();
+            settings.lightType.SetEnumValue(LightType.Spot);
+
+            Assert.That(
+                VividLightEditor.ShouldDrawBoxSpotLightIntensity(settings),
+                Is.True);
+            Assert.That(
+                VividLightEditor.ShouldDrawCoreLightIntensityModifiers(settings),
+                Is.False);
+
+            var spotLightObject = new GameObject("Vivid Spot Light Intensity Test");
+
+            try
+            {
+                var spotLight = spotLightObject.AddComponent<Light>();
+                spotLight.type = LightType.Spot;
+                var spotSettings = new LightEditor.Settings(new SerializedObject(spotLight));
+                spotSettings.OnEnable();
+                spotSettings.Update();
+
+                Assert.That(
+                    VividLightEditor.ShouldDrawBoxSpotLightIntensity(spotSettings),
+                    Is.False);
+                Assert.That(
+                    VividLightEditor.ShouldDrawCoreLightIntensityModifiers(spotSettings),
+                    Is.True);
             }
             finally
             {

@@ -24,6 +24,14 @@ namespace VividRP.Editor.RenderPipeline
         private static readonly GUIContent s_SrpBatcherLabel = EditorGUIUtility.TrTextContent("SRP Batcher");
         private static readonly GUIContent s_SupportProbeVolumeLabel = EditorGUIUtility.TrTextContent("Adaptive Probe Volumes");
         private static readonly GUIContent s_ProbeVolumeShBandsLabel = EditorGUIUtility.TrTextContent("APV SH Bands");
+        private static readonly GUIContent s_ReflectionProbeAtlasResolutionLabel =
+            EditorGUIUtility.TrTextContent("Atlas Resolution", "Size of the runtime texture atlas used for visible reflection probes.");
+        private static readonly GUIContent s_ReflectionProbeAtlasFormatLabel =
+            EditorGUIUtility.TrTextContent("Atlas Format", "Graphics format used by the runtime reflection probe atlas.");
+        private static readonly GUIContent s_ReflectionProbeAtlasLastValidCubeMipLabel =
+            EditorGUIUtility.TrTextContent("Last Valid Cube Mip", "Last mip level that keeps full padding when copying cube probes into the octahedral atlas.");
+        private static readonly GUIContent s_ReflectionProbeAtlasDecreaseResToFitLabel =
+            EditorGUIUtility.TrTextContent("Decrease Resolution To Fit", "Allow the atlas allocator to halve a probe allocation when the full-resolution region does not fit.");
         private static readonly GUIContent s_MaxLocalVolumetricFogCountLabel =
             EditorGUIUtility.TrTextContent("Max Local Volumetric Fog Count", "Maximum number of visible Local Volumetric Fog volumes allocated and processed per camera.");
         private static readonly string s_DefaultVolumeSharedMessage =
@@ -117,6 +125,8 @@ namespace VividRP.Editor.RenderPipeline
             };
             root.Add(probeVolumeShBandsField);
 
+            AddReflectionProbeAtlasFoldout(root);
+
             root.Bind(serializedObject);
 
             RefreshGlobalSettingsSerializedObject();
@@ -189,6 +199,57 @@ namespace VividRP.Editor.RenderPipeline
 
             foldout.Bind(m_GlobalSettingsSerializedObject);
             root.Add(foldout);
+        }
+
+        private void AddReflectionProbeAtlasFoldout(VisualElement root)
+        {
+            var foldout = new Foldout
+            {
+                text = "Reflection Probe Atlas",
+                value = true,
+                name = "vivid-rp-asset-reflection-probe-atlas-foldout",
+            };
+
+            AddAssetProperty(
+                foldout,
+                "m_ReflectionProbeAtlasResolution",
+                s_ReflectionProbeAtlasResolutionLabel,
+                "vivid-rp-asset-reflection-probe-atlas-resolution-field");
+            AddAssetProperty(
+                foldout,
+                "m_ReflectionProbeAtlasFormat",
+                s_ReflectionProbeAtlasFormatLabel,
+                "vivid-rp-asset-reflection-probe-atlas-format-field");
+            AddAssetProperty(
+                foldout,
+                "m_ReflectionProbeAtlasLastValidCubeMip",
+                s_ReflectionProbeAtlasLastValidCubeMipLabel,
+                "vivid-rp-asset-reflection-probe-atlas-last-valid-cube-mip-field");
+            AddAssetProperty(
+                foldout,
+                "m_ReflectionProbeAtlasDecreaseResToFit",
+                s_ReflectionProbeAtlasDecreaseResToFitLabel,
+                "vivid-rp-asset-reflection-probe-atlas-decrease-res-to-fit-field");
+
+            root.Add(foldout);
+        }
+
+        private void AddAssetProperty(
+            VisualElement root,
+            string propertyName,
+            GUIContent label,
+            string elementName)
+        {
+            var property = serializedObject.FindProperty(propertyName);
+            if (property == null)
+                return;
+
+            var field = new PropertyField(property, label.text)
+            {
+                name = elementName,
+                tooltip = label.tooltip,
+            };
+            root.Add(field);
         }
 
         private void AddGlobalSettingsProperty(

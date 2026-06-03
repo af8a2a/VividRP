@@ -1,8 +1,43 @@
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum VividReflectionProbeAtlasResolution
+    {
+        [InspectorName("512x512")]
+        Resolution512x512 = 512,
+        [InspectorName("1024x512")]
+        Resolution1024x512 = 1024 << 16 | 512,
+        [InspectorName("1024x1024")]
+        Resolution1024x1024 = 1024,
+        [InspectorName("2048x1024")]
+        Resolution2048x1024 = 2048 << 16 | 1024,
+        [InspectorName("2048x2048")]
+        Resolution2048x2048 = 2048,
+        [InspectorName("4096x2048")]
+        Resolution4096x2048 = 4096 << 16 | 2048,
+        [InspectorName("4096x4096")]
+        Resolution4096x4096 = 4096,
+        [InspectorName("8192x4096")]
+        Resolution8192x4096 = 8192 << 16 | 4096,
+        [InspectorName("8192x8192")]
+        Resolution8192x8192 = 8192,
+        [InspectorName("16384x8192")]
+        Resolution16384x8192 = 16384 << 16 | 8192,
+        [InspectorName("16384x16384")]
+        Resolution16384x16384 = 16384,
+    }
+
+    public enum VividReflectionProbeAtlasFormat
+    {
+        [InspectorName("R11G11B10")]
+        R11G11B10 = (int)GraphicsFormat.B10G11R11_UFloatPack32,
+        [InspectorName("R16G16B16A16")]
+        R16G16B16A16 = (int)GraphicsFormat.R16G16B16A16_SFloat,
+    }
+
     public enum ColorGradingSpace
     {
         AcesCg,
@@ -43,6 +78,20 @@ namespace VividRP.Runtime
         private ProbeVolumeSHBands m_ProbeVolumeSHBands = ProbeVolumeSHBands.SphericalHarmonicsL2;
 
         [SerializeField]
+        private VividReflectionProbeAtlasResolution m_ReflectionProbeAtlasResolution =
+            VividReflectionProbeAtlasResolution.Resolution4096x4096;
+
+        [SerializeField]
+        private VividReflectionProbeAtlasFormat m_ReflectionProbeAtlasFormat =
+            VividReflectionProbeAtlasFormat.R16G16B16A16;
+
+        [SerializeField]
+        private int m_ReflectionProbeAtlasLastValidCubeMip = 3;
+
+        [SerializeField]
+        private bool m_ReflectionProbeAtlasDecreaseResToFit = true;
+
+        [SerializeField]
         private ColorGradingSpace m_ColorGradingSpace = ColorGradingSpace.sRGB;
 
         [SerializeField]
@@ -71,6 +120,35 @@ namespace VividRP.Runtime
             get => m_ProbeVolumeSHBands;
             set => m_ProbeVolumeSHBands = value;
         }
+
+        public VividReflectionProbeAtlasResolution ReflectionProbeAtlasResolution
+        {
+            get => m_ReflectionProbeAtlasResolution;
+            set => m_ReflectionProbeAtlasResolution = value;
+        }
+
+        public VividReflectionProbeAtlasFormat ReflectionProbeAtlasFormat
+        {
+            get => m_ReflectionProbeAtlasFormat;
+            set => m_ReflectionProbeAtlasFormat = value;
+        }
+
+        public int ReflectionProbeAtlasLastValidCubeMip
+        {
+            get => Mathf.Clamp(m_ReflectionProbeAtlasLastValidCubeMip, 0, VividReflectionProbeTextureCache.ConvolutionMipCount - 1);
+            set => m_ReflectionProbeAtlasLastValidCubeMip = Mathf.Clamp(value, 0, VividReflectionProbeTextureCache.ConvolutionMipCount - 1);
+        }
+
+        public bool ReflectionProbeAtlasDecreaseResToFit
+        {
+            get => m_ReflectionProbeAtlasDecreaseResToFit;
+            set => m_ReflectionProbeAtlasDecreaseResToFit = value;
+        }
+
+        public GraphicsFormat ReflectionProbeAtlasGraphicsFormat => (GraphicsFormat)(int)m_ReflectionProbeAtlasFormat;
+
+        public Vector2Int ReflectionProbeAtlasDimensions =>
+            VividReflectionProbeAtlasSettings.ResolveDimensions(m_ReflectionProbeAtlasResolution);
 
         public ColorGradingSpace ColorGradingSpace
         {

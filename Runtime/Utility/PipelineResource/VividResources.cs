@@ -103,6 +103,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/CoreBlitColorAndDepth")]
         public Shader CoreBlitColorAndDepthShader;
 
+        [VividResourcePath("Shaders/Core/Private/BlitCubeTextureFace")]
+        public Shader BlitCubeTextureFaceShader;
+
         [VividResourcePath("Shaders/FullScreenUV")]
         public Shader FullScreenUVShader;
 

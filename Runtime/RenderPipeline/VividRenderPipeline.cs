@@ -47,6 +47,7 @@ namespace VividRP.Runtime
             RTHandles.Initialize(Screen.width, Screen.height);
             LensFlareCommonSRP.Initialize();
             VividAdaptiveProbeVolumeUtility.Initialize(asset);
+            VividReflectionProbeAtlasSystem.Initialize();
             VividGPUDrivenSystem.Initialize();
 #if DLSS_PLUGIN_INTEGRATE
             DLSSExtension.Initialize();
@@ -397,6 +398,7 @@ namespace VividRP.Runtime
             LTCAreaLightSystem.Deinitialize();
             VividVolumeManagerUtility.Deinitialize();
             DecalSystem.Deinitialize();
+            VividReflectionProbeAtlasSystem.Deinitialize();
             VividGPUDrivenSystem.Deinitialize();
             VividLocalVolumetricFogManager.Dispose();
 #if DLSS_PLUGIN_INTEGRATE

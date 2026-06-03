@@ -94,6 +94,11 @@ namespace VividRP.Tests
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-srp-batcher-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-support-probe-volume-field"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-probe-volume-sh-bands-field"), Is.Not.Null);
+                Assert.That(root.Q<Foldout>("vivid-rp-asset-reflection-probe-atlas-foldout"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-reflection-probe-atlas-resolution-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-reflection-probe-atlas-format-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-reflection-probe-atlas-last-valid-cube-mip-field"), Is.Not.Null);
+                Assert.That(root.Q<PropertyField>("vivid-rp-asset-reflection-probe-atlas-decrease-res-to-fit-field"), Is.Not.Null);
                 Assert.That(root.Q<Foldout>("vivid-rp-asset-local-volumetric-fog-foldout"), Is.Not.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-volumetric-fog-control-mode-field"), Is.Null);
                 Assert.That(root.Q<PropertyField>("vivid-rp-asset-volumetric-fog-budget-field"), Is.Null);
@@ -118,6 +123,11 @@ namespace VividRP.Tests
             Assert.That(m_PipelineAsset.EnableSRPBatcher, Is.True);
             Assert.That(m_PipelineAsset.SupportProbeVolume, Is.False);
             Assert.That(m_PipelineAsset.ProbeVolumeSHBands, Is.EqualTo(ProbeVolumeSHBands.SphericalHarmonicsL2));
+            Assert.That(m_PipelineAsset.ReflectionProbeAtlasResolution, Is.EqualTo(VividReflectionProbeAtlasResolution.Resolution4096x4096));
+            Assert.That(m_PipelineAsset.ReflectionProbeAtlasFormat, Is.EqualTo(VividReflectionProbeAtlasFormat.R16G16B16A16));
+            Assert.That(m_PipelineAsset.ReflectionProbeAtlasDimensions, Is.EqualTo(new Vector2Int(4096, 4096)));
+            Assert.That(m_PipelineAsset.ReflectionProbeAtlasLastValidCubeMip, Is.EqualTo(3));
+            Assert.That(m_PipelineAsset.ReflectionProbeAtlasDecreaseResToFit, Is.True);
         }
 
         [Test]

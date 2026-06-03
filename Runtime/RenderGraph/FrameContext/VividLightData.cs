@@ -96,6 +96,8 @@ namespace VividRP.Runtime
             public Vector3 forwardWS;
             public float padding;
             public Vector4 hdrData;
+            public Vector4 atlasScaleOffset;
+            public Vector4 atlasIndexAndSlice;
 
             internal static int Stride => Marshal.SizeOf<ReflectionProbeData>();
         }
@@ -868,6 +870,45 @@ namespace VividRP.Runtime
             }
         }
 
+        internal void UpdateReflectionProbeAtlasData(
+            CommandBuffer cmd,
+            VividReflectionProbeTextureCache reflectionProbeTextureCache)
+        {
+            if (reflectionProbeTextureCache == null || cmd == null || reflectionProbeCount <= 0)
+                return;
+
+            var compactProbeIndex = 0;
+            if (!visibleReflectionProbes.IsCreated || visibleReflectionProbes.Length == 0)
+                return;
+
+            for (var visibleProbeIndex = 0; visibleProbeIndex < visibleReflectionProbes.Length; visibleProbeIndex++)
+            {
+                var visibleReflectionProbe = visibleReflectionProbes[visibleProbeIndex];
+                if (!IsReflectionProbeSpatiallyValid(visibleReflectionProbe))
+                    continue;
+
+                if (compactProbeIndex >= reflectionProbeCount)
+                    break;
+
+                var reflectionProbeData = reflectionProbes[compactProbeIndex];
+                var scaleOffset = Vector4.zero;
+                var fetchIndex = -1;
+                var texture = visibleReflectionProbe.texture;
+
+                if (texture != null && texture.dimension == TextureDimension.Cube)
+                    scaleOffset = reflectionProbeTextureCache.FetchCubeReflectionProbe(cmd, texture, out fetchIndex);
+
+                reflectionProbeData.atlasScaleOffset = scaleOffset;
+                reflectionProbeData.atlasIndexAndSlice = new Vector4(
+                    Mathf.Max(fetchIndex, -1),
+                    fetchIndex >= 0 ? 0.0f : -1.0f,
+                    0.0f,
+                    0.0f);
+                reflectionProbes[compactProbeIndex] = reflectionProbeData;
+                compactProbeIndex++;
+            }
+        }
+
         private void EnsureLightGridBufferCapacity(int lightCapacity)
         {
             // VisibleLightRenderDataRecord must be built on the main thread (touches managed Light + database).
@@ -1149,11 +1190,11 @@ namespace VividRP.Runtime
         {
             reflectionProbeData = default;
 
-            var bounds = visibleReflectionProbe.bounds;
-            var extents = bounds.extents;
-            if (extents.x <= 0.0f || extents.y <= 0.0f || extents.z <= 0.0f)
+            if (!IsReflectionProbeSpatiallyValid(visibleReflectionProbe))
                 return false;
 
+            var bounds = visibleReflectionProbe.bounds;
+            var extents = bounds.extents;
             reflectionProbeData = new ReflectionProbeData
             {
                 positionWS = bounds.center,
@@ -1167,8 +1208,16 @@ namespace VividRP.Runtime
                 forwardWS = Vector3.forward,
                 padding = 0.0f,
                 hdrData = visibleReflectionProbe.hdrData,
+                atlasScaleOffset = Vector4.zero,
+                atlasIndexAndSlice = new Vector4(-1.0f, -1.0f, 0.0f, 0.0f),
             };
             return true;
+        }
+
+        private static bool IsReflectionProbeSpatiallyValid(VisibleReflectionProbe visibleReflectionProbe)
+        {
+            var extents = visibleReflectionProbe.bounds.extents;
+            return extents.x > 0.0f && extents.y > 0.0f && extents.z > 0.0f;
         }
 
         private static bool IsPunctualLightSupported(VividLightRenderData trackedLightData)

@@ -21,6 +21,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 42f3d055f6e68f94784c895cccbe859c, type: 3}
   - ResourceName: Shaders/Core/Private/Blit
     ResourceObject: {fileID: 4800000, guid: 88588a6fde9a5844db576cbc17606db2, type: 3}
+  - ResourceName: Shaders/Core/Private/BlitCubeTextureFace
+    ResourceObject: {fileID: 4800000, guid: f064ed6148de9df4c99f20de9b65e7a0, type: 3}
   - ResourceName: Shaders/Core/Private/Bloom/BloomBlur.compute
     ResourceObject: {fileID: 7200000, guid: a66065783c869624e8f9b8c9aa5e3b4d, type: 3}
   - ResourceName: Shaders/Core/Private/Bloom/BloomPrefilter.compute

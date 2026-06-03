@@ -16,6 +16,10 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<PunctualLightData> _PunctualLights;"));
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<AreaLightData> _AreaLights;"));
             Assert.That(lightingSource, Does.Contain("StructuredBuffer<ReflectionProbeData> _ReflectionProbes;"));
+            Assert.That(lightingSource, Does.Contain("TEXTURE2D_ARRAY(_ReflectionAtlas);"));
+            Assert.That(lightingSource, Does.Contain("_ReflectionAtlasCubeData"));
+            Assert.That(lightingSource, Does.Contain("_ReflectionAtlasMipCount"));
+            Assert.That(lightingSource, Does.Contain("_ReflectionAtlasSliceCount"));
             Assert.That(lightingSource, Does.Contain("GetReflectionProbe"));
             Assert.That(lightingSource, Does.Not.Contain("_PunctualLightCount"));
             Assert.That(lightingSource, Does.Not.Contain("_AreaLightCount"));

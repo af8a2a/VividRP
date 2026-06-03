@@ -81,12 +81,19 @@ struct ReflectionProbeData
     float3 forwardWS;
     float padding;
     float4 hdrData;
+    float4 atlasScaleOffset;
+    float4 atlasIndexAndSlice;
 };
 
 StructuredBuffer<DirectionalLightData> _DirectionalLights;
 StructuredBuffer<PunctualLightData> _PunctualLights;
 StructuredBuffer<AreaLightData> _AreaLights;
 StructuredBuffer<ReflectionProbeData> _ReflectionProbes;
+TEXTURE2D_ARRAY(_ReflectionAtlas);
+SAMPLER(sampler_ReflectionAtlas);
+float4 _ReflectionAtlasCubeData;
+uint _ReflectionAtlasMipCount;
+uint _ReflectionAtlasSliceCount;
 uint _DirectionalLightCount;
 uint _ReflectionProbeCount;
 int _MainDirectionalLightIndex;

@@ -5,7 +5,7 @@
 VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。它延续了 legacy [VividRP](https://github.com/af8a2a/VividRP) 的方向，但当前代码库已经不再是旧版 README 那份"大而全功能清单"的直接同步版本。现阶段的重点是先把一个可运行、可扩展、可测试的 RenderGraph-first 渲染管线基础搭起来，再逐步把 GPU Driven、Bindless、Ray Tracing 等能力接回到统一工作流里。
 
 > [!IMPORTANT]
-> - 当前开发目标为 Unity `6000.5.0a7` / `6000.5`
+> - 当前开发目标为 Unity `6000.6.0a5` / `6000.6`
 > - 当前最可靠的运行路径是 Windows + DirectX 12
 > - Bindless 与 Ray Tracing 相关流程默认按 DX12 / DXR 能力设计
 > - legacy README 中列出的功能不应直接视为当前包已全部实现，请以本文档和当前源码为准
@@ -63,7 +63,7 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 **阴影系统：**
 - `CSMShadowPass` — Cascade Shadow Map 渲染（2x2 Atlas，最多 4 级 Cascade）
 - `MeshletShadowPass` — GPU Driven Meshlet 阴影投射（Visibility Buffer Shadow Caster）
-- `CSMShadowResolvePass` — CSM 阴影解析，PCSS 柔和阴影（Percentage Closer Soft Shadows），支持屏幕空间阴影 Tile 分类
+- `CSMShadowResolvePass` — CSM 阴影解析，PCSS 柔和阴影（Percentage Closer Soft Shadows），支持屏幕空间阴影 Tile 分类与 Bend SSS 参数控制
 - `ShadowClassifyPass` — 像素分类标记需要光线追踪阴影的区域
 - `DirectionalRayTracedShadowPass` — 方向光 DXR 光线追踪阴影
 - `SIGMAShadowDenoisePass` — SIGMA 阴影降噪（ClassifyTiles → SmoothTiles → Blur → TemporalStabilization）
@@ -77,6 +77,17 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `HDRISky` / `PhysicallyBasedSky` — HDRI 天空和物理天空系统
 - `AtmosphericScatteringPass` — 大气散射与雾效
 - `SkyInjectionPass` — 天空注入渲染
+
+**反射探针系统：**
+- `VividReflectionProbeAtlasSystem` — 反射探针图集系统（VividSubsystem），将探针 Cubemap 打包到共享纹理图集中，支持 LRU 淘汰、GGX BSDF 卷积与 HDR 解码
+- `VividAdditionalReflectionData` — 反射探针附加数据，支持 HDRP 风格的 Proxy Volume 模式（Infinite / InfluenceVolume / Box）、Blend Distance、Side Fade、Multiplier、Weight 与 Importance
+- `VividReflectionProbeAtlasSettings` — 图集配置（分辨率 / 格式 / 最大探针数 / Mip 级别）
+- 反射探针剔除已集成到 `LightGridPass` 的簇状光照剔除管线中
+
+**ReGIR（Reservoir-based Global Illumination Ray Tracing）：**
+- `ReGIRGridBuildPass` — ReGIR 空间网格构建（Compute Pass），管理 Reservoir 缓冲区
+- `ReGIRDebugPass` — ReGIR 调试可视化（Cells / ReservoirOccupancy / ReservoirWeight 模式）
+- `VividReGIRData` — ReGIR 逐帧上下文数据
 
 **体积雾系统：**
 - `VolumetricDensityPass` — 体积雾密度累积（UnsafePass，支持全局状态修改）
@@ -124,6 +135,9 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `VisibilityBufferDebugPass` — GPU Driven 可见性缓冲调试（Raster Pass）
 - `VirtualTextureDemoPass` — Virtual Texture 演示（Residency / MipBias / PhysicalPageId 模式）
 - `VirtualTextureVisualizationPass` — Virtual Texture 可视化
+- `MaterialDebugPass` — GBuffer 材质通道可视化（24 种模式：BaseColor / Normal / Roughness / Metallic / AO / SpecularOcclusion / Coat / MaterialFeatures / Emissive / BakedGI / Depth 等）
+- `ReflectionProbeAtlasDebugPass` — 反射探针图集调试（Atlas / Slot 模式，可调 Mip / Slice / Exposure）
+- `ReGIRDebugPass` — ReGIR Reservoir 调试可视化（Cells / ReservoirOccupancy / ReservoirWeight）
 
 ### GPU Driven / Bindless
 
@@ -149,6 +163,8 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
   - `SkyManager` — 天空管理器（按相机类型条件更新全局天空环境，缓存天空数据）
   - `VividAutoExposureSystem` — 自动曝光子系统（预渲染订阅、帧上下文清理时的资源释放）
   - `VividGPUDrivenSystem` — GPU Driven 子系统
+  - `VividSceneLightSystem` — 场景灯光系统（PlayerLoop PreLateUpdate 阶段构建灯光快照，调度 `VividLightRenderDatabase` 数据准备）
+  - `VividReflectionProbeAtlasSystem` — 反射探针图集系统（探针注册/淘汰、图集打包、GGX 卷积调度）
 
 ### LTC 面光源
 
@@ -161,7 +177,13 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `VirtualTextureSystem` — 完整的 Virtual Texture 运行时系统
 - 地址空间管理（`VTAddressSpace`）、页表更新（`VTPageTableUpdater`）、反馈读取（`VirtualTextureFeedback`）
 - Producer 与 Request 管线、驻留管理（`VTResidencyManager`）
+- `VTPhysicalPool` — 共享物理纹理页池，支持跨地址空间共享、页分配/淘汰与统计追踪
+- Streamed Virtual Texture（SVT）— 流式虚拟纹理 Producer，已集成到 `StandardLayeredLit` 材质中
 - `VirtualTextureDemoPass` / `VirtualTextureVisualizationPass` 调试可视化
+
+### 工具
+
+- `ColorChecker Tool` — 颜色校准参考图表组件（`Rendering/VividRP/Color Checker Tool`），支持 Color Palette / Cross Polarized Grayscale / Middle Gray / Reflection / Stepped Luminance / Material Palette / External Texture 七种模式，含网格叠加、梯度可视化、球面模式与 Unlit 对比选项
 
 ### 原生插件绑定
 
@@ -181,8 +203,8 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 
 ### 材质、Shader 与后处理
 
-- 当前包内提供 `StandardLit`、`SimpleLit`、`SimpleForward` 等材质 shader
-- 已包含 URP Lit 材质转换与自定义 Shader GUI（`StandardLitShaderGUI`）
+- 当前包内提供 `StandardLit`、`SimpleLit`、`SimpleForward`、`StandardLayeredLit` 等材质 shader
+- 已包含 URP Lit 材质转换（`URPLitMaterialConverter`）与 HDRP 材质转换（`HDRPMaterialConverter`，支持 HDRP/Lit、HDRP/LitTessellation、HDRP/Unlit → VividRP StandardLit）
 - 支持 Metallic 工作流、Alpha Test、Clear Coat、Normal Map、Emission、Roughness Map、Occlusion Map
 - 已包含 Color Grading、White Balance、Channel Mixer、Split Toning、Film Grain、Tonemapping 等后处理组件
 - `ThirdParty/LWGUI` 已随包集成，供材质 Inspector 使用
@@ -196,9 +218,12 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
   - Antialiasing Mode（None / CMAA2 / TemporalAntiAliasing）
   - TAA Settings（Jitter Spread、Sample Count、Blend Factor、Motion Weight Decay、Anti-Flicker）
   - 相机矩阵扩展（View / Projection / Jitter / GPU 投影等）
+  - Editor-only：Export Final Frame Screenshot 按钮（GameView 分辨率读回并保存为 PNG）
 - `VividAdditionalLightData` — 灯光附加数据
   - Light Render Database (`VividLightRenderDatabase`) 全局灯光追踪
-  - Shadow Settings（CSM 质量、Ray Traced Shadow、PCSS 参数）
+  - Shadow Settings（CSM 质量、Ray Traced Shadow、PCSS 参数、Bend SSS）
+  - HDRP 风格 Spot Shape 切换（Cone / Box / Pyramid），Box Spot 可编辑 Gizmo
+  - Punctual Light Radius 暴露到 Inspector
   - Light category flags、cast shadows、rendering layer masks
   - Time of Day 控制（`m_EnableTimeOfDay` / `m_TimeOfDay` 0–24 小时制）
     - `EvaluateTimeOfDaySun()` — 基于正弦仰角、大气消光与地平线渐隐的太阳位置计算
@@ -245,7 +270,7 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - 图编辑器验证：Pass 类型解析、资源合约校验、Async Compute 资格检查、循环依赖检测、连接冲突检测
 - `VividRenderPipelineAssetEditor` — 管线资产 Inspector（Render Graph Asset / Color Grading Space / Auto Exposure 实现 / Async Compute / GPU Driven / SRP Batcher / Adaptive Probe Volumes / Default Volume Profile）
 - `VividCameraEditor` / `VividLightEditor` — 相机/灯光自定义 Inspector
-- `StandardLitShaderGUI`（LWGUI 框架）与 `URPLitMaterialConverter` — 材质编辑器与 URP Lit 材质转换
+- `StandardLitShaderGUI`（LWGUI 框架）、`URPLitMaterialConverter` 与 `HDRPMaterialConverter` — 材质编辑器、URP Lit 材质转换与 HDRP 材质转换
 - Volume 组件自定义 Inspector（CascadedShadow / RayTracing / GPUDriven / Sky / AutoExposure / ColorGrading / Diffusion / ScreenSpaceLensFlare）
 - `BoundProxy` 编辑器工具 — 代理体形编辑与管理
 - `Tests/Editor` 已覆盖 RenderGraph、Pass、Drawer、GPU Driven、Ray Tracing Volume、材质导入、组件数据、FrameContext、Shadow Data、SubSystem 等大量 EditMode 场景
@@ -274,11 +299,11 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 
 legacy README 中提到的大量高级特性目前并不是当前包的已交付状态，至少不应在这个包里被默认认为"已经可用"。当前仓库中尚未看到完整落地或仅保留占位入口的方向包括：
 
-- legacy README 里的大规模 GI / Path Tracing / ReSTIR 系列能力
+- legacy README 里的大规模 GI / Path Tracing 系列能力
 - `Terrain`、`Foliage` 等子系统的完整实现
 - 生产可用的 samples / demo scene 工作流
 
-> 以下能力已在当前包中实质落地，不再列入"未恢复"清单：SSR（含 ReBlur 降噪器与时域累积）、Volumetric Fog（密度/光照/MaxZ 三 Pass + Local Volumetric Fog 组件）、DLSS SR/RR、LTC 面光源、Virtual Texture 完整系统。
+> 以下能力已在当前包中实质落地，不再列入"未恢复"清单：SSR（含 ReBlur 降噪器与时域累积）、Volumetric Fog（密度/光照/MaxZ 三 Pass + Local Volumetric Fog 组件）、DLSS SR/RR、LTC 面光源、Virtual Texture 完整系统（含 SVT 与物理页池）、Reflection Probe Atlas（含 HDRP 风格 Proxy/Fade 字段与图集调试）、ReGIR（Grid Build Pass + 调试可视化）。
 
 如果你是在对照旧版 README 寻找某个特性，建议先检查当前源码、`Documentation/` 和 `Tests/Editor/` 是否真的存在对应实现。
 
@@ -297,16 +322,20 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 - `Runtime/SubSystem/Volumetric` — 体积雾系统（全局/局部雾、VBuffer、体素化）
 - `Runtime/SubSystem/VirtualTexture` — Virtual Texture 系统（地址空间/页表/驻留管理）
 - `Runtime/SubSystem/Sky` — 天空系统（HDRI / PhysicallyBased / SkyManager）
+- `Runtime/SubSystem/Reflection` — 反射探针图集系统（Atlas / Probe Cache / Settings）
 - `Runtime/SubSystem/Plugin` — 原生插件绑定（Bindless / METIS / MeshOptimizer / NVAPI / NeuralRadianceCache）
-- `Runtime/ComponentData` — 自定义组件数据（VividAdditionalCameraData / VividAdditionalLightData）
+- `Runtime/SubSystem/Lighting` — 场景灯光系统（VividSceneLightSystem）
+- `Runtime/ComponentData` — 自定义组件数据（VividAdditionalCameraData / VividAdditionalLightData / VividAdditionalReflectionData）
 - `Runtime/Utility` — 运行时工具集（PipelineResource / BoundProxy / Camera Utility / BlueNoise / HaltonJitter）
+- `Runtime/Tools` — 运行时工具（ColorChecker）
 - `Runtime/Extension/CoreRP` — Core RP 扩展（UnsafeGraphContext 扩展、ObjectDispatcherService）
 - `Editor/RenderGraph` — Graph Toolkit 编辑器、验证、导入、编译、节点注册生成
 - `Editor/PipelineResource` — 资源回收与同步工具
 - `Editor/ComponentEditor` — 相机/灯光自定义 Inspector
 - `Editor/Material` / `Editor/Shader` — 材质 Shader GUI、URP Lit 材质转换、编辑器 Shader
 - `Editor/VolumeEditor` — Volume 组件自定义 Inspector
-- `Shaders` — 包内 shader（StandardLit / SimpleLit / SimpleForward / DeferredLit / 编辑器 Shader）
+- `Editor/Tools` — 编辑器工具（ColorChecker Editor）
+- `Shaders` — 包内 shader（StandardLit / SimpleLit / SimpleForward / StandardLayeredLit / DeferredLit / 编辑器 Shader）
 - `Documentation` — 当前工作流和子系统文档
 - `Tests/Editor` — EditMode 测试
 
@@ -321,6 +350,13 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 - [Physically Based Sky HDRP Gap Inventory](Documentation~/PhysicallyBasedSkyHdrpGapInventory.md)
 - [Sky System Roadmap](Documentation~/SkySystemRoadmap.md)
 - [Local Exposure](Documentation~/LocalExposure.md)
+
+## 路线图
+
+- [Shadow](Roadmap~/Shadow.md)
+- [Sky](Roadmap~/Sky.md)
+- [Virtual Texture System](Roadmap~/VirtualTextureSystem.md)
+- [Streamed Virtual Texture (SVT)](Roadmap~/SVTRoadmap.md)
 
 ## 测试
 

@@ -2,7 +2,7 @@
 #define VIVIDRP_BEND_SCREEN_SPACE_SHADOW_INCLUDED
 
 // Adapted from Bend Studio's common screen space shadow projection code:
-// E:/UnrealEngine/Engine/Shaders/Private/bend_sss_gpu.ush
+// UnrealEngine/Engine/Shaders/Private/bend_sss_gpu.ush
 //
 // Copyright 2023 Sony Interactive Entertainment.
 //

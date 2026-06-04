@@ -42,6 +42,9 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.Atlas;
             Assert.That(pass.IsActive(new ContextContainer()), Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.Slot;
+            Assert.That(pass.IsActive(new ContextContainer()), Is.True);
         }
 
         [Test]
@@ -146,11 +149,11 @@ namespace VividRP.Editor.Tests
                     new()
                     {
                         FieldName = "m_Mode",
-                        Value = (int)ReflectionProbeAtlasDebugMode.Atlas,
+                        Value = (int)ReflectionProbeAtlasDebugMode.Slot,
                     }
                 });
 
-            Assert.That(pass.Mode, Is.EqualTo(ReflectionProbeAtlasDebugMode.Atlas));
+            Assert.That(pass.Mode, Is.EqualTo(ReflectionProbeAtlasDebugMode.Slot));
         }
 
         [Test]

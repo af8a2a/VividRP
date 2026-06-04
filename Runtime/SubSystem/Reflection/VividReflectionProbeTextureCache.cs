@@ -49,6 +49,8 @@ namespace VividRP.Runtime
         private FilterMode m_TmpTextureConvolvedFilterMode;
         private RenderTexture m_TempConvertedReflectionProbeTexture;
         private RenderTexture m_TempConvolvedReflectionProbeTexture;
+        private Vector4 m_DebugScaleOffset;
+        private bool m_HasDebugScaleOffset;
 
         private readonly struct TextureCacheEntry
         {
@@ -171,6 +173,12 @@ namespace VividRP.Runtime
                 LogErrorNoMoreSpaceOnce();
             }
 
+            if (scaleOffset.x > 0.0f && scaleOffset.y > 0.0f)
+            {
+                m_DebugScaleOffset = scaleOffset;
+                m_HasDebugScaleOffset = true;
+            }
+
             return scaleOffset;
         }
 
@@ -221,6 +229,8 @@ namespace VividRP.Runtime
             m_Atlas?.ResetAllocator();
             m_TextureLRUAndHash.Clear();
             m_TextureLRUSorted.Clear();
+            m_DebugScaleOffset = Vector4.zero;
+            m_HasDebugScaleOffset = false;
         }
 
         internal void Clear(CommandBuffer cmd)
@@ -273,6 +283,12 @@ namespace VividRP.Runtime
         internal int GetEnvSliceSize()
         {
             return m_AtlasSlicesCount;
+        }
+
+        internal bool TryGetDebugScaleOffset(out Vector4 scaleOffset)
+        {
+            scaleOffset = m_DebugScaleOffset;
+            return m_HasDebugScaleOffset;
         }
 
         public void Dispose()

@@ -34,7 +34,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ReflectionProbeData_StrideIncludesAtlasFields()
         {
-            Assert.That(VividLightData.ReflectionProbeData.Stride, Is.EqualTo(128));
+            Assert.That(VividLightData.ReflectionProbeData.Stride, Is.EqualTo(144));
         }
 
         [Test]
@@ -111,6 +111,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstScaleOffset.x, Is.GreaterThan(0.0f));
                 Assert.That(firstScaleOffset.y, Is.GreaterThan(0.0f));
                 Assert.That(secondScaleOffset, Is.EqualTo(firstScaleOffset));
+                Assert.That(cache.TryGetDebugScaleOffset(out var debugScaleOffset), Is.True);
+                Assert.That(debugScaleOffset, Is.EqualTo(firstScaleOffset));
 
                 cache.NewFrame();
                 var nextFrameScaleOffset = cache.FetchCubeReflectionProbe(cmd, probeTexture, out var nextFrameFetchIndex);
@@ -119,6 +121,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(nextFrameScaleOffset, Is.EqualTo(firstScaleOffset));
 
                 cache.Clear(cmd);
+                Assert.That(cache.TryGetDebugScaleOffset(out _), Is.False);
                 cache.NewFrame();
                 var clearedScaleOffset = cache.FetchCubeReflectionProbe(cmd, probeTexture, out var clearedFetchIndex);
 

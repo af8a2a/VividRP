@@ -9,6 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         None = 0,
         Atlas = 1,
+        Slot = 2,
     }
 
     public sealed class ReflectionProbeAtlasDebugPass : RasterPass
@@ -23,6 +24,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DebugMipCountId = Shader.PropertyToID("_ReflectionAtlasDebugMipCount");
         private static readonly int DebugSliceCountId = Shader.PropertyToID("_ReflectionAtlasDebugSliceCount");
         private static readonly int DebugExposureId = Shader.PropertyToID("_ReflectionAtlasDebugExposure");
+        private static readonly int DebugScaleOffsetId = Shader.PropertyToID("_ReflectionAtlasDebugScaleOffset");
+        private static readonly int DebugHasScaleOffsetId = Shader.PropertyToID("_ReflectionAtlasDebugHasScaleOffset");
 
         [RenderGraphResource(
             Name = "DebugTexture",
@@ -48,6 +51,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Texture m_AtlasTexture;
         private int m_AtlasMipCount;
         private int m_AtlasSliceCount;
+        private Vector4 m_AtlasScaleOffset;
+        private bool m_HasAtlasScaleOffset;
         private bool m_AtlasAvailable;
         private bool m_ShouldSkipExecution;
 
@@ -177,6 +182,8 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetInt(DebugMipCountId, Mathf.Max(0, m_AtlasMipCount));
             mpb.SetInt(DebugSliceCountId, Mathf.Max(0, m_AtlasSliceCount));
             mpb.SetFloat(DebugExposureId, m_ResolvedSettings.exposure);
+            mpb.SetVector(DebugScaleOffsetId, m_AtlasScaleOffset);
+            mpb.SetInt(DebugHasScaleOffsetId, m_HasAtlasScaleOffset ? 1 : 0);
 
             if (m_AtlasAvailable)
                 mpb.SetTexture(ReflectionAtlasId, m_AtlasTexture);
@@ -205,6 +212,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 ReflectionProbeAtlasDebugMode.None => ReflectionProbeAtlasDebugMode.None,
                 ReflectionProbeAtlasDebugMode.Atlas => ReflectionProbeAtlasDebugMode.Atlas,
+                ReflectionProbeAtlasDebugMode.Slot => ReflectionProbeAtlasDebugMode.Slot,
                 _ => ReflectionProbeAtlasDebugMode.None,
             };
         }
@@ -243,7 +251,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 out m_AtlasTexture,
                 out _,
                 out m_AtlasMipCount,
-                out m_AtlasSliceCount);
+                out m_AtlasSliceCount,
+                out m_AtlasScaleOffset);
+            m_HasAtlasScaleOffset = m_AtlasAvailable
+                && m_AtlasScaleOffset.x > 0.0f
+                && m_AtlasScaleOffset.y > 0.0f;
         }
 
         private void ConfigureDebugTexture(int width, int height)

@@ -94,7 +94,9 @@ namespace VividRP.Runtime
             public Vector3 upWS;
             public float weight;
             public Vector3 forwardWS;
-            public float padding;
+            public float padding0;
+            public Vector3 capturePositionWS;
+            public float padding1;
             public Vector4 hdrData;
             public Vector4 atlasScaleOffset;
             public Vector4 atlasIndexAndSlice;
@@ -1195,18 +1197,21 @@ namespace VividRP.Runtime
 
             var bounds = visibleReflectionProbe.bounds;
             var extents = bounds.extents;
+            var localToWorld = visibleReflectionProbe.localToWorldMatrix;
             reflectionProbeData = new ReflectionProbeData
             {
                 positionWS = bounds.center,
                 blendDistance = Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f),
                 extents = extents,
                 isBoxProjection = visibleReflectionProbe.isBoxProjection ? 1u : 0u,
-                rightWS = Vector3.right,
+                rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
                 importance = visibleReflectionProbe.importance,
-                upWS = Vector3.up,
+                upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
                 weight = 1.0f,
-                forwardWS = Vector3.forward,
-                padding = 0.0f,
+                forwardWS = NormalizeDirection(new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22), Vector3.forward),
+                padding0 = 0.0f,
+                capturePositionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
+                padding1 = 0.0f,
                 hdrData = visibleReflectionProbe.hdrData,
                 atlasScaleOffset = Vector4.zero,
                 atlasIndexAndSlice = new Vector4(-1.0f, -1.0f, 0.0f, 0.0f),

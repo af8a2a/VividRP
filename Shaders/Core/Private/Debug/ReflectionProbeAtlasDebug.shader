@@ -20,6 +20,7 @@ Shader "Hidden/VividRP/ReflectionProbeAtlasDebug"
 
             #define VIVID_REFLECTION_PROBE_ATLAS_DEBUG_NONE 0
             #define VIVID_REFLECTION_PROBE_ATLAS_DEBUG_ATLAS 1
+            #define VIVID_REFLECTION_PROBE_ATLAS_DEBUG_SLOT 2
 
             TEXTURE2D_ARRAY(_ReflectionAtlas);
             SAMPLER(sampler_ReflectionAtlas);
@@ -31,6 +32,8 @@ Shader "Hidden/VividRP/ReflectionProbeAtlasDebug"
             int _ReflectionAtlasDebugMipCount;
             int _ReflectionAtlasDebugSliceCount;
             float _ReflectionAtlasDebugExposure;
+            float4 _ReflectionAtlasDebugScaleOffset;
+            int _ReflectionAtlasDebugHasScaleOffset;
 
             struct Attributes
             {
@@ -63,10 +66,20 @@ Shader "Hidden/VividRP/ReflectionProbeAtlasDebug"
 
                 int sliceIndex = clamp(_ReflectionAtlasDebugSlice, 0, _ReflectionAtlasDebugSliceCount - 1);
                 int mipLevel = clamp(_ReflectionAtlasDebugMip, 0, _ReflectionAtlasDebugMipCount - 1);
+                float2 atlasUV = saturate(input.uv);
+
+                if (_ReflectionAtlasDebugMode == VIVID_REFLECTION_PROBE_ATLAS_DEBUG_SLOT)
+                {
+                    if (_ReflectionAtlasDebugHasScaleOffset == 0)
+                        return float4(0.0, 0.0, 0.0, 1.0);
+
+                    atlasUV = atlasUV * _ReflectionAtlasDebugScaleOffset.xy + _ReflectionAtlasDebugScaleOffset.zw;
+                }
+
                 float4 atlasColor = SAMPLE_TEXTURE2D_ARRAY_LOD(
                     _ReflectionAtlas,
                     sampler_ReflectionAtlas,
-                    saturate(input.uv),
+                    saturate(atlasUV),
                     (float)sliceIndex,
                     (float)mipLevel);
 

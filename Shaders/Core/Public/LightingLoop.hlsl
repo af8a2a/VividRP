@@ -98,6 +98,92 @@ struct VividLightingLoop
         return GetReflectionProbe(lightIndex);
     }
 
+    static bool TryLoadReflectionProbe(
+        VividLightingLoopContext context,
+        uint localLightIndex,
+        out ReflectionProbeData probe)
+    {
+        probe = (ReflectionProbeData)0;
+        if (localLightIndex >= GetReflectionProbeCount(context))
+            return false;
+
+        probe = LoadReflectionProbe(context, localLightIndex);
+        return true;
+    }
+
+    static bool TryEvaluateReflectionProbe(
+        VividLightingLoopContext context,
+        uint localLightIndex,
+        float3 positionWS,
+        float3 normalWS,
+        float3 reflectionDirectionWS,
+        float perceptualRoughness,
+        out float3 radiance,
+        out float weight)
+    {
+        ReflectionProbeData probe;
+        if (!TryLoadReflectionProbe(context, localLightIndex, probe))
+        {
+            radiance = 0.0;
+            weight = 0.0;
+            return false;
+        }
+
+        return TryEvaluateReflectionProbeData(
+            probe,
+            positionWS,
+            normalWS,
+            reflectionDirectionWS,
+            perceptualRoughness,
+            radiance,
+            weight);
+    }
+
+    static bool TryEvaluateReflectionProbes(
+        VividLightingLoopContext context,
+        float3 positionWS,
+        float3 normalWS,
+        float3 reflectionDirectionWS,
+        float perceptualRoughness,
+        out float3 radiance,
+        out float weight)
+    {
+        radiance = 0.0;
+        weight = 0.0;
+
+        float remainingWeight = 1.0;
+        uint probeCount = GetReflectionProbeCount(context);
+
+        [loop]
+        for (uint localProbeIndex = 0u; localProbeIndex < probeCount; localProbeIndex++)
+        {
+            if (remainingWeight <= 0.0)
+                break;
+
+            float3 probeRadiance;
+            float probeWeight;
+            if (!TryEvaluateReflectionProbe(
+                    context,
+                    localProbeIndex,
+                    positionWS,
+                    normalWS,
+                    reflectionDirectionWS,
+                    perceptualRoughness,
+                    probeRadiance,
+                    probeWeight))
+            {
+                continue;
+            }
+
+            float contributionWeight = min(probeWeight, remainingWeight);
+            radiance += probeRadiance * contributionWeight;
+            weight += contributionWeight;
+            remainingWeight -= contributionWeight;
+        }
+
+        return weight > 0.0;
+    }
+
     static uint GetDecalCount(VividLightingLoopContext context)
     {
         return context.decalCell.count;
@@ -140,22 +226,6 @@ struct VividLightingLoop
         return GetAreaLight(lightIndex);
     }
 
-    static uint GetBigTileReflectionProbeIndex(VividBigTileLightingLoopContext context, uint localLightIndex)
-    {
-        return GetBigTileLightIndex(context, localLightIndex) - _PunctualLightCount - _AreaLightCount;
-    }
-
-    static ReflectionProbeData LoadBigTileReflectionProbe(VividBigTileLightingLoopContext context, uint localLightIndex)
-    {
-        uint lightIndex = GetBigTileReflectionProbeIndex(context, localLightIndex);
-        return GetReflectionProbe(lightIndex);
-    }
-
-    static uint GetBigTileDecalIndex(VividBigTileLightingLoopContext context, uint localLightIndex)
-    {
-        return GetBigTileLightIndex(context, localLightIndex) - _PunctualLightCount - _AreaLightCount - _ReflectionProbeCount;
-    }
-
     static uint GetBigTileLightCategory(uint lightIndex)
     {
         uint areaLightStart = _PunctualLightCount;
@@ -176,6 +246,152 @@ struct VividLightingLoop
             return LIGHTCATEGORY_DECAL;
 
         return LIGHTCATEGORY_COUNT;
+    }
+
+    static bool TryGetBigTileReflectionProbeIndex(
+        VividBigTileLightingLoopContext context,
+        uint localReflectionProbeIndex,
+        out uint reflectionProbeIndex)
+    {
+        reflectionProbeIndex = 0u;
+        uint lightCount = GetBigTileLightCount(context);
+        uint reflectionProbeOrdinal = 0u;
+
+        [loop]
+        for (uint localLightIndex = 0u; localLightIndex < lightCount; localLightIndex++)
+        {
+            uint lightIndex = GetBigTileLightIndex(context, localLightIndex);
+            if (GetBigTileLightCategory(lightIndex) != LIGHTCATEGORY_ENV)
+                continue;
+
+            if (reflectionProbeOrdinal == localReflectionProbeIndex)
+            {
+                reflectionProbeIndex = lightIndex - _PunctualLightCount - _AreaLightCount;
+                return true;
+            }
+
+            reflectionProbeOrdinal++;
+        }
+
+        return false;
+    }
+
+    static uint GetBigTileReflectionProbeIndex(
+        VividBigTileLightingLoopContext context,
+        uint localReflectionProbeIndex)
+    {
+        uint reflectionProbeIndex = 0u;
+        TryGetBigTileReflectionProbeIndex(context, localReflectionProbeIndex, reflectionProbeIndex);
+        return reflectionProbeIndex;
+    }
+
+    static ReflectionProbeData LoadBigTileReflectionProbe(
+        VividBigTileLightingLoopContext context,
+        uint localReflectionProbeIndex)
+    {
+        uint reflectionProbeIndex = 0u;
+        if (!TryGetBigTileReflectionProbeIndex(context, localReflectionProbeIndex, reflectionProbeIndex))
+            return (ReflectionProbeData)0;
+
+        return GetReflectionProbe(reflectionProbeIndex);
+    }
+
+    static bool TryLoadBigTileReflectionProbe(
+        VividBigTileLightingLoopContext context,
+        uint localReflectionProbeIndex,
+        out ReflectionProbeData probe)
+    {
+        probe = (ReflectionProbeData)0;
+
+        uint reflectionProbeIndex = 0u;
+        if (!TryGetBigTileReflectionProbeIndex(context, localReflectionProbeIndex, reflectionProbeIndex))
+            return false;
+
+        probe = GetReflectionProbe(reflectionProbeIndex);
+        return true;
+    }
+
+    static bool TryEvaluateBigTileReflectionProbe(
+        VividBigTileLightingLoopContext context,
+        uint localLightIndex,
+        float3 positionWS,
+        float3 normalWS,
+        float3 reflectionDirectionWS,
+        float perceptualRoughness,
+        out float3 radiance,
+        out float weight)
+    {
+        ReflectionProbeData probe;
+        if (!TryLoadBigTileReflectionProbe(context, localLightIndex, probe))
+        {
+            radiance = 0.0;
+            weight = 0.0;
+            return false;
+        }
+
+        return TryEvaluateReflectionProbeData(
+            probe,
+            positionWS,
+            normalWS,
+            reflectionDirectionWS,
+            perceptualRoughness,
+            radiance,
+            weight);
+    }
+
+    static bool TryEvaluateBigTileReflectionProbes(
+        VividBigTileLightingLoopContext context,
+        float3 positionWS,
+        float3 normalWS,
+        float3 reflectionDirectionWS,
+        float perceptualRoughness,
+        out float3 radiance,
+        out float weight)
+    {
+        radiance = 0.0;
+        weight = 0.0;
+
+        float remainingWeight = 1.0;
+        uint lightCount = GetBigTileLightCount(context);
+
+        [loop]
+        for (uint localLightIndex = 0u; localLightIndex < lightCount; localLightIndex++)
+        {
+            if (remainingWeight <= 0.0)
+                break;
+
+            uint lightIndex = GetBigTileLightIndex(context, localLightIndex);
+            if (GetBigTileLightCategory(lightIndex) != LIGHTCATEGORY_ENV)
+                continue;
+
+            uint reflectionProbeIndex = lightIndex - _PunctualLightCount - _AreaLightCount;
+            ReflectionProbeData probe = GetReflectionProbe(reflectionProbeIndex);
+            float3 probeRadiance;
+            float probeWeight;
+            if (!TryEvaluateReflectionProbeData(
+                    probe,
+                    positionWS,
+                    normalWS,
+                    reflectionDirectionWS,
+                    perceptualRoughness,
+                    probeRadiance,
+                    probeWeight))
+            {
+                continue;
+            }
+
+            float contributionWeight = min(probeWeight, remainingWeight);
+            radiance += probeRadiance * contributionWeight;
+            weight += contributionWeight;
+            remainingWeight -= contributionWeight;
+        }
+
+        return weight > 0.0;
+    }
+
+    static uint GetBigTileDecalIndex(VividBigTileLightingLoopContext context, uint localLightIndex)
+    {
+        return GetBigTileLightIndex(context, localLightIndex) - _PunctualLightCount - _AreaLightCount - _ReflectionProbeCount;
     }
 
     static uint CountBigTileLightsByCategory(VividBigTileLightingLoopContext context, uint lightCategory)

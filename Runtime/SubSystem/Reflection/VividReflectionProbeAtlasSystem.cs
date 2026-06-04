@@ -33,12 +33,14 @@ namespace VividRP.Runtime
             out Texture atlasTexture,
             out Vector2Int atlasDimensions,
             out int mipCount,
-            out int sliceCount)
+            out int sliceCount,
+            out Vector4 scaleOffset)
         {
             atlasTexture = null;
             atlasDimensions = Vector2Int.zero;
             mipCount = 0;
             sliceCount = 0;
+            scaleOffset = Vector4.zero;
 
             var textureCache = RawInstance?.m_TextureCache;
             atlasTexture = textureCache?.GetAtlasTexture();
@@ -48,6 +50,7 @@ namespace VividRP.Runtime
             atlasDimensions = new Vector2Int(atlasTexture.width, atlasTexture.height);
             mipCount = textureCache.GetAtlasSamplingMipCount();
             sliceCount = textureCache.GetEnvSliceSize();
+            textureCache.TryGetDebugScaleOffset(out scaleOffset);
             return true;
         }
 

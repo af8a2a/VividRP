@@ -115,6 +115,18 @@ namespace VividRP.Runtime
         private bool m_ForceMeshletCullingFromMainCamera;
 
         [SerializeField]
+        private ReflectionProbeAtlasDebugMode m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.None;
+
+        [SerializeField]
+        private int m_ReflectionProbeAtlasArraySlice;
+
+        [SerializeField]
+        private int m_ReflectionProbeAtlasMipLevel;
+
+        [SerializeField]
+        private float m_ReflectionProbeAtlasExposure;
+
+        [SerializeField]
         private float m_Slider = 50f;
 
         [SerializeField]
@@ -267,6 +279,30 @@ namespace VividRP.Runtime
             set => m_ForceMeshletCullingFromMainCamera = value;
         }
 
+        internal ReflectionProbeAtlasDebugMode reflectionProbeAtlasDebugMode
+        {
+            get => ReflectionProbeAtlasDebugPass.NormalizeDebugMode(m_ReflectionProbeAtlasDebugMode);
+            set => m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugPass.NormalizeDebugMode(value);
+        }
+
+        internal int reflectionProbeAtlasArraySlice
+        {
+            get => Mathf.Max(0, m_ReflectionProbeAtlasArraySlice);
+            set => m_ReflectionProbeAtlasArraySlice = Mathf.Max(0, value);
+        }
+
+        internal int reflectionProbeAtlasMipLevel
+        {
+            get => Mathf.Max(0, m_ReflectionProbeAtlasMipLevel);
+            set => m_ReflectionProbeAtlasMipLevel = Mathf.Max(0, value);
+        }
+
+        internal float reflectionProbeAtlasExposure
+        {
+            get => m_ReflectionProbeAtlasExposure;
+            set => m_ReflectionProbeAtlasExposure = value;
+        }
+
         internal float slider
         {
             get => m_Slider;
@@ -321,6 +357,10 @@ namespace VividRP.Runtime
             || m_VisibilityBufferDebugMode != VisibilityBufferDebugVisualizationMode.Cluster
             || !Mathf.Approximately(m_VisibilityBufferDebugExposure, 0f)
             || m_ForceMeshletCullingFromMainCamera
+            || reflectionProbeAtlasDebugMode != ReflectionProbeAtlasDebugMode.None
+            || m_ReflectionProbeAtlasArraySlice != 0
+            || m_ReflectionProbeAtlasMipLevel != 0
+            || !Mathf.Approximately(m_ReflectionProbeAtlasExposure, 0f)
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
             || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings
@@ -357,6 +397,10 @@ namespace VividRP.Runtime
             m_VisibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.Cluster;
             m_VisibilityBufferDebugExposure = 0f;
             m_ForceMeshletCullingFromMainCamera = false;
+            m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.None;
+            m_ReflectionProbeAtlasArraySlice = 0;
+            m_ReflectionProbeAtlasMipLevel = 0;
+            m_ReflectionProbeAtlasExposure = 0f;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
@@ -386,6 +430,7 @@ namespace VividRP.Runtime
             public const string OverlayName = "Overlay";
             public const string MaterialName = "Material";
             public const string VisibilityBufferName = "Visibility Buffer";
+            public const string ReflectionProbeAtlasName = "Reflection Probe Atlas";
             public const string SliderName = "Slider";
             public const string VirtualTextureName = "Virtual Texture";
 
@@ -527,6 +572,30 @@ namespace VividRP.Runtime
                 tooltip = "Use the scene MainCamera when building meshlet GPU culling parameters."
             };
 
+            public static readonly NameAndTooltip ReflectionProbeAtlasDebugMode = new()
+            {
+                name = "Mode",
+                tooltip = "Select the reflection probe atlas debug visualization mode."
+            };
+
+            public static readonly NameAndTooltip ReflectionProbeAtlasArraySlice = new()
+            {
+                name = "Slice",
+                tooltip = "Array slice sampled from the reflection probe atlas."
+            };
+
+            public static readonly NameAndTooltip ReflectionProbeAtlasMipLevel = new()
+            {
+                name = "Mip",
+                tooltip = "Mip level sampled from the reflection probe atlas."
+            };
+
+            public static readonly NameAndTooltip ReflectionProbeAtlasExposure = new()
+            {
+                name = "Exposure",
+                tooltip = "Exposure compensation applied to the reflection probe atlas debug view."
+            };
+
             public static readonly NameAndTooltip Slider = new()
             {
                 name = "Slider",
@@ -582,6 +651,7 @@ namespace VividRP.Runtime
                 root.children.Add(CreateOverlayFoldout(data));
                 root.children.Add(CreateMaterialFoldout(data));
                 root.children.Add(CreateVisibilityBufferFoldout(data));
+                root.children.Add(CreateReflectionProbeAtlasFoldout(data));
                 root.children.Add(CreateSliderFoldout(data));
                 root.children.Add(CreateVirtualTextureFoldout(data));
                 return root;
@@ -788,6 +858,43 @@ namespace VividRP.Runtime
                     nameAndTooltip = Strings.ForceMeshletCullingFromMainCamera,
                     getter = () => data.forceMeshletCullingFromMainCamera,
                     setter = value => data.forceMeshletCullingFromMainCamera = value,
+                });
+                return foldout;
+            }
+
+            private static DebugUI.Foldout CreateReflectionProbeAtlasFoldout(VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.ReflectionProbeAtlasName,
+                    opened = true,
+                };
+
+                foldout.children.Add(CreateEnumField(
+                    Strings.ReflectionProbeAtlasDebugMode,
+                    () => data.reflectionProbeAtlasDebugMode,
+                    value => data.reflectionProbeAtlasDebugMode = value));
+                foldout.children.Add(new DebugUI.IntField
+                {
+                    nameAndTooltip = Strings.ReflectionProbeAtlasArraySlice,
+                    getter = () => data.reflectionProbeAtlasArraySlice,
+                    setter = value => data.reflectionProbeAtlasArraySlice = value,
+                    min = () => 0,
+                });
+                foldout.children.Add(new DebugUI.IntField
+                {
+                    nameAndTooltip = Strings.ReflectionProbeAtlasMipLevel,
+                    getter = () => data.reflectionProbeAtlasMipLevel,
+                    setter = value => data.reflectionProbeAtlasMipLevel = value,
+                    min = () => 0,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.ReflectionProbeAtlasExposure,
+                    getter = () => data.reflectionProbeAtlasExposure,
+                    setter = value => data.reflectionProbeAtlasExposure = value,
+                    min = () => -16f,
+                    max = () => 16f,
                 });
                 return foldout;
             }

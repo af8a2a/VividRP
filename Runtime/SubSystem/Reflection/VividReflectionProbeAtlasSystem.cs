@@ -11,6 +11,7 @@ namespace VividRP.Runtime
         private static readonly int ReflectionAtlasMipCountId = Shader.PropertyToID("_ReflectionAtlasMipCount");
         private static readonly int ReflectionAtlasSliceCountId = Shader.PropertyToID("_ReflectionAtlasSliceCount");
 
+        private static ProfilingSampler m_ProfilingSampler = new ProfilingSampler("VividReflectionProbeAtlas");
         private VividReflectionProbeTextureCache m_TextureCache;
 
 #if UNITY_EDITOR
@@ -28,6 +29,28 @@ namespace VividRP.Runtime
             RawInstance?.m_TextureCache?.Clear(cmd);
         }
 
+        internal static bool TryGetAtlasDebugData(
+            out Texture atlasTexture,
+            out Vector2Int atlasDimensions,
+            out int mipCount,
+            out int sliceCount)
+        {
+            atlasTexture = null;
+            atlasDimensions = Vector2Int.zero;
+            mipCount = 0;
+            sliceCount = 0;
+
+            var textureCache = RawInstance?.m_TextureCache;
+            atlasTexture = textureCache?.GetAtlasTexture();
+            if (atlasTexture == null)
+                return false;
+
+            atlasDimensions = new Vector2Int(atlasTexture.width, atlasTexture.height);
+            mipCount = textureCache.GetAtlasMipCount();
+            sliceCount = textureCache.GetEnvSliceSize();
+            return true;
+        }
+
         protected override void OnInitialize()
         {
         }
@@ -39,31 +62,34 @@ namespace VividRP.Runtime
 
         protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
         {
-            if (frameData == null)
+            using (new ProfilingScope(cmd, m_ProfilingSampler))
             {
+                if (frameData == null)
+                {
+                    BindGlobalAtlas(cmd);
+                    return;
+                }
+
+                var asset = VividRenderPipelineAsset.GetActiveAsset();
+                EnsureTextureCache(asset);
+
+                var lightData = frameData.GetOrCreate<VividLightData>();
+
+                if (cmd == null)
+                    return;
+
+                if (m_TextureCache == null)
+                {
+                    BindGlobalAtlas(cmd);
+                    return;
+                }
+
+                m_TextureCache.NewRender();
+                m_TextureCache.NewFrame();
+                lightData.UpdateReflectionProbeAtlasData(cmd, m_TextureCache);
+                m_TextureCache.GarbageCollectTmpResources();
                 BindGlobalAtlas(cmd);
-                return;
             }
-
-            var asset = VividRenderPipelineAsset.GetActiveAsset();
-            EnsureTextureCache(asset);
-
-            var lightData = frameData.GetOrCreate<VividLightData>();
-
-            if (cmd == null)
-                return;
-
-            if (m_TextureCache == null)
-            {
-                BindGlobalAtlas(cmd);
-                return;
-            }
-
-            m_TextureCache.NewRender();
-            m_TextureCache.NewFrame();
-            lightData.UpdateReflectionProbeAtlasData(cmd, m_TextureCache);
-            m_TextureCache.GarbageCollectTmpResources();
-            BindGlobalAtlas(cmd);
         }
 
         private void BindGlobalAtlas(CommandBuffer cmd)

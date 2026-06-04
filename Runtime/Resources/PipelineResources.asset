@@ -53,6 +53,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4aee2e660114dc34381676fa542650e2, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/ReGIRDebug
     ResourceObject: {fileID: 4800000, guid: 2265eb7dd5eff0343883e74f26451387, type: 3}
+  - ResourceName: Shaders/Core/Private/Debug/ReflectionProbeAtlasDebug
+    ResourceObject: {fileID: 4800000, guid: b974f021133ecde479d75a3763b559b1, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/SliderDebug
     ResourceObject: {fileID: 4800000, guid: 985a5b1e96340614fb6346ff8c3108ad, type: 3}
   - ResourceName: Shaders/Core/Private/Debug/VisibilityBufferDebug

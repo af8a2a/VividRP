@@ -85,5 +85,4 @@ namespace VividRP.Runtime
 
         protected abstract void OnUpdate(ContextContainer frameData, CommandBuffer cmd);
     }
-
 }

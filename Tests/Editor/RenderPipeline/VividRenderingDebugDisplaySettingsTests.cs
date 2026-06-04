@@ -41,6 +41,11 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Visibility Buffer"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Mode"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Slice"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Mip"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Slider"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Stats Source"), Is.Not.Null);
@@ -151,6 +156,25 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Reset_RestoresReflectionProbeAtlasDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasDebugMode =
+                ReflectionProbeAtlasDebugMode.Atlas;
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasArraySlice = 3;
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasMipLevel = 2;
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasExposure = 1.5f;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasDebugMode,
+                Is.EqualTo(ReflectionProbeAtlasDebugMode.None));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasArraySlice, Is.Zero);
+            Assert.That(VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasMipLevel, Is.Zero);
+            Assert.That(VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasExposure, Is.Zero);
+        }
+
+        [Test]
         public void AreAnySettingsActive_TracksMaterialDebugOverrides()
         {
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
@@ -193,6 +217,22 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.Reset();
             VividRenderingDebugDisplaySettings.Data.reGIRDebugOpacity = 0.25f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksReflectionProbeAtlasDebugOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasDebugMode =
+                ReflectionProbeAtlasDebugMode.Atlas;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasMipLevel = 1;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

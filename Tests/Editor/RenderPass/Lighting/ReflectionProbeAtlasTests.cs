@@ -38,6 +38,45 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BSDFFilterSourceSize_ReservesHdrpConvolutionMipRange()
+        {
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilterSourceSize(16), Is.EqualTo(64));
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilterSourceSize(64), Is.EqualTo(64));
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilterSourceSize(128), Is.EqualTo(128));
+        }
+
+        [Test]
+        public void BSDFFilteredSourceMipLevel_ClampsToConvolutionMipRange()
+        {
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilteredSourceMipLevel(-1), Is.Zero);
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilteredSourceMipLevel(3), Is.EqualTo(3));
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilteredSourceMipLevel(6), Is.EqualTo(6));
+            Assert.That(VividReflectionProbeTextureCache.GetBSDFFilteredSourceMipLevel(12), Is.EqualTo(6));
+        }
+
+        [Test]
+        public void GetAtlasSamplingMipCount_UsesBsdfFilteredMipCount()
+        {
+            var cache = new VividReflectionProbeTextureCache(
+                null,
+                512,
+                512,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                true,
+                3);
+
+            try
+            {
+                Assert.That(cache.GetAtlasMipCount(), Is.GreaterThan(VividReflectionProbeTextureCache.ConvolutionMipCount));
+                Assert.That(cache.GetAtlasSamplingMipCount(), Is.EqualTo(VividReflectionProbeTextureCache.ConvolutionMipCount));
+            }
+            finally
+            {
+                cache.Dispose();
+            }
+        }
+
+        [Test]
         public void ClusteredLightingData_DoesNotCarryReflectionAtlasState_WhenAtlasIsGlobal()
         {
             Assert.That(typeof(VividClusteredLightingData).GetField("reflectionAtlas"), Is.Null);

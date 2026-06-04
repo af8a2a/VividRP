@@ -175,6 +175,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ReflectionProbeAtlasIndexWidgets_UseDynamicAtlasLimits()
+        {
+            var sliceWidget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Slice")
+                as DebugUI.IntField;
+            var mipWidget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Mip")
+                as DebugUI.IntField;
+
+            Assert.That(sliceWidget, Is.Not.Null);
+            Assert.That(mipWidget, Is.Not.Null);
+            Assert.That(sliceWidget.min(), Is.Zero);
+            Assert.That(mipWidget.min(), Is.Zero);
+            Assert.That(sliceWidget.max, Is.Not.Null);
+            Assert.That(mipWidget.max, Is.Not.Null);
+            Assert.That(sliceWidget.max(), Is.GreaterThanOrEqualTo(0));
+            Assert.That(mipWidget.max(), Is.GreaterThanOrEqualTo(0));
+        }
+
+        [Test]
         public void AreAnySettingsActive_TracksMaterialDebugOverrides()
         {
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);

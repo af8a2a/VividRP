@@ -6,8 +6,9 @@ namespace VividRP.Runtime
     internal sealed class SkyCubemapGGXConvolution : System.IDisposable
     {
         internal const string GGXConvolutionShaderName = "Hidden/VividRP/Sky/GGXConvolve";
+        internal const int ConvolutionMipCount = 7;
 
-        private const int MaxConvolutionMipLevel = 6;
+        private const int MaxConvolutionMipLevel = ConvolutionMipCount - 1;
         private const float GoldenRatio = 1.618033988749895f;
         private const int GgxConvolutionPassIndex = 0;
         private const int CopyMipZeroPassIndex = 1;

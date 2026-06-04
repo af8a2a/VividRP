@@ -287,14 +287,14 @@ namespace VividRP.Runtime
 
         internal int reflectionProbeAtlasArraySlice
         {
-            get => Mathf.Max(0, m_ReflectionProbeAtlasArraySlice);
-            set => m_ReflectionProbeAtlasArraySlice = Mathf.Max(0, value);
+            get => ClampReflectionProbeAtlasArraySlice(m_ReflectionProbeAtlasArraySlice);
+            set => m_ReflectionProbeAtlasArraySlice = ClampReflectionProbeAtlasArraySlice(value);
         }
 
         internal int reflectionProbeAtlasMipLevel
         {
-            get => Mathf.Max(0, m_ReflectionProbeAtlasMipLevel);
-            set => m_ReflectionProbeAtlasMipLevel = Mathf.Max(0, value);
+            get => ClampReflectionProbeAtlasMipLevel(m_ReflectionProbeAtlasMipLevel);
+            set => m_ReflectionProbeAtlasMipLevel = ClampReflectionProbeAtlasMipLevel(value);
         }
 
         internal float reflectionProbeAtlasExposure
@@ -419,6 +419,22 @@ namespace VividRP.Runtime
             return normalized == 0
                 ? TileClusterCategoryDebug.Punctual
                 : normalized;
+        }
+
+        private static int ClampReflectionProbeAtlasArraySlice(int value)
+        {
+            var sliceCount = VividReflectionProbeAtlasSystem.GetAtlasDebugSliceCount();
+            return sliceCount > 0
+                ? Mathf.Clamp(value, 0, sliceCount - 1)
+                : Mathf.Max(0, value);
+        }
+
+        private static int ClampReflectionProbeAtlasMipLevel(int value)
+        {
+            var mipCount = VividReflectionProbeAtlasSystem.GetAtlasDebugMipCount();
+            return mipCount > 0
+                ? Mathf.Clamp(value, 0, mipCount - 1)
+                : Mathf.Max(0, value);
         }
 
         private static class Strings
@@ -880,6 +896,7 @@ namespace VividRP.Runtime
                     getter = () => data.reflectionProbeAtlasArraySlice,
                     setter = value => data.reflectionProbeAtlasArraySlice = value,
                     min = () => 0,
+                    max = () => Mathf.Max(0, VividReflectionProbeAtlasSystem.GetAtlasDebugSliceCount() - 1),
                 });
                 foldout.children.Add(new DebugUI.IntField
                 {
@@ -887,6 +904,7 @@ namespace VividRP.Runtime
                     getter = () => data.reflectionProbeAtlasMipLevel,
                     setter = value => data.reflectionProbeAtlasMipLevel = value,
                     min = () => 0,
+                    max = () => Mathf.Max(0, VividReflectionProbeAtlasSystem.GetAtlasDebugMipCount() - 1),
                 });
                 foldout.children.Add(new DebugUI.FloatField
                 {

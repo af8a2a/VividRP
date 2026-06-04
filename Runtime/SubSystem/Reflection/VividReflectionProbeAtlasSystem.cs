@@ -46,9 +46,19 @@ namespace VividRP.Runtime
                 return false;
 
             atlasDimensions = new Vector2Int(atlasTexture.width, atlasTexture.height);
-            mipCount = textureCache.GetAtlasMipCount();
+            mipCount = textureCache.GetAtlasSamplingMipCount();
             sliceCount = textureCache.GetEnvSliceSize();
             return true;
+        }
+
+        internal static int GetAtlasDebugMipCount()
+        {
+            return RawInstance?.m_TextureCache?.GetAtlasSamplingMipCount() ?? 0;
+        }
+
+        internal static int GetAtlasDebugSliceCount()
+        {
+            return RawInstance?.m_TextureCache?.GetEnvSliceSize() ?? 0;
         }
 
         protected override void OnInitialize()
@@ -107,7 +117,7 @@ namespace VividRP.Runtime
 
             cmd.SetGlobalTexture(ReflectionAtlasId, m_TextureCache.GetAtlasTexture());
             cmd.SetGlobalVector(ReflectionAtlasCubeDataId, m_TextureCache.GetTextureAtlasCubeData());
-            cmd.SetGlobalInt(ReflectionAtlasMipCountId, m_TextureCache.GetAtlasMipCount());
+            cmd.SetGlobalInt(ReflectionAtlasMipCountId, m_TextureCache.GetAtlasSamplingMipCount());
             cmd.SetGlobalInt(ReflectionAtlasSliceCountId, m_TextureCache.GetEnvSliceSize());
         }
 

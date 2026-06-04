@@ -9,7 +9,7 @@ namespace VividRP.Runtime
 {
     internal sealed class VividReflectionProbeTextureCache : IDisposable
     {
-        internal const int ConvolutionMipCount = 7;
+        internal const int ConvolutionMipCount = SkyCubemapGGXConvolution.ConvolutionMipCount;
 
         private const int MaxTexturesInAtlas = 2048;
         private const int MaxFramesTmpUsage = 60;
@@ -30,7 +30,7 @@ namespace VividRP.Runtime
         private readonly bool m_DecreaseResToFit;
         private readonly Dictionary<VividTextureId, TextureCacheEntry> m_TextureLRUAndHash = new();
         private readonly List<TextureLRUEntry> m_TextureLRUSorted = new();
-        private readonly SkyCubemapGGXConvolution m_GgxConvolution = new();
+        private readonly SkyCubemapGGXConvolution m_BsdfFilter = new();
         private readonly MaterialPropertyBlock m_ConvertTexturePropertyBlock = new();
 
         private RTHandle m_AtlasTexture;
@@ -109,7 +109,7 @@ namespace VividRP.Runtime
                 name: "VividReflectionProbeAtlas");
             m_Atlas = new VividTexture2DAtlasDynamic(width, height, MaxTexturesInAtlas, m_AtlasTexture);
 
-            m_GgxConvolution.Build(resources);
+            m_BsdfFilter.Build(resources);
             var convertShader = resources?.BlitCubeTextureFaceShader;
 #if UNITY_EDITOR
             convertShader ??= Shader.Find("Hidden/VividRP/BlitCubeTextureFace");
@@ -142,6 +142,16 @@ namespace VividRP.Runtime
         {
             const double mipmapFactorApprox = 1.33;
             return (long)(elementsCount * width * height * mipmapFactorApprox * GraphicsFormatUtility.GetBlockSize(format));
+        }
+
+        internal static int GetBSDFFilterSourceSize(int textureSize)
+        {
+            return Mathf.Max(textureSize, 1 << (ConvolutionMipCount - 1));
+        }
+
+        internal static int GetBSDFFilteredSourceMipLevel(int atlasMipLevel)
+        {
+            return Mathf.Clamp(atlasMipLevel, 0, ConvolutionMipCount - 1);
         }
 
         internal Vector4 FetchCubeReflectionProbe(CommandBuffer cmd, Texture texture, out int fetchIndex)
@@ -255,6 +265,11 @@ namespace VividRP.Runtime
             return m_AtlasMipCount;
         }
 
+        internal int GetAtlasSamplingMipCount()
+        {
+            return Mathf.Min(m_AtlasMipCount, ConvolutionMipCount);
+        }
+
         internal int GetEnvSliceSize()
         {
             return m_AtlasSlicesCount;
@@ -262,7 +277,7 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
-            m_GgxConvolution.Dispose();
+            m_BsdfFilter.Dispose();
             m_Atlas?.Dispose();
             m_Atlas = null;
             m_AtlasTexture?.Release();
@@ -336,8 +351,8 @@ namespace VividRP.Runtime
 
                 var convertedTexture = PrepareCubeReflectionProbeTexture(cmd, texture, textureSize);
                 var sourceTexture = convertedTexture != null ? convertedTexture : texture;
-                var convolvedTexture = ConvolveCubeReflectionProbeTexture(cmd, sourceTexture);
-                BlitTextureCube(cmd, scaleOffset, convolvedTexture != null ? convolvedTexture : sourceTexture, 0);
+                var filteredTexture = BuildBSDFFilteredCubeMipChain(cmd, sourceTexture);
+                BlitTextureCube(cmd, scaleOffset, filteredTexture, 0);
                 return true;
             }
         }
@@ -351,7 +366,7 @@ namespace VividRP.Runtime
 
             using (new ProfilingScope(cmd, s_ConvertReflectionProbeSampler))
             {
-                var cubeSize = Mathf.Max(textureSize, 1 << (ConvolutionMipCount - 1));
+                var cubeSize = GetBSDFFilterSourceSize(textureSize);
                 var conversionRequired = texture.graphicsFormat != m_AtlasFormat;
                 conversionRequired |= cubemap != null && cubemap.mipmapCount == 1;
                 conversionRequired |= renderTexture != null && !renderTexture.useMipMap;
@@ -413,10 +428,13 @@ namespace VividRP.Runtime
             return m_TempConvertedReflectionProbeTexture;
         }
 
-        private Texture ConvolveCubeReflectionProbeTexture(CommandBuffer cmd, Texture texture)
+        private Texture BuildBSDFFilteredCubeMipChain(CommandBuffer cmd, Texture texture)
         {
-            var convolvedTexture = GetTempConvolvedReflectionProbeTexture(texture);
-            return m_GgxConvolution.Convolve(cmd, texture, convolvedTexture) ? convolvedTexture : texture;
+            if (!m_BsdfFilter.IsSupported)
+                return texture;
+
+            var filteredTexture = GetTempConvolvedReflectionProbeTexture(texture);
+            return m_BsdfFilter.Convolve(cmd, texture, filteredTexture) ? filteredTexture : texture;
         }
 
         private RenderTexture GetTempConvolvedReflectionProbeTexture(Texture texture)
@@ -468,12 +486,14 @@ namespace VividRP.Runtime
                         texelPadding *= 2;
 
                     cmd.SetRenderTarget(m_AtlasTexture.rt, mipLevel, CubemapFace.Unknown, arraySlice);
+                    // The BSDF filter only builds the fixed HDRP convolution range; lower physical atlas mips reuse the roughest filtered level.
+                    var sourceMipLevel = GetBSDFFilteredSourceMipLevel(mipLevel);
                     Blitter.BlitCubeToOctahedral2DQuadWithPadding(
                         cmd,
                         texture,
                         textureSizeWithoutPadding,
                         scaleOffset,
-                        mipLevel,
+                        sourceMipLevel,
                         bilinear,
                         texelPadding);
                 }

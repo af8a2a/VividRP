@@ -50,6 +50,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AccumulateIndirectLighting("));
             Assert.That(source, Does.Contain("AccumulateDirectLighting("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Env("));
+            Assert.That(source, Does.Contain("EvaluateDeferredReflectionProbeIndirectLighting("));
+            Assert.That(source, Does.Contain("VividLightingLoop::TryEvaluateReflectionProbes("));
+            Assert.That(source, Does.Contain("ApplyVividReflectionProbeSpecularLighting("));
+            Assert.That(source, Does.Contain("GetVividReflectionProbeSampleInputs("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Directional("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Punctual("));
             Assert.That(source, Does.Contain("EvaluateBSDF_Area("));

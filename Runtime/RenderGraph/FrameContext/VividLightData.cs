@@ -898,7 +898,11 @@ namespace VividRP.Runtime
                 var texture = visibleReflectionProbe.texture;
 
                 if (texture != null && texture.dimension == TextureDimension.Cube)
-                    scaleOffset = reflectionProbeTextureCache.FetchCubeReflectionProbe(cmd, texture, out fetchIndex);
+                    scaleOffset = reflectionProbeTextureCache.FetchCubeReflectionProbe(
+                        cmd,
+                        texture,
+                        visibleReflectionProbe.hdrData,
+                        out fetchIndex);
 
                 reflectionProbeData.atlasScaleOffset = scaleOffset;
                 reflectionProbeData.atlasIndexAndSlice = new Vector4(

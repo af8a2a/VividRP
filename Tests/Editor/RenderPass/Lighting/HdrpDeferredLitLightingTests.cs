@@ -94,6 +94,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AccumulateIndirectLighting("));
             Assert.That(source, Does.Contain("PostEvaluateBSDF("));
             Assert.That(source, Does.Contain("GetSpecularDominantDir"));
+            Assert.That(source, Does.Contain("GetVividReflectionProbeSampleInputs("));
+            Assert.That(source, Does.Contain("ApplyVividReflectionProbeSpecularLighting("));
+            Assert.That(source, Does.Contain("NeedsVividClearCoatReflectionProbeSample("));
+            Assert.That(source, Does.Contain("GetVividFabricReflectionProbeSpecularFactor("));
         }
 
         [Test]
@@ -207,6 +211,27 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
                 Does.Contain("PostEvaluateBSDF("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl")),
+                Does.Contain("EvaluateDeferredReflectionProbeIndirectLighting("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl")),
+                Does.Contain("EvaluateDeferredReflectionProbeIndirectLighting("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
+                Does.Contain("EvaluateDeferredReflectionProbeIndirectLighting("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl")),
+                Does.Contain("VividLightingLoop::TryEvaluateReflectionProbes("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl")),
+                Does.Contain("VividLightingLoop::TryEvaluateReflectionProbes("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
+                Does.Contain("VividLightingLoop::TryEvaluateReflectionProbes("));
+            Assert.That(
+                File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute")),
+                Does.Contain("ApplyVividReflectionProbeSpecularLighting("));
         }
 
         [Test]

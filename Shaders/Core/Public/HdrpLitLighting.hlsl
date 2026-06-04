@@ -641,6 +641,132 @@ VividIndirectLighting EvaluateBSDF_Env(
     return lighting;
 }
 
+float GetVividFabricIblPerceptualRoughness(VividGBufferSurfaceData surfaceData)
+{
+    float roughness = ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);
+    return RoughnessToPerceptualRoughness(roughness);
+}
+
+float3 GetVividFabricReflectionProbeSpecularFactor(
+    VividGBufferSurfaceData surfaceData,
+    float3 viewDirectionWS)
+{
+    float nDotV = dot(surfaceData.normalWS, SafeNormalize(viewDirectionWS));
+    float clampedNdotV = saturate(ClampNdotV(nDotV));
+    float perceptualRoughness = GetVividFabricIblPerceptualRoughness(surfaceData);
+    float fuzzAmount = saturate(surfaceData.customData);
+    float3 baseSpecular = lerp(kVividDielectricF0, surfaceData.baseColor, surfaceData.metallic);
+    float luminance = VividGetLuminance(surfaceData.baseColor);
+    float3 sheenTint = lerp(luminance.xxx, surfaceData.baseColor, 0.35);
+    float3 fabricFresnel0 = lerp(baseSpecular, sheenTint, fuzzAmount);
+    float3 specularFGD = 0.0;
+    float diffuseFGD = 0.0;
+    float reflectivity = 0.0;
+
+    GetPreIntegratedFGDCharlieAndFabricLambert(
+        clampedNdotV,
+        perceptualRoughness,
+        fabricFresnel0,
+        specularFGD,
+        diffuseFGD,
+        reflectivity);
+
+    return specularFGD * fuzzAmount;
+}
+
+void GetVividReflectionProbeSampleInputs(
+    VividGBufferSurfaceData surfaceData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS,
+    out float3 directionWS,
+    out float perceptualRoughness)
+{
+    float clampedNdotV = saturate(ClampNdotV(preLightData.NdotV));
+
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    {
+        perceptualRoughness = GetVividFabricIblPerceptualRoughness(surfaceData);
+        float3 reflectionVectorWS = VividGetReflectionVector(SafeNormalize(viewDirectionWS), surfaceData.normalWS);
+        directionWS = GetSpecularDominantDir(
+            surfaceData.normalWS,
+            reflectionVectorWS,
+            perceptualRoughness,
+            clampedNdotV);
+        return;
+    }
+
+    perceptualRoughness = preLightData.iblPerceptualRoughness;
+    directionWS = GetSpecularDominantDir(
+        surfaceData.normalWS,
+        preLightData.iblR,
+        perceptualRoughness,
+        clampedNdotV);
+}
+
+bool NeedsVividClearCoatReflectionProbeSample(VividLitBSDFData bsdfData)
+{
+    return bsdfData.coatMask > 0.0;
+}
+
+void GetVividClearCoatReflectionProbeSampleInputs(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    out float3 directionWS,
+    out float perceptualRoughness)
+{
+    float clampedNdotV = saturate(ClampNdotV(preLightData.NdotV));
+    perceptualRoughness = RoughnessToPerceptualRoughness(bsdfData.coatRoughness);
+    directionWS = GetSpecularDominantDir(
+        surfaceData.normalWS,
+        preLightData.iblR,
+        perceptualRoughness,
+        clampedNdotV);
+}
+
+float3 GetVividReflectionProbeSpecularFactor(
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS)
+{
+    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        return GetVividFabricReflectionProbeSpecularFactor(surfaceData, viewDirectionWS);
+
+    float3 specularFactor = preLightData.specularFGD;
+    if (NeedsVividClearCoatReflectionProbeSample(bsdfData))
+        specularFactor *= Sq(1.0 - preLightData.coatIblF);
+
+    return specularFactor;
+}
+
+VividIndirectLighting ApplyVividReflectionProbeSpecularLighting(
+    VividIndirectLighting lighting,
+    float3 weightedProbeRadiance,
+    float reflectionProbeWeight,
+    float3 weightedCoatProbeRadiance,
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 viewDirectionWS)
+{
+    float hierarchyWeight = saturate(reflectionProbeWeight);
+    float ambientOcclusion = surfaceData.ambientOcclusion;
+
+    lighting.specularReflected *= 1.0 - hierarchyWeight;
+    lighting.specularReflected += weightedProbeRadiance
+        * GetVividReflectionProbeSpecularFactor(surfaceData, bsdfData, preLightData, viewDirectionWS)
+        * ambientOcclusion;
+
+    if (surfaceData.materialId != VIVID_GBUFFER_MATERIAL_FABRIC
+        && NeedsVividClearCoatReflectionProbeSample(bsdfData))
+    {
+        lighting.specularReflected += weightedCoatProbeRadiance * preLightData.coatIblF * ambientOcclusion;
+    }
+
+    return lighting;
+}
+
 float3 EvaluateIndirectLighting(
     VividGBufferSurfaceData surfaceData,
     VividLitBSDFData bsdfData,

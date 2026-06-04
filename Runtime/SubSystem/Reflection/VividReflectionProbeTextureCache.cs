@@ -14,8 +14,10 @@ namespace VividRP.Runtime
         private const int MaxTexturesInAtlas = 2048;
         private const int MaxFramesTmpUsage = 60;
         private static readonly int InputTexId = Shader.PropertyToID("_InputTex");
+        private static readonly int InputTexHDRId = Shader.PropertyToID("_InputTex_HDR");
         private static readonly int FaceIndexId = Shader.PropertyToID("_FaceIndex");
         private static readonly int LodId = Shader.PropertyToID("_LoD");
+        private static readonly Vector4 DefaultHDRDecodeData = new(1.0f, 1.0f, 0.0f, 0.0f);
         private static readonly ProfilingSampler s_ConvertReflectionProbeSampler = new("VividReflectionProbeTextureCache.Convert");
         private static readonly ProfilingSampler s_BlitTextureToAtlasSampler = new("VividReflectionProbeTextureCache.BlitToAtlas");
         private static readonly ProfilingSampler s_UpdateReflectionProbeAtlasSampler = new("VividReflectionProbeTextureCache.UpdateAtlas");
@@ -158,6 +160,15 @@ namespace VividRP.Runtime
 
         internal Vector4 FetchCubeReflectionProbe(CommandBuffer cmd, Texture texture, out int fetchIndex)
         {
+            return FetchCubeReflectionProbe(cmd, texture, DefaultHDRDecodeData, out fetchIndex);
+        }
+
+        internal Vector4 FetchCubeReflectionProbe(
+            CommandBuffer cmd,
+            Texture texture,
+            Vector4 hdrDecodeData,
+            out int fetchIndex)
+        {
             fetchIndex = -1;
 
             if (cmd == null || !IsValidCubeTexture(texture))
@@ -168,7 +179,7 @@ namespace VividRP.Runtime
             var textureId = GetTextureIdAndSize(texture, out _);
 
             if (NeedsUpdate(textureId, GetTextureHash(texture), ref scaleOffset)
-                && !UpdateTexture(cmd, texture, ref scaleOffset))
+                && !UpdateTexture(cmd, texture, hdrDecodeData, ref scaleOffset))
             {
                 LogErrorNoMoreSpaceOnce();
             }
@@ -354,7 +365,11 @@ namespace VividRP.Runtime
             return needsUpdate;
         }
 
-        private bool UpdateTexture(CommandBuffer cmd, Texture texture, ref Vector4 scaleOffset)
+        private bool UpdateTexture(
+            CommandBuffer cmd,
+            Texture texture,
+            Vector4 hdrDecodeData,
+            ref Vector4 scaleOffset)
         {
             using (new ProfilingScope(cmd, s_UpdateReflectionProbeAtlasSampler))
             {
@@ -365,7 +380,7 @@ namespace VividRP.Runtime
                     return false;
                 }
 
-                var convertedTexture = PrepareCubeReflectionProbeTexture(cmd, texture, textureSize);
+                var convertedTexture = PrepareCubeReflectionProbeTexture(cmd, texture, textureSize, hdrDecodeData);
                 var sourceTexture = convertedTexture != null ? convertedTexture : texture;
                 var filteredTexture = BuildBSDFFilteredCubeMipChain(cmd, sourceTexture);
                 BlitTextureCube(cmd, scaleOffset, filteredTexture, 0);
@@ -373,7 +388,11 @@ namespace VividRP.Runtime
             }
         }
 
-        private RenderTexture PrepareCubeReflectionProbeTexture(CommandBuffer cmd, Texture texture, int textureSize)
+        private RenderTexture PrepareCubeReflectionProbeTexture(
+            CommandBuffer cmd,
+            Texture texture,
+            int textureSize,
+            Vector4 hdrDecodeData)
         {
             var renderTexture = texture as RenderTexture;
             var cubemap = texture as Cubemap;
@@ -396,6 +415,7 @@ namespace VividRP.Runtime
                     var convertedTexture = GetTempConvertedReflectionProbeTexture(texture, cubeSize);
                     m_ConvertTexturePropertyBlock.Clear();
                     m_ConvertTexturePropertyBlock.SetTexture(InputTexId, texture);
+                    m_ConvertTexturePropertyBlock.SetVector(InputTexHDRId, hdrDecodeData);
                     m_ConvertTexturePropertyBlock.SetFloat(LodId, 0.0f);
 
                     for (var faceIndex = 0; faceIndex < 6; faceIndex++)

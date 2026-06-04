@@ -91,6 +91,71 @@ float EvaluateDeferredDirectionalShadowAttenuation(
     return lerp(1.0, directionalShadow, saturate(directionalLight.shadowStrength));
 }
 
+VividIndirectLighting EvaluateDeferredReflectionProbeIndirectLighting(
+    VividLightingLoopContext lightLoop,
+    VividIndirectLighting indirectLighting,
+    VividGBufferSurfaceData surfaceData,
+    VividLitBSDFData bsdfData,
+    VividPreLightData preLightData,
+    float3 positionWS,
+    float3 viewDirectionWS)
+{
+    float3 probeDirectionWS;
+    float probePerceptualRoughness;
+    GetVividReflectionProbeSampleInputs(
+        surfaceData,
+        preLightData,
+        viewDirectionWS,
+        probeDirectionWS,
+        probePerceptualRoughness);
+
+    float3 weightedProbeRadiance;
+    float reflectionProbeWeight;
+    if (!VividLightingLoop::TryEvaluateReflectionProbes(
+            lightLoop,
+            positionWS,
+            surfaceData.normalWS,
+            probeDirectionWS,
+            probePerceptualRoughness,
+            weightedProbeRadiance,
+            reflectionProbeWeight))
+    {
+        return indirectLighting;
+    }
+
+    float3 weightedCoatProbeRadiance = 0.0;
+    if (NeedsVividClearCoatReflectionProbeSample(bsdfData))
+    {
+        float3 coatProbeDirectionWS;
+        float coatProbePerceptualRoughness;
+        float coatProbeWeight;
+        GetVividClearCoatReflectionProbeSampleInputs(
+            surfaceData,
+            bsdfData,
+            preLightData,
+            coatProbeDirectionWS,
+            coatProbePerceptualRoughness);
+        VividLightingLoop::TryEvaluateReflectionProbes(
+            lightLoop,
+            positionWS,
+            surfaceData.normalWS,
+            coatProbeDirectionWS,
+            coatProbePerceptualRoughness,
+            weightedCoatProbeRadiance,
+            coatProbeWeight);
+    }
+
+    return ApplyVividReflectionProbeSpecularLighting(
+        indirectLighting,
+        weightedProbeRadiance,
+        reflectionProbeWeight,
+        weightedCoatProbeRadiance,
+        surfaceData,
+        bsdfData,
+        preLightData,
+        viewDirectionWS);
+}
+
 VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividGBufferSurfaceData surfaceData,
     uint2 pixelCoord,
@@ -104,9 +169,17 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
     VividPreLightData preLightData = GetVividPreLightData(viewDirectionWS, surfaceData, bsdfData);
     screenSpaceReflectionFGD = preLightData.specularFGD;
     VividAggregateLighting aggregateLighting = (VividAggregateLighting)0;
+    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
 
     AccumulateIndirectLighting(
-        EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData),
+        EvaluateDeferredReflectionProbeIndirectLighting(
+            lightLoop,
+            EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData),
+            surfaceData,
+            bsdfData,
+            preLightData,
+            positionWS,
+            viewDirectionWS),
         aggregateLighting);
 
     [loop]
@@ -119,7 +192,6 @@ VividLightLoopOutput EvaluateDeferredLitLightLoop(
         AccumulateDirectLighting(lighting, aggregateLighting);
     }
 
-    VividLightingLoopContext lightLoop = VividLightingLoop::Create(pixelCoord, positionWS);
     uint punctualLightCount = VividLightingLoop::GetPunctualLightCount(lightLoop);
 
     [loop]
@@ -236,6 +308,7 @@ void DeferredLit(
         + screenSpaceReflection.rgb * screenSpaceReflectionFGD * reflectionWeight;
     float3 lighting = diffuseLighting + specularLighting;
     float3 indirectLighting = VividApplyPreExposure(max(indirectDiffuseLighting + indirectSpecularLighting, 0.0));
+    _LightingDebugTexture[pixelCoord] = float4(indirectLighting, reflectionWeight);
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
 }

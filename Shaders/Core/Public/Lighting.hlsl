@@ -88,6 +88,18 @@ struct ReflectionProbeData
     float4 hdrData;
     float4 atlasScaleOffset;
     float4 atlasIndexAndSlice;
+    float3 blendDistancePositive;
+    float multiplier;
+    float3 blendDistanceNegative;
+    uint isProjectionInfinite;
+    float3 boxSideFadePositive;
+    float rangeCompressionFactor;
+    float3 boxSideFadeNegative;
+    float padding2;
+    float3 proxyPositionWS;
+    float padding3;
+    float3 proxyExtents;
+    float padding4;
 };
 
 StructuredBuffer<DirectionalLightData> _DirectionalLights;
@@ -157,13 +169,18 @@ bool IsReflectionProbeAtlasEntryValid(ReflectionProbeData probe)
         && probe.atlasScaleOffset.y > 0.0;
 }
 
-float3 WorldToReflectionProbeLocalPosition(ReflectionProbeData probe, float3 positionWS)
+float3 WorldToReflectionProbeLocalPosition(ReflectionProbeData probe, float3 positionWS, float3 centerWS)
 {
-    float3 offsetWS = positionWS - probe.positionWS;
+    float3 offsetWS = positionWS - centerWS;
     return float3(
         dot(offsetWS, probe.rightWS),
         dot(offsetWS, probe.upWS),
         dot(offsetWS, probe.forwardWS));
+}
+
+float3 WorldToReflectionProbeLocalPosition(ReflectionProbeData probe, float3 positionWS)
+{
+    return WorldToReflectionProbeLocalPosition(probe, positionWS, probe.positionWS);
 }
 
 float3 WorldToReflectionProbeLocalDirection(ReflectionProbeData probe, float3 directionWS)
@@ -181,32 +198,49 @@ float3 ReflectionProbeLocalToWorldDirection(ReflectionProbeData probe, float3 di
         + directionLS.z * probe.forwardWS;
 }
 
-float EvaluateReflectionProbeInfluenceWeight(ReflectionProbeData probe, float3 positionWS, float3 normalWS)
+float EvaluateReflectionProbeInfluenceWeight(
+    ReflectionProbeData probe,
+    float3 positionWS,
+    float3 normalWS,
+    float3 reflectionDirectionWS)
 {
     float3 positionLS = WorldToReflectionProbeLocalPosition(probe, positionWS);
-    float3 distanceToFace = probe.extents - abs(positionLS);
-    float insideWeight = all(distanceToFace >= 0.0) ? 1.0 : 0.0;
-    float fadeDistance = max(probe.blendDistance, 0.0001);
-    float faceWeight = saturate(min(min(distanceToFace.x, distanceToFace.y), distanceToFace.z) / fadeDistance);
+    float3 negativeDistance = probe.extents + positionLS;
+    float3 positiveDistance = probe.extents - positionLS;
+    float insideWeight = all(negativeDistance >= 0.0) && all(positiveDistance >= 0.0) ? 1.0 : 0.0;
+    float3 blendPositive = max(probe.blendDistancePositive, float3(0.0, 0.0, 0.0));
+    float3 blendNegative = max(probe.blendDistanceNegative, float3(0.0, 0.0, 0.0));
+    float3 positiveFalloff = positiveDistance / max(blendPositive, float3(0.0001, 0.0001, 0.0001));
+    float3 negativeFalloff = negativeDistance / max(blendNegative, float3(0.0001, 0.0001, 0.0001));
+    float influenceFalloff = min(
+        min(min(negativeFalloff.x, negativeFalloff.y), negativeFalloff.z),
+        min(min(positiveFalloff.x, positiveFalloff.y), positiveFalloff.z));
+    float faceWeight = saturate(influenceFalloff) * insideWeight;
 
-    return Smoothstep01(faceWeight) * insideWeight * saturate(probe.weight);
+    float3 directionLS = SafeNormalize(WorldToReflectionProbeLocalDirection(probe, reflectionDirectionWS));
+    float3 faceFade = saturate((4.0 * directionLS - 1.0) * probe.boxSideFadePositive)
+        + saturate((-4.0 * directionLS - 1.0) * probe.boxSideFadeNegative);
+    faceWeight *= saturate(faceFade.x + faceFade.y + faceFade.z);
+
+    return Smoothstep01(faceWeight) * saturate(probe.weight);
 }
 
 float3 ProjectReflectionProbeDirection(ReflectionProbeData probe, float3 positionWS, float3 reflectionDirectionWS)
 {
     float3 directionWS = SafeNormalize(reflectionDirectionWS);
-    if (probe.isBoxProjection == 0u)
+    if (probe.isBoxProjection == 0u || probe.isProjectionInfinite != 0u)
         return directionWS;
 
-    float3 positionLS = WorldToReflectionProbeLocalPosition(probe, positionWS);
+    float3 proxyExtents = max(probe.proxyExtents, float3(0.0001, 0.0001, 0.0001));
+    float3 positionLS = WorldToReflectionProbeLocalPosition(probe, positionWS, probe.proxyPositionWS);
     float3 directionLS = SafeNormalize(WorldToReflectionProbeLocalDirection(probe, directionWS));
-    float projectionDistance = IntersectRayAABBSimple(positionLS, directionLS, -probe.extents, probe.extents);
+    float projectionDistance = IntersectRayAABBSimple(positionLS, directionLS, -proxyExtents, proxyExtents);
 
     if (projectionDistance <= 0.0 || IsNaN(projectionDistance))
         return directionWS;
 
     float3 hitLS = positionLS + projectionDistance * directionLS;
-    float3 hitWS = probe.positionWS + ReflectionProbeLocalToWorldDirection(probe, hitLS);
+    float3 hitWS = probe.proxyPositionWS + ReflectionProbeLocalToWorldDirection(probe, hitLS);
     return hitWS - probe.capturePositionWS;
 }
 
@@ -259,13 +293,13 @@ bool TryEvaluateReflectionProbeData(
     if (!IsReflectionProbeAtlasEntryValid(probe))
         return false;
 
-    weight = EvaluateReflectionProbeInfluenceWeight(probe, positionWS, normalWS);
+    weight = EvaluateReflectionProbeInfluenceWeight(probe, positionWS, normalWS, reflectionDirectionWS);
     if (weight <= 0.0)
         return false;
 
     float3 atlasDirectionWS = ProjectReflectionProbeDirection(probe, positionWS, reflectionDirectionWS);
     float4 sample = SampleReflectionProbeAtlas(probe, atlasDirectionWS, perceptualRoughness);
-    radiance = sample.rgb;
+    radiance = sample.rgb * max(probe.multiplier, 0.0);
     return true;
 }
 

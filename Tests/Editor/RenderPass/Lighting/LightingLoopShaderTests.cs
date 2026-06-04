@@ -22,6 +22,16 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingSource, Does.Contain("_ReflectionAtlasSliceCount"));
             Assert.That(lightingSource, Does.Contain("GetReflectionProbe"));
             Assert.That(lightingSource, Does.Contain("capturePositionWS"));
+            Assert.That(lightingSource, Does.Contain("blendDistancePositive"));
+            Assert.That(lightingSource, Does.Contain("blendDistanceNegative"));
+            Assert.That(lightingSource, Does.Contain("boxSideFadePositive"));
+            Assert.That(lightingSource, Does.Contain("boxSideFadeNegative"));
+            Assert.That(lightingSource, Does.Contain("proxyPositionWS"));
+            Assert.That(lightingSource, Does.Contain("proxyExtents"));
+            Assert.That(lightingSource, Does.Contain("isProjectionInfinite"));
+            Assert.That(lightingSource, Does.Contain("multiplier"));
+            Assert.That(lightingSource, Does.Contain("float3 blendPositive = max(probe.blendDistancePositive"));
+            Assert.That(lightingSource, Does.Contain("float3 blendNegative = max(probe.blendDistanceNegative"));
             Assert.That(lightingSource, Does.Contain("IsReflectionProbeAtlasEntryValid"));
             Assert.That(lightingSource, Does.Contain("EvaluateReflectionProbeInfluenceWeight"));
             Assert.That(lightingSource, Does.Contain("ProjectReflectionProbeDirection"));

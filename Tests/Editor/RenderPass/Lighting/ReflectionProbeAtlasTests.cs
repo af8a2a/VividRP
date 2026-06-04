@@ -34,7 +34,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ReflectionProbeData_StrideIncludesAtlasFields()
         {
-            Assert.That(VividLightData.ReflectionProbeData.Stride, Is.EqualTo(144));
+            Assert.That(VividLightData.ReflectionProbeData.Stride, Is.EqualTo(240));
         }
 
         [Test]

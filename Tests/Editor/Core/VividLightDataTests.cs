@@ -18,6 +18,39 @@ namespace VividRP.Editor.Tests
         private static readonly MethodInfo s_UpdateVisibleLightDataMethod =
             typeof(VividLightData).GetMethod("UpdateVisibleLightData", BindingFlags.Instance | BindingFlags.NonPublic);
 
+        private static readonly MethodInfo s_ComputeLinearDistanceFadeMethod =
+            typeof(VividLightData).GetMethod("ComputeLinearDistanceFade", BindingFlags.Static | BindingFlags.NonPublic);
+
+        private static readonly MethodInfo s_ComputeWeightedLinearFadeDistanceMethod =
+            typeof(VividLightData).GetMethod("ComputeWeightedLinearFadeDistance", BindingFlags.Static | BindingFlags.NonPublic);
+
+        [Test]
+        public void ComputeLinearDistanceFade_MatchesHdrpFadeWindow()
+        {
+            Assert.That(s_ComputeLinearDistanceFadeMethod, Is.Not.Null);
+            Assert.That(InvokeLinearDistanceFade(8.0f, 10.0f), Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(InvokeLinearDistanceFade(9.5f, 10.0f), Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(InvokeLinearDistanceFade(11.0f, 10.0f), Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void ComputeWeightedLinearFadeDistance_MultipliesClampedWeight()
+        {
+            Assert.That(s_ComputeWeightedLinearFadeDistanceMethod, Is.Not.Null);
+
+            var result = (float)s_ComputeWeightedLinearFadeDistanceMethod.Invoke(
+                null,
+                new object[]
+                {
+                    new Vector3(9.5f, 0.0f, 0.0f),
+                    Vector3.zero,
+                    0.25f,
+                    10.0f,
+                });
+
+            Assert.That(result, Is.EqualTo(0.125f).Within(0.0001f));
+        }
+
         [Test]
         public void DecalClusterData_UsesUnsignedBindlessTextureIndicesAndScalarMaterialInputs()
         {
@@ -1034,6 +1067,17 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
             Assert.That(actual.w, Is.EqualTo(expected.w).Within(tolerance));
+        }
+
+        private static float InvokeLinearDistanceFade(float distanceToCamera, float fadeDistance)
+        {
+            return (float)s_ComputeLinearDistanceFadeMethod.Invoke(
+                null,
+                new object[]
+                {
+                    distanceToCamera,
+                    fadeDistance,
+                });
         }
     }
 }

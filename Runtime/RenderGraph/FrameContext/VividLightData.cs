@@ -100,6 +100,18 @@ namespace VividRP.Runtime
             public Vector4 hdrData;
             public Vector4 atlasScaleOffset;
             public Vector4 atlasIndexAndSlice;
+            public Vector3 blendDistancePositive;
+            public float multiplier;
+            public Vector3 blendDistanceNegative;
+            public uint isProjectionInfinite;
+            public Vector3 boxSideFadePositive;
+            public float rangeCompressionFactor;
+            public Vector3 boxSideFadeNegative;
+            public float padding2;
+            public Vector3 proxyPositionWS;
+            public float padding3;
+            public Vector3 proxyExtents;
+            public float padding4;
 
             internal static int Stride => Marshal.SizeOf<ReflectionProbeData>();
         }
@@ -387,7 +399,7 @@ namespace VividRP.Runtime
             visibleLights = cullingResults.visibleLights;
             visibleReflectionProbes = cullingResults.visibleReflectionProbes;
             UpdateVisibleLightData(visibleLights, RenderSettings.sun, worldToViewMatrix);
-            UpdateVisibleReflectionProbeData(visibleReflectionProbes);
+            UpdateVisibleReflectionProbeData(visibleReflectionProbes, ResolveCameraPositionWS(worldToViewMatrix));
         }
 
         internal void Update(CullingResults cullingResults)
@@ -852,7 +864,9 @@ namespace VividRP.Runtime
             JobHandle.ScheduleBatchedJobs();
         }
 
-        private void UpdateVisibleReflectionProbeData(NativeArray<VisibleReflectionProbe> visibleReflectionProbes)
+        private void UpdateVisibleReflectionProbeData(
+            NativeArray<VisibleReflectionProbe> visibleReflectionProbes,
+            Vector3 cameraPositionWS)
         {
             reflectionProbeCount = 0;
             m_LightGridClusteredCullDataPrepared = false;
@@ -864,7 +878,7 @@ namespace VividRP.Runtime
 
             for (var probeIndex = 0; probeIndex < visibleReflectionProbes.Length; probeIndex++)
             {
-                if (!TryCreateReflectionProbeData(visibleReflectionProbes[probeIndex], out var reflectionProbeData))
+                if (!TryCreateReflectionProbeData(visibleReflectionProbes[probeIndex], cameraPositionWS, out var reflectionProbeData))
                     continue;
 
                 reflectionProbes[reflectionProbeCount] = reflectionProbeData;
@@ -1192,6 +1206,7 @@ namespace VividRP.Runtime
 
         private static bool TryCreateReflectionProbeData(
             VisibleReflectionProbe visibleReflectionProbe,
+            Vector3 cameraPositionWS,
             out ReflectionProbeData reflectionProbeData)
         {
             reflectionProbeData = default;
@@ -1202,16 +1217,56 @@ namespace VividRP.Runtime
             var bounds = visibleReflectionProbe.bounds;
             var extents = bounds.extents;
             var localToWorld = visibleReflectionProbe.localToWorldMatrix;
+            var additionalData = GetAdditionalReflectionData(visibleReflectionProbe);
+            var hasAdditionalData = additionalData != null && additionalData.isActiveAndEnabled;
+            var axisScale = GetLocalAxisScale(localToWorld);
+            var positionWS = bounds.center;
+            var proxyPositionWS = positionWS;
+            var proxyExtents = extents;
+            var blendDistancePositive = Vector3.one * Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f);
+            var blendDistanceNegative = blendDistancePositive;
+            var boxSideFadePositive = Vector3.one;
+            var boxSideFadeNegative = Vector3.one;
+            var isBoxProjection = visibleReflectionProbe.isBoxProjection;
+            var isProjectionInfinite = !visibleReflectionProbe.isBoxProjection;
+            var multiplier = 1.0f;
+            var weight = 1.0f;
+            var importance = visibleReflectionProbe.importance;
+            var rangeCompressionFactor = 1.0f;
+
+            if (hasAdditionalData)
+            {
+                additionalData.SyncReflectionProbe();
+                positionWS = localToWorld.MultiplyPoint(additionalData.influenceBoxOffset);
+                extents = ScaleVector(additionalData.influenceBoxSize * 0.5f, axisScale);
+                blendDistancePositive = ScaleVector(additionalData.boxBlendDistancePositive, axisScale);
+                blendDistanceNegative = ScaleVector(additionalData.boxBlendDistanceNegative, axisScale);
+                boxSideFadePositive = additionalData.boxSideFadePositive;
+                boxSideFadeNegative = additionalData.boxSideFadeNegative;
+                isProjectionInfinite = additionalData.isProjectionInfinite;
+                isBoxProjection = !isProjectionInfinite;
+                multiplier = additionalData.multiplier;
+                weight = ComputeWeightedLinearFadeDistance(
+                    new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
+                    cameraPositionWS,
+                    additionalData.weight,
+                    additionalData.fadeDistance);
+                importance = additionalData.importance;
+                rangeCompressionFactor = additionalData.rangeCompressionFactor;
+                proxyPositionWS = localToWorld.MultiplyPoint(additionalData.GetProxyBoxOffset());
+                proxyExtents = ScaleVector(additionalData.GetProxyBoxSize() * 0.5f, axisScale);
+            }
+
             reflectionProbeData = new ReflectionProbeData
             {
-                positionWS = bounds.center,
+                positionWS = positionWS,
                 blendDistance = Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f),
                 extents = extents,
-                isBoxProjection = visibleReflectionProbe.isBoxProjection ? 1u : 0u,
+                isBoxProjection = isBoxProjection ? 1u : 0u,
                 rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
-                importance = visibleReflectionProbe.importance,
+                importance = importance,
                 upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
-                weight = 1.0f,
+                weight = weight,
                 forwardWS = NormalizeDirection(new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22), Vector3.forward),
                 padding0 = 0.0f,
                 capturePositionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
@@ -1219,8 +1274,66 @@ namespace VividRP.Runtime
                 hdrData = visibleReflectionProbe.hdrData,
                 atlasScaleOffset = Vector4.zero,
                 atlasIndexAndSlice = new Vector4(-1.0f, -1.0f, 0.0f, 0.0f),
+                blendDistancePositive = blendDistancePositive,
+                multiplier = multiplier,
+                blendDistanceNegative = blendDistanceNegative,
+                isProjectionInfinite = isProjectionInfinite ? 1u : 0u,
+                boxSideFadePositive = boxSideFadePositive,
+                rangeCompressionFactor = rangeCompressionFactor,
+                boxSideFadeNegative = boxSideFadeNegative,
+                padding2 = 0.0f,
+                proxyPositionWS = proxyPositionWS,
+                padding3 = 0.0f,
+                proxyExtents = proxyExtents,
+                padding4 = 0.0f,
             };
             return true;
+        }
+
+        private static VividAdditionalReflectionData GetAdditionalReflectionData(VisibleReflectionProbe visibleReflectionProbe)
+        {
+            var reflectionProbe = visibleReflectionProbe.reflectionProbe;
+            if (reflectionProbe == null)
+                return null;
+
+            return reflectionProbe.TryGetComponent<VividAdditionalReflectionData>(out var additionalData)
+                ? additionalData
+                : null;
+        }
+
+        private static Vector3 GetLocalAxisScale(Matrix4x4 localToWorld)
+        {
+            return new Vector3(
+                new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20).magnitude,
+                new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21).magnitude,
+                new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22).magnitude);
+        }
+
+        private static Vector3 ScaleVector(Vector3 value, Vector3 scale)
+        {
+            return new Vector3(
+                Mathf.Abs(value.x * scale.x),
+                Mathf.Abs(value.y * scale.y),
+                Mathf.Abs(value.z * scale.z));
+        }
+
+        private static float ComputeWeightedLinearFadeDistance(
+            Vector3 positionWS,
+            Vector3 cameraPositionWS,
+            float weight,
+            float fadeDistance)
+        {
+            return Mathf.Clamp01(weight) * ComputeLinearDistanceFade(Vector3.Distance(positionWS, cameraPositionWS), fadeDistance);
+        }
+
+        private static float ComputeLinearDistanceFade(float distanceToCamera, float fadeDistance)
+        {
+            if (fadeDistance <= 0.0001f)
+                return distanceToCamera <= 0.0001f ? 1.0f : 0.0f;
+
+            var fadeStart = 0.9f * fadeDistance;
+            var fadeRange = Mathf.Max(fadeDistance - fadeStart, 0.0001f);
+            return 1.0f - Mathf.Clamp01((distanceToCamera - fadeStart) / fadeRange);
         }
 
         private static bool IsReflectionProbeSpatiallyValid(VisibleReflectionProbe visibleReflectionProbe)

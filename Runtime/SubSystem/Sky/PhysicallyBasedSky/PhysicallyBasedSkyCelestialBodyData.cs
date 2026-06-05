@@ -1,6 +1,7 @@
 using System;
 using System.Runtime.InteropServices;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
@@ -457,7 +458,7 @@ namespace VividRP.Runtime
             celestialBodyHash = AppendCelestialBodyHash(
                 celestialBodyHash,
                 celestialBody,
-                additionalData?.surfaceTexture != null ? additionalData.surfaceTexture.GetEntityId().GetHashCode() : 0);
+                GetSurfaceTextureEntityHash(additionalData));
             celestialBodyCount++;
         }
 
@@ -695,6 +696,12 @@ namespace VividRP.Runtime
                 hash = hash * 23 + celestialBody.color.GetHashCode();
                 return hash;
             }
+        }
+
+        private static int GetSurfaceTextureEntityHash(VividAdditionalLightData additionalData)
+        {
+            var surfaceTexture = additionalData?.surfaceTexture;
+            return surfaceTexture != null ? EntityId.ToULong(surfaceTexture.GetEntityId()).GetHashCode() : 0;
         }
 
         private static int AppendCelestialBodyHash(

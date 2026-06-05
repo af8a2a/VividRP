@@ -289,8 +289,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EnsureLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(skySettings);"));
             Assert.That(source, Does.Contain("var intensityMultiplier = volume.GetIntensityMultiplier();"));
-            Assert.That(source, Does.Contain("SkySettingsVolume.GetIncludeSunInBaking(skySettings),"));
-            Assert.That(source, Does.Contain("intensityMultiplier,"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, SkySettingsVolume.GetIncludeSunInBaking(skySettings));"));
+            Assert.That(source, Does.Contain("hash = AppendHash(hash, intensityMultiplier);"));
+            Assert.That(source, Does.Not.Contain("HashCode.Combine("));
             Assert.That(source, Does.Contain("materialParameters.renderSunDisk = includeSunInBaking && volume.renderSunDisk.value ? 1 : 0;"));
 
             Assert.That(parametersSource, Does.Contain("internal static bool TryBuildForSkyBaking("));

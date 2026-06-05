@@ -135,6 +135,15 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenSetFrameDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/SetFrameData");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenReportStatsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ReportStats");
         public static readonly ProfilerMarker PrepareFrameSubsystemSkyMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyFrameDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/FrameData");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyActiveRendererMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/ActiveRenderer");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyBuildContextMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/BuildContext");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyRendererUpdateMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/RendererUpdate");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyEnvironmentMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyEnvironmentSpecularMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment/SpecularCubemap");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyEnvironmentDiffuseMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment/DiffuseAmbientProbe");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyEnvironmentGlobalsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment/GlobalTexture");
+        public static readonly ProfilerMarker PrepareFrameSubsystemSkyCopyToFrameMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/CopyToFrame");
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem");
         public static readonly ProfilerMarker PrepareAllMarker = new("VividRP.RenderPass.PrepareAll");
         public static readonly ProfilerMarker RecordRenderGraphMarker = new("VividRP.RenderPass.RecordRenderGraph");

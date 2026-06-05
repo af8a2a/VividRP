@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -65,12 +64,18 @@ namespace VividRP.Runtime
             var sky = VividVolumeManagerUtility.GetHDRISkyVolume();
             var cubemap = GetSkyCubemap();
             var intensityMultiplier = ResolveSkyIntensityMultiplier(sky);
-            return HashCode.Combine(
-                cubemap != null ? cubemap.GetEntityId() : EntityId.None,
-                Color.white,
-                intensityMultiplier,
-                sky?.rotation.value ?? 0.0f,
-                16);
+            var rotation = sky?.rotation.value ?? 0.0f;
+
+            unchecked
+            {
+                var hash = 17;
+                hash = AppendHash(hash, GetTextureEntityHash(cubemap));
+                hash = AppendHash(hash, Color.white.GetHashCode());
+                hash = AppendHash(hash, intensityMultiplier);
+                hash = AppendHash(hash, rotation);
+                hash = AppendHash(hash, 16);
+                return hash;
+            }
         }
 
         public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
@@ -327,6 +332,24 @@ namespace VividRP.Runtime
         private static float ResolveSkyIntensityMultiplier(HDRISkyVolume sky)
         {
             return sky != null ? sky.GetIntensityFromSettings() : 1.0f;
+        }
+
+        private static int GetTextureEntityHash(Texture texture)
+        {
+            return texture != null ? EntityId.ToULong(texture.GetEntityId()).GetHashCode() : 0;
+        }
+
+        private static int AppendHash(int hash, int value)
+        {
+            unchecked
+            {
+                return hash * 31 + value;
+            }
+        }
+
+        private static int AppendHash(int hash, float value)
+        {
+            return AppendHash(hash, value.GetHashCode());
         }
 
         private static void GetSkyParameters(float intensityMultiplier, float rotation, out float intensity, out float phi)

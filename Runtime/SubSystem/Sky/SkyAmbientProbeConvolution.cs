@@ -60,6 +60,15 @@ namespace VividRP.Runtime
         private int m_ConvolvedSkyHash;
         private bool m_DebugReadbackPending;
         private int m_DebugReadbackSkyHash;
+        private int m_DebugReadbackPendingSkyHash;
+        private readonly System.Action<AsyncGPUReadbackRequest> m_DebugReadbackCompletedCallback;
+
+        internal SkyAmbientProbeConvolution()
+        {
+            m_DebugReadbackCompletedCallback = OnDebugReadbackCompleted;
+            m_DebugReadbackSkyHash = int.MinValue;
+            m_DebugReadbackPendingSkyHash = int.MinValue;
+        }
 
         internal bool IsSupported =>
             m_ComputeShader != null
@@ -97,6 +106,7 @@ namespace VividRP.Runtime
             m_ConvolvedSkyHash = 0;
             m_DebugReadbackPending = false;
             m_DebugReadbackSkyHash = int.MinValue;
+            m_DebugReadbackPendingSkyHash = int.MinValue;
         }
 
         internal void RequestUpdate(
@@ -296,14 +306,17 @@ namespace VividRP.Runtime
                 return;
 
             m_DebugReadbackPending = true;
-            cmd.RequestAsyncReadback(activeBuffer, request => OnDebugReadbackCompleted(request, debugSkyHash));
+            m_DebugReadbackPendingSkyHash = debugSkyHash;
+            cmd.RequestAsyncReadback(activeBuffer, m_DebugReadbackCompletedCallback);
 #endif
         }
 
-        private void OnDebugReadbackCompleted(AsyncGPUReadbackRequest request, int skyHash)
+        private void OnDebugReadbackCompleted(AsyncGPUReadbackRequest request)
         {
 #if UNITY_EDITOR
             m_DebugReadbackPending = false;
+            var skyHash = m_DebugReadbackPendingSkyHash;
+            m_DebugReadbackPendingSkyHash = int.MinValue;
             if (request.hasError)
                 return;
 

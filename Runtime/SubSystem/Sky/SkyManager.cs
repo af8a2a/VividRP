@@ -10,7 +10,7 @@ namespace VividRP.Runtime
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
-        private static readonly Dictionary<SkyType, ISkyRenderer> s_Renderers = new();
+        private static readonly Dictionary<SkyType, ISkyRenderer> s_Renderers = new(new SkyTypeComparer());
         private static readonly VividSkyData s_CachedSkyData = new();
         private static readonly SkyAmbientProbeConvolution s_AmbientProbeConvolution = new();
         private static readonly SkySpecularCache s_SpecularCache = new();
@@ -90,61 +90,97 @@ namespace VividRP.Runtime
             if (!IsInitialized)
                 Initialize();
 
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            var skyData = frameData.GetOrCreate<VividSkyData>();
-            skyData.Reset();
+            VividCameraData cameraData;
+            VividSkyData skyData;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyFrameDataMarker.Auto())
+            {
+                cameraData = frameData.GetOrCreate<VividCameraData>();
+                skyData = frameData.GetOrCreate<VividSkyData>();
+                skyData.Reset();
 
-            s_SkyUpdateVersion++;
-            s_PendingSkyRenderer = null;
-            s_PendingSkyCamera = null;
-            s_PendingSkyUpdateVersion = -1;
+                s_SkyUpdateVersion++;
+                s_PendingSkyRenderer = null;
+                s_PendingSkyCamera = null;
+                s_PendingSkyUpdateVersion = -1;
+            }
 
             if (!ShouldUpdateGlobalSkyEnvironment(cameraData))
             {
-                CopyCachedSkyDataToFrame(skyData, cmd);
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyCopyToFrameMarker.Auto())
+                {
+                    CopyCachedSkyDataToFrame(skyData, cmd);
+                }
                 return;
             }
 
-            var skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
-            var activeSkyType = skySettings?.skyType.value ?? SkyType.HDRI;
-            var hasActiveSky =
-                s_Renderers.TryGetValue(activeSkyType, out var renderer)
-                && activeSkyType != SkyType.None
-                && renderer != null
-                && renderer.IsActive();
-            s_ActiveRenderer = hasActiveSky ? renderer : null;
-
-            var context = new SkyRendererContext(
-                cameraData,
-                frameData.GetOrCreate<VividLightData>(),
-                frameData.GetOrCreate<VividExposureData>());
+            SkySettingsVolume skySettings;
+            SkyType activeSkyType;
+            ISkyRenderer renderer = null;
+            bool hasActiveSky;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyActiveRendererMarker.Auto())
+            {
+                skySettings = VividVolumeManagerUtility.GetSkySettingsVolume();
+                activeSkyType = skySettings?.skyType.value ?? SkyType.HDRI;
+                hasActiveSky =
+                    activeSkyType != SkyType.None
+                    && s_Renderers.TryGetValue(activeSkyType, out renderer)
+                    && renderer != null
+                    && renderer.IsActive();
+                s_ActiveRenderer = hasActiveSky ? renderer : null;
+            }
 
             var forceRebuild = false;
-            if (hasActiveSky)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyRendererUpdateMarker.Auto())
             {
-                renderer.UpdateFrameResources(context, s_CachedSkyData, cmd);
-                var skyHash = renderer.GetSkyHash(context);
+                if (hasActiveSky)
+                {
+                    SkyRendererContext context;
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyBuildContextMarker.Auto())
+                    {
+                        context = BuildRendererContext(frameData, cameraData, activeSkyType);
+                    }
 
-                if (NeedsUpdate(activeSkyType, skySettings, skyHash, out forceRebuild))
+                    renderer.UpdateFrameResources(context, s_CachedSkyData, cmd);
+                    var skyHash = renderer.GetSkyHash(context);
+
+                    if (NeedsUpdate(activeSkyType, skySettings, skyHash, out forceRebuild))
+                    {
+                        s_CachedSkyData.Reset();
+                        renderer.Update(context, s_CachedSkyData, cmd, skyHash, forceRebuild);
+                        s_CachedSkyData.activeSkyType = activeSkyType;
+                        s_CachedSkyData.skyHash = skyHash;
+                        s_LastUpdateTime = Time.realtimeSinceStartup;
+                        s_UpdateRequested = false;
+                    }
+                }
+                else
                 {
                     s_CachedSkyData.Reset();
-                    renderer.Update(context, s_CachedSkyData, cmd, skyHash, forceRebuild);
-                    s_CachedSkyData.activeSkyType = activeSkyType;
-                    s_CachedSkyData.skyHash = skyHash;
-                    s_LastUpdateTime = Time.realtimeSinceStartup;
-                    s_UpdateRequested = false;
                 }
             }
-            else
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyEnvironmentMarker.Auto())
             {
-                s_CachedSkyData.Reset();
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyEnvironmentSpecularMarker.Auto())
+                {
+                    UpdateSpecularCubemap(cmd, s_CachedSkyData, forceRebuild);
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyEnvironmentDiffuseMarker.Auto())
+                {
+                    UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyEnvironmentGlobalsMarker.Auto())
+                {
+                    BindGlobalSkyTexture(cmd, s_CachedSkyData);
+                }
             }
 
-            UpdateSpecularCubemap(cmd, s_CachedSkyData, forceRebuild);
-            UpdateDiffuseAmbientProbe(cmd, s_CachedSkyData, forceRebuild);
-            BindGlobalSkyTexture(cmd, s_CachedSkyData);
-
-            skyData.CopyFrom(s_CachedSkyData);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemSkyCopyToFrameMarker.Auto())
+            {
+                skyData.CopyFrom(s_CachedSkyData);
+            }
         }
 
         internal static bool PrepareSkyInjection(
@@ -173,10 +209,7 @@ namespace VividRP.Runtime
             if (skyData.activeSkyType == SkyType.None)
                 return false;
 
-            var context = new SkyRendererContext(
-                cameraData,
-                frameData.GetOrCreate<VividLightData>(),
-                frameData.GetOrCreate<VividExposureData>());
+            var context = BuildRendererContext(frameData, cameraData, skyData.activeSkyType);
             var camera = context.cameraData?.camera;
             if (ReferenceEquals(s_PendingSkyCamera, camera)
                 && s_PendingSkyUpdateVersion == s_SkyUpdateVersion)
@@ -279,6 +312,32 @@ namespace VividRP.Runtime
         {
             renderer.Build(resources);
             s_Renderers[renderer.Type] = renderer;
+        }
+
+        private static SkyRendererContext BuildRendererContext(
+            ContextContainer frameData,
+            VividCameraData cameraData,
+            SkyType skyType)
+        {
+            return skyType == SkyType.PhysicallyBased
+                ? new SkyRendererContext(
+                    cameraData,
+                    frameData.GetOrCreate<VividLightData>(),
+                    frameData.Get<VividExposureData>())
+                : new SkyRendererContext(cameraData, null);
+        }
+
+        private sealed class SkyTypeComparer : IEqualityComparer<SkyType>
+        {
+            public bool Equals(SkyType x, SkyType y)
+            {
+                return x == y;
+            }
+
+            public int GetHashCode(SkyType obj)
+            {
+                return (int)obj;
+            }
         }
 
         private static bool ShouldUpdateGlobalSkyEnvironment(VividCameraData cameraData)

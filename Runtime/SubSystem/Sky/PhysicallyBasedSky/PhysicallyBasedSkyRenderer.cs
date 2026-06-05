@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -137,14 +136,16 @@ namespace VividRP.Runtime
             var planet = ResolvePlanet(context, volume, skySettings);
             var includeSunInBaking = SkySettingsVolume.GetIncludeSunInBaking(skySettings);
             var intensityMultiplier = volume.GetIntensityMultiplier();
-            return HashCode.Combine(
-                volume.GetHashCode(),
-                generatedCubemapViewSampleCount,
-                planet.ComputeHashCode(),
-                includeSunInBaking,
-                intensityMultiplier,
-                ResolveCameraPosition(context, volume.planetRadius.value),
-                PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
+
+            var hash = 17;
+            hash = AppendHash(hash, volume.GetHashCode());
+            hash = AppendHash(hash, generatedCubemapViewSampleCount);
+            hash = AppendHash(hash, planet.ComputeHashCode());
+            hash = AppendHash(hash, includeSunInBaking);
+            hash = AppendHash(hash, intensityMultiplier);
+            hash = AppendHash(hash, ResolveCameraPosition(context, volume.planetRadius.value));
+            hash = AppendHash(hash, PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
+            return hash;
         }
 
         public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
@@ -1134,13 +1135,14 @@ namespace VividRP.Runtime
             int generatedCubemapViewSampleCount,
             float intensityMultiplier)
         {
-            return HashCode.Combine(
-                volume.GetHashCode(),
-                generatedCubemapViewSampleCount,
-                ResolvePlanet(context, volume, skySettings).ComputeHashCode(),
-                SkySettingsVolume.GetIncludeSunInBaking(skySettings),
-                intensityMultiplier,
-                PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
+            var hash = 17;
+            hash = AppendHash(hash, volume.GetHashCode());
+            hash = AppendHash(hash, generatedCubemapViewSampleCount);
+            hash = AppendHash(hash, ResolvePlanet(context, volume, skySettings).ComputeHashCode());
+            hash = AppendHash(hash, SkySettingsVolume.GetIncludeSunInBaking(skySettings));
+            hash = AppendHash(hash, intensityMultiplier);
+            hash = AppendHash(hash, PhysicallyBasedSkyCelestialBodyUtility.ComputeCelestialBodyHash(context));
+            return hash;
         }
 
         private static Vector3 ResolveWorldCameraPosition(in SkyRendererContext context)
@@ -1165,6 +1167,22 @@ namespace VividRP.Runtime
         private static int AppendHash(int hash, float value)
         {
             return AppendHash(hash, value.GetHashCode());
+        }
+
+        private static int AppendHash(int hash, bool value)
+        {
+            return AppendHash(hash, value ? 1 : 0);
+        }
+
+        private static int AppendHash(int hash, Vector3 value)
+        {
+            unchecked
+            {
+                hash = AppendHash(hash, value.x);
+                hash = AppendHash(hash, value.y);
+                hash = AppendHash(hash, value.z);
+                return hash;
+            }
         }
 
         private static int AppendHash(int hash, Vector4 value)

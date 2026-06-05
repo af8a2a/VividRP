@@ -119,6 +119,15 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/SetFrameData"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ReportStats"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/FrameData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/ActiveRenderer"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/BuildContext"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/RendererUpdate"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment/SpecularCubemap"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment/DiffuseAmbientProbe"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/Environment/GlobalTexture"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/SkyManager/CopyToFrame"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem"));
 
             Assert.That(passRecorderSource, Does.Contain("InitializeContextMarker.Auto()"));
@@ -151,6 +160,15 @@ namespace VividRP.Editor.Tests
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenSetFrameDataMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenReportStatsMarker.Auto()"));
             Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyFrameDataMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyActiveRendererMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyBuildContextMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyRendererUpdateMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyEnvironmentMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyEnvironmentSpecularMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyEnvironmentDiffuseMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyEnvironmentGlobalsMarker.Auto()"));
+            Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyCopyToFrameMarker.Auto()"));
             Assert.That(virtualTextureSource, Does.Contain("PrepareFrameSubsystemVirtualTextureMarker.Auto()"));
         }
 

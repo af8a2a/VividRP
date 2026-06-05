@@ -72,7 +72,8 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererSource, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_SkyMaterial, properties, 0);"));
             Assert.That(skyManagerSource, Does.Not.Contain("private static readonly PhysicallyBasedSkyAtmosphereLutCache"));
             Assert.That(skyManagerSource, Does.Contain("renderer.UpdateFrameResources(context, s_CachedSkyData, cmd);"));
-            Assert.That(skyManagerSource, Does.Contain("frameData.GetOrCreate<VividExposureData>()"));
+            Assert.That(skyManagerSource, Does.Contain("BuildRendererContext(frameData, cameraData, activeSkyType)"));
+            Assert.That(skyManagerSource, Does.Contain("frameData.Get<VividExposureData>()"));
             Assert.That(skyManagerSource, Does.Not.Contain("s_PhysicallyBasedSkyAtmosphereLutCache.Update(context, cmd);"));
             Assert.That(skyRendererContextSource, Does.Contain("VividExposureData exposureData = null"));
             Assert.That(skyRendererContextSource, Does.Contain("internal VividExposureData exposureData { get; }"));

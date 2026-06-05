@@ -18,6 +18,7 @@ namespace VividRP.Runtime
         private static readonly List<VividLocalVolumetricFog> s_RegisteredFogs = new();
         private static readonly Comparison<VividLocalVolumetricFog> s_PriorityComparison =
             (left, right) => right.priority.CompareTo(left.priority);
+        private static readonly Plane[] s_FrustumPlanes = new Plane[6];
         private static VividVolumetricMaterialBounds[] s_VolumeBoundsData =
             new VividVolumetricMaterialBounds[DefaultMaxVisibleLocalVolumetricFogCount];
         private static uint[] s_VisibleGlobalIndicesData =
@@ -130,7 +131,7 @@ namespace VividRP.Runtime
             Array.Clear(s_VisibleMaterialFogs, 0, s_VisibleMaterialFogs.Length);
 
             var materialCount = 0;
-            var planes = camera != null ? GeometryUtility.CalculateFrustumPlanes(camera) : null;
+            var planes = ResolveFrustumPlanes(camera);
 
             for (int index = 0; index < s_RegisteredFogs.Count; index++)
             {
@@ -155,6 +156,15 @@ namespace VividRP.Runtime
             PrepareVolumetricMaterialDrawCalls(materialCount);
 
             return materialCount;
+        }
+
+        internal static Plane[] ResolveFrustumPlanes(Camera camera)
+        {
+            if (camera == null)
+                return null;
+
+            GeometryUtility.CalculateFrustumPlanes(camera, s_FrustumPlanes);
+            return s_FrustumPlanes;
         }
 
         internal static void Dispose()

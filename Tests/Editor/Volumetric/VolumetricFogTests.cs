@@ -706,6 +706,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void LocalVolumetricFogManager_ResolveFrustumPlanes_ReusesPlaneArray()
+        {
+            var cameraObject = new GameObject("Local Volumetric Fog Frustum Camera");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                var planes = VividLocalVolumetricFogManager.ResolveFrustumPlanes(camera);
+
+                System.GC.Collect();
+                var allocatedBefore = System.GC.GetAllocatedBytesForCurrentThread();
+                var reusedPlaneArray = true;
+                for (var index = 0; index < 32; index++)
+                    reusedPlaneArray &= ReferenceEquals(VividLocalVolumetricFogManager.ResolveFrustumPlanes(camera), planes);
+
+                var allocatedBytes = System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(reusedPlaneArray, Is.True);
+                Assert.That(allocatedBytes, Is.Zero);
+                Assert.That(VividLocalVolumetricFogManager.ResolveFrustumPlanes(null), Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void LocalVolumetricFogMenuItems_DefinesGameObjectMenuEntryLikeHdrp()
         {
             var source = File.ReadAllText(GetPackageFilePath("Editor", "ComponentEditor", "VividLocalVolumetricFogMenuItems.cs"));

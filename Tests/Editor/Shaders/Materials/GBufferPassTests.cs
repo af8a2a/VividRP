@@ -100,6 +100,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_ReusesShaderTagNameArrays_WhenDecalModeIsStable()
+        {
+            var pass = new GBufferPass();
+            var frameData = CreateFrameData();
+            frameData.GetOrCreate<VividGPUDrivenDecalData>().isEnabled = true;
+
+            pass.Prepare(frameData);
+
+            var renderList = GetFieldValue<RenderGraphRenderList>(pass, "m_RenderList");
+            var virtualTextureRenderList = GetFieldValue<RenderGraphRenderList>(pass, "m_VirtualTextureRenderList");
+            var renderListShaderTagNames = renderList.desc.ShaderTagNames;
+            var virtualTextureShaderTagNames = virtualTextureRenderList.desc.ShaderTagNames;
+
+            pass.Prepare(frameData);
+
+            Assert.That(renderList.desc.ShaderTagNames, Is.SameAs(renderListShaderTagNames));
+            Assert.That(virtualTextureRenderList.desc.ShaderTagNames, Is.SameAs(virtualTextureShaderTagNames));
+        }
+
+        [Test]
         public void Prepare_EnablesClusteredDecalGrid_WhenLightGridResourcesAreBound()
         {
             var pass = new GBufferPass();

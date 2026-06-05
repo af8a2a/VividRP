@@ -293,19 +293,21 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void UpdateRenderListShaderTags(ContextContainer frameData)
         {
+            var useGPUDrivenDecalShaderTag = ShouldUseGPUDrivenDecalShaderTag(frameData);
+
             if (m_RenderList?.desc == null)
                 return;
 
-            m_RenderList.desc.ShaderTagNames = ShouldUseGPUDrivenDecalShaderTag(frameData)
-                ? (string[])s_GPUDrivenDecalGBufferShaderTagNames.Clone()
-                : (string[])s_DefaultGBufferShaderTagNames.Clone();
+            m_RenderList.desc.ShaderTagNames = useGPUDrivenDecalShaderTag
+                ? s_GPUDrivenDecalGBufferShaderTagNames
+                : s_DefaultGBufferShaderTagNames;
 
             if (m_VirtualTextureRenderList?.desc == null)
                 return;
 
-            m_VirtualTextureRenderList.desc.ShaderTagNames = ShouldUseGPUDrivenDecalShaderTag(frameData)
-                ? (string[])s_GPUDrivenDecalVirtualTextureGBufferShaderTagNames.Clone()
-                : (string[])s_DefaultVirtualTextureGBufferShaderTagNames.Clone();
+            m_VirtualTextureRenderList.desc.ShaderTagNames = useGPUDrivenDecalShaderTag
+                ? s_GPUDrivenDecalVirtualTextureGBufferShaderTagNames
+                : s_DefaultVirtualTextureGBufferShaderTagNames;
         }
 
         private void PrepareClusteredDecalParameters(ContextContainer frameData, int width, int height)

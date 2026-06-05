@@ -94,6 +94,7 @@ namespace VividRP.Runtime
         private static readonly Dictionary<RenderGraphBuffer, BufferHandle> s_RecordGraphBufferCache = new(16);
         private static readonly Dictionary<RenderGraphRenderList, RendererListHandle> s_RecordGraphRenderListCache = new(16);
         private static readonly Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> s_RecordGraphAccelerationStructureCache = new(8);
+        private static bool[] s_PassActiveStates = Array.Empty<bool>();
         private static RenderGraph s_CurrentRenderGraph;
         private static int s_InactiveBypassVersion;
 
@@ -331,6 +332,7 @@ namespace VividRP.Runtime
             s_PassIndices.Clear();
             s_PassResourceAccessOverrides.Clear();
             s_PassHistoryKeys.Clear();
+            s_PassActiveStates = Array.Empty<bool>();
             ClearHistoryImportedHandles();
             s_HistoryPreviousTextures = Array.Empty<RenderGraphTexture>();
             s_HistoryCurrentTextures = Array.Empty<RenderGraphTexture>();
@@ -919,9 +921,19 @@ namespace VividRP.Runtime
                 GetCurrentPassResources(pass);
             }
 
+            GetPassActiveStatesBuffer(s_RenderPasses.Count);
+
             s_CurrentGraphAsset = graphAsset;
             s_CurrentImportVersion = graphAsset != null ? graphAsset.ImportVersion : 0;
             s_IsCompiled = true;
+        }
+
+        internal static bool[] GetPassActiveStatesBuffer(int passCount)
+        {
+            if (s_PassActiveStates.Length < passCount)
+                s_PassActiveStates = new bool[passCount];
+
+            return s_PassActiveStates;
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -1552,7 +1564,7 @@ namespace VividRP.Runtime
             bool[] passActiveStates;
             using (RenderPassProfilingUtility.RecordRenderGraphAllocatePassActiveStatesMarker.Auto())
             {
-                passActiveStates = new bool[s_RenderPasses.Count];
+                passActiveStates = GetPassActiveStatesBuffer(s_RenderPasses.Count);
             }
 
             using (RenderPassProfilingUtility.PrepareAllMarker.Auto())

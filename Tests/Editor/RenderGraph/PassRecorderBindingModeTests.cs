@@ -84,6 +84,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetPassActiveStatesBuffer_ReusesArray_WhenCapacityIsEnough()
+        {
+            var buffer = PassRecorder.GetPassActiveStatesBuffer(4);
+            Assert.That(buffer.Length, Is.GreaterThanOrEqualTo(4));
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var reusedBuffer = true;
+            for (var index = 0; index < 32; index++)
+                reusedBuffer &= ReferenceEquals(PassRecorder.GetPassActiveStatesBuffer(4), buffer);
+
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(reusedBuffer, Is.True);
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
+        public void GetPassActiveStatesBuffer_GrowsArray_WhenCapacityIsInsufficient()
+        {
+            var buffer = PassRecorder.GetPassActiveStatesBuffer(4);
+            var grownBuffer = PassRecorder.GetPassActiveStatesBuffer(8);
+
+            Assert.That(grownBuffer, Is.Not.SameAs(buffer));
+            Assert.That(grownBuffer.Length, Is.GreaterThanOrEqualTo(8));
+        }
+
+        [Test]
         public void Compile_SharesCtorOwnedResource_WithDownstreamPassFieldBinding()
         {
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();

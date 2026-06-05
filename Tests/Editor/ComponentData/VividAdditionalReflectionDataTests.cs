@@ -1,4 +1,5 @@
 using System;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using NUnit.Framework;
 using UnityEditor;
@@ -50,6 +51,7 @@ namespace VividRP.Editor.Tests
 
             AssertVector3(additionalData.influenceBoxSize, reflectionProbe.size);
             AssertVector3(additionalData.influenceBoxOffset, reflectionProbe.center);
+            AssertVector3(additionalData.capturePositionOffset, Vector3.zero);
             AssertVector3(additionalData.boxBlendDistancePositive, new Vector3(1.0f, 1.25f, 1.25f));
             AssertVector3(additionalData.boxBlendDistanceNegative, new Vector3(1.0f, 1.25f, 1.25f));
             Assert.That(additionalData.importance, Is.EqualTo(reflectionProbe.importance));
@@ -67,6 +69,8 @@ namespace VividRP.Editor.Tests
             additionalData.boxBlendDistanceNegative = new Vector3(0.25f, 0.5f, 0.75f);
             additionalData.boxSideFadePositive = new Vector3(-1.0f, 0.5f, 2.0f);
             additionalData.boxSideFadeNegative = new Vector3(0.25f, 1.5f, 1.0f);
+            additionalData.capturePositionOffset = new Vector3(0.0f, 1.0f, 0.0f);
+            additionalData.boxPerAxisControl = true;
             additionalData.importance = VividAdditionalReflectionData.MaxImportance + 10;
             additionalData.proxyVolumeMode = VividReflectionProbeProxyVolumeMode.Box;
             additionalData.proxyBoxSize = new Vector3(3.0f, 4.0f, 5.0f);
@@ -80,6 +84,8 @@ namespace VividRP.Editor.Tests
             Assert.That(reflectionProbe.blendDistance, Is.EqualTo(4.0f).Within(0.0001f));
             Assert.That(reflectionProbe.importance, Is.EqualTo(VividAdditionalReflectionData.MaxImportance));
             Assert.That(reflectionProbe.boxProjection, Is.True);
+            AssertVector3(additionalData.capturePositionOffset, new Vector3(0.0f, 1.0f, 0.0f));
+            Assert.That(additionalData.boxPerAxisControl, Is.True);
             AssertVector3(additionalData.boxBlendDistancePositive, new Vector3(1.0f, VividAdditionalReflectionData.MinBoxSize * 0.5f, 4.0f));
             AssertVector3(additionalData.boxSideFadePositive, new Vector3(0.0f, 0.5f, 1.0f));
             AssertVector3(additionalData.boxSideFadeNegative, new Vector3(0.25f, 1.0f, 1.0f));
@@ -124,12 +130,14 @@ namespace VividRP.Editor.Tests
             Assert.That(serializedReflectionProbe.importance, Is.Not.Null);
             Assert.That(serializedReflectionProbe.fadeDistance, Is.Not.Null);
             Assert.That(serializedReflectionProbe.rangeCompressionFactor, Is.Not.Null);
+            Assert.That(serializedReflectionProbe.capturePositionOffset, Is.Not.Null);
             Assert.That(serializedReflectionProbe.influenceBoxSize, Is.Not.Null);
             Assert.That(serializedReflectionProbe.influenceBoxOffset, Is.Not.Null);
             Assert.That(serializedReflectionProbe.boxBlendDistancePositive, Is.Not.Null);
             Assert.That(serializedReflectionProbe.boxBlendDistanceNegative, Is.Not.Null);
             Assert.That(serializedReflectionProbe.boxBlendNormalDistancePositive, Is.Not.Null);
             Assert.That(serializedReflectionProbe.boxBlendNormalDistanceNegative, Is.Not.Null);
+            Assert.That(serializedReflectionProbe.boxPerAxisControl, Is.Not.Null);
             Assert.That(serializedReflectionProbe.boxSideFadePositive, Is.Not.Null);
             Assert.That(serializedReflectionProbe.boxSideFadeNegative, Is.Not.Null);
             Assert.That(serializedReflectionProbe.proxyVolumeMode, Is.Not.Null);
@@ -141,6 +149,15 @@ namespace VividRP.Editor.Tests
         public void ProxyVolumeMode_DoesNotExposeSphereShape()
         {
             Assert.That(Enum.GetNames(typeof(VividReflectionProbeProxyVolumeMode)), Does.Not.Contain("Sphere"));
+        }
+
+        [Test]
+        public void VividReflectionProbeEditor_DoesNotWrapBuiltinReflectionProbeEditor()
+        {
+            const BindingFlags flags = BindingFlags.Static | BindingFlags.Instance | BindingFlags.NonPublic;
+
+            Assert.That(typeof(VividReflectionProbeEditor).GetField("BuiltinReflectionProbeEditorType", flags), Is.Null);
+            Assert.That(typeof(VividReflectionProbeEditor).GetField("m_BuiltinEditor", flags), Is.Null);
         }
 
         private static void AssertVector3(Vector3 actual, Vector3 expected, float tolerance = 0.0001f)

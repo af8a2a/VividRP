@@ -1221,6 +1221,7 @@ namespace VividRP.Runtime
             var hasAdditionalData = additionalData != null && additionalData.isActiveAndEnabled;
             var axisScale = GetLocalAxisScale(localToWorld);
             var positionWS = bounds.center;
+            var capturePositionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23);
             var proxyPositionWS = positionWS;
             var proxyExtents = extents;
             var blendDistancePositive = Vector3.one * Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f);
@@ -1246,6 +1247,7 @@ namespace VividRP.Runtime
                 isProjectionInfinite = additionalData.isProjectionInfinite;
                 isBoxProjection = !isProjectionInfinite;
                 multiplier = additionalData.multiplier;
+                capturePositionWS = localToWorld.MultiplyPoint(additionalData.capturePositionOffset);
                 weight = ComputeWeightedLinearFadeDistance(
                     new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
                     cameraPositionWS,
@@ -1269,7 +1271,7 @@ namespace VividRP.Runtime
                 weight = weight,
                 forwardWS = NormalizeDirection(new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22), Vector3.forward),
                 padding0 = 0.0f,
-                capturePositionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
+                capturePositionWS = capturePositionWS,
                 padding1 = 0.0f,
                 hdrData = visibleReflectionProbe.hdrData,
                 atlasScaleOffset = Vector4.zero,

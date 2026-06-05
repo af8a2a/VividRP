@@ -358,12 +358,3 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 - [Virtual Texture System](Roadmap~/VirtualTextureSystem.md)
 - [Streamed Virtual Texture (SVT)](Roadmap~/SVTRoadmap.md)
 
-## 测试
-
-从项目根目录运行当前 EditMode 测试：
-
-```powershell
-Unity.exe -batchmode -projectPath "<project root>" -runTests -testPlatform EditMode -testResults Logs/editmode-results.xml -quit -logFile Logs/editmode.log
-```
-
-当前包里还没有提交 PlayMode 测试。

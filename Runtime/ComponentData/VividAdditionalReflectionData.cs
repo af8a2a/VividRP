@@ -53,6 +53,9 @@ namespace VividRP.Runtime
         private float m_RangeCompressionFactor = 1.0f;
 
         [SerializeField]
+        private Vector3 m_CapturePositionOffset = Vector3.zero;
+
+        [SerializeField]
         private Vector3 m_InfluenceBoxSize = Vector3.one * 10.0f;
 
         [SerializeField]
@@ -69,6 +72,9 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private Vector3 m_BoxBlendNormalDistanceNegative = Vector3.zero;
+
+        [SerializeField]
+        private bool m_BoxPerAxisControl;
 
         [SerializeField]
         private Vector3 m_BoxSideFadePositive = Vector3.one;
@@ -127,6 +133,12 @@ namespace VividRP.Runtime
             set => m_RangeCompressionFactor = Mathf.Max(0.0001f, value);
         }
 
+        public Vector3 capturePositionOffset
+        {
+            get => m_CapturePositionOffset;
+            set => m_CapturePositionOffset = value;
+        }
+
         public Vector3 influenceBoxSize
         {
             get => m_InfluenceBoxSize;
@@ -161,6 +173,12 @@ namespace VividRP.Runtime
         {
             get => m_BoxBlendNormalDistanceNegative;
             set => m_BoxBlendNormalDistanceNegative = ClampBlendDistance(value, influenceBoxSize);
+        }
+
+        public bool boxPerAxisControl
+        {
+            get => m_BoxPerAxisControl;
+            set => m_BoxPerAxisControl = value;
         }
 
         public Vector3 boxSideFadePositive
@@ -289,6 +307,7 @@ namespace VividRP.Runtime
 
             m_InfluenceBoxSize = SanitizeSize(probe.size);
             m_InfluenceBoxOffset = probe.center;
+            m_CapturePositionOffset = Vector3.zero;
             m_ProxyBoxSize = m_InfluenceBoxSize;
             m_ProxyBoxOffset = m_InfluenceBoxOffset;
             m_BoxBlendDistancePositive = Vector3.one * Mathf.Max(0.0f, probe.blendDistance);

@@ -107,6 +107,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SyncReflectionProbeIfDirty_SyncsOnlyAfterAdditionalDataChanges()
+        {
+            var reflectionProbe = m_GameObject.AddComponent<ReflectionProbe>();
+            var additionalData = reflectionProbe.GetVividAdditionalReflectionData();
+
+            additionalData.influenceBoxSize = new Vector3(2.0f, 3.0f, 4.0f);
+            additionalData.SyncReflectionProbeIfDirty();
+
+            AssertVector3(reflectionProbe.size, new Vector3(2.0f, 3.0f, 4.0f));
+
+            reflectionProbe.size = new Vector3(8.0f, 8.0f, 8.0f);
+            additionalData.SyncReflectionProbeIfDirty();
+
+            AssertVector3(reflectionProbe.size, new Vector3(8.0f, 8.0f, 8.0f));
+
+            additionalData.influenceBoxOffset = new Vector3(1.0f, 2.0f, 3.0f);
+            additionalData.SyncReflectionProbeIfDirty();
+
+            AssertVector3(reflectionProbe.center, new Vector3(1.0f, 2.0f, 3.0f));
+        }
+
+        [Test]
         public void ObjectFactory_AddsAdditionalReflectionData_WhenReflectionProbeComponentIsCreated()
         {
             var reflectionProbe = ObjectFactory.AddComponent<ReflectionProbe>(m_GameObject);
@@ -115,6 +137,44 @@ namespace VividRP.Editor.Tests
 
             Assert.That(additionalData, Is.Not.Null);
             Assert.That((additionalData.hideFlags & HideFlags.HideInInspector) != 0, Is.True);
+        }
+
+        [Test]
+        public void TryGetAdditionalData_UsesEnabledReflectionProbeRegistration()
+        {
+            var reflectionProbe = m_GameObject.AddComponent<ReflectionProbe>();
+            var additionalData = reflectionProbe.GetVividAdditionalReflectionData();
+
+            Assert.That(VividAdditionalReflectionData.hasRegisteredData, Is.True);
+
+            Assert.That(
+                VividAdditionalReflectionData.TryGetAdditionalData(reflectionProbe, out var cachedData),
+                Is.True);
+            Assert.That(cachedData, Is.SameAs(additionalData));
+            Assert.That(
+                VividAdditionalReflectionData.TryGetAdditionalData(reflectionProbe.GetEntityId(), out cachedData),
+                Is.True);
+            Assert.That(cachedData, Is.SameAs(additionalData));
+
+            additionalData.enabled = false;
+
+            Assert.That(VividAdditionalReflectionData.hasRegisteredData, Is.False);
+            Assert.That(
+                VividAdditionalReflectionData.TryGetAdditionalData(reflectionProbe, out cachedData),
+                Is.False);
+            Assert.That(cachedData, Is.Null);
+            Assert.That(
+                VividAdditionalReflectionData.TryGetAdditionalData(reflectionProbe.GetEntityId(), out cachedData),
+                Is.False);
+            Assert.That(cachedData, Is.Null);
+
+            additionalData.enabled = true;
+
+            Assert.That(VividAdditionalReflectionData.hasRegisteredData, Is.True);
+            Assert.That(
+                VividAdditionalReflectionData.TryGetAdditionalData(reflectionProbe, out cachedData),
+                Is.True);
+            Assert.That(cachedData, Is.SameAs(additionalData));
         }
 
         [Test]

@@ -84,6 +84,7 @@ namespace VividRP.Editor.Tests
             var profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
             var passRecorderSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.Execution.cs"));
             var frameContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "FrameContextSystem.cs"));
+            var lightDataSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividLightData.cs"));
             var ltcAreaLightSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "AreaLight", "LTCAreaLightSystem.cs"));
             var decalSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Decal", "DecalSystem.cs"));
             var gpuDrivenSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenSystem.cs"));
@@ -91,6 +92,27 @@ namespace VividRP.Editor.Tests
             var virtualTextureSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
 
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/Drain"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/Inputs"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights/SceneLightComplete"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights/EnsureBuffers"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights/CollectVisible"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights/CollectScene"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights/Directional"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/VisibleLights/ScheduleJobs"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/EnsureCapacity"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/Spatial"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/BaseData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/AdditionalData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/ApplyAdditionalData"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/ApplyAdditionalData/Sync"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/ApplyAdditionalData/Values"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/PackResult"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update/ReflectionProbes/Build/Store"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/EnsureCompiled"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearHistoryImports"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/ClearCodeManagedHistory"));
@@ -137,6 +159,31 @@ namespace VividRP.Editor.Tests
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameContextUpdateMarker.Auto()"));
             Assert.That(passRecorderSource, Does.Contain("PrepareFramePrepareHistoryTargetsMarker.Auto()"));
             Assert.That(passRecorderSource, Does.Contain("PrepareFrameClearImportedTexturesMarker.Auto()"));
+
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataDrainMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataInputsMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataVisibleLightsMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataSceneLightCompleteMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataEnsureBuffersMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataCollectVisibleMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataCollectSceneMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataDirectionalMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataScheduleMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbesMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeEnsureCapacityMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeBuildMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeBuildSpatialMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeBuildBaseDataMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeAdditionalDataMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeApplyAdditionalDataMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeApplyAdditionalDataSyncMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeApplyAdditionalDataValuesMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbePackResultMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("SyncReflectionProbeIfDirty"));
+            Assert.That(lightDataSource, Does.Contain("InitializeContextLightDataReflectionProbeStoreMarker.Auto()"));
+            Assert.That(lightDataSource, Does.Contain("UnsafeUtility.As<VisibleReflectionProbe, VisibleReflectionProbeEntityIdLayout>"));
+            Assert.That(lightDataSource, Does.Contain("VividAdditionalReflectionData.TryGetAdditionalData"));
+            Assert.That(lightDataSource, Does.Not.Contain("reflectionProbe.TryGetComponent<VividAdditionalReflectionData>"));
 
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextPurgeDestroyedCamerasMarker.Auto()"));
             Assert.That(frameContextSource, Does.Contain("PrepareFrameContextResolveDataMarker.Auto()"));

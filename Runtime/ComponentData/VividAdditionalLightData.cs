@@ -57,7 +57,7 @@ namespace VividRP.Runtime
         private readonly List<VividAdditionalLightData> m_RegisteredAdditionalLightData = new();
         private readonly List<VividLightRenderData> m_LightData = new();
         private readonly List<VividLightRenderData> m_PreparedSceneLightData = new();
-        private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new();
+        private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new(new EntityIdComparer());
         private NativeArray<VividLightRenderData> m_SceneLightSources;
         private NativeList<VividLightRenderData> m_PreparedSceneLightNativeData;
         private JobHandle m_PrepareSceneLightJobHandle;
@@ -125,7 +125,7 @@ namespace VividRP.Runtime
         {
             trackedLightData = default;
 
-            if (lightEntityId.Equals(EntityId.None))
+            if (IsEntityIdNone(lightEntityId))
                 return false;
 
             return m_EntityIdToDataIndex.TryGetValue(lightEntityId, out var dataIndex)
@@ -149,7 +149,7 @@ namespace VividRP.Runtime
             RemoveRegisteredLight(light);
 
             var lightEntityId = light.GetEntityId();
-            if (lightEntityId.Equals(EntityId.None)
+            if (IsEntityIdNone(lightEntityId)
                 || !m_EntityIdToDataIndex.TryGetValue(lightEntityId, out var removedIndex))
                 return;
 
@@ -351,7 +351,7 @@ namespace VividRP.Runtime
 
         private void StoreLightData(VividLightRenderData trackedLightData)
         {
-            if (trackedLightData.lightEntityId.Equals(EntityId.None))
+            if (IsEntityIdNone(trackedLightData.lightEntityId))
                 return;
 
             if (m_EntityIdToDataIndex.TryGetValue(trackedLightData.lightEntityId, out var dataIndex))
@@ -370,8 +370,26 @@ namespace VividRP.Runtime
 
         private void RemoveLookups(VividLightRenderData trackedLightData)
         {
-            if (!trackedLightData.lightEntityId.Equals(EntityId.None))
+            if (!IsEntityIdNone(trackedLightData.lightEntityId))
                 m_EntityIdToDataIndex.Remove(trackedLightData.lightEntityId);
+        }
+
+        private static bool IsEntityIdNone(EntityId entityId)
+        {
+            return EntityId.ToULong(entityId) == EntityId.ToULong(EntityId.None);
+        }
+
+        private sealed class EntityIdComparer : IEqualityComparer<EntityId>
+        {
+            public bool Equals(EntityId x, EntityId y)
+            {
+                return EntityId.ToULong(x) == EntityId.ToULong(y);
+            }
+
+            public int GetHashCode(EntityId obj)
+            {
+                return EntityId.ToULong(obj).GetHashCode();
+            }
         }
 
         [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]

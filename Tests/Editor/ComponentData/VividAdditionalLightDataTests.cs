@@ -1499,6 +1499,18 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLightRenderDatabase_UsesEntityIdComparer_ForTrackedLightLookups()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "ComponentData", "VividAdditionalLightData.cs"));
+
+            Assert.That(source, Does.Contain("Dictionary<EntityId, int> m_EntityIdToDataIndex = new(new EntityIdComparer())"));
+            Assert.That(source, Does.Contain("return EntityId.ToULong(x) == EntityId.ToULong(y);"));
+            Assert.That(source, Does.Contain("return EntityId.ToULong(entityId) == EntityId.ToULong(EntityId.None);"));
+            Assert.That(source, Does.Not.Contain("lightEntityId.Equals(EntityId.None)"));
+            Assert.That(source, Does.Not.Contain("trackedLightData.lightEntityId.Equals(EntityId.None)"));
+        }
+
+        [Test]
         public void UpdateLightData_RefreshesTrackedSnapshot_WhenLightPropertiesChange()
         {
             var light = m_GameObject.AddComponent<Light>();

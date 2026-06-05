@@ -36,6 +36,7 @@ namespace VividRP.Runtime
         internal const int MaxImportance = 32767;
 
         private static readonly HashSet<VividAdditionalReflectionData> s_AllInstances = new();
+        private static readonly Dictionary<EntityId, VividAdditionalReflectionData> s_DataByReflectionProbeId = new(new EntityIdComparer());
 
         [SerializeField, Min(0.0f)]
         private float m_Multiplier = 1.0f;
@@ -92,6 +93,8 @@ namespace VividRP.Runtime
         private Vector3 m_ProxyBoxOffset = Vector3.zero;
 
         private ReflectionProbe m_ReflectionProbe;
+        private EntityId m_ReflectionProbeEntityId = EntityId.None;
+        private bool m_ReflectionProbeSyncDirty = true;
 
         public ReflectionProbe reflectionProbe
         {
@@ -118,7 +121,15 @@ namespace VividRP.Runtime
         public int importance
         {
             get => m_Importance;
-            set => m_Importance = Mathf.Clamp(value, 0, MaxImportance);
+            set
+            {
+                var clampedValue = Mathf.Clamp(value, 0, MaxImportance);
+                if (m_Importance == clampedValue)
+                    return;
+
+                m_Importance = clampedValue;
+                MarkReflectionProbeSyncDirty();
+            }
         }
 
         public float fadeDistance
@@ -142,25 +153,56 @@ namespace VividRP.Runtime
         public Vector3 influenceBoxSize
         {
             get => m_InfluenceBoxSize;
-            set => m_InfluenceBoxSize = SanitizeSize(value);
+            set
+            {
+                var sanitizedValue = SanitizeSize(value);
+                if (m_InfluenceBoxSize == sanitizedValue)
+                    return;
+
+                m_InfluenceBoxSize = sanitizedValue;
+                MarkReflectionProbeSyncDirty();
+            }
         }
 
         public Vector3 influenceBoxOffset
         {
             get => m_InfluenceBoxOffset;
-            set => m_InfluenceBoxOffset = value;
+            set
+            {
+                if (m_InfluenceBoxOffset == value)
+                    return;
+
+                m_InfluenceBoxOffset = value;
+                MarkReflectionProbeSyncDirty();
+            }
         }
 
         public Vector3 boxBlendDistancePositive
         {
             get => m_BoxBlendDistancePositive;
-            set => m_BoxBlendDistancePositive = ClampBlendDistance(value, influenceBoxSize);
+            set
+            {
+                var clampedValue = ClampBlendDistance(value, influenceBoxSize);
+                if (m_BoxBlendDistancePositive == clampedValue)
+                    return;
+
+                m_BoxBlendDistancePositive = clampedValue;
+                MarkReflectionProbeSyncDirty();
+            }
         }
 
         public Vector3 boxBlendDistanceNegative
         {
             get => m_BoxBlendDistanceNegative;
-            set => m_BoxBlendDistanceNegative = ClampBlendDistance(value, influenceBoxSize);
+            set
+            {
+                var clampedValue = ClampBlendDistance(value, influenceBoxSize);
+                if (m_BoxBlendDistanceNegative == clampedValue)
+                    return;
+
+                m_BoxBlendDistanceNegative = clampedValue;
+                MarkReflectionProbeSyncDirty();
+            }
         }
 
         public Vector3 boxBlendNormalDistancePositive
@@ -196,7 +238,14 @@ namespace VividRP.Runtime
         public VividReflectionProbeProxyVolumeMode proxyVolumeMode
         {
             get => m_ProxyVolumeMode;
-            set => m_ProxyVolumeMode = value;
+            set
+            {
+                if (m_ProxyVolumeMode == value)
+                    return;
+
+                m_ProxyVolumeMode = value;
+                MarkReflectionProbeSyncDirty();
+            }
         }
 
         public Vector3 proxyBoxSize
@@ -218,6 +267,34 @@ namespace VividRP.Runtime
             var reflectionDatas = new VividAdditionalReflectionData[s_AllInstances.Count];
             s_AllInstances.CopyTo(reflectionDatas);
             return reflectionDatas;
+        }
+
+        internal static bool hasRegisteredData => s_DataByReflectionProbeId.Count > 0;
+
+        internal static bool TryGetAdditionalData(
+            ReflectionProbe reflectionProbe,
+            out VividAdditionalReflectionData reflectionData)
+        {
+            reflectionData = null;
+
+            if (reflectionProbe == null)
+                return false;
+
+            return TryGetAdditionalData(reflectionProbe.GetEntityId(), out reflectionData);
+        }
+
+        internal static bool TryGetAdditionalData(
+            EntityId reflectionProbeEntityId,
+            out VividAdditionalReflectionData reflectionData)
+        {
+            reflectionData = null;
+
+            if (IsEntityIdNone(reflectionProbeEntityId))
+                return false;
+
+            return s_DataByReflectionProbeId.TryGetValue(reflectionProbeEntityId, out reflectionData)
+                   && reflectionData != null
+                   && reflectionData.isActiveAndEnabled;
         }
 
         public Bounds GetInfluenceBounds()
@@ -252,6 +329,15 @@ namespace VividRP.Runtime
             probe.blendDistance = GetMaxBlendDistance();
             probe.importance = m_Importance;
             probe.boxProjection = !isProjectionInfinite;
+            m_ReflectionProbeSyncDirty = false;
+        }
+
+        internal void SyncReflectionProbeIfDirty()
+        {
+            if (!m_ReflectionProbeSyncDirty)
+                return;
+
+            SyncReflectionProbe();
         }
 
         private void Reset()
@@ -263,6 +349,7 @@ namespace VividRP.Runtime
         private void OnEnable()
         {
             s_AllInstances.Add(this);
+            RegisterReflectionProbe();
             PullFromReflectionProbeIfDefault();
             SyncReflectionProbe();
         }
@@ -270,16 +357,69 @@ namespace VividRP.Runtime
         private void OnDisable()
         {
             s_AllInstances.Remove(this);
+            UnregisterReflectionProbe();
         }
 
         private void OnDestroy()
         {
             s_AllInstances.Remove(this);
+            UnregisterReflectionProbe();
         }
 
         private void OnValidate()
         {
+            MarkReflectionProbeSyncDirty();
             SyncReflectionProbe();
+        }
+
+        private void RegisterReflectionProbe()
+        {
+            var probe = reflectionProbe;
+            if (probe == null)
+                return;
+
+            m_ReflectionProbeEntityId = probe.GetEntityId();
+            if (IsEntityIdNone(m_ReflectionProbeEntityId))
+                return;
+
+            s_DataByReflectionProbeId[m_ReflectionProbeEntityId] = this;
+        }
+
+        private void UnregisterReflectionProbe()
+        {
+            if (IsEntityIdNone(m_ReflectionProbeEntityId))
+                return;
+
+            if (s_DataByReflectionProbeId.TryGetValue(m_ReflectionProbeEntityId, out var reflectionData)
+                && ReferenceEquals(reflectionData, this))
+            {
+                s_DataByReflectionProbeId.Remove(m_ReflectionProbeEntityId);
+            }
+
+            m_ReflectionProbeEntityId = EntityId.None;
+        }
+
+        private static bool IsEntityIdNone(EntityId entityId)
+        {
+            return EntityId.ToULong(entityId) == EntityId.ToULong(EntityId.None);
+        }
+
+        private void MarkReflectionProbeSyncDirty()
+        {
+            m_ReflectionProbeSyncDirty = true;
+        }
+
+        private sealed class EntityIdComparer : IEqualityComparer<EntityId>
+        {
+            public bool Equals(EntityId x, EntityId y)
+            {
+                return EntityId.ToULong(x) == EntityId.ToULong(y);
+            }
+
+            public int GetHashCode(EntityId obj)
+            {
+                return EntityId.ToULong(obj).GetHashCode();
+            }
         }
 
         private void PullFromReflectionProbeIfDefault()

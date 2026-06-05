@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
@@ -14,6 +15,22 @@ namespace VividRP.Runtime
     {
         // Covers the default Grid volume and the current default Onion outer radius before sphere-vs-box rejection.
         private const float DefaultReGIRCollectionBoxHalfExtent = 80.0f;
+        private static readonly bool s_CanReadVisibleReflectionProbeEntityId =
+            UnsafeUtility.SizeOf<VisibleReflectionProbe>() == UnsafeUtility.SizeOf<VisibleReflectionProbeEntityIdLayout>();
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct VisibleReflectionProbeEntityIdLayout
+        {
+            public Bounds bounds;
+            public Matrix4x4 localToWorldMatrix;
+            public Vector4 hdrData;
+            public Vector3 center;
+            public float blendDistance;
+            public int importance;
+            public int boxProjection;
+            public EntityId entityId;
+            public EntityId textureId;
+        }
 
         [StructLayout(LayoutKind.Sequential)]
         public struct DirectionalLightData
@@ -347,6 +364,7 @@ namespace VividRP.Runtime
         // LightGrid/ReGIR candidate builds run on Burst jobs scheduled in Update and completed by LightGrid/ReGIR Prepare.
         // The fields below are owned by VividLightData while the job is in flight; do not access from outside CompleteLightGridPrepare.
         private NativeList<VisibleLightRenderDataRecord> m_LightGridVisibleLightRecords;
+        private NativeList<DirectionalLightCandidate> m_LightGridDirectionalCandidates;
         private NativeList<PunctualLightCandidate> m_LightGridPunctualCandidates;
         private NativeList<AreaLightCandidate> m_LightGridAreaCandidates;
         private NativeList<SFiniteLightBound> m_LightGridPunctualLightBounds;
@@ -394,12 +412,26 @@ namespace VividRP.Runtime
         {
             // Defensive: previous frame's LightGridPass should have drained this, but bail-outs (camera early-return,
             // pipeline swap) can leave the handle live. Drain before mutating any state read by the job.
-            DrainLightGridPrepare();
+            using (RenderPassProfilingUtility.InitializeContextLightDataDrainMarker.Auto())
+            {
+                DrainLightGridPrepare();
+            }
 
-            visibleLights = cullingResults.visibleLights;
-            visibleReflectionProbes = cullingResults.visibleReflectionProbes;
-            UpdateVisibleLightData(visibleLights, RenderSettings.sun, worldToViewMatrix);
-            UpdateVisibleReflectionProbeData(visibleReflectionProbes, ResolveCameraPositionWS(worldToViewMatrix));
+            using (RenderPassProfilingUtility.InitializeContextLightDataInputsMarker.Auto())
+            {
+                visibleLights = cullingResults.visibleLights;
+                visibleReflectionProbes = cullingResults.visibleReflectionProbes;
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextLightDataVisibleLightsMarker.Auto())
+            {
+                UpdateVisibleLightData(visibleLights, RenderSettings.sun, worldToViewMatrix);
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbesMarker.Auto())
+            {
+                UpdateVisibleReflectionProbeData(visibleReflectionProbes, ResolveCameraPositionWS(worldToViewMatrix));
+            }
         }
 
         internal void Update(CullingResults cullingResults)
@@ -471,6 +503,7 @@ namespace VividRP.Runtime
         private void ClearLightGridBuffers()
         {
             ClearLightGridBuffer(ref m_LightGridVisibleLightRecords);
+            ClearLightGridBuffer(ref m_LightGridDirectionalCandidates);
             ClearLightGridBuffer(ref m_LightGridPunctualCandidates);
             ClearLightGridBuffer(ref m_LightGridAreaCandidates);
             ClearLightGridBuffer(ref m_LightGridPunctualLightBounds);
@@ -485,6 +518,7 @@ namespace VividRP.Runtime
         private void DisposeLightGridBuffers()
         {
             DisposeLightGridBuffer(ref m_LightGridVisibleLightRecords);
+            DisposeLightGridBuffer(ref m_LightGridDirectionalCandidates);
             DisposeLightGridBuffer(ref m_LightGridPunctualCandidates);
             DisposeLightGridBuffer(ref m_LightGridAreaCandidates);
             DisposeLightGridBuffer(ref m_LightGridPunctualLightBounds);
@@ -806,6 +840,7 @@ namespace VividRP.Runtime
             reGIRLightCount = 0;
             m_LightGridClusteredCullDataPrepared = false;
 
+            using (RenderPassProfilingUtility.InitializeContextLightDataSceneLightCompleteMarker.Auto())
             using (RenderPassProfilingUtility.InitializeContextSceneLightCompleteMarker.Auto())
             {
                 VividLightRenderDatabase.instance.CompleteSceneLightPrepare();
@@ -815,12 +850,21 @@ namespace VividRP.Runtime
             var visibleLightCount = visibleLights.IsCreated ? visibleLights.Length : 0;
             var sceneLightCount = sceneLightData.Count;
             var lightCapacity = Mathf.Max(Mathf.Max(visibleLightCount, sceneLightCount), 1);
-            EnsureLightGridBufferCapacity(lightCapacity);
+            using (RenderPassProfilingUtility.InitializeContextLightDataEnsureBuffersMarker.Auto())
+            {
+                EnsureLightGridBufferCapacity(lightCapacity);
+            }
 
-            if (visibleLightCount > 0)
-                CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
+            using (RenderPassProfilingUtility.InitializeContextLightDataCollectVisibleMarker.Auto())
+            {
+                if (visibleLightCount > 0)
+                    CollectVisibleLightRenderDataRecords(visibleLights, m_LightGridVisibleLightRecords);
+            }
 
-            CollectReGIRSceneLightSourceRecords(sceneLightData, m_ReGIRSceneLightSourceRecords);
+            using (RenderPassProfilingUtility.InitializeContextLightDataCollectSceneMarker.Auto())
+            {
+                CollectReGIRSceneLightSourceRecords(sceneLightData, m_ReGIRSceneLightSourceRecords);
+            }
 
             if (m_LightGridVisibleLightRecords.Length == 0 && m_ReGIRSceneLightSourceRecords.Length == 0)
             {
@@ -828,40 +872,46 @@ namespace VividRP.Runtime
                 return;
             }
 
-            CollectDirectionalLightCandidatesAndApply(m_LightGridVisibleLightRecords, sunLight);
-
-            var collectReGIRJobHandle = default(JobHandle);
-            if (m_ReGIRSceneLightSourceRecords.Length > 0)
+            using (RenderPassProfilingUtility.InitializeContextLightDataDirectionalMarker.Auto())
             {
-                var collectReGIRSceneLightJob = new CollectReGIRSceneLightRenderDataRecordsJob
-                {
-                    sceneLightRenderDataRecords = m_ReGIRSceneLightSourceRecords.AsArray(),
-                    reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords,
-                    collectionBoxCenterWS = ResolveCameraPositionWS(worldToViewMatrix),
-                    collectionBoxHalfExtents = new Vector3(
-                        DefaultReGIRCollectionBoxHalfExtent,
-                        DefaultReGIRCollectionBoxHalfExtent,
-                        DefaultReGIRCollectionBoxHalfExtent),
-                };
-                collectReGIRJobHandle = collectReGIRSceneLightJob.Schedule();
+                CollectDirectionalLightCandidatesAndApply(m_LightGridVisibleLightRecords, sunLight);
             }
 
-            var buildLightGridJob = new BuildLightGridLightCandidatesJob
+            using (RenderPassProfilingUtility.InitializeContextLightDataScheduleMarker.Auto())
             {
-                visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
-                reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords.AsDeferredJobArray(),
-                punctualLights = m_LightGridPunctualCandidates,
-                areaLights = m_LightGridAreaCandidates,
-                reGIRLights = m_LightGridReGIRLights,
-                punctualLightBounds = m_LightGridPunctualLightBounds,
-                punctualLightVolumeData = m_LightGridPunctualLightVolumeData,
-                areaLightBounds = m_LightGridAreaLightBounds,
-                areaLightVolumeData = m_LightGridAreaLightVolumeData,
-                worldToViewMatrix = worldToViewMatrix,
-            };
-            m_LightGridJobHandle = buildLightGridJob.Schedule(collectReGIRJobHandle);
-            m_LightGridJobScheduled = true;
-            JobHandle.ScheduleBatchedJobs();
+                var collectReGIRJobHandle = default(JobHandle);
+                if (m_ReGIRSceneLightSourceRecords.Length > 0)
+                {
+                    var collectReGIRSceneLightJob = new CollectReGIRSceneLightRenderDataRecordsJob
+                    {
+                        sceneLightRenderDataRecords = m_ReGIRSceneLightSourceRecords.AsArray(),
+                        reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords,
+                        collectionBoxCenterWS = ResolveCameraPositionWS(worldToViewMatrix),
+                        collectionBoxHalfExtents = new Vector3(
+                            DefaultReGIRCollectionBoxHalfExtent,
+                            DefaultReGIRCollectionBoxHalfExtent,
+                            DefaultReGIRCollectionBoxHalfExtent),
+                    };
+                    collectReGIRJobHandle = collectReGIRSceneLightJob.Schedule();
+                }
+
+                var buildLightGridJob = new BuildLightGridLightCandidatesJob
+                {
+                    visibleLightRenderDataRecords = m_LightGridVisibleLightRecords.AsArray(),
+                    reGIRSceneLightRenderDataRecords = m_ReGIRSceneLightRecords.AsDeferredJobArray(),
+                    punctualLights = m_LightGridPunctualCandidates,
+                    areaLights = m_LightGridAreaCandidates,
+                    reGIRLights = m_LightGridReGIRLights,
+                    punctualLightBounds = m_LightGridPunctualLightBounds,
+                    punctualLightVolumeData = m_LightGridPunctualLightVolumeData,
+                    areaLightBounds = m_LightGridAreaLightBounds,
+                    areaLightVolumeData = m_LightGridAreaLightVolumeData,
+                    worldToViewMatrix = worldToViewMatrix,
+                };
+                m_LightGridJobHandle = buildLightGridJob.Schedule(collectReGIRJobHandle);
+                m_LightGridJobScheduled = true;
+                JobHandle.ScheduleBatchedJobs();
+            }
         }
 
         private void UpdateVisibleReflectionProbeData(
@@ -874,15 +924,24 @@ namespace VividRP.Runtime
             if (!visibleReflectionProbes.IsCreated || visibleReflectionProbes.Length == 0)
                 return;
 
-            EnsureReflectionProbeCapacity(visibleReflectionProbes.Length);
-
-            for (var probeIndex = 0; probeIndex < visibleReflectionProbes.Length; probeIndex++)
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeEnsureCapacityMarker.Auto())
             {
-                if (!TryCreateReflectionProbeData(visibleReflectionProbes[probeIndex], cameraPositionWS, out var reflectionProbeData))
-                    continue;
+                EnsureReflectionProbeCapacity(visibleReflectionProbes.Length);
+            }
 
-                reflectionProbes[reflectionProbeCount] = reflectionProbeData;
-                reflectionProbeCount++;
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeBuildMarker.Auto())
+            {
+                for (var probeIndex = 0; probeIndex < visibleReflectionProbes.Length; probeIndex++)
+                {
+                    if (!TryCreateReflectionProbeData(visibleReflectionProbes[probeIndex], cameraPositionWS, out var reflectionProbeData))
+                        continue;
+
+                    using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeStoreMarker.Auto())
+                    {
+                        reflectionProbes[reflectionProbeCount] = reflectionProbeData;
+                        reflectionProbeCount++;
+                    }
+                }
             }
         }
 
@@ -934,6 +993,7 @@ namespace VividRP.Runtime
             // VisibleLightRenderDataRecord must be built on the main thread (touches managed Light + database).
             // It is consumed by both the synchronous directional pass below and the deferred LightGrid Burst job.
             EnsureLightGridBufferCapacity(ref m_LightGridVisibleLightRecords, lightCapacity);
+            EnsureLightGridBufferCapacity(ref m_LightGridDirectionalCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridPunctualCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridAreaCandidates, lightCapacity);
             EnsureLightGridBufferCapacity(ref m_LightGridReGIRLights, lightCapacity);
@@ -984,19 +1044,17 @@ namespace VividRP.Runtime
             NativeList<VisibleLightRenderDataRecord> visibleLightRenderDataRecords,
             Light sunLight)
         {
-            using var directionalCandidates = new NativeList<DirectionalLightCandidate>(visibleLightRenderDataRecords.Length, Allocator.Temp);
-
             for (var lightIndex = 0; lightIndex < visibleLightRenderDataRecords.Length; lightIndex++)
             {
                 var record = visibleLightRenderDataRecords[lightIndex];
                 if (record.lightRenderData.lightType != LightType.Directional)
                     continue;
 
-                directionalCandidates.Add(
+                m_LightGridDirectionalCandidates.AddNoResize(
                     CreateDirectionalLightCandidate(record.visibleLightIndex, record.lightRenderData));
             }
 
-            ApplyDirectionalLightCandidates(directionalCandidates, sunLight);
+            ApplyDirectionalLightCandidates(m_LightGridDirectionalCandidates, sunLight);
         }
 
         private void ApplyDirectionalLightCandidates(NativeList<DirectionalLightCandidate> directionalCandidates, Light sunLight)
@@ -1010,6 +1068,7 @@ namespace VividRP.Runtime
             mainDirectionalLightEntityId = EntityId.None;
 
             var sunLightEntityId = sunLight != null ? sunLight.GetEntityId() : EntityId.None;
+            var hasSunLightEntityId = !AreEntityIdsEqual(sunLightEntityId, EntityId.None);
             var brightestDirectionalIntensity = float.NegativeInfinity;
             var brightestVisibleLightIndex = -1;
             var brightestDirectionalIndex = -1;
@@ -1020,7 +1079,7 @@ namespace VividRP.Runtime
                 var candidate = directionalCandidates[directionalIndex];
                 directionalLights[directionalIndex] = candidate.lightData;
 
-                if (!sunLightEntityId.Equals(EntityId.None) && candidate.lightEntityId.Equals(sunLightEntityId))
+                if (hasSunLightEntityId && AreEntityIdsEqual(candidate.lightEntityId, sunLightEntityId))
                 {
                     mainLightIndex = candidate.visibleLightIndex;
                     mainLightEntityId = candidate.lightEntityId;
@@ -1104,6 +1163,11 @@ namespace VividRP.Runtime
         private static Vector3 ResolveCameraPositionWS(Matrix4x4 worldToViewMatrix)
         {
             return worldToViewMatrix.inverse.MultiplyPoint3x4(Vector3.zero);
+        }
+
+        private static bool AreEntityIdsEqual(EntityId lhs, EntityId rhs)
+        {
+            return EntityId.ToULong(lhs) == EntityId.ToULong(rhs);
         }
 
         private void CollectVisibleLightRenderDataRecords(
@@ -1211,94 +1275,152 @@ namespace VividRP.Runtime
         {
             reflectionProbeData = default;
 
-            if (!IsReflectionProbeSpatiallyValid(visibleReflectionProbe))
-                return false;
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeBuildSpatialMarker.Auto())
+            {
+                if (!IsReflectionProbeSpatiallyValid(visibleReflectionProbe))
+                    return false;
+            }
 
-            var bounds = visibleReflectionProbe.bounds;
-            var extents = bounds.extents;
-            var localToWorld = visibleReflectionProbe.localToWorldMatrix;
-            var additionalData = GetAdditionalReflectionData(visibleReflectionProbe);
+            Bounds bounds;
+            Vector3 extents;
+            Matrix4x4 localToWorld;
+            Vector3 axisScale;
+            Vector3 positionWS;
+            Vector3 capturePositionWS;
+            Vector3 proxyPositionWS;
+            Vector3 proxyExtents;
+            Vector3 blendDistancePositive;
+            Vector3 blendDistanceNegative;
+            Vector3 boxSideFadePositive;
+            Vector3 boxSideFadeNegative;
+            Vector4 hdrData;
+            float visibleBlendDistance;
+            bool isBoxProjection;
+            bool isProjectionInfinite;
+            float multiplier;
+            float weight;
+            int importance;
+            float rangeCompressionFactor;
+
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeBuildBaseDataMarker.Auto())
+            {
+                bounds = visibleReflectionProbe.bounds;
+                extents = bounds.extents;
+                localToWorld = visibleReflectionProbe.localToWorldMatrix;
+                axisScale = GetLocalAxisScale(localToWorld);
+                positionWS = bounds.center;
+                capturePositionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23);
+                proxyPositionWS = positionWS;
+                proxyExtents = extents;
+                visibleBlendDistance = Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f);
+                blendDistancePositive = Vector3.one * visibleBlendDistance;
+                blendDistanceNegative = blendDistancePositive;
+                boxSideFadePositive = Vector3.one;
+                boxSideFadeNegative = Vector3.one;
+                isBoxProjection = visibleReflectionProbe.isBoxProjection;
+                isProjectionInfinite = !isBoxProjection;
+                multiplier = 1.0f;
+                weight = 1.0f;
+                importance = visibleReflectionProbe.importance;
+                rangeCompressionFactor = 1.0f;
+                hdrData = visibleReflectionProbe.hdrData;
+            }
+
+            VividAdditionalReflectionData additionalData;
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeAdditionalDataMarker.Auto())
+            {
+                additionalData = GetAdditionalReflectionData(visibleReflectionProbe);
+            }
             var hasAdditionalData = additionalData != null && additionalData.isActiveAndEnabled;
-            var axisScale = GetLocalAxisScale(localToWorld);
-            var positionWS = bounds.center;
-            var capturePositionWS = new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23);
-            var proxyPositionWS = positionWS;
-            var proxyExtents = extents;
-            var blendDistancePositive = Vector3.one * Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f);
-            var blendDistanceNegative = blendDistancePositive;
-            var boxSideFadePositive = Vector3.one;
-            var boxSideFadeNegative = Vector3.one;
-            var isBoxProjection = visibleReflectionProbe.isBoxProjection;
-            var isProjectionInfinite = !visibleReflectionProbe.isBoxProjection;
-            var multiplier = 1.0f;
-            var weight = 1.0f;
-            var importance = visibleReflectionProbe.importance;
-            var rangeCompressionFactor = 1.0f;
 
             if (hasAdditionalData)
             {
-                additionalData.SyncReflectionProbe();
-                positionWS = localToWorld.MultiplyPoint(additionalData.influenceBoxOffset);
-                extents = ScaleVector(additionalData.influenceBoxSize * 0.5f, axisScale);
-                blendDistancePositive = ScaleVector(additionalData.boxBlendDistancePositive, axisScale);
-                blendDistanceNegative = ScaleVector(additionalData.boxBlendDistanceNegative, axisScale);
-                boxSideFadePositive = additionalData.boxSideFadePositive;
-                boxSideFadeNegative = additionalData.boxSideFadeNegative;
-                isProjectionInfinite = additionalData.isProjectionInfinite;
-                isBoxProjection = !isProjectionInfinite;
-                multiplier = additionalData.multiplier;
-                capturePositionWS = localToWorld.MultiplyPoint(additionalData.capturePositionOffset);
-                weight = ComputeWeightedLinearFadeDistance(
-                    new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
-                    cameraPositionWS,
-                    additionalData.weight,
-                    additionalData.fadeDistance);
-                importance = additionalData.importance;
-                rangeCompressionFactor = additionalData.rangeCompressionFactor;
-                proxyPositionWS = localToWorld.MultiplyPoint(additionalData.GetProxyBoxOffset());
-                proxyExtents = ScaleVector(additionalData.GetProxyBoxSize() * 0.5f, axisScale);
+                using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeApplyAdditionalDataMarker.Auto())
+                {
+                    using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeApplyAdditionalDataSyncMarker.Auto())
+                    {
+                        additionalData.SyncReflectionProbeIfDirty();
+                    }
+
+                    using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbeApplyAdditionalDataValuesMarker.Auto())
+                    {
+                        positionWS = localToWorld.MultiplyPoint(additionalData.influenceBoxOffset);
+                        extents = ScaleVector(additionalData.influenceBoxSize * 0.5f, axisScale);
+                        blendDistancePositive = ScaleVector(additionalData.boxBlendDistancePositive, axisScale);
+                        blendDistanceNegative = ScaleVector(additionalData.boxBlendDistanceNegative, axisScale);
+                        boxSideFadePositive = additionalData.boxSideFadePositive;
+                        boxSideFadeNegative = additionalData.boxSideFadeNegative;
+                        isProjectionInfinite = additionalData.isProjectionInfinite;
+                        isBoxProjection = !isProjectionInfinite;
+                        multiplier = additionalData.multiplier;
+                        capturePositionWS = localToWorld.MultiplyPoint(additionalData.capturePositionOffset);
+                        weight = ComputeWeightedLinearFadeDistance(
+                            new Vector3(localToWorld.m03, localToWorld.m13, localToWorld.m23),
+                            cameraPositionWS,
+                            additionalData.weight,
+                            additionalData.fadeDistance);
+                        importance = additionalData.importance;
+                        rangeCompressionFactor = additionalData.rangeCompressionFactor;
+                        proxyPositionWS = localToWorld.MultiplyPoint(additionalData.GetProxyBoxOffset());
+                        proxyExtents = ScaleVector(additionalData.GetProxyBoxSize() * 0.5f, axisScale);
+                    }
+                }
             }
 
-            reflectionProbeData = new ReflectionProbeData
+            using (RenderPassProfilingUtility.InitializeContextLightDataReflectionProbePackResultMarker.Auto())
             {
-                positionWS = positionWS,
-                blendDistance = Mathf.Max(visibleReflectionProbe.blendDistance, 0.0f),
-                extents = extents,
-                isBoxProjection = isBoxProjection ? 1u : 0u,
-                rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
-                importance = importance,
-                upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
-                weight = weight,
-                forwardWS = NormalizeDirection(new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22), Vector3.forward),
-                padding0 = 0.0f,
-                capturePositionWS = capturePositionWS,
-                padding1 = 0.0f,
-                hdrData = visibleReflectionProbe.hdrData,
-                atlasScaleOffset = Vector4.zero,
-                atlasIndexAndSlice = new Vector4(-1.0f, -1.0f, 0.0f, 0.0f),
-                blendDistancePositive = blendDistancePositive,
-                multiplier = multiplier,
-                blendDistanceNegative = blendDistanceNegative,
-                isProjectionInfinite = isProjectionInfinite ? 1u : 0u,
-                boxSideFadePositive = boxSideFadePositive,
-                rangeCompressionFactor = rangeCompressionFactor,
-                boxSideFadeNegative = boxSideFadeNegative,
-                padding2 = 0.0f,
-                proxyPositionWS = proxyPositionWS,
-                padding3 = 0.0f,
-                proxyExtents = proxyExtents,
-                padding4 = 0.0f,
-            };
+                reflectionProbeData = new ReflectionProbeData
+                {
+                    positionWS = positionWS,
+                    blendDistance = visibleBlendDistance,
+                    extents = extents,
+                    isBoxProjection = isBoxProjection ? 1u : 0u,
+                    rightWS = NormalizeDirection(new Vector3(localToWorld.m00, localToWorld.m10, localToWorld.m20), Vector3.right),
+                    importance = importance,
+                    upWS = NormalizeDirection(new Vector3(localToWorld.m01, localToWorld.m11, localToWorld.m21), Vector3.up),
+                    weight = weight,
+                    forwardWS = NormalizeDirection(new Vector3(localToWorld.m02, localToWorld.m12, localToWorld.m22), Vector3.forward),
+                    padding0 = 0.0f,
+                    capturePositionWS = capturePositionWS,
+                    padding1 = 0.0f,
+                    hdrData = hdrData,
+                    atlasScaleOffset = Vector4.zero,
+                    atlasIndexAndSlice = new Vector4(-1.0f, -1.0f, 0.0f, 0.0f),
+                    blendDistancePositive = blendDistancePositive,
+                    multiplier = multiplier,
+                    blendDistanceNegative = blendDistanceNegative,
+                    isProjectionInfinite = isProjectionInfinite ? 1u : 0u,
+                    boxSideFadePositive = boxSideFadePositive,
+                    rangeCompressionFactor = rangeCompressionFactor,
+                    boxSideFadeNegative = boxSideFadeNegative,
+                    padding2 = 0.0f,
+                    proxyPositionWS = proxyPositionWS,
+                    padding3 = 0.0f,
+                    proxyExtents = proxyExtents,
+                    padding4 = 0.0f,
+                };
+            }
             return true;
         }
 
         private static VividAdditionalReflectionData GetAdditionalReflectionData(VisibleReflectionProbe visibleReflectionProbe)
         {
+            if (!VividAdditionalReflectionData.hasRegisteredData)
+                return null;
+
+            if (s_CanReadVisibleReflectionProbeEntityId)
+            {
+                ref var probeLayout = ref UnsafeUtility.As<VisibleReflectionProbe, VisibleReflectionProbeEntityIdLayout>(ref visibleReflectionProbe);
+                return VividAdditionalReflectionData.TryGetAdditionalData(probeLayout.entityId, out var entityIdAdditionalData)
+                    ? entityIdAdditionalData
+                    : null;
+            }
+
             var reflectionProbe = visibleReflectionProbe.reflectionProbe;
             if (reflectionProbe == null)
                 return null;
 
-            return reflectionProbe.TryGetComponent<VividAdditionalReflectionData>(out var additionalData)
+            return VividAdditionalReflectionData.TryGetAdditionalData(reflectionProbe, out var additionalData)
                 ? additionalData
                 : null;
         }

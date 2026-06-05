@@ -13,7 +13,37 @@ namespace VividRP.Runtime
     public class VividRenderPipeline : RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
         private const string RenderGraphName = "VividRP RenderGraph";
+        private static readonly ProfilerMarker s_RenderMarker = new("VividRP.RenderPipeline.Render");
+        private static readonly ProfilerMarker s_ApplySRPBatcherMarker = new("VividRP.RenderPipeline.ApplySRPBatcherSetting");
+        private static readonly ProfilerMarker s_EndFrameMarker = new("VividRP.RenderPipeline.RenderGraph.EndFrame");
+        private static readonly ProfilerMarker s_RenderCameraMarker = new("VividRP.RenderPipeline.RenderCamera");
+        private static readonly ProfilerMarker s_BeginCameraRenderingMarker = new("VividRP.RenderPipeline.RenderCamera.BeginCameraRendering");
+        private static readonly ProfilerMarker s_RestoreProjectionStateMarker = new("VividRP.RenderPipeline.RenderCamera.RestoreProjectionState");
+        private static readonly ProfilerMarker s_VolumeUpdateMarker = new("VividRP.RenderPipeline.RenderCamera.VolumeUpdate");
+        private static readonly ProfilerMarker s_CullingParametersMarker = new("VividRP.RenderPipeline.RenderCamera.CullingParameters");
+        private static readonly ProfilerMarker s_EmitGeometryMarker = new("VividRP.RenderPipeline.RenderCamera.EmitGeometry");
+        private static readonly ProfilerMarker s_ShadowDistanceMarker = new("VividRP.RenderPipeline.RenderCamera.ShadowDistance");
+        private static readonly ProfilerMarker s_CullMarker = new("VividRP.RenderPipeline.RenderCamera.Cull");
+        private static readonly ProfilerMarker s_CommandBufferGetMarker = new("VividRP.RenderPipeline.RenderCamera.CommandBuffer.Get");
+        private static readonly ProfilerMarker s_PreviewCameraMarker = new("VividRP.RenderPipeline.RenderCamera.Preview");
+        private static readonly ProfilerMarker s_SetupCameraPropertiesMarker = new("VividRP.RenderPipeline.RenderCamera.SetupCameraProperties");
+        private static readonly ProfilerMarker s_PrepareFrameMarker = new("VividRP.RenderPipeline.RenderCamera.PrepareFrame");
+        private static readonly ProfilerMarker s_ExecutePreGraphCommandsMarker = new("VividRP.RenderPipeline.RenderCamera.ExecutePreGraphCommands");
+        private static readonly ProfilerMarker s_RenderGraphParametersMarker = new("VividRP.RenderPipeline.RenderCamera.RenderGraphParameters");
+        private static readonly ProfilerMarker s_RecordAndExecuteRenderGraphMarker = new("VividRP.RenderPipeline.RenderCamera.RecordAndExecuteRenderGraph");
+        private static readonly ProfilerMarker s_CommitFrameMarker = new("VividRP.RenderPipeline.RenderCamera.CommitFrame");
+        private static readonly ProfilerMarker s_PostRenderMarker = new("VividRP.RenderPipeline.RenderCamera.PostRender");
+        private static readonly ProfilerMarker s_RequestEditorTemporalRepaintMarker = new("VividRP.RenderPipeline.RenderCamera.RequestEditorTemporalRepaint");
+        private static readonly ProfilerMarker s_ExecutePostGraphCommandsMarker = new("VividRP.RenderPipeline.RenderCamera.ExecutePostGraphCommands");
+        private static readonly ProfilerMarker s_RenderSubmittedGizmosMarker = new("VividRP.RenderPipeline.RenderCamera.RenderSubmittedGizmos");
+        private static readonly ProfilerMarker s_CommandBufferReleaseMarker = new("VividRP.RenderPipeline.RenderCamera.CommandBuffer.Release");
         private static readonly ProfilerMarker s_ContextSubmitMarker = new("VividRP.RenderPipeline.RenderCamera.ContextSubmit");
+        private static readonly ProfilerMarker s_EndCameraRenderingMarker = new("VividRP.RenderPipeline.RenderCamera.EndCameraRendering");
+        private static readonly ProfilerMarker s_RenderGraphBeginRecordingMarker = new("VividRP.RenderPipeline.RenderGraph.BeginRecording");
+        private static readonly ProfilerMarker s_RenderGraphRecordMarker = new("VividRP.RenderPipeline.RenderGraph.Record");
+        private static readonly ProfilerMarker s_RenderGraphEndRecordingAndExecuteMarker = new("VividRP.RenderPipeline.RenderGraph.EndRecordingAndExecute");
+        private static readonly ProfilerMarker s_RenderGraphAbortFrameMarker = new("VividRP.RenderPipeline.RenderGraph.AbortFrame");
+        private static readonly ProfilerMarker s_RenderGraphResetAfterExceptionMarker = new("VividRP.RenderPipeline.RenderGraph.ResetAfterException");
         private static readonly ShaderTagId[] s_PreviewCameraShaderTagIds =
         {
             new(RenderGraphRenderListDesc.ForwardShaderTagName),
@@ -60,16 +90,28 @@ namespace VividRP.Runtime
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
         {
-            ApplySRPBatcherSetting(m_Asset);
+            using var renderScope = s_RenderMarker.Auto();
+            using (s_ApplySRPBatcherMarker.Auto())
+            {
+                ApplySRPBatcherSetting(m_Asset);
+            }
 
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
-            m_RenderGraph.EndFrame();
+
+            using (s_EndFrameMarker.Auto())
+            {
+                m_RenderGraph.EndFrame();
+            }
         }
 
         private void RenderCamera(ScriptableRenderContext context, Camera camera)
         {
-            BeginCameraRendering(context, camera);
+            using var renderCameraScope = s_RenderCameraMarker.Auto();
+            using (s_BeginCameraRenderingMarker.Auto())
+            {
+                BeginCameraRendering(context, camera);
+            }
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
@@ -77,75 +119,147 @@ namespace VividRP.Runtime
 
             try
             {
-                CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
-                VividVolumeManagerUtility.Update(camera);
+                using (s_RestoreProjectionStateMarker.Auto())
+                {
+                    CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                }
 
-                if (!camera.TryGetCullingParameters(out var cullingParameters))
-                    return;
+                using (s_VolumeUpdateMarker.Auto())
+                {
+                    VividVolumeManagerUtility.Update(camera);
+                }
 
-                EmitGeometryForCamera(camera);
-                ApplyShadowDistanceOverride(camera, ref cullingParameters);
+                ScriptableCullingParameters cullingParameters;
+                using (s_CullingParametersMarker.Auto())
+                {
+                    if (!camera.TryGetCullingParameters(out cullingParameters))
+                        return;
+                }
+
+                using (s_EmitGeometryMarker.Auto())
+                {
+                    EmitGeometryForCamera(camera);
+                }
+
+                using (s_ShadowDistanceMarker.Auto())
+                {
+                    ApplyShadowDistanceOverride(camera, ref cullingParameters);
+                }
+
                 cullingParameters.cullingOptions |= CullingOptions.DisablePerObjectCulling
                     | CullingOptions.NeedsReflectionProbes;
 
-                var cullingResults = context.Cull(ref cullingParameters);
+                CullingResults cullingResults;
+                using (s_CullMarker.Auto())
+                {
+                    cullingResults = context.Cull(ref cullingParameters);
+                }
 
-                cmdBuffer = CommandBufferPool.Get("VividRP");
+                using (s_CommandBufferGetMarker.Auto())
+                {
+                    cmdBuffer = CommandBufferPool.Get("VividRP");
+                }
 
                 if (ShouldUsePreviewCameraRenderPath(camera.cameraType))
                 {
-                    RenderPreviewCamera(context, camera, cullingResults, cmdBuffer);
+                    using (s_PreviewCameraMarker.Auto())
+                    {
+                        RenderPreviewCamera(context, camera, cullingResults, cmdBuffer);
+                    }
+
                     shouldSubmit = true;
                     return;
                 }
 
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
-                context.SetupCameraProperties(camera);
-
-                PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
-
-                shouldSubmit = true;
-                context.ExecuteCommandBuffer(cmdBuffer);
-                cmdBuffer.Clear();
-
-                var renderGraphParams = new RenderGraphParameters
+                using (s_SetupCameraPropertiesMarker.Auto())
                 {
-                    scriptableRenderContext = context,
-                    commandBuffer = cmdBuffer,
-                    currentFrameIndex = PassRecorder.GetFrameData().Get<VividCameraData>()?.frameIndex ?? Time.frameCount,
-                    executionId = camera.GetEntityId(),
-                    generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
-                };
-
-                if (!TryRecordAndExecuteRenderGraph(
-                        m_RenderGraph,
-                        renderGraphParams,
-                        () => PassRecorder.RecordRenderGraph(
-                            m_RenderGraph,
-                            context,
-                            graphAsset,
-                            m_Asset != null && m_Asset.EnableAsyncCompute),
-                        PassRecorder.AbortFrame))
-                {
-                    return;
+                    context.SetupCameraProperties(camera);
                 }
 
-                PassRecorder.CommitFrame(graphAsset);
-                context.SetupCameraProperties(camera);
-                FrameContextSystem.ExecutePostRender(PassRecorder.GetFrameData(), cmdBuffer);
-                RequestEditorTemporalRepaint();
+                using (s_PrepareFrameMarker.Auto())
+                {
+                    PassRecorder.PrepareFrame(graphAsset, cmdBuffer);
+                }
 
-                context.ExecuteCommandBuffer(cmdBuffer);
+                shouldSubmit = true;
+                using (s_ExecutePreGraphCommandsMarker.Auto())
+                {
+                    context.ExecuteCommandBuffer(cmdBuffer);
+                }
+
                 cmdBuffer.Clear();
-                RenderSubmittedGizmos(context, camera, graphAsset);
+
+                RenderGraphParameters renderGraphParams;
+                using (s_RenderGraphParametersMarker.Auto())
+                {
+                    renderGraphParams = new RenderGraphParameters
+                    {
+                        scriptableRenderContext = context,
+                        commandBuffer = cmdBuffer,
+                        currentFrameIndex = PassRecorder.GetFrameData().Get<VividCameraData>()?.frameIndex ?? Time.frameCount,
+                        executionId = camera.GetEntityId(),
+                        generateDebugData = camera.cameraType != CameraType.Preview && !camera.isProcessingRenderRequest,
+                    };
+                }
+
+                using (s_RecordAndExecuteRenderGraphMarker.Auto())
+                {
+                    if (!TryRecordAndExecuteRenderGraph(
+                            m_RenderGraph,
+                            renderGraphParams,
+                            () => PassRecorder.RecordRenderGraph(
+                                m_RenderGraph,
+                                context,
+                                graphAsset,
+                                m_Asset != null && m_Asset.EnableAsyncCompute),
+                            PassRecorder.AbortFrame))
+                    {
+                        return;
+                    }
+                }
+
+                using (s_CommitFrameMarker.Auto())
+                {
+                    PassRecorder.CommitFrame(graphAsset);
+                }
+
+                using (s_SetupCameraPropertiesMarker.Auto())
+                {
+                    context.SetupCameraProperties(camera);
+                }
+
+                using (s_PostRenderMarker.Auto())
+                {
+                    FrameContextSystem.ExecutePostRender(PassRecorder.GetFrameData(), cmdBuffer);
+                }
+
+                using (s_RequestEditorTemporalRepaintMarker.Auto())
+                {
+                    RequestEditorTemporalRepaint();
+                }
+
+                using (s_ExecutePostGraphCommandsMarker.Auto())
+                {
+                    context.ExecuteCommandBuffer(cmdBuffer);
+                }
+
+                cmdBuffer.Clear();
+                using (s_RenderSubmittedGizmosMarker.Auto())
+                {
+                    RenderSubmittedGizmos(context, camera, graphAsset);
+                }
             }
             finally
             {
                 if (cmdBuffer != null)
                 {
-                    cmdBuffer.Clear();
-                    CommandBufferPool.Release(cmdBuffer);
+                    using (s_CommandBufferReleaseMarker.Auto())
+                    {
+                        cmdBuffer.Clear();
+                        CommandBufferPool.Release(cmdBuffer);
+                    }
                 }
 
                 try
@@ -160,10 +274,16 @@ namespace VividRP.Runtime
                 }
                 finally
                 {
-                    CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                    using (s_RestoreProjectionStateMarker.Auto())
+                    {
+                        CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                    }
                 }
 
-                EndCameraRendering(context, camera);
+                using (s_EndCameraRenderingMarker.Auto())
+                {
+                    EndCameraRendering(context, camera);
+                }
             }
         }
 
@@ -193,23 +313,42 @@ namespace VividRP.Runtime
 
             try
             {
-                renderGraph.BeginRecording(renderGraphParams);
-                recordRenderGraph();
-                renderGraph.EndRecordingAndExecute();
+                using (s_RenderGraphBeginRecordingMarker.Auto())
+                {
+                    renderGraph.BeginRecording(renderGraphParams);
+                }
+
+                using (s_RenderGraphRecordMarker.Auto())
+                {
+                    recordRenderGraph();
+                }
+
+                using (s_RenderGraphEndRecordingAndExecuteMarker.Auto())
+                {
+                    renderGraph.EndRecordingAndExecute();
+                }
+
                 return true;
             }
             catch (Exception exception)
             {
                 try
                 {
-                    onException?.Invoke();
+                    using (s_RenderGraphAbortFrameMarker.Auto())
+                    {
+                        onException?.Invoke();
+                    }
                 }
                 catch (Exception cleanupException)
                 {
                     Debug.LogException(cleanupException);
                 }
 
-                renderGraph.ResetGraphAndLogException(exception);
+                using (s_RenderGraphResetAfterExceptionMarker.Auto())
+                {
+                    renderGraph.ResetGraphAndLogException(exception);
+                }
+
                 return false;
             }
         }

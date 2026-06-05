@@ -125,47 +125,90 @@ namespace VividRP.Runtime
         {
             using var initializeContextScope = RenderPassProfilingUtility.InitializeContextMarker.Auto();
 
-            ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
-            VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
-            VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
+            using (RenderPassProfilingUtility.InitializeContextClearFrameCachesMarker.Auto())
+            {
+                ColorGradingSettingsResolver.ClearFrameCache(s_FrameData);
+                VividColorPyramidRuntimeUtility.ClearFrameCache(s_FrameData);
+                VividScreenSpaceReflectionRuntimeUtility.ClearFrameCache(s_FrameData);
+            }
 
-            var renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
-            var cameraData = s_FrameData.GetOrCreate<VividCameraData>();
-            var antialiasingData = s_FrameData.GetOrCreate<VividAntialiasingData>();
-            var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
-            var gpuDrivenDecalData = s_FrameData.GetOrCreate<VividGPUDrivenDecalData>();
-            var lightData = s_FrameData.GetOrCreate<VividLightData>();
-            var frameIndex = ResolveFrameIndex();
-            var additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
-            if (additionalCameraData == null && camera.cameraType == CameraType.Game)
-                additionalCameraData = camera.GetVividAdditionalCameraData();
+            VividRenderingData renderingData;
+            VividCameraData cameraData;
+            VividAntialiasingData antialiasingData;
+            VividGPUDrivenFrameData gpuDrivenFrameData;
+            VividGPUDrivenDecalData gpuDrivenDecalData;
+            VividLightData lightData;
+            using (RenderPassProfilingUtility.InitializeContextResolveFrameDataMarker.Auto())
+            {
+                renderingData = s_FrameData.GetOrCreate<VividRenderingData>();
+                cameraData = s_FrameData.GetOrCreate<VividCameraData>();
+                antialiasingData = s_FrameData.GetOrCreate<VividAntialiasingData>();
+                gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
+                gpuDrivenDecalData = s_FrameData.GetOrCreate<VividGPUDrivenDecalData>();
+                lightData = s_FrameData.GetOrCreate<VividLightData>();
+            }
 
-            VividAntialiasingRuntimeUtility.Resolve(
-                camera,
-                additionalCameraData,
-                HasAntialiasingPass(graphAsset),
-                antialiasingData);
-            VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalCameraData, antialiasingData, frameIndex);
+            int frameIndex;
+            using (RenderPassProfilingUtility.InitializeContextResolveFrameIndexMarker.Auto())
+            {
+                frameIndex = ResolveFrameIndex();
+            }
 
-            if (additionalCameraData != null)
-                additionalCameraData.UpdateCameraMatrices(true);
+            VividAdditionalCameraData additionalCameraData;
+            using (RenderPassProfilingUtility.InitializeContextResolveAdditionalCameraDataMarker.Auto())
+            {
+                additionalCameraData = camera.GetComponent<VividAdditionalCameraData>();
+                if (additionalCameraData == null && camera.cameraType == CameraType.Game)
+                    additionalCameraData = camera.GetVividAdditionalCameraData();
+            }
 
-            cameraData.SetCamera(camera);
-            cameraData.additionalData = additionalCameraData;
-            cameraData.renderType = additionalCameraData != null ? additionalCameraData.renderType : VividCameraRenderType.Base;
-            cameraData.clearDepth = additionalCameraData == null || additionalCameraData.clearDepth;
-            cameraData.pixelWidth = camera.pixelWidth;
-            cameraData.pixelHeight = camera.pixelHeight;
-            cameraData.pixelRect = camera.pixelRect;
-            var actualSize = ResolveActualCameraSize(camera, antialiasingData);
-            cameraData.actualWidth = actualSize.x;
-            cameraData.actualHeight = actualSize.y;
-            cameraData.frameIndex = frameIndex;
-            renderingData.cullingResults = cullingResults;
-            renderingData.context = context;
-            gpuDrivenFrameData.Reset();
-            gpuDrivenDecalData.Reset();
-            lightData.Update(cullingResults, cameraData.viewMatrix);
+            using (RenderPassProfilingUtility.InitializeContextAntialiasingResolveMarker.Auto())
+            {
+                VividAntialiasingRuntimeUtility.Resolve(
+                    camera,
+                    additionalCameraData,
+                    HasAntialiasingPass(graphAsset),
+                    antialiasingData);
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextAntialiasingJitterMarker.Auto())
+            {
+                VividAntialiasingRuntimeUtility.ApplyJitter(camera, additionalCameraData, antialiasingData, frameIndex);
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextUpdateCameraMatricesMarker.Auto())
+            {
+                if (additionalCameraData != null)
+                    additionalCameraData.UpdateCameraMatrices(true);
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextPopulateCameraDataMarker.Auto())
+            {
+                cameraData.SetCamera(camera);
+                cameraData.additionalData = additionalCameraData;
+                cameraData.renderType = additionalCameraData != null ? additionalCameraData.renderType : VividCameraRenderType.Base;
+                cameraData.clearDepth = additionalCameraData == null || additionalCameraData.clearDepth;
+                cameraData.pixelWidth = camera.pixelWidth;
+                cameraData.pixelHeight = camera.pixelHeight;
+                cameraData.pixelRect = camera.pixelRect;
+                var actualSize = ResolveActualCameraSize(camera, antialiasingData);
+                cameraData.actualWidth = actualSize.x;
+                cameraData.actualHeight = actualSize.y;
+                cameraData.frameIndex = frameIndex;
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextPopulateRenderingDataMarker.Auto())
+            {
+                renderingData.cullingResults = cullingResults;
+                renderingData.context = context;
+                gpuDrivenFrameData.Reset();
+                gpuDrivenDecalData.Reset();
+            }
+
+            using (RenderPassProfilingUtility.InitializeContextLightDataUpdateMarker.Auto())
+            {
+                lightData.Update(cullingResults, cameraData.viewMatrix);
+            }
         }
 
         private static int ResolveFrameIndex()
@@ -450,6 +493,8 @@ namespace VividRP.Runtime
             RenderGraphTexture current,
             RenderGraphTextureDesc desc)
         {
+            using var historyAllocScope = RenderPassProfilingUtility.AllocHistoryTextureForPassMarker.Auto();
+
             if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
                 return false;
 
@@ -502,10 +547,26 @@ namespace VividRP.Runtime
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
-            CommitTextureHistories(graphAsset);
-            FinalizeCodeManagedBufferHistories(graphAsset);
-            ClearHistoryImportedHandles();
-            ClearCodeManagedHistoryFrameState();
+            using var commitFrameScope = RenderPassProfilingUtility.CommitFrameMarker.Auto();
+            using (RenderPassProfilingUtility.CommitFrameTextureHistoriesMarker.Auto())
+            {
+                CommitTextureHistories(graphAsset);
+            }
+
+            using (RenderPassProfilingUtility.CommitFrameBufferHistoriesMarker.Auto())
+            {
+                FinalizeCodeManagedBufferHistories(graphAsset);
+            }
+
+            using (RenderPassProfilingUtility.CommitFrameClearHistoryImportsMarker.Auto())
+            {
+                ClearHistoryImportedHandles();
+            }
+
+            using (RenderPassProfilingUtility.CommitFrameClearCodeManagedHistoryMarker.Auto())
+            {
+                ClearCodeManagedHistoryFrameState();
+            }
         }
 
         internal static bool HasRenderGizmoPrePostProcessBoundary(RenderGraphData graphAsset)
@@ -590,6 +651,8 @@ namespace VividRP.Runtime
             RenderGraphBuffer current,
             RenderGraphBufferDesc desc)
         {
+            using var historyAllocScope = RenderPassProfilingUtility.AllocHistoryBufferForPassMarker.Auto();
+
             if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
                 return false;
 
@@ -1469,141 +1532,215 @@ namespace VividRP.Runtime
             bool enableAsyncCompute = true)
         {
             using var recordRenderGraphScope = RenderPassProfilingUtility.RecordRenderGraphMarker.Auto();
-            EnsureCompiled(graphAsset);
+            using (RenderPassProfilingUtility.RecordRenderGraphEnsureCompiledMarker.Auto())
+            {
+                EnsureCompiled(graphAsset);
+            }
 
-            s_CurrentRenderGraph = renderGraph;
-            BlueNoise.Instance?.ImportResources(renderGraph);
+            using (RenderPassProfilingUtility.RecordRenderGraphSetCurrentGraphMarker.Auto())
+            {
+                s_CurrentRenderGraph = renderGraph;
+            }
+
+            using (RenderPassProfilingUtility.RecordRenderGraphImportBlueNoiseMarker.Auto())
+            {
+                BlueNoise.Instance?.ImportResources(renderGraph);
+            }
 
             var passDefinitions = s_RuntimePassDefinitions;
-            var passActiveStates = new bool[s_RenderPasses.Count];
+            bool[] passActiveStates;
+            using (RenderPassProfilingUtility.RecordRenderGraphAllocatePassActiveStatesMarker.Auto())
+            {
+                passActiveStates = new bool[s_RenderPasses.Count];
+            }
+
             using (RenderPassProfilingUtility.PrepareAllMarker.Auto())
             {
                 for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
                 {
                     var pass = s_RenderPasses[passIndex];
-                    var resources = GetCurrentPassResources(pass);
+                    var markers = RenderPassProfilingUtility.GetMarkers(pass, null, ResolvePassIndex(pass));
+                    PassResource resources;
+                    using (RenderPassProfilingUtility.RecordRenderGraphPrepareAllResolveResourcesMarker.Auto())
+                    using (markers.RecordGraphResolveResources.Auto())
+                    {
+                        resources = GetCurrentPassResources(pass);
+                    }
+
                     var passDefinition = GetRuntimePassDefinition(passDefinitions, passIndex);
-                    var isActive = IsRenderPassActive(pass);
+                    bool isActive;
+                    using (RenderPassProfilingUtility.RecordRenderGraphPrepareAllEvaluateActiveMarker.Auto())
+                    {
+                        isActive = IsRenderPassActive(pass);
+                    }
+
                     passActiveStates[passIndex] = isActive;
 
                     if (isActive)
                     {
-                        PrepareRenderPass(pass);
-                        GetCurrentPassResources(pass);
+                        using (RenderPassProfilingUtility.RecordRenderGraphPrepareAllPrepareActiveMarker.Auto())
+                        {
+                            PrepareRenderPass(pass);
+                        }
+
+                        using (RenderPassProfilingUtility.RecordRenderGraphPrepareAllResolveResourcesMarker.Auto())
+                        using (markers.RecordGraphResolveResources.Auto())
+                        {
+                            GetCurrentPassResources(pass);
+                        }
                     }
                     else
                     {
-                        ApplyInactivePassBypassDescriptors(pass, resources, passDefinition);
+                        using (RenderPassProfilingUtility.RecordRenderGraphPrepareAllApplyInactiveBypassMarker.Auto())
+                        using (markers.RecordGraphInactiveBypass.Auto())
+                        {
+                            ApplyInactivePassBypassDescriptors(pass, resources, passDefinition);
+                        }
                     }
                 }
 
             }
 
-            PreparePendingHistoryTextureImports(renderGraph);
+            using (RenderPassProfilingUtility.RecordRenderGraphPrepareHistoryImportsMarker.Auto())
+            {
+                PreparePendingHistoryTextureImports(renderGraph);
+            }
+
             s_CurrentRenderGraph = null;
 
-            ClearRecordGraphResourceCaches();
+            using (RenderPassProfilingUtility.RecordRenderGraphClearResourceCachesMarker.Auto())
+            {
+                ClearRecordGraphResourceCaches();
+            }
+
             var textureCache = s_RecordGraphTextureCache;
             var bufferCache = s_RecordGraphBufferCache;
             var renderListCache = s_RecordGraphRenderListCache;
             var accelerationStructureCache = s_RecordGraphAccelerationStructureCache;
             var recordedPreImageEffectGizmos = false;
 
-            for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
+            using (RenderPassProfilingUtility.RecordRenderGraphRecordPassesMarker.Auto())
             {
-                var pass = s_RenderPasses[passIndex];
-                PrepareRenderGraphPass(pass);
+                for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
+                {
+                    var pass = s_RenderPasses[passIndex];
+                    var markers = RenderPassProfilingUtility.GetMarkers(pass, null, ResolvePassIndex(pass));
+                    using (markers.RecordGraphPrepareRenderGraph.Auto())
+                    {
+                        PrepareRenderGraphPass(pass);
+                    }
 
 #if UNITY_EDITOR
-                if (!recordedPreImageEffectGizmos && pass is IRenderGizmoPrePostProcessBoundaryPass)
-                {
-                    var boundaryResources = GetCurrentPassResources(pass);
-                    var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
-                    if (VividRenderPipeline.ShouldRenderPreImageEffectGizmosInRenderGraph(camera)
-                        && TryGetPreImageEffectGizmoTargets(
-                            passIndex,
-                            boundaryResources,
-                            out var gizmoColorTexture,
-                            out var gizmoDepthTexture))
+                    if (!recordedPreImageEffectGizmos && pass is IRenderGizmoPrePostProcessBoundaryPass)
                     {
-                        RecordRenderGizmosPass(
-                            renderGraph,
-                            GizmoSubset.PreImageEffects,
-                            gizmoColorTexture,
-                            gizmoDepthTexture,
-                            textureCache);
-                        s_RenderedPreImageEffectGizmosInGraph = true;
+                        var boundaryResources = GetCurrentPassResources(pass);
+                        var camera = s_FrameData.GetOrCreate<VividCameraData>().camera;
+                        if (VividRenderPipeline.ShouldRenderPreImageEffectGizmosInRenderGraph(camera)
+                            && TryGetPreImageEffectGizmoTargets(
+                                passIndex,
+                                boundaryResources,
+                                out var gizmoColorTexture,
+                                out var gizmoDepthTexture))
+                        {
+                            using (RenderPassProfilingUtility.RecordRenderGraphRecordGizmosMarker.Auto())
+                            {
+                                RecordRenderGizmosPass(
+                                    renderGraph,
+                                    GizmoSubset.PreImageEffects,
+                                    gizmoColorTexture,
+                                    gizmoDepthTexture,
+                                    textureCache);
+                            }
+
+                            s_RenderedPreImageEffectGizmosInGraph = true;
+                        }
+
+                        recordedPreImageEffectGizmos = true;
                     }
-                    recordedPreImageEffectGizmos = true;
-                }
 #endif
-                var resources = GetCurrentPassResources(pass);
-                var passDefinition = GetRuntimePassDefinition(passDefinitions, passIndex);
+                    PassResource resources;
+                    using (markers.RecordGraphResolveResources.Auto())
+                    {
+                        resources = GetCurrentPassResources(pass);
+                    }
 
-                if (passIndex < passActiveStates.Length && !passActiveStates[passIndex])
-                {
-                    ApplyInactivePassBypassHandles(
-                        renderGraph,
-                        pass,
-                        resources,
-                        passDefinition,
-                        textureCache,
-                        bufferCache);
-                    continue;
-                }
+                    var passDefinition = GetRuntimePassDefinition(passDefinitions, passIndex);
 
-                if (pass is IRenderGraphRecordingPass graphRecordingPass)
-                {
-                    graphRecordingPass.RecordGraph(new RenderGraphRecordingContext(
-                        renderGraph,
-                        s_FrameData,
-                        passDefinition,
-                        enableAsyncCompute,
-                        textureCache,
-                        bufferCache,
-                        renderListCache,
-                        accelerationStructureCache));
-                }
-                else if (pass is ComputePass computePass)
-                {
-                    RecordComputePass(
-                        renderGraph,
-                        computePass,
-                        resources,
-                        passDefinition,
-                        enableAsyncCompute,
-                        textureCache,
-                        bufferCache,
-                        renderListCache,
-                        accelerationStructureCache);
-                }
-                else if (pass is RasterPass rasterPass)
-                {
-                    RecordRasterPass(
-                        renderGraph,
-                        rasterPass,
-                        resources,
-                        textureCache,
-                        bufferCache,
-                        renderListCache,
-                        accelerationStructureCache);
-                }
-                else if (pass is UnsafePass unsafePass)
-                {
-                    RecordUnsafePass(
-                        renderGraph,
-                        unsafePass,
-                        resources,
-                        passDefinition,
-                        enableAsyncCompute,
-                        textureCache,
-                        bufferCache,
-                        renderListCache,
-                        accelerationStructureCache);
+                    if (passIndex < passActiveStates.Length && !passActiveStates[passIndex])
+                    {
+                        using (markers.RecordGraphInactiveBypass.Auto())
+                        {
+                            ApplyInactivePassBypassHandles(
+                                renderGraph,
+                                pass,
+                                resources,
+                                passDefinition,
+                                textureCache,
+                                bufferCache);
+                        }
+
+                        continue;
+                    }
+
+                    if (pass is IRenderGraphRecordingPass graphRecordingPass)
+                    {
+                        using (markers.RecordGraph.Auto())
+                        {
+                            graphRecordingPass.RecordGraph(new RenderGraphRecordingContext(
+                                renderGraph,
+                                s_FrameData,
+                                passDefinition,
+                                enableAsyncCompute,
+                                textureCache,
+                                bufferCache,
+                                renderListCache,
+                                accelerationStructureCache));
+                        }
+                    }
+                    else if (pass is ComputePass computePass)
+                    {
+                        RecordComputePass(
+                            renderGraph,
+                            computePass,
+                            resources,
+                            passDefinition,
+                            enableAsyncCompute,
+                            textureCache,
+                            bufferCache,
+                            renderListCache,
+                            accelerationStructureCache);
+                    }
+                    else if (pass is RasterPass rasterPass)
+                    {
+                        RecordRasterPass(
+                            renderGraph,
+                            rasterPass,
+                            resources,
+                            textureCache,
+                            bufferCache,
+                            renderListCache,
+                            accelerationStructureCache);
+                    }
+                    else if (pass is UnsafePass unsafePass)
+                    {
+                        RecordUnsafePass(
+                            renderGraph,
+                            unsafePass,
+                            resources,
+                            passDefinition,
+                            enableAsyncCompute,
+                            textureCache,
+                            bufferCache,
+                            renderListCache,
+                            accelerationStructureCache);
+                    }
                 }
             }
 
-            ClearRecordGraphResourceCaches();
+            using (RenderPassProfilingUtility.RecordRenderGraphClearResourceCachesMarker.Auto())
+            {
+                ClearRecordGraphResourceCaches();
+            }
         }
 
         private static void ClearRecordGraphResourceCaches()

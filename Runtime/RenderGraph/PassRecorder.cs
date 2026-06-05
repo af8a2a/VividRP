@@ -110,27 +110,43 @@ namespace VividRP.Runtime
         {
             var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
             using var recordGraphScope = markers.RecordGraph.Auto();
-            using var builder = renderGraph.AddComputePass<ComputePassData>(
-                markers.GraphName, out var passData);
+            using (markers.RecordGraphBuild.Auto())
+            {
+                using var builder = renderGraph.AddComputePass<ComputePassData>(
+                    markers.GraphName, out var passData);
 
-            passData.Pass = pass;
-            passData.Markers = markers;
+                passData.Pass = pass;
+                passData.Markers = markers;
 
-            SetupComputeResources(
-                renderGraph,
-                builder,
-                resource,
-                textureCache,
-                bufferCache,
-                renderListCache,
-                accelerationStructureCache);
-            SetupImportedHandles(builder, pass);
-            ConfigureGlobalStateModification(builder, pass);
+                using (markers.RecordGraphSetupResources.Auto())
+                {
+                    SetupComputeResources(
+                        renderGraph,
+                        builder,
+                        resource,
+                        textureCache,
+                        bufferCache,
+                        renderListCache,
+                        accelerationStructureCache);
+                }
 
-            if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
-                builder.EnableAsyncCompute(true);
+                using (markers.RecordGraphSetupImportedHandles.Auto())
+                {
+                    SetupImportedHandles(builder, pass);
+                }
 
-            builder.SetRenderFunc<ComputePassData>(s_ComputeRenderFunc);
+                using (markers.RecordGraphConfigureBuilder.Auto())
+                {
+                    ConfigureGlobalStateModification(builder, pass);
+                    if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
+                        builder.EnableAsyncCompute(true);
+                }
+
+                using (markers.RecordGraphSetRenderFunc.Auto())
+                {
+                    builder.SetRenderFunc<ComputePassData>(s_ComputeRenderFunc);
+                }
+            }
         }
 
         /// <summary>
@@ -149,24 +165,41 @@ namespace VividRP.Runtime
         {
             var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
             using var recordGraphScope = markers.RecordGraph.Auto();
-            using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
-                markers.GraphName, out var passData);
+            using (markers.RecordGraphBuild.Auto())
+            {
+                using var builder = renderGraph.AddRasterRenderPass<RasterPassData>(
+                    markers.GraphName, out var passData);
 
-            passData.Pass = pass;
-            passData.Markers = markers;
+                passData.Pass = pass;
+                passData.Markers = markers;
 
-            SetupRasterResources(
-                renderGraph,
-                builder,
-                resource,
-                textureCache,
-                bufferCache,
-                renderListCache,
-                accelerationStructureCache);
-            SetupImportedHandles(builder, pass);
-            ConfigureGlobalStateModification(builder, pass);
+                using (markers.RecordGraphSetupResources.Auto())
+                {
+                    SetupRasterResources(
+                        renderGraph,
+                        builder,
+                        resource,
+                        textureCache,
+                        bufferCache,
+                        renderListCache,
+                        accelerationStructureCache);
+                }
 
-            builder.SetRenderFunc<RasterPassData>(s_RasterRenderFunc);
+                using (markers.RecordGraphSetupImportedHandles.Auto())
+                {
+                    SetupImportedHandles(builder, pass);
+                }
+
+                using (markers.RecordGraphConfigureBuilder.Auto())
+                {
+                    ConfigureGlobalStateModification(builder, pass);
+                }
+
+                using (markers.RecordGraphSetRenderFunc.Auto())
+                {
+                    builder.SetRenderFunc<RasterPassData>(s_RasterRenderFunc);
+                }
+            }
         }
 
         /// <summary>
@@ -187,27 +220,43 @@ namespace VividRP.Runtime
         {
             var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
             using var recordGraphScope = markers.RecordGraph.Auto();
-            using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
-                markers.GraphName, out var passData);
+            using (markers.RecordGraphBuild.Auto())
+            {
+                using var builder = renderGraph.AddUnsafePass<UnsafePassData>(
+                    markers.GraphName, out var passData);
 
-            passData.Pass = pass;
-            passData.Markers = markers;
+                passData.Pass = pass;
+                passData.Markers = markers;
 
-            SetupUnsafeResources(
-                renderGraph,
-                builder,
-                resource,
-                textureCache,
-                bufferCache,
-                renderListCache,
-                accelerationStructureCache);
-            SetupImportedHandles(builder, pass);
-            ConfigureGlobalStateModification(builder, pass);
+                using (markers.RecordGraphSetupResources.Auto())
+                {
+                    SetupUnsafeResources(
+                        renderGraph,
+                        builder,
+                        resource,
+                        textureCache,
+                        bufferCache,
+                        renderListCache,
+                        accelerationStructureCache);
+                }
 
-            if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
-                builder.EnableAsyncCompute(true);
+                using (markers.RecordGraphSetupImportedHandles.Auto())
+                {
+                    SetupImportedHandles(builder, pass);
+                }
 
-            builder.SetRenderFunc<UnsafePassData>(s_UnsafeRenderFunc);
+                using (markers.RecordGraphConfigureBuilder.Auto())
+                {
+                    ConfigureGlobalStateModification(builder, pass);
+                    if (ShouldEnableAsyncCompute(enableAsyncCompute, pass, passDefinition))
+                        builder.EnableAsyncCompute(true);
+                }
+
+                using (markers.RecordGraphSetRenderFunc.Auto())
+                {
+                    builder.SetRenderFunc<UnsafePassData>(s_UnsafeRenderFunc);
+                }
+            }
         }
 
         private static void ExecuteComputePass(ComputePassData data, ComputeGraphContext ctx)
@@ -421,6 +470,8 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache)
         {
+            using var setupRenderListsScope = RenderPassProfilingUtility.RecordGraphSetupRenderListsMarker.Auto();
+
             var usesRendererList = false;
 
             foreach (var entry in resource.RenderLists)
@@ -449,6 +500,8 @@ namespace VividRP.Runtime
             PassResource resource,
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
+            using var setupAccelerationStructuresScope = RenderPassProfilingUtility.RecordGraphSetupAccelerationStructuresMarker.Auto();
+
             foreach (var entry in resource.AccelerationStructures)
             {
                 var accelerationStructure = entry.AccelerationStructure;
@@ -478,38 +531,44 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
-            foreach (var entry in resource.Textures)
+            using (RenderPassProfilingUtility.RecordGraphSetupTexturesMarker.Auto())
             {
-                var texture = entry.Texture;
-                if (texture == null) continue;
-
-                if (entry.IsTransient)
+                foreach (var entry in resource.Textures)
                 {
-                    CreateTransientTextureHandle(builder, texture);
-                    continue;
-                }
+                    var texture = entry.Texture;
+                    if (texture == null) continue;
 
-                // Read-only textures are expected to be imported or created externally.
-                // Create a placeholder — the pipeline will replace this with the actual handle.
-                var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
-                texture.innerHandle = handle;
-                builder.UseTexture(handle, entry.Access);
+                    if (entry.IsTransient)
+                    {
+                        CreateTransientTextureHandle(builder, texture);
+                        continue;
+                    }
+
+                    // Read-only textures are expected to be imported or created externally.
+                    // Create a placeholder — the pipeline will replace this with the actual handle.
+                    var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                    texture.innerHandle = handle;
+                    builder.UseTexture(handle, entry.Access);
+                }
             }
 
-            foreach (var entry in resource.Buffers)
+            using (RenderPassProfilingUtility.RecordGraphSetupBuffersMarker.Auto())
             {
-                var buffer = entry.Buffer;
-                if (buffer == null) continue;
-
-                if (entry.IsTransient)
+                foreach (var entry in resource.Buffers)
                 {
-                    CreateTransientBufferHandle(builder, buffer);
-                    continue;
-                }
+                    var buffer = entry.Buffer;
+                    if (buffer == null) continue;
 
-                var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
-                buffer.innerHandle = handle;
-                builder.UseBuffer(handle, entry.Access);
+                    if (entry.IsTransient)
+                    {
+                        CreateTransientBufferHandle(builder, buffer);
+                        continue;
+                    }
+
+                    var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
+                    buffer.innerHandle = handle;
+                    builder.UseBuffer(handle, entry.Access);
+                }
             }
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
@@ -530,38 +589,44 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
-            foreach (var entry in resource.Textures)
+            using (RenderPassProfilingUtility.RecordGraphSetupTexturesMarker.Auto())
             {
-                var texture = entry.Texture;
-                if (texture == null) continue;
-
-                if (entry.IsTransient)
+                foreach (var entry in resource.Textures)
                 {
-                    CreateTransientTextureHandle(builder, texture);
-                    continue;
-                }
+                    var texture = entry.Texture;
+                    if (texture == null) continue;
 
-                // Read-only textures are expected to be imported or created externally.
-                // Create a placeholder — the pipeline will replace this with the actual handle.
-                var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
-                texture.innerHandle = handle;
-                builder.UseTexture(handle, entry.Access);
+                    if (entry.IsTransient)
+                    {
+                        CreateTransientTextureHandle(builder, texture);
+                        continue;
+                    }
+
+                    // Read-only textures are expected to be imported or created externally.
+                    // Create a placeholder — the pipeline will replace this with the actual handle.
+                    var handle = GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                    texture.innerHandle = handle;
+                    builder.UseTexture(handle, entry.Access);
+                }
             }
 
-            foreach (var entry in resource.Buffers)
+            using (RenderPassProfilingUtility.RecordGraphSetupBuffersMarker.Auto())
             {
-                var buffer = entry.Buffer;
-                if (buffer == null) continue;
-
-                if (entry.IsTransient)
+                foreach (var entry in resource.Buffers)
                 {
-                    CreateTransientBufferHandle(builder, buffer);
-                    continue;
-                }
+                    var buffer = entry.Buffer;
+                    if (buffer == null) continue;
 
-                var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
-                buffer.innerHandle = handle;
-                builder.UseBuffer(handle, entry.Access);
+                    if (entry.IsTransient)
+                    {
+                        CreateTransientBufferHandle(builder, buffer);
+                        continue;
+                    }
+
+                    var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
+                    buffer.innerHandle = handle;
+                    builder.UseBuffer(handle, entry.Access);
+                }
             }
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);
@@ -583,45 +648,51 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphRenderList, RendererListHandle> renderListCache,
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache)
         {
-            foreach (var entry in resource.Textures)
+            using (RenderPassProfilingUtility.RecordGraphSetupTexturesMarker.Auto())
             {
-                var texture = entry.Texture;
-                if (texture == null) continue;
+                foreach (var entry in resource.Textures)
+                {
+                    var texture = entry.Texture;
+                    if (texture == null) continue;
 
-                var handle = entry.IsTransient
-                    ? CreateTransientTextureHandle(builder, texture)
-                    : GetOrCreateTextureHandle(renderGraph, texture, textureCache);
-                texture.innerHandle = handle;
+                    var handle = entry.IsTransient
+                        ? CreateTransientTextureHandle(builder, texture)
+                        : GetOrCreateTextureHandle(renderGraph, texture, textureCache);
+                    texture.innerHandle = handle;
 
-                if (entry.IsDepthAttachment)
-                {
-                    builder.SetRenderAttachmentDepth(handle, entry.Access);
-                }
-                else if (entry.AttachmentIndex >= 0)
-                {
-                    builder.SetRenderAttachment(handle, entry.AttachmentIndex, entry.Access);
-                }
-                else
-                {
-                    if (!entry.IsTransient)
-                        builder.UseTexture(handle, entry.Access);
+                    if (entry.IsDepthAttachment)
+                    {
+                        builder.SetRenderAttachmentDepth(handle, entry.Access);
+                    }
+                    else if (entry.AttachmentIndex >= 0)
+                    {
+                        builder.SetRenderAttachment(handle, entry.AttachmentIndex, entry.Access);
+                    }
+                    else
+                    {
+                        if (!entry.IsTransient)
+                            builder.UseTexture(handle, entry.Access);
+                    }
                 }
             }
 
-            foreach (var entry in resource.Buffers)
+            using (RenderPassProfilingUtility.RecordGraphSetupBuffersMarker.Auto())
             {
-                var buffer = entry.Buffer;
-                if (buffer == null) continue;
-
-                if (entry.IsTransient)
+                foreach (var entry in resource.Buffers)
                 {
-                    CreateTransientBufferHandle(builder, buffer);
-                    continue;
-                }
+                    var buffer = entry.Buffer;
+                    if (buffer == null) continue;
 
-                var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
-                buffer.innerHandle = handle;
-                builder.UseBuffer(handle, entry.Access);
+                    if (entry.IsTransient)
+                    {
+                        CreateTransientBufferHandle(builder, buffer);
+                        continue;
+                    }
+
+                    var handle = GetOrCreateBufferHandle(renderGraph, buffer, bufferCache);
+                    buffer.innerHandle = handle;
+                    builder.UseBuffer(handle, entry.Access);
+                }
             }
 
             SetupRenderLists(renderGraph, builder, resource, renderListCache);

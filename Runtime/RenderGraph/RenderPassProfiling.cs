@@ -22,6 +22,14 @@ namespace VividRP.Runtime
             Initialize = new ProfilerMarker($"{MarkerRoot}.Initialize/{displayName}");
             Prepare = new ProfilerMarker($"{MarkerRoot}.Prepare/{displayName}");
             RecordGraph = new ProfilerMarker($"{MarkerRoot}.RecordGraph/{displayName}");
+            RecordGraphPrepareRenderGraph = new ProfilerMarker($"{MarkerRoot}.RecordGraph.PrepareRenderGraph/{displayName}");
+            RecordGraphResolveResources = new ProfilerMarker($"{MarkerRoot}.RecordGraph.ResolveResources/{displayName}");
+            RecordGraphInactiveBypass = new ProfilerMarker($"{MarkerRoot}.RecordGraph.InactiveBypass/{displayName}");
+            RecordGraphBuild = new ProfilerMarker($"{MarkerRoot}.RecordGraph.Build/{displayName}");
+            RecordGraphSetupResources = new ProfilerMarker($"{MarkerRoot}.RecordGraph.SetupResources/{displayName}");
+            RecordGraphSetupImportedHandles = new ProfilerMarker($"{MarkerRoot}.RecordGraph.SetupImportedHandles/{displayName}");
+            RecordGraphConfigureBuilder = new ProfilerMarker($"{MarkerRoot}.RecordGraph.ConfigureBuilder/{displayName}");
+            RecordGraphSetRenderFunc = new ProfilerMarker($"{MarkerRoot}.RecordGraph.SetRenderFunc/{displayName}");
             Record = new ProfilerMarker($"{MarkerRoot}.Record/{displayName}");
             Dispose = new ProfilerMarker($"{MarkerRoot}.Dispose/{displayName}");
             GraphName = graphName;
@@ -31,6 +39,14 @@ namespace VividRP.Runtime
         public ProfilerMarker Initialize { get; }
         public ProfilerMarker Prepare { get; }
         public ProfilerMarker RecordGraph { get; }
+        public ProfilerMarker RecordGraphPrepareRenderGraph { get; }
+        public ProfilerMarker RecordGraphResolveResources { get; }
+        public ProfilerMarker RecordGraphInactiveBypass { get; }
+        public ProfilerMarker RecordGraphBuild { get; }
+        public ProfilerMarker RecordGraphSetupResources { get; }
+        public ProfilerMarker RecordGraphSetupImportedHandles { get; }
+        public ProfilerMarker RecordGraphConfigureBuilder { get; }
+        public ProfilerMarker RecordGraphSetRenderFunc { get; }
         public ProfilerMarker Record { get; }
         public ProfilerMarker Dispose { get; }
         public string GraphName { get; }
@@ -75,6 +91,16 @@ namespace VividRP.Runtime
 
         public static readonly ProfilerMarker CompileMarker = new("VividRP.RenderPass.Compile");
         public static readonly ProfilerMarker InitializeContextMarker = new("VividRP.RenderPass.InitializeContext");
+        public static readonly ProfilerMarker InitializeContextClearFrameCachesMarker = new("VividRP.RenderPass.InitializeContext/ClearFrameCaches");
+        public static readonly ProfilerMarker InitializeContextResolveFrameDataMarker = new("VividRP.RenderPass.InitializeContext/ResolveFrameData");
+        public static readonly ProfilerMarker InitializeContextResolveFrameIndexMarker = new("VividRP.RenderPass.InitializeContext/ResolveFrameIndex");
+        public static readonly ProfilerMarker InitializeContextResolveAdditionalCameraDataMarker = new("VividRP.RenderPass.InitializeContext/ResolveAdditionalCameraData");
+        public static readonly ProfilerMarker InitializeContextAntialiasingResolveMarker = new("VividRP.RenderPass.InitializeContext/Antialiasing.Resolve");
+        public static readonly ProfilerMarker InitializeContextAntialiasingJitterMarker = new("VividRP.RenderPass.InitializeContext/Antialiasing.ApplyJitter");
+        public static readonly ProfilerMarker InitializeContextUpdateCameraMatricesMarker = new("VividRP.RenderPass.InitializeContext/UpdateCameraMatrices");
+        public static readonly ProfilerMarker InitializeContextPopulateCameraDataMarker = new("VividRP.RenderPass.InitializeContext/PopulateCameraData");
+        public static readonly ProfilerMarker InitializeContextPopulateRenderingDataMarker = new("VividRP.RenderPass.InitializeContext/PopulateRenderingData");
+        public static readonly ProfilerMarker InitializeContextLightDataUpdateMarker = new("VividRP.RenderPass.InitializeContext/LightData.Update");
         public static readonly ProfilerMarker InitializeContextSceneLightCompleteMarker = new("VividRP.RenderPass.InitializeContext/VividSceneLightSystem.Complete");
         public static readonly ProfilerMarker PrepareFrameMarker = new("VividRP.RenderPass.PrepareFrame");
         public static readonly ProfilerMarker PrepareFrameEnsureCompiledMarker = new("VividRP.RenderPass.PrepareFrame/EnsureCompiled");
@@ -112,6 +138,29 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameSubsystemVirtualTextureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VirtualTextureSystem");
         public static readonly ProfilerMarker PrepareAllMarker = new("VividRP.RenderPass.PrepareAll");
         public static readonly ProfilerMarker RecordRenderGraphMarker = new("VividRP.RenderPass.RecordRenderGraph");
+        public static readonly ProfilerMarker RecordRenderGraphEnsureCompiledMarker = new("VividRP.RenderPass.RecordRenderGraph/EnsureCompiled");
+        public static readonly ProfilerMarker RecordRenderGraphSetCurrentGraphMarker = new("VividRP.RenderPass.RecordRenderGraph/SetCurrentGraph");
+        public static readonly ProfilerMarker RecordRenderGraphImportBlueNoiseMarker = new("VividRP.RenderPass.RecordRenderGraph/ImportBlueNoise");
+        public static readonly ProfilerMarker RecordRenderGraphAllocatePassActiveStatesMarker = new("VividRP.RenderPass.RecordRenderGraph/AllocatePassActiveStates");
+        public static readonly ProfilerMarker RecordRenderGraphPrepareAllResolveResourcesMarker = new("VividRP.RenderPass.PrepareAll/ResolveResources");
+        public static readonly ProfilerMarker RecordRenderGraphPrepareAllEvaluateActiveMarker = new("VividRP.RenderPass.PrepareAll/EvaluateActive");
+        public static readonly ProfilerMarker RecordRenderGraphPrepareAllPrepareActiveMarker = new("VividRP.RenderPass.PrepareAll/PrepareActive");
+        public static readonly ProfilerMarker RecordRenderGraphPrepareAllApplyInactiveBypassMarker = new("VividRP.RenderPass.PrepareAll/ApplyInactiveBypassDescriptors");
+        public static readonly ProfilerMarker RecordRenderGraphPrepareHistoryImportsMarker = new("VividRP.RenderPass.RecordRenderGraph/PrepareHistoryImports");
+        public static readonly ProfilerMarker RecordRenderGraphClearResourceCachesMarker = new("VividRP.RenderPass.RecordRenderGraph/ClearResourceCaches");
+        public static readonly ProfilerMarker RecordRenderGraphRecordPassesMarker = new("VividRP.RenderPass.RecordRenderGraph/RecordPasses");
+        public static readonly ProfilerMarker RecordRenderGraphRecordGizmosMarker = new("VividRP.RenderPass.RecordRenderGraph/RecordGizmos");
+        public static readonly ProfilerMarker RecordGraphSetupTexturesMarker = new("VividRP.RenderPass.RecordGraph.SetupResources/Textures");
+        public static readonly ProfilerMarker RecordGraphSetupBuffersMarker = new("VividRP.RenderPass.RecordGraph.SetupResources/Buffers");
+        public static readonly ProfilerMarker RecordGraphSetupRenderListsMarker = new("VividRP.RenderPass.RecordGraph.SetupResources/RenderLists");
+        public static readonly ProfilerMarker RecordGraphSetupAccelerationStructuresMarker = new("VividRP.RenderPass.RecordGraph.SetupResources/AccelerationStructures");
+        public static readonly ProfilerMarker CommitFrameMarker = new("VividRP.RenderPass.CommitFrame");
+        public static readonly ProfilerMarker CommitFrameTextureHistoriesMarker = new("VividRP.RenderPass.CommitFrame/TextureHistories");
+        public static readonly ProfilerMarker CommitFrameBufferHistoriesMarker = new("VividRP.RenderPass.CommitFrame/BufferHistories");
+        public static readonly ProfilerMarker CommitFrameClearHistoryImportsMarker = new("VividRP.RenderPass.CommitFrame/ClearHistoryImports");
+        public static readonly ProfilerMarker CommitFrameClearCodeManagedHistoryMarker = new("VividRP.RenderPass.CommitFrame/ClearCodeManagedHistory");
+        public static readonly ProfilerMarker AllocHistoryTextureForPassMarker = new("VividRP.RenderPass.History.AllocTextureForPass");
+        public static readonly ProfilerMarker AllocHistoryBufferForPassMarker = new("VividRP.RenderPass.History.AllocBufferForPass");
 
         public static RenderPassProfilerMarkers GetMarkers(
             IRenderPass pass,

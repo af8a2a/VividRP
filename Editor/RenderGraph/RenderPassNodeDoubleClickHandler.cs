@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -18,6 +19,7 @@ namespace VividRP.Editor.RenderGraph
 
         static RenderPassNodeDoubleClickHandler()
         {
+            RenderGraphEditorWindowReflectionUtility.TryRepairPersistedInvalidSubgraphStacksFromUserLayouts();
             EditorApplication.delayCall += RegisterCallbacks;
             EditorApplication.update += RegisterCallbacks;
         }
@@ -26,8 +28,18 @@ namespace VividRP.Editor.RenderGraph
         {
             foreach (var window in Resources.FindObjectsOfTypeAll<EditorWindow>())
             {
-                if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _))
+                RenderGraphEditorWindowReflectionUtility.TryRepairInvalidSubgraphStack(window, out _);
+
+                try
+                {
+                    if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _))
+                        continue;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[VividRP] Failed to inspect a GraphToolkit window for RenderGraph callbacks: {ex.Message}");
                     continue;
+                }
 
                 var graphView = RenderGraphEditorWindowReflectionUtility.GetGraphView(window);
                 if (graphView == null)
@@ -99,11 +111,22 @@ namespace VividRP.Editor.RenderGraph
         private const string NodeViewTypeName = "Unity.GraphToolkit.Editor.NodeView";
         private const string GraphViewPropertyName = "GraphView";
         private const string GraphModelPropertyName = "GraphModel";
+        private const string GraphToolPropertyName = "GraphTool";
+        private const string ToolStatePropertyName = "ToolState";
+        private const string SubgraphStackPropertyName = "SubgraphStack";
+        private const string SubgraphStackFieldName = "m_SubgraphStack";
+        private const string ResolveGraphModelMethodName = "ResolveGraphModel";
+        private const string ResolveSubGraphMethodName = "ResolveSubGraph";
+        private const string GetSubGraphModelMethodName = "GetSubGraphModel";
         private const string GraphContainerFieldName = "m_GraphContainer";
         private const string NodeModelsPropertyName = "NodeModels";
         private const string BackingNodePropertyName = "Node";
         private const string GraphObjectPropertyName = "GraphObject";
         private const string FilePathPropertyName = "FilePath";
+        private const string DefaultGraphToolName = "UnnamedTool";
+        private const string GraphToolkitWindowIdentifier = "Unity.GraphToolkit.Editor.Implementation.GraphViewEditorWindowImp";
+        private const string PersistedStateTypeName = "Unity.GraphToolkit.Editor.PersistedState, UnityEditor.GraphToolkitModule";
+        private const string ToolStateComponentTypeName = "Unity.GraphToolkit.Editor.ToolStateComponent, UnityEditor.GraphToolkitModule";
 
         private static readonly BindingFlags InstanceBindings = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
@@ -123,7 +146,18 @@ namespace VividRP.Editor.RenderGraph
             if (window == null || !IsGraphViewEditorWindow(window.GetType()))
                 return null;
 
-            return window.GetType().GetProperty(GraphViewPropertyName, InstanceBindings)?.GetValue(window) as VisualElement;
+            try
+            {
+                return window.GetType().GetProperty(GraphViewPropertyName, InstanceBindings)?.GetValue(window) as VisualElement;
+            }
+            catch (TargetInvocationException)
+            {
+                return null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         internal static VisualElement GetGraphContainer(EditorWindow window)
@@ -148,7 +182,18 @@ namespace VividRP.Editor.RenderGraph
             if (nodeView == null)
                 return null;
 
-            return nodeView.GetType().GetProperty("NodeModel", InstanceBindings)?.GetValue(nodeView);
+            try
+            {
+                return nodeView.GetType().GetProperty("NodeModel", InstanceBindings)?.GetValue(nodeView);
+            }
+            catch (TargetInvocationException)
+            {
+                return null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         internal static bool TryGetCurrentGraph(EditorWindow window, out RenderGraphEditorGraph graph)
@@ -157,10 +202,20 @@ namespace VividRP.Editor.RenderGraph
             if (window == null)
                 return false;
 
+            TryRepairInvalidSubgraphStack(window, out _);
+
 #if UNITY_6000_6_OR_NEWER
             if (window is IGraphWindow graphWindow)
             {
-                graph = graphWindow.Graph as RenderGraphEditorGraph;
+                try
+                {
+                    graph = graphWindow.Graph as RenderGraphEditorGraph;
+                }
+                catch (Exception)
+                {
+                    graph = null;
+                }
+
                 return graph != null;
             }
 #endif
@@ -174,11 +229,125 @@ namespace VividRP.Editor.RenderGraph
             if (graphView == null)
                 return false;
 
-            var graphModel = graphView.GetType().GetProperty(GraphModelPropertyName, InstanceBindings)?.GetValue(graphView);
+            object graphModel;
+            try
+            {
+                graphModel = graphView.GetType().GetProperty(GraphModelPropertyName, InstanceBindings)?.GetValue(graphView);
+            }
+            catch (TargetInvocationException)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+
             if (graphModel == null)
                 return false;
 
             return TryResolveGraph(graphModel, out graph);
+        }
+
+        internal static int TryRepairPersistedInvalidSubgraphStacksFromUserLayouts()
+        {
+            try
+            {
+                var repairedCount = 0;
+                foreach (var windowId in EnumerateGraphToolkitWindowIdsFromUserLayouts())
+                {
+                    if (TryRepairPersistedInvalidSubgraphStack(windowId))
+                        repairedCount++;
+                }
+
+                if (repairedCount > 0)
+                {
+                    FlushGraphToolkitPersistedState();
+                    Debug.LogWarning(
+                        $"[VividRP] Recovered {repairedCount} persisted RenderGraph editor window state(s) with invalid GraphToolkit subgraph stacks.");
+                }
+
+                return repairedCount;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[VividRP] Failed to inspect persisted GraphToolkit window state: {ex.Message}");
+                return 0;
+            }
+        }
+
+        internal static bool TryRepairInvalidSubgraphStack(EditorWindow window, out string graphName)
+        {
+            graphName = null;
+            if (window == null || !IsGraphViewEditorWindow(window.GetType()))
+                return false;
+
+            if (!TryGetValue(window, GraphToolPropertyName, out object graphTool) || graphTool == null)
+                return false;
+
+            if (!TryGetValue(graphTool, ToolStatePropertyName, out object toolState) || toolState == null)
+                return false;
+
+            if (!HasInvalidFirstSubgraphModel(toolState))
+                return false;
+
+            if (!TryGetCurrentGraphFromToolState(toolState, out var graph))
+                return false;
+
+            if (!TryClearSubgraphStack(toolState))
+                return false;
+
+            graphName = string.IsNullOrWhiteSpace(graph.Name) ? "RenderGraph" : graph.Name;
+            FlushGraphToolkitPersistedState();
+            Debug.LogWarning(
+                $"[VividRP] Recovered RenderGraph editor window '{graphName}' from an invalid GraphToolkit subgraph restore state. " +
+                "The window was restored to the root graph.");
+            return true;
+        }
+
+        private static bool TryRepairPersistedInvalidSubgraphStack(Hash128 windowId)
+        {
+            var toolState = GetPersistedToolState(windowId);
+            if (toolState == null)
+                return false;
+
+            if (!HasInvalidFirstSubgraphModel(toolState))
+                return false;
+
+            if (!TryGetCurrentGraphFromToolState(toolState, out _))
+                return false;
+
+            return TryClearSubgraphStack(toolState);
+        }
+
+        private static object GetPersistedToolState(Hash128 windowId)
+        {
+            var persistedStateType = Type.GetType(PersistedStateTypeName);
+            var toolStateType = Type.GetType(ToolStateComponentTypeName);
+            if (persistedStateType == null || toolStateType == null)
+                return null;
+
+            var method = persistedStateType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(candidate =>
+                    candidate.Name == "GetOrCreatePersistedStateComponent"
+                    && candidate.IsGenericMethodDefinition
+                    && candidate.GetParameters().Length == 3);
+            if (method == null)
+                return null;
+
+            try
+            {
+                return method.MakeGenericMethod(toolStateType)
+                    .Invoke(null, new object[] { null, windowId, DefaultGraphToolName });
+            }
+            catch (TargetInvocationException)
+            {
+                return null;
+            }
+            catch (Exception)
+            {
+                return null;
+            }
         }
 
         private static bool TryResolveGraph(object graphModel, out RenderGraphEditorGraph graph)
@@ -194,6 +363,78 @@ namespace VividRP.Editor.RenderGraph
                 return true;
 
             return TryLoadGraphFromGraphObject(graphModel, out graph);
+        }
+
+        private static bool TryGetCurrentGraphFromToolState(object toolState, out RenderGraphEditorGraph graph)
+        {
+            graph = null;
+
+            if (!TryInvokeMethod(toolState, ResolveGraphModelMethodName, null, out var graphModel)
+                && !TryGetValue(toolState, GraphModelPropertyName, out graphModel))
+            {
+                return false;
+            }
+
+            return graphModel != null && TryResolveGraph(graphModel, out graph);
+        }
+
+        private static bool HasInvalidFirstSubgraphModel(object toolState)
+        {
+            if (!TryGetValue(toolState, SubgraphStackPropertyName, out object subgraphStack) || GetCount(subgraphStack) <= 0)
+                return false;
+
+            if (TryInvokeMethod(toolState, ResolveSubGraphMethodName, new object[] { 0 }, out var resolvedSubgraphModel))
+                return resolvedSubgraphModel == null;
+
+            var method = toolState.GetType().GetMethod(GetSubGraphModelMethodName, InstanceBindings);
+            if (method == null)
+                return false;
+
+            try
+            {
+                return method.Invoke(toolState, new object[] { 0 }) == null;
+            }
+            catch (TargetInvocationException)
+            {
+                return true;
+            }
+        }
+
+        private static bool TryClearSubgraphStack(object toolState)
+        {
+            var field = toolState.GetType().GetField(SubgraphStackFieldName, InstanceBindings);
+            if (field?.GetValue(toolState) is not System.Collections.IList subgraphStack)
+                return false;
+
+            subgraphStack.Clear();
+            return true;
+        }
+
+        private static int GetCount(object collection)
+        {
+            if (collection == null)
+                return 0;
+
+            if (collection is System.Collections.ICollection legacyCollection)
+                return legacyCollection.Count;
+
+            var count = collection.GetType().GetProperty("Count", InstanceBindings)?.GetValue(collection);
+            return count is int value ? value : 0;
+        }
+
+        private static void FlushGraphToolkitPersistedState()
+        {
+            try
+            {
+                var persistedStateType = Type.GetType("Unity.GraphToolkit.Editor.PersistedState, UnityEditor.GraphToolkitModule");
+                persistedStateType?.GetMethod("Flush", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.Invoke(null, null);
+            }
+            catch (TargetInvocationException)
+            {
+            }
+            catch (Exception)
+            {
+            }
         }
 
         private static bool TryGetLiveGraphFromNodeModels(object graphModel, out RenderGraphEditorGraph graph)
@@ -238,7 +479,20 @@ namespace VividRP.Editor.RenderGraph
             var property = type.GetProperty(memberName, InstanceBindings);
             if (property != null)
             {
-                var rawValue = property.GetValue(source);
+                object rawValue;
+                try
+                {
+                    rawValue = property.GetValue(source);
+                }
+                catch (TargetInvocationException)
+                {
+                    return false;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+
                 if (rawValue is T typedValue)
                 {
                     value = typedValue;
@@ -249,7 +503,20 @@ namespace VividRP.Editor.RenderGraph
             var field = type.GetField(memberName, InstanceBindings);
             if (field != null)
             {
-                var rawValue = field.GetValue(source);
+                object rawValue;
+                try
+                {
+                    rawValue = field.GetValue(source);
+                }
+                catch (TargetInvocationException)
+                {
+                    return false;
+                }
+                catch (Exception)
+                {
+                    return false;
+                }
+
                 if (rawValue is T typedValue)
                 {
                     value = typedValue;
@@ -258,6 +525,110 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return false;
+        }
+
+        private static bool TryInvokeMethod(object target, string methodName, object[] arguments, out object result)
+        {
+            result = null;
+            if (target == null)
+                return false;
+
+            var method = target.GetType().GetMethod(methodName, InstanceBindings);
+            if (method == null)
+                return false;
+
+            try
+            {
+                result = method.Invoke(target, arguments ?? Array.Empty<object>());
+                return true;
+            }
+            catch (TargetInvocationException)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        private static IEnumerable<Hash128> EnumerateGraphToolkitWindowIdsFromUserLayouts()
+        {
+            var layoutDirectory = GetUserLayoutDirectory();
+            if (string.IsNullOrEmpty(layoutDirectory) || !Directory.Exists(layoutDirectory))
+                yield break;
+
+            var yielded = new HashSet<Hash128>();
+            foreach (var layoutPath in Directory.EnumerateFiles(layoutDirectory, "*.dwlt", SearchOption.TopDirectoryOnly))
+            {
+                foreach (var windowId in EnumerateGraphToolkitWindowIds(layoutPath))
+                {
+                    if (yielded.Add(windowId))
+                        yield return windowId;
+                }
+            }
+        }
+
+        private static string GetUserLayoutDirectory()
+        {
+            if (string.IsNullOrEmpty(Application.dataPath))
+                return null;
+
+            var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+            return string.IsNullOrEmpty(projectRoot)
+                ? null
+                : Path.Combine(projectRoot, "UserSettings", "Layouts");
+        }
+
+        private static IEnumerable<Hash128> EnumerateGraphToolkitWindowIds(string layoutPath)
+        {
+            if (string.IsNullOrEmpty(layoutPath) || !File.Exists(layoutPath))
+                yield break;
+
+            var inGraphToolkitWindow = false;
+            ulong value0 = 0;
+            ulong value1 = 0;
+            var hasValue0 = false;
+
+            foreach (var line in File.ReadLines(layoutPath))
+            {
+                if (line.Contains(GraphToolkitWindowIdentifier))
+                {
+                    inGraphToolkitWindow = true;
+                    value0 = 0;
+                    value1 = 0;
+                    hasValue0 = false;
+                    continue;
+                }
+
+                if (!inGraphToolkitWindow)
+                    continue;
+
+                var trimmed = line.Trim();
+                if (trimmed.StartsWith("m_Value0:", StringComparison.Ordinal))
+                {
+                    hasValue0 = TryParseLayoutUlong(trimmed, out value0);
+                    continue;
+                }
+
+                if (hasValue0
+                    && trimmed.StartsWith("m_Value1:", StringComparison.Ordinal)
+                    && TryParseLayoutUlong(trimmed, out value1))
+                {
+                    yield return new Hash128(value0, value1);
+                    inGraphToolkitWindow = false;
+                }
+            }
+        }
+
+        private static bool TryParseLayoutUlong(string line, out ulong value)
+        {
+            value = 0;
+            var separatorIndex = line.IndexOf(':');
+            if (separatorIndex < 0 || separatorIndex >= line.Length - 1)
+                return false;
+
+            return ulong.TryParse(line.Substring(separatorIndex + 1).Trim(), out value);
         }
 
         private static bool IsAssignableToTypeName(Type type, string typeName)
@@ -279,6 +650,7 @@ namespace VividRP.Editor.RenderGraph
 
         static RenderGraphExecutionOrderOverlayBootstrap()
         {
+            RenderGraphEditorWindowReflectionUtility.TryRepairPersistedInvalidSubgraphStacksFromUserLayouts();
             EditorApplication.delayCall += EnsureOverlays;
             EditorApplication.update += EnsureOverlays;
         }
@@ -297,25 +669,34 @@ namespace VividRP.Editor.RenderGraph
         {
             foreach (var window in Resources.FindObjectsOfTypeAll<EditorWindow>())
             {
-                if (window == null || !RenderGraphEditorWindowReflectionUtility.IsGraphViewEditorWindow(window.GetType()))
-                    continue;
+                try
+                {
+                    if (window == null || !RenderGraphEditorWindowReflectionUtility.IsGraphViewEditorWindow(window.GetType()))
+                        continue;
 
-                if (window.overlayCanvas == null)
-                    continue;
+                    RenderGraphEditorWindowReflectionUtility.TryRepairInvalidSubgraphStack(window, out _);
 
-                if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _))
-                    continue;
+                    if (window.overlayCanvas == null)
+                        continue;
 
-                var graphView = RenderGraphEditorWindowReflectionUtility.GetGraphView(window);
-                if (graphView?.panel == null)
-                    continue;
+                    if (!RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(window, out _))
+                        continue;
 
-                if (window.TryGetOverlay(RenderGraphExecutionOrderOverlay.OverlayId, out _))
-                    continue;
+                    var graphView = RenderGraphEditorWindowReflectionUtility.GetGraphView(window);
+                    if (graphView?.panel == null)
+                        continue;
 
-                var overlay = new RenderGraphExecutionOrderOverlay();
-                window.overlayCanvas.Add(overlay);
-                overlay.displayed = true;
+                    if (window.TryGetOverlay(RenderGraphExecutionOrderOverlay.OverlayId, out _))
+                        continue;
+
+                    var overlay = new RenderGraphExecutionOrderOverlay();
+                    window.overlayCanvas.Add(overlay);
+                    overlay.displayed = true;
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[VividRP] Failed to register RenderGraph execution order overlay: {ex.Message}");
+                }
             }
         }
     }

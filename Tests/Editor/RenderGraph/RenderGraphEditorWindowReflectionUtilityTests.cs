@@ -52,11 +52,43 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void TryGetCurrentGraph_ReturnsFalse_WhenGraphWindowGraphGetterThrows()
+        {
+            var window = ScriptableObject.CreateInstance<TestGraphWindow>();
+
+            try
+            {
+                window.ThrowOnGraphAccess = true;
+
+                var result = RenderGraphEditorWindowReflectionUtility.TryGetCurrentGraph(
+                    window,
+                    out var resolvedGraph);
+
+                Assert.That(result, Is.False);
+                Assert.That(resolvedGraph, Is.Null);
+            }
+            finally
+            {
+                Object.DestroyImmediate(window);
+            }
+        }
+
         private sealed class TestGraphWindow : EditorWindow, IGraphWindow
         {
             internal Graph GraphValue { get; set; }
+            internal bool ThrowOnGraphAccess { get; set; }
 
-            public Graph Graph => GraphValue;
+            public Graph Graph
+            {
+                get
+                {
+                    if (ThrowOnGraphAccess)
+                        throw new System.NullReferenceException("Simulated GraphToolkit restore failure.");
+
+                    return GraphValue;
+                }
+            }
         }
     }
 #endif

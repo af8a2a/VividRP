@@ -57,8 +57,47 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int TSRParamsId = Shader.PropertyToID("_TSRParams");
         private static readonly int TSRRejectionParamsId = Shader.PropertyToID("_TSRRejectionParams");
 
+        private static readonly string[] s_HistoryColorNames =
+        {
+            "TSR_HistoryColor1",
+            "TSR_HistoryColor2",
+        };
+        private static readonly string[] s_HistoryMetaNames =
+        {
+            "TSR_HistoryMeta1",
+            "TSR_HistoryMeta2",
+        };
+        private static readonly string[] s_ResurrectionColorNames =
+        {
+            "TSR_ResurrectionColor1",
+            "TSR_ResurrectionColor2",
+        };
+        private static readonly string[] s_ResurrectionMetaNames =
+        {
+            "TSR_ResurrectionMeta1",
+            "TSR_ResurrectionMeta2",
+        };
+
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
         private readonly List<EntityId> m_ExpiredCameraIds = new();
+        private readonly RenderGraphTextureDesc m_OutputDescriptor =
+            RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+        private readonly RenderGraphTextureDesc m_DilatedMotionDescriptor = new();
+        private readonly RenderGraphTextureDesc m_DilatedDepthDescriptor = new();
+        private readonly RenderGraphTextureDesc m_DepthErrorDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectionBoundaryDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ThinGeometryCoverageDescriptor = new();
+        private readonly RenderGraphTextureDesc m_LumaInstabilityDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectedHistoryColorDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectedHistoryMetaDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectedResurrectionColorDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReprojectedResurrectionMetaDescriptor = new();
+        private readonly RenderGraphTextureDesc m_AcceptedHistoryColorDescriptor = new();
+        private readonly RenderGraphTextureDesc m_RejectionMaskDescriptor = new();
+        private readonly RenderGraphTextureDesc m_SpatialAntiAliasedColorDescriptor =
+            RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+        private readonly RenderGraphTextureDesc m_PreSharpenOutputDescriptor =
+            RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
 
         public static bool IsSupported
         {
@@ -124,41 +163,110 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData.frameIndex,
                 forceResetHistory || (temporalData != null && temporalData.IsFirstFrame));
 
-            var outputDescriptor = CreateOutputDescriptor(sourceTexture.desc, outputSize);
+            var outputDescriptor = ConfigureOutputDescriptor(m_OutputDescriptor, sourceTexture.desc, outputSize);
             var outputHandle = renderGraph.CreateTexture(outputDescriptor);
             var handles = cameraState.Import(renderGraph);
             var currentJitter = ResolveCurrentJitter(cameraData, temporalData);
             var previousJitter = ResolvePreviousJitter(cameraState, temporalData);
 
             var dilatedMotion = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_DilatedMotion", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat));
+                ConfigureColorDescriptor(
+                    m_DilatedMotionDescriptor,
+                    "TSR_DilatedMotion",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R16G16_SFloat));
             var dilatedDepth = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_DilatedDepth", renderSize.x, renderSize.y, GraphicsFormat.R32_SFloat));
+                ConfigureColorDescriptor(
+                    m_DilatedDepthDescriptor,
+                    "TSR_DilatedDepth",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R32_SFloat));
             var depthError = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_DepthError", renderSize.x, renderSize.y, GraphicsFormat.R16_SFloat));
+                ConfigureColorDescriptor(
+                    m_DepthErrorDescriptor,
+                    "TSR_DepthError",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R16_SFloat));
             var reprojectionBoundary = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_ReprojectionBoundary", renderSize.x, renderSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_ReprojectionBoundaryDescriptor,
+                    "TSR_ReprojectionBoundary",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R8_UNorm));
             var thinGeometryCoverage = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_ThinGeometryCoverage", renderSize.x, renderSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_ThinGeometryCoverageDescriptor,
+                    "TSR_ThinGeometryCoverage",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R8_UNorm));
             var lumaInstability = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_LumaInstability", renderSize.x, renderSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_LumaInstabilityDescriptor,
+                    "TSR_LumaInstability",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R8_UNorm));
             var reprojectedHistoryColor = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_ReprojectedHistoryColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+                ConfigureColorDescriptor(
+                    m_ReprojectedHistoryColorDescriptor,
+                    "TSR_ReprojectedHistoryColor",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R16G16B16A16_SFloat));
             var reprojectedHistoryMeta = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_ReprojectedHistoryMeta", outputSize.x, outputSize.y, GraphicsFormat.R16G16_SFloat));
+                ConfigureColorDescriptor(
+                    m_ReprojectedHistoryMetaDescriptor,
+                    "TSR_ReprojectedHistoryMeta",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R16G16_SFloat));
             var reprojectedResurrectionColor = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_ReprojectedResurrectionColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+                ConfigureColorDescriptor(
+                    m_ReprojectedResurrectionColorDescriptor,
+                    "TSR_ReprojectedResurrectionColor",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R16G16B16A16_SFloat));
             var reprojectedResurrectionMeta = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_ReprojectedResurrectionMeta", outputSize.x, outputSize.y, GraphicsFormat.R16G16_SFloat));
+                ConfigureColorDescriptor(
+                    m_ReprojectedResurrectionMetaDescriptor,
+                    "TSR_ReprojectedResurrectionMeta",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R16G16_SFloat));
             var acceptedHistoryColor = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_AcceptedHistoryColor", outputSize.x, outputSize.y, GraphicsFormat.R16G16B16A16_SFloat));
+                ConfigureColorDescriptor(
+                    m_AcceptedHistoryColorDescriptor,
+                    "TSR_AcceptedHistoryColor",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R16G16B16A16_SFloat));
             var rejectionMask = renderGraph.CreateTexture(
-                CreateColorDescriptor("TSR_RejectionMask", outputSize.x, outputSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_RejectionMaskDescriptor,
+                    "TSR_RejectionMask",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R8_UNorm));
             var spatialAntiAliasedColor = renderGraph.CreateTexture(
-                CreateOutputDescriptor(sourceTexture.desc, outputSize, "TSR_SpatialAntiAliasedColor"));
+                ConfigureOutputDescriptor(
+                    m_SpatialAntiAliasedColorDescriptor,
+                    sourceTexture.desc,
+                    outputSize,
+                    "TSR_SpatialAntiAliasedColor"));
             var enableSharpening = additionalData == null || additionalData.tsrEnableSharpening;
             var resolveOutput = enableSharpening
-                ? renderGraph.CreateTexture(CreateOutputDescriptor(sourceTexture.desc, outputSize, "TSR_PreSharpenOutput"))
+                ? renderGraph.CreateTexture(
+                    ConfigureOutputDescriptor(
+                        m_PreSharpenOutputDescriptor,
+                        sourceTexture.desc,
+                        outputSize,
+                        "TSR_PreSharpenOutput"))
                 : outputHandle;
 
             using (var builder = renderGraph.AddUnsafePass<PassData>(
@@ -542,16 +650,28 @@ namespace VividRP.Runtime.RenderPass.Core
             return new Vector2Int(Mathf.Max(1, outputWidth), Mathf.Max(1, outputHeight));
         }
 
-        private static RenderGraphTextureDesc CreateOutputDescriptor(
+        internal static RenderGraphTextureDesc ConfigureOutputDescriptor(
+            RenderGraphTextureDesc descriptor,
             RenderGraphTextureDesc sourceDescriptor,
             Vector2Int outputSize,
             string name = "TSROutput")
         {
-            var descriptor = sourceDescriptor?.Clone()
-                ?? RenderGraphTextureDesc.CreateColorTarget(
+            if (descriptor == null)
+                return null;
+
+            if (sourceDescriptor != null)
+            {
+                RenderGraphTextureDescUtility.Copy(sourceDescriptor, descriptor);
+            }
+            else
+            {
+                ConfigureColorDescriptor(
+                    descriptor,
+                    name,
                     Mathf.Max(1, outputSize.x),
                     Mathf.Max(1, outputSize.y),
                     GraphicsFormat.R16G16B16A16_SFloat);
+            }
 
             var colorFormat = descriptor.ColorFormat != GraphicsFormat.None
                 ? descriptor.ColorFormat
@@ -580,24 +700,40 @@ namespace VividRP.Runtime.RenderPass.Core
             return descriptor;
         }
 
-        private static RenderGraphTextureDesc CreateColorDescriptor(string name, int width, int height, GraphicsFormat format)
+        internal static RenderGraphTextureDesc ConfigureColorDescriptor(
+            RenderGraphTextureDesc descriptor,
+            string name,
+            int width,
+            int height,
+            GraphicsFormat format)
         {
-            return new RenderGraphTextureDesc
-            {
-                Name = name,
-                Width = Mathf.Max(1, width),
-                Height = Mathf.Max(1, height),
-                ColorFormat = format,
-                DepthBufferBits = DepthBits.None,
-                MsaaSamples = MSAASamples.None,
-                FilterMode = FilterMode.Bilinear,
-                WrapMode = TextureWrapMode.Clamp,
-                ClearBuffer = false,
-                EnableRandomWrite = true,
-                UseMipMap = false,
-                AutoGenerateMips = false,
-                MipCount = 1,
-            };
+            if (descriptor == null)
+                return null;
+
+            descriptor.Name = name;
+            descriptor.Width = Mathf.Max(1, width);
+            descriptor.Height = Mathf.Max(1, height);
+            descriptor.Slices = 1;
+            descriptor.Dimension = TextureDimension.Tex2D;
+            descriptor.ColorFormat = format;
+            descriptor.DepthBufferBits = DepthBits.None;
+            descriptor.MsaaSamples = MSAASamples.None;
+            descriptor.FilterMode = FilterMode.Bilinear;
+            descriptor.WrapMode = TextureWrapMode.Clamp;
+            descriptor.AnisoLevel = 1;
+            descriptor.MipMapBias = 0f;
+            descriptor.ClearBuffer = false;
+            descriptor.ClearColor = Color.clear;
+            descriptor.IsShadowMap = false;
+            descriptor.EnableRandomWrite = true;
+            descriptor.BindTextureMS = false;
+            descriptor.UseDynamicScale = false;
+            descriptor.UseDynamicScaleExplicit = false;
+            descriptor.ScaleFactor = Vector2.one;
+            descriptor.UseMipMap = false;
+            descriptor.AutoGenerateMips = false;
+            descriptor.MipCount = 1;
+            return descriptor;
         }
 
         private static int DivRoundUp(int value, int divisor)
@@ -868,25 +1004,25 @@ namespace VividRP.Runtime.RenderPass.Core
                         outputSize.x,
                         outputSize.y,
                         GraphicsFormat.R16G16B16A16_SFloat,
-                        $"TSR_HistoryColor{i + 1}");
+                        s_HistoryColorNames[i]);
                     EnsureHandle(
                         ref m_HistoryMeta[i],
                         outputSize.x,
                         outputSize.y,
                         GraphicsFormat.R16G16_SFloat,
-                        $"TSR_HistoryMeta{i + 1}");
+                        s_HistoryMetaNames[i]);
                     EnsureHandle(
                         ref m_ResurrectionColor[i],
                         outputSize.x,
                         outputSize.y,
                         GraphicsFormat.R16G16B16A16_SFloat,
-                        $"TSR_ResurrectionColor{i + 1}");
+                        s_ResurrectionColorNames[i]);
                     EnsureHandle(
                         ref m_ResurrectionMeta[i],
                         outputSize.x,
                         outputSize.y,
                         GraphicsFormat.R16G16_SFloat,
-                        $"TSR_ResurrectionMeta{i + 1}");
+                        s_ResurrectionMetaNames[i]);
                 }
             }
 

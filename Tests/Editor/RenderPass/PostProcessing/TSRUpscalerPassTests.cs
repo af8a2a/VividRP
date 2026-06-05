@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -226,6 +227,27 @@ namespace VividRP.Editor.Tests
             Assert.That(spatialSource, Does.Contain("edgeStrength"));
             Assert.That(updateSource, Does.Contain("Texture2D<float4> _CurrentFrameColor"));
             Assert.That(updateSource, Does.Contain("float3 currentColor = _CurrentFrameColor[pixelCoord].rgb"));
+        }
+
+        [Test]
+        public void ConfigureColorDescriptor_ReusesDescriptorInstance()
+        {
+            var descriptor = new RenderGraphTextureDesc();
+
+            var configured = TSRUpscalerPass.ConfigureColorDescriptor(
+                descriptor,
+                "TSR_TestDescriptor",
+                1920,
+                1080,
+                GraphicsFormat.R16G16_SFloat);
+
+            Assert.That(configured, Is.SameAs(descriptor));
+            Assert.That(descriptor.Name, Is.EqualTo("TSR_TestDescriptor"));
+            Assert.That(descriptor.Width, Is.EqualTo(1920));
+            Assert.That(descriptor.Height, Is.EqualTo(1080));
+            Assert.That(descriptor.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16_SFloat));
+            Assert.That(descriptor.EnableRandomWrite, Is.True);
+            Assert.That(descriptor.AnisoLevel, Is.EqualTo(1));
         }
 
         [Test]

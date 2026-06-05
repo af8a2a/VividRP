@@ -46,6 +46,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultColor;
         private readonly RenderGraphTexture m_DefaultMotionVectors;
         private readonly RenderGraphTexture m_DefaultCameraDepth;
+        private readonly RenderGraphTextureDesc m_OutputDescriptor =
+            RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
         private readonly RenderGraphTextureDesc m_TaaHistoryColorDescriptor =
             RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
         private ComputeShader m_ComputeShader;
@@ -647,8 +649,21 @@ namespace VividRP.Runtime.RenderPass.Core
             AntialiasingOutput ??= CreatePassOwnedTexture("AntialiasingOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
 
             var sourceDescriptor = Color?.desc;
-            var outputDescriptor = sourceDescriptor?.Clone()
-                ?? RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            var outputDescriptor = m_OutputDescriptor;
+            if (sourceDescriptor != null)
+            {
+                RenderGraphTextureDescUtility.Copy(sourceDescriptor, outputDescriptor);
+            }
+            else
+            {
+                ConfigureColorDescriptor(
+                    outputDescriptor,
+                    "AntialiasingOutput",
+                    1,
+                    1,
+                    GraphicsFormat.R16G16B16A16_SFloat);
+            }
+
             var outputSize = ResolveOutputDimensions(cameraData, antialiasingData);
 
             if (m_EffectiveMode == VividAntialiasingMode.None)
@@ -683,6 +698,42 @@ namespace VividRP.Runtime.RenderPass.Core
             outputDescriptor.BindTextureMS = false;
 
             AntialiasingOutput.desc = outputDescriptor;
+        }
+
+        private static RenderGraphTextureDesc ConfigureColorDescriptor(
+            RenderGraphTextureDesc descriptor,
+            string name,
+            int width,
+            int height,
+            GraphicsFormat format)
+        {
+            if (descriptor == null)
+                return null;
+
+            descriptor.Name = name;
+            descriptor.Width = Mathf.Max(1, width);
+            descriptor.Height = Mathf.Max(1, height);
+            descriptor.Slices = 1;
+            descriptor.Dimension = TextureDimension.Tex2D;
+            descriptor.ColorFormat = format;
+            descriptor.DepthBufferBits = DepthBits.None;
+            descriptor.MsaaSamples = MSAASamples.None;
+            descriptor.FilterMode = FilterMode.Bilinear;
+            descriptor.WrapMode = TextureWrapMode.Clamp;
+            descriptor.AnisoLevel = 1;
+            descriptor.MipMapBias = 0f;
+            descriptor.ClearBuffer = false;
+            descriptor.ClearColor = UnityEngine.Color.clear;
+            descriptor.IsShadowMap = false;
+            descriptor.EnableRandomWrite = false;
+            descriptor.BindTextureMS = false;
+            descriptor.UseDynamicScale = false;
+            descriptor.UseDynamicScaleExplicit = false;
+            descriptor.ScaleFactor = Vector2.one;
+            descriptor.UseMipMap = false;
+            descriptor.AutoGenerateMips = false;
+            descriptor.MipCount = 1;
+            return descriptor;
         }
 
         private Vector2Int ResolveOutputDimensions(VividCameraData cameraData, VividAntialiasingData antialiasingData)

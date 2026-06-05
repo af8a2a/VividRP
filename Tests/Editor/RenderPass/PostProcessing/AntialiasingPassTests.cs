@@ -164,6 +164,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_ReusesOutputDescriptorInstance()
+        {
+            var pass = new AntialiasingPass();
+            var frameData = CreateFrameData(
+                1024,
+                512,
+                VividAntialiasingMode.TemporalAntiAliasing,
+                new Vector2Int(1024, 512),
+                new Vector2Int(1024, 512));
+
+            pass.Prepare(frameData);
+
+            var outputTexture = GetTextureField(pass, "AntialiasingOutput");
+            var descriptor = outputTexture.desc;
+
+            frameData = CreateFrameData(
+                1280,
+                720,
+                VividAntialiasingMode.TemporalSuperResolution,
+                new Vector2Int(1129, 636),
+                new Vector2Int(1920, 1080));
+
+            pass.Prepare(frameData);
+
+            Assert.That(outputTexture.desc, Is.SameAs(descriptor));
+            Assert.That(outputTexture.desc.Width, Is.EqualTo(1920));
+            Assert.That(outputTexture.desc.Height, Is.EqualTo(1080));
+        }
+
+        [Test]
         public void Cmaa2PassResources_ReusesCachedResources_WhenLayoutIsClean()
         {
             var pass = new AntialiasingPass();

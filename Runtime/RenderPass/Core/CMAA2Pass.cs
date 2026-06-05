@@ -6,7 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class CMAA2Pass : ComputePass, IDynamicPassResourceLayout
+    public sealed class CMAA2Pass : ComputePass, IStablePassResourceLayout
     {
         private const int InputKernelSize = 16;
         private const int OutputKernelSize = InputKernelSize - 2;

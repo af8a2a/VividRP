@@ -289,6 +289,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CMAA2Pass_UsesStablePassResourceLayout()
+        {
+            Assert.That(typeof(IStablePassResourceLayout).IsAssignableFrom(typeof(CMAA2Pass)), Is.True);
+        }
+
+        [Test]
         public void Prepare_ConfiguresOutputDimensionsFromCameraData()
         {
             var pass = new CMAA2Pass();

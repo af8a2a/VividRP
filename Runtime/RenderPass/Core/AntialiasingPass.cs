@@ -51,6 +51,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_ComputeShader;
         private Material m_CopyMaterial;
         private CMAA2Pass m_Cmaa2Pass;
+        private PassResource m_Cmaa2Resources;
         private FSR3UpscalerPass m_Fsr3Pass;
         private TSRUpscalerPass m_TsrPass;
 #if DLSS_PLUGIN_INTEGRATE
@@ -106,6 +107,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Cmaa2Pass = new CMAA2Pass();
             m_Cmaa2Pass.Create();
+            m_Cmaa2Resources = null;
             m_Fsr3Pass = new FSR3UpscalerPass();
             m_TsrPass = new TSRUpscalerPass();
 #if DLSS_PLUGIN_INTEGRATE
@@ -137,7 +139,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public void RecordGraph(RenderGraphRecordingContext context)
         {
-            if (context?.RenderGraph == null)
+            if (context.RenderGraph == null)
                 return;
 
             if (ReferenceEquals(Color, m_DefaultColor))
@@ -215,6 +217,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Cmaa2Pass?.Dispose();
             m_Cmaa2Pass = null;
+            m_Cmaa2Resources = null;
             m_Fsr3Pass?.Dispose();
             m_Fsr3Pass = null;
             m_TsrPass?.Dispose();
@@ -326,11 +329,37 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_Cmaa2Pass.SetInput(Color);
             m_Cmaa2Pass.SetOutput(AntialiasingOutput);
+            var resources = GetCmaa2PassResources();
+            if (resources == null)
+                return false;
+
             context.RecordComputePass(
                 m_Cmaa2Pass,
-                ((IRenderPass)m_Cmaa2Pass).Initialize(),
+                resources,
                 passName: "Antialiasing/CMAA2");
             return AntialiasingOutput?.innerHandle.IsValid() == true;
+        }
+
+        internal PassResource GetCmaa2PassResources()
+        {
+            if (m_Cmaa2Pass == null)
+                return null;
+
+            if (m_Cmaa2Resources == null)
+            {
+                m_Cmaa2Resources = ((IRenderPass)m_Cmaa2Pass).Initialize();
+                m_Cmaa2Pass.ClearPassResourceLayoutDirty();
+                return m_Cmaa2Resources;
+            }
+
+            if (!m_Cmaa2Pass.IsPassResourceLayoutDirty)
+                return m_Cmaa2Resources;
+
+            if (!PassResourceReferenceRefreshUtility.TryRefresh(m_Cmaa2Pass, m_Cmaa2Resources))
+                m_Cmaa2Resources = ((IRenderPass)m_Cmaa2Pass).Initialize();
+
+            m_Cmaa2Pass.ClearPassResourceLayoutDirty();
+            return m_Cmaa2Resources;
         }
 
         private bool TryRecordFsr3Pass(RenderGraphRecordingContext context)

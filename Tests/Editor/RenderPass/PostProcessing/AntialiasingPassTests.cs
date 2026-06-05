@@ -164,6 +164,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Cmaa2PassResources_ReusesCachedResources_WhenLayoutIsClean()
+        {
+            var pass = new AntialiasingPass();
+            SetField(pass, "m_Cmaa2Pass", new CMAA2Pass());
+
+            try
+            {
+                var resources = pass.GetCmaa2PassResources();
+                Assert.That(resources, Is.Not.Null);
+
+                GC.Collect();
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                for (var index = 0; index < 32; index++)
+                {
+                    var currentResources = pass.GetCmaa2PassResources();
+                    if (!ReferenceEquals(currentResources, resources))
+                        Assert.Fail("CMAA2 pass resources should be reused while the layout is clean.");
+                }
+
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                pass.Dispose();
+            }
+        }
+
+        [Test]
         public void Resolver_DisablesTemporalWork_WhenGraphHasNoAntialiasingPass()
         {
             var cameraObject = new GameObject("AA Resolver Test Camera");
@@ -312,6 +341,13 @@ namespace VividRP.Editor.Tests
             var field = typeof(AntialiasingPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture)field.GetValue(pass);
+        }
+
+        private static void SetField<T>(AntialiasingPass pass, string fieldName, T value)
+        {
+            var field = typeof(AntialiasingPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null);
+            field.SetValue(pass, value);
         }
 
         private static void InvokeResolver(

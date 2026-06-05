@@ -564,7 +564,7 @@ namespace VividRP.Runtime
         void PrepareRenderGraph(ContextContainer frameData);
     }
 
-    public sealed class RenderGraphRecordingContext
+    public readonly struct RenderGraphRecordingContext
     {
         internal RenderGraphRecordingContext(
             RenderGraph renderGraph,

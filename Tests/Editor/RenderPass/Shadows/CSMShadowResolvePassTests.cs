@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
@@ -170,6 +171,33 @@ namespace VividRP.Editor.Tests
             Assert.That(dispatchList.DispatchCount, Is.EqualTo(2));
             AssertBendDispatch(dispatchList.Dispatches[0], new Vector3Int(64, 2, 2), new Vector2Int(-320, 0));
             AssertBendDispatch(dispatchList.Dispatches[1], new Vector3Int(64, 3, 2), new Vector2Int(-320, -128));
+        }
+
+        [Test]
+        public void BuildBendDispatchList_ReusesProvidedStorage_WithoutAllocating()
+        {
+            var dispatches = new CSMShadowResolvePass.BendDispatchData[8];
+
+            CSMShadowResolvePass.BuildBendDispatchList(
+                dispatches,
+                new Vector4(0.0f, 0.0f, 0.5f, 1.0f),
+                new Vector2Int(256, 128),
+                Vector2Int.zero,
+                new Vector2Int(256, 128));
+            GC.Collect();
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var dispatchList = CSMShadowResolvePass.BuildBendDispatchList(
+                dispatches,
+                new Vector4(0.0f, 0.0f, 0.5f, 1.0f),
+                new Vector2Int(256, 128),
+                Vector2Int.zero,
+                new Vector2Int(256, 128));
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.EqualTo(0));
+            Assert.That(dispatchList.Dispatches, Is.SameAs(dispatches));
+            AssertValidBendDispatchList(dispatchList);
         }
 
         [Test]

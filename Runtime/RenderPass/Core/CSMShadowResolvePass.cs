@@ -162,6 +162,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_BilateralFilterHKernel = -1;
         private int m_BilateralFilterVKernel = -1;
         private readonly int[] m_BendCompositeKernels = { -1, -1, -1, -1 };
+        private readonly BendDispatchData[] m_BendDispatches = new BendDispatchData[BendMaxDispatchCount];
         private bool m_IsActive;
         private bool m_EnableTiledResolve;
         private bool m_EnableBilateralDenoise;
@@ -171,7 +172,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_TileCountX = 1;
         private int m_TileCountY = 1;
         private Matrix4x4 m_InvViewProjMatrix = Matrix4x4.identity;
-        private BendDispatchList m_BendDispatchList = new(Vector4.zero, new BendDispatchData[BendMaxDispatchCount], 0);
+        private BendDispatchList m_BendDispatchList;
         private BendQualitySettings m_BendQualitySettings = ResolveBendQualitySettings(
             (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low);
         private Vector4 m_BendDepthTextureSize = Vector4.zero;
@@ -203,6 +204,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public CSMShadowResolvePass()
         {
             profilingSampler = new ProfilingSampler(nameof(CSMShadowResolvePass));
+            m_BendDispatchList = CreateEmptyBendDispatchList();
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_CSMShadowAtlas = RenderGraphTexture.CreateInput("CSMShadowAtlas", GraphicsFormat.None, DepthBits.Depth16);
@@ -262,7 +264,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnableBilateralDenoise = false;
             m_EnableBendComposite = false;
             m_LightDirectionWS = Vector4.zero;
-            m_BendDispatchList = new BendDispatchList(Vector4.zero, new BendDispatchData[BendMaxDispatchCount], 0);
+            m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
             m_ShadowQuality = (int)VividAdditionalLightData.CSMScreenSpaceShadowQuality.Low;
             m_BendQualitySettings = ResolveBendQualitySettings(m_ShadowQuality);
@@ -354,6 +356,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (IsUnrealScreenSpaceShadowQuality(m_ShadowQuality))
                 {
                     m_BendDispatchList = BuildBendDispatchList(
+                        m_BendDispatches,
                         cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true) * m_LightDirectionWS,
                         new Vector2Int(width, height),
                         Vector2Int.zero,
@@ -420,7 +423,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_TileCountX = 1;
             m_TileCountY = 1;
             m_FrameIndex = 0;
-            m_BendDispatchList = new BendDispatchList(Vector4.zero, new BendDispatchData[BendMaxDispatchCount], 0);
+            m_BendDispatchList = CreateEmptyBendDispatchList();
             m_BendDepthTextureSize = Vector4.zero;
             m_CascadeWorldTexelSizes = Vector4.zero;
             m_CascadeBorders = Vector4.zero;
@@ -649,6 +652,28 @@ namespace VividRP.Runtime.RenderPass.Core
             int waveSize = BendWaveSize)
         {
             var dispatches = new BendDispatchData[BendMaxDispatchCount];
+            return BuildBendDispatchList(
+                dispatches,
+                lightProjection,
+                viewportSize,
+                minRenderBounds,
+                maxRenderBounds,
+                expandedZRange,
+                waveSize);
+        }
+
+        internal static BendDispatchList BuildBendDispatchList(
+            BendDispatchData[] dispatches,
+            Vector4 lightProjection,
+            Vector2Int viewportSize,
+            Vector2Int minRenderBounds,
+            Vector2Int maxRenderBounds,
+            bool expandedZRange = false,
+            int waveSize = BendWaveSize)
+        {
+            if (dispatches == null || dispatches.Length == 0)
+                return new BendDispatchList(Vector4.zero, dispatches, 0);
+
             var dispatchCount = 0;
             var safeWaveSize = Mathf.Max(1, waveSize);
             var safeViewportWidth = Mathf.Max(1, viewportSize.x);
@@ -674,47 +699,41 @@ namespace VividRP.Runtime.RenderPass.Core
                 (int)(lightCoordinate.x + 0.5f),
                 (int)(lightCoordinate.y + 0.5f));
 
-            var biasedBounds = new[]
-            {
-                minRenderBounds.x - lightXY.x,
-                -(maxRenderBounds.y - lightXY.y),
-                maxRenderBounds.x - lightXY.x,
-                -(minRenderBounds.y - lightXY.y)
-            };
+            var biasedMinX = minRenderBounds.x - lightXY.x;
+            var biasedMinY = -(maxRenderBounds.y - lightXY.y);
+            var biasedMaxX = maxRenderBounds.x - lightXY.x;
+            var biasedMaxY = -(minRenderBounds.y - lightXY.y);
 
             for (var quadrant = 0; quadrant < 4; quadrant++)
             {
                 var vertical = quadrant == 0 || quadrant == 3;
-                var bounds = new[]
-                {
-                    BendMax(0, ((quadrant & 1) != 0 ? biasedBounds[0] : -biasedBounds[2])) / safeWaveSize,
-                    BendMax(0, ((quadrant & 2) != 0 ? biasedBounds[1] : -biasedBounds[3])) / safeWaveSize,
-                    BendMax(0, (((quadrant & 1) != 0 ? biasedBounds[2] : -biasedBounds[0])
-                        + safeWaveSize * (vertical ? 1 : 2) - 1)) / safeWaveSize,
-                    BendMax(0, (((quadrant & 2) != 0 ? biasedBounds[3] : -biasedBounds[1])
-                        + safeWaveSize * (vertical ? 2 : 1) - 1)) / safeWaveSize
-                };
+                var minX = BendMax(0, ((quadrant & 1) != 0 ? biasedMinX : -biasedMaxX)) / safeWaveSize;
+                var minY = BendMax(0, ((quadrant & 2) != 0 ? biasedMinY : -biasedMaxY)) / safeWaveSize;
+                var maxX = BendMax(0, (((quadrant & 1) != 0 ? biasedMaxX : -biasedMinX)
+                    + safeWaveSize * (vertical ? 1 : 2) - 1)) / safeWaveSize;
+                var maxY = BendMax(0, (((quadrant & 2) != 0 ? biasedMaxY : -biasedMinY)
+                    + safeWaveSize * (vertical ? 2 : 1) - 1)) / safeWaveSize;
 
-                if ((bounds[2] - bounds[0]) <= 0 || (bounds[3] - bounds[1]) <= 0)
+                if ((maxX - minX) <= 0 || (maxY - minY) <= 0)
                     continue;
 
                 var biasX = quadrant == 2 || quadrant == 3 ? 1 : 0;
                 var biasY = quadrant == 1 || quadrant == 3 ? 1 : 0;
                 var dispatch = new BendDispatchData
                 {
-                    WaveCount = new Vector3Int(safeWaveSize, bounds[2] - bounds[0], bounds[3] - bounds[1]),
+                    WaveCount = new Vector3Int(safeWaveSize, maxX - minX, maxY - minY),
                     WaveOffset = new Vector2Int(
-                        ((quadrant & 1) != 0 ? bounds[0] : -bounds[2]) + biasX,
-                        ((quadrant & 2) != 0 ? -bounds[3] : bounds[1]) + biasY)
+                        ((quadrant & 1) != 0 ? minX : -maxX) + biasX,
+                        ((quadrant & 2) != 0 ? -maxY : minY) + biasY)
                 };
 
-                var axisDelta = biasedBounds[0] - biasedBounds[1];
+                var axisDelta = biasedMinX - biasedMinY;
                 if (quadrant == 1)
-                    axisDelta = biasedBounds[2] + biasedBounds[1];
+                    axisDelta = biasedMaxX + biasedMinY;
                 if (quadrant == 2)
-                    axisDelta = -biasedBounds[0] - biasedBounds[3];
+                    axisDelta = -biasedMinX - biasedMaxY;
                 if (quadrant == 3)
-                    axisDelta = -biasedBounds[2] + biasedBounds[3];
+                    axisDelta = -biasedMaxX + biasedMaxY;
 
                 axisDelta = (axisDelta + safeWaveSize - 1) / safeWaveSize;
 
@@ -776,13 +795,21 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static void AddBendDispatch(BendDispatchData[] dispatches, ref int dispatchCount, BendDispatchData dispatch)
         {
+            if (dispatches == null)
+                return;
+
             if (dispatch.WaveCount.x <= 0 || dispatch.WaveCount.y <= 0 || dispatch.WaveCount.z <= 0)
                 return;
 
-            if (dispatchCount >= BendMaxDispatchCount)
+            if (dispatchCount >= dispatches.Length)
                 return;
 
             dispatches[dispatchCount++] = dispatch;
+        }
+
+        private BendDispatchList CreateEmptyBendDispatchList()
+        {
+            return new BendDispatchList(Vector4.zero, m_BendDispatches, 0);
         }
 
         private static int BendMin(int a, int b)

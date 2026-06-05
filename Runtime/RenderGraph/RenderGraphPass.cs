@@ -41,6 +41,9 @@ namespace VividRP.Runtime
         public PassResourceType ResourceType;
         public FieldInfo SourceField;
         public FieldInfo OutputField;
+        internal PassResourceEntry SourceEntry;
+        internal PassResourceEntry OutputEntry;
+        internal int AppliedBypassVersion;
     }
 
     internal static class RenderGraphPassReflectionUtility
@@ -206,14 +209,56 @@ namespace VividRP.Runtime
                 TryAddBypassRule(type, field, attr, isTransient, bypassRules);
             }
 
+            var textureEntries = textures.ToArray();
+            var bufferEntries = buffers.ToArray();
+            var renderListEntries = renderLists.ToArray();
+            var accelerationStructureEntries = accelerationStructures.ToArray();
+            var bypassRuleEntries = bypassRules.ToArray();
+            ResolveBypassRuleEntries(bypassRuleEntries, textureEntries, bufferEntries);
+
             return new PassResource
             {
-                Textures = textures.ToArray(),
-                Buffers = buffers.ToArray(),
-                RenderLists = renderLists.ToArray(),
-                AccelerationStructures = accelerationStructures.ToArray(),
-                BypassRules = bypassRules.ToArray(),
+                Textures = textureEntries,
+                Buffers = bufferEntries,
+                RenderLists = renderListEntries,
+                AccelerationStructures = accelerationStructureEntries,
+                BypassRules = bypassRuleEntries,
             };
+        }
+
+        private static void ResolveBypassRuleEntries(
+            PassBypassRule[] bypassRules,
+            PassResourceEntry[] textureEntries,
+            PassResourceEntry[] bufferEntries)
+        {
+            if (bypassRules == null)
+                return;
+
+            for (var i = 0; i < bypassRules.Length; i++)
+            {
+                var rule = bypassRules[i];
+                if (rule == null)
+                    continue;
+
+                var entries = rule.ResourceType == PassResourceType.Buffer ? bufferEntries : textureEntries;
+                rule.SourceEntry = FindEntry(entries, rule.SourceField);
+                rule.OutputEntry = FindEntry(entries, rule.OutputField);
+            }
+        }
+
+        private static PassResourceEntry FindEntry(PassResourceEntry[] entries, FieldInfo field)
+        {
+            if (entries == null || field == null)
+                return null;
+
+            for (var i = 0; i < entries.Length; i++)
+            {
+                var entry = entries[i];
+                if (entry != null && ReferenceEquals(entry.Field, field))
+                    return entry;
+            }
+
+            return null;
         }
 
         private static void TryAddBypassRule(

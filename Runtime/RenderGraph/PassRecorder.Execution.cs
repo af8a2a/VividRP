@@ -95,6 +95,7 @@ namespace VividRP.Runtime
         private static readonly Dictionary<RenderGraphRenderList, RendererListHandle> s_RecordGraphRenderListCache = new(16);
         private static readonly Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> s_RecordGraphAccelerationStructureCache = new(8);
         private static RenderGraph s_CurrentRenderGraph;
+        private static int s_InactiveBypassVersion;
 
         private static RenderGraphData s_CurrentGraphAsset;
         private static List<RenderGraphPassDefinition> s_RuntimePassDefinitions = new();
@@ -1827,8 +1828,8 @@ namespace VividRP.Runtime
 
         private static void CopyBypassTextureDescriptor(IRenderPass pass, PassBypassRule rule)
         {
-            var sourceTexture = rule.SourceField?.GetValue(pass) as RenderGraphTexture;
-            var outputTexture = rule.OutputField?.GetValue(pass) as RenderGraphTexture;
+            var sourceTexture = rule.SourceEntry?.Texture ?? rule.SourceField?.GetValue(pass) as RenderGraphTexture;
+            var outputTexture = rule.OutputEntry?.Texture ?? rule.OutputField?.GetValue(pass) as RenderGraphTexture;
             var sourceDescriptor = sourceTexture?.desc;
             if (sourceDescriptor == null || outputTexture == null)
                 return;
@@ -1839,8 +1840,8 @@ namespace VividRP.Runtime
 
         private static void CopyBypassBufferDescriptor(IRenderPass pass, PassBypassRule rule)
         {
-            var sourceBuffer = rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
-            var outputBuffer = rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
+            var sourceBuffer = rule.SourceEntry?.Buffer ?? rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
+            var outputBuffer = rule.OutputEntry?.Buffer ?? rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
             var sourceDescriptor = sourceBuffer?.desc;
             if (sourceDescriptor == null || outputBuffer == null)
                 return;
@@ -1848,7 +1849,7 @@ namespace VividRP.Runtime
             outputBuffer.desc = sourceDescriptor.Clone();
         }
 
-        private static void ApplyInactivePassBypassHandles(
+        internal static void ApplyInactivePassBypassHandles(
             RenderGraph renderGraph,
             IRenderPass pass,
             PassResource resources,
@@ -1856,12 +1857,14 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
             Dictionary<RenderGraphBuffer, BufferHandle> bufferCache)
         {
-            var bypassedOutputFields = new HashSet<string>(StringComparer.Ordinal);
+            var bypassVersion = NextInactiveBypassVersion();
 
             if (pass != null && resources?.BypassRules != null)
             {
-                foreach (var rule in resources.BypassRules)
+                var bypassRules = resources.BypassRules;
+                for (var i = 0; i < bypassRules.Length; i++)
                 {
+                    var rule = bypassRules[i];
                     if (!CanApplyBypassRule(rule, passDefinition))
                         continue;
 
@@ -1872,12 +1875,24 @@ namespace VividRP.Runtime
                             textureCache,
                             bufferCache))
                     {
-                        bypassedOutputFields.Add(rule.OutputFieldName);
+                        rule.AppliedBypassVersion = bypassVersion;
                     }
                 }
             }
 
-            ClearInactivePassUnbypassedOutputs(resources, bypassedOutputFields);
+            ClearInactivePassUnbypassedOutputs(resources, bypassVersion);
+        }
+
+        private static int NextInactiveBypassVersion()
+        {
+            unchecked
+            {
+                s_InactiveBypassVersion++;
+                if (s_InactiveBypassVersion == 0)
+                    s_InactiveBypassVersion = 1;
+            }
+
+            return s_InactiveBypassVersion;
         }
 
         private static bool TryApplyInactivePassBypassHandle(
@@ -1894,8 +1909,8 @@ namespace VividRP.Runtime
             {
                 case PassResourceType.Texture:
                 {
-                    var sourceTexture = rule.SourceField?.GetValue(pass) as RenderGraphTexture;
-                    var outputTexture = rule.OutputField?.GetValue(pass) as RenderGraphTexture;
+                    var sourceTexture = rule.SourceEntry?.Texture ?? rule.SourceField?.GetValue(pass) as RenderGraphTexture;
+                    var outputTexture = rule.OutputEntry?.Texture ?? rule.OutputField?.GetValue(pass) as RenderGraphTexture;
                     if (sourceTexture == null || outputTexture == null)
                         return false;
 
@@ -1910,8 +1925,8 @@ namespace VividRP.Runtime
                 }
                 case PassResourceType.Buffer:
                 {
-                    var sourceBuffer = rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
-                    var outputBuffer = rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
+                    var sourceBuffer = rule.SourceEntry?.Buffer ?? rule.SourceField?.GetValue(pass) as RenderGraphBuffer;
+                    var outputBuffer = rule.OutputEntry?.Buffer ?? rule.OutputField?.GetValue(pass) as RenderGraphBuffer;
                     if (sourceBuffer == null || outputBuffer == null)
                         return false;
 
@@ -1930,18 +1945,22 @@ namespace VividRP.Runtime
 
         private static void ClearInactivePassUnbypassedOutputs(
             PassResource resources,
-            ISet<string> bypassedOutputFields)
+            int bypassVersion)
         {
             if (resources == null)
                 return;
 
-            ClearInactivePassUnbypassedTextures(resources.Textures, bypassedOutputFields);
-            ClearInactivePassUnbypassedBuffers(resources.Buffers, bypassedOutputFields);
-            ClearInactivePassUnbypassedRenderLists(resources.RenderLists, bypassedOutputFields);
-            ClearInactivePassUnbypassedAccelerationStructures(resources.AccelerationStructures, bypassedOutputFields);
+            var bypassRules = resources.BypassRules;
+            ClearInactivePassUnbypassedTextures(resources.Textures, bypassRules, bypassVersion);
+            ClearInactivePassUnbypassedBuffers(resources.Buffers, bypassRules, bypassVersion);
+            ClearInactivePassUnbypassedRenderLists(resources.RenderLists, bypassRules, bypassVersion);
+            ClearInactivePassUnbypassedAccelerationStructures(resources.AccelerationStructures, bypassRules, bypassVersion);
         }
 
-        private static bool ShouldClearInactivePassOutput(PassResourceEntry entry, ISet<string> bypassedOutputFields)
+        private static bool ShouldClearInactivePassOutput(
+            PassResourceEntry entry,
+            PassBypassRule[] bypassRules,
+            int bypassVersion)
         {
             if (entry == null)
                 return false;
@@ -1949,22 +1968,50 @@ namespace VividRP.Runtime
             if ((entry.Access & AccessFlags.Write) == 0 || (entry.Access & AccessFlags.Read) != 0)
                 return false;
 
-            var fieldName = entry.Field?.Name;
-            return string.IsNullOrEmpty(fieldName)
-                   || bypassedOutputFields == null
-                   || !bypassedOutputFields.Contains(fieldName);
+            return !WasInactivePassOutputBypassed(entry, bypassRules, bypassVersion);
+        }
+
+        private static bool WasInactivePassOutputBypassed(
+            PassResourceEntry entry,
+            PassBypassRule[] bypassRules,
+            int bypassVersion)
+        {
+            if (entry == null || bypassRules == null)
+                return false;
+
+            for (var i = 0; i < bypassRules.Length; i++)
+            {
+                var rule = bypassRules[i];
+                if (rule == null || rule.AppliedBypassVersion != bypassVersion)
+                    continue;
+
+                if (ReferenceEquals(rule.OutputEntry, entry))
+                    return true;
+
+                var field = entry.Field;
+                if (field != null
+                    && (ReferenceEquals(rule.OutputField, field)
+                        || string.Equals(rule.OutputFieldName, field.Name, StringComparison.Ordinal)))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static void ClearInactivePassUnbypassedTextures(
-            IEnumerable<PassResourceEntry> entries,
-            ISet<string> bypassedOutputFields)
+            PassResourceEntry[] entries,
+            PassBypassRule[] bypassRules,
+            int bypassVersion)
         {
             if (entries == null)
                 return;
 
-            foreach (var entry in entries)
+            for (var i = 0; i < entries.Length; i++)
             {
-                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields))
+                var entry = entries[i];
+                if (!ShouldClearInactivePassOutput(entry, bypassRules, bypassVersion))
                     continue;
 
                 entry.Texture?.ClearImportedHandle();
@@ -1972,15 +2019,17 @@ namespace VividRP.Runtime
         }
 
         private static void ClearInactivePassUnbypassedBuffers(
-            IEnumerable<PassResourceEntry> entries,
-            ISet<string> bypassedOutputFields)
+            PassResourceEntry[] entries,
+            PassBypassRule[] bypassRules,
+            int bypassVersion)
         {
             if (entries == null)
                 return;
 
-            foreach (var entry in entries)
+            for (var i = 0; i < entries.Length; i++)
             {
-                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields) || entry.Buffer == null)
+                var entry = entries[i];
+                if (!ShouldClearInactivePassOutput(entry, bypassRules, bypassVersion) || entry.Buffer == null)
                     continue;
 
                 entry.Buffer.innerHandle = default;
@@ -1988,15 +2037,17 @@ namespace VividRP.Runtime
         }
 
         private static void ClearInactivePassUnbypassedRenderLists(
-            IEnumerable<PassResourceEntry> entries,
-            ISet<string> bypassedOutputFields)
+            PassResourceEntry[] entries,
+            PassBypassRule[] bypassRules,
+            int bypassVersion)
         {
             if (entries == null)
                 return;
 
-            foreach (var entry in entries)
+            for (var i = 0; i < entries.Length; i++)
             {
-                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields) || entry.RenderList == null)
+                var entry = entries[i];
+                if (!ShouldClearInactivePassOutput(entry, bypassRules, bypassVersion) || entry.RenderList == null)
                     continue;
 
                 entry.RenderList.innerHandle = default;
@@ -2004,15 +2055,17 @@ namespace VividRP.Runtime
         }
 
         private static void ClearInactivePassUnbypassedAccelerationStructures(
-            IEnumerable<PassResourceEntry> entries,
-            ISet<string> bypassedOutputFields)
+            PassResourceEntry[] entries,
+            PassBypassRule[] bypassRules,
+            int bypassVersion)
         {
             if (entries == null)
                 return;
 
-            foreach (var entry in entries)
+            for (var i = 0; i < entries.Length; i++)
             {
-                if (!ShouldClearInactivePassOutput(entry, bypassedOutputFields) || entry.AccelerationStructure == null)
+                var entry = entries[i];
+                if (!ShouldClearInactivePassOutput(entry, bypassRules, bypassVersion) || entry.AccelerationStructure == null)
                     continue;
 
                 entry.AccelerationStructure.innerHandle = default;

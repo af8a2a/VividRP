@@ -63,6 +63,32 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             public float ProjectY { get; }
         }
 
+        private readonly struct ProjectionPlanes
+        {
+            public ProjectionPlanes(
+                Vector4 left,
+                Vector4 right,
+                Vector4 bottom,
+                Vector4 top,
+                Vector4 near,
+                Vector4 far)
+            {
+                Left = left;
+                Right = right;
+                Bottom = bottom;
+                Top = top;
+                Near = near;
+                Far = far;
+            }
+
+            public Vector4 Left { get; }
+            public Vector4 Right { get; }
+            public Vector4 Bottom { get; }
+            public Vector4 Top { get; }
+            public Vector4 Near { get; }
+            public Vector4 Far { get; }
+        }
+
         public static SigmaSharedConstants Compute(
             Matrix4x4 worldToView,
             Matrix4x4 viewToClip,
@@ -184,8 +210,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         private static ProjectionData DecomposeProjection(Matrix4x4 projection, bool isOrthographicHint)
         {
-            var planes = new Vector4[6];
-            bool isReversedZ = MvpToPlanes(projection, planes);
+            bool isReversedZ = MvpToPlanes(projection, out var planes);
             bool isOrthographic = isOrthographicHint || IsOrthographicProjection(projection);
 
             float x0;
@@ -195,23 +220,23 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
             if (isOrthographic)
             {
-                x0 = -planes[0].w;
-                x1 = planes[1].w;
-                y0 = -planes[2].w;
-                y1 = planes[3].w;
+                x0 = -planes.Left.w;
+                x1 = planes.Right.w;
+                y0 = -planes.Bottom.w;
+                y1 = planes.Top.w;
 
                 if (projection[1, 1] < 0.0f)
                     Swap(ref y0, ref y1);
             }
             else
             {
-                x0 = planes[0].z / planes[0].x;
-                x1 = planes[1].z / planes[1].x;
-                y0 = planes[2].z / planes[2].y;
-                y1 = planes[3].z / planes[3].y;
+                x0 = planes.Left.z / planes.Left.x;
+                x1 = planes.Right.z / planes.Right.x;
+                y0 = planes.Bottom.z / planes.Bottom.y;
+                y1 = planes.Top.z / planes.Top.y;
             }
 
-            float nearZ = -planes[4].w;
+            float nearZ = -planes.Near.w;
             Vector4 clip = projection * new Vector4(0.0f, 0.0f, nearZ, 1.0f);
             Vector3 column2 = isOrthographic
                 ? GetColumn(projection, 2) * (isReversedZ ? -1.0f : 1.0f)
@@ -244,7 +269,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             return worldToView;
         }
 
-        private static bool MvpToPlanes(Matrix4x4 matrix, Vector4[] planes)
+        private static bool MvpToPlanes(Matrix4x4 matrix, out ProjectionPlanes planes)
         {
             Vector4 left = NormalizePlane(matrix.GetRow(3) + matrix.GetRow(0));
             Vector4 right = NormalizePlane(matrix.GetRow(3) - matrix.GetRow(0));
@@ -260,12 +285,7 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             if (GetLengthSquared(far) < Epsilon * Epsilon)
                 far = new Vector4(-near.x, -near.y, -near.z, far.w);
 
-            planes[0] = left;
-            planes[1] = right;
-            planes[2] = bottom;
-            planes[3] = top;
-            planes[4] = near;
-            planes[5] = far;
+            planes = new ProjectionPlanes(left, right, bottom, top, near, far);
 
             return isReversedZ;
         }

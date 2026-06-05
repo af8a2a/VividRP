@@ -1,3 +1,4 @@
+using System;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Runtime.RenderPass.Core.Sigma;
@@ -74,6 +75,54 @@ namespace VividRP.Editor.Tests
             Assert.That(constants.gWorldToView.m22, Is.EqualTo(0.804071f).Within(1e-6f));
             Assert.That(constants.gFrustum.x, Is.LessThan(0.0f));
             Assert.That(constants.gFrustum.z, Is.GreaterThan(0.0f));
+        }
+
+        [Test]
+        public void Compute_DoesNotAllocate_WhenResolvingProjectionPlanes()
+        {
+            var worldToView = Matrix4x4.identity;
+            var viewToClip = Matrix4x4.Perspective(60.0f, 16.0f / 9.0f, 0.1f, 1000.0f);
+
+            SigmaSharedConstants.Compute(
+                worldToView,
+                viewToClip,
+                worldToView,
+                viewToClip,
+                Vector3.zero,
+                Vector3.zero,
+                Vector3.down,
+                1920,
+                1080,
+                1920,
+                1080,
+                1u,
+                1.0f,
+                0.02f,
+                0.0f,
+                false);
+            GC.Collect();
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            SigmaSharedConstants.Compute(
+                worldToView,
+                viewToClip,
+                worldToView,
+                viewToClip,
+                Vector3.zero,
+                Vector3.zero,
+                Vector3.down,
+                1920,
+                1080,
+                1920,
+                1080,
+                1u,
+                1.0f,
+                0.02f,
+                0.0f,
+                false);
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.EqualTo(0));
         }
 
         [Test]

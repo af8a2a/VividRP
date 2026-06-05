@@ -146,6 +146,47 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void InactiveStopNaNPassBypassHandles_DoesNotAllocate_WhenHandlesAreCached()
+        {
+            var renderGraph = new UnityRenderGraph("VividRP StopNaN PassBypass Allocation Test");
+            var pass = new StopNaNPass();
+            var source = RenderGraphTexture.CreateInput("SceneColor", GraphicsFormat.R8G8B8A8_UNorm);
+            SetField(pass, "m_Source", source);
+
+            var resources = PassResourceCollector.Collect(pass);
+            var textureCache = new Dictionary<RenderGraphTexture, TextureHandle>(4);
+            var bufferCache = new Dictionary<RenderGraphBuffer, BufferHandle>(1);
+
+            try
+            {
+                PassRecorder.ApplyInactivePassBypassHandles(
+                    renderGraph,
+                    pass,
+                    resources,
+                    null,
+                    textureCache,
+                    bufferCache);
+                GC.Collect();
+
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                PassRecorder.ApplyInactivePassBypassHandles(
+                    renderGraph,
+                    pass,
+                    resources,
+                    null,
+                    textureCache,
+                    bufferCache);
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+                Assert.That(allocatedBytes, Is.EqualTo(0));
+            }
+            finally
+            {
+                renderGraph.Cleanup();
+            }
+        }
+
+        [Test]
         public void StopNaNPass_IsActive_FollowsCameraStopNaNsSetting()
         {
             var pass = new StopNaNPass();
@@ -233,20 +274,13 @@ namespace VividRP.Editor.Tests
             PassResource resources,
             RenderGraphPassDefinition passDefinition = null)
         {
-            var method = typeof(PassRecorder).GetMethod(
-                "ApplyInactivePassBypassHandles",
-                BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.That(method, Is.Not.Null);
-
-            method.Invoke(null, new object[]
-            {
+            PassRecorder.ApplyInactivePassBypassHandles(
                 renderGraph,
                 pass,
                 resources,
                 passDefinition,
                 new Dictionary<RenderGraphTexture, TextureHandle>(),
-                new Dictionary<RenderGraphBuffer, BufferHandle>(),
-            });
+                new Dictionary<RenderGraphBuffer, BufferHandle>());
         }
     }
 

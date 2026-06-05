@@ -7,20 +7,22 @@ namespace VividRP.Runtime
     [Serializable, VolumeComponentMenu("Post-processing/Shadows Midtones Highlights")]
     public sealed class ShadowsMidtonesHighlights : VolumeComponent, IPostProcessComponent
     {
+        private static readonly Vector4 s_DefaultColorWheelValue = new(1f, 1f, 1f, 0f);
+
         /// <summary>
         /// Controls the darkest portions of the render.
         /// </summary>
-        public Vector4Parameter shadows = new Vector4Parameter(new Vector4(1f, 1f, 1f, 0f));
+        public Vector4Parameter shadows = new Vector4Parameter(s_DefaultColorWheelValue);
 
         /// <summary>
         /// Controls the power function that handles mid-range tones.
         /// </summary>
-        public Vector4Parameter midtones = new Vector4Parameter(new Vector4(1f, 1f, 1f, 0f));
+        public Vector4Parameter midtones = new Vector4Parameter(s_DefaultColorWheelValue);
 
         /// <summary>
         /// Controls the lightest portions of the render.
         /// </summary>
-        public Vector4Parameter highlights = new Vector4Parameter(new Vector4(1f, 1f, 1f, 0f));
+        public Vector4Parameter highlights = new Vector4Parameter(s_DefaultColorWheelValue);
 
         /// <summary>
         /// Sets the start point of the transition between shadows and midtones.
@@ -53,10 +55,9 @@ namespace VividRP.Runtime
         /// <returns><c>true</c> if the effect should be rendered, <c>false</c> otherwise.</returns>
         public bool IsActive()
         {
-            var defaultState = new Vector4(1f, 1f, 1f, 0f);
-            return shadows != defaultState
-                   || midtones != defaultState
-                   || highlights != defaultState;
+            return !ColorGradingCurvePresets.IsApproximately(shadows.value, s_DefaultColorWheelValue)
+                || !ColorGradingCurvePresets.IsApproximately(midtones.value, s_DefaultColorWheelValue)
+                || !ColorGradingCurvePresets.IsApproximately(highlights.value, s_DefaultColorWheelValue);
         }
     }
 }

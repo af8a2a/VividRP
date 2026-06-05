@@ -112,6 +112,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShadowsMidtonesHighlights_IsInactive_WithDefaultValues()
+        {
+            var settings = new ShadowsMidtonesHighlights();
+
+            Assert.That(settings.IsActive(), Is.False);
+        }
+
+        [Test]
+        public void ShadowsMidtonesHighlights_IsActive_WhenColorWheelChanges()
+        {
+            var settings = new ShadowsMidtonesHighlights();
+
+            settings.shadows.value = new Vector4(1.1f, 1f, 1f, 0f);
+
+            Assert.That(settings.IsActive(), Is.True);
+        }
+
+        [Test]
+        public void ShadowsMidtonesHighlights_IsActive_DoesNotAllocate_WithDefaultValues()
+        {
+            var settings = new ShadowsMidtonesHighlights();
+            settings.IsActive();
+
+            var isActive = false;
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+            for (var i = 0; i < 128; i++)
+                isActive |= settings.IsActive();
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(isActive, Is.False);
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void Resolve_WithFrameData_CachesSettingsForLaterPasses()
         {
             using var frameData = new ContextContainer();

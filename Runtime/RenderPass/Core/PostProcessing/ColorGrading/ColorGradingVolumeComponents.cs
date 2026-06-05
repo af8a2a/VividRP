@@ -66,5 +66,13 @@ namespace VividRP.Runtime
                 && Mathf.Abs(left.b - right.b) <= epsilon
                 && Mathf.Abs(left.a - right.a) <= epsilon;
         }
+
+        internal static bool IsApproximately(Vector4 left, Vector4 right, float epsilon = CurveTolerance)
+        {
+            return Mathf.Abs(left.x - right.x) <= epsilon
+                && Mathf.Abs(left.y - right.y) <= epsilon
+                && Mathf.Abs(left.z - right.z) <= epsilon
+                && Mathf.Abs(left.w - right.w) <= epsilon;
+        }
     }
 }

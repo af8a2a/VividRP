@@ -29,11 +29,32 @@ namespace VividRP.Runtime
 
     internal static class VividAntialiasingRuntimeUtility
     {
-        private static readonly Dictionary<EntityId, AntialiasingHistoryKey> s_PreviousHistoryKeys = new();
+        private static readonly EntityIdComparer s_EntityIdComparer = new();
+        private static readonly Dictionary<EntityId, AntialiasingHistoryKey> s_PreviousHistoryKeys = new(32, s_EntityIdComparer);
+        private static bool s_HasResolvedStpSupport;
+        private static bool s_CachedStpSupport;
+        private static bool s_HasResolvedFsr3Support;
+        private static bool s_CachedFsr3Support;
+        private static bool s_HasResolvedTsrSupport;
+        private static bool s_CachedTsrSupport;
+#if DLSS_PLUGIN_INTEGRATE
+        private static bool s_HasResolvedDlssSupport;
+        private static bool s_CachedDlssSupport;
+#endif
 
         internal static void Clear()
         {
             s_PreviousHistoryKeys.Clear();
+            s_HasResolvedStpSupport = false;
+            s_CachedStpSupport = false;
+            s_HasResolvedFsr3Support = false;
+            s_CachedFsr3Support = false;
+            s_HasResolvedTsrSupport = false;
+            s_CachedTsrSupport = false;
+#if DLSS_PLUGIN_INTEGRATE
+            s_HasResolvedDlssSupport = false;
+            s_CachedDlssSupport = false;
+#endif
         }
 
         internal static void Resolve(
@@ -167,20 +188,20 @@ namespace VividRP.Runtime
                 case VividAntialiasingMode.TemporalAntiAliasing:
                     return additionalData.antialiasing;
                 case VividAntialiasingMode.SpatialTemporalPostProcessing:
-                    return STP.IsSupported()
+                    return IsStpSupported()
                         ? VividAntialiasingMode.SpatialTemporalPostProcessing
                         : VividAntialiasingMode.None;
                 case VividAntialiasingMode.FidelityFXSuperResolution3:
-                    return FSR3UpscalerPass.IsSupported
+                    return IsFsr3Supported()
                         ? VividAntialiasingMode.FidelityFXSuperResolution3
                         : VividAntialiasingMode.None;
                 case VividAntialiasingMode.TemporalSuperResolution:
-                    return TSRUpscalerPass.IsSupported
+                    return IsTsrSupported()
                         ? VividAntialiasingMode.TemporalSuperResolution
                         : VividAntialiasingMode.None;
 #if DLSS_PLUGIN_INTEGRATE
                 case VividAntialiasingMode.DeepLearningSuperSampling:
-                    return DLSSExtension.IsSuperResolutionSupported
+                    return IsDlssSupported()
                         ? VividAntialiasingMode.DeepLearningSuperSampling
                         : VividAntialiasingMode.None;
 #endif
@@ -188,6 +209,52 @@ namespace VividRP.Runtime
                     return VividAntialiasingMode.None;
             }
         }
+
+        internal static bool IsStpSupported()
+        {
+            if (!s_HasResolvedStpSupport)
+            {
+                s_CachedStpSupport = STP.IsSupported();
+                s_HasResolvedStpSupport = true;
+            }
+
+            return s_CachedStpSupport;
+        }
+
+        internal static bool IsFsr3Supported()
+        {
+            if (!s_HasResolvedFsr3Support)
+            {
+                s_CachedFsr3Support = FSR3UpscalerPass.IsSupported;
+                s_HasResolvedFsr3Support = true;
+            }
+
+            return s_CachedFsr3Support;
+        }
+
+        internal static bool IsTsrSupported()
+        {
+            if (!s_HasResolvedTsrSupport)
+            {
+                s_CachedTsrSupport = TSRUpscalerPass.IsSupported;
+                s_HasResolvedTsrSupport = true;
+            }
+
+            return s_CachedTsrSupport;
+        }
+
+#if DLSS_PLUGIN_INTEGRATE
+        internal static bool IsDlssSupported()
+        {
+            if (!s_HasResolvedDlssSupport)
+            {
+                s_CachedDlssSupport = DLSSExtension.IsSuperResolutionSupported;
+                s_HasResolvedDlssSupport = true;
+            }
+
+            return s_CachedDlssSupport;
+        }
+#endif
 
         private static bool ShouldResetHistory(
             Camera camera,
@@ -199,12 +266,17 @@ namespace VividRP.Runtime
                 return effectiveMode != VividAntialiasingMode.None;
 
             var cameraId = camera.GetEntityId();
+            if (effectiveMode == VividAntialiasingMode.None)
+            {
+                s_PreviousHistoryKeys.Remove(cameraId);
+                return false;
+            }
+
             var historyKey = AntialiasingHistoryKey.Create(effectiveMode, outputSize, additionalData);
             var hasPreviousKey = s_PreviousHistoryKeys.TryGetValue(cameraId, out var previousKey);
             s_PreviousHistoryKeys[cameraId] = historyKey;
 
-            return effectiveMode != VividAntialiasingMode.None
-                && (!hasPreviousKey || !previousKey.Equals(historyKey));
+            return !hasPreviousKey || !previousKey.Equals(historyKey);
         }
 
         private static void ApplyTaaJitter(
@@ -411,6 +483,19 @@ namespace VividRP.Runtime
                     hashCode = (hashCode * 397) ^ (int)m_TsrQuality;
                     return hashCode;
                 }
+            }
+        }
+
+        private sealed class EntityIdComparer : IEqualityComparer<EntityId>
+        {
+            public bool Equals(EntityId x, EntityId y)
+            {
+                return EntityId.ToULong(x) == EntityId.ToULong(y);
+            }
+
+            public int GetHashCode(EntityId obj)
+            {
+                return EntityId.ToULong(obj).GetHashCode();
             }
         }
     }

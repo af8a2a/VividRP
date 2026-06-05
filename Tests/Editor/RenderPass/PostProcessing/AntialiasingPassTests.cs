@@ -289,6 +289,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Resolver_DoesNotAllocate_ForCachedTemporalSuperResolutionPath()
+        {
+            var cameraObject = new GameObject("AA Resolver Allocation Camera");
+
+            try
+            {
+                var camera = cameraObject.AddComponent<Camera>();
+                var additionalData = cameraObject.AddComponent<VividAdditionalCameraData>();
+                additionalData.antialiasing = VividAntialiasingMode.TemporalSuperResolution;
+                additionalData.tsrQuality = VividTsrQualityMode.Balanced;
+
+                var data = new VividAntialiasingData();
+                VividAntialiasingRuntimeUtility.Clear();
+                VividAntialiasingRuntimeUtility.Resolve(camera, additionalData, hasAntialiasingPass: true, data);
+
+                GC.Collect();
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                for (var index = 0; index < 32; index++)
+                    VividAntialiasingRuntimeUtility.Resolve(camera, additionalData, hasAntialiasingPass: true, data);
+
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                VividAntialiasingRuntimeUtility.Clear();
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void SourceFiles_RemoveLegacyAAPassRecorderInjection()
         {
             var passRecorderSource = File.ReadAllText(GetPackageFilePath(

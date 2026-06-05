@@ -103,9 +103,45 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("rw_spd_mip4"),
             Shader.PropertyToID("rw_spd_mip5"),
         };
+        private static readonly int[] s_RcasConfigScratch = new int[4];
+        private static readonly int[] s_ComputeInt2Scratch = new int[2];
+        private static readonly string[] s_AccumulationNames =
+        {
+            "FSR3_Accumulation1",
+            "FSR3_Accumulation2",
+        };
+        private static readonly string[] s_InternalUpscaledNames =
+        {
+            "FSR3_InternalUpscaled1",
+            "FSR3_InternalUpscaled2",
+        };
+        private static readonly string[] s_LumaHistoryNames =
+        {
+            "FSR3_LumaHistory1",
+            "FSR3_LumaHistory2",
+        };
+        private static readonly string[] s_LumaNames =
+        {
+            "FSR3_Luma1",
+            "FSR3_Luma2",
+        };
 
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
         private readonly List<EntityId> m_ExpiredCameraIds = new();
+        private readonly RenderGraphTexture m_RecordOutputTexture = new();
+        private readonly RenderGraphTextureDesc m_OutputDescriptor =
+            RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+        private readonly RenderGraphTextureDesc m_DilatedMotionVectorsDescriptor = new();
+        private readonly RenderGraphTextureDesc m_DilatedDepthDescriptor = new();
+        private readonly RenderGraphTextureDesc m_ReconstructedPrevNearestDepthDescriptor = new();
+        private readonly RenderGraphTextureDesc m_FarthestDepthDescriptor = new();
+        private readonly RenderGraphTextureDesc m_SpdMipsDescriptor = new();
+        private readonly RenderGraphTextureDesc m_FarthestDepthMip1Descriptor = new();
+        private readonly RenderGraphTextureDesc m_ShadingChangeDescriptor = new();
+        private readonly RenderGraphTextureDesc m_NewLocksDescriptor = new();
+        private readonly RenderGraphTextureDesc m_DilatedReactiveMasksDescriptor = new();
+        private readonly RenderGraphTextureDesc m_LumaInstabilityDescriptor = new();
+        private readonly RenderGraphTextureDesc m_SpdAtomicCounterDescriptor = new();
 
         public static bool IsSupported
         {
@@ -162,33 +198,88 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData.frameIndex,
                 forceResetHistory || (temporalData != null && temporalData.IsFirstFrame));
 
-            var outputDescriptor = CreateOutputDescriptor(sourceTexture.desc, outputSize);
+            var outputDescriptor = ConfigureOutputDescriptor(m_OutputDescriptor, sourceTexture.desc, outputSize);
             var outputHandle = renderGraph.CreateTexture(outputDescriptor);
             var handles = cameraState.Import(renderGraph);
 
             var dilatedMotionVectors = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_DilatedMotionVectors", renderSize.x, renderSize.y, GraphicsFormat.R16G16_SFloat));
+                ConfigureColorDescriptor(
+                    m_DilatedMotionVectorsDescriptor,
+                    "FSR3_DilatedMotionVectors",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R16G16_SFloat));
             var dilatedDepth = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_DilatedDepth", renderSize.x, renderSize.y, GraphicsFormat.R32_SFloat));
+                ConfigureColorDescriptor(
+                    m_DilatedDepthDescriptor,
+                    "FSR3_DilatedDepth",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R32_SFloat));
             var reconstructedPrevNearestDepth = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_ReconstructedPrevNearestDepth", renderSize.x, renderSize.y, GraphicsFormat.R32_UInt));
+                ConfigureColorDescriptor(
+                    m_ReconstructedPrevNearestDepthDescriptor,
+                    "FSR3_ReconstructedPrevNearestDepth",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R32_UInt));
             var farthestDepth = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_FarthestDepth", renderSize.x, renderSize.y, GraphicsFormat.R16_SFloat));
+                ConfigureColorDescriptor(
+                    m_FarthestDepthDescriptor,
+                    "FSR3_FarthestDepth",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R16_SFloat));
             var halfRenderSize = new Vector2Int(Mathf.Max(1, renderSize.x / 2), Mathf.Max(1, renderSize.y / 2));
             var spdMips = renderGraph.CreateTexture(
-                CreateMipDescriptor("FSR3_SpdMips", halfRenderSize.x, halfRenderSize.y, GraphicsFormat.R16G16_SFloat));
+                ConfigureMipDescriptor(
+                    m_SpdMipsDescriptor,
+                    "FSR3_SpdMips",
+                    halfRenderSize.x,
+                    halfRenderSize.y,
+                    GraphicsFormat.R16G16_SFloat));
             var farthestDepthMip1 = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_FarthestDepthMip1", halfRenderSize.x, halfRenderSize.y, GraphicsFormat.R16_SFloat));
+                ConfigureColorDescriptor(
+                    m_FarthestDepthMip1Descriptor,
+                    "FSR3_FarthestDepthMip1",
+                    halfRenderSize.x,
+                    halfRenderSize.y,
+                    GraphicsFormat.R16_SFloat));
             var shadingChange = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_ShadingChange", halfRenderSize.x, halfRenderSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_ShadingChangeDescriptor,
+                    "FSR3_ShadingChange",
+                    halfRenderSize.x,
+                    halfRenderSize.y,
+                    GraphicsFormat.R8_UNorm));
             var newLocks = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_NewLocks", outputSize.x, outputSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_NewLocksDescriptor,
+                    "FSR3_NewLocks",
+                    outputSize.x,
+                    outputSize.y,
+                    GraphicsFormat.R8_UNorm));
             var dilatedReactiveMasks = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_DilatedReactiveMasks", renderSize.x, renderSize.y, GraphicsFormat.R8G8B8A8_UNorm));
+                ConfigureColorDescriptor(
+                    m_DilatedReactiveMasksDescriptor,
+                    "FSR3_DilatedReactiveMasks",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R8G8B8A8_UNorm));
             var lumaInstability = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_LumaInstability", renderSize.x, renderSize.y, GraphicsFormat.R8_UNorm));
+                ConfigureColorDescriptor(
+                    m_LumaInstabilityDescriptor,
+                    "FSR3_LumaInstability",
+                    renderSize.x,
+                    renderSize.y,
+                    GraphicsFormat.R8_UNorm));
             var spdAtomicCounter = renderGraph.CreateTexture(
-                CreateColorDescriptor("FSR3_SpdAtomicCounter", 1, 1, GraphicsFormat.R32_UInt));
+                ConfigureColorDescriptor(
+                    m_SpdAtomicCounterDescriptor,
+                    "FSR3_SpdAtomicCounter",
+                    1,
+                    1,
+                    GraphicsFormat.R32_UInt));
 
             using (var builder = renderGraph.AddUnsafePass<PassData>(
                        "FSR3 Super Resolution",
@@ -239,7 +330,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     : Mathf.Clamp01(Time.deltaTime);
                 passData.FrameIndex = resetHistory ? 0.0f : cameraState.AccumulatedFrameIndex + 1.0f;
                 passData.EnableSharpening = additionalData == null || additionalData.fsr3EnableSharpening;
-                passData.RcasConfig = CreateRcasConfig(additionalData != null ? additionalData.fsr3Sharpness : 0.2f);
+                ConfigureRcasConfig(
+                    additionalData != null ? additionalData.fsr3Sharpness : 0.2f,
+                    out passData.RcasConfig0,
+                    out passData.RcasConfig1,
+                    out passData.RcasConfig2,
+                    out passData.RcasConfig3);
 
                 builder.UseTexture(passData.Source, AccessFlags.Read);
                 builder.UseTexture(passData.Depth, AccessFlags.Read);
@@ -278,13 +374,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             cameraState.CommitFrame(renderSize, outputSize, passDataJitter: additionalData != null ? additionalData.fsr3JitterOffset : Vector2.zero);
 
-            var outputTexture = new RenderGraphTexture
-            {
-                desc = outputDescriptor,
-                innerHandle = outputHandle,
-            };
-            textureCache[outputTexture] = outputHandle;
-            return outputTexture;
+            m_RecordOutputTexture.desc = outputDescriptor;
+            m_RecordOutputTexture.innerHandle = outputHandle;
+            textureCache[m_RecordOutputTexture] = outputHandle;
+            return m_RecordOutputTexture;
         }
 
         public bool Record(
@@ -512,7 +605,11 @@ namespace VividRP.Runtime.RenderPass.Core
             var shader = data.Shaders.Rcas;
             var kernel = data.Shaders.RcasKernel;
             SetCommonConstants(cmd, shader, data);
-            cmd.SetComputeIntParams(shader, RcasConfigId, data.RcasConfig);
+            s_RcasConfigScratch[0] = data.RcasConfig0;
+            s_RcasConfigScratch[1] = data.RcasConfig1;
+            s_RcasConfigScratch[2] = data.RcasConfig2;
+            s_RcasConfigScratch[3] = data.RcasConfig3;
+            cmd.SetComputeIntParams(shader, RcasConfigId, s_RcasConfigScratch);
             cmd.SetComputeTextureParam(shader, kernel, RInputExposureId, data.FrameInfo);
             cmd.SetComputeTextureParam(shader, kernel, RRcasInputId, data.CurrentInternalUpscaled);
             cmd.SetComputeTextureParam(shader, kernel, RwUpscaledOutputId, data.Output);
@@ -521,12 +618,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static void SetCommonConstants(CommandBuffer cmd, ComputeShader shader, PassData data)
         {
-            cmd.SetComputeIntParams(shader, IRenderSizeId, data.RenderSize.x, data.RenderSize.y);
-            cmd.SetComputeIntParams(shader, IPreviousFrameRenderSizeId, data.PreviousRenderSize.x, data.PreviousRenderSize.y);
-            cmd.SetComputeIntParams(shader, IUpscaleSizeId, data.OutputSize.x, data.OutputSize.y);
-            cmd.SetComputeIntParams(shader, IPreviousFrameUpscaleSizeId, data.PreviousOutputSize.x, data.PreviousOutputSize.y);
-            cmd.SetComputeIntParams(shader, IMaxRenderSizeId, data.RenderSize.x, data.RenderSize.y);
-            cmd.SetComputeIntParams(shader, IMaxUpscaleSizeId, data.OutputSize.x, data.OutputSize.y);
+            SetComputeInt2(cmd, shader, IRenderSizeId, data.RenderSize.x, data.RenderSize.y);
+            SetComputeInt2(cmd, shader, IPreviousFrameRenderSizeId, data.PreviousRenderSize.x, data.PreviousRenderSize.y);
+            SetComputeInt2(cmd, shader, IUpscaleSizeId, data.OutputSize.x, data.OutputSize.y);
+            SetComputeInt2(cmd, shader, IPreviousFrameUpscaleSizeId, data.PreviousOutputSize.x, data.PreviousOutputSize.y);
+            SetComputeInt2(cmd, shader, IMaxRenderSizeId, data.RenderSize.x, data.RenderSize.y);
+            SetComputeInt2(cmd, shader, IMaxUpscaleSizeId, data.OutputSize.x, data.OutputSize.y);
             cmd.SetComputeVectorParam(shader, FDeviceToViewDepthId, data.DeviceToViewDepth);
             cmd.SetComputeVectorParam(shader, FJitterId, new Vector4(data.Jitter.x, data.Jitter.y, 0f, 0f));
             cmd.SetComputeVectorParam(shader, FPreviousFrameJitterId, new Vector4(data.PreviousJitter.x, data.PreviousJitter.y, 0f, 0f));
@@ -554,8 +651,15 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cmd.SetComputeIntParam(shader, SpdMipsId, data.SpdMipCount);
             cmd.SetComputeIntParam(shader, SpdNumWorkGroupsId, data.SpdDispatchSize.x * data.SpdDispatchSize.y);
-            cmd.SetComputeIntParams(shader, SpdWorkGroupOffsetId, 0, 0);
-            cmd.SetComputeIntParams(shader, SpdRenderSizeId, data.RenderSize.x, data.RenderSize.y);
+            SetComputeInt2(cmd, shader, SpdWorkGroupOffsetId, 0, 0);
+            SetComputeInt2(cmd, shader, SpdRenderSizeId, data.RenderSize.x, data.RenderSize.y);
+        }
+
+        private static void SetComputeInt2(CommandBuffer cmd, ComputeShader shader, int nameId, int x, int y)
+        {
+            s_ComputeInt2Scratch[0] = x;
+            s_ComputeInt2Scratch[1] = y;
+            cmd.SetComputeIntParams(shader, nameId, s_ComputeInt2Scratch);
         }
 
         private static void BindSpdMips(CommandBuffer cmd, ComputeShader shader, int kernel, TextureHandle texture)
@@ -652,15 +756,27 @@ namespace VividRP.Runtime.RenderPass.Core
             return Mathf.Tan(horizontalFov * 0.5f);
         }
 
-        private static RenderGraphTextureDesc CreateOutputDescriptor(
+        internal static RenderGraphTextureDesc ConfigureOutputDescriptor(
+            RenderGraphTextureDesc descriptor,
             RenderGraphTextureDesc sourceDescriptor,
             Vector2Int outputSize)
         {
-            var descriptor = sourceDescriptor?.Clone()
-                ?? RenderGraphTextureDesc.CreateColorTarget(
+            if (descriptor == null)
+                return null;
+
+            if (sourceDescriptor != null)
+            {
+                RenderGraphTextureDescUtility.Copy(sourceDescriptor, descriptor);
+            }
+            else
+            {
+                ConfigureColorDescriptor(
+                    descriptor,
+                    "FSR3Output",
                     Mathf.Max(1, outputSize.x),
                     Mathf.Max(1, outputSize.y),
                     GraphicsFormat.R16G16B16A16_SFloat);
+            }
 
             var colorFormat = descriptor.ColorFormat != GraphicsFormat.None
                 ? descriptor.ColorFormat
@@ -689,29 +805,53 @@ namespace VividRP.Runtime.RenderPass.Core
             return descriptor;
         }
 
-        private static RenderGraphTextureDesc CreateColorDescriptor(string name, int width, int height, GraphicsFormat format)
+        internal static RenderGraphTextureDesc ConfigureColorDescriptor(
+            RenderGraphTextureDesc descriptor,
+            string name,
+            int width,
+            int height,
+            GraphicsFormat format)
         {
-            return new RenderGraphTextureDesc
-            {
-                Name = name,
-                Width = Mathf.Max(1, width),
-                Height = Mathf.Max(1, height),
-                ColorFormat = format,
-                DepthBufferBits = DepthBits.None,
-                MsaaSamples = MSAASamples.None,
-                FilterMode = FilterMode.Bilinear,
-                WrapMode = TextureWrapMode.Clamp,
-                ClearBuffer = false,
-                EnableRandomWrite = true,
-                UseMipMap = false,
-                AutoGenerateMips = false,
-                MipCount = 1,
-            };
+            if (descriptor == null)
+                return null;
+
+            descriptor.Name = name;
+            descriptor.Width = Mathf.Max(1, width);
+            descriptor.Height = Mathf.Max(1, height);
+            descriptor.Slices = 1;
+            descriptor.Dimension = TextureDimension.Tex2D;
+            descriptor.ColorFormat = format;
+            descriptor.DepthBufferBits = DepthBits.None;
+            descriptor.MsaaSamples = MSAASamples.None;
+            descriptor.FilterMode = FilterMode.Bilinear;
+            descriptor.WrapMode = TextureWrapMode.Clamp;
+            descriptor.AnisoLevel = 1;
+            descriptor.MipMapBias = 0f;
+            descriptor.ClearBuffer = false;
+            descriptor.ClearColor = Color.clear;
+            descriptor.IsShadowMap = false;
+            descriptor.EnableRandomWrite = true;
+            descriptor.BindTextureMS = false;
+            descriptor.UseDynamicScale = false;
+            descriptor.UseDynamicScaleExplicit = false;
+            descriptor.ScaleFactor = Vector2.one;
+            descriptor.UseMipMap = false;
+            descriptor.AutoGenerateMips = false;
+            descriptor.MipCount = 1;
+            return descriptor;
         }
 
-        private static RenderGraphTextureDesc CreateMipDescriptor(string name, int width, int height, GraphicsFormat format)
+        internal static RenderGraphTextureDesc ConfigureMipDescriptor(
+            RenderGraphTextureDesc descriptor,
+            string name,
+            int width,
+            int height,
+            GraphicsFormat format)
         {
-            var descriptor = CreateColorDescriptor(name, width, height, format);
+            ConfigureColorDescriptor(descriptor, name, width, height, format);
+            if (descriptor == null)
+                return null;
+
             descriptor.FilterMode = FilterMode.Bilinear;
             descriptor.UseMipMap = true;
             descriptor.AutoGenerateMips = false;
@@ -719,17 +859,32 @@ namespace VividRP.Runtime.RenderPass.Core
             return descriptor;
         }
 
-        private static int[] CreateRcasConfig(float sharpness)
+        internal static void ConfigureRcasConfig(int[] config, float sharpness)
+        {
+            if (config == null || config.Length < 4)
+                return;
+
+            ConfigureRcasConfig(
+                sharpness,
+                out config[0],
+                out config[1],
+                out config[2],
+                out config[3]);
+        }
+
+        private static void ConfigureRcasConfig(
+            float sharpness,
+            out int config0,
+            out int config1,
+            out int config2,
+            out int config3)
         {
             var remappedSharpness = (-2.0f * Mathf.Clamp01(sharpness)) + 2.0f;
             var linearSharpness = Mathf.Pow(2.0f, -remappedSharpness);
-            return new[]
-            {
-                BitConverter.SingleToInt32Bits(linearSharpness),
-                unchecked((int)PackHalf2x16(linearSharpness, linearSharpness)),
-                0,
-                0,
-            };
+            config0 = BitConverter.SingleToInt32Bits(linearSharpness);
+            config1 = unchecked((int)PackHalf2x16(linearSharpness, linearSharpness));
+            config2 = 0;
+            config3 = 0;
         }
 
         private static uint PackHalf2x16(float x, float y)
@@ -925,7 +1080,10 @@ namespace VividRP.Runtime.RenderPass.Core
             public float FrameIndex;
             public bool ResetHistory;
             public bool EnableSharpening;
-            public int[] RcasConfig;
+            public int RcasConfig0;
+            public int RcasConfig1;
+            public int RcasConfig2;
+            public int RcasConfig3;
 
             public Vector2Int SpdDispatchSize => new(
                 DivRoundUp(RenderSize.x, SpdThreadGroupSize),
@@ -1049,25 +1207,25 @@ namespace VividRP.Runtime.RenderPass.Core
                         renderSize.x,
                         renderSize.y,
                         GraphicsFormat.R8_UNorm,
-                        $"FSR3_Accumulation{i + 1}");
+                        s_AccumulationNames[i]);
                     EnsureHandle(
                         ref m_InternalUpscaled[i],
                         outputSize.x,
                         outputSize.y,
                         GraphicsFormat.R16G16B16A16_SFloat,
-                        $"FSR3_InternalUpscaled{i + 1}");
+                        s_InternalUpscaledNames[i]);
                     EnsureHandle(
                         ref m_LumaHistory[i],
                         renderSize.x,
                         renderSize.y,
                         GraphicsFormat.R16G16B16A16_SFloat,
-                        $"FSR3_LumaHistory{i + 1}");
+                        s_LumaHistoryNames[i]);
                     EnsureHandle(
                         ref m_Luma[i],
                         renderSize.x,
                         renderSize.y,
                         GraphicsFormat.R16_SFloat,
-                        $"FSR3_Luma{i + 1}");
+                        s_LumaNames[i]);
                 }
 
                 EnsureHandle(ref m_FrameInfo, 1, 1, GraphicsFormat.R32G32B32A32_SFloat, "FSR3_FrameInfo");

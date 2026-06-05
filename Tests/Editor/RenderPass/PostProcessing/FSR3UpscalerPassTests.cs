@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -124,6 +125,41 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("renderGraph.ImportTexture(m_Luma[writeIndex])"));
             Assert.That(passSource, Does.Contain("temporalData != null && temporalData.IsFirstFrame"));
             Assert.That(passSource, Does.Contain("forceResetHistory"));
+        }
+
+        [Test]
+        public void ConfigureColorDescriptor_ReusesDescriptorInstance()
+        {
+            var descriptor = new RenderGraphTextureDesc();
+
+            var configured = FSR3UpscalerPass.ConfigureColorDescriptor(
+                descriptor,
+                "FSR3_TestDescriptor",
+                1920,
+                1080,
+                GraphicsFormat.R16G16_SFloat);
+
+            Assert.That(configured, Is.SameAs(descriptor));
+            Assert.That(descriptor.Name, Is.EqualTo("FSR3_TestDescriptor"));
+            Assert.That(descriptor.Width, Is.EqualTo(1920));
+            Assert.That(descriptor.Height, Is.EqualTo(1080));
+            Assert.That(descriptor.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16_SFloat));
+            Assert.That(descriptor.EnableRandomWrite, Is.True);
+            Assert.That(descriptor.AnisoLevel, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ConfigureRcasConfig_DoesNotAllocate_WhenArrayIsReused()
+        {
+            var config = new int[4];
+            FSR3UpscalerPass.ConfigureRcasConfig(config, 0.2f);
+
+            var allocatedBefore = System.GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+                FSR3UpscalerPass.ConfigureRcasConfig(config, 0.2f);
+
+            var allocatedBytes = System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+            Assert.That(allocatedBytes, Is.Zero);
         }
 
         [Test]

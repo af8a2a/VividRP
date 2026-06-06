@@ -42,26 +42,34 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(camera));
             }
 
-            VividGPUDrivenCullingContextUtility.Build(
-                camera,
-                passMask,
-                out VividGPUCullingContext cullingContext,
-                out VividGPULODSelectionContext lodSelectionContext
-            );
+            VividGPUCullingContext cullingContext;
+            VividGPULODSelectionContext lodSelectionContext;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullBuildContextMarker.Auto())
+            {
+                VividGPUDrivenCullingContextUtility.Build(
+                    camera,
+                    passMask,
+                    out cullingContext,
+                    out lodSelectionContext
+                );
+            }
 
-            Dispatch(
-                cmd,
-                cullingContext,
-                lodSelectionContext,
-                sceneData,
-                sceneBuffers,
-                gpuInstanceCullingCompute,
-                meshletListBuildCompute,
-                gpuMeshletCullingCompute,
-                fixupVisibleMeshletIndirectDrawArgsCompute,
-                forcedMeshLODNodeDepth,
-                meshLODErrorThreshold
-            );
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMarker.Auto())
+            {
+                Dispatch(
+                    cmd,
+                    cullingContext,
+                    lodSelectionContext,
+                    sceneData,
+                    sceneBuffers,
+                    gpuInstanceCullingCompute,
+                    meshletListBuildCompute,
+                    gpuMeshletCullingCompute,
+                    fixupVisibleMeshletIndirectDrawArgsCompute,
+                    forcedMeshLODNodeDepth,
+                    meshLODErrorThreshold
+                );
+            }
         }
 
         public void Dispatch(

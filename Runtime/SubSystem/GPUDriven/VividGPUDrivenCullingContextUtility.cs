@@ -8,6 +8,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         public const int DefaultForcedMeshLODNodeDepth = VividGPUDrivenDefaults.ForcedMeshLODNodeDepth;
         public const float DefaultMeshLODErrorThreshold = VividGPUDrivenDefaults.MeshLODErrorThreshold;
+        private static readonly Plane[] s_FrustumPlanes = new Plane[6];
 
         public static void Build(
             Camera camera,
@@ -84,7 +85,10 @@ namespace VividRP.Runtime.GPUDriven
             Matrix4x4 gpuProjectionMatrix = GL.GetGPUProjectionMatrix(projectionMatrix, true);
             Matrix4x4 gpuViewProjectionMatrix = gpuProjectionMatrix * viewMatrix;
             Matrix4x4 cullingViewProjectionMatrix = projectionMatrix * viewMatrix;
-            Plane[] frustumPlanes = GeometryUtility.CalculateFrustumPlanes(cullingViewProjectionMatrix);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullFrustumPlanesMarker.Auto())
+            {
+                GeometryUtility.CalculateFrustumPlanes(cullingViewProjectionMatrix, s_FrustumPlanes);
+            }
 
             cullingContext = new VividGPUCullingContext
             {
@@ -98,7 +102,7 @@ namespace VividRP.Runtime.GPUDriven
                 MeshletListBuildJobsOffset = 0,
                 MeshletRenderRequestsOffset = 0,
             };
-            FillFrustumPlanes(ref cullingContext, frustumPlanes);
+            FillFrustumPlanes(ref cullingContext, s_FrustumPlanes);
 
             lodSelectionContext = new VividGPULODSelectionContext
             {

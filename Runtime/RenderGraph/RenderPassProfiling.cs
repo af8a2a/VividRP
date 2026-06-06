@@ -151,6 +151,9 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenApplySettingsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ApplySettings");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenResolveResourcesMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ResolveResources");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenCullMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull");
+        public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenCullBuildContextMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull/BuildContext");
+        public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenCullFrustumPlanesMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull/BuildContext/FrustumPlanes");
+        public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenCullDispatchMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull/Dispatch");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenBindGlobalsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/BindGlobals");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenSetFrameDataMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/SetFrameData");
         public static readonly ProfilerMarker PrepareFrameSubsystemGPUDrivenReportStatsMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ReportStats");

@@ -88,6 +88,8 @@ namespace VividRP.Editor.Tests
             var ltcAreaLightSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "AreaLight", "LTCAreaLightSystem.cs"));
             var decalSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Decal", "DecalSystem.cs"));
             var gpuDrivenSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenSystem.cs"));
+            var gpuDrivenCullingDispatcherSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenCullingDispatcher.cs"));
+            var gpuDrivenCullingContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenCullingContextUtility.cs"));
             var skySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
             var virtualTextureSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
 
@@ -137,6 +139,9 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ApplySettings"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ResolveResources"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull/BuildContext"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull/BuildContext/FrustumPlanes"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/Cull/Dispatch"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/BindGlobals"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/SetFrameData"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/ReportStats"));
@@ -206,6 +211,11 @@ namespace VividRP.Editor.Tests
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenBindGlobalsMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenSetFrameDataMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenReportStatsMarker.Auto()"));
+            Assert.That(gpuDrivenCullingDispatcherSource, Does.Contain("PrepareFrameSubsystemGPUDrivenCullBuildContextMarker.Auto()"));
+            Assert.That(gpuDrivenCullingDispatcherSource, Does.Contain("PrepareFrameSubsystemGPUDrivenCullDispatchMarker.Auto()"));
+            Assert.That(gpuDrivenCullingContextSource, Does.Contain("PrepareFrameSubsystemGPUDrivenCullFrustumPlanesMarker.Auto()"));
+            Assert.That(gpuDrivenCullingContextSource, Does.Contain("GeometryUtility.CalculateFrustumPlanes(cullingViewProjectionMatrix, s_FrustumPlanes)"));
+            Assert.That(gpuDrivenCullingContextSource, Does.Not.Contain("GeometryUtility.CalculateFrustumPlanes(cullingViewProjectionMatrix);"));
             Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyMarker.Auto()"));
             Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyFrameDataMarker.Auto()"));
             Assert.That(skySource, Does.Contain("PrepareFrameSubsystemSkyActiveRendererMarker.Auto()"));

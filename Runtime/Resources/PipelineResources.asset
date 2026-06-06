@@ -197,10 +197,18 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 4c43bc7556866e04b985dc155321bc61, type: 3}
   - ResourceName: Shaders/Material/MaterialClassification
     ResourceObject: {fileID: 7200000, guid: 10706a155531873498d61668200a903d, type: 3}
+  - ResourceName: Texture/BlueNoise/RankingTile1SPP.png
+    ResourceObject: {fileID: 2800000, guid: 3014c3f0ebe00d743a49e8b7913dad74, type: 3}
   - ResourceName: Texture/BlueNoise/RankingTile256SPP.png
     ResourceObject: {fileID: 2800000, guid: 948549db1fcb4c1b9fefb0fe55c31b7a, type: 3}
+  - ResourceName: Texture/BlueNoise/RankingTile8SPP.png
+    ResourceObject: {fileID: 2800000, guid: bba50fb6feb56a74db2a71848f0a097d, type: 3}
+  - ResourceName: Texture/BlueNoise/ScramblingTile1SPP.png
+    ResourceObject: {fileID: 2800000, guid: a8d2d14733d3c5e4aaa80784c53362a0, type: 3}
   - ResourceName: Texture/BlueNoise/ScramblingTile256SPP.png
     ResourceObject: {fileID: 2800000, guid: 3c978153caa04294a8c9bdef3ded0594, type: 3}
+  - ResourceName: Texture/BlueNoise/ScramblingTile8SPP.png
+    ResourceObject: {fileID: 2800000, guid: 4af270a7411c44b4aafa6b305d16d933, type: 3}
   - ResourceName: Texture/BlueNoise/SobolOwenScrambled256.png
     ResourceObject: {fileID: 2800000, guid: 740f2c43de4841599d4b6f676ef3d897, type: 3}
   - ResourceName: Texture/Default/DefaultHDRISky.exr

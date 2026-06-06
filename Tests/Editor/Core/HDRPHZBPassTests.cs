@@ -572,6 +572,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(avgRadianceTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
                 Assert.That(avgRadianceTexture.desc.EnableRandomWrite, Is.True);
 
+                var hdrpHitPointTexture = GetPrivateField<RenderGraphTexture>(pass, "m_HDRPHitPointTexture");
+                Assert.That(hdrpHitPointTexture.desc.Width, Is.EqualTo(1920));
+                Assert.That(hdrpHitPointTexture.desc.Height, Is.EqualTo(1080));
+                Assert.That(hdrpHitPointTexture.desc.Name, Is.EqualTo("ScreenSpaceReflectionHDRPHitPoint"));
+                Assert.That(hdrpHitPointTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16_UNorm));
+                Assert.That(hdrpHitPointTexture.desc.EnableRandomWrite, Is.True);
+
                 var accumulationHistory = GetPrivateField<RenderGraphTexture>(pass, "m_AccumulationHistoryCurrent");
                 Assert.That(accumulationHistory.desc.Width, Is.EqualTo(1920));
                 Assert.That(accumulationHistory.desc.Height, Is.EqualTo(1080));
@@ -681,7 +688,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRHybridDispatchIndirectArgs;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRResolveTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRRayInfoTexture;"));
-            Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPHitPointTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float2> _SSRHDRPHitPointTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPAccumTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPOutputTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRAccumTexture;"));
@@ -890,7 +897,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPTracing("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPReprojection("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPAccumulate("));
-            Assert.That(source, Does.Contain("_SSRHDRPHitPointTexture[coordSS] = float4(hitScreenUV, 1.0, 1.0);"));
+            Assert.That(source, Does.Contain("_SSRHDRPHitPointTexture[coordSS] = float2(0.0, 0.0);"));
+            Assert.That(source, Does.Contain("_SSRHDRPHitPointTexture[coordSS] = hitScreenUV;"));
+            Assert.That(source, Does.Contain("float2 hitData = _SSRHDRPHitPointTexture[coordSS];"));
+            Assert.That(source, Does.Contain("if (max(hitData.x, hitData.y) == 0.0)"));
+            Assert.That(source, Does.Not.Contain("hitData.z <= 0.0"));
             Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, opacity);"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
             Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];"));

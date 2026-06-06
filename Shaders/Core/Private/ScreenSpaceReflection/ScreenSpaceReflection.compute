@@ -50,7 +50,7 @@ RWTexture2D<float4> _SSRTraceTexture;
 RWTexture2D<float4> _SSRResolveTexture;
 RWTexture2D<float4> _SSRRayInfoTexture;
 RWTexture2D<float4> _SSRDebugTexture;
-RWTexture2D<float4> _SSRHDRPHitPointTexture;
+RWTexture2D<float2> _SSRHDRPHitPointTexture;
 RWTexture2D<float4> _SSRHDRPAccumTexture;
 RWTexture2D<float4> _SSRHDRPOutputTexture;
 RWTexture2D<float4> _SSRAccumTexture;
@@ -2376,7 +2376,7 @@ void ScreenSpaceReflectionsHDRPTracing(uint3 dispatchThreadId : SV_DispatchThrea
     if (IsOutsideScreen(coordSS))
         return;
 
-    _SSRHDRPHitPointTexture[coordSS] = EmptySsrResult();
+    _SSRHDRPHitPointTexture[coordSS] = float2(0.0, 0.0);
 
     float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
     if (IsRawFarDepth(deviceDepth))
@@ -2399,7 +2399,7 @@ void ScreenSpaceReflectionsHDRPTracing(uint3 dispatchThreadId : SV_DispatchThrea
 
     float2 hitScreenUV;
     if (TraceScreenSpaceReflectionHDRP(coordSS, screenUV, deviceDepth, normalWS, viewDirWS, reflectionDirWS, hitScreenUV))
-        _SSRHDRPHitPointTexture[coordSS] = float4(hitScreenUV, 1.0, 1.0);
+        _SSRHDRPHitPointTexture[coordSS] = hitScreenUV;
 }
 
 [numthreads(8, 8, 1)]
@@ -2411,16 +2411,16 @@ void ScreenSpaceReflectionsHDRPReprojection(uint3 dispatchThreadId : SV_Dispatch
 
     _SSRHDRPAccumTexture[coordSS] = EmptySsrResult();
 
-    float4 hitData = _SSRHDRPHitPointTexture[coordSS];
-    if (hitData.z <= 0.0)
+    float2 hitData = _SSRHDRPHitPointTexture[coordSS];
+    if (max(hitData.x, hitData.y) == 0.0)
         return;
 
     float perceptualRoughness = LoadPerceptualRoughness(coordSS);
-    float opacity = EdgeOfScreenFade(hitData.xy) * PerceptualRoughnessFade(perceptualRoughness) * saturate(_SsrIntensity);
+    float opacity = EdgeOfScreenFade(hitData) * PerceptualRoughnessFade(perceptualRoughness) * saturate(_SsrIntensity);
     if (opacity <= 0.0001)
         return;
 
-    float3 color = SanitizeSsrRadiance(SampleReflectionColor(hitData.xy, perceptualRoughness));
+    float3 color = SanitizeSsrRadiance(SampleReflectionColor(hitData, perceptualRoughness));
     if (all(color <= 0.0))
         return;
 

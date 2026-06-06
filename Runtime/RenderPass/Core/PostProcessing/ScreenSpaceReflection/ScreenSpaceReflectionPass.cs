@@ -456,7 +456,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments);
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
             m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
-            m_HDRPHitPointTexture = CreateColorTexture("ScreenSpaceReflectionHDRPHitPoint", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+            m_HDRPHitPointTexture = CreateColorTexture("ScreenSpaceReflectionHDRPHitPoint", 1, 1, GraphicsFormat.R16G16_UNorm);
             m_HDRPAccumTexture = CreateColorTexture("ScreenSpaceReflectionHDRPAccum", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_HDRPOutputTexture = CreateColorTexture("ScreenSpaceReflectionHDRPOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_DefaultPreviousColorPyramidTexture = RenderGraphTexture.CreateInput(
@@ -515,7 +515,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_ResolveAccumTexture, "ScreenSpaceReflectionResolveAccum", 1, 1);
             ConfigureAvgRadianceDescriptor(m_AvgRadianceTexture, 1, 1);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", 1, 1);
-            ConfigureInternalTextureDescriptor(m_HDRPHitPointTexture, "ScreenSpaceReflectionHDRPHitPoint", 1, 1);
+            ConfigureHDRPHitPointDescriptor(m_HDRPHitPointTexture, 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", 1, 1);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryPrevious, "ScreenSpaceReflectionAccumPrev", 1, 1);
@@ -1773,7 +1773,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureInternalTextureDescriptor(m_ResolveAccumTexture, "ScreenSpaceReflectionResolveAccum", width, height);
             ConfigureAvgRadianceDescriptor(m_AvgRadianceTexture, m_TileCountX, m_TileCountY);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", width, height);
-            ConfigureInternalTextureDescriptor(m_HDRPHitPointTexture, "ScreenSpaceReflectionHDRPHitPoint", width, height);
+            ConfigureHDRPHitPointDescriptor(m_HDRPHitPointTexture, width, height);
             ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", width, height);
             ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", width, height);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryPrevious, "ScreenSpaceReflectionAccumPrev", width, height);
@@ -2046,6 +2046,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
             texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
             texture.desc.FilterMode = FilterMode.Bilinear;
+        }
+
+        private static void ConfigureHDRPHitPointDescriptor(RenderGraphTexture texture, int width, int height)
+        {
+            ConfigureInternalTextureDescriptor(texture, "ScreenSpaceReflectionHDRPHitPoint", width, height);
+            if (texture?.desc == null)
+                return;
+
+            texture.desc.ColorFormat = GraphicsFormat.R16G16_UNorm;
         }
 
         private static void ConfigureReBlurAccumulationDescriptor(

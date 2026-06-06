@@ -72,15 +72,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cameraData = frameData.Get<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
-            var width = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Width,
+            var width = RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                 cameraData.actualWidth,
                 cameraData.pixelWidth,
                 Screen.width,
                 m_LeftTexture?.desc,
                 m_RightTexture?.desc);
-            var height = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Height,
+            var height = RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(
                 cameraData.actualHeight,
                 cameraData.pixelHeight,
                 Screen.height,

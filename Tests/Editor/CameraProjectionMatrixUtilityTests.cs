@@ -344,6 +344,27 @@ namespace VividRP.Editor.Tests
             Assert.That(allocatedBytes, Is.Zero);
         }
 
+        [Test]
+        public void RestoreProjectionState_DoesNotAllocate_WhenImplicitProjectionIsAlreadyRestored()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.fieldOfView = 60.0f;
+
+            var state = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
+            CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            for (var index = 0; index < 32; index++)
+                CameraProjectionMatrixUtility.RestoreProjectionState(camera, state);
+
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
         private static float MaxAbsDiff(Matrix4x4 lhs, Matrix4x4 rhs)
         {
             var maxDiff = 0.0f;

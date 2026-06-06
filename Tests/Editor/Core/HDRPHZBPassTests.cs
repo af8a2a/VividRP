@@ -994,7 +994,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("public Matrix4x4 SsrInvViewProjMatrix;"));
             Assert.That(source, Does.Contain("public Matrix4x4 SsrPrevViewProjMatrix;"));
             Assert.That(source, Does.Contain("cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);"));
-            Assert.That(source, Does.Contain("ResolveSsrPrevViewProjMatrix(cameraShaderData, viewProjMatrix);"));
+            Assert.That(source, Does.Contain("ResolveSsrPrevViewProjMatrix(cameraData, viewProjMatrix);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))"));

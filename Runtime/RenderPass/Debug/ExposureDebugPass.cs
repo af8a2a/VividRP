@@ -151,14 +151,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ExposureData = frameData.Get<VividExposureData>();
             m_ColorGradingSettings = ColorGradingSettingsResolver.Resolve();
 
-            var width = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Width,
+            var width = RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                 cameraData.actualWidth,
                 cameraData.pixelWidth,
                 Screen.width,
                 m_SourceTexture?.desc);
-            var height = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Height,
+            var height = RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(
                 cameraData.actualHeight,
                 cameraData.pixelHeight,
                 Screen.height,

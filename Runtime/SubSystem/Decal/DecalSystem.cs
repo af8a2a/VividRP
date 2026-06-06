@@ -49,8 +49,6 @@ namespace VividRP.Runtime.SubSystem.Decal
 
         protected override void OnInitialize()
         {
-            RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
-            RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
             InsertIntoPlayerLoop();
         }
 
@@ -60,7 +58,6 @@ namespace VividRP.Runtime.SubSystem.Decal
             m_KickRan = false;
 
             RemoveFromPlayerLoop();
-            RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
 
             if (m_Sources.IsCreated)
                 m_Sources.Dispose();
@@ -203,7 +200,7 @@ namespace VividRP.Runtime.SubSystem.Decal
             }
         }
 
-        private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
+        internal static void ScheduleCullForCamera(Camera camera)
         {
             if (!IsInitialized || camera == null)
                 return;
@@ -249,7 +246,7 @@ namespace VividRP.Runtime.SubSystem.Decal
                 return;
             }
 
-            // Cull was scheduled by OnBeginCameraRendering for this camera — just join the result.
+            // Cull was scheduled by RenderCamera for this camera — just join the result.
             EntityId cameraId = camera.GetEntityId();
             if ((m_CullScheduled || m_CullReady) && m_CullScheduledForCameraId == cameraId)
             {

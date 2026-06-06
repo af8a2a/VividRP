@@ -170,14 +170,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 : AutoExposureSettingsData.CreateDefault();
 
             var sourceDescriptor = source?.desc;
-            m_Width = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Width,
+            m_Width = RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                 cameraData?.actualWidth ?? 0,
                 cameraData?.pixelWidth ?? 0,
                 Screen.width,
                 sourceDescriptor);
-            m_Height = RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                descriptor => descriptor.Height,
+            m_Height = RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(
                 cameraData?.actualHeight ?? 0,
                 cameraData?.pixelHeight ?? 0,
                 Screen.height,

@@ -24,15 +24,17 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_CutoffPropertyId = Shader.PropertyToID("_Cutoff");
         private static readonly int s_CullPropertyId = Shader.PropertyToID("_Cull");
         private const string SimpleForwardShaderName = "VividRP/Material/SimpleForward";
+        private static readonly EntityIdComparer s_EntityIdComparer = new();
+        private static readonly EntityIdSubMeshIndexComparer s_EntityIdSubMeshIndexComparer = new();
 
-        private readonly Dictionary<EntityId, int> m_MaterialIndexByObjectId = new();
-        private readonly Dictionary<EntityId, MaterialMetadata> m_MaterialMetadataByObjectId = new();
-        private readonly Dictionary<EntityId, MeshletAssetMetadata> m_MeshMetadataByObjectId = new();
-        private readonly HashSet<EntityId> m_PreviousReferencedMeshletAssetIds = new();
-        private readonly HashSet<EntityId> m_CurrentReferencedMeshletAssetIds = new();
-        private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new();
-        private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new();
-        private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new();
+        private readonly Dictionary<EntityId, int> m_MaterialIndexByObjectId = new(s_EntityIdComparer);
+        private readonly Dictionary<EntityId, MaterialMetadata> m_MaterialMetadataByObjectId = new(s_EntityIdComparer);
+        private readonly Dictionary<EntityId, MeshletAssetMetadata> m_MeshMetadataByObjectId = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_PreviousReferencedMeshletAssetIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_CurrentReferencedMeshletAssetIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_PreviousReferencedMaterialProxyIds = new(s_EntityIdComparer);
+        private readonly HashSet<EntityId> m_CurrentReferencedMaterialProxyIds = new(s_EntityIdComparer);
+        private readonly HashSet<(EntityId entityId, int subMeshIndex)> m_MissingProxyWarningKeys = new(s_EntityIdSubMeshIndexComparer);
         private readonly List<VividInstanceData> m_PreviousInstanceData = new();
         private static readonly Dictionary<Shader, bool> s_SimpleForwardShaderMatchCache = new();
         private static Shader s_SimpleForwardShader;
@@ -84,74 +86,116 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             bool staticDataChanged = !m_HasBuiltStaticData;
-            CollectReferencedMeshletAssetIds(database);
-            CollectReferencedMaterialProxyIds(database);
-
-            if (!staticDataChanged && !m_CurrentReferencedMeshletAssetIds.SetEquals(m_PreviousReferencedMeshletAssetIds))
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataCollectReferencesMarker.Auto())
             {
-                staticDataChanged = true;
+                CollectReferencedMeshletAssetIds(database);
+                CollectReferencedMaterialProxyIds(database);
             }
 
-            if (!staticDataChanged && HasTrackedMeshletAssetVersionChanges(database))
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataDetectChangesMarker.Auto())
             {
-                staticDataChanged = true;
+                if (!staticDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedMeshletAssetIds, m_PreviousReferencedMeshletAssetIds))
+                {
+                    staticDataChanged = true;
+                }
+
+                if (!staticDataChanged && HasTrackedMeshletAssetVersionChanges(database))
+                {
+                    staticDataChanged = true;
+                }
+
+                materialDataChanged = staticDataChanged || m_UsesFallbackMaterials;
+                if (!materialDataChanged && !AreEntityIdSetsEqual(m_CurrentReferencedMaterialProxyIds, m_PreviousReferencedMaterialProxyIds))
+                {
+                    materialDataChanged = true;
+                }
+
+                if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database))
+                {
+                    materialDataChanged = true;
+                }
+
+                if (!materialDataChanged && m_PreviousTextureBindingRevision != bindlessTextureContainer.TextureBindingRevision)
+                {
+                    materialDataChanged = true;
+                }
             }
 
-            materialDataChanged = staticDataChanged || m_UsesFallbackMaterials;
-            if (!materialDataChanged && !m_CurrentReferencedMaterialProxyIds.SetEquals(m_PreviousReferencedMaterialProxyIds))
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataClearSceneMarker.Auto())
             {
-                materialDataChanged = true;
+                if (staticDataChanged)
+                {
+                    sceneData.Clear();
+                    m_MeshMetadataByObjectId.Clear();
+                    m_MaterialMetadataByObjectId.Clear();
+                }
+                else if (materialDataChanged)
+                {
+                    sceneData.ClearDynamic();
+                    m_MaterialMetadataByObjectId.Clear();
+                }
+                else
+                {
+                    sceneData.ClearInstances();
+                }
+
+                m_MaterialIndexByObjectId.Clear();
             }
 
-            if (!materialDataChanged && HasTrackedMaterialProxyVersionChanges(database))
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataAppendRenderersMarker.Auto())
             {
-                materialDataChanged = true;
+                IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+                IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+                int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+
+                for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+                {
+                    AppendRendererSceneData(
+                        sceneData,
+                        rendererData[rendererIndex],
+                        rendererResources[rendererIndex],
+                        bindlessTextureContainer
+                    );
+                }
             }
 
-            if (!materialDataChanged && m_PreviousTextureBindingRevision != bindlessTextureContainer.TextureBindingRevision)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataInstanceDiffMarker.Auto())
             {
-                materialDataChanged = true;
+                instanceDataChanged = !AreInstanceDataListsEqual(sceneData.MutableInstances, m_PreviousInstanceData);
+                UpdatePreviousInstanceData(sceneData.MutableInstances);
             }
 
-            if (staticDataChanged)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataSwapReferencesMarker.Auto())
             {
-                sceneData.Clear();
-                m_MeshMetadataByObjectId.Clear();
-                m_MaterialMetadataByObjectId.Clear();
+                SwapReferencedMeshletAssetIds();
+                SwapReferencedMaterialProxyIds();
             }
-            else if (materialDataChanged)
-            {
-                sceneData.ClearDynamic();
-                m_MaterialMetadataByObjectId.Clear();
-            }
-            else
-            {
-                sceneData.ClearInstances();
-            }
-
-            m_MaterialIndexByObjectId.Clear();
-
-            IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
-            IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-            int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
-
-            for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
-            {
-                AppendRendererSceneData(
-                    sceneData,
-                    rendererData[rendererIndex],
-                    rendererResources[rendererIndex],
-                    bindlessTextureContainer
-                );
-            }
-
-            instanceDataChanged = !AreInstanceDataListsEqual(sceneData.MutableInstances, m_PreviousInstanceData);
-            UpdatePreviousInstanceData(sceneData.MutableInstances);
-            SwapReferencedMeshletAssetIds();
-            SwapReferencedMaterialProxyIds();
             m_HasBuiltStaticData = true;
             m_PreviousTextureBindingRevision = bindlessTextureContainer.TextureBindingRevision;
             return staticDataChanged;
+        }
+
+        private static bool AreEntityIdSetsEqual(HashSet<EntityId> current, HashSet<EntityId> previous)
+        {
+            if (ReferenceEquals(current, previous))
+            {
+                return true;
+            }
+
+            if (current == null || previous == null || current.Count != previous.Count)
+            {
+                return false;
+            }
+
+            foreach (EntityId entityId in current)
+            {
+                if (!previous.Contains(entityId))
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         private static bool AreInstanceDataListsEqual(
@@ -921,6 +965,38 @@ namespace VividRP.Runtime.GPUDriven
             public int MaterialIndex { get; }
 
             public uint Revision { get; }
+        }
+
+        private sealed class EntityIdComparer : IEqualityComparer<EntityId>
+        {
+            public bool Equals(EntityId x, EntityId y)
+            {
+                return EntityId.ToULong(x) == EntityId.ToULong(y);
+            }
+
+            public int GetHashCode(EntityId obj)
+            {
+                return EntityId.ToULong(obj).GetHashCode();
+            }
+        }
+
+        private sealed class EntityIdSubMeshIndexComparer : IEqualityComparer<(EntityId entityId, int subMeshIndex)>
+        {
+            public bool Equals(
+                (EntityId entityId, int subMeshIndex) x,
+                (EntityId entityId, int subMeshIndex) y)
+            {
+                return x.subMeshIndex == y.subMeshIndex
+                       && EntityId.ToULong(x.entityId) == EntityId.ToULong(y.entityId);
+            }
+
+            public int GetHashCode((EntityId entityId, int subMeshIndex) obj)
+            {
+                unchecked
+                {
+                    return (EntityId.ToULong(obj.entityId).GetHashCode() * 397) ^ obj.subMeshIndex;
+                }
+            }
         }
     }
 }

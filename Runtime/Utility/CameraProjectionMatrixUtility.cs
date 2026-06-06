@@ -9,6 +9,7 @@ namespace VividRP.Runtime
         private const float MatrixTolerance = 0.0001f;
         private static readonly PropertyInfo s_ProjectionMatrixModeProperty =
             typeof(Camera).GetProperty("projectionMatrixMode", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly Func<Camera, int> s_ProjectionMatrixModeGetter = CreateProjectionMatrixModeGetter();
         private static readonly object[] s_ProjectionStateModeValues = CreateProjectionStateModeValues();
 
         internal enum CameraProjectionStateMode
@@ -138,10 +139,16 @@ namespace VividRP.Runtime
                     camera.projectionMatrix = state.ProjectionMatrix;
                     break;
                 case CameraProjectionStateMode.PhysicalPropertiesBased:
+                    if (IsParameterDrivenProjectionAlreadyRestored(camera, CameraProjectionStateMode.PhysicalPropertiesBased))
+                        return;
+
                     RestoreParameterDrivenProjection(camera, CameraProjectionStateMode.PhysicalPropertiesBased);
                     break;
                 case CameraProjectionStateMode.Implicit:
                 default:
+                    if (IsParameterDrivenProjectionAlreadyRestored(camera, CameraProjectionStateMode.Implicit))
+                        return;
+
                     RestoreParameterDrivenProjection(camera, CameraProjectionStateMode.Implicit);
                     break;
             }
@@ -169,6 +176,19 @@ namespace VividRP.Runtime
                 return;
 
             camera.ResetProjectionMatrix();
+        }
+
+        private static bool IsParameterDrivenProjectionAlreadyRestored(Camera camera, CameraProjectionStateMode mode)
+        {
+            if (camera == null)
+                return true;
+
+            if (!TryGetProjectionStateMode(camera, out var currentMode) || currentMode != mode)
+                return false;
+
+            var expectedProjection = BuildProjectionMatrix(camera);
+            return MaxAbsDiff(camera.projectionMatrix, expectedProjection) <= MatrixTolerance
+                && MaxAbsDiff(camera.nonJitteredProjectionMatrix, expectedProjection) <= MatrixTolerance;
         }
 
         private static void RestorePhysicalPropertiesBasedProjection(Camera camera)
@@ -307,6 +327,17 @@ namespace VividRP.Runtime
         {
             mode = default;
 
+            if (s_ProjectionMatrixModeGetter != null)
+            {
+                var rawMode = s_ProjectionMatrixModeGetter(camera);
+                if (rawMode >= (int)CameraProjectionStateMode.Explicit
+                    && rawMode <= (int)CameraProjectionStateMode.PhysicalPropertiesBased)
+                {
+                    mode = (CameraProjectionStateMode)rawMode;
+                    return true;
+                }
+            }
+
             if (s_ProjectionMatrixModeProperty == null)
                 return false;
 
@@ -331,6 +362,26 @@ namespace VividRP.Runtime
             catch
             {
                 return false;
+            }
+        }
+
+        private static Func<Camera, int> CreateProjectionMatrixModeGetter()
+        {
+            var getter = s_ProjectionMatrixModeProperty?.GetGetMethod(true);
+            if (getter == null)
+                return null;
+
+            try
+            {
+                return (Func<Camera, int>)Delegate.CreateDelegate(typeof(Func<Camera, int>), getter);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            catch (MemberAccessException)
+            {
+                return null;
             }
         }
 

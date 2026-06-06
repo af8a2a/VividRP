@@ -1,4 +1,3 @@
-using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 
@@ -14,28 +13,32 @@ namespace VividRP.Runtime
                 && !(descriptor.Width == 1 && descriptor.Height == 1);
         }
 
-        internal static int ResolveMaxExplicitDimension(
-            Func<RenderGraphTextureDesc, int> selector,
-            int actualCameraDimension,
-            int cameraDimension,
-            int screenDimension,
-            params RenderGraphTextureDesc[] descriptors)
+        internal static int ResolveMaxExplicitWidth(
+            int actualCameraWidth,
+            int cameraWidth,
+            int screenWidth,
+            RenderGraphTextureDesc descriptorA = null,
+            RenderGraphTextureDesc descriptorB = null)
         {
-            var resolved = 0;
+            var resolved = Mathf.Max(
+                ResolveExplicitWidth(descriptorA),
+                ResolveExplicitWidth(descriptorB));
 
-            for (var i = 0; i < descriptors.Length; i++)
-            {
-                var descriptor = descriptors[i];
-                if (!HasExplicitSize(descriptor))
-                    continue;
+            return ResolveDimensionOrCamera(resolved, actualCameraWidth, cameraWidth, screenWidth);
+        }
 
-                resolved = Mathf.Max(resolved, selector(descriptor));
-            }
+        internal static int ResolveMaxExplicitHeight(
+            int actualCameraHeight,
+            int cameraHeight,
+            int screenHeight,
+            RenderGraphTextureDesc descriptorA = null,
+            RenderGraphTextureDesc descriptorB = null)
+        {
+            var resolved = Mathf.Max(
+                ResolveExplicitHeight(descriptorA),
+                ResolveExplicitHeight(descriptorB));
 
-            if (resolved > 0)
-                return resolved;
-
-            return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
+            return ResolveDimensionOrCamera(resolved, actualCameraHeight, cameraHeight, screenHeight);
         }
 
         internal static GraphicsFormat ResolveColorFormat(
@@ -76,6 +79,28 @@ namespace VividRP.Runtime
             destination.UseDynamicScaleExplicit = source.UseDynamicScaleExplicit;
             destination.ScaleFactor = source.ScaleFactor;
             destination.Name = source.Name;
+        }
+
+        private static int ResolveExplicitWidth(RenderGraphTextureDesc descriptor)
+        {
+            return HasExplicitSize(descriptor) ? descriptor.Width : 0;
+        }
+
+        private static int ResolveExplicitHeight(RenderGraphTextureDesc descriptor)
+        {
+            return HasExplicitSize(descriptor) ? descriptor.Height : 0;
+        }
+
+        private static int ResolveDimensionOrCamera(
+            int resolved,
+            int actualCameraDimension,
+            int cameraDimension,
+            int screenDimension)
+        {
+            if (resolved > 0)
+                return resolved;
+
+            return CameraDimensionUtility.ResolveCameraDimension(actualCameraDimension, cameraDimension, screenDimension);
         }
     }
 }

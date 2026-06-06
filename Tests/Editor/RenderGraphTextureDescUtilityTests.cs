@@ -49,7 +49,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveMaxExplicitDimension_ReturnsLargestExplicitDescriptorDimension_WhenAvailable()
+        public void ResolveMaxExplicitWidth_ReturnsLargestExplicitDescriptorWidth_WhenAvailable()
         {
             var descriptorA = new RenderGraphTextureDesc
             {
@@ -63,8 +63,7 @@ namespace VividRP.Editor.Tests
             };
 
             Assert.That(
-                RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                    descriptor => descriptor.Width,
+                RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                     0,
                     0,
                     1,
@@ -74,7 +73,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveMaxExplicitDimension_FallsBackToCameraDimension_WhenNoExplicitDescriptorExists()
+        public void ResolveMaxExplicitHeight_ReturnsLargestExplicitDescriptorHeight_WhenAvailable()
+        {
+            var descriptorA = new RenderGraphTextureDesc
+            {
+                Width = 64,
+                Height = 32
+            };
+            var descriptorB = new RenderGraphTextureDesc
+            {
+                Width = 128,
+                Height = 16
+            };
+
+            Assert.That(
+                RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(
+                    0,
+                    0,
+                    1,
+                    descriptorA,
+                    descriptorB),
+                Is.EqualTo(32));
+        }
+
+        [Test]
+        public void ResolveMaxExplicitWidthAndHeight_FallsBackToCameraDimensions_WhenNoExplicitDescriptorExists()
         {
             var placeholderDescriptor = new RenderGraphTextureDesc
             {
@@ -83,13 +106,49 @@ namespace VividRP.Editor.Tests
             };
 
             Assert.That(
-                RenderGraphTextureDescUtility.ResolveMaxExplicitDimension(
-                    descriptor => descriptor.Width,
+                RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                     0,
                     256,
                     1,
                     placeholderDescriptor),
                 Is.EqualTo(256));
+            Assert.That(
+                RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(
+                    0,
+                    128,
+                    1,
+                    placeholderDescriptor),
+                Is.EqualTo(128));
+        }
+
+        [Test]
+        public void ResolveMaxExplicitWidthAndHeight_DoNotAllocate()
+        {
+            var descriptorA = new RenderGraphTextureDesc
+            {
+                Width = 64,
+                Height = 32
+            };
+            var descriptorB = new RenderGraphTextureDesc
+            {
+                Width = 128,
+                Height = 16
+            };
+
+            RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(0, 0, 1, descriptorA, descriptorB);
+            RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(0, 0, 1, descriptorA, descriptorB);
+
+            var allocatedBefore = global::System.GC.GetAllocatedBytesForCurrentThread();
+
+            for (var i = 0; i < 32; i++)
+            {
+                RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(0, 0, 1, descriptorA, descriptorB);
+                RenderGraphTextureDescUtility.ResolveMaxExplicitHeight(0, 0, 1, descriptorA, descriptorB);
+            }
+
+            var allocatedBytes = global::System.GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(allocatedBytes, Is.Zero);
         }
 
         [Test]

@@ -4,18 +4,6 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal sealed class VividCameraShaderData : ContextItem
-    {
-        public ShaderVariablesGlobal shaderVariablesGlobal;
-        public bool hasShaderVariablesGlobal;
-
-        public override void Reset()
-        {
-            shaderVariablesGlobal = default;
-            hasShaderVariablesGlobal = false;
-        }
-    }
-
     internal sealed class FrameContextSystem : CameraRelativeSystem<CameraTemporalData>
     {
         private static readonly FrameContextSystem s_Instance = new();
@@ -79,7 +67,7 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsMarker.Auto())
             {
-                SetShaderGlobals(cmd, frameData, cameraData, shaderVariables, temporalData, skyData);
+                SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData, skyData);
             }
 
             using (RenderPassProfilingUtility.PrepareFrameContextAdaptiveProbeVolumeMarker.Auto())
@@ -120,24 +108,43 @@ namespace VividRP.Runtime
 
         private static void SetShaderGlobals(
             CommandBuffer cmd,
-            ContextContainer frameData,
             VividCameraData cameraData,
             VividCameraData.ShaderVariables sv,
             CameraTemporalData temporalData,
             VividSkyData skyData)
         {
-            var shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);
-            var cameraShaderData = frameData.GetOrCreate<VividCameraShaderData>();
-            cameraShaderData.shaderVariablesGlobal = shaderVariablesGlobal;
-            cameraShaderData.hasShaderVariablesGlobal = true;
+            ShaderVariablesGlobal shaderVariablesGlobal;
+            using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsBuildMarker.Auto())
+            {
+                shaderVariablesGlobal = ShaderVariablesGlobal.Create(sv, temporalData, skyData);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsStoreMarker.Auto())
+            {
+                if (cameraData != null)
+                {
+                    cameraData.shaderVariablesGlobal = shaderVariablesGlobal;
+                    cameraData.hasShaderVariablesGlobal = true;
+                }
+            }
 #if VIVIDRP_DEBUG
             CameraShaderVariablesGlobalComparisonLogger.CaptureAndCompare(cameraData, shaderVariablesGlobal);
 #endif
-            ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);
+            using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsPushConstantBufferMarker.Auto())
+            {
+                ConstantBuffer.PushGlobal(cmd, shaderVariablesGlobal, ShaderVariablesGlobal.ConstantBufferShaderId);
+            }
 
-            cmd.SetGlobalVectorArray(CameraWorldClipPlanesId, sv.cameraWorldClipPlanes);
-            cmd.SetGlobalVectorArray(FrustumPlanesId, sv.frustumPlanes);
-            BlueNoise.Instance?.Bind(cmd);
+            using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsVectorArraysMarker.Auto())
+            {
+                cmd.SetGlobalVectorArray(CameraWorldClipPlanesId, sv.cameraWorldClipPlanes);
+                cmd.SetGlobalVectorArray(FrustumPlanesId, sv.frustumPlanes);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameContextSetShaderGlobalsBlueNoiseMarker.Auto())
+            {
+                BlueNoise.Instance?.Bind(cmd);
+            }
         }
     }
 }

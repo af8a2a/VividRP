@@ -48,71 +48,182 @@ namespace VividRP.Runtime
         {
             var currentCamera = camera;
 
-            if (currentCamera != null)
-                currentCamera.depthTextureMode |= DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesDepthTextureModeMarker.Auto())
+            {
+                EnsureRequiredDepthTextureMode(currentCamera);
+            }
 
-            var scaledWidth = ResolveScaledDimension(actualWidth, currentCamera != null ? currentCamera.scaledPixelWidth : 0, pixelWidth, Screen.width);
-            var scaledHeight = ResolveScaledDimension(actualHeight, currentCamera != null ? currentCamera.scaledPixelHeight : 0, pixelHeight, Screen.height);
-            var referenceWidth = ResolveReferenceDimension(pixelWidth, currentCamera != null ? currentCamera.pixelWidth : 0, scaledWidth);
-            var referenceHeight = ResolveReferenceDimension(pixelHeight, currentCamera != null ? currentCamera.pixelHeight : 0, scaledHeight);
-            var nearClip = currentCamera != null ? Mathf.Max(0.0001f, currentCamera.nearClipPlane) : 0.3f;
-            var farClip = currentCamera != null ? Mathf.Max(nearClip + 0.0001f, currentCamera.farClipPlane) : 1000.0f;
-            var viewMatrix = GetViewMatrix();
-            var invViewMatrix = GetInverseViewMatrix();
-            var cameraProjection = GetProjectionMatrix();
-            var cameraInvProjection = GetInverseProjectionMatrix();
-            var glstateMatrixProjection = GetGPUProjectionMatrix();
-            var matrixInvP = glstateMatrixProjection.inverse;
-            var matrixVP = glstateMatrixProjection * viewMatrix;
-            var matrixInvVP = matrixVP.inverse;
-            var projectionFlipSign = glstateMatrixProjection.m11 < 0.0f ? -1.0f : 1.0f;
+            int scaledWidth;
+            int scaledHeight;
+            int referenceWidth;
+            int referenceHeight;
+            float nearClip;
+            float farClip;
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesDimensionsMarker.Auto())
+            {
+                scaledWidth = ResolveScaledWidth(currentCamera);
+                scaledHeight = ResolveScaledHeight(currentCamera);
+                referenceWidth = ResolveReferenceWidth(currentCamera, scaledWidth);
+                referenceHeight = ResolveReferenceHeight(currentCamera, scaledHeight);
+                nearClip = ResolveNearClip(currentCamera);
+                farClip = ResolveFarClip(currentCamera, nearClip);
+            }
+
+            Matrix4x4 viewMatrix;
+            Matrix4x4 invViewMatrix;
+            Matrix4x4 cameraProjection;
+            Matrix4x4 cameraInvProjection;
+            Matrix4x4 glstateMatrixProjection;
+            Matrix4x4 matrixInvP;
+            Matrix4x4 matrixVP;
+            Matrix4x4 matrixInvVP;
+            float projectionFlipSign;
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesMatricesMarker.Auto())
+            {
+                viewMatrix = GetViewMatrix();
+                invViewMatrix = additionalData != null
+                    ? additionalData.GetInverseViewMatrix()
+                    : viewMatrix.inverse;
+                cameraProjection = GetProjectionMatrix();
+                cameraInvProjection = additionalData != null
+                    ? additionalData.GetInverseProjectionMatrix()
+                    : cameraProjection.inverse;
+                glstateMatrixProjection = additionalData != null
+                    ? additionalData.GetGPUProjectionMatrix()
+                    : GL.GetGPUProjectionMatrix(cameraProjection, ResolveRenderIntoTexture(currentCamera));
+                matrixInvP = glstateMatrixProjection.inverse;
+                matrixVP = glstateMatrixProjection * viewMatrix;
+                matrixInvVP = matrixVP.inverse;
+                projectionFlipSign = glstateMatrixProjection.m11 < 0.0f ? -1.0f : 1.0f;
+            }
 
             // Temporal matrices: use FrameContextSystem data if available, otherwise fallback
             var nonJitteredVP = matrixVP;
             var prevVP = matrixVP;
-            if (temporalData != null)
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesTemporalMarker.Auto())
             {
-                nonJitteredVP = temporalData.ViewProjection;
-                prevVP = temporalData.PreviousViewProjection;
+                if (temporalData != null)
+                {
+                    nonJitteredVP = temporalData.ViewProjection;
+                    prevVP = temporalData.PreviousViewProjection;
+                }
             }
 
-            UpdateFrustumPlanes(currentCamera, cameraProjection * viewMatrix);
-
-            return new ShaderVariables
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesFrustumPlanesMarker.Auto())
             {
-                worldSpaceCameraPos = invViewMatrix.GetColumn(3),
-                projectionParams = new Vector4(projectionFlipSign, nearClip, farClip, 1.0f / farClip),
-                screenParams = CreateScreenParams(referenceWidth, referenceHeight),
-                zBufferParams = CreateZBufferParams(nearClip, farClip),
-                orthoParams = CreateOrthoParams(currentCamera, referenceWidth, referenceHeight),
-                scaleBias = new Vector4(projectionFlipSign, 1.0f, 0.0f, 0.0f),
-                scaleBiasRt = new Vector4(projectionFlipSign, 1.0f, 0.0f, 0.0f),
-                rtHandleScale = CreateRtHandleScale(),
-                cameraProjection = cameraProjection,
-                cameraInvProjection = cameraInvProjection,
-                worldToCamera = viewMatrix,
-                cameraToWorld = invViewMatrix,
-                glstateMatrixProjection = glstateMatrixProjection,
-                matrixV = viewMatrix,
-                matrixInvV = invViewMatrix,
-                matrixInvP = matrixInvP,
-                matrixVP = matrixVP,
-                matrixInvVP = matrixInvVP,
-                prevViewProjMatrix = prevVP,
-                nonJitteredViewProjMatrix = nonJitteredVP,
-                viewProjMatrix = matrixVP,
-                viewMatrix = viewMatrix,
-                projMatrix = glstateMatrixProjection,
-                invViewProjMatrix = matrixInvVP,
-                invViewMatrix = invViewMatrix,
-                invProjMatrix = matrixInvP,
-                invProjParam = CreateInvProjParam(matrixInvP),
-                screenSize = new Vector4(scaledWidth, scaledHeight, 1.0f / scaledWidth, 1.0f / scaledHeight),
-                globalMipBias = CreateGlobalMipBias(referenceWidth, referenceHeight, scaledWidth, scaledHeight),
-                scaledScreenParams = CreateScreenParams(scaledWidth, scaledHeight),
-                cameraWorldClipPlanes = m_CameraWorldClipPlanes,
-                frustumPlanes = m_ShaderFrustumPlanes,
-            };
+                UpdateFrustumPlanes(currentCamera, cameraProjection * viewMatrix);
+            }
+
+            Vector4 worldSpaceCameraPos;
+            Vector4 projectionParams;
+            Vector4 screenParams;
+            Vector4 zBufferParams;
+            Vector4 orthoParams;
+            Vector4 scaleBias;
+            Vector4 scaleBiasRt;
+            Vector4 rtHandleScale;
+            Vector4 invProjParam;
+            Vector4 screenSize;
+            Vector2 globalMipBias;
+            Vector4 scaledScreenParams;
+            using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackMarker.Auto())
+            {
+                using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackCameraMarker.Auto())
+                {
+                    worldSpaceCameraPos = CreateTranslationColumn(invViewMatrix);
+                    projectionParams = new Vector4(projectionFlipSign, nearClip, farClip, 1.0f / farClip);
+                    zBufferParams = CreateZBufferParams(nearClip, farClip);
+                    orthoParams = CreateOrthoParams(currentCamera);
+                    scaleBias = new Vector4(projectionFlipSign, 1.0f, 0.0f, 0.0f);
+                    scaleBiasRt = new Vector4(projectionFlipSign, 1.0f, 0.0f, 0.0f);
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackScreenMarker.Auto())
+                {
+                    screenParams = CreateScreenParams(referenceWidth, referenceHeight);
+                    screenSize = new Vector4(scaledWidth, scaledHeight, 1.0f / scaledWidth, 1.0f / scaledHeight);
+                    scaledScreenParams = CreateScreenParams(scaledWidth, scaledHeight);
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackRtHandleScaleMarker.Auto())
+                {
+                    rtHandleScale = CreateRtHandleScale();
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackMipBiasMarker.Auto())
+                {
+                    globalMipBias = CreateGlobalMipBias(referenceWidth, referenceHeight, scaledWidth, scaledHeight);
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackMatricesMarker.Auto())
+                {
+                    invProjParam = CreateInvProjParam(matrixInvP);
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameContextBuildShaderVariablesPackResultMarker.Auto())
+                {
+                    return new ShaderVariables
+                    {
+                        worldSpaceCameraPos = worldSpaceCameraPos,
+                        projectionParams = projectionParams,
+                        screenParams = screenParams,
+                        zBufferParams = zBufferParams,
+                        orthoParams = orthoParams,
+                        scaleBias = scaleBias,
+                        scaleBiasRt = scaleBiasRt,
+                        rtHandleScale = rtHandleScale,
+                        cameraProjection = cameraProjection,
+                        cameraInvProjection = cameraInvProjection,
+                        worldToCamera = viewMatrix,
+                        cameraToWorld = invViewMatrix,
+                        glstateMatrixProjection = glstateMatrixProjection,
+                        matrixV = viewMatrix,
+                        matrixInvV = invViewMatrix,
+                        matrixInvP = matrixInvP,
+                        matrixVP = matrixVP,
+                        matrixInvVP = matrixInvVP,
+                        prevViewProjMatrix = prevVP,
+                        nonJitteredViewProjMatrix = nonJitteredVP,
+                        viewProjMatrix = matrixVP,
+                        viewMatrix = viewMatrix,
+                        projMatrix = glstateMatrixProjection,
+                        invViewProjMatrix = matrixInvVP,
+                        invViewMatrix = invViewMatrix,
+                        invProjMatrix = matrixInvP,
+                        invProjParam = invProjParam,
+                        screenSize = screenSize,
+                        globalMipBias = globalMipBias,
+                        scaledScreenParams = scaledScreenParams,
+                        cameraWorldClipPlanes = m_CameraWorldClipPlanes,
+                        frustumPlanes = m_ShaderFrustumPlanes,
+                    };
+                }
+            }
+        }
+
+        private void EnsureRequiredDepthTextureMode(Camera currentCamera)
+        {
+            if (currentCamera == null)
+            {
+                m_DepthTextureModeSource = null;
+                m_DepthTextureModeHasRequiredFlags = false;
+                return;
+            }
+
+            if (ReferenceEquals(m_DepthTextureModeSource, currentCamera) && m_DepthTextureModeHasRequiredFlags)
+                return;
+
+            const DepthTextureMode requiredMode = DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
+            m_DepthTextureModeSource = currentCamera;
+            var depthTextureMode = currentCamera.depthTextureMode;
+            if ((depthTextureMode & requiredMode) == requiredMode)
+            {
+                m_DepthTextureModeHasRequiredFlags = true;
+                return;
+            }
+
+            currentCamera.depthTextureMode = depthTextureMode | requiredMode;
+            m_DepthTextureModeHasRequiredFlags = true;
         }
 
         private void UpdateFrustumPlanes(Camera currentCamera, Matrix4x4 viewProjectionMatrix)
@@ -142,29 +253,100 @@ namespace VividRP.Runtime
             }
         }
 
-        private static int ResolveScaledDimension(int preferredDimension, int cameraDimension, int fallbackDimension, int screenDimension)
+        private int ResolveScaledWidth(Camera currentCamera)
         {
-            if (preferredDimension > 0)
-                return preferredDimension;
+            if (actualWidth > 0)
+                return actualWidth;
 
-            if (cameraDimension > 0)
-                return cameraDimension;
+            if (hasCameraFrameProperties && scaledPixelWidth > 0)
+                return scaledPixelWidth;
 
-            if (fallbackDimension > 0)
-                return fallbackDimension;
+            if (currentCamera != null)
+            {
+                var cameraWidth = currentCamera.scaledPixelWidth;
+                if (cameraWidth > 0)
+                    return cameraWidth;
+            }
 
-            return Mathf.Max(1, screenDimension);
+            if (pixelWidth > 0)
+                return pixelWidth;
+
+            return Mathf.Max(1, Screen.width);
         }
 
-        private static int ResolveReferenceDimension(int preferredDimension, int cameraDimension, int fallbackDimension)
+        private int ResolveScaledHeight(Camera currentCamera)
         {
-            if (preferredDimension > 0)
-                return preferredDimension;
+            if (actualHeight > 0)
+                return actualHeight;
 
-            if (cameraDimension > 0)
-                return cameraDimension;
+            if (hasCameraFrameProperties && scaledPixelHeight > 0)
+                return scaledPixelHeight;
 
-            return Mathf.Max(1, fallbackDimension);
+            if (currentCamera != null)
+            {
+                var cameraHeight = currentCamera.scaledPixelHeight;
+                if (cameraHeight > 0)
+                    return cameraHeight;
+            }
+
+            if (pixelHeight > 0)
+                return pixelHeight;
+
+            return Mathf.Max(1, Screen.height);
+        }
+
+        private int ResolveReferenceWidth(Camera currentCamera, int fallbackWidth)
+        {
+            if (pixelWidth > 0)
+                return pixelWidth;
+
+            if (currentCamera != null)
+            {
+                var cameraWidth = currentCamera.pixelWidth;
+                if (cameraWidth > 0)
+                    return cameraWidth;
+            }
+
+            return Mathf.Max(1, fallbackWidth);
+        }
+
+        private int ResolveReferenceHeight(Camera currentCamera, int fallbackHeight)
+        {
+            if (pixelHeight > 0)
+                return pixelHeight;
+
+            if (currentCamera != null)
+            {
+                var cameraHeight = currentCamera.pixelHeight;
+                if (cameraHeight > 0)
+                    return cameraHeight;
+            }
+
+            return Mathf.Max(1, fallbackHeight);
+        }
+
+        private float ResolveNearClip(Camera currentCamera)
+        {
+            if (hasCameraFrameProperties)
+                return Mathf.Max(0.0001f, nearClipPlane);
+
+            return currentCamera != null ? Mathf.Max(0.0001f, currentCamera.nearClipPlane) : 0.3f;
+        }
+
+        private float ResolveFarClip(Camera currentCamera, float nearClip)
+        {
+            if (hasCameraFrameProperties)
+                return Mathf.Max(nearClip + 0.0001f, farClipPlane);
+
+            return currentCamera != null ? Mathf.Max(nearClip + 0.0001f, currentCamera.farClipPlane) : 1000.0f;
+        }
+
+        private bool ResolveRenderIntoTexture(Camera currentCamera)
+        {
+            if (hasCameraFrameProperties)
+                return renderIntoTexture;
+
+            return currentCamera != null && (currentCamera.targetTexture != null || currentCamera.cameraType == CameraType.SceneView);
         }
 
         private static Vector4 CreateScreenParams(int width, int height)
@@ -178,14 +360,26 @@ namespace VividRP.Runtime
             return new Vector4(fpn - 1.0f, 1.0f, (fpn - 1.0f) / farClip, 1.0f / farClip);
         }
 
-        private static Vector4 CreateOrthoParams(Camera currentCamera, int referenceWidth, int referenceHeight)
+        private static Vector4 CreateTranslationColumn(Matrix4x4 matrix)
         {
+            return new Vector4(matrix.m03, matrix.m13, matrix.m23, matrix.m33);
+        }
+
+        private Vector4 CreateOrthoParams(Camera currentCamera)
+        {
+            if (hasCameraFrameProperties)
+            {
+                return isOrthographic
+                    ? new Vector4(orthographicSize * aspect * 2.0f, orthographicSize * 2.0f, 0.0f, 1.0f)
+                    : Vector4.zero;
+            }
+
             if (currentCamera == null || !currentCamera.orthographic)
                 return Vector4.zero;
 
             var orthoSize = currentCamera.orthographicSize;
-            var aspect = currentCamera.aspect;
-            return new Vector4(orthoSize * aspect * 2.0f, orthoSize * 2.0f, 0.0f, 1.0f);
+            var cameraAspect = currentCamera.aspect;
+            return new Vector4(orthoSize * cameraAspect * 2.0f, orthoSize * 2.0f, 0.0f, 1.0f);
         }
 
         private static Vector4 CreateRtHandleScale()
@@ -198,7 +392,8 @@ namespace VividRP.Runtime
         {
             var widthRatio = referenceWidth / (float)Mathf.Max(1, scaledWidth);
             var heightRatio = referenceHeight / (float)Mathf.Max(1, scaledHeight);
-            var mipScale = Mathf.Max(widthRatio, heightRatio, 0.0001f);
+            var maxRatio = Mathf.Max(widthRatio, heightRatio);
+            var mipScale = Mathf.Max(maxRatio, 0.0001f);
             var mipBias = Mathf.Log(mipScale, 2.0f);
             return new Vector2(mipBias, Mathf.Pow(2.0f, mipBias));
         }

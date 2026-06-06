@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -316,6 +317,33 @@ namespace VividRP.Editor.Tests
             {
                 VividAntialiasingRuntimeUtility.Clear();
                 UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void HasAntialiasingPass_DoesNotAllocate_WhenListIsReadThroughInterface()
+        {
+            var pass = new AntialiasingPass();
+            IReadOnlyList<IRenderPass> renderPasses = new List<IRenderPass> { pass };
+
+            try
+            {
+                Assert.That(PassRecorder.HasAntialiasingPass(renderPasses), Is.True);
+
+                GC.Collect();
+                var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                for (var index = 0; index < 64; index++)
+                {
+                    if (!PassRecorder.HasAntialiasingPass(renderPasses))
+                        Assert.Fail("Antialiasing pass should be detected without allocating.");
+                }
+
+                var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                Assert.That(allocatedBytes, Is.Zero);
+            }
+            finally
+            {
+                pass.Dispose();
             }
         }
 

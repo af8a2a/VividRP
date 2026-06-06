@@ -279,12 +279,11 @@ namespace VividRP.Runtime.RenderPass.Core
             ContextContainer frameData,
             VividCameraData cameraData)
         {
-            var cameraShaderData = frameData.Get<VividCameraShaderData>();
-            if (cameraShaderData != null && cameraShaderData.hasShaderVariablesGlobal)
-                return cameraShaderData.shaderVariablesGlobal;
-
             if (cameraData == null)
                 return default;
+
+            if (cameraData.hasShaderVariablesGlobal)
+                return cameraData.shaderVariablesGlobal;
 
             var temporalData = FrameContextSystem.GetOrCreate(cameraData?.camera);
             var skyData = frameData.GetOrCreate<VividSkyData>();

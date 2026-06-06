@@ -166,11 +166,20 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.InitializeContextAntialiasingResolveMarker.Auto())
             {
-                VividAntialiasingRuntimeUtility.Resolve(
-                    camera,
-                    additionalCameraData,
-                    HasAntialiasingPass(graphAsset),
-                    antialiasingData);
+                bool hasAntialiasingPass;
+                using (RenderPassProfilingUtility.InitializeContextAntialiasingResolveHasPassMarker.Auto())
+                {
+                    hasAntialiasingPass = HasAntialiasingPass(graphAsset);
+                }
+
+                using (RenderPassProfilingUtility.InitializeContextAntialiasingResolveDataMarker.Auto())
+                {
+                    VividAntialiasingRuntimeUtility.Resolve(
+                        camera,
+                        additionalCameraData,
+                        hasAntialiasingPass,
+                        antialiasingData);
+                }
             }
 
             using (RenderPassProfilingUtility.InitializeContextAntialiasingJitterMarker.Auto())
@@ -193,6 +202,7 @@ namespace VividRP.Runtime
                 cameraData.pixelWidth = camera.pixelWidth;
                 cameraData.pixelHeight = camera.pixelHeight;
                 cameraData.pixelRect = camera.pixelRect;
+                cameraData.CacheCameraFrameProperties(camera);
                 var actualSize = ResolveActualCameraSize(camera, antialiasingData);
                 cameraData.actualWidth = actualSize.x;
                 cameraData.actualHeight = actualSize.y;
@@ -589,8 +599,9 @@ namespace VividRP.Runtime
             if (renderPasses == null)
                 return false;
 
-            foreach (var renderPass in renderPasses)
+            for (var index = 0; index < renderPasses.Count; index++)
             {
+                var renderPass = renderPasses[index];
                 if (renderPass is IRenderGizmoPrePostProcessBoundaryPass)
                     return true;
             }
@@ -603,8 +614,9 @@ namespace VividRP.Runtime
             if (renderPasses == null)
                 return false;
 
-            foreach (var renderPass in renderPasses)
+            for (var index = 0; index < renderPasses.Count; index++)
             {
+                var renderPass = renderPasses[index];
                 if (renderPass is AntialiasingPass)
                     return true;
             }

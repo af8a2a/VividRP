@@ -161,21 +161,40 @@ namespace VividRP.Runtime.GPUDriven
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameMarker.Auto())
             {
-                BindlessTextureContainer.ResetPerFrameStats();
-                BindlessTextureContainer.PreRender();
-                bool staticDataChanged = m_SceneDataBuilder.Build(
-                    SceneData,
-                    VividMeshletRendererDatabase.instance,
-                    BindlessTextureContainer,
-                    out bool materialDataChanged,
-                    out bool instanceDataChanged
-                );
-                m_BufferSet.Upload(
-                    SceneData,
-                    uploadInstanceData: instanceDataChanged,
-                    uploadMaterialData: materialDataChanged,
-                    uploadStaticData: staticDataChanged
-                );
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameResetStatsMarker.Auto())
+                {
+                    BindlessTextureContainer.ResetPerFrameStats();
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBindlessPreRenderMarker.Auto())
+                {
+                    BindlessTextureContainer.PreRender();
+                }
+
+                bool staticDataChanged;
+                bool materialDataChanged;
+                bool instanceDataChanged;
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataMarker.Auto())
+                {
+                    staticDataChanged = m_SceneDataBuilder.Build(
+                        SceneData,
+                        VividMeshletRendererDatabase.instance,
+                        BindlessTextureContainer,
+                        out materialDataChanged,
+                        out instanceDataChanged
+                    );
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameUploadBuffersMarker.Auto())
+                {
+                    m_BufferSet.Upload(
+                        SceneData,
+                        uploadInstanceData: instanceDataChanged,
+                        uploadMaterialData: materialDataChanged,
+                        uploadStaticData: staticDataChanged
+                    );
+                }
+
                 if (reportStats)
                 {
                     ReportStats(null);

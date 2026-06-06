@@ -17,7 +17,20 @@ namespace VividRP.Runtime
         internal int frameIndex = -1;
         internal string cameraName;
         internal EntityId cameraEntityId = EntityId.None;
+        internal ShaderVariablesGlobal shaderVariablesGlobal;
+        internal bool hasShaderVariablesGlobal;
+        internal int scaledPixelWidth;
+        internal int scaledPixelHeight;
+        internal float nearClipPlane = 0.3f;
+        internal float farClipPlane = 1000.0f;
+        internal bool isOrthographic;
+        internal float orthographicSize;
+        internal float aspect = 1.0f;
+        internal bool renderIntoTexture;
+        internal bool hasCameraFrameProperties;
         private Camera m_CameraNameSource;
+        private Camera m_DepthTextureModeSource;
+        private bool m_DepthTextureModeHasRequiredFlags;
 
         public Matrix4x4 viewMatrix => GetViewMatrix();
         public Matrix4x4 inverseViewMatrix => GetInverseViewMatrix();
@@ -37,8 +50,38 @@ namespace VividRP.Runtime
                 return;
 
             m_CameraNameSource = value;
+            m_DepthTextureModeSource = null;
+            m_DepthTextureModeHasRequiredFlags = false;
+            hasCameraFrameProperties = false;
             cameraName = value != null ? value.name : null;
             cameraEntityId = value != null ? value.GetEntityId() : EntityId.None;
+        }
+
+        internal void CacheCameraFrameProperties(Camera value)
+        {
+            if (value == null)
+            {
+                scaledPixelWidth = 0;
+                scaledPixelHeight = 0;
+                nearClipPlane = 0.3f;
+                farClipPlane = 1000.0f;
+                isOrthographic = false;
+                orthographicSize = 0.0f;
+                aspect = 1.0f;
+                renderIntoTexture = false;
+                hasCameraFrameProperties = false;
+                return;
+            }
+
+            scaledPixelWidth = value.scaledPixelWidth;
+            scaledPixelHeight = value.scaledPixelHeight;
+            nearClipPlane = value.nearClipPlane;
+            farClipPlane = value.farClipPlane;
+            isOrthographic = value.orthographic;
+            orthographicSize = value.orthographicSize;
+            aspect = value.aspect;
+            renderIntoTexture = value.targetTexture != null || value.cameraType == CameraType.SceneView;
+            hasCameraFrameProperties = true;
         }
 
         public Matrix4x4 GetViewMatrix(int viewIndex = 0)
@@ -175,7 +218,20 @@ namespace VividRP.Runtime
             frameIndex = -1;
             cameraName = null;
             cameraEntityId = EntityId.None;
+            shaderVariablesGlobal = default;
+            hasShaderVariablesGlobal = false;
+            scaledPixelWidth = 0;
+            scaledPixelHeight = 0;
+            nearClipPlane = 0.3f;
+            farClipPlane = 1000.0f;
+            isOrthographic = false;
+            orthographicSize = 0.0f;
+            aspect = 1.0f;
+            renderIntoTexture = false;
+            hasCameraFrameProperties = false;
             m_CameraNameSource = null;
+            m_DepthTextureModeSource = null;
+            m_DepthTextureModeHasRequiredFlags = false;
         }
 
         

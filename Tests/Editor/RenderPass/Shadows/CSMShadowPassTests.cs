@@ -30,7 +30,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("m_CascadeBorders[i] = cascadeBorders[i];"));
             Assert.That(source, Does.Contain("m_ShadowCasterBiases[i] = BuildShadowCasterState(mainVisibleLight);"));
             Assert.That(source, Does.Contain("m_CameraShaderGlobals = ResolveCameraShaderGlobals(frameData, cameraData);"));
-            Assert.That(source, Does.Contain("var cameraShaderData = frameData.Get<VividCameraShaderData>();"));
+            Assert.That(source, Does.Contain("if (cameraData.hasShaderVariablesGlobal)"));
+            Assert.That(source, Does.Contain("return cameraData.shaderVariablesGlobal;"));
             Assert.That(source, Does.Not.Contain("m_CameraShaderGlobals = ShaderVariablesGlobal.Create(cameraData.BuildShaderVariables"));
             Assert.That(source, Does.Contain("var gpuProjMatrix = GL.GetGPUProjectionMatrix(m_ProjMatrices[cascadeIndex], true);"));
             Assert.That(source, Does.Contain("var cascadeShaderGlobals = BuildCascadeShaderGlobals(cascadeIndex, gpuProjMatrix);"));
@@ -67,14 +68,14 @@ namespace VividRP.Editor.Tests
         public void FrameContextSystem_CachesShaderGlobalsForPrepareConsumers()
         {
             var source = File.ReadAllText(GetFrameContextSystemSourcePath());
+            var cameraDataSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.cs"));
 
-            Assert.That(source, Does.Contain("internal sealed class VividCameraShaderData : ContextItem"));
-            Assert.That(source, Does.Contain("public ShaderVariablesGlobal shaderVariablesGlobal;"));
-            Assert.That(source, Does.Contain("public bool hasShaderVariablesGlobal;"));
-            Assert.That(source, Does.Contain("SetShaderGlobals(cmd, frameData, cameraData, shaderVariables, temporalData, skyData);"));
-            Assert.That(source, Does.Contain("var cameraShaderData = frameData.GetOrCreate<VividCameraShaderData>();"));
-            Assert.That(source, Does.Contain("cameraShaderData.shaderVariablesGlobal = shaderVariablesGlobal;"));
-            Assert.That(source, Does.Contain("cameraShaderData.hasShaderVariablesGlobal = true;"));
+            Assert.That(source, Does.Contain("SetShaderGlobals(cmd, cameraData, shaderVariables, temporalData, skyData);"));
+            Assert.That(source, Does.Contain("cameraData.shaderVariablesGlobal = shaderVariablesGlobal;"));
+            Assert.That(source, Does.Contain("cameraData.hasShaderVariablesGlobal = true;"));
+            Assert.That(source, Does.Not.Contain("GetOrCreate<VividCameraShaderData>"));
+            Assert.That(cameraDataSource, Does.Contain("internal ShaderVariablesGlobal shaderVariablesGlobal;"));
+            Assert.That(cameraDataSource, Does.Contain("internal bool hasShaderVariablesGlobal;"));
         }
 
         private static string GetPassSourcePath()

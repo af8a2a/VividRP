@@ -44,6 +44,8 @@ namespace VividRP.Runtime
         private static readonly ProfilerMarker s_RenderGraphEndRecordingAndExecuteMarker = new("VividRP.RenderPipeline.RenderGraph.EndRecordingAndExecute");
         private static readonly ProfilerMarker s_RenderGraphAbortFrameMarker = new("VividRP.RenderPipeline.RenderGraph.AbortFrame");
         private static readonly ProfilerMarker s_RenderGraphResetAfterExceptionMarker = new("VividRP.RenderPipeline.RenderGraph.ResetAfterException");
+        private static readonly Action<ScriptableRenderContext, Camera> s_BeginCameraRenderingDispatcher =
+            CreateRenderPipelineManagerCameraRenderingDispatcher("BeginCameraRendering");
         private static readonly ShaderTagId[] s_PreviewCameraShaderTagIds =
         {
             new(RenderGraphRenderListDesc.ForwardShaderTagName),
@@ -110,8 +112,10 @@ namespace VividRP.Runtime
             using var renderCameraScope = s_RenderCameraMarker.Auto();
             using (s_BeginCameraRenderingMarker.Auto())
             {
-                BeginCameraRendering(context, camera);
+                DispatchBeginCameraRendering(context, camera);
             }
+
+            DecalSystem.ScheduleCullForCamera(camera);
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
@@ -209,12 +213,9 @@ namespace VividRP.Runtime
                     if (!TryRecordAndExecuteRenderGraph(
                             m_RenderGraph,
                             renderGraphParams,
-                            () => PassRecorder.RecordRenderGraph(
-                                m_RenderGraph,
-                                context,
-                                graphAsset,
-                                m_Asset != null && m_Asset.EnableAsyncCompute),
-                            PassRecorder.AbortFrame))
+                            context,
+                            graphAsset,
+                            m_Asset != null && m_Asset.EnableAsyncCompute))
                     {
                         return;
                     }
@@ -287,6 +288,45 @@ namespace VividRP.Runtime
             }
         }
 
+        private void DispatchBeginCameraRendering(ScriptableRenderContext context, Camera camera)
+        {
+            if (s_BeginCameraRenderingDispatcher != null)
+            {
+                s_BeginCameraRenderingDispatcher(context, camera);
+                return;
+            }
+
+            BeginCameraRendering(context, camera);
+        }
+
+        private static Action<ScriptableRenderContext, Camera> CreateRenderPipelineManagerCameraRenderingDispatcher(string methodName)
+        {
+            var method = typeof(RenderPipelineManager).GetMethod(
+                methodName,
+                System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic,
+                null,
+                new[] { typeof(ScriptableRenderContext), typeof(Camera) },
+                null);
+
+            if (method == null)
+                return null;
+
+            try
+            {
+                return (Action<ScriptableRenderContext, Camera>)Delegate.CreateDelegate(
+                    typeof(Action<ScriptableRenderContext, Camera>),
+                    method);
+            }
+            catch (ArgumentException)
+            {
+                return null;
+            }
+            catch (MemberAccessException)
+            {
+                return null;
+            }
+        }
+
         private static void ApplyShadowDistanceOverride(Camera camera, ref ScriptableCullingParameters cullingParameters)
         {
             if (camera == null)
@@ -337,6 +377,62 @@ namespace VividRP.Runtime
                     using (s_RenderGraphAbortFrameMarker.Auto())
                     {
                         onException?.Invoke();
+                    }
+                }
+                catch (Exception cleanupException)
+                {
+                    Debug.LogException(cleanupException);
+                }
+
+                using (s_RenderGraphResetAfterExceptionMarker.Auto())
+                {
+                    renderGraph.ResetGraphAndLogException(exception);
+                }
+
+                return false;
+            }
+        }
+
+        private static bool TryRecordAndExecuteRenderGraph(
+            RenderGraph renderGraph,
+            in RenderGraphParameters renderGraphParams,
+            ScriptableRenderContext context,
+            RenderGraphData graphAsset,
+            bool enableAsyncCompute)
+        {
+            if (renderGraph == null)
+                throw new ArgumentNullException(nameof(renderGraph));
+
+            try
+            {
+                using (s_RenderGraphBeginRecordingMarker.Auto())
+                {
+                    renderGraph.BeginRecording(renderGraphParams);
+                }
+
+                using (s_RenderGraphRecordMarker.Auto())
+                {
+                    PassRecorder.RecordRenderGraph(
+                        renderGraph,
+                        context,
+                        graphAsset,
+                        enableAsyncCompute);
+                }
+
+                using (s_RenderGraphEndRecordingAndExecuteMarker.Auto())
+                {
+                    renderGraph.EndRecordingAndExecute();
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                try
+                {
+                    using (s_RenderGraphAbortFrameMarker.Auto())
+                    {
+                        PassRecorder.AbortFrame();
                     }
                 }
                 catch (Exception cleanupException)

@@ -638,7 +638,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_ConstantBuffer = BuildConstantBuffer(
                 cameraData,
-                frameData.Get<VividCameraShaderData>(),
                 m_Width,
                 m_Height,
                 m_Settings);
@@ -1798,7 +1797,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static ScreenSpaceReflectionConstantBufferData BuildConstantBuffer(
             VividCameraData cameraData,
-            VividCameraShaderData cameraShaderData,
             int width,
             int height,
             ScreenSpaceReflectionSettingsData settings)
@@ -1819,7 +1817,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var viewProjMatrix = ResolveSsrViewProjMatrix(cameraData);
             var invViewProjMatrix = viewProjMatrix.inverse;
-            var prevViewProjMatrix = ResolveSsrPrevViewProjMatrix(cameraShaderData, viewProjMatrix);
+            var prevViewProjMatrix = ResolveSsrPrevViewProjMatrix(cameraData, viewProjMatrix);
             int reBlurFrameIndex = Time.frameCount & 31;
 
             return new ScreenSpaceReflectionConstantBufferData
@@ -1888,11 +1886,11 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private static Matrix4x4 ResolveSsrPrevViewProjMatrix(
-            VividCameraShaderData cameraShaderData,
+            VividCameraData cameraData,
             Matrix4x4 fallbackViewProjMatrix)
         {
-            return cameraShaderData != null && cameraShaderData.hasShaderVariablesGlobal
-                ? cameraShaderData.shaderVariablesGlobal._VividPrevViewProjMatrix
+            return cameraData != null && cameraData.hasShaderVariablesGlobal
+                ? cameraData.shaderVariablesGlobal._VividPrevViewProjMatrix
                 : fallbackViewProjMatrix;
         }
 

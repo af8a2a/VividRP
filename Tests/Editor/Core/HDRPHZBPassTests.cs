@@ -741,7 +741,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("exposedSkyHsv.z = clamp(exposedSkyHsv.z, 0.0, _SsrIntensityClamp);"));
             Assert.That(source, Does.Contain("return ClampToFloat16Max(HsvToRgb(exposedSkyHsv) * VividGetOneOverPreExposure());"));
             Assert.That(source, Does.Contain("float2 GetSsrBlueNoiseSample(uint2 coordSS)"));
-            Assert.That(source, Does.Contain("GetBNDSequenceSample(coordSS, (uint)_SsrFrameIndex, 0)"));
+            Assert.That(source, Does.Contain("GetBNDSequenceSample1SPP(coordSS, (uint)_SsrFrameIndex, 0)"));
+            Assert.That(source, Does.Contain("GetBNDSequenceSample1SPP(coordSS, (uint)_SsrFrameIndex, 1)"));
             Assert.That(source, Does.Contain("bool SampleSsrGGXVNDF("));
             Assert.That(source, Does.Contain("SampleGGXVisibleNormal(inputSample.xy, viewDirWS, localToWorld, roughness, localV, localH, VdotH);"));
             Assert.That(source, Does.Contain("float3 SampleSsrReflectionDir("));
@@ -1019,6 +1020,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return DecodePreExposedHistoryRadiance(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb);"));
             Assert.That(source, Does.Contain("return SanitizeSsrRadiance(skyRadiance);"));
             Assert.That(source, Does.Contain("return SanitizeSsrRadiance(radiance);"));
+            Assert.That(source, Does.Contain("GetBNDSequenceSample1SPP(coordSS, (uint)_SsrFrameIndex, 0)"));
+            Assert.That(source, Does.Contain("GetBNDSequenceSample1SPP(coordSS, (uint)_SsrFrameIndex, 1)"));
             Assert.That(source, Does.Not.Contain("VividApplyPreExposure(skyRadiance)"));
             Assert.That(source, Does.Not.Contain("exposedRadiance"));
             Assert.That(source, Does.Not.Contain("HsvToRgb(exposedSkyHsv) * VividGetOneOverPreExposure()"));

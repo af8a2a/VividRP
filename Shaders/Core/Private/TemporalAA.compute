@@ -6,9 +6,10 @@
 #pragma kernel DeferredColorApply2x2CS
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
 Texture2D<float4> _InputColor;
-Texture2D<float2> _MotionVectors;
+Texture2D<float4> _MotionVectors;
 Texture2D<float> _DepthTexture;
 Texture2D<float4> _HistoryColor;
 
@@ -82,7 +83,8 @@ void TemporalAA(uint3 dispatchThreadId : SV_DispatchThreadID)
     float2 uv = (float2(pixelCoord) + 0.5) * _ScreenSize.zw;
     float3 currentColor = _InputColor[pixelCoord].rgb;
 
-    float2 motionVector = _MotionVectors[pixelCoord].xy;
+    float2 motionVector;
+    DecodeMotionVector(_MotionVectors[pixelCoord], motionVector);
     float2 jitterDelta = (_Jitter.zw - _Jitter.xy) * 0.5;
 #if UNITY_UV_STARTS_AT_TOP
     jitterDelta.y = -jitterDelta.y;

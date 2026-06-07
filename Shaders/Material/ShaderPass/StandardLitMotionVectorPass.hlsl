@@ -86,7 +86,7 @@ float4 Frag(Varyings input) : SV_Target
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     ApplyAlphaClip(SampleBase(input.uv).a);
-    return float4(CalcNdcMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter), 0.0, 0.0);
+    return EncodeMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter);
 }
 
 #endif

@@ -909,14 +909,17 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("bool TryComputeSsrHistoryColorPyramidUV(float2 historyScreenUV, float mipLevel, out float2 historyPyramidUV)"));
             Assert.That(source, Does.Contain("float2 ClampSsrHDRPMotionVectorUV(float2 screenUV)"));
             Assert.That(source, Does.Contain("bool TryLoadSsrHDRPReprojectionSample("));
+            Assert.That(source, Does.Contain("bool TryValidateSsrHDRPReprojectionCenter(uint2 coordSS, float2 hitData)"));
             Assert.That(source, Does.Contain("#define SSR_HDRP_REPROJECT_SAMPLE_RADIUS 1"));
             Assert.That(source, Does.Contain("float2 hitMotion = LoadSsrMotionVector(hitData);"));
             Assert.That(source, Does.Contain("float2 prevFrameNDC = hitData - hitMotion;"));
             Assert.That(source, Does.Contain("if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))"));
+            Assert.That(source, Does.Contain("if (!TryValidateSsrHDRPReprojectionCenter(coordSS, hitData))"));
             Assert.That(source, Does.Contain("bool IsPositiveFiniteSsrHistoryColor(float3 color)"));
             Assert.That(source, Does.Contain("uint3 intCol = asuint(color);"));
             Assert.That(source, Does.Contain("return max(max(intCol.r, intCol.g), intCol.b) < 0x7F800000;"));
-            Assert.That(source, Does.Contain("color = SampleReflectionColorRaw(prevFrameUV, perceptualRoughness);"));
+            Assert.That(source, Does.Contain("float3 SampleReflectionColorRawMip(float2 screenUV, int mipLevel)"));
+            Assert.That(source, Does.Contain("color = SampleReflectionColorRawMip(prevFrameUV, 0);"));
             Assert.That(source, Does.Contain("bool isPosFin = IsPositiveFiniteSsrHistoryColor(color);"));
             Assert.That(source, Does.Contain("color = isPosFin ? DecodePreExposedSsrRadiance(color) : 0.0;"));
             Assert.That(source, Does.Contain("opacity = isPosFin ? opacity : 0.0;"));
@@ -924,6 +927,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("if (abs(x) == abs(y) && abs(x) == SSR_HDRP_REPROJECT_SAMPLE_RADIUS)"));
             Assert.That(source, Does.Contain("colorSum += sampleColor * sampleWeight;"));
             Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(filteredColor, filteredOpacity);"));
+            Assert.That(source, Does.Contain("float _SsrHDRPAccumulationAmount;"));
+            Assert.That(source, Does.Contain("float _SsrHDRPAccumulationSpeedRejection;"));
+            Assert.That(source, Does.Contain("float ComputeSsrHDRPAccumulationCoefficient(uint2 coordSS, float2 hitPositionNDC)"));
+            Assert.That(source, Does.Contain("float speedUsedLocally = length(motionVectorCenterNDC) + length(motionVectorHitNDC);"));
+            Assert.That(source, Does.Contain("float speed = saturate(speedUsedLocally * (128.0 * rcp(0.5 * 0.2)) * _SsrHDRPAccumulationSpeedRejection);"));
+            Assert.That(source, Does.Contain("return lerp(_SsrHDRPAccumulationAmount, 1.0, speed);"));
+            Assert.That(source, Does.Contain("float accumulationWeight = ComputeSsrHDRPAccumulationCoefficient(coordSS, hitPositionNDC);"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
             Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
             Assert.That(source, Does.Contain("if (_SsrWriteHDRPToOutput != 0)"));
@@ -1014,6 +1024,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool ShouldRunHDRPPath()"));
             Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
+            Assert.That(source, Does.Contain("private const float HDRPDefaultAccumulationFactor = 0.75f;"));
+            Assert.That(source, Does.Contain("private const float HDRPDefaultSpeedRejection = 0.5f;"));
+            Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SsrHDRPAccumulationAmount\")"));
+            Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SsrHDRPAccumulationSpeedRejection\")"));
+            Assert.That(source, Does.Contain("Mathf.Pow(2.0f, Mathf.Lerp(0.0f, -7.0f, HDRPDefaultAccumulationFactor))"));
+            Assert.That(source, Does.Contain("SsrHDRPAccumulationSpeedRejectionId,"));
+            Assert.That(source, Does.Contain("HDRPDefaultSpeedRejection);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, DepthTextureId, m_DepthTexture.innerHandle);"));
             Assert.That(
                 source.Contains("m_SSRHDRPReprojectionKernel,\r\n                    MotionVectorsId")

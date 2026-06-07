@@ -75,7 +75,7 @@ float4 Frag(Varyings input) : SV_Target
     if (_AlphaClip > 0.5)
         clip(SampleMotionVectorAlpha(input.uv) - _Cutoff);
 
-    return float4(CalcNdcMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter), 0.0, 0.0);
+    return EncodeMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter);
 }
 
 #endif

@@ -4,9 +4,10 @@
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
 Texture2D<float> _InputDepth;
-Texture2D<float2> _InputMotionVectors;
+Texture2D<float4> _InputMotionVectors;
 Texture2D<float4> _InputColor;
 Texture2D<float4> _HistoryColor;
 
@@ -23,6 +24,13 @@ float4 _PreviousOutputSize;
 float4 _Jitter;
 float4 _TSRParams;
 
+float2 LoadDecodedInputMotionVector(int2 coord)
+{
+    float2 motionVector;
+    DecodeMotionVector(_InputMotionVectors[coord], motionVector);
+    return motionVector;
+}
+
 [numthreads(8, 8, 1)]
 void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -32,7 +40,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         return;
 
     float centerDepth = _InputDepth[pixelCoord];
-    float2 centerMotion = _InputMotionVectors[pixelCoord];
+    float2 centerMotion = LoadDecodedInputMotionVector(pixelCoord);
     float2 selectedMotion = centerMotion;
     float selectedDepth = centerDepth;
     float selectedMotionLength = dot(selectedMotion, selectedMotion);
@@ -47,7 +55,7 @@ void CS(uint3 dispatchThreadId : SV_DispatchThreadID)
         {
             int2 sampleCoord = clamp(pixelCoord + int2(x, y), int2(0, 0), renderSize - 1);
             float sampleDepth = _InputDepth[sampleCoord];
-            float2 motion = _InputMotionVectors[sampleCoord];
+            float2 motion = LoadDecodedInputMotionVector(sampleCoord);
             float motionLength = dot(motion, motion);
             float depthError = abs(sampleDepth - centerDepth);
             float motionDelta = length((motion - centerMotion) * float2(renderSize));

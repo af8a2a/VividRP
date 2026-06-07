@@ -121,7 +121,7 @@ float4 FragMotionVectors(Varyings input) : SV_Target
 
     float4 colorSample = SampleUnlitColor(input.uv);
     ApplyUnlitAlphaClip(colorSample.a);
-    return float4(CalcNdcMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter), 0.0, 0.0);
+    return EncodeMotionVectorFromCsPositions(input.positionCSNoJitter, input.previousPositionCSNoJitter);
 }
 
 #else

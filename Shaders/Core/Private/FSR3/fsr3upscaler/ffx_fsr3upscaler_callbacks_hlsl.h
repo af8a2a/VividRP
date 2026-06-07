@@ -441,7 +441,8 @@ Texture2D<FfxFloat32x4> r_input_motion_vectors : FFX_FSR3UPSCALER_DECLARE_SRV(FS
 
 FfxFloat32x2 LoadInputMotionVector(FfxUInt32x2 iPxDilatedMotionVectorPos)
 {
-    FfxFloat32x2 fSrcMotionVector = r_input_motion_vectors[iPxDilatedMotionVectorPos].xy;
+    FfxFloat32x4 fEncodedMotionVector = r_input_motion_vectors[iPxDilatedMotionVectorPos];
+    FfxFloat32x2 fSrcMotionVector = fEncodedMotionVector.x > 1.0f ? FfxFloat32x2(0.0f, 0.0f) : fEncodedMotionVector.xy;
 
     FfxFloat32x2 fUvMotionVector = fSrcMotionVector * MotionVectorScale();
 

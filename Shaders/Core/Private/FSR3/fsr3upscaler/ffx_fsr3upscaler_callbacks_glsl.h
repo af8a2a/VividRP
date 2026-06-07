@@ -368,7 +368,8 @@ layout (set = 0, binding = FSR3UPSCALER_BIND_SRV_INPUT_MOTION_VECTORS) uniform t
 
 FfxFloat32x2 LoadInputMotionVector(FfxInt32x2 iPxDilatedMotionVectorPos)
 {
-	FfxFloat32x2 fSrcMotionVector = texelFetch(r_input_motion_vectors, iPxDilatedMotionVectorPos, 0).xy;
+	FfxFloat32x4 fEncodedMotionVector = texelFetch(r_input_motion_vectors, iPxDilatedMotionVectorPos, 0);
+	FfxFloat32x2 fSrcMotionVector = fEncodedMotionVector.x > 1.0 ? FfxFloat32x2(0.0, 0.0) : fEncodedMotionVector.xy;
 
 	FfxFloat32x2 fUvMotionVector = fSrcMotionVector * MotionVectorScale();
 

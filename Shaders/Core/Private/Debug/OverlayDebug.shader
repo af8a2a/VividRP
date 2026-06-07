@@ -17,6 +17,7 @@ Shader "Hidden/VividRP/OverlayDebug"
             #pragma fragment Frag
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
             #define VIVID_OVERLAY_VISUALIZATION_AUTO 0
             #define VIVID_OVERLAY_VISUALIZATION_COLOR 1
@@ -188,7 +189,11 @@ Shader "Hidden/VividRP/OverlayDebug"
                 float4 sampleColor = SampleDebugTextureRaw(uv);
 
                 if (_VisualizationMode == VIVID_OVERLAY_VISUALIZATION_MOTION_VECTORS)
-                    return float4(OverlayMotionVectorArrows(uv, EvaluateMotionVectorColor(sampleColor.xy)), 1.0);
+                {
+                    float2 motionVector;
+                    DecodeMotionVector(sampleColor, motionVector);
+                    return float4(OverlayMotionVectorArrows(uv, EvaluateMotionVectorColor(motionVector)), 1.0);
+                }
 
                 return EvaluateDebugColor(sampleColor);
             }

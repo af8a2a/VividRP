@@ -26,7 +26,6 @@ Shader "Hidden/VividRP/CameraMotionVectors"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
             TEXTURE2D_X_FLOAT(_CameraDepthTexture);
-            SAMPLER(sampler_CameraDepthTexture);
 
             struct Attributes
             {
@@ -57,15 +56,15 @@ Shader "Hidden/VividRP/CameraMotionVectors"
             {
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-                float depth = SAMPLE_TEXTURE2D_X(_CameraDepthTexture, sampler_CameraDepthTexture, input.uv).x;
+                float2 depthUV = ClampAndScaleUV(input.uv, _ScreenSize.zw, 0.5);
+                float depth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_PointClamp, depthUV, 0).x;
                 outputDepth = depth;
 
                 float3 positionWS = ComputeWorldSpacePosition(input.uv, depth, UNITY_MATRIX_I_VP);
                 float4 positionCSNoJitter = mul(_NonJitteredViewProjMatrix, float4(positionWS, 1.0));
                 float4 previousPositionCSNoJitter = mul(_PrevViewProjMatrix, float4(positionWS, 1.0));
-                float2 velocity = CalcNdcMotionVectorFromCsPositions(positionCSNoJitter, previousPositionCSNoJitter);
 
-                return float4(velocity, 0.0, 0.0);
+                return EncodeCameraMotionVectorFromCsPositions(positionCSNoJitter, previousPositionCSNoJitter);
             }
             ENDHLSL
         }

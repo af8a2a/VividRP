@@ -10,12 +10,13 @@
 #pragma kernel KCombineFastTiles
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
 Texture2D<float4> _InputColorTexture;
 Texture2D<float> _InputLinearDepthTexture;
 Texture2D<float> _InputCoCTexture;
 Texture2D<float> _InputHistoryCoCTexture;
-Texture2D<float2> _MotionVectorsTexture;
+Texture2D<float4> _MotionVectorsTexture;
 Texture2D<float4> _TileTexture;
 
 RWTexture2D<float4> _OutputColorTexture;
@@ -426,7 +427,8 @@ void KReprojectCoC(uint3 dispatchThreadId : SV_DispatchThreadID)
         closest = float3(0.0, 1.0, cocDown);
 
     int2 motionCoord = ClampCoord(centerCoord + int2(closest.xy), fullResSize);
-    float2 motionVector = _MotionVectorsTexture[motionCoord];
+    float2 motionVector;
+    DecodeMotionVector(_MotionVectorsTexture[motionCoord], motionVector);
     float2 uv = GetFullResUv(pixelCoord);
     float2 historyUv = uv - motionVector;
     bool validHistory = all(historyUv >= 0.0) && all(historyUv <= 1.0);

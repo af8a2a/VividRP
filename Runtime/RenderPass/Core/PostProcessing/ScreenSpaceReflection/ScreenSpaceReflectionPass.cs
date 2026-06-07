@@ -47,6 +47,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string AccumulationHistoryKey = "SSRAccumulation";
         private const string HDRPAccumulationHistoryKey = "SSRHDRPAccumulation";
         private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
+        private const float HDRPDefaultAccumulationFactor = 0.75f;
+        private const float HDRPDefaultSpeedRejection = 0.5f;
         private const string ReBlurLightingDistanceHistoryKey = "SSRReBlurLightingDistance";
         private const string ReBlurAccumulationHistoryKey = "SSRReBlurAccumulation";
         private const string ReBlurStabilizationHistoryKey = "SSRReBlurStabilization";
@@ -120,6 +122,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SSRHDRPOutputTextureId = Shader.PropertyToID("_SSRHDRPOutputTexture");
         private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
         private static readonly int SsrUseHDRPAccumulationHistoryId = Shader.PropertyToID("_SsrUseHDRPAccumulationHistory");
+        private static readonly int SsrHDRPAccumulationAmountId = Shader.PropertyToID("_SsrHDRPAccumulationAmount");
+        private static readonly int SsrHDRPAccumulationSpeedRejectionId = Shader.PropertyToID("_SsrHDRPAccumulationSpeedRejection");
         private static readonly int SSRAccumTextureId = Shader.PropertyToID("_SSRAccumTexture");
         private static readonly int SSRAvgRadianceTextureId = Shader.PropertyToID("_SSRAvgRadianceTexture");
         private static readonly int ReBlurLightingDistanceTextureId = Shader.PropertyToID("_ReBlurLightingDistanceTexture");
@@ -1749,6 +1753,16 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ComputeShader,
                     SsrUseHDRPAccumulationHistoryId,
                     m_HasValidHDRPAccumulationHistory ? 1 : 0);
+                cmd.SetComputeFloatParam(
+                    m_ComputeShader,
+                    SsrHDRPAccumulationAmountId,
+                    m_HasValidHDRPAccumulationHistory
+                        ? Mathf.Pow(2.0f, Mathf.Lerp(0.0f, -7.0f, HDRPDefaultAccumulationFactor))
+                        : 1.0f);
+                cmd.SetComputeFloatParam(
+                    m_ComputeShader,
+                    SsrHDRPAccumulationSpeedRejectionId,
+                    HDRPDefaultSpeedRejection);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, OutputColorTextureId, output.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);

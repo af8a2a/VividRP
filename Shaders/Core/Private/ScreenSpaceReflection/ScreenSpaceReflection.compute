@@ -245,17 +245,53 @@ float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
     return lerp(cx0, cx1, factor.y);
 }
 
-float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+int GetSsrHistoryColorPyramidMaxMip()
 {
-    if (_SsrUseHistoryColorPyramid == 0)
-        return 0.0;
-
     uint width;
     uint height;
     uint mipCount;
     _PreviousColorPyramidTexture.GetDimensions((uint)0, width, height, mipCount);
 
-    int maxMip = min(max((int)mipCount - 1, 0), _SsrHistoryColorPyramidMaxMip);
+    return min(max((int)mipCount - 1, 0), _SsrHistoryColorPyramidMaxMip);
+}
+
+float GetSsrHistoryColorPyramidMipLevel(float perceptualRoughness)
+{
+    return saturate(perceptualRoughness) * (float)GetSsrHistoryColorPyramidMaxMip();
+}
+
+float4 GetSsrHistoryColorPyramidUvScaleAndLimit()
+{
+    float2 uvScale = float2(1.0, 1.0);
+    float2 uvLimit = uvScale - 0.5 * _SsrHistoryColorPyramidSize.zw;
+    return float4(uvScale, saturate(uvLimit));
+}
+
+bool TryComputeSsrHistoryColorPyramidUV(float2 historyScreenUV, float mipLevel, out float2 historyPyramidUV)
+{
+    historyPyramidUV = 0.0;
+
+    if (_SsrUseHistoryColorPyramid == 0 || any(_SsrHistoryColorPyramidSize.xy <= 0.0))
+        return false;
+
+    if (any(isnan(historyScreenUV)) || any(isinf(historyScreenUV)))
+        return false;
+
+    float4 uvScaleAndLimit = GetSsrHistoryColorPyramidUvScaleAndLimit();
+    historyPyramidUV = historyScreenUV * uvScaleAndLimit.xy;
+
+    float2 diffLimit = uvScaleAndLimit.xy - uvScaleAndLimit.zw;
+    float2 diffLimitMipAdjusted = diffLimit * exp2(1.5 + ceil(abs(mipLevel)));
+    float2 limit = uvScaleAndLimit.xy - diffLimitMipAdjusted;
+    return all(historyPyramidUV >= 0.0) && all(historyPyramidUV <= limit);
+}
+
+float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+{
+    if (_SsrUseHistoryColorPyramid == 0)
+        return 0.0;
+
+    int maxMip = GetSsrHistoryColorPyramidMaxMip();
     float lod = saturate(perceptualRoughness) * (float)maxMip;
     int mip0 = (int)floor(lod);
     int mip1 = min(mip0 + 1, maxMip);
@@ -2404,6 +2440,23 @@ void ScreenSpaceReflectionsHDRPTracing(uint3 dispatchThreadId : SV_DispatchThrea
         _SSRHDRPHitPointTexture[coordSS] = hitScreenUV;
 }
 
+uint2 GetSsrHDRPPixelCoordFromUV(float2 screenUV)
+{
+    int2 pixelCoord = (int2)floor(saturate(screenUV) * _SsrTraceScreenSize.xy);
+    return (uint2)ClampPixelCoord(pixelCoord);
+}
+
+float2 ClampSsrHDRPMotionVectorUV(float2 screenUV)
+{
+    float2 maxUV = max(1.0 - 0.5 * _SsrTraceScreenSize.zw, 0.0);
+    return min(saturate(screenUV), maxUV);
+}
+
+float2 LoadSsrMotionVector(float2 screenUV)
+{
+    return _MotionVectors.Load(int3(GetSsrHDRPPixelCoordFromUV(ClampSsrHDRPMotionVectorUV(screenUV)), 0)).xy;
+}
+
 [numthreads(8, 8, 1)]
 void ScreenSpaceReflectionsHDRPReprojection(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -2418,26 +2471,22 @@ void ScreenSpaceReflectionsHDRPReprojection(uint3 dispatchThreadId : SV_Dispatch
         return;
 
     float perceptualRoughness = LoadPerceptualRoughness(coordSS);
-    float opacity = EdgeOfScreenFade(hitData) * PerceptualRoughnessFade(perceptualRoughness) * saturate(_SsrIntensity);
+    float2 hitMotion = LoadSsrMotionVector(hitData);
+    float2 prevFrameNDC = hitData - hitMotion;
+    float mipLevel = GetSsrHistoryColorPyramidMipLevel(perceptualRoughness);
+    float2 prevFrameUV;
+    if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))
+        return;
+
+    float opacity = EdgeOfScreenFade(prevFrameNDC) * PerceptualRoughnessFade(perceptualRoughness) * saturate(_SsrIntensity);
     if (opacity <= 0.0001)
         return;
 
-    float3 color = SanitizeSsrRadiance(SampleReflectionColor(hitData, perceptualRoughness));
+    float3 color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));
     if (all(color <= 0.0))
         return;
 
     _SSRHDRPAccumTexture[coordSS] = float4(color, opacity);
-}
-
-uint2 GetSsrHDRPPixelCoordFromUV(float2 screenUV)
-{
-    int2 pixelCoord = (int2)floor(saturate(screenUV) * _SsrTraceScreenSize.xy);
-    return (uint2)ClampPixelCoord(pixelCoord);
-}
-
-float2 LoadSsrMotionVector(float2 screenUV)
-{
-    return _MotionVectors.Load(int3(GetSsrHDRPPixelCoordFromUV(screenUV), 0)).xy;
 }
 
 float4 LoadSsrHDRPAccumulationHistory(uint2 coordSS)

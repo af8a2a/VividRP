@@ -1717,6 +1717,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_SSRHDRPReprojectionKernel,
+                    MotionVectorsId,
+                    m_MotionVectors?.innerHandle.IsValid() == true
+                        ? m_MotionVectors.innerHandle
+                        : context.renderGraphContext.defaultResources.blackTexture);
                 if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
                     && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
                 {

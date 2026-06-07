@@ -905,6 +905,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float2 hitData = _SSRHDRPHitPointTexture[coordSS];"));
             Assert.That(source, Does.Contain("if (max(hitData.x, hitData.y) == 0.0)"));
             Assert.That(source, Does.Not.Contain("hitData.z <= 0.0"));
+            Assert.That(source, Does.Contain("float4 GetSsrHistoryColorPyramidUvScaleAndLimit()"));
+            Assert.That(source, Does.Contain("bool TryComputeSsrHistoryColorPyramidUV(float2 historyScreenUV, float mipLevel, out float2 historyPyramidUV)"));
+            Assert.That(source, Does.Contain("float2 ClampSsrHDRPMotionVectorUV(float2 screenUV)"));
+            Assert.That(source, Does.Contain("float2 hitMotion = LoadSsrMotionVector(hitData);"));
+            Assert.That(source, Does.Contain("float2 prevFrameNDC = hitData - hitMotion;"));
+            Assert.That(source, Does.Contain("if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))"));
+            Assert.That(source, Does.Contain("float3 color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));"));
             Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, opacity);"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
             Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
@@ -996,6 +1003,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool ShouldRunHDRPPath()"));
             Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
+            Assert.That(
+                source.Contains("m_SSRHDRPReprojectionKernel,\r\n                    MotionVectorsId")
+                    || source.Contains("m_SSRHDRPReprojectionKernel,\n                    MotionVectorsId"),
+                Is.True);
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);"));
             Assert.That(source, Does.Contain("BlueNoise.Instance?.Bind(cmd, m_HybridTraceRayTracingShader);"));
             Assert.That(source, Does.Contain("BindHybridRayTracingParameters(cmd, context);"));

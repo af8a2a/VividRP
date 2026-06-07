@@ -908,11 +908,16 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float4 GetSsrHistoryColorPyramidUvScaleAndLimit()"));
             Assert.That(source, Does.Contain("bool TryComputeSsrHistoryColorPyramidUV(float2 historyScreenUV, float mipLevel, out float2 historyPyramidUV)"));
             Assert.That(source, Does.Contain("float2 ClampSsrHDRPMotionVectorUV(float2 screenUV)"));
+            Assert.That(source, Does.Contain("bool TryLoadSsrHDRPReprojectionSample("));
+            Assert.That(source, Does.Contain("#define SSR_HDRP_REPROJECT_SAMPLE_RADIUS 1"));
             Assert.That(source, Does.Contain("float2 hitMotion = LoadSsrMotionVector(hitData);"));
             Assert.That(source, Does.Contain("float2 prevFrameNDC = hitData - hitMotion;"));
             Assert.That(source, Does.Contain("if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))"));
-            Assert.That(source, Does.Contain("float3 color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));"));
-            Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, opacity);"));
+            Assert.That(source, Does.Contain("color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));"));
+            Assert.That(source, Does.Contain("for (int y = -SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y <= SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y++)"));
+            Assert.That(source, Does.Contain("if (abs(x) == abs(y) && abs(x) == SSR_HDRP_REPROJECT_SAMPLE_RADIUS)"));
+            Assert.That(source, Does.Contain("colorSum += sampleColor * sampleWeight;"));
+            Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(filteredColor, filteredOpacity);"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
             Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
             Assert.That(source, Does.Contain("if (_SsrWriteHDRPToOutput != 0)"));
@@ -1003,6 +1008,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool ShouldRunHDRPPath()"));
             Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, DepthTextureId, m_DepthTexture.innerHandle);"));
             Assert.That(
                 source.Contains("m_SSRHDRPReprojectionKernel,\r\n                    MotionVectorsId")
                     || source.Contains("m_SSRHDRPReprojectionKernel,\n                    MotionVectorsId"),

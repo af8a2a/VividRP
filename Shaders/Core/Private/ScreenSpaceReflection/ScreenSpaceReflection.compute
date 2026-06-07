@@ -2457,6 +2457,82 @@ float2 LoadSsrMotionVector(float2 screenUV)
     return _MotionVectors.Load(int3(GetSsrHDRPPixelCoordFromUV(ClampSsrHDRPMotionVectorUV(screenUV)), 0)).xy;
 }
 
+#define SSR_HDRP_REPROJECT_SAMPLE_RADIUS 1
+
+bool TryGetSsrHDRPWorldSpacePosition(uint2 coordSS, out float3 positionWS)
+{
+    positionWS = 0.0;
+
+    if (IsOutsideScreen(coordSS))
+        return false;
+
+    float deviceDepth = _DepthTexture.Load(int3(coordSS, 0));
+    if (IsRawFarDepth(deviceDepth))
+        return false;
+
+    float2 screenUV = ((float2)coordSS + 0.5) * _SsrTraceScreenSize.zw;
+    positionWS = ComputeSsrWorldSpacePosition(screenUV, deviceDepth);
+    return !any(isnan(positionWS)) && !any(isinf(positionWS));
+}
+
+bool TryLoadSsrHDRPReprojectionSample(
+    uint2 coordSS,
+    out float3 color,
+    out float weight,
+    out float opacity)
+{
+    color = 0.0;
+    weight = 0.0;
+    opacity = 0.0;
+
+    if (IsOutsideScreen(coordSS))
+        return false;
+
+    float2 hitData = _SSRHDRPHitPointTexture[coordSS];
+    if (max(hitData.x, hitData.y) == 0.0)
+        return false;
+    if (any(isnan(hitData)) || any(isinf(hitData)))
+        return false;
+
+    float3 positionSrcWS;
+    float3 positionDstWS;
+    if (!TryGetSsrHDRPWorldSpacePosition(coordSS, positionSrcWS))
+        return false;
+    if (!TryGetSsrHDRPWorldSpacePosition(GetSsrHDRPPixelCoordFromUV(hitData), positionDstWS))
+        return false;
+
+    float3 srcToDstWS = positionDstWS - positionSrcWS;
+    float hitDistance = length(srcToDstWS);
+    if (hitDistance <= 0.0001)
+        return false;
+
+    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+    float roughness = clamp(
+        PerceptualRoughnessToRoughness(perceptualRoughness),
+        SSR_MIN_GGX_ROUGHNESS,
+        SSR_MAX_GGX_ROUGHNESS);
+
+    float3 viewDirWS = GetSsrWorldSpaceNormalizeViewDir(positionSrcWS);
+    float3 reflectionDirWS = srcToDstWS * rcp(hitDistance);
+    weight = GetSsrSampleWeight(viewDirWS, reflectionDirWS, roughness);
+    if (weight <= 0.001 || isnan(weight) || isinf(weight))
+        return false;
+
+    float2 hitMotion = LoadSsrMotionVector(hitData);
+    float2 prevFrameNDC = hitData - hitMotion;
+    float mipLevel = GetSsrHistoryColorPyramidMipLevel(perceptualRoughness);
+    float2 prevFrameUV;
+    if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))
+        return false;
+
+    opacity = EdgeOfScreenFade(prevFrameNDC) * PerceptualRoughnessFade(perceptualRoughness) * saturate(_SsrIntensity);
+    if (opacity <= 0.0001)
+        return false;
+
+    color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));
+    return any(color > 0.0);
+}
+
 [numthreads(8, 8, 1)]
 void ScreenSpaceReflectionsHDRPReprojection(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -2469,24 +2545,47 @@ void ScreenSpaceReflectionsHDRPReprojection(uint3 dispatchThreadId : SV_Dispatch
     float2 hitData = _SSRHDRPHitPointTexture[coordSS];
     if (max(hitData.x, hitData.y) == 0.0)
         return;
-
-    float perceptualRoughness = LoadPerceptualRoughness(coordSS);
-    float2 hitMotion = LoadSsrMotionVector(hitData);
-    float2 prevFrameNDC = hitData - hitMotion;
-    float mipLevel = GetSsrHistoryColorPyramidMipLevel(perceptualRoughness);
-    float2 prevFrameUV;
-    if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))
+    if (any(isnan(hitData)) || any(isinf(hitData)))
         return;
 
-    float opacity = EdgeOfScreenFade(prevFrameNDC) * PerceptualRoughnessFade(perceptualRoughness) * saturate(_SsrIntensity);
-    if (opacity <= 0.0001)
+    float3 colorSum = 0.0;
+    float opacitySum = 0.0;
+    float weightSum = 0.0;
+
+    [unroll]
+    for (int y = -SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y <= SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y++)
+    {
+        [unroll]
+        for (int x = -SSR_HDRP_REPROJECT_SAMPLE_RADIUS; x <= SSR_HDRP_REPROJECT_SAMPLE_RADIUS; x++)
+        {
+            if (abs(x) == abs(y) && abs(x) == SSR_HDRP_REPROJECT_SAMPLE_RADIUS)
+                continue;
+
+            int2 sampleCoordSS = (int2)coordSS + int2(x, y);
+            if (sampleCoordSS.x < 0 || sampleCoordSS.y < 0)
+                continue;
+
+            float3 sampleColor;
+            float sampleWeight;
+            float sampleOpacity;
+            if (!TryLoadSsrHDRPReprojectionSample((uint2)sampleCoordSS, sampleColor, sampleWeight, sampleOpacity))
+                continue;
+
+            colorSum += sampleColor * sampleWeight;
+            opacitySum += sampleOpacity * sampleWeight;
+            weightSum += sampleWeight;
+        }
+    }
+
+    if (weightSum <= 0.0001)
         return;
 
-    float3 color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));
-    if (all(color <= 0.0))
+    float3 filteredColor = SanitizeSsrRadiance(colorSum * rcp(weightSum));
+    float filteredOpacity = saturate(opacitySum * rcp(weightSum));
+    if (filteredOpacity <= 0.0001 || all(filteredColor <= 0.0))
         return;
 
-    _SSRHDRPAccumTexture[coordSS] = float4(color, opacity);
+    _SSRHDRPAccumTexture[coordSS] = float4(filteredColor, filteredOpacity);
 }
 
 float4 LoadSsrHDRPAccumulationHistory(uint2 coordSS)

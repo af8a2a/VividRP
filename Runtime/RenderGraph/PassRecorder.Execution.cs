@@ -539,6 +539,30 @@ namespace VividRP.Runtime
 
             return hasHistoryTextures && hasValidData;
         }
+
+        internal static bool TryGetHistoryTextureHandlesForPass(
+            IRenderPass pass,
+            string key,
+            out RTHandle previousHandle,
+            out RTHandle currentHandle,
+            out bool hasValidData)
+        {
+            previousHandle = null;
+            currentHandle = null;
+            hasValidData = false;
+
+            if (!TryResolvePassHistoryContext(pass, key, out var historyKey, out var camera, out var graphAsset))
+                return false;
+
+            return RenderGraphHistoryRegistry.TryGetHistoryTextures(
+                camera,
+                graphAsset,
+                historyKey,
+                out previousHandle,
+                out currentHandle,
+                out hasValidData);
+        }
+
         internal static void RegisterHistoryTextureWriteForPass(
             IRenderPass pass,
             string key,

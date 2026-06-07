@@ -109,6 +109,7 @@ CBUFFER_START(ShaderVariablesScreenSpaceReflection)
     int _SsrReflectsSky;
     int _SsrFrameIndex;
     float4 _SsrHistoryColorPyramidSize;
+    float4 _SsrHistoryColorPyramidUvScaleAndLimit;
     int _SsrUseHistoryColorPyramid;
     int _SsrHistoryColorPyramidMaxMip;
     int _SsrUseAccumulationHistory;
@@ -305,6 +306,13 @@ float GetSsrHistoryColorPyramidMipLevel(float perceptualRoughness)
 
 float4 GetSsrHistoryColorPyramidUvScaleAndLimit()
 {
+    float4 uvScaleAndLimit = _SsrHistoryColorPyramidUvScaleAndLimit;
+    if (all(uvScaleAndLimit.xy > 0.0) && all(uvScaleAndLimit.zw > 0.0))
+    {
+        uvScaleAndLimit.zw = min(uvScaleAndLimit.zw, uvScaleAndLimit.xy);
+        return uvScaleAndLimit;
+    }
+
     float2 uvScale = float2(1.0, 1.0);
     float2 uvLimit = uvScale - 0.5 * _SsrHistoryColorPyramidSize.zw;
     return float4(uvScale, saturate(uvLimit));
@@ -329,20 +337,36 @@ bool TryComputeSsrHistoryColorPyramidUV(float2 historyScreenUV, float mipLevel, 
     return all(historyPyramidUV >= 0.0) && all(historyPyramidUV <= limit);
 }
 
-float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+bool TrySampleReflectionColor(float2 screenUV, float perceptualRoughness, out float3 color)
 {
+    color = 0.0;
+
     if (_SsrUseHistoryColorPyramid == 0)
-        return 0.0;
+        return false;
 
     int maxMip = GetSsrHistoryColorPyramidMaxMip();
     float lod = saturate(perceptualRoughness) * (float)maxMip;
+    float2 pyramidUV;
+    if (!TryComputeSsrHistoryColorPyramidUV(screenUV, lod, pyramidUV))
+        return false;
+
     int mip0 = (int)floor(lod);
     int mip1 = min(mip0 + 1, maxMip);
     float factor = frac(lod);
 
-    float3 color0 = SampleHistoryPyramidBilinear(screenUV, mip0);
-    float3 color1 = SampleHistoryPyramidBilinear(screenUV, mip1);
-    return lerp(color0, color1, factor);
+    float3 color0 = SampleHistoryPyramidBilinear(pyramidUV, mip0);
+    float3 color1 = SampleHistoryPyramidBilinear(pyramidUV, mip1);
+    color = lerp(color0, color1, factor);
+    return true;
+}
+
+float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+{
+    float3 color;
+    if (TrySampleReflectionColor(screenUV, perceptualRoughness, color))
+        return color;
+
+    return 0.0;
 }
 
 float3 SampleReflectionColorRawMip(float2 screenUV, int mipLevel)
@@ -1104,7 +1128,14 @@ void ScreenSpaceReflectionsTracing(
         return;
     }
 
-    float3 historyColor = SanitizeSsrRadiance(SampleReflectionColor(historyScreenUV, perceptualRoughness));
+    float3 historyColor;
+    if (!TrySampleReflectionColor(historyScreenUV, perceptualRoughness, historyColor))
+    {
+        StoreEmptySsrTrace(coordSS);
+        return;
+    }
+
+    historyColor = SanitizeSsrRadiance(historyColor);
     float3 reflectedColor = historyColor;
     float contribution = saturate(roughnessFade * _SsrIntensity * historyReliability);
 

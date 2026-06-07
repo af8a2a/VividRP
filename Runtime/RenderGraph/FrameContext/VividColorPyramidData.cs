@@ -1,3 +1,4 @@
+using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
@@ -9,7 +10,10 @@ namespace VividRP.Runtime
         public RenderGraphTexture currentColorPyramid;
         public int width;
         public int height;
+        public int previousWidth;
+        public int previousHeight;
         public int mipCount;
+        public Vector4 previousColorPyramidUvScaleAndLimit;
 
         public override void Reset()
         {
@@ -18,7 +22,10 @@ namespace VividRP.Runtime
             currentColorPyramid = null;
             width = 0;
             height = 0;
+            previousWidth = 0;
+            previousHeight = 0;
             mipCount = 0;
+            previousColorPyramidUvScaleAndLimit = Vector4.zero;
         }
     }
 

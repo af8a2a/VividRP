@@ -35,6 +35,7 @@ float _SsrIntensityClamp;
 int _SsrReflectsSky;
 int _SsrFrameIndex;
 float4 _SsrHistoryColorPyramidSize;
+float4 _SsrHistoryColorPyramidUvScaleAndLimit;
 int _SsrUseHistoryColorPyramid;
 int _SsrHistoryColorPyramidMaxMip;
 float4 _SsrWorldSpaceCameraPos;
@@ -131,25 +132,84 @@ float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
     return lerp(cx0, cx1, factor.y);
 }
 
-float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+int GetSsrHistoryColorPyramidMaxMip()
 {
-    if (_SsrUseHistoryColorPyramid == 0)
-        return 0.0;
-
     uint width;
     uint height;
     uint mipCount;
     _PreviousColorPyramidTexture.GetDimensions((uint)0, width, height, mipCount);
 
-    int maxMip = min(max((int)mipCount - 1, 0), _SsrHistoryColorPyramidMaxMip);
+    return min(max((int)mipCount - 1, 0), _SsrHistoryColorPyramidMaxMip);
+}
+
+float GetSsrHistoryColorPyramidMipLevel(float perceptualRoughness)
+{
+    return saturate(perceptualRoughness) * (float)GetSsrHistoryColorPyramidMaxMip();
+}
+
+float4 GetSsrHistoryColorPyramidUvScaleAndLimit()
+{
+    float4 uvScaleAndLimit = _SsrHistoryColorPyramidUvScaleAndLimit;
+    if (all(uvScaleAndLimit.xy > 0.0) && all(uvScaleAndLimit.zw > 0.0))
+    {
+        uvScaleAndLimit.zw = min(uvScaleAndLimit.zw, uvScaleAndLimit.xy);
+        return uvScaleAndLimit;
+    }
+
+    float2 uvScale = float2(1.0, 1.0);
+    float2 uvLimit = uvScale - 0.5 * _SsrHistoryColorPyramidSize.zw;
+    return float4(uvScale, saturate(uvLimit));
+}
+
+bool TryComputeSsrHistoryColorPyramidUV(float2 historyScreenUV, float mipLevel, out float2 historyPyramidUV)
+{
+    historyPyramidUV = 0.0;
+
+    if (_SsrUseHistoryColorPyramid == 0 || any(_SsrHistoryColorPyramidSize.xy <= 0.0))
+        return false;
+
+    if (any(isnan(historyScreenUV)) || any(isinf(historyScreenUV)))
+        return false;
+
+    float4 uvScaleAndLimit = GetSsrHistoryColorPyramidUvScaleAndLimit();
+    historyPyramidUV = historyScreenUV * uvScaleAndLimit.xy;
+
+    float2 diffLimit = uvScaleAndLimit.xy - uvScaleAndLimit.zw;
+    float2 diffLimitMipAdjusted = diffLimit * exp2(1.5 + ceil(abs(mipLevel)));
+    float2 limit = uvScaleAndLimit.xy - diffLimitMipAdjusted;
+    return all(historyPyramidUV >= 0.0) && all(historyPyramidUV <= limit);
+}
+
+bool TrySampleReflectionColor(float2 screenUV, float perceptualRoughness, out float3 color)
+{
+    color = 0.0;
+
+    if (_SsrUseHistoryColorPyramid == 0)
+        return false;
+
+    int maxMip = GetSsrHistoryColorPyramidMaxMip();
     float lod = saturate(perceptualRoughness) * (float)maxMip;
+    float2 pyramidUV;
+    if (!TryComputeSsrHistoryColorPyramidUV(screenUV, lod, pyramidUV))
+        return false;
+
     int mip0 = (int)floor(lod);
     int mip1 = min(mip0 + 1, maxMip);
     float factor = frac(lod);
 
-    float3 color0 = SampleHistoryPyramidBilinear(screenUV, mip0);
-    float3 color1 = SampleHistoryPyramidBilinear(screenUV, mip1);
-    return lerp(color0, color1, factor);
+    float3 color0 = SampleHistoryPyramidBilinear(pyramidUV, mip0);
+    float3 color1 = SampleHistoryPyramidBilinear(pyramidUV, mip1);
+    color = lerp(color0, color1, factor);
+    return true;
+}
+
+float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
+{
+    float3 color;
+    if (TrySampleReflectionColor(screenUV, perceptualRoughness, color))
+        return color;
+
+    return 0.0;
 }
 
 float EdgeOfScreenFade(float2 screenUV)
@@ -422,7 +482,14 @@ void RayGenScreenSpaceReflectionsHybridTrace()
         return;
     }
 
-    float3 historyColor = SanitizeSsrRadiance(SampleReflectionColor(historyScreenUV, perceptualRoughness));
+    float3 historyColor;
+    if (!TrySampleReflectionColor(historyScreenUV, perceptualRoughness, historyColor))
+    {
+        StoreEmptySsrTrace(coordSS);
+        return;
+    }
+
+    historyColor = SanitizeSsrRadiance(historyColor);
     float contribution = saturate(roughnessFade * _SsrIntensity * historyReliability);
 
     _SSRTraceTexture[coordSS] = float4(historyColor, contribution);

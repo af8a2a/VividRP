@@ -150,6 +150,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SsrReflectsSkyId = Shader.PropertyToID("_SsrReflectsSky");
         private static readonly int SsrFrameIndexId = Shader.PropertyToID("_SsrFrameIndex");
         private static readonly int SsrHistoryColorPyramidSizeId = Shader.PropertyToID("_SsrHistoryColorPyramidSize");
+        private static readonly int SsrHistoryColorPyramidUvScaleAndLimitId = Shader.PropertyToID("_SsrHistoryColorPyramidUvScaleAndLimit");
         private static readonly int SsrUseHistoryColorPyramidId = Shader.PropertyToID("_SsrUseHistoryColorPyramid");
         private static readonly int SsrHistoryColorPyramidMaxMipId = Shader.PropertyToID("_SsrHistoryColorPyramidMaxMip");
         private static readonly int SsrWorldSpaceCameraPosId = Shader.PropertyToID("_SsrWorldSpaceCameraPos");
@@ -180,6 +181,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public int SsrReflectsSky;
             public int SsrFrameIndex;
             public Vector4 SsrHistoryColorPyramidSize;
+            public Vector4 SsrHistoryColorPyramidUvScaleAndLimit;
             public int SsrUseHistoryColorPyramid;
             public int SsrHistoryColorPyramidMaxMip;
             public int SsrUseAccumulationHistory;
@@ -821,6 +823,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidSize = Vector4.zero;
+            m_ConstantBuffer.SsrHistoryColorPyramidUvScaleAndLimit = Vector4.zero;
 
             if (frameData == null || !frameData.Contains<VividColorPyramidData>())
                 return false;
@@ -835,12 +838,19 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
+            int previousColorPyramidWidth = colorPyramidData.previousWidth > 0
+                ? colorPyramidData.previousWidth
+                : colorPyramidData.width;
+            int previousColorPyramidHeight = colorPyramidData.previousHeight > 0
+                ? colorPyramidData.previousHeight
+                : colorPyramidData.height;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = Mathf.Max(0, colorPyramidData.mipCount - 1);
             m_ConstantBuffer.SsrHistoryColorPyramidSize = new Vector4(
-                colorPyramidData.width,
-                colorPyramidData.height,
-                1.0f / Mathf.Max(1, colorPyramidData.width),
-                1.0f / Mathf.Max(1, colorPyramidData.height));
+                previousColorPyramidWidth,
+                previousColorPyramidHeight,
+                1.0f / Mathf.Max(1, previousColorPyramidWidth),
+                1.0f / Mathf.Max(1, previousColorPyramidHeight));
+            m_ConstantBuffer.SsrHistoryColorPyramidUvScaleAndLimit = colorPyramidData.previousColorPyramidUvScaleAndLimit;
 
             if (!colorPyramidData.hasValidHistory)
                 return false;
@@ -1841,6 +1851,10 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetRayTracingIntParam(m_HybridTraceRayTracingShader, SsrReflectsSkyId, m_ConstantBuffer.SsrReflectsSky);
             cmd.SetRayTracingIntParam(m_HybridTraceRayTracingShader, SsrFrameIndexId, m_ConstantBuffer.SsrFrameIndex);
             cmd.SetRayTracingVectorParam(m_HybridTraceRayTracingShader, SsrHistoryColorPyramidSizeId, m_ConstantBuffer.SsrHistoryColorPyramidSize);
+            cmd.SetRayTracingVectorParam(
+                m_HybridTraceRayTracingShader,
+                SsrHistoryColorPyramidUvScaleAndLimitId,
+                m_ConstantBuffer.SsrHistoryColorPyramidUvScaleAndLimit);
             cmd.SetRayTracingIntParam(
                 m_HybridTraceRayTracingShader,
                 SsrUseHistoryColorPyramidId,
@@ -1961,6 +1975,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 SsrReflectsSky = settings.reflectSky ? 1 : 0,
                 SsrFrameIndex = Time.frameCount,
                 SsrHistoryColorPyramidSize = Vector4.zero,
+                SsrHistoryColorPyramidUvScaleAndLimit = Vector4.zero,
                 SsrUseHistoryColorPyramid = 0,
                 SsrHistoryColorPyramidMaxMip = 0,
                 SsrUseAccumulationHistory = 0,

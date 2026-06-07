@@ -142,13 +142,30 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_PreviousColorPyramid,
                 m_CurrentColorPyramid,
                 m_CurrentColorPyramid.desc);
+            PassRecorder.TryGetHistoryTextureHandlesForPass(
+                this,
+                HistoryKey,
+                out var previousColorPyramidHandle,
+                out _,
+                out _);
+
+            var previousViewportSize = ResolvePreviousColorPyramidViewportSize(
+                previousColorPyramidHandle,
+                m_Width,
+                m_Height);
 
             colorPyramidData.hasValidHistory = hasValidHistory;
             colorPyramidData.previousColorPyramid = m_PreviousColorPyramid;
             colorPyramidData.currentColorPyramid = m_CurrentColorPyramid;
             colorPyramidData.width = m_Width;
             colorPyramidData.height = m_Height;
+            colorPyramidData.previousWidth = previousViewportSize.x;
+            colorPyramidData.previousHeight = previousViewportSize.y;
             colorPyramidData.mipCount = m_MipCount;
+            colorPyramidData.previousColorPyramidUvScaleAndLimit = ComputePreviousColorPyramidUvScaleAndLimit(
+                previousColorPyramidHandle,
+                m_Width,
+                m_Height);
         }
 
         public override void Record(ComputePassContext context)
@@ -249,6 +266,71 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             int maxDimension = Mathf.Max(1, Mathf.Max(width, height));
             return Mathf.FloorToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
+        }
+
+        private static Vector2Int ResolvePreviousColorPyramidViewportSize(RTHandle historyHandle, int fallbackWidth, int fallbackHeight)
+        {
+            var fallbackSize = new Vector2Int(Mathf.Max(1, fallbackWidth), Mathf.Max(1, fallbackHeight));
+            if (historyHandle == null)
+                return fallbackSize;
+
+            var properties = historyHandle.rtHandleProperties;
+            if (IsValidSize(properties.previousViewportSize))
+                return properties.previousViewportSize;
+
+            if (IsValidSize(properties.currentViewportSize))
+                return properties.currentViewportSize;
+
+            return fallbackSize;
+        }
+
+        private static Vector4 ComputePreviousColorPyramidUvScaleAndLimit(
+            RTHandle historyHandle,
+            int fallbackWidth,
+            int fallbackHeight)
+        {
+            Vector2Int viewportSize = ResolvePreviousColorPyramidViewportSize(historyHandle, fallbackWidth, fallbackHeight);
+            Vector2Int renderTargetSize = ResolvePreviousColorPyramidRenderTargetSize(historyHandle, viewportSize);
+            return ComputeViewportScaleAndLimit(viewportSize, renderTargetSize);
+        }
+
+        private static Vector2Int ResolvePreviousColorPyramidRenderTargetSize(RTHandle historyHandle, Vector2Int fallbackSize)
+        {
+            if (historyHandle == null)
+                return ClampSize(fallbackSize);
+
+            var properties = historyHandle.rtHandleProperties;
+            if (IsValidSize(properties.previousRenderTargetSize))
+                return properties.previousRenderTargetSize;
+
+            if (historyHandle.rt != null)
+                return new Vector2Int(Mathf.Max(1, historyHandle.rt.width), Mathf.Max(1, historyHandle.rt.height));
+
+            if (IsValidSize(properties.currentRenderTargetSize))
+                return properties.currentRenderTargetSize;
+
+            return ClampSize(fallbackSize);
+        }
+
+        private static Vector4 ComputeViewportScaleAndLimit(Vector2Int viewportSize, Vector2Int renderTargetSize)
+        {
+            viewportSize = ClampSize(viewportSize);
+            renderTargetSize = ClampSize(renderTargetSize);
+            return new Vector4(
+                viewportSize.x / (float)renderTargetSize.x,
+                viewportSize.y / (float)renderTargetSize.y,
+                (viewportSize.x - 0.5f) / renderTargetSize.x,
+                (viewportSize.y - 0.5f) / renderTargetSize.y);
+        }
+
+        private static Vector2Int ClampSize(Vector2Int size)
+        {
+            return new Vector2Int(Mathf.Max(1, size.x), Mathf.Max(1, size.y));
+        }
+
+        private static bool IsValidSize(Vector2Int size)
+        {
+            return size.x > 0 && size.y > 0;
         }
 
         private static void ConfigureSourceDescriptor(RenderGraphTexture texture, int width, int height)

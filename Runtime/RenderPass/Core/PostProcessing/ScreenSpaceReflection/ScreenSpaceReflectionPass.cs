@@ -157,6 +157,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SsrInvViewProjMatrixId = Shader.PropertyToID("_SsrInvViewProjMatrix");
         private static readonly int SsrPrevViewProjMatrixId = Shader.PropertyToID("_SsrPrevViewProjMatrix");
         private static readonly int SsrHybridRayBiasId = Shader.PropertyToID("_SsrHybridRayBias");
+        private static readonly int SsrPBRBiasId = Shader.PropertyToID("_SsrPBRBias");
         private static readonly int SsrAccumPrevId = Shader.PropertyToID("_SsrAccumPrev");
         private static readonly int SsrAccumTextureId = Shader.PropertyToID("_SsrAccumTexture");
         private static readonly int SSRPrevNumFramesAccumTextureId = Shader.PropertyToID("_SSRPrevNumFramesAccumTexture");
@@ -195,7 +196,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public float ReBlurDenoiserRadius;
             public float ReBlurAntiFlickeringStrength;
             public float ReBlurHistoryValidity;
-            public float ReBlurPadding;
+            public float SsrPBRBias;
         }
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -1853,6 +1854,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetRayTracingMatrixParam(m_HybridTraceRayTracingShader, SsrInvViewProjMatrixId, m_ConstantBuffer.SsrInvViewProjMatrix);
             cmd.SetRayTracingMatrixParam(m_HybridTraceRayTracingShader, SsrPrevViewProjMatrixId, m_ConstantBuffer.SsrPrevViewProjMatrix);
             cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrHybridRayBiasId, m_ShaderVariablesRayTracing._RayTracingRayBias);
+            cmd.SetRayTracingFloatParam(m_HybridTraceRayTracingShader, SsrPBRBiasId, m_ConstantBuffer.SsrPBRBias);
         }
 
         private void UpdateOutputDescriptor(int width, int height)
@@ -1983,7 +1985,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReBlurDenoiserRadius = Mathf.Lerp(0.5f, 1.0f, settings.reBlurDenoiserRadius),
                 ReBlurAntiFlickeringStrength = Mathf.Lerp(0.0f, 3.5f, settings.reBlurAntiFlickeringStrength),
                 ReBlurHistoryValidity = 0.0f,
-                ReBlurPadding = 0.0f
+                SsrPBRBias = settings.biasFactor
             };
         }
 

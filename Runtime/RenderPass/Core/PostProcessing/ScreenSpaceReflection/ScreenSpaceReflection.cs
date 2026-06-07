@@ -40,6 +40,9 @@ namespace VividRP.Runtime
         [Tooltip("Maximum HiZ ray marching steps.")]
         public ClampedIntParameter rayMaxIterations = new(32, 1, 128);
 
+        [Tooltip("Biases stochastic reflection samples toward the mirror direction for rough surfaces.")]
+        public ClampedFloatParameter biasFactor = new(0.5f, 0.0f, 1.0f);
+
         [Tooltip("Scales the ReBLUR filter radius used by DXR reflections.")]
         public ClampedFloatParameter reBlurDenoiserRadius = new(1.0f, 0.0f, 1.0f);
 

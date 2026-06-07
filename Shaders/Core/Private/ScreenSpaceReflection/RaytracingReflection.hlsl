@@ -42,6 +42,7 @@ float4x4 _SsrViewProjMatrix;
 float4x4 _SsrInvViewProjMatrix;
 float4x4 _SsrPrevViewProjMatrix;
 float _SsrHybridRayBias;
+float _SsrPBRBias;
 
 uint2 UnpackSsrHybridCandidateCoord(uint packedCoord)
 {
@@ -316,6 +317,14 @@ bool SampleSsrGGXVNDF(
     return true;
 }
 
+float2 ApplySsrPBRBias(float2 sample, float roughness)
+{
+    roughness = max(roughness, SSR_MIN_GGX_ROUGHNESS);
+    float coefBias = saturate(_SsrPBRBias) * rcp(roughness);
+    sample.x = lerp(sample.x, 0.0, saturate(roughness * coefBias));
+    return sample;
+}
+
 float3 SampleSsrReflectionDir(
     float3 normalWS,
     float3 viewDirWS,
@@ -323,7 +332,8 @@ float3 SampleSsrReflectionDir(
     float2 blueNoiseSample,
     out float sampleWeight)
 {
-    float roughness = PerceptualRoughnessToRoughness(perceptualRoughness);
+    float roughness = clamp(PerceptualRoughnessToRoughness(perceptualRoughness), SSR_MIN_GGX_ROUGHNESS, SSR_MAX_GGX_ROUGHNESS);
+    blueNoiseSample = ApplySsrPBRBias(blueNoiseSample, roughness);
     float3x3 localToWorld = GetLocalFrame(normalWS);
     float3 reflectionDirWS = reflect(-viewDirWS, normalWS);
 

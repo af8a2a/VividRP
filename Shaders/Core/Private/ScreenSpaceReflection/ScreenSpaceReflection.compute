@@ -195,6 +195,12 @@ float3 DecodePreExposedSsrRadiance(float3 color)
     return ClampToFloat16Max(clamp(color, 0.0, _SsrIntensityClamp) * VividGetOneOverPreExposure());
 }
 
+bool IsPositiveFiniteSsrHistoryColor(float3 color)
+{
+    uint3 intCol = asuint(color);
+    return max(max(intCol.r, intCol.g), intCol.b) < 0x7F800000;
+}
+
 float4 EmptySsrResult()
 {
     return float4(0.0, 0.0, 0.0, 0.0);
@@ -223,6 +229,18 @@ float3 LoadHistoryPyramidColor(int2 pixelCoord, int mipLevel)
     return DecodePreExposedSsrRadiance(_PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb);
 }
 
+float3 LoadHistoryPyramidColorRaw(int2 pixelCoord, int mipLevel)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _PreviousColorPyramidTexture.GetDimensions((uint)mipLevel, width, height, mipCount);
+
+    int2 maxCoord = int2(max((int)width - 1, 0), max((int)height - 1, 0));
+    pixelCoord = clamp(pixelCoord, int2(0, 0), maxCoord);
+    return _PreviousColorPyramidTexture.Load(int3(pixelCoord, mipLevel)).rgb;
+}
+
 float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
 {
     uint width;
@@ -239,6 +257,28 @@ float3 SampleHistoryPyramidBilinear(float2 screenUV, int mipLevel)
     float3 c10 = LoadHistoryPyramidColor(baseCoord + int2(1, 0), mipLevel);
     float3 c01 = LoadHistoryPyramidColor(baseCoord + int2(0, 1), mipLevel);
     float3 c11 = LoadHistoryPyramidColor(baseCoord + int2(1, 1), mipLevel);
+
+    float3 cx0 = lerp(c00, c10, factor.x);
+    float3 cx1 = lerp(c01, c11, factor.x);
+    return lerp(cx0, cx1, factor.y);
+}
+
+float3 SampleHistoryPyramidBilinearRaw(float2 screenUV, int mipLevel)
+{
+    uint width;
+    uint height;
+    uint mipCount;
+    _PreviousColorPyramidTexture.GetDimensions((uint)mipLevel, width, height, mipCount);
+
+    float2 mipSize = float2((float)max(width, 1u), (float)max(height, 1u));
+    float2 pixelCoord = screenUV * mipSize - 0.5;
+    int2 baseCoord = (int2)floor(pixelCoord);
+    float2 factor = frac(pixelCoord);
+
+    float3 c00 = LoadHistoryPyramidColorRaw(baseCoord, mipLevel);
+    float3 c10 = LoadHistoryPyramidColorRaw(baseCoord + int2(1, 0), mipLevel);
+    float3 c01 = LoadHistoryPyramidColorRaw(baseCoord + int2(0, 1), mipLevel);
+    float3 c11 = LoadHistoryPyramidColorRaw(baseCoord + int2(1, 1), mipLevel);
 
     float3 cx0 = lerp(c00, c10, factor.x);
     float3 cx1 = lerp(c01, c11, factor.x);
@@ -299,6 +339,22 @@ float3 SampleReflectionColor(float2 screenUV, float perceptualRoughness)
 
     float3 color0 = SampleHistoryPyramidBilinear(screenUV, mip0);
     float3 color1 = SampleHistoryPyramidBilinear(screenUV, mip1);
+    return lerp(color0, color1, factor);
+}
+
+float3 SampleReflectionColorRaw(float2 screenUV, float perceptualRoughness)
+{
+    if (_SsrUseHistoryColorPyramid == 0)
+        return 0.0;
+
+    int maxMip = GetSsrHistoryColorPyramidMaxMip();
+    float lod = saturate(perceptualRoughness) * (float)maxMip;
+    int mip0 = (int)floor(lod);
+    int mip1 = min(mip0 + 1, maxMip);
+    float factor = frac(lod);
+
+    float3 color0 = SampleHistoryPyramidBilinearRaw(screenUV, mip0);
+    float3 color1 = SampleHistoryPyramidBilinearRaw(screenUV, mip1);
     return lerp(color0, color1, factor);
 }
 
@@ -2529,7 +2585,10 @@ bool TryLoadSsrHDRPReprojectionSample(
     if (opacity <= 0.0001)
         return false;
 
-    color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));
+    color = SampleReflectionColorRaw(prevFrameUV, perceptualRoughness);
+    bool isPosFin = IsPositiveFiniteSsrHistoryColor(color);
+    color = isPosFin ? DecodePreExposedSsrRadiance(color) : 0.0;
+    opacity = isPosFin ? opacity : 0.0;
     return any(color > 0.0);
 }
 

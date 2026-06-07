@@ -913,7 +913,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float2 hitMotion = LoadSsrMotionVector(hitData);"));
             Assert.That(source, Does.Contain("float2 prevFrameNDC = hitData - hitMotion;"));
             Assert.That(source, Does.Contain("if (!TryComputeSsrHistoryColorPyramidUV(prevFrameNDC, mipLevel, prevFrameUV))"));
-            Assert.That(source, Does.Contain("color = SanitizeSsrRadiance(SampleReflectionColor(prevFrameUV, perceptualRoughness));"));
+            Assert.That(source, Does.Contain("bool IsPositiveFiniteSsrHistoryColor(float3 color)"));
+            Assert.That(source, Does.Contain("uint3 intCol = asuint(color);"));
+            Assert.That(source, Does.Contain("return max(max(intCol.r, intCol.g), intCol.b) < 0x7F800000;"));
+            Assert.That(source, Does.Contain("color = SampleReflectionColorRaw(prevFrameUV, perceptualRoughness);"));
+            Assert.That(source, Does.Contain("bool isPosFin = IsPositiveFiniteSsrHistoryColor(color);"));
+            Assert.That(source, Does.Contain("color = isPosFin ? DecodePreExposedSsrRadiance(color) : 0.0;"));
+            Assert.That(source, Does.Contain("opacity = isPosFin ? opacity : 0.0;"));
             Assert.That(source, Does.Contain("for (int y = -SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y <= SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y++)"));
             Assert.That(source, Does.Contain("if (abs(x) == abs(y) && abs(x) == SSR_HDRP_REPROJECT_SAMPLE_RADIUS)"));
             Assert.That(source, Does.Contain("colorSum += sampleColor * sampleWeight;"));

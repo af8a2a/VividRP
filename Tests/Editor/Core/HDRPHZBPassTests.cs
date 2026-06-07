@@ -93,6 +93,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("HZB"));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("ScreenSpaceReflectionOutput"));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "MotionVectors").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Buffers.Select(entry => entry.Name), Does.Contain("HZBMipLevelOffsets"));
             Assert.That(resources.AccelerationStructures.Single(entry => entry.Name == "SceneRTAS").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionTrace").IsTransient, Is.True);
@@ -114,6 +115,8 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccum").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").IsTransient, Is.False);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccumPrev").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccumTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").IsTransient, Is.False);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionAccumPrev").Access, Is.EqualTo(AccessFlags.Read));
@@ -904,9 +907,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("hitData.z <= 0.0"));
             Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, opacity);"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
-            Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];"));
+            Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
             Assert.That(source, Does.Contain("if (_SsrWriteHDRPToOutput != 0)"));
-            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];"));
+            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = accumulatedReflection;"));
             Assert.That(source, Does.Not.Contain("ClearScreenSpaceReflectionTiles"));
             Assert.That(source, Does.Not.Contain("sourceColor.rgb + reflectedColor"));
             Assert.That(source, Does.Not.Contain("_InputColorTexture"));
@@ -993,6 +996,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool ShouldRunHDRPPath()"));
             Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
             Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);"));
             Assert.That(source, Does.Contain("BlueNoise.Instance?.Bind(cmd, m_HybridTraceRayTracingShader);"));
             Assert.That(source, Does.Contain("BindHybridRayTracingParameters(cmd, context);"));
             Assert.That(source, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer"));

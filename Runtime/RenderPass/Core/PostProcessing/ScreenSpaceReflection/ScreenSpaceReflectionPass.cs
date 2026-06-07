@@ -45,6 +45,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string HybridRayGenName = "RayGenScreenSpaceReflectionsHybridTrace";
         private const string RayTracingRayGenName = "RayGenIntegration";
         private const string AccumulationHistoryKey = "SSRAccumulation";
+        private const string HDRPAccumulationHistoryKey = "SSRHDRPAccumulation";
         private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
         private const string ReBlurLightingDistanceHistoryKey = "SSRReBlurLightingDistance";
         private const string ReBlurAccumulationHistoryKey = "SSRReBlurAccumulation";
@@ -107,6 +108,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
+        private static readonly int MotionVectorsId = Shader.PropertyToID("_MotionVectors");
         private static readonly int PreviousColorPyramidTextureId = Shader.PropertyToID("_PreviousColorPyramidTexture");
         private static readonly int DepthPyramidMipLevelOffsetsId = Shader.PropertyToID("_DepthPyramidMipLevelOffsets");
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
@@ -117,6 +119,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SSRHDRPAccumTextureId = Shader.PropertyToID("_SSRHDRPAccumTexture");
         private static readonly int SSRHDRPOutputTextureId = Shader.PropertyToID("_SSRHDRPOutputTexture");
         private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
+        private static readonly int SsrUseHDRPAccumulationHistoryId = Shader.PropertyToID("_SsrUseHDRPAccumulationHistory");
         private static readonly int SSRAccumTextureId = Shader.PropertyToID("_SSRAccumTexture");
         private static readonly int SSRAvgRadianceTextureId = Shader.PropertyToID("_SSRAvgRadianceTexture");
         private static readonly int ReBlurLightingDistanceTextureId = Shader.PropertyToID("_ReBlurLightingDistanceTexture");
@@ -208,6 +211,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "GBuffer2", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer2;
+
+        [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_MotionVectors;
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private readonly RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -302,6 +308,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_HDRPOutputTexture;
 
         private readonly RenderGraphTexture m_DefaultPreviousColorPyramidTexture;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionHDRPAccumPrev",
+            Access = AccessFlags.Read)]
+        private readonly RenderGraphTexture m_HDRPAccumHistoryPrevious;
+
+        [RenderGraphResource(
+            Name = "ScreenSpaceReflectionHDRPAccumTexture",
+            Access = AccessFlags.Write)]
+        private readonly RenderGraphTexture m_HDRPAccumHistoryCurrent;
 
         [RenderGraphResource(
             Name = "ScreenSpaceReflectionAccumPrev",
@@ -407,8 +423,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_IsPassResourceLayoutDirty;
         private bool m_UseHistoryColorPyramid;
         private bool m_HasValidAccumulationHistory;
+        private bool m_HasValidHDRPAccumulationHistory;
         private bool m_HasValidReBlurHistory;
         private bool m_HistoryInvalidated = true;
+        private bool m_HDRPHistoryInvalidated = true;
         private bool m_SupportsRayTracing;
 
         private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;
@@ -435,6 +453,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
+            m_MotionVectors = RenderGraphTexture.CreateInput("MotionVectors", GraphicsFormat.R16G16_SFloat);
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
             output = CreateColorTexture("ScreenSpaceReflectionOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_TraceTexture = CreateColorTexture("ScreenSpaceReflectionTrace", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
@@ -463,6 +482,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 "PreviousColorPyramid",
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
+            m_HDRPAccumHistoryPrevious = RenderGraphTexture.CreateInput(
+                "ScreenSpaceReflectionHDRPAccumPrev",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_HDRPAccumHistoryCurrent = CreateColorTexture(
+                "ScreenSpaceReflectionHDRPAccumTexture",
+                1,
+                1,
+                GraphicsFormat.R16G16B16A16_SFloat);
             m_AccumulationHistoryPrevious = RenderGraphTexture.CreateInput(
                 "ScreenSpaceReflectionAccumPrev",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -518,6 +545,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureHDRPHitPointDescriptor(m_HDRPHitPointTexture, 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", 1, 1);
+            ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryPrevious, "ScreenSpaceReflectionHDRPAccumPrev", 1, 1);
+            ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryCurrent, "ScreenSpaceReflectionHDRPAccumTexture", 1, 1);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryPrevious, "ScreenSpaceReflectionAccumPrev", 1, 1);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryCurrent, "ScreenSpaceReflectionAccumTexture", 1, 1);
             ConfigureSingleChannelHistoryDescriptor(m_NumFramesHistoryPrevious, "ScreenSpaceReflectionPrevNumFramesAccum", 1, 1);
@@ -623,6 +652,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeInputTexture(m_GBuffer0, m_Width, m_Height);
             ResizeInputTexture(m_GBuffer1, m_Width, m_Height);
             ResizeInputTexture(m_GBuffer2, m_Width, m_Height);
+            ResizeInputTexture(m_MotionVectors, m_Width, m_Height);
             if (ReferenceEquals(m_HZBTexture, m_DefaultHZBTexture))
             {
                 ResizeInputTexture(m_HZBTexture, m_Width, m_Height);
@@ -645,6 +675,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ShaderVariablesRayTracingUtility.Create(frameData.GetOrCreate<VividRayTracingSettingsData>());
             PrepareReBlurHistory(frameData);
             PrepareAccumulationHistory(frameData);
+            PrepareHDRPAccumulationHistory(frameData);
             PrepareFrameContextOutput(frameData);
         }
 
@@ -764,8 +795,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_IsPassResourceLayoutDirty = false;
             m_UseHistoryColorPyramid = false;
             m_HasValidAccumulationHistory = false;
+            m_HasValidHDRPAccumulationHistory = false;
             m_HasValidReBlurHistory = false;
             m_HistoryInvalidated = true;
+            m_HDRPHistoryInvalidated = true;
             m_SupportsRayTracing = false;
             m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
             m_SkyTextureTint = Color.white;
@@ -869,6 +902,40 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !m_HistoryInvalidated;
             m_ConstantBuffer.SsrUseAccumulationHistory = m_HasValidAccumulationHistory ? 1 : 0;
             m_HistoryInvalidated = false;
+        }
+
+        private void PrepareHDRPAccumulationHistory(ContextContainer frameData)
+        {
+            m_HasValidHDRPAccumulationHistory = false;
+            ConfigureInternalTextureDescriptor(
+                m_HDRPAccumHistoryPrevious,
+                "ScreenSpaceReflectionHDRPAccumPrev",
+                m_Width,
+                m_Height);
+            ConfigureInternalTextureDescriptor(
+                m_HDRPAccumHistoryCurrent,
+                "ScreenSpaceReflectionHDRPAccumTexture",
+                m_Width,
+                m_Height);
+
+            if (!m_ShouldApply || !ShouldRunHDRPPath())
+            {
+                m_HDRPHistoryInvalidated = true;
+                return;
+            }
+
+            bool hasAccumulationHistory = AllocHistoryTexture(
+                HDRPAccumulationHistoryKey,
+                m_HDRPAccumHistoryPrevious,
+                m_HDRPAccumHistoryCurrent,
+                m_HDRPAccumHistoryCurrent.desc);
+
+            var temporalData = frameData.Get<VividTemporalData>();
+            bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;
+            m_HasValidHDRPAccumulationHistory = hasAccumulationHistory
+                && !isFirstFrame
+                && !m_HDRPHistoryInvalidated;
+            m_HDRPHistoryInvalidated = false;
         }
 
         private void PrepareReBlurHistory(ContextContainer frameData)
@@ -1082,6 +1149,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_HDRPHitPointTexture?.innerHandle.IsValid() == true
                 && m_HDRPAccumTexture?.innerHandle.IsValid() == true
                 && m_HDRPOutputTexture?.innerHandle.IsValid() == true
+                && m_HDRPAccumHistoryCurrent?.innerHandle.IsValid() == true
                 && output?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
                 && m_HZBTexture?.innerHandle.IsValid() == true
@@ -1669,9 +1737,34 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd, s_SSRHDRPAccumulateProfilingSampler))
             {
                 cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);
+                cmd.SetComputeIntParam(
+                    m_ComputeShader,
+                    SsrUseHDRPAccumulationHistoryId,
+                    m_HasValidHDRPAccumulationHistory ? 1 : 0);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, OutputColorTextureId, output.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_SSRHDRPAccumulateKernel,
+                    SsrAccumPrevId,
+                    m_HasValidHDRPAccumulationHistory && m_HDRPAccumHistoryPrevious?.innerHandle.IsValid() == true
+                        ? m_HDRPAccumHistoryPrevious.innerHandle
+                        : context.renderGraphContext.defaultResources.blackTexture);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_SSRHDRPAccumulateKernel,
+                    SsrAccumTextureId,
+                    m_HDRPAccumHistoryCurrent.innerHandle);
+                cmd.SetComputeTextureParam(
+                    m_ComputeShader,
+                    m_SSRHDRPAccumulateKernel,
+                    MotionVectorsId,
+                    m_MotionVectors?.innerHandle.IsValid() == true
+                        ? m_MotionVectors.innerHandle
+                        : context.renderGraphContext.defaultResources.blackTexture);
                 DispatchFullScreen(cmd, m_SSRHDRPAccumulateKernel);
             }
         }
@@ -1776,6 +1869,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureHDRPHitPointDescriptor(m_HDRPHitPointTexture, width, height);
             ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", width, height);
             ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", width, height);
+            ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryPrevious, "ScreenSpaceReflectionHDRPAccumPrev", width, height);
+            ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryCurrent, "ScreenSpaceReflectionHDRPAccumTexture", width, height);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryPrevious, "ScreenSpaceReflectionAccumPrev", width, height);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryCurrent, "ScreenSpaceReflectionAccumTexture", width, height);
             ConfigureSingleChannelHistoryDescriptor(m_NumFramesHistoryPrevious, "ScreenSpaceReflectionPrevNumFramesAccum", width, height);

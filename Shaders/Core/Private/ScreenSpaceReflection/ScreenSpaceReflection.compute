@@ -81,12 +81,14 @@ StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
+Texture2D<float2> _MotionVectors;
 Texture2D<float4> _PreviousColorPyramidTexture;
 TEXTURECUBE(_SkyTexture);
 SAMPLER(sampler_SkyTexture);
 float4 _SkyTextureTint;
 float4 _SkyTextureParams;
 int _SsrWriteHDRPToOutput;
+int _SsrUseHDRPAccumulationHistory;
 int _TargetMipLevel;
 
 CBUFFER_START(ShaderVariablesScreenSpaceReflection)
@@ -2427,6 +2429,53 @@ void ScreenSpaceReflectionsHDRPReprojection(uint3 dispatchThreadId : SV_Dispatch
     _SSRHDRPAccumTexture[coordSS] = float4(color, opacity);
 }
 
+uint2 GetSsrHDRPPixelCoordFromUV(float2 screenUV)
+{
+    int2 pixelCoord = (int2)floor(saturate(screenUV) * _SsrTraceScreenSize.xy);
+    return (uint2)ClampPixelCoord(pixelCoord);
+}
+
+float2 LoadSsrMotionVector(float2 screenUV)
+{
+    return _MotionVectors.Load(int3(GetSsrHDRPPixelCoordFromUV(screenUV), 0)).xy;
+}
+
+float4 LoadSsrHDRPAccumulationHistory(uint2 coordSS)
+{
+    float4 history = _SsrAccumPrev.Load(int3(coordSS, 0));
+    history.rgb = SanitizeSsrRadiance(history.rgb);
+    history.a = saturate(history.a);
+    return history;
+}
+
+bool IsValidSsrHDRPAccumulation(float4 value)
+{
+    if (value.a <= 0.0001)
+        return false;
+
+    return !any(isnan(value)) && !any(isinf(value));
+}
+
+float ComputeSsrHDRPAccumulationWeight(uint2 coordSS, float2 hitPositionNDC, float perceptualRoughness)
+{
+    float2 positionNDC = ((float2)coordSS + 0.5) * _SsrTraceScreenSize.zw;
+    float2 surfaceMotion = LoadSsrMotionVector(positionNDC);
+    float2 hitMotion = LoadSsrMotionVector(hitPositionNDC);
+    float motionPixels = length(surfaceMotion * _SsrTraceScreenSize.xy)
+        + length(hitMotion * _SsrTraceScreenSize.xy);
+    float speedRejection = saturate(motionPixels * rcp(8.0));
+
+    float roughness = clamp(
+        PerceptualRoughnessToRoughness(perceptualRoughness),
+        SSR_MIN_GGX_ROUGHNESS,
+        SSR_MAX_GGX_ROUGHNESS);
+    float roughnessReductionFactor = 1.0 - exp(-roughness * 100.0);
+    float maxSamplesNum = max(8.0, SSR_MAX_ACCUMULATED_FRAMES * roughnessReductionFactor)
+        * max(_SsrAccumulationAmount, 0.0);
+    float historyWeight = rcp(max(maxSamplesNum, 1.0));
+    return lerp(historyWeight, 1.0, speedRejection);
+}
+
 [numthreads(8, 8, 1)]
 void ScreenSpaceReflectionsHDRPAccumulate(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
@@ -2434,7 +2483,41 @@ void ScreenSpaceReflectionsHDRPAccumulate(uint3 dispatchThreadId : SV_DispatchTh
     if (IsOutsideScreen(coordSS))
         return;
 
-    _SSRHDRPOutputTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];
+    float4 currentReflection = _SSRHDRPAccumTexture[coordSS];
+    float2 hitPositionNDC = _SSRHDRPHitPointTexture[coordSS];
+    if (max(hitPositionNDC.x, hitPositionNDC.y) == 0.0 || currentReflection.a <= 0.0001)
+    {
+        _SSRHDRPAccumTexture[coordSS] = EmptySsrResult();
+        _SSRHDRPOutputTexture[coordSS] = EmptySsrResult();
+        _SsrAccumTexture[coordSS] = EmptySsrResult();
+        if (_SsrWriteHDRPToOutput != 0)
+            _OutputColorTexture[coordSS] = EmptySsrResult();
+        return;
+    }
+
+    currentReflection.rgb = SanitizeSsrRadiance(currentReflection.rgb);
+    currentReflection.a = saturate(currentReflection.a);
+
+    float4 accumulatedReflection = currentReflection;
+    if (_SsrUseHDRPAccumulationHistory != 0)
+    {
+        float4 previousReflection = LoadSsrHDRPAccumulationHistory(coordSS);
+        if (IsValidSsrHDRPAccumulation(previousReflection))
+        {
+            float perceptualRoughness = LoadPerceptualRoughness(coordSS);
+            float accumulationWeight = ComputeSsrHDRPAccumulationWeight(coordSS, hitPositionNDC, perceptualRoughness);
+            accumulatedReflection = lerp(previousReflection, currentReflection, accumulationWeight);
+        }
+    }
+
+    if (!IsValidSsrHDRPAccumulation(accumulatedReflection))
+        accumulatedReflection = EmptySsrResult();
+
+    accumulatedReflection.rgb = SanitizeSsrRadiance(accumulatedReflection.rgb);
+    accumulatedReflection.a = saturate(accumulatedReflection.a);
+    _SSRHDRPAccumTexture[coordSS] = accumulatedReflection;
+    _SSRHDRPOutputTexture[coordSS] = accumulatedReflection;
+    _SsrAccumTexture[coordSS] = accumulatedReflection;
     if (_SsrWriteHDRPToOutput != 0)
-        _OutputColorTexture[coordSS] = _SSRHDRPAccumTexture[coordSS];
+        _OutputColorTexture[coordSS] = accumulatedReflection;
 }

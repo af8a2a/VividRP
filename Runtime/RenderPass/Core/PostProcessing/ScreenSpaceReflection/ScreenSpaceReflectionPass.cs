@@ -109,17 +109,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
-        private static readonly int MotionVectorsId = Shader.PropertyToID("_MotionVectors");
+        private static readonly int CameraMotionVectorsTextureId = Shader.PropertyToID("_CameraMotionVectorsTexture");
         private static readonly int PreviousColorPyramidTextureId = Shader.PropertyToID("_PreviousColorPyramidTexture");
         private static readonly int DepthPyramidMipLevelOffsetsId = Shader.PropertyToID("_DepthPyramidMipLevelOffsets");
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
         private static readonly int SSRDebugTextureId = Shader.PropertyToID("_SSRDebugTexture");
-        private static readonly int SSRHDRPHitPointTextureId = Shader.PropertyToID("_SSRHDRPHitPointTexture");
-        private static readonly int SSRHDRPAccumTextureId = Shader.PropertyToID("_SSRHDRPAccumTexture");
-        private static readonly int SSRHDRPOutputTextureId = Shader.PropertyToID("_SSRHDRPOutputTexture");
-        private static readonly int SsrWriteHDRPToOutputId = Shader.PropertyToID("_SsrWriteHDRPToOutput");
+        private static readonly int SsrHitPointTextureId = Shader.PropertyToID("_SsrHitPointTexture");
         private static readonly int SsrUseHDRPAccumulationHistoryId = Shader.PropertyToID("_SsrUseHDRPAccumulationHistory");
         private static readonly int SsrHDRPAccumulationAmountId = Shader.PropertyToID("_SsrHDRPAccumulationAmount");
         private static readonly int SsrHDRPAccumulationSpeedRejectionId = Shader.PropertyToID("_SsrHDRPAccumulationSpeedRejection");
@@ -186,6 +183,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public int SsrUseAccumulationHistory;
             public float SsrAccumulationAmount;
             public Vector4 SsrAccumulationHistorySize;
+            public Vector4 SsrHDRPAccumulationHistorySize;
+            public Vector4 SsrHDRPAccumulationHistoryScale;
             public Vector4 SsrWorldSpaceCameraPos;
             public Matrix4x4 SsrViewProjMatrix;
             public Matrix4x4 SsrInvViewProjMatrix;
@@ -301,18 +300,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_HDRPHitPointTexture;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionHDRPAccum",
-            Access = AccessFlags.ReadWrite)]
-        [TransientResource]
-        private readonly RenderGraphTexture m_HDRPAccumTexture;
-
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionHDRPOutput",
-            Access = AccessFlags.Write,
-            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
-        private readonly RenderGraphTexture m_HDRPOutputTexture;
-
         private readonly RenderGraphTexture m_DefaultPreviousColorPyramidTexture;
 
         [RenderGraphResource(
@@ -420,6 +407,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_SSRHDRPReprojectionKernel = -1;
         private int m_SSRHDRPAccumulateKernel = -1;
         private int m_CopyKernel = -1;
+        private int m_CopyHDRPKernel = -1;
         private RayTracingShader m_HybridTraceRayTracingShader;
         private int m_Width = 1;
         private int m_Height = 1;
@@ -482,8 +470,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
             m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_HDRPHitPointTexture = CreateColorTexture("ScreenSpaceReflectionHDRPHitPoint", 1, 1, GraphicsFormat.R16G16_UNorm);
-            m_HDRPAccumTexture = CreateColorTexture("ScreenSpaceReflectionHDRPAccum", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
-            m_HDRPOutputTexture = CreateColorTexture("ScreenSpaceReflectionHDRPOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_DefaultPreviousColorPyramidTexture = RenderGraphTexture.CreateInput(
                 "PreviousColorPyramid",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -549,8 +535,6 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureAvgRadianceDescriptor(m_AvgRadianceTexture, 1, 1);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", 1, 1);
             ConfigureHDRPHitPointDescriptor(m_HDRPHitPointTexture, 1, 1);
-            ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", 1, 1);
-            ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryPrevious, "ScreenSpaceReflectionHDRPAccumPrev", 1, 1);
             ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryCurrent, "ScreenSpaceReflectionHDRPAccumTexture", 1, 1);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryPrevious, "ScreenSpaceReflectionAccumPrev", 1, 1);
@@ -606,6 +590,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SSRHDRPReprojectionKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsHDRPReprojection");
                 m_SSRHDRPAccumulateKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsHDRPAccumulate");
                 m_CopyKernel = m_ComputeShader.FindKernel("CopyScreenSpaceReflection");
+                m_CopyHDRPKernel = m_ComputeShader.FindKernel("CopyHDRPScreenSpaceReflection");
             }
             catch (ArgumentException)
             {
@@ -622,6 +607,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SSRHDRPReprojectionKernel = -1;
                 m_SSRHDRPAccumulateKernel = -1;
                 m_CopyKernel = -1;
+                m_CopyHDRPKernel = -1;
             }
 
             m_SSRHybridCandidatesKernel = TryFindKernel(m_ComputeShader, "ScreenSpaceReflectionsHybridCandidates");
@@ -797,6 +783,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SSRHDRPReprojectionKernel = -1;
             m_SSRHDRPAccumulateKernel = -1;
             m_CopyKernel = -1;
+            m_CopyHDRPKernel = -1;
             m_ShouldApply = false;
             m_IsPassResourceLayoutDirty = false;
             m_UseHistoryColorPyramid = false;
@@ -869,6 +856,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Height,
                 1.0f / Mathf.Max(1, m_Width),
                 1.0f / Mathf.Max(1, m_Height));
+            m_ConstantBuffer.SsrHDRPAccumulationHistorySize = m_ConstantBuffer.SsrAccumulationHistorySize;
+            m_ConstantBuffer.SsrHDRPAccumulationHistoryScale = Vector4.one;
 
             ConfigureInternalTextureDescriptor(
                 m_AccumulationHistoryPrevious,
@@ -921,6 +910,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private void PrepareHDRPAccumulationHistory(ContextContainer frameData)
         {
             m_HasValidHDRPAccumulationHistory = false;
+            m_ConstantBuffer.SsrHDRPAccumulationHistorySize = BuildTextureSizeVector(m_Width, m_Height);
+            m_ConstantBuffer.SsrHDRPAccumulationHistoryScale = Vector4.one;
+
             ConfigureInternalTextureDescriptor(
                 m_HDRPAccumHistoryPrevious,
                 "ScreenSpaceReflectionHDRPAccumPrev",
@@ -943,6 +935,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_HDRPAccumHistoryPrevious,
                 m_HDRPAccumHistoryCurrent,
                 m_HDRPAccumHistoryCurrent.desc);
+            PassRecorder.TryGetHistoryTextureHandlesForPass(
+                this,
+                HDRPAccumulationHistoryKey,
+                out var previousHistoryHandle,
+                out var currentHistoryHandle,
+                out _);
+
+            RTHandle historyPropertiesHandle = previousHistoryHandle ?? currentHistoryHandle;
+            m_ConstantBuffer.SsrHDRPAccumulationHistorySize = ResolvePreviousHistoryTextureSize(
+                previousHistoryHandle,
+                m_Width,
+                m_Height);
+            m_ConstantBuffer.SsrHDRPAccumulationHistoryScale = ResolveHistoryRTHandleScale(historyPropertiesHandle);
 
             var temporalData = frameData.Get<VividTemporalData>();
             bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;
@@ -1149,8 +1154,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanExecuteCopy()
         {
             return CanRecordCopy()
-                && output?.innerHandle.IsValid() == true
-                && m_HDRPOutputTexture?.innerHandle.IsValid() == true;
+                && output?.innerHandle.IsValid() == true;
         }
 
         private bool CanExecuteHDRPComparison()
@@ -1161,8 +1165,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_SSRHDRPReprojectionKernel >= 0
                 && m_SSRHDRPAccumulateKernel >= 0
                 && m_HDRPHitPointTexture?.innerHandle.IsValid() == true
-                && m_HDRPAccumTexture?.innerHandle.IsValid() == true
-                && m_HDRPOutputTexture?.innerHandle.IsValid() == true
                 && m_HDRPAccumHistoryCurrent?.innerHandle.IsValid() == true
                 && output?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
@@ -1241,10 +1243,28 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, OutputColorTextureId, output.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
             cmd.DispatchCompute(
                 m_ComputeShader,
                 m_CopyKernel,
+                CoreUtils.DivRoundUp(m_Width, ThreadGroupSize),
+                CoreUtils.DivRoundUp(m_Height, ThreadGroupSize),
+                1);
+        }
+
+        private void DispatchHDRPCopy(ComputeCommandBuffer cmd)
+        {
+            if (m_CopyHDRPKernel < 0
+                || output?.innerHandle.IsValid() != true
+                || m_HDRPAccumHistoryCurrent?.innerHandle.IsValid() != true)
+            {
+                return;
+            }
+
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyHDRPKernel, OutputColorTextureId, output.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyHDRPKernel, SSRAccumTextureId, m_HDRPAccumHistoryCurrent.innerHandle);
+            cmd.DispatchCompute(
+                m_ComputeShader,
+                m_CopyHDRPKernel,
                 CoreUtils.DivRoundUp(m_Width, ThreadGroupSize),
                 CoreUtils.DivRoundUp(m_Height, ThreadGroupSize),
                 1);
@@ -1716,9 +1736,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(cmd, s_SSRHDRPTracingProfilingSampler))
             {
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SsrHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, DepthTextureId, m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, HZBTextureId, m_HZBTexture.innerHandle);
                 cmd.SetComputeBufferParam(m_ComputeShader, m_SSRHDRPTracingKernel, DepthPyramidMipLevelOffsetsId, m_HZBMipLevelOffsets.innerHandle);
@@ -1728,14 +1746,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(cmd, s_SSRHDRPReprojectionProfilingSampler))
             {
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SsrHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, SSRAccumTextureId, m_HDRPAccumHistoryCurrent.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, DepthTextureId, m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, GBuffer1Id, m_GBuffer1.innerHandle);
                 cmd.SetComputeTextureParam(
                     m_ComputeShader,
                     m_SSRHDRPReprojectionKernel,
-                    MotionVectorsId,
+                    CameraMotionVectorsTextureId,
                     m_MotionVectors?.innerHandle.IsValid() == true
                         ? m_MotionVectors.innerHandle
                         : context.renderGraphContext.defaultResources.blackTexture);
@@ -1758,7 +1776,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(cmd, s_SSRHDRPAccumulateProfilingSampler))
             {
-                cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);
                 cmd.SetComputeIntParam(
                     m_ComputeShader,
                     SsrUseHDRPAccumulationHistoryId,
@@ -1773,11 +1790,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ComputeShader,
                     SsrHDRPAccumulationSpeedRejectionId,
                     HDRPDefaultSpeedRejection);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, OutputColorTextureId, output.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPOutputTextureId, m_HDRPOutputTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRHDRPAccumTextureId, m_HDRPAccumTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SsrHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, SSRAccumTextureId, m_HDRPAccumHistoryCurrent.innerHandle);
                 cmd.SetComputeTextureParam(
                     m_ComputeShader,
                     m_SSRHDRPAccumulateKernel,
@@ -1788,17 +1802,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(
                     m_ComputeShader,
                     m_SSRHDRPAccumulateKernel,
-                    SsrAccumTextureId,
-                    m_HDRPAccumHistoryCurrent.innerHandle);
-                cmd.SetComputeTextureParam(
-                    m_ComputeShader,
-                    m_SSRHDRPAccumulateKernel,
-                    MotionVectorsId,
+                    CameraMotionVectorsTextureId,
                     m_MotionVectors?.innerHandle.IsValid() == true
                         ? m_MotionVectors.innerHandle
                         : context.renderGraphContext.defaultResources.blackTexture);
                 DispatchFullScreen(cmd, m_SSRHDRPAccumulateKernel);
             }
+
+            if (ShouldUseHDRPAsMainOutput())
+                DispatchHDRPCopy(cmd);
         }
 
         private void DispatchFullScreen(ComputeCommandBuffer cmd, int kernel)
@@ -1904,8 +1916,6 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureAvgRadianceDescriptor(m_AvgRadianceTexture, m_TileCountX, m_TileCountY);
             ConfigureInternalTextureDescriptor(m_DebugTexture, "ScreenSpaceReflectionDebug", width, height);
             ConfigureHDRPHitPointDescriptor(m_HDRPHitPointTexture, width, height);
-            ConfigureInternalTextureDescriptor(m_HDRPAccumTexture, "ScreenSpaceReflectionHDRPAccum", width, height);
-            ConfigureInternalTextureDescriptor(m_HDRPOutputTexture, "ScreenSpaceReflectionHDRPOutput", width, height);
             ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryPrevious, "ScreenSpaceReflectionHDRPAccumPrev", width, height);
             ConfigureInternalTextureDescriptor(m_HDRPAccumHistoryCurrent, "ScreenSpaceReflectionHDRPAccumTexture", width, height);
             ConfigureInternalTextureDescriptor(m_AccumulationHistoryPrevious, "ScreenSpaceReflectionAccumPrev", width, height);
@@ -1984,6 +1994,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     height,
                     1.0f / Mathf.Max(1, width),
                     1.0f / Mathf.Max(1, height)),
+                SsrHDRPAccumulationHistorySize = new Vector4(
+                    width,
+                    height,
+                    1.0f / Mathf.Max(1, width),
+                    1.0f / Mathf.Max(1, height)),
+                SsrHDRPAccumulationHistoryScale = Vector4.one,
                 SsrWorldSpaceCameraPos = ResolveSsrWorldSpaceCameraPos(cameraData),
                 SsrViewProjMatrix = viewProjMatrix,
                 SsrInvViewProjMatrix = invViewProjMatrix,
@@ -2041,6 +2057,66 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             int maxDimension = Mathf.Max(1, Mathf.Max(width, height));
             return Mathf.CeilToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
+        }
+
+        private static Vector4 ResolvePreviousHistoryTextureSize(
+            RTHandle previousHistoryHandle,
+            int fallbackWidth,
+            int fallbackHeight)
+        {
+            Vector2Int size = new Vector2Int(Mathf.Max(1, fallbackWidth), Mathf.Max(1, fallbackHeight));
+            if (previousHistoryHandle != null)
+            {
+                var properties = previousHistoryHandle.rtHandleProperties;
+                if (IsValidSize(properties.previousRenderTargetSize))
+                {
+                    size = properties.previousRenderTargetSize;
+                }
+                else if (previousHistoryHandle.rt != null)
+                {
+                    size = new Vector2Int(
+                        Mathf.Max(1, previousHistoryHandle.rt.width),
+                        Mathf.Max(1, previousHistoryHandle.rt.height));
+                }
+                else if (IsValidSize(properties.currentRenderTargetSize))
+                {
+                    size = properties.currentRenderTargetSize;
+                }
+            }
+
+            return BuildTextureSizeVector(size.x, size.y);
+        }
+
+        private static Vector4 ResolveHistoryRTHandleScale(RTHandle historyHandle)
+        {
+            if (historyHandle == null)
+                return Vector4.one;
+
+            Vector4 scale = historyHandle.rtHandleProperties.rtHandleScale;
+            float scaleX = ResolvePositiveScale(scale.x, 1.0f);
+            float scaleY = ResolvePositiveScale(scale.y, 1.0f);
+            return new Vector4(
+                scaleX,
+                scaleY,
+                ResolvePositiveScale(scale.z, scaleX),
+                ResolvePositiveScale(scale.w, scaleY));
+        }
+
+        private static float ResolvePositiveScale(float value, float fallback)
+        {
+            return value > 0.000001f ? value : Mathf.Max(fallback, 0.000001f);
+        }
+
+        private static Vector4 BuildTextureSizeVector(int width, int height)
+        {
+            width = Mathf.Max(1, width);
+            height = Mathf.Max(1, height);
+            return new Vector4(width, height, 1.0f / width, 1.0f / height);
+        }
+
+        private static bool IsValidSize(Vector2Int size)
+        {
+            return size.x > 0 && size.y > 0;
         }
 
         private static int TryFindKernel(ComputeShader shader, string kernelName)

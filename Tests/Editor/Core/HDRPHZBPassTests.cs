@@ -112,9 +112,8 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurStabilizationHistory").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ReBlurStabilizationHistoryTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPHitPoint").IsTransient, Is.True);
-            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccum").IsTransient, Is.True);
-            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").IsTransient, Is.False);
-            Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPOutput").Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("ScreenSpaceReflectionHDRPAccum"));
+            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("ScreenSpaceReflectionHDRPOutput"));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccumPrev").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionHDRPAccumTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionDebug").IsTransient, Is.False);
@@ -149,8 +148,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_TileListBuffer_In"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DispatchIndirectArgsBuffer_Out"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DispatchIndirectArgsBuffer_In"), Is.Null);
-                Assert.That(node.GetOutputPortByName("m_HDRPOutputTexture"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_HDRPOutputTexture"), Is.Null);
                 Assert.That(node.TryGetExecutionPath(out _), Is.False);
             }
             finally
@@ -684,18 +681,20 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPReprojection"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHDRPAccumulate"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsHybridCandidates"));
-            Assert.That(source, Does.Contain("int _SsrWriteHDRPToOutput;"));
+            Assert.That(source, Does.Contain("#pragma kernel CopyHDRPScreenSpaceReflection"));
+            Assert.That(source, Does.Not.Contain("int _SsrWriteHDRPToOutput;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRTileList;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRHybridCandidateBuffer;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRHybridDispatchIndirectArgs;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRResolveTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRRayInfoTexture;"));
-            Assert.That(source, Does.Contain("RWTexture2D<float2> _SSRHDRPHitPointTexture;"));
-            Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPAccumTexture;"));
-            Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRHDRPOutputTexture;"));
+            Assert.That(source, Does.Contain("RWTexture2D<float2> _SsrHitPointTexture;"));
+            Assert.That(source, Does.Not.Contain("RWTexture2D<float4> _SSRHDRPAccumTexture;"));
+            Assert.That(source, Does.Not.Contain("RWTexture2D<float4> _SSRHDRPOutputTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRAccumTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRAvgRadianceTexture;"));
+            Assert.That(source, Does.Contain("Texture2D<float4> _CameraMotionVectorsTexture;"));
             Assert.That(source, Does.Contain("Texture2D<float4> _ReBlurLightingDistanceTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _ReBlurLightingDistanceTextureRW;"));
             Assert.That(source, Does.Contain("Texture2D<uint> _ReBlurAccumulationTexture;"));
@@ -902,9 +901,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPTracing("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPReprojection("));
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPAccumulate("));
-            Assert.That(source, Does.Contain("_SSRHDRPHitPointTexture[coordSS] = float2(0.0, 0.0);"));
-            Assert.That(source, Does.Contain("_SSRHDRPHitPointTexture[coordSS] = hitScreenUV;"));
-            Assert.That(source, Does.Contain("float2 hitData = _SSRHDRPHitPointTexture[coordSS];"));
+            Assert.That(source, Does.Contain("_SsrHitPointTexture[coordSS] = float2(0.0, 0.0);"));
+            Assert.That(source, Does.Contain("_SsrHitPointTexture[coordSS] = hitScreenUV;"));
+            Assert.That(source, Does.Contain("float2 hitData = _SsrHitPointTexture[coordSS];"));
             Assert.That(source, Does.Contain("if (max(hitData.x, hitData.y) == 0.0)"));
             Assert.That(source, Does.Not.Contain("hitData.z <= 0.0"));
             Assert.That(source, Does.Contain("float4 GetSsrHistoryColorPyramidUvScaleAndLimit()"));
@@ -928,7 +927,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("for (int y = -SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y <= SSR_HDRP_REPROJECT_SAMPLE_RADIUS; y++)"));
             Assert.That(source, Does.Contain("if (abs(x) == abs(y) && abs(x) == SSR_HDRP_REPROJECT_SAMPLE_RADIUS)"));
             Assert.That(source, Does.Contain("colorSum += sampleColor * sampleWeight;"));
-            Assert.That(source, Does.Contain("_SSRHDRPAccumTexture[coordSS] = float4(filteredColor, filteredOpacity);"));
+            Assert.That(source, Does.Contain("_SSRAccumTexture[coordSS] = float4(filteredColor, filteredOpacity);"));
             Assert.That(source, Does.Contain("float _SsrHDRPAccumulationAmount;"));
             Assert.That(source, Does.Contain("float _SsrHDRPAccumulationSpeedRejection;"));
             Assert.That(source, Does.Contain("float ComputeSsrHDRPAccumulationCoefficient(uint2 coordSS, float2 hitPositionNDC)"));
@@ -937,9 +936,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return lerp(_SsrHDRPAccumulationAmount, 1.0, speed);"));
             Assert.That(source, Does.Contain("float accumulationWeight = ComputeSsrHDRPAccumulationCoefficient(coordSS, hitPositionNDC);"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPAccumTexture[coordSS] = float4(color, 1.0) * opacity;"));
-            Assert.That(source, Does.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
-            Assert.That(source, Does.Contain("if (_SsrWriteHDRPToOutput != 0)"));
-            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = accumulatedReflection;"));
+            Assert.That(source, Does.Contain("_SSRAccumTexture[coordSS] = accumulatedReflection;"));
+            Assert.That(source, Does.Not.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
+            Assert.That(source, Does.Not.Contain("if (_SsrWriteHDRPToOutput != 0)"));
+            Assert.That(source, Does.Contain("void CopyHDRPScreenSpaceReflection("));
+            Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = _SSRAccumTexture[coordSS];"));
             Assert.That(source, Does.Not.Contain("ClearScreenSpaceReflectionTiles"));
             Assert.That(source, Does.Not.Contain("sourceColor.rgb + reflectedColor"));
             Assert.That(source, Does.Not.Contain("_InputColorTexture"));
@@ -1025,20 +1026,20 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool ShouldRunRayTracingPath()"));
             Assert.That(source, Does.Contain("private bool ShouldRunHDRPPath()"));
             Assert.That(source, Does.Contain("private bool ShouldUseHDRPAsMainOutput()"));
-            Assert.That(source, Does.Contain("cmd.SetComputeIntParam(m_ComputeShader, SsrWriteHDRPToOutputId, ShouldUseHDRPAsMainOutput() ? 1 : 0);"));
-            Assert.That(source, Does.Contain("private const float HDRPDefaultAccumulationFactor = 0.75f;"));
+            Assert.That(source, Does.Not.Contain("SsrWriteHDRPToOutputId"));
             Assert.That(source, Does.Contain("private const float HDRPDefaultSpeedRejection = 0.5f;"));
             Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SsrHDRPAccumulationAmount\")"));
             Assert.That(source, Does.Contain("Shader.PropertyToID(\"_SsrHDRPAccumulationSpeedRejection\")"));
-            Assert.That(source, Does.Contain("Mathf.Pow(2.0f, Mathf.Lerp(0.0f, -7.0f, HDRPDefaultAccumulationFactor))"));
+            Assert.That(source, Does.Contain("Mathf.Pow(2.0f, Mathf.Lerp(0.0f, -7.0f, m_Settings.accumulationFactor))"));
             Assert.That(source, Does.Contain("SsrHDRPAccumulationSpeedRejectionId,"));
             Assert.That(source, Does.Contain("HDRPDefaultSpeedRejection);"));
             Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, DepthTextureId, m_DepthTexture.innerHandle);"));
             Assert.That(
-                source.Contains("m_SSRHDRPReprojectionKernel,\r\n                    MotionVectorsId")
-                    || source.Contains("m_SSRHDRPReprojectionKernel,\n                    MotionVectorsId"),
+                source.Contains("m_SSRHDRPReprojectionKernel,\r\n                    CameraMotionVectorsTextureId")
+                    || source.Contains("m_SSRHDRPReprojectionKernel,\n                    CameraMotionVectorsTextureId"),
                 Is.True);
-            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);"));
+            Assert.That(source, Does.Not.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);"));
+            Assert.That(source, Does.Contain("DispatchHDRPCopy(cmd);"));
             Assert.That(source, Does.Contain("BlueNoise.Instance?.Bind(cmd, m_HybridTraceRayTracingShader);"));
             Assert.That(source, Does.Contain("BindHybridRayTracingParameters(cmd, context);"));
             Assert.That(source, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer"));

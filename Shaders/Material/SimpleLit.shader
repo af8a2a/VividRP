@@ -11,6 +11,9 @@ Shader "VividRP/Material/SimpleLit"
         [Sub(MaterialInputs)] _Metallic("Metallic", Range(0, 1)) = 0.0
         [Sub(MaterialInputs)] _Occlusion("Occlusion", Range(0, 1)) = 1.0
         [SubEnum(MaterialInputs, Standard, 0, Fabric, 1, ClearCoat, 2)] _MaterialId("Material ID", Float) = 0
+        [Sub(MaterialInputs)] _MaterialFeatureId("Material Feature ID", Float) = -1
+        [SubToggle(MaterialInputs, _)] _ReceiveSSR("Receive SSR", Float) = 1.0
+        [SubToggle(MaterialInputs, _)] _ReceiveDecals("Receive Decals", Float) = 1.0
         [Sub(MaterialInputs)] _CustomData("Custom Data", Range(0, 1)) = 0.0
 
         [Main(Emission, _, off, off)] _EmissionGroup("Emission", Float) = 0

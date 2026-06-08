@@ -9,8 +9,19 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const int ClearThreadGroupSizeX = 8;
         private const int ClearThreadGroupSizeY = 8;
+        private const int MaterialFeatureVariantCount = 7;
+        private const int IndirectArgsElementCount = 4;
         private const string ClearDeferredLitKernelName = "ClearDeferredLit";
-        private const string DeferredLitKernelName = "DeferredLit";
+        private static readonly string[] DeferredLitVariantKernelNames =
+        {
+            "DeferredLit_Variant0",
+            "DeferredLit_Variant1",
+            "DeferredLit_Variant2",
+            "DeferredLit_Variant3",
+            "DeferredLit_Variant4",
+            "DeferredLit_Variant5",
+            "DeferredLit_Variant6"
+        };
 
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
@@ -26,7 +37,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int LightingDebugTextureId = Shader.PropertyToID("_LightingDebugTexture");
         private static readonly int LightingWidthId = Shader.PropertyToID("_LightingWidth");
         private static readonly int LightingHeightId = Shader.PropertyToID("_LightingHeight");
-        private static readonly int MaterialPixelIndicesId = Shader.PropertyToID("_MaterialPixelIndices");
+        private static readonly int MaterialTileFeatureFlagsId = Shader.PropertyToID("_MaterialTileFeatureFlags");
+        private static readonly int MaterialFeatureTileListId = Shader.PropertyToID("_MaterialFeatureTileList");
+        private static readonly int MaterialTileCountXId = Shader.PropertyToID("_MaterialTileCountX");
+        private static readonly int MaterialFeatureTileListOffsetId = Shader.PropertyToID("_MaterialFeatureTileListOffset");
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
@@ -59,7 +73,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ClusterNearClipId = Shader.PropertyToID("_ClusterNearClip");
         private static readonly int ClusterFarClipId = Shader.PropertyToID("_ClusterFarClip");
         private static readonly int ClusterIsOrthographicId = Shader.PropertyToID("_ClusterIsOrthographic");
-        private const uint IndirectArgsOffset = 0u;
 
         [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer0;
@@ -106,23 +119,14 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Read)]
         private RenderGraphTexture m_SkyIBLCubemap;
 
-        [RenderGraphResource(Name = "StandardMaterialIndices", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_StandardMaterialIndices;
+        [RenderGraphResource(Name = "MaterialTileFeatureFlags", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialTileFeatureFlags;
 
-        [RenderGraphResource(Name = "FabricMaterialIndices", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_FabricMaterialIndices;
+        [RenderGraphResource(Name = "MaterialFeatureTileList", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialFeatureTileList;
 
-        [RenderGraphResource(Name = "ClearCoatMaterialIndices", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_ClearCoatMaterialIndices;
-
-        [RenderGraphResource(Name = "StandardIndirectArgs", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_StandardIndirectArgs;
-
-        [RenderGraphResource(Name = "FabricIndirectArgs", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_FabricIndirectArgs;
-
-        [RenderGraphResource(Name = "ClearCoatIndirectArgs", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_ClearCoatIndirectArgs;
+        [RenderGraphResource(Name = "MaterialFeatureIndirectArgs", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialFeatureIndirectArgs;
 
         [RenderGraphResource(
             Name = "DirectionalLights",
@@ -172,11 +176,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_DeferredLitCompute;
         private int m_ClearDeferredLitKernel = -1;
-        private int m_DeferredLitKernel = -1;
+        private readonly int[] m_DeferredLitVariantKernels = { -1, -1, -1, -1, -1, -1, -1 };
         private int m_LightingWidth = 1;
         private int m_LightingHeight = 1;
         private int m_ClearDispatchGroupCountX = 1;
         private int m_ClearDispatchGroupCountY = 1;
+        private int m_MaterialTileCount = 1;
+        private int m_MaterialTileCountX = 1;
         private int m_DirectionalLightCount;
         private int m_PunctualLightCount;
         private int m_AreaLightCount;
@@ -266,12 +272,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DebugTexture.desc.FilterMode = FilterMode.Point;
             m_DebugTexture.desc.WrapMode = TextureWrapMode.Clamp;
             m_SkyIBLCubemap = CreateSkyIBLCubemapTexture("SkyIBLCubemap");
-            m_StandardMaterialIndices = RenderGraphBuffer.CreateStructured("StandardMaterialIndices", sizeof(uint));
-            m_FabricMaterialIndices = RenderGraphBuffer.CreateStructured("FabricMaterialIndices", sizeof(uint));
-            m_ClearCoatMaterialIndices = RenderGraphBuffer.CreateStructured("ClearCoatMaterialIndices", sizeof(uint));
-            m_StandardIndirectArgs = CreateIndirectArgsBuffer("StandardIndirectArgs");
-            m_FabricIndirectArgs = CreateIndirectArgsBuffer("FabricIndirectArgs");
-            m_ClearCoatIndirectArgs = CreateIndirectArgsBuffer("ClearCoatIndirectArgs");
+            m_MaterialTileFeatureFlags = RenderGraphBuffer.CreateStructured("MaterialTileFeatureFlags", sizeof(uint));
+            m_MaterialFeatureTileList = RenderGraphBuffer.CreateStructured("MaterialFeatureTileList", sizeof(uint));
+            m_MaterialFeatureIndirectArgs = CreateIndirectArgsBuffer("MaterialFeatureIndirectArgs");
             m_LocalDirectionalLightBuffer = RenderGraphBuffer.CreateStructured("DirectionalLights", VividLightData.DirectionalLightData.Stride);
             m_LocalPunctualLightBuffer = RenderGraphBuffer.CreateStructured("PunctualLights", VividLightData.PunctualLightData.Stride);
             m_LocalAreaLightBuffer = RenderGraphBuffer.CreateStructured("AreaLights", VividLightData.AreaLightData.Stride);
@@ -304,7 +307,8 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_ClearDeferredLitKernel = m_DeferredLitCompute.FindKernel(ClearDeferredLitKernelName);
-            m_DeferredLitKernel = m_DeferredLitCompute.FindKernel(DeferredLitKernelName);
+            for (var i = 0; i < MaterialFeatureVariantCount; i++)
+                m_DeferredLitVariantKernels[i] = m_DeferredLitCompute.FindKernel(DeferredLitVariantKernelNames[i]);
         }
         
 
@@ -324,6 +328,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LightingHeight = height;
             m_ClearDispatchGroupCountX = Mathf.Max(1, (width + ClearThreadGroupSizeX - 1) / ClearThreadGroupSizeX);
             m_ClearDispatchGroupCountY = Mathf.Max(1, (height + ClearThreadGroupSizeY - 1) / ClearThreadGroupSizeY);
+            m_MaterialTileCountX = m_ClearDispatchGroupCountX;
+            m_MaterialTileCount = Mathf.Max(1, m_ClearDispatchGroupCountX * m_ClearDispatchGroupCountY);
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
 
             PrepareScreenSpaceReflectionResource(frameData);
@@ -352,7 +358,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (m_DeferredLitCompute == null
                 || m_ClearDeferredLitKernel < 0
-                || m_DeferredLitKernel < 0)
+                || !HasValidDeferredLitVariantKernels())
             {
                 return;
             }
@@ -366,12 +372,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 BindSkyTextureParameters(cmd, m_ClearDeferredLitKernel);
                 cmd.DispatchCompute(m_DeferredLitCompute, m_ClearDeferredLitKernel, m_ClearDispatchGroupCountX, m_ClearDispatchGroupCountY, 1);
 
-                BindSharedParameters(context, cmd, m_DeferredLitKernel);
-                BindIndirectLightingParameters(cmd, m_DeferredLitKernel);
-                BindLightLoopParameters(cmd, m_DeferredLitKernel);
-                DispatchMaterialClass(cmd, m_StandardMaterialIndices, m_StandardIndirectArgs);
-                // DispatchMaterialClass(cmd, m_FabricMaterialIndices, m_FabricIndirectArgs);
-                // DispatchMaterialClass(cmd, m_ClearCoatMaterialIndices, m_ClearCoatIndirectArgs);
+                for (var variant = 0; variant < MaterialFeatureVariantCount; variant++)
+                {
+                    var kernel = m_DeferredLitVariantKernels[variant];
+                    BindSharedParameters(context, cmd, kernel);
+                    BindIndirectLightingParameters(cmd, kernel);
+                    BindLightLoopParameters(cmd, kernel);
+                    BindMaterialFeatureVariantParameters(cmd, kernel, variant);
+                    DispatchMaterialFeatureVariant(cmd, kernel, variant);
+                }
             }
         }
 
@@ -382,7 +391,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_DeferredLitCompute = null;
             m_ClearDeferredLitKernel = -1;
-            m_DeferredLitKernel = -1;
+            ResetDeferredLitVariantKernels();
             m_ScreenSpaceReflectionTexture = m_LocalScreenSpaceReflectionTexture;
             m_FrameContextScreenSpaceReflectionTexture = null;
             m_IsPassResourceLayoutDirty = false;
@@ -570,10 +579,43 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
         }
 
-        private void DispatchMaterialClass(ComputeCommandBuffer cmd, RenderGraphBuffer materialIndices, RenderGraphBuffer materialDispatchArgs)
+        private bool HasValidDeferredLitVariantKernels()
         {
-            cmd.SetComputeBufferParam(m_DeferredLitCompute, m_DeferredLitKernel, MaterialPixelIndicesId, materialIndices.innerHandle);
-            cmd.DispatchCompute(m_DeferredLitCompute, m_DeferredLitKernel, materialDispatchArgs, IndirectArgsOffset);
+            for (var i = 0; i < MaterialFeatureVariantCount; i++)
+            {
+                if (m_DeferredLitVariantKernels[i] < 0)
+                    return false;
+            }
+
+            return true;
+        }
+
+        private void ResetDeferredLitVariantKernels()
+        {
+            for (var i = 0; i < MaterialFeatureVariantCount; i++)
+                m_DeferredLitVariantKernels[i] = -1;
+        }
+
+        private void BindMaterialFeatureVariantParameters(ComputeCommandBuffer cmd, int kernel, int variant)
+        {
+            cmd.SetComputeBufferParam(
+                m_DeferredLitCompute,
+                kernel,
+                MaterialTileFeatureFlagsId,
+                m_MaterialTileFeatureFlags.innerHandle);
+            cmd.SetComputeBufferParam(
+                m_DeferredLitCompute,
+                kernel,
+                MaterialFeatureTileListId,
+                m_MaterialFeatureTileList.innerHandle);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, MaterialTileCountXId, m_MaterialTileCountX);
+            cmd.SetComputeIntParam(m_DeferredLitCompute, MaterialFeatureTileListOffsetId, variant * m_MaterialTileCount);
+        }
+
+        private void DispatchMaterialFeatureVariant(ComputeCommandBuffer cmd, int kernel, int variant)
+        {
+            var indirectArgsOffset = (uint)(variant * IndirectArgsElementCount * sizeof(uint));
+            cmd.DispatchCompute(m_DeferredLitCompute, kernel, m_MaterialFeatureIndirectArgs, indirectArgsOffset);
         }
 
         private void PrepareClusteredLightingParameters(ContextContainer frameData)
@@ -777,7 +819,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = new RenderGraphBufferDesc
                 {
-                    Count = 4,
+                    Count = MaterialFeatureVariantCount * IndirectArgsElementCount,
                     Stride = sizeof(uint),
                     Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
                     Name = name

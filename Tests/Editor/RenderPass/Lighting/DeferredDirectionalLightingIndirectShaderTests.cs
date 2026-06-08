@@ -53,11 +53,17 @@ namespace VividRP.Editor.Tests
 
             Assert.That(passSource, Does.Contain("DeferredLitCompute"));
             Assert.That(passSource, Does.Contain("VividPreIntegratedFGD"));
-            Assert.That(passSource, Does.Contain("GetNativeCommandBuffer"));
             Assert.That(passSource, Does.Contain("PreparePreIntegratedFGDResources"));
             Assert.That(passSource, Does.Contain("BindIndirectLightingParameters"));
             Assert.That(passSource, Does.Contain("BindSkyTextureParameters"));
             Assert.That(passSource, Does.Contain("BindLightLoopParameters"));
+            Assert.That(passSource, Does.Contain("BindMaterialFeatureVariantParameters"));
+            Assert.That(passSource, Does.Contain("DispatchMaterialFeatureVariant"));
+            Assert.That(passSource, Does.Contain("DeferredLit_Variant0"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_MaterialTileFeatureFlags\")"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_MaterialFeatureTileList\")"));
+            Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_MaterialFeatureTileListOffset\")"));
+            Assert.That(passSource, Does.Contain("cmd.DispatchCompute(m_DeferredLitCompute, kernel, m_MaterialFeatureIndirectArgs, indirectArgsOffset);"));
             Assert.That(passSource, Does.Contain("PrepareSkyTextureState"));
             Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_GTAOTexture\")"));
             Assert.That(passSource, Does.Contain("Shader.PropertyToID(\"_SkyTexture\")"));

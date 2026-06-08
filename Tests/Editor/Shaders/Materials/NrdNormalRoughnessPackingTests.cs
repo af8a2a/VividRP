@@ -7,6 +7,22 @@ namespace VividRP.Editor.Tests
     public sealed class NrdNormalRoughnessPackingTests
     {
         [Test]
+        public void GBufferLayout_PacksMaterialFeatureIdIntoGBuffer0()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "GBuffer.hlsl"));
+
+            Assert.That(source, Does.Contain("RT0 (RGBA8_UNORM)              : BaseColor.rgb + MaterialFeatureId.a"));
+            Assert.That(source, Does.Contain("uint materialFeatures;"));
+            Assert.That(source, Does.Contain("#define VIVID_MATERIALFEATURE_ID_MASK 31u"));
+            Assert.That(source, Does.Contain("float EncodeVividMaterialFeatureId(uint materialFeatures)"));
+            Assert.That(source, Does.Contain("uint DecodeVividMaterialFeatureId(float encodedMaterialFeatureId)"));
+            Assert.That(source, Does.Contain("uint DecodeVividMaterialFeatures(float encodedMaterialFeatureId)"));
+            Assert.That(source, Does.Contain("uint LegacyVividMaterialIdToFeatures(uint materialId)"));
+            Assert.That(source, Does.Contain("output.rt0 = float4(surfaceData.baseColor, EncodeVividMaterialFeatureId(surfaceData.materialFeatures));"));
+            Assert.That(source, Does.Contain("surfaceData.materialFeatures = DecodeVividMaterialFeatures(rt0.a);"));
+        }
+
+        [Test]
         public void GBufferLayout_PacksLinearRoughnessAndNrdMaterialIdIntoGBuffer1()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "GBuffer.hlsl"));
@@ -14,7 +30,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RT1 (A2B10G10R10_UNORM)"));
             Assert.That(source, Does.Contain("output.rt1 = float4("));
             Assert.That(source, Does.Contain("surfaceData.linearRoughness,"));
-            Assert.That(source, Does.Contain("EncodeVividNrdMaterialId(surfaceData.materialId)"));
+            Assert.That(source, Does.Contain("EncodeVividNrdMaterialId(GetVividNrdMaterialIdFromFeatures(surfaceData.materialFeatures))"));
         }
 
         [Test]

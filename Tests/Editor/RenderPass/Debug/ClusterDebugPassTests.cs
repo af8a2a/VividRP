@@ -16,7 +16,7 @@ namespace VividRP.Editor.Tests
     public class ClusterDebugPassTests
     {
         [Test]
-        public void Initialize_RegistersSourceDepthInputsAndColorOutput()
+        public void Initialize_RegistersSourceDepthMaterialFeatureInputsAndColorOutput()
         {
             IRenderPass renderPass = new ClusterDebugPass();
 
@@ -31,9 +31,12 @@ namespace VividRP.Editor.Tests
             var layeredOffsetEntry = resources.Buffers.Single(entry => entry.Name == "LayeredOffset");
             var layeredLightListEntry = resources.Buffers.Single(entry => entry.Name == "LayeredLightList");
             var logBaseBufferEntry = resources.Buffers.Single(entry => entry.Name == "LogBaseBuffer");
+            var materialTileFeatureFlagsEntry = resources.Buffers.Single(entry => entry.Name == "MaterialTileFeatureFlags");
+            var materialFeatureTileListEntry = resources.Buffers.Single(entry => entry.Name == "MaterialFeatureTileList");
+            var materialFeatureIndirectArgsEntry = resources.Buffers.Single(entry => entry.Name == "MaterialFeatureIndirectArgs");
 
             Assert.That(resources.Textures, Has.Length.EqualTo(3));
-            Assert.That(resources.Buffers, Has.Length.EqualTo(7));
+            Assert.That(resources.Buffers, Has.Length.EqualTo(10));
             Assert.That(sourceEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(outputEntry.Access, Is.EqualTo(AccessFlags.Write));
@@ -45,6 +48,9 @@ namespace VividRP.Editor.Tests
             Assert.That(layeredOffsetEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(layeredLightListEntry.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(logBaseBufferEntry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(materialTileFeatureFlagsEntry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(materialFeatureTileListEntry.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(materialFeatureIndirectArgsEntry.Access, Is.EqualTo(AccessFlags.Read));
         }
 
         [Test]
@@ -77,6 +83,7 @@ namespace VividRP.Editor.Tests
             {
                 tileClusterDebug = TileClusterDebug.Cluster,
                 tileClusterDebugByCategory = TileClusterCategoryDebug.Punctual | TileClusterCategoryDebug.Area | TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal,
+                materialFeatureVariantDebug = MaterialFeatureVariantDebug.ClearCoat,
                 clusterDebugMode = ClusterDebugMode.VisualizeSlice,
                 clusterDebugDistance = 6f,
             };
@@ -85,6 +92,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
             Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Punctual | TileClusterCategoryDebug.Area | TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal));
+            Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.ClearCoat));
             Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
             Assert.That(settings.clusterDebugDistance, Is.EqualTo(6f));
         }
@@ -96,6 +104,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.None));
             Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Punctual));
+            Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.All));
             Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeOpaque));
             Assert.That(settings.clusterDebugDistance, Is.EqualTo(1f));
         }
@@ -111,6 +120,7 @@ namespace VividRP.Editor.Tests
                 data.Reset();
                 data.tileClusterDebug = TileClusterDebug.Cluster;
                 data.tileClusterDebugByCategory = TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal;
+                data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.SSRReceive;
                 data.clusterDebugMode = ClusterDebugMode.VisualizeSlice;
                 data.clusterDebugDistance = 4f;
 
@@ -124,6 +134,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(settings.tileClusterDebug, Is.EqualTo(TileClusterDebug.Cluster));
                 Assert.That(settings.tileClusterDebugByCategory, Is.EqualTo(TileClusterCategoryDebug.Environment | TileClusterCategoryDebug.Decal));
+                Assert.That(settings.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.SSRReceive));
                 Assert.That(settings.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeSlice));
                 Assert.That(settings.clusterDebugDistance, Is.EqualTo(4f));
             }
@@ -186,6 +197,9 @@ namespace VividRP.Editor.Tests
             Assert.That(GetFieldValue<int>(pass, "m_ClusterSliceCount"), Is.EqualTo(32));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterTileCountX"), Is.EqualTo(10));
             Assert.That(GetFieldValue<int>(pass, "m_ClusterTileCountY"), Is.EqualTo(6));
+            Assert.That(GetFieldValue<int>(pass, "m_MaterialTileCountX"), Is.EqualTo(80));
+            Assert.That(GetFieldValue<int>(pass, "m_MaterialTileCountY"), Is.EqualTo(45));
+            Assert.That(GetFieldValue<int>(pass, "m_MaterialTileCount"), Is.EqualTo(3600));
             Assert.That(GetFieldValue<int>(pass, "m_BigTileCountX"), Is.EqualTo(5));
             Assert.That(GetFieldValue<int>(pass, "m_BigTileCountY"), Is.EqualTo(3));
             Assert.That(GetFieldValue<float>(pass, "m_ClusterNearClip"), Is.EqualTo(0.3f));
@@ -219,6 +233,16 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_Material.SetBuffer(BigTileLightListId"));
             Assert.That(passSource, Does.Contain("m_Material.SetBuffer(LayeredOffsetId"));
             Assert.That(passSource, Does.Contain("m_Material.SetBuffer(LayeredLightListId"));
+            Assert.That(passSource, Does.Contain("MaterialTileFeatureFlagsId = Shader.PropertyToID(\"_MaterialTileFeatureFlags\")"));
+            Assert.That(passSource, Does.Contain("MaterialFeatureTileListId = Shader.PropertyToID(\"_MaterialFeatureTileList\")"));
+            Assert.That(passSource, Does.Contain("MaterialFeatureIndirectArgsId = Shader.PropertyToID(\"_MaterialFeatureIndirectArgs\")"));
+            Assert.That(passSource, Does.Contain("DrawMaterialFeatureVariantOverlay(context);"));
+            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(MaterialTileFeatureFlagsId"));
+            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(MaterialFeatureTileListId"));
+            Assert.That(passSource, Does.Contain("m_Material.SetBuffer(MaterialFeatureIndirectArgsId"));
+            Assert.That(passSource, Does.Contain("mpb.SetInt(MaterialFeatureDebugId"));
+            Assert.That(passSource, Does.Contain("context.cmd.DrawProcedural("));
+            Assert.That(passSource, Does.Not.Contain("GBuffer0Id = Shader.PropertyToID(\"_GBuffer0\")"));
         }
 
         [Test]
@@ -250,6 +274,17 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("_ClusteredReflectionProbeGridEnabled"));
             Assert.That(shaderSource, Does.Contain("_ReflectionProbeCount"));
             Assert.That(shaderSource, Does.Contain("_ClusteredDecalGridEnabled"));
+            Assert.That(shaderSource, Does.Contain("Name \"MaterialFeatureVariantsOverlay\""));
+            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _MaterialFeatureTileList"));
+            Assert.That(shaderSource, Does.Contain("StructuredBuffer<uint> _MaterialFeatureIndirectArgs"));
+            Assert.That(shaderSource, Does.Contain("TryResolveMaterialFeatureVariant"));
+            Assert.That(shaderSource, Does.Contain("_MaterialFeatureIndirectArgs[argsOffset]"));
+            Assert.That(shaderSource, Does.Contain("_MaterialFeatureTileList[variant * _MaterialTileCount + variantTileIndex]"));
+            Assert.That(shaderSource, Does.Contain("IsValidMaterialFeatureMask"));
+            Assert.That(shaderSource, Does.Contain("_MaterialTileFeatureFlags[input.tileIndex]"));
+            Assert.That(shaderSource, Does.Contain("_MaterialFeatureDebug & VIVID_MATERIAL_FEATURE_DEBUG_MASK"));
+            Assert.That(shaderSource, Does.Contain("Blend SrcAlpha OneMinusSrcAlpha"));
+            Assert.That(shaderSource, Does.Not.Contain("EvaluateMaterialFeatureVariantDebug(pixelCoord, sourceColor)"));
             Assert.That(shaderSource, Does.Contain("float2 pixelUv = (float2(pixelCoord) + 0.5) * _ClusterDebugLightViewportSize.zw;"));
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r"));
             Assert.That(shaderSource, Does.Not.Contain("GetBruteForcePunctualLightCount"));

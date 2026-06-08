@@ -32,6 +32,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.PanelIndex("Rendering"), Is.GreaterThanOrEqualTo(0));
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster -> Material Feature"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Opacity"), Is.Not.Null);
@@ -101,6 +102,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Reset_RestoresClusterDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.tileClusterDebug = TileClusterDebug.MaterialFeatureVariants;
+            VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.Fabric;
+            VividRenderingDebugDisplaySettings.Data.clusterDebugMode = ClusterDebugMode.VisualizeSlice;
+            VividRenderingDebugDisplaySettings.Data.clusterDebugDistance = 8f;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.tileClusterDebug, Is.EqualTo(TileClusterDebug.None));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug, Is.EqualTo(MaterialFeatureVariantDebug.All));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.clusterDebugMode, Is.EqualTo(ClusterDebugMode.VisualizeOpaque));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.clusterDebugDistance, Is.EqualTo(1f));
+        }
+
+        [Test]
         public void MaterialDebugModeWidget_MapsDropdownIndexToEnumValue()
         {
             var widget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode")
@@ -119,6 +136,27 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(MaterialDebugVisualizationMode.BaseColor));
             Assert.That(widget.getIndex(), Is.EqualTo(baseColorIndex));
             Assert.That(widget.getter(), Is.EqualTo((int)MaterialDebugVisualizationMode.BaseColor));
+        }
+
+        [Test]
+        public void ClusterMaterialFeatureWidget_MapsDropdownIndexToEnumValue()
+        {
+            var widget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Cluster -> Material Feature")
+                as DebugUI.EnumField;
+
+            Assert.That(widget, Is.Not.Null);
+            var fabricIndex = Array.IndexOf(
+                widget.enumValues,
+                (int)MaterialFeatureVariantDebug.Fabric);
+            Assert.That(fabricIndex, Is.GreaterThanOrEqualTo(0));
+
+            widget.setIndex(fabricIndex);
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug,
+                Is.EqualTo(MaterialFeatureVariantDebug.Fabric));
+            Assert.That(widget.getIndex(), Is.EqualTo(fabricIndex));
+            Assert.That(widget.getter(), Is.EqualTo((int)MaterialFeatureVariantDebug.Fabric));
         }
 
         [Test]
@@ -203,6 +241,16 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.Reset();
             VividRenderingDebugDisplaySettings.Data.materialDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksClusterMaterialFeatureOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.materialFeatureVariantDebug = MaterialFeatureVariantDebug.DecalReceive;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

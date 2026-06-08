@@ -51,6 +51,9 @@ namespace VividRP.Runtime
         private TileClusterCategoryDebug m_TileClusterDebugByCategory = TileClusterCategoryDebug.Punctual;
 
         [SerializeField]
+        private MaterialFeatureVariantDebug m_MaterialFeatureVariantDebug = MaterialFeatureVariantDebug.All;
+
+        [SerializeField]
         private ClusterDebugMode m_ClusterDebugMode = ClusterDebugMode.VisualizeOpaque;
 
         [SerializeField]
@@ -151,6 +154,12 @@ namespace VividRP.Runtime
         {
             get => NormalizeTileClusterCategory(m_TileClusterDebugByCategory);
             set => m_TileClusterDebugByCategory = NormalizeTileClusterCategory(value);
+        }
+
+        internal MaterialFeatureVariantDebug materialFeatureVariantDebug
+        {
+            get => NormalizeMaterialFeatureVariantDebug(m_MaterialFeatureVariantDebug);
+            set => m_MaterialFeatureVariantDebug = NormalizeMaterialFeatureVariantDebug(value);
         }
 
         internal ClusterDebugMode clusterDebugMode
@@ -336,6 +345,7 @@ namespace VividRP.Runtime
         public bool AreAnySettingsActive =>
             m_TileClusterDebug != TileClusterDebug.None
             || tileClusterDebugByCategory != TileClusterCategoryDebug.Punctual
+            || materialFeatureVariantDebug != MaterialFeatureVariantDebug.All
             || m_ClusterDebugMode != ClusterDebugMode.VisualizeOpaque
             || !Mathf.Approximately(m_ClusterDebugDistance, 1f)
             || reGIRDebugMode != DefaultReGIRDebugMode
@@ -376,6 +386,7 @@ namespace VividRP.Runtime
         {
             m_TileClusterDebug = TileClusterDebug.None;
             m_TileClusterDebugByCategory = TileClusterCategoryDebug.Punctual;
+            m_MaterialFeatureVariantDebug = MaterialFeatureVariantDebug.All;
             m_ClusterDebugMode = ClusterDebugMode.VisualizeOpaque;
             m_ClusterDebugDistance = 1f;
             m_ReGIRDebugMode = DefaultReGIRDebugMode;
@@ -421,6 +432,20 @@ namespace VividRP.Runtime
                 : normalized;
         }
 
+        private static MaterialFeatureVariantDebug NormalizeMaterialFeatureVariantDebug(MaterialFeatureVariantDebug value)
+        {
+            return value switch
+            {
+                MaterialFeatureVariantDebug.All => MaterialFeatureVariantDebug.All,
+                MaterialFeatureVariantDebug.Lit => MaterialFeatureVariantDebug.Lit,
+                MaterialFeatureVariantDebug.Fabric => MaterialFeatureVariantDebug.Fabric,
+                MaterialFeatureVariantDebug.ClearCoat => MaterialFeatureVariantDebug.ClearCoat,
+                MaterialFeatureVariantDebug.SSRReceive => MaterialFeatureVariantDebug.SSRReceive,
+                MaterialFeatureVariantDebug.DecalReceive => MaterialFeatureVariantDebug.DecalReceive,
+                _ => MaterialFeatureVariantDebug.All,
+            };
+        }
+
         private static int ClampReflectionProbeAtlasArraySlice(int value)
         {
             var sliceCount = VividReflectionProbeAtlasSystem.GetAtlasDebugSliceCount();
@@ -460,6 +485,12 @@ namespace VividRP.Runtime
             {
                 name = "Categories",
                 tooltip = "Select which light categories are included in the cluster debug view."
+            };
+
+            public static readonly NameAndTooltip MaterialFeatureVariantDebug = new()
+            {
+                name = "Material Feature",
+                tooltip = "Select which material feature coverage is shown in the material feature variants tile view."
             };
 
             public static readonly NameAndTooltip ClusterDebugMode = new()
@@ -691,17 +722,28 @@ namespace VividRP.Runtime
                     enumType = typeof(TileClusterCategoryDebug),
                     getter = () => data.tileClusterDebugByCategory,
                     setter = value => data.tileClusterDebugByCategory = (TileClusterCategoryDebug)value,
+                    isHiddenCallback = () => data.tileClusterDebug == TileClusterDebug.MaterialFeatureVariants,
                 });
-                foldout.children.Add(CreateEnumField(
+                var materialFeatureField = CreateEnumField(
+                    Strings.MaterialFeatureVariantDebug,
+                    () => data.materialFeatureVariantDebug,
+                    value => data.materialFeatureVariantDebug = value);
+                materialFeatureField.isHiddenCallback = () => data.tileClusterDebug != TileClusterDebug.MaterialFeatureVariants;
+                foldout.children.Add(materialFeatureField);
+
+                var clusterModeField = CreateEnumField(
                     Strings.ClusterDebugMode,
                     () => data.clusterDebugMode,
-                    value => data.clusterDebugMode = value));
+                    value => data.clusterDebugMode = value);
+                clusterModeField.isHiddenCallback = () => data.tileClusterDebug != TileClusterDebug.Cluster;
+                foldout.children.Add(clusterModeField);
                 foldout.children.Add(new DebugUI.FloatField
                 {
                     nameAndTooltip = Strings.ClusterDebugDistance,
                     getter = () => data.clusterDebugDistance,
                     setter = value => data.clusterDebugDistance = value,
                     min = () => 0f,
+                    isHiddenCallback = () => data.tileClusterDebug != TileClusterDebug.Cluster,
                 });
                 return foldout;
             }

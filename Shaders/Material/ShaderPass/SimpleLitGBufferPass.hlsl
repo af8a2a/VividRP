@@ -17,6 +17,9 @@ CBUFFER_START(UnityPerMaterial)
     float _Occlusion;
     float _CustomData;
     float _MaterialId;
+    float _MaterialFeatureId;
+    float _ReceiveSSR;
+    float _ReceiveDecals;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);
@@ -68,6 +71,22 @@ uint GetMaterialId()
     return (uint)min(max(round(_MaterialId), 0.0), 255.0);
 }
 
+uint GetSimpleLitMaterialFeatures()
+{
+    if (_MaterialFeatureId >= 0.0)
+        return (uint)min(round(_MaterialFeatureId), (float)VIVID_MATERIALFEATURE_ID_MASK);
+
+    uint materialFeatures = LegacyVividMaterialIdToFeatures(GetMaterialId());
+
+    if (_ReceiveSSR <= 0.5)
+        materialFeatures &= ~VIVID_MATERIALFEATURE_SSR_RECEIVE;
+
+    if (_ReceiveDecals <= 0.5)
+        materialFeatures &= ~VIVID_MATERIALFEATURE_DECAL_RECEIVE;
+
+    return materialFeatures;
+}
+
 VividGBufferSurfaceData BuildSimpleLitSurfaceData(Varyings input)
 {
     VividGBufferSurfaceData surfaceData;
@@ -78,7 +97,7 @@ VividGBufferSurfaceData BuildSimpleLitSurfaceData(Varyings input)
     surfaceData.ambientOcclusion = _Occlusion;
     surfaceData.customData = _CustomData;
     surfaceData.customData1 = 0.0;
-    surfaceData.materialId = GetMaterialId();
+    surfaceData.materialFeatures = GetSimpleLitMaterialFeatures();
     surfaceData.emissive = _EmissiveColor.rgb;
     surfaceData.bakedGI = SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS);
     surfaceData.hasBakedGI = HasVividBakedGI();

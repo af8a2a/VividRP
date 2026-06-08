@@ -149,7 +149,7 @@ VividLitBSDFData BuildVividHDRPLitBSDFData(VividGBufferSurfaceData surfaceData)
     bsdfData.coatMask = 0.0;
     bsdfData.coatRoughness = kVividClearCoatRoughness;
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT))
     {
         bsdfData.coatMask = saturate(surfaceData.customData);
 
@@ -242,7 +242,7 @@ float3 FinalizeVividSpecularLighting(
     VividPreLightData preLightData,
     float3 specularLighting)
 {
-    return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC
+    return HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC)
         ? specularLighting
         : ApplyVividSpecularEnergyCompensation(specularLighting, bsdfData, preLightData);
 }
@@ -393,7 +393,7 @@ VividCBSDF EvaluateBSDF(
 {
     VividCBSDF cbsdf = (VividCBSDF)0;
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
         cbsdf = EvaluateVividFabricBSDF(surfaceData, viewDirectionWS, lightDirectionWS);
     else
         cbsdf = EvaluateVividLitBSDF(surfaceData, bsdfData, preLightData, viewDirectionWS, lightDirectionWS);
@@ -615,7 +615,7 @@ VividIndirectLighting EvaluateBSDF_Env(
     float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
     VividIndirectLighting lighting = (VividIndirectLighting)0;
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
         lighting = EvaluateVividFabricIndirectBSDF(surfaceData, normalizedViewDirectionWS);
     else
         lighting = EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS);
@@ -633,7 +633,7 @@ VividIndirectLighting EvaluateBSDF_Env(
     float3 normalizedViewDirectionWS = SafeNormalize(viewDirectionWS);
     VividIndirectLighting lighting = (VividIndirectLighting)0;
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
         lighting = EvaluateVividFabricIndirectBSDF(surfaceData, normalizedViewDirectionWS, positionWS);
     else
         lighting = EvaluateVividLitIndirectBSDF(surfaceData, bsdfData, preLightData, normalizedViewDirectionWS, positionWS);
@@ -683,7 +683,7 @@ void GetVividReflectionProbeSampleInputs(
 {
     float clampedNdotV = saturate(ClampNdotV(preLightData.NdotV));
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
     {
         perceptualRoughness = GetVividFabricIblPerceptualRoughness(surfaceData);
         float3 reflectionVectorWS = VividGetReflectionVector(SafeNormalize(viewDirectionWS), surfaceData.normalWS);
@@ -730,7 +730,7 @@ float3 GetVividReflectionProbeSpecularFactor(
     VividPreLightData preLightData,
     float3 viewDirectionWS)
 {
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
         return GetVividFabricReflectionProbeSpecularFactor(surfaceData, viewDirectionWS);
 
     float3 specularFactor = preLightData.specularFGD;
@@ -758,7 +758,7 @@ VividIndirectLighting ApplyVividReflectionProbeSpecularLighting(
         * GetVividReflectionProbeSpecularFactor(surfaceData, bsdfData, preLightData, viewDirectionWS)
         * ambientOcclusion;
 
-    if (surfaceData.materialId != VIVID_GBUFFER_MATERIAL_FABRIC
+    if (!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC)
         && NeedsVividClearCoatReflectionProbeSample(bsdfData))
     {
         lighting.specularReflected += weightedCoatProbeRadiance * preLightData.coatIblF * ambientOcclusion;
@@ -1009,7 +1009,7 @@ VividDirectLighting EvaluateBSDF_Area(
     float3 right = mul(preLightData.orthoBasisViewNormal, areaLight.rightWS);
     float3 up = mul(preLightData.orthoBasisViewNormal, areaLight.upWS);
 
-    if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+    if (HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
     {
         float clampedNdotV = saturate(ClampNdotV(preLightData.NdotV));
         float roughness = ClampRoughnessForAnalyticalLights(surfaceData.linearRoughness);

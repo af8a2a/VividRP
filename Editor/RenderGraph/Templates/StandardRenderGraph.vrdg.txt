@@ -4920,6 +4920,10 @@ MonoBehaviour:
         - rid: 8515051663678505557
         - rid: 8515051663678505558
         - rid: 8515051663678505559
+        - rid: 8515053000000000000
+        - rid: 8515053000000000005
+        - rid: 8515053000000000007
+        - rid: 8515053000000000010
         - rid: 8515051663678505560
         - rid: 8515051663678505561
         - rid: 8515051663678505562
@@ -6972,12 +6976,9 @@ MonoBehaviour:
           - m_DepthTexture
           - m_DirectionalShadowTexture
           - m_SkyIBLCubemap
-          - m_StandardMaterialIndices
-          - m_FabricMaterialIndices
-          - m_ClearCoatMaterialIndices
-          - m_StandardIndirectArgs
-          - m_FabricIndirectArgs
-          - m_ClearCoatIndirectArgs
+          - m_MaterialTileFeatureFlags
+          - m_MaterialFeatureTileList
+          - m_MaterialFeatureIndirectArgs
           - m_DirectionalLightBuffer
           - m_PunctualLightBuffer
           - m_LayeredOffsetBuffer
@@ -7000,9 +7001,6 @@ MonoBehaviour:
           - rid: 8515051663678505640
           - rid: 8515051663678505641
           - rid: 8515051663678505642
-          - rid: 8515051663678505643
-          - rid: 8515051663678505644
-          - rid: 8515051663678505645
           - rid: 8515051663678505646
           - rid: 8515051663678505647
           - rid: 8515051663678505648
@@ -7634,10 +7632,10 @@ MonoBehaviour:
           m_NodeModelHashGuid:
             serializedVersion: 2
             Hash: 02729197cc224036a1e9b1db2a62d29c
-          m_UniqueId: m_StandardMaterialIndices
+          m_UniqueId: m_MaterialFeatureTileList
           m_PortDirection: 2
           m_PortOrientation: 0
-          m_Title: StandardMaterialIndices (W)
+          m_Title: MaterialFeatureTileList (W)
         m_ToPortReference:
           m_NodeModelGuid:
             m_Value0: 8157211344893881794
@@ -7645,10 +7643,10 @@ MonoBehaviour:
           m_NodeModelHashGuid:
             serializedVersion: 2
             Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
-          m_UniqueId: m_StandardMaterialIndices
+          m_UniqueId: m_MaterialFeatureTileList
           m_PortDirection: 1
           m_PortOrientation: 0
-          m_Title: StandardMaterialIndices (R)
+          m_Title: MaterialFeatureTileList (R)
     - rid: 8515051663678505559
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7666,10 +7664,10 @@ MonoBehaviour:
           m_NodeModelHashGuid:
             serializedVersion: 2
             Hash: 02729197cc224036a1e9b1db2a62d29c
-          m_UniqueId: m_StandardIndirectArgs
+          m_UniqueId: m_MaterialFeatureIndirectArgs
           m_PortDirection: 2
           m_PortOrientation: 0
-          m_Title: StandardIndirectArgs (W)
+          m_Title: MaterialFeatureIndirectArgs (W)
         m_ToPortReference:
           m_NodeModelGuid:
             m_Value0: 8157211344893881794
@@ -7677,10 +7675,138 @@ MonoBehaviour:
           m_NodeModelHashGuid:
             serializedVersion: 2
             Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
-          m_UniqueId: m_StandardIndirectArgs
+          m_UniqueId: m_MaterialFeatureIndirectArgs
           m_PortDirection: 1
           m_PortOrientation: 0
-          m_Title: StandardIndirectArgs (R)
+          m_Title: MaterialFeatureIndirectArgs (R)
+    - rid: 8515053000000000000
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 1234567890123456789
+          m_Value1: 1234567890123456790
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 0123456789abcdef0123456789abcdea
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 3909162738669154818
+            m_Value1: 11300202351240014241
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 02729197cc224036a1e9b1db2a62d29c
+          m_UniqueId: m_MaterialTileFeatureFlags
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: MaterialTileFeatureFlags (W)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 8157211344893881794
+            m_Value1: 17810888210725321172
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
+          m_UniqueId: m_MaterialTileFeatureFlags
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: MaterialTileFeatureFlags (R)
+    - rid: 8515053000000000005
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 1234567890123456795
+          m_Value1: 1234567890123456796
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 0123456789abcdef0123456789abcdeb
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 3909162738669154818
+            m_Value1: 11300202351240014241
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 02729197cc224036a1e9b1db2a62d29c
+          m_UniqueId: m_MaterialTileFeatureFlags
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: MaterialTileFeatureFlags (W)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 2697173796129172334
+            m_Value1: 12725414160313065811
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 6e6bc5ff46496e2553a12fb5c1c099b0
+          m_UniqueId: m_MaterialTileFeatureFlags
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: MaterialTileFeatureFlags (R)
+    - rid: 8515053000000000007
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 1234567890123456797
+          m_Value1: 1234567890123456798
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 0123456789abcdef0123456789abcdec
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 3909162738669154818
+            m_Value1: 11300202351240014241
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 02729197cc224036a1e9b1db2a62d29c
+          m_UniqueId: m_MaterialFeatureTileList
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: MaterialFeatureTileList (W)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 2697173796129172334
+            m_Value1: 12725414160313065811
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 6e6bc5ff46496e2553a12fb5c1c099b0
+          m_UniqueId: m_MaterialFeatureTileList
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: MaterialFeatureTileList (R)
+    - rid: 8515053000000000010
+      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Guid:
+          m_Value0: 1234567890123456799
+          m_Value1: 1234567890123456800
+        m_HashGuid:
+          serializedVersion: 2
+          Hash: 0123456789abcdef0123456789abcded
+        m_Version: 2
+        m_FromPortReference:
+          m_NodeModelGuid:
+            m_Value0: 3909162738669154818
+            m_Value1: 11300202351240014241
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 02729197cc224036a1e9b1db2a62d29c
+          m_UniqueId: m_MaterialFeatureIndirectArgs
+          m_PortDirection: 2
+          m_PortOrientation: 0
+          m_Title: MaterialFeatureIndirectArgs (W)
+        m_ToPortReference:
+          m_NodeModelGuid:
+            m_Value0: 2697173796129172334
+            m_Value1: 12725414160313065811
+          m_NodeModelHashGuid:
+            serializedVersion: 2
+            Hash: 6e6bc5ff46496e2553a12fb5c1c099b0
+          m_UniqueId: m_MaterialFeatureIndirectArgs
+          m_PortDirection: 1
+          m_PortOrientation: 0
+          m_Title: MaterialFeatureIndirectArgs (R)
     - rid: 8515051663678505560
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12633,7 +12759,10 @@ MonoBehaviour:
           - m_LayeredLightListBuffer
           - m_LogBaseBuffer
           - m_BigTileLightListBuffer
-          m_ValueList:
+          - m_MaterialTileFeatureFlags
+          - m_MaterialFeatureTileList
+          - m_MaterialFeatureIndirectArgs
+        m_ValueList:
           - rid: 8515051898187808849
           - rid: 8515051898187808850
           - rid: 8515051898187808851
@@ -12644,6 +12773,9 @@ MonoBehaviour:
           - rid: 8515051898187808856
           - rid: 8515051898187808857
           - rid: 8515051898187808881
+          - rid: 8515053000000000004
+          - rid: 8515053000000000006
+          - rid: 8515053000000000008
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
@@ -12719,6 +12851,15 @@ MonoBehaviour:
             UseDynamicScaleExplicit: 0
             ScaleFactor: {x: 1, y: 1}
             Name: Texture
+    - rid: 8515053000000000006
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Count: 1
+            Stride: 4
+            Target: 16
+            Name: Buffer
     - rid: 8515051898187808852
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -12776,6 +12917,24 @@ MonoBehaviour:
     - rid: 8515051898187808858
       type: {class: ClusterDebugPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data: 
+    - rid: 8515053000000000004
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Count: 1
+            Stride: 4
+            Target: 16
+            Name: Buffer
+    - rid: 8515053000000000008
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphBuffer, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          desc:
+            Count: 28
+            Stride: 4
+            Target: 272
+            Name: Buffer
     - rid: 8515051898187808865
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:

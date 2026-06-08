@@ -582,6 +582,10 @@ bool ShouldTracePixel(uint2 coordSS)
     if (IsRawFarDepth(deviceDepth))
         return false;
 
+    uint materialFeatures = DecodeVividMaterialFeatures(_GBuffer0.Load(int3(coordSS, 0)).a);
+    if (!HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE))
+        return false;
+
     float perceptualRoughness = LoadPerceptualRoughness(coordSS);
     if (perceptualRoughness >= _SsrRoughnessFadeEnd)
         return false;

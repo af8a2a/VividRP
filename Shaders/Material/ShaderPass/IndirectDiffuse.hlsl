@@ -45,6 +45,8 @@ CBUFFER_START(UnityPerMaterial)
     float _ClearCoatSmoothness;
     float _AlphaClip;
     float _WorkflowMode;
+    float _ReceiveSSR;
+    float _ReceiveDecals;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);
@@ -305,14 +307,23 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(VividIndirectDiffuseHitGeome
     surfaceData.ambientOcclusion = SampleAmbientOcclusion(geometry.uv);
     surfaceData.customData1 = 0.0;
 
+    uint materialFeatures = VIVID_MATERIALFEATURE_LIT;
+
+    if (_ReceiveSSR > 0.5)
+        materialFeatures |= VIVID_MATERIALFEATURE_SSR_RECEIVE;
+
+    if (_ReceiveDecals > 0.5)
+        materialFeatures |= VIVID_MATERIALFEATURE_DECAL_RECEIVE;
+
 #if defined(_CLEARCOAT)
     float clearCoatMask = saturate(_ClearCoatMask);
     surfaceData.customData = clearCoatMask;
-    surfaceData.materialId = clearCoatMask > 0.0 ? VIVID_GBUFFER_MATERIAL_CLEARCOAT : VIVID_GBUFFER_MATERIAL_STANDARD;
+    if (clearCoatMask > 0.0)
+        materialFeatures |= VIVID_MATERIALFEATURE_CLEAR_COAT;
 #else
     surfaceData.customData = 0.0;
-    surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
 #endif
+    surfaceData.materialFeatures = materialFeatures;
 
     surfaceData.emissive = SampleEmission(geometry.uv);
     surfaceData.bakedGI = SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS);

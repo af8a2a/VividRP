@@ -12,7 +12,8 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetComputeShaderSourcePath());
 
             Assert.That(source, Does.Contain("#pragma kernel ClearDeferredLit"));
-            Assert.That(source, Does.Contain("#pragma kernel DeferredLit"));
+            Assert.That(source, Does.Contain("#pragma kernel DeferredLit_Variant0"));
+            Assert.That(source, Does.Contain("#pragma kernel DeferredLit_Variant6"));
             Assert.That(source, Does.Contain("_GBuffer0"));
             Assert.That(source, Does.Contain("_GBuffer1"));
             Assert.That(source, Does.Contain("_GBuffer2"));
@@ -22,7 +23,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_GTAOTexture"));
             Assert.That(source, Does.Contain("_ScreenSpaceReflectionTexture"));
             Assert.That(source, Does.Contain("_ScreenSpaceReflectionEnabled"));
-            Assert.That(source, Does.Contain("_MaterialPixelIndices"));
+            Assert.That(source, Does.Contain("_MaterialTileFeatureFlags"));
+            Assert.That(source, Does.Contain("_MaterialFeatureTileList"));
+            Assert.That(source, Does.Contain("_MaterialFeatureTileListOffset"));
+            Assert.That(source, Does.Contain("_MaterialTileCountX"));
             Assert.That(source, Does.Not.Contain("_MaterialDispatchArgs"));
             Assert.That(source, Does.Contain("_LightingTexture"));
             Assert.That(source, Does.Contain("_LightingDebugTexture"));
@@ -68,7 +72,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("return EvaluateDeferredLitLightLoop("));
             Assert.That(source, Does.Contain("ComputeWorldSpacePosition"));
             Assert.That(source, Does.Contain("surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));"));
-            Assert.That(source, Does.Contain("float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);"));
+            Assert.That(source, Does.Contain("float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, surfaceData);"));
+            Assert.That(source, Does.Contain("!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE)"));
             Assert.That(source, Does.Contain("return float4(VividApplyPreExposure(max(reflection.rgb, 0.0)), saturate(reflection.a));"));
             Assert.That(source, Does.Contain("indirectSpecularLighting = FinalizeVividSpecularLighting("));
             Assert.That(source, Does.Contain("float reflectionWeight = screenSpaceReflection.a;"));
@@ -80,6 +85,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("tileCount ="));
             Assert.That(source, Does.Contain("uint tileListIndex = groupId.x;"));
             Assert.That(source, Does.Contain("UnpackTileCoord"));
+            Assert.That(source, Does.Contain("_MaterialFeatureTileList[_MaterialFeatureTileListOffset + tileListIndex]"));
+            Assert.That(source, Does.Contain("uint tileMaterialFeatures = GetDeferredTileFeatureFlags(deferredVariant, tileIndex);"));
+            Assert.That(source, Does.Contain("DeferredLitVariant(6u, groupId, groupThreadId);"));
             Assert.That(source, Does.Contain("tileCoord * CLASSIFY_TILE_SIZE"));
             Assert.That(source, Does.Contain("float3 EvaluateDeferredSkyLighting(uint2 pixelCoord)"));
             Assert.That(source, Does.Contain("float3 viewDirectionWS = GetSkyViewDirWS(float2(pixelCoord) + 0.5);"));

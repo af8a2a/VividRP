@@ -21,7 +21,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersGBufferInputsColorOutputAndBypass()
+        public void Initialize_RegistersGBufferInputsMaterialFeatureTileBufferColorOutputAndBypass()
         {
             IRenderPass renderPass = new MaterialDebugPass();
 
@@ -39,6 +39,11 @@ namespace VividRP.Editor.Tests
                 "OutputTexture",
             }));
             Assert.That(resources.Textures.Where(entry => entry.Access == AccessFlags.Read), Has.Exactly(7).Count);
+            Assert.That(resources.Buffers.Select(entry => entry.Name), Is.EquivalentTo(new[]
+            {
+                "MaterialTileFeatureFlags",
+            }));
+            Assert.That(resources.Buffers.Single().Access, Is.EqualTo(AccessFlags.Read));
 
             var outputEntry = resources.Textures.Single(entry => entry.Name == "OutputTexture");
             Assert.That(outputEntry.Access, Is.EqualTo(AccessFlags.Write));
@@ -151,6 +156,11 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(outputTexture.desc.WrapMode, Is.EqualTo(TextureWrapMode.Repeat));
             Assert.That(outputTexture.desc.Slices, Is.EqualTo(2));
+            Assert.That(
+                GetFieldValue<Vector4>(pass, "m_MaterialFeatureDebugScreenSize"),
+                Is.EqualTo(new Vector4(1600f, 900f, 1f / 1600f, 1f / 900f)));
+            Assert.That(GetFieldValue<int>(pass, "m_MaterialTileCountX"), Is.EqualTo(200));
+            Assert.That(GetFieldValue<int>(pass, "m_MaterialTileCount"), Is.EqualTo(22600));
         }
 
         [Test]

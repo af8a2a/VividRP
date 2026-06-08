@@ -148,6 +148,9 @@ void ApplyVividGPUDrivenDecalsToGBufferSurfaceData(
     float3 positionWS,
     uint2 pixelCoord)
 {
+    if (!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_DECAL_RECEIVE))
+        return;
+
     VividClusteredLightCell decalCell = VividClusteredLighting::LoadDecalCell(pixelCoord, positionWS);
     float3 positionWSDdx = ddx(positionWS);
     float3 positionWSDdy = ddy(positionWS);

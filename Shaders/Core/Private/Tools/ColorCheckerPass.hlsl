@@ -250,7 +250,7 @@ VividGBufferSurfaceData BuildColorCheckerGBufferSurfaceData(Varyings input)
     surfaceData.ambientOcclusion = 1.0;
     surfaceData.customData = 0.0;
     surfaceData.customData1 = 0.0;
-    surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
+    surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
     surfaceData.emissive = checkerSurface.emission;
     surfaceData.bakedGI = SampleVividBakedGI(input.lightmapUV, normalWS);
     surfaceData.hasBakedGI = HasVividBakedGI();

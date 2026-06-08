@@ -36,6 +36,7 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class MaterialDebugPass : RasterPass
     {
         internal const string MaterialDebugShaderName = "Hidden/VividRP/MaterialDebug";
+        private const int MaterialFeatureTileSize = 8;
 
         private static readonly int SourceTextureId = Shader.PropertyToID("_SourceTexture");
         private static readonly int CameraDepthTextureId = Shader.PropertyToID("_CameraDepthTexture");
@@ -53,6 +54,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer4ScaleBiasId = Shader.PropertyToID("_GBuffer4ScaleBias");
         private static readonly int MaterialDebugModeId = Shader.PropertyToID("_MaterialDebugMode");
         private static readonly int MaterialDebugExposureId = Shader.PropertyToID("_MaterialDebugExposure");
+        private static readonly int MaterialTileFeatureFlagsId = Shader.PropertyToID("_MaterialTileFeatureFlags");
+        private static readonly int MaterialTileCountId = Shader.PropertyToID("_MaterialTileCount");
+        private static readonly int MaterialTileCountXId = Shader.PropertyToID("_MaterialTileCountX");
+        private static readonly int MaterialFeatureDebugAvailableId = Shader.PropertyToID("_MaterialFeatureDebugAvailable");
+        private static readonly int MaterialFeatureDebugScreenSizeId = Shader.PropertyToID("_MaterialFeatureDebugScreenSize");
 
         [RenderGraphResource(Name = "SourceTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SourceTexture;
@@ -75,6 +81,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "GBuffer4", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer4;
 
+        [RenderGraphResource(Name = "MaterialTileFeatureFlags", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialTileFeatureFlags;
+
         [RenderGraphResource(
             Name = "OutputTexture",
             Access = AccessFlags.Write,
@@ -91,6 +100,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private Material m_Material;
         private MaterialDebugSettingsData m_ResolvedSettings;
+        private Vector4 m_MaterialFeatureDebugScreenSize = new(1f, 1f, 1f, 1f);
+        private int m_MaterialTileCount = 1;
+        private int m_MaterialTileCountX = 1;
         private bool m_ShouldSkipExecution;
 
         internal readonly struct MaterialDebugSettingsData
@@ -131,6 +143,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
             m_GBuffer3 = RenderGraphTexture.CreateInput("GBuffer3", GraphicsFormat.B10G11R11_UFloatPack32);
             m_GBuffer4 = RenderGraphTexture.CreateInput("GBuffer4", GraphicsFormat.R16G16B16A16_SFloat);
+            m_MaterialTileFeatureFlags = RenderGraphBuffer.CreateStructured("MaterialTileFeatureFlags", 1, sizeof(uint));
             m_OutputTexture = RenderGraphTexture.CreateColorTarget("OutputTexture", GraphicsFormat.R8G8B8A8_UNorm);
             m_OutputTexture.desc.ClearBuffer = false;
         }
@@ -178,6 +191,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_GBuffer0?.desc);
 
             ConfigureOutputTexture(width, height, GetPreferredSourceDescriptor());
+            ConfigureMaterialFeatureTileDebug(width, height);
         }
 
         public override void Record(RasterPassContext context)
@@ -237,6 +251,16 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetVector(GBuffer4ScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_GBuffer4.innerHandle));
             mpb.SetInt(MaterialDebugModeId, resolvedMode);
             mpb.SetFloat(MaterialDebugExposureId, resolvedExposure);
+            mpb.SetVector(MaterialFeatureDebugScreenSizeId, m_MaterialFeatureDebugScreenSize);
+            mpb.SetInt(MaterialTileCountId, m_MaterialTileCount);
+            mpb.SetInt(MaterialTileCountXId, m_MaterialTileCountX);
+            mpb.SetInt(MaterialFeatureDebugAvailableId, 0);
+
+            if (m_MaterialTileFeatureFlags?.innerHandle.IsValid() == true)
+            {
+                mpb.SetBuffer(MaterialTileFeatureFlagsId, m_MaterialTileFeatureFlags);
+                mpb.SetInt(MaterialFeatureDebugAvailableId, 1);
+            }
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -309,6 +333,23 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.UseDynamicScale = sourceDescriptor.UseDynamicScale;
             m_OutputTexture.desc.UseDynamicScaleExplicit = sourceDescriptor.UseDynamicScaleExplicit;
             m_OutputTexture.desc.ScaleFactor = sourceDescriptor.ScaleFactor;
+        }
+
+        private void ConfigureMaterialFeatureTileDebug(int width, int height)
+        {
+            width = Mathf.Max(1, width);
+            height = Mathf.Max(1, height);
+            m_MaterialTileCountX = Mathf.Max(1, (width + MaterialFeatureTileSize - 1) / MaterialFeatureTileSize);
+            var materialTileCountY = Mathf.Max(1, (height + MaterialFeatureTileSize - 1) / MaterialFeatureTileSize);
+            m_MaterialTileCount = Mathf.Max(1, m_MaterialTileCountX * materialTileCountY);
+            m_MaterialFeatureDebugScreenSize = new Vector4(width, height, 1f / width, 1f / height);
+
+            if (m_MaterialTileFeatureFlags?.desc == null)
+                return;
+
+            m_MaterialTileFeatureFlags.desc.Count = m_MaterialTileCount;
+            m_MaterialTileFeatureFlags.desc.Stride = sizeof(uint);
+            m_MaterialTileFeatureFlags.desc.Target = GraphicsBuffer.Target.Structured;
         }
 
         private RenderGraphTextureDesc GetPreferredSourceDescriptor()

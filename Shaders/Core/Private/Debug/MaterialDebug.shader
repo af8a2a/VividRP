@@ -19,6 +19,7 @@ Shader "Hidden/VividRP/MaterialDebug"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
 
+            #define CLASSIFY_TILE_SIZE 8
             #define VIVID_MATERIAL_DEBUG_NONE 0
             #define VIVID_MATERIAL_DEBUG_BASE_COLOR 1
             #define VIVID_MATERIAL_DEBUG_NORMAL_WS 2
@@ -43,6 +44,8 @@ Shader "Hidden/VividRP/MaterialDebug"
             #define VIVID_MATERIAL_DEBUG_COAT_MASK 21
             #define VIVID_MATERIAL_DEBUG_COAT_ROUGHNESS 22
             #define VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES 23
+            #define VIVID_MATERIAL_FEATURE_DEBUG_MASK \
+                (VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE | VIVID_MATERIALFEATURE_DECAL_RECEIVE)
 
             static const float3 kVividMaterialDebugDielectricF0 = float3(0.04, 0.04, 0.04);
             static const float kVividMaterialDebugClearCoatRoughness = 0.01;
@@ -55,6 +58,7 @@ Shader "Hidden/VividRP/MaterialDebug"
             TEXTURE2D(_GBuffer2);
             TEXTURE2D(_GBuffer3);
             TEXTURE2D(_GBuffer4);
+            StructuredBuffer<uint> _MaterialTileFeatureFlags;
 
             float4 _SourceTextureScaleBias;
             float4 _CameraDepthTextureScaleBias;
@@ -65,6 +69,10 @@ Shader "Hidden/VividRP/MaterialDebug"
             float4 _GBuffer4ScaleBias;
             int _MaterialDebugMode;
             float _MaterialDebugExposure;
+            uint _MaterialTileCount;
+            uint _MaterialTileCountX;
+            int _MaterialFeatureDebugAvailable;
+            float4 _MaterialFeatureDebugScreenSize;
 
             struct Attributes
             {
@@ -103,32 +111,80 @@ Shader "Hidden/VividRP/MaterialDebug"
                 return saturate(0.25 + value * 0.75);
             }
 
-            float3 EvaluateMaterialIdColor(uint materialId)
+            float3 EvaluateMaterialIdColor(uint materialFeatures)
             {
-                if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
-                    return float3(0.2, 0.55, 1.0);
-
-                if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
-                    return float3(0.9, 0.35, 0.85);
-
-                if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
-                    return float3(1.0, 0.75, 0.15);
-
-                return HashColor(materialId);
+                return HashColor(EncodeVividMaterialFeatureIdRaw(materialFeatures));
             }
 
-            float3 EvaluateMaterialFeatureColor(uint materialId)
+            float3 EvaluateMaterialFeatureColor(uint materialFeatures)
             {
-                if (materialId == VIVID_GBUFFER_MATERIAL_STANDARD)
-                    return float3(0.0, 0.45, 1.0);
+                float3 color = 0.0;
 
-                if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
-                    return float3(0.8, 0.2, 0.95);
+                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_LIT))
+                    color += float3(0.0, 0.45, 1.0);
 
-                if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
-                    return float3(1.0, 0.65, 0.0);
+                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
+                    color += float3(0.8, 0.2, 0.95);
 
-                return HashColor(1u << (materialId & 7u));
+                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT))
+                    color += float3(1.0, 0.65, 0.0);
+
+                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE))
+                    color += float3(0.0, 0.85, 0.6);
+
+                if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_DECAL_RECEIVE))
+                    color += float3(0.9, 0.9, 0.15);
+
+                return any(color > 0.0) ? saturate(color) : HashColor(materialFeatures);
+            }
+
+            float3 EvaluateMaterialFeatureHeatmapColor(uint featureCount)
+            {
+                if (featureCount <= 1u)
+                    return float3(0.22, 0.02, 0.62);
+
+                if (featureCount == 2u)
+                    return float3(0.06, 0.20, 0.86);
+
+                if (featureCount == 3u)
+                    return float3(0.00, 0.62, 0.92);
+
+                if (featureCount == 4u)
+                    return float3(1.00, 0.72, 0.08);
+
+                return float3(1.00, 0.16, 0.04);
+            }
+
+            float4 EvaluateMaterialFeatureTileHeatmap(float2 uv, float4 sourceColor)
+            {
+                if (_MaterialFeatureDebugAvailable == 0 || _MaterialTileCount == 0u || _MaterialTileCountX == 0u)
+                    return sourceColor;
+
+                uint2 screenSize = (uint2)max(_MaterialFeatureDebugScreenSize.xy, float2(1.0, 1.0));
+                uint2 pixelCoord = min((uint2)(saturate(uv) * (float2)screenSize), screenSize - uint2(1u, 1u));
+                uint2 tileCoord = pixelCoord / CLASSIFY_TILE_SIZE;
+                uint tileIndex = tileCoord.y * _MaterialTileCountX + tileCoord.x;
+
+                if (tileIndex >= _MaterialTileCount)
+                    return sourceColor;
+
+                uint materialFeatures = _MaterialTileFeatureFlags[tileIndex] & VIVID_MATERIAL_FEATURE_DEBUG_MASK;
+                uint featureCount = countbits(materialFeatures);
+                if (featureCount == 0u)
+                    return sourceColor;
+
+                float2 tileMinPixel = float2(tileCoord * CLASSIFY_TILE_SIZE);
+                float2 tileMaxPixel = min(tileMinPixel + CLASSIFY_TILE_SIZE, _MaterialFeatureDebugScreenSize.xy);
+                float2 tilePixelSize = max(tileMaxPixel - tileMinPixel, float2(1.0, 1.0));
+                float2 localUv = (float2(pixelCoord) + 0.5 - tileMinPixel) / tilePixelSize;
+                float edgeDistance = min(
+                    min(localUv.x, localUv.y),
+                    min(1.0 - localUv.x, 1.0 - localUv.y));
+                float borderWidth = 1.25 / max(min(tilePixelSize.x, tilePixelSize.y), 1.0);
+                float border = 1.0 - smoothstep(borderWidth, borderWidth * 2.0, edgeDistance);
+                float overlayOpacity = saturate(0.42 + border * 0.38);
+                float3 heatmapColor = EvaluateMaterialFeatureHeatmapColor(featureCount);
+                return float4(lerp(sourceColor.rgb, heatmapColor, overlayOpacity), sourceColor.a);
             }
 
             float3 EncodeDirectionDebug(float3 direction)
@@ -149,7 +205,7 @@ Shader "Hidden/VividRP/MaterialDebug"
             float3 EvaluateFresnel0(VividGBufferSurfaceData surfaceData)
             {
                 float3 baseSpecular = lerp(kVividMaterialDebugDielectricF0, surfaceData.baseColor, surfaceData.metallic);
-                if (surfaceData.materialId != VIVID_GBUFFER_MATERIAL_FABRIC)
+                if (!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
                     return baseSpecular;
 
                 float luminance = Luminance(surfaceData.baseColor);
@@ -159,7 +215,7 @@ Shader "Hidden/VividRP/MaterialDebug"
 
             float EvaluateCoatMask(VividGBufferSurfaceData surfaceData)
             {
-                return surfaceData.materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT
+                return HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT)
                     ? saturate(surfaceData.customData)
                     : 0.0;
             }
@@ -225,7 +281,7 @@ Shader "Hidden/VividRP/MaterialDebug"
                 }
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES)
-                    return EvaluateMaterialFeatureColor(surfaceData.materialId);
+                    return EvaluateMaterialFeatureColor(surfaceData.materialFeatures);
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_CUSTOM_DATA)
                     return surfaceData.customData.xxx;
@@ -234,7 +290,7 @@ Shader "Hidden/VividRP/MaterialDebug"
                     return surfaceData.customData1.xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_MATERIAL_ID)
-                    return EvaluateMaterialIdColor(surfaceData.materialId);
+                    return EvaluateMaterialIdColor(surfaceData.materialFeatures);
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_EMISSIVE)
                     return surfaceData.emissive * exposureMultiplier;
@@ -253,10 +309,15 @@ Shader "Hidden/VividRP/MaterialDebug"
                 float2 sourceUv = ApplyScaleBias(input.uv, _SourceTextureScaleBias);
                 float4 sourceColor = SAMPLE_TEXTURE2D(_SourceTexture, sampler_SourceTexture, sourceUv);
 
+
                 float2 depthUv = ApplyScaleBias(input.uv, _CameraDepthTextureScaleBias);
                 float deviceDepth = SAMPLE_TEXTURE2D_LOD(_CameraDepthTexture, sampler_PointClamp, depthUv, 0).r;
                 if (IsSkyDepth(deviceDepth) || _MaterialDebugMode == VIVID_MATERIAL_DEBUG_NONE)
                     return sourceColor;
+
+
+                if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_MATERIAL_FEATURES)
+                    return EvaluateMaterialFeatureTileHeatmap(input.uv, sourceColor);
 
                 float4 rt0 = SAMPLE_TEXTURE2D_LOD(_GBuffer0, sampler_PointClamp, ApplyScaleBias(input.uv, _GBuffer0ScaleBias), 0);
                 float4 rt1 = SAMPLE_TEXTURE2D_LOD(_GBuffer1, sampler_PointClamp, ApplyScaleBias(input.uv, _GBuffer1ScaleBias), 0);

@@ -35,7 +35,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("BuildVividHDRPLitBSDFData"));
             Assert.That(source, Does.Contain("VividCBSDF cbsdf = (VividCBSDF)0;"));
             Assert.That(source, Does.Contain("VividIndirectLighting lighting = (VividIndirectLighting)0;"));
-            Assert.That(source, Does.Contain("if (surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC)"));
+            Assert.That(source, Does.Contain("HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_FABRIC)"));
             Assert.That(source, Does.Not.Contain("? EvaluateVividFabricBSDF("));
             Assert.That(source, Does.Not.Contain("? EvaluateVividFabricIndirectBSDF("));
             Assert.That(source, Does.Contain("EvaluateVividLitDirectLight"));
@@ -47,7 +47,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("areaLight.barnDoorLength"));
             Assert.That(source, Does.Contain("AccumulateDirectLighting("));
             Assert.That(source, Does.Contain("FinalizeVividSpecularLighting("));
-            Assert.That(source, Does.Contain("surfaceData.materialId == VIVID_GBUFFER_MATERIAL_FABRIC"));
+            Assert.That(source, Does.Not.Contain("surfaceData.materialId"));
             Assert.That(punctualSource, Does.Contain("VividPunctualLightAttenuationWithDistanceModification"));
             Assert.That(punctualSource, Does.Contain("DistanceWindowing("));
             Assert.That(punctualSource, Does.Contain("punctualLight.rangeAttenuationScale"));

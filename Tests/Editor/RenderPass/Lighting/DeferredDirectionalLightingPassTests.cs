@@ -56,18 +56,15 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "AreaLights",
-                "ClearCoatIndirectArgs",
-                "ClearCoatMaterialIndices",
                 "DirectionalLights",
-                "FabricIndirectArgs",
-                "FabricMaterialIndices",
                 "LayeredLightList",
                 "LayeredOffset",
                 "LogBaseBuffer",
+                "MaterialFeatureIndirectArgs",
+                "MaterialFeatureTileList",
+                "MaterialTileFeatureFlags",
                 "PunctualLights",
-                "ReflectionProbes",
-                "StandardIndirectArgs",
-                "StandardMaterialIndices"
+                "ReflectionProbes"
             }));
             Assert.That(bufferEntries.Select(entry => entry.Access).Distinct(), Is.EqualTo(new[] { AccessFlags.Read }));
         }

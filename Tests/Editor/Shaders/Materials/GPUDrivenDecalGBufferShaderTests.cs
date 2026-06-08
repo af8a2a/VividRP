@@ -46,6 +46,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SharedDecalGBufferHlsl_RequiresDecalReceiveMaterialFeature()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));
+
+            Assert.That(source, Does.Contain("HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_DECAL_RECEIVE)"));
+        }
+
+        [Test]
         public void SharedDecalGBufferHlsl_UsesClusteredDecalDataAndBindlessBaseNormalSampling()
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "GPUDrivenDecalGBuffer.hlsl"));

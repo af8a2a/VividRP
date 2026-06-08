@@ -1,6 +1,12 @@
 #pragma use_dxc
 #pragma kernel ClearDeferredLit
-#pragma kernel DeferredLit
+#pragma kernel DeferredLit_Variant0
+#pragma kernel DeferredLit_Variant1
+#pragma kernel DeferredLit_Variant2
+#pragma kernel DeferredLit_Variant3
+#pragma kernel DeferredLit_Variant4
+#pragma kernel DeferredLit_Variant5
+#pragma kernel DeferredLit_Variant6
 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
@@ -22,7 +28,8 @@ Texture2D<float> _DepthTexture;
 Texture2D<float> _DirectionalShadowTexture;
 Texture2D<float> _GTAOTexture;
 Texture2D<float4> _ScreenSpaceReflectionTexture;
-StructuredBuffer<uint> _MaterialPixelIndices;
+StructuredBuffer<uint> _MaterialTileFeatureFlags;
+StructuredBuffer<uint> _MaterialFeatureTileList;
 
 RWTexture2D<float4> _LightingTexture;
 RWTexture2D<float4> _LightingDebugTexture;
@@ -30,6 +37,10 @@ RWTexture2D<float4> _LightingDebugTexture;
 uint _LightingWidth;
 uint _LightingHeight;
 uint _ScreenSpaceReflectionEnabled;
+uint _MaterialTileCountX;
+uint _MaterialFeatureTileListOffset;
+
+#define VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL 6u
 
 bool IsSkyPixel(float deviceDepth)
 {
@@ -58,6 +69,37 @@ VividGBufferSurfaceData LoadVividGBuffer(uint2 pixelCoord)
     return UnpackVividGBufferSurfaceData(rt0, rt1, rt2, rt3, rt4);
 }
 
+uint GetMaterialFeatureVariantFlags(uint variant)
+{
+    if (variant == 0u)
+        return VIVID_MATERIALFEATURE_LIT;
+
+    if (variant == 1u)
+        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_SSR_RECEIVE;
+
+    if (variant == 2u)
+        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_CLEAR_COAT;
+
+    if (variant == 3u)
+        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE;
+
+    if (variant == 4u)
+        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC;
+
+    if (variant == 5u)
+        return VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_SSR_RECEIVE;
+
+    return VIVID_MATERIALFEATURE_DEFERRED_MASK;
+}
+
+uint GetDeferredTileFeatureFlags(uint deferredVariant, uint tileIndex)
+{
+    if (deferredVariant == VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL)
+        return _MaterialTileFeatureFlags[tileIndex] & VIVID_MATERIALFEATURE_DEFERRED_MASK;
+
+    return GetMaterialFeatureVariantFlags(deferredVariant);
+}
+
 float SampleDirectionalShadow(uint2 pixelCoord)
 {
     float2 uv = (float2(pixelCoord) + 0.5) / float2(_LightingWidth, _LightingHeight);
@@ -70,9 +112,12 @@ float SampleGTAO(uint2 pixelCoord)
     return _GTAOTexture.SampleLevel(sampler_PointClamp, uv, 0).x;
 }
 
-float4 LoadScreenSpaceReflection(uint2 pixelCoord)
+float4 LoadScreenSpaceReflection(uint2 pixelCoord, VividGBufferSurfaceData surfaceData)
 {
     if (_ScreenSpaceReflectionEnabled == 0)
+        return float4(0.0, 0.0, 0.0, 0.0);
+
+    if (!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE))
         return float4(0.0, 0.0, 0.0, 0.0);
 
     float4 reflection = _ScreenSpaceReflectionTexture.Load(int3(pixelCoord, 0));
@@ -265,13 +310,19 @@ void ClearDeferredLit(uint3 dispatchThreadId : SV_DispatchThreadID)
     _LightingDebugTexture[pixelCoord] = float4(0.0, 0.0, 0.0, 0.0);
 }
 
-[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
-void DeferredLit(
-    uint3 groupId : SV_GroupID,
-    uint3 groupThreadId : SV_GroupThreadID)
+void DeferredLitVariant(
+    uint deferredVariant,
+    uint3 groupId,
+    uint3 groupThreadId)
 {
     uint tileListIndex = groupId.x;
-    uint2 tileCoord = TileClassifaction::UnpackTileCoord(_MaterialPixelIndices[tileListIndex]);
+    uint2 tileCoord = TileClassifaction::UnpackTileCoord(_MaterialFeatureTileList[_MaterialFeatureTileListOffset + tileListIndex]);
+    uint tileIndex = tileCoord.y * _MaterialTileCountX + tileCoord.x;
+    uint tileMaterialFeatures = GetDeferredTileFeatureFlags(deferredVariant, tileIndex);
+
+    if (!HasVividMaterialFeature(tileMaterialFeatures, VIVID_MATERIALFEATURE_LIT))
+        return;
+
     uint2 pixelCoord = tileCoord * CLASSIFY_TILE_SIZE + groupThreadId.xy;
     if (pixelCoord.x >= _LightingWidth || pixelCoord.y >= _LightingHeight)
         return;
@@ -282,7 +333,7 @@ void DeferredLit(
         return;
 
     VividGBufferSurfaceData surfaceData = LoadVividGBuffer(pixelCoord);
-    if (surfaceData.materialId > VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+    if (!HasVividMaterialFeature(surfaceData.materialFeatures, VIVID_MATERIALFEATURE_LIT))
         return;
 
     surfaceData.ambientOcclusion *= saturate(SampleGTAO(pixelCoord));
@@ -301,7 +352,7 @@ void DeferredLit(
         screenSpaceReflectionFGD);
     float3 diffuseLighting = VividApplyPreExposure(max(lightLoopOutput.diffuseLighting, 0.0));
     float3 specularLighting = VividApplyPreExposure(max(lightLoopOutput.specularLighting, 0.0));
-    float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord);
+    float4 screenSpaceReflection = LoadScreenSpaceReflection(pixelCoord, surfaceData);
     float reflectionWeight = screenSpaceReflection.a;
     float3 preExposedIndirectSpecular = VividApplyPreExposure(max(indirectSpecularLighting, 0.0));
     specularLighting = max(specularLighting - preExposedIndirectSpecular * reflectionWeight, 0.0)
@@ -311,4 +362,46 @@ void DeferredLit(
     _LightingDebugTexture[pixelCoord] = float4(indirectLighting, reflectionWeight);
     float4 currentLighting = _LightingTexture[pixelCoord];
     _LightingTexture[pixelCoord] = float4(currentLighting.rgb + lighting, currentLighting.a);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant0(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(0u, groupId, groupThreadId);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant1(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(1u, groupId, groupThreadId);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant2(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(2u, groupId, groupThreadId);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant3(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(3u, groupId, groupThreadId);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant4(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(4u, groupId, groupThreadId);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant5(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(5u, groupId, groupThreadId);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void DeferredLit_Variant6(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    DeferredLitVariant(6u, groupId, groupThreadId);
 }

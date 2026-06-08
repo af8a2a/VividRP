@@ -779,6 +779,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("bool IsSameReceiverPlaneHit(float3 receiverNormalWS, float3 hitNormalWS, float3 receiverToHitWS, float hitDistance)"));
             Assert.That(source, Does.Contain("bool IsHitPositionConsistentWithReflectionRay(float3 reflectionDirWS, float3 receiverToHitWS, float hitDistance)"));
             Assert.That(source, Does.Contain("bool IsMirrorSsrReflection(float perceptualRoughness)"));
+            Assert.That(source, Does.Contain("uint materialFeatures = DecodeVividMaterialFeatures(_GBuffer0.Load(int3(coordSS, 0)).a);"));
+            Assert.That(source, Does.Contain("!HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_SSR_RECEIVE)"));
             Assert.That(source, Does.Contain("float ResolveDepthWeight(float centerDeviceDepth, float sampleDeviceDepth)"));
             Assert.That(source, Does.Contain("void IncreaseResolveVariance("));
             Assert.That(source, Does.Contain("bool IsValidSsrRayInfo(float4 rayInfo)"));

@@ -8,6 +8,8 @@ Shader "VividRP/Material/StandardLayeredLit"
         [Sub(SurfaceOptions)] _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
         [SubEnum(SurfaceOptions, Back, 2, Front, 1, Off, 0)] _Cull("Cull", Float) = 2.0
         [SubToggle(SurfaceOptions, _)] _ReceiveShadows("Receive Shadows", Float) = 1.0
+        [SubToggle(SurfaceOptions, _)] _ReceiveSSR("Receive SSR", Float) = 1.0
+        [SubToggle(SurfaceOptions, _)] _ReceiveDecals("Receive Decals", Float) = 1.0
         [Sub(SurfaceOptions)] _QueueOffset("Queue Offset", Float) = 0.0
 
         [Main(SurfaceInputs, _, on, off)] _SurfaceInputs("Surface Inputs", Float) = 1

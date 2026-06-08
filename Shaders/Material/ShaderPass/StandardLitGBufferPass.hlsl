@@ -25,6 +25,8 @@ CBUFFER_START(UnityPerMaterial)
     float _ClearCoatSmoothness;
     float _AlphaClip;
     float _WorkflowMode;
+    float _ReceiveSSR;
+    float _ReceiveDecals;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);
@@ -213,6 +215,22 @@ float HasStandardLitBakedGI()
 #endif
 }
 
+uint GetStandardLitMaterialFeatures(float clearCoatMask)
+{
+    uint materialFeatures = VIVID_MATERIALFEATURE_LIT;
+
+    if (_ReceiveSSR > 0.5)
+        materialFeatures |= VIVID_MATERIALFEATURE_SSR_RECEIVE;
+
+    if (_ReceiveDecals > 0.5)
+        materialFeatures |= VIVID_MATERIALFEATURE_DECAL_RECEIVE;
+
+    if (clearCoatMask > 0.0)
+        materialFeatures |= VIVID_MATERIALFEATURE_CLEAR_COAT;
+
+    return materialFeatures;
+}
+
 VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
 {
     float4 baseSample = SampleBase(input.uv);
@@ -231,11 +249,11 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(Varyings input)
 #if defined(_CLEARCOAT)
     float clearCoatMask = saturate(_ClearCoatMask);
     surfaceData.customData = clearCoatMask;
-    surfaceData.materialId = clearCoatMask > 0.0 ? VIVID_GBUFFER_MATERIAL_CLEARCOAT : VIVID_GBUFFER_MATERIAL_STANDARD;
 #else
+    float clearCoatMask = 0.0;
     surfaceData.customData = 0.0;
-    surfaceData.materialId = VIVID_GBUFFER_MATERIAL_STANDARD;
 #endif
+    surfaceData.materialFeatures = GetStandardLitMaterialFeatures(clearCoatMask);
 
     surfaceData.emissive = SampleEmission(input.uv);
     surfaceData.bakedGI = SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS, input.positionWS);

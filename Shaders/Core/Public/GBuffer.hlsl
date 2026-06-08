@@ -10,8 +10,20 @@
 #define VIVID_GBUFFER_MAX_MATERIAL_ID    255u
 #define VIVID_GBUFFER_MAX_NRD_MATERIAL_ID 3u
 
+#define VIVID_MATERIALFEATURE_LIT           (1u << 0)
+#define VIVID_MATERIALFEATURE_FABRIC        (1u << 1)
+#define VIVID_MATERIALFEATURE_CLEAR_COAT    (1u << 2)
+#define VIVID_MATERIALFEATURE_SSR_RECEIVE   (1u << 3)
+#define VIVID_MATERIALFEATURE_DECAL_RECEIVE (1u << 4)
+
+#define VIVID_MATERIALFEATURE_ID_MASK       31u
+#define VIVID_MATERIALFEATURE_DEFERRED_MASK \
+    (VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_FABRIC | VIVID_MATERIALFEATURE_CLEAR_COAT | VIVID_MATERIALFEATURE_SSR_RECEIVE)
+#define VIVID_MATERIALFEATURE_DEFAULT \
+    (VIVID_MATERIALFEATURE_LIT | VIVID_MATERIALFEATURE_SSR_RECEIVE | VIVID_MATERIALFEATURE_DECAL_RECEIVE)
+
 // GBuffer layout:
-// RT0 (RGBA8_UNORM)              : BaseColor.rgb + MaterialId.a
+// RT0 (RGBA8_UNORM)              : BaseColor.rgb + MaterialFeatureId.a
 // RT1 (A2B10G10R10_UNORM)        : Octahedral Normal.xy + LinearRoughness.b + NRDMaterialId.a
 // RT2 (RGBA8_UNORM)              : Metallic.r + AO.g + MaterialData0.b + MaterialData1.a
 // RT3 (R11G11B10_UFLOAT)         : Emissive.rgb
@@ -26,7 +38,7 @@ struct VividGBufferSurfaceData
     float ambientOcclusion;
     float customData;
     float customData1;
-    uint materialId;
+    uint materialFeatures;
     float3 emissive;
     float3 bakedGI;
     float hasBakedGI;
@@ -41,15 +53,53 @@ struct VividGBufferFragmentOutput
     float4 rt4 : SV_Target4;
 };
 
-float EncodeVividMaterialId(uint materialId)
+uint LegacyVividMaterialIdToFeatures(uint materialId)
 {
-    uint clampedMaterialId = min(materialId, VIVID_GBUFFER_MAX_MATERIAL_ID);
-    return clampedMaterialId * (1.0 / 255.0);
+    uint features = VIVID_MATERIALFEATURE_DEFAULT;
+
+    if (materialId == VIVID_GBUFFER_MATERIAL_FABRIC)
+        features |= VIVID_MATERIALFEATURE_FABRIC;
+
+    if (materialId == VIVID_GBUFFER_MATERIAL_CLEARCOAT)
+        features |= VIVID_MATERIALFEATURE_CLEAR_COAT;
+
+    return features;
 }
 
-uint DecodeVividMaterialId(float encodedMaterialId)
+bool HasVividMaterialFeature(uint features, uint feature)
 {
-    return (uint)min(round(saturate(encodedMaterialId) * 255.0), 255.0);
+    return (features & feature) == feature;
+}
+
+uint EncodeVividMaterialFeatureIdRaw(uint materialFeatures)
+{
+    return materialFeatures & VIVID_MATERIALFEATURE_ID_MASK;
+}
+
+float EncodeVividMaterialFeatureId(uint materialFeatures)
+{
+    return EncodeVividMaterialFeatureIdRaw(materialFeatures) * (1.0 / 255.0);
+}
+
+uint DecodeVividMaterialFeatureId(float encodedMaterialFeatureId)
+{
+    return (uint)min(round(saturate(encodedMaterialFeatureId) * 255.0), 255.0) & VIVID_MATERIALFEATURE_ID_MASK;
+}
+
+uint DecodeVividMaterialFeatures(float encodedMaterialFeatureId)
+{
+    return DecodeVividMaterialFeatureId(encodedMaterialFeatureId);
+}
+
+uint GetVividNrdMaterialIdFromFeatures(uint materialFeatures)
+{
+    if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_FABRIC))
+        return VIVID_GBUFFER_MATERIAL_FABRIC;
+
+    if (HasVividMaterialFeature(materialFeatures, VIVID_MATERIALFEATURE_CLEAR_COAT))
+        return VIVID_GBUFFER_MATERIAL_CLEARCOAT;
+
+    return VIVID_GBUFFER_MATERIAL_STANDARD;
 }
 
 float2 EncodeVividNormalOctRaw(float3 normalWS)
@@ -118,7 +168,7 @@ VividGBufferSurfaceData SanitizeVividGBufferSurfaceData(VividGBufferSurfaceData 
     surfaceData.ambientOcclusion = SanitizeAmbientOcclusion(surfaceData.ambientOcclusion);
     surfaceData.customData = SanitizeCustomData(surfaceData.customData);
     surfaceData.customData1 = SanitizeCustomData1(surfaceData.customData1);
-    surfaceData.materialId = min(surfaceData.materialId, VIVID_GBUFFER_MAX_MATERIAL_ID);
+    surfaceData.materialFeatures = EncodeVividMaterialFeatureIdRaw(surfaceData.materialFeatures);
     surfaceData.emissive = max(surfaceData.emissive, 0.0);
     surfaceData.bakedGI = max(surfaceData.bakedGI, 0.0);
     surfaceData.hasBakedGI = saturate(surfaceData.hasBakedGI);
@@ -130,11 +180,11 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
     surfaceData = SanitizeVividGBufferSurfaceData(surfaceData);
 
     VividGBufferFragmentOutput output;
-    output.rt0 = float4(surfaceData.baseColor, EncodeVividMaterialId(surfaceData.materialId));
+    output.rt0 = float4(surfaceData.baseColor, EncodeVividMaterialFeatureId(surfaceData.materialFeatures));
     output.rt1 = float4(
         EncodeVividNormalOct(surfaceData.normalWS),
         surfaceData.linearRoughness,
-        EncodeVividNrdMaterialId(surfaceData.materialId));
+        EncodeVividNrdMaterialId(GetVividNrdMaterialIdFromFeatures(surfaceData.materialFeatures)));
     output.rt2 = float4(
         surfaceData.metallic,
         surfaceData.ambientOcclusion,
@@ -149,7 +199,7 @@ VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, fl
 {
     VividGBufferSurfaceData surfaceData;
     surfaceData.baseColor = saturate(rt0.rgb);
-    surfaceData.materialId = DecodeVividMaterialId(rt0.a);
+    surfaceData.materialFeatures = DecodeVividMaterialFeatures(rt0.a);
     surfaceData.normalWS = DecodeVividNormalOct(rt1.xy);
     surfaceData.linearRoughness = SanitizeLinearRoughness(rt1.z);
     surfaceData.metallic = SanitizeMetallic(rt2.r);

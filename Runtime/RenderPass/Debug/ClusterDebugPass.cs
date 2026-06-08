@@ -8,6 +8,11 @@ namespace VividRP.Runtime.RenderPass.Core
     public class ClusterDebugPass : RasterPass
     {
         internal const string ClusterDebugShaderName = "Hidden/VividRP/ClusterDebug";
+        private const int MaterialFeatureTileSize = 8;
+        private const int MaterialFeatureVariantCount = 7;
+        private const int IndirectArgsElementCount = 4;
+        private const int ClusterDebugPassIndex = 0;
+        private const int MaterialFeatureVariantsOverlayPassIndex = 1;
 
         private static readonly int SourceTextureId = Shader.PropertyToID("_SourceTexture");
         private static readonly int CameraDepthTextureId = Shader.PropertyToID("_CameraDepthTexture");
@@ -15,6 +20,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CameraDepthTextureScaleBiasId = Shader.PropertyToID("_CameraDepthTextureScaleBias");
         private static readonly int TileClusterDebugId = Shader.PropertyToID("_TileClusterDebug");
         private static readonly int ViewTilesFlagsId = Shader.PropertyToID("_ViewTilesFlags");
+        private static readonly int MaterialFeatureDebugId = Shader.PropertyToID("_MaterialFeatureDebug");
+        private static readonly int MaterialTileFeatureFlagsId = Shader.PropertyToID("_MaterialTileFeatureFlags");
+        private static readonly int MaterialFeatureTileListId = Shader.PropertyToID("_MaterialFeatureTileList");
+        private static readonly int MaterialFeatureIndirectArgsId = Shader.PropertyToID("_MaterialFeatureIndirectArgs");
+        private static readonly int MaterialFeatureDebugAvailableId = Shader.PropertyToID("_MaterialFeatureDebugAvailable");
+        private static readonly int MaterialTileCountId = Shader.PropertyToID("_MaterialTileCount");
+        private static readonly int MaterialTileCountXId = Shader.PropertyToID("_MaterialTileCountX");
+        private static readonly int MaterialTileCountYId = Shader.PropertyToID("_MaterialTileCountY");
         private static readonly int ClusterDebugModeId = Shader.PropertyToID("_ClusterDebugMode");
         private static readonly int ClusterDebugDistanceId = Shader.PropertyToID("_ClusterDebugDistance");
         private static readonly int ClusterDebugLightViewportSizeId = Shader.PropertyToID("_ClusterDebugLightViewportSize");
@@ -89,6 +102,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "LogBaseBuffer", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_LogBaseBuffer;
 
+        [RenderGraphResource(Name = "MaterialTileFeatureFlags", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialTileFeatureFlags;
+
+        [RenderGraphResource(Name = "MaterialFeatureTileList", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialFeatureTileList;
+
+        [RenderGraphResource(Name = "MaterialFeatureIndirectArgs", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_MaterialFeatureIndirectArgs;
+
         private Material m_Material;
         private ClusterDebugSettingsData m_ResolvedSettings;
         private readonly RenderGraphBuffer m_LocalPunctualLightBuffer;
@@ -98,6 +120,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphBuffer m_LocalLayeredOffsetBuffer;
         private readonly RenderGraphBuffer m_LocalLayeredLightListBuffer;
         private readonly RenderGraphBuffer m_LocalLogBaseBuffer;
+        private readonly RenderGraphBuffer m_LocalMaterialTileFeatureFlags;
+        private readonly RenderGraphBuffer m_LocalMaterialFeatureTileList;
+        private readonly RenderGraphBuffer m_LocalMaterialFeatureIndirectArgs;
         private Vector4 m_ClusterDebugLightViewportSize = new(1f, 1f, 1f, 1f);
         private int m_PunctualLightCount;
         private int m_AreaLightCount;
@@ -107,6 +132,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
         private int m_ClusterTileCountX = 1;
         private int m_ClusterTileCountY = 1;
+        private int m_MaterialTileCount = 1;
+        private int m_MaterialTileCountX = 1;
+        private int m_MaterialTileCountY = 1;
         private int m_BigTileCountX = 1;
         private int m_BigTileCountY = 1;
         private float m_ClusterNearClip = 0.1f;
@@ -127,17 +155,20 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             public readonly TileClusterDebug tileClusterDebug;
             public readonly TileClusterCategoryDebug tileClusterDebugByCategory;
+            public readonly MaterialFeatureVariantDebug materialFeatureVariantDebug;
             public readonly ClusterDebugMode clusterDebugMode;
             public readonly float clusterDebugDistance;
 
             public ClusterDebugSettingsData(
                 TileClusterDebug tileClusterDebug,
                 TileClusterCategoryDebug tileClusterDebugByCategory,
+                MaterialFeatureVariantDebug materialFeatureVariantDebug,
                 ClusterDebugMode clusterDebugMode,
                 float clusterDebugDistance)
             {
                 this.tileClusterDebug = tileClusterDebug;
                 this.tileClusterDebugByCategory = tileClusterDebugByCategory;
+                this.materialFeatureVariantDebug = materialFeatureVariantDebug;
                 this.clusterDebugMode = clusterDebugMode;
                 this.clusterDebugDistance = clusterDebugDistance;
             }
@@ -159,6 +190,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LocalLayeredOffsetBuffer = RenderGraphBuffer.CreateStructured("LayeredOffset", sizeof(uint));
             m_LocalLayeredLightListBuffer = RenderGraphBuffer.CreateStructured("LayeredLightList", sizeof(uint));
             m_LocalLogBaseBuffer = RenderGraphBuffer.CreateStructured("LogBaseBuffer", sizeof(float));
+            m_LocalMaterialTileFeatureFlags = RenderGraphBuffer.CreateStructured("MaterialTileFeatureFlags", 1, sizeof(uint));
+            m_LocalMaterialFeatureTileList = RenderGraphBuffer.CreateStructured("MaterialFeatureTileList", 1, sizeof(uint));
+            m_LocalMaterialFeatureIndirectArgs = CreateIndirectArgsBuffer("MaterialFeatureIndirectArgs");
             m_PunctualLightBuffer = m_LocalPunctualLightBuffer;
             m_AreaLightBuffer = m_LocalAreaLightBuffer;
             m_DecalDataBuffer = m_LocalDecalDataBuffer;
@@ -166,9 +200,13 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
+            m_MaterialTileFeatureFlags = m_LocalMaterialTileFeatureFlags;
+            m_MaterialFeatureTileList = m_LocalMaterialFeatureTileList;
+            m_MaterialFeatureIndirectArgs = m_LocalMaterialFeatureIndirectArgs;
             m_ResolvedSettings = new ClusterDebugSettingsData(
                 TileClusterDebug.None,
                 TileClusterCategoryDebug.Punctual,
+                MaterialFeatureVariantDebug.All,
                 ClusterDebugMode.VisualizeOpaque,
                 1f);
         }
@@ -212,6 +250,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 1f / Mathf.Max(1, width),
                 1f / Mathf.Max(1, height));
             PrepareClusteredLightingParameters(frameData, cameraData, width, height);
+            PrepareMaterialFeatureDebugParameters(width, height);
         }
 
         public override void Record(RasterPassContext context)
@@ -235,6 +274,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
             var tileClusterDebug = m_ResolvedSettings.tileClusterDebug;
+            var isMaterialFeatureVariantDebug = tileClusterDebug == TileClusterDebug.MaterialFeatureVariants;
 
             if (depthTexture == Texture2D.whiteTexture && tileClusterDebug == TileClusterDebug.Cluster)
                 tileClusterDebug = TileClusterDebug.None;
@@ -246,8 +286,13 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetTexture(CameraDepthTextureId, depthTexture);
             mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture.innerHandle));
             mpb.SetVector(CameraDepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
-            mpb.SetInt(TileClusterDebugId, (int)tileClusterDebug);
+            mpb.SetInt(TileClusterDebugId, isMaterialFeatureVariantDebug ? (int)TileClusterDebug.None : (int)tileClusterDebug);
             mpb.SetInt(ViewTilesFlagsId, (int)m_ResolvedSettings.tileClusterDebugByCategory);
+            mpb.SetInt(MaterialFeatureDebugId, (int)m_ResolvedSettings.materialFeatureVariantDebug);
+            mpb.SetInt(MaterialFeatureDebugAvailableId, 0);
+            mpb.SetInt(MaterialTileCountId, m_MaterialTileCount);
+            mpb.SetInt(MaterialTileCountXId, m_MaterialTileCountX);
+            mpb.SetInt(MaterialTileCountYId, m_MaterialTileCountY);
             mpb.SetInt(ClusterDebugModeId, (int)m_ResolvedSettings.clusterDebugMode);
             mpb.SetFloat(ClusterDebugDistanceId, m_ResolvedSettings.clusterDebugDistance);
             mpb.SetVector(ClusterDebugLightViewportSizeId, m_ClusterDebugLightViewportSize);
@@ -257,7 +302,16 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? BigTileMaxLightCount
                     : VividRP.Runtime.LightGridPass.ClusterMaxLightsPerCluster);
 
-            CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
+            if (HasBoundMaterialFeatureDebugBuffer() && m_MaterialTileFeatureFlags?.innerHandle.IsValid() == true)
+            {
+                mpb.SetBuffer(MaterialTileFeatureFlagsId, m_MaterialTileFeatureFlags);
+                mpb.SetInt(MaterialFeatureDebugAvailableId, 1);
+            }
+
+            CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, ClusterDebugPassIndex);
+
+            if (isMaterialFeatureVariantDebug)
+                DrawMaterialFeatureVariantOverlay(context);
         }
 
         public override void Dispose()
@@ -275,6 +329,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_LayeredOffsetBuffer = m_LocalLayeredOffsetBuffer;
             m_LayeredLightListBuffer = m_LocalLayeredLightListBuffer;
             m_LogBaseBuffer = m_LocalLogBaseBuffer;
+            m_MaterialTileFeatureFlags = m_LocalMaterialTileFeatureFlags;
+            m_MaterialFeatureTileList = m_LocalMaterialFeatureTileList;
+            m_MaterialFeatureIndirectArgs = m_LocalMaterialFeatureIndirectArgs;
             m_PunctualLightCount = 0;
             m_AreaLightCount = 0;
             m_ReflectionProbeCount = 0;
@@ -283,6 +340,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClusterSliceCount = LightGridPass.ClusterSliceCount;
             m_ClusterTileCountX = 1;
             m_ClusterTileCountY = 1;
+            m_MaterialTileCount = 1;
+            m_MaterialTileCountX = 1;
+            m_MaterialTileCountY = 1;
             m_BigTileCountX = 1;
             m_BigTileCountY = 1;
             m_ClusterNearClip = 0.1f;
@@ -304,6 +364,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var tileClusterDebug = TileClusterDebug.None;
             var tileClusterDebugByCategory = TileClusterCategoryDebug.Punctual;
+            var materialFeatureVariantDebug = MaterialFeatureVariantDebug.All;
             var clusterDebugMode = ClusterDebugMode.VisualizeOpaque;
             var clusterDebugDistance = 1f;
 
@@ -312,18 +373,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 return new ClusterDebugSettingsData(
                     tileClusterDebug,
                     tileClusterDebugByCategory,
+                    materialFeatureVariantDebug,
                     clusterDebugMode,
                     clusterDebugDistance);
             }
 
             tileClusterDebug = data.tileClusterDebug;
             tileClusterDebugByCategory = data.tileClusterDebugByCategory;
+            materialFeatureVariantDebug = data.materialFeatureVariantDebug;
             clusterDebugMode = data.clusterDebugMode;
             clusterDebugDistance = Mathf.Max(0f, data.clusterDebugDistance);
 
             return new ClusterDebugSettingsData(
                 tileClusterDebug,
                 tileClusterDebugByCategory,
+                materialFeatureVariantDebug,
                 clusterDebugMode,
                 clusterDebugDistance);
         }
@@ -427,6 +491,61 @@ namespace VividRP.Runtime.RenderPass.Core
                 && !ReferenceEquals(m_LogBaseBuffer, m_LocalLogBaseBuffer);
         }
 
+        private void PrepareMaterialFeatureDebugParameters(int width, int height)
+        {
+            width = Mathf.Max(1, width);
+            height = Mathf.Max(1, height);
+            m_MaterialTileCountX = Mathf.Max(1, Mathf.CeilToInt(width / (float)MaterialFeatureTileSize));
+            m_MaterialTileCountY = Mathf.Max(1, Mathf.CeilToInt(height / (float)MaterialFeatureTileSize));
+            m_MaterialTileCount = Mathf.Max(1, m_MaterialTileCountX * m_MaterialTileCountY);
+
+            if (!ReferenceEquals(m_MaterialTileFeatureFlags, m_LocalMaterialTileFeatureFlags)
+                || m_LocalMaterialTileFeatureFlags?.desc == null)
+            {
+                return;
+            }
+
+            m_LocalMaterialTileFeatureFlags.desc.Count = m_MaterialTileCount;
+            m_LocalMaterialTileFeatureFlags.desc.Stride = sizeof(uint);
+            m_LocalMaterialTileFeatureFlags.desc.Target = GraphicsBuffer.Target.Structured;
+            m_LocalMaterialFeatureTileList.desc.Count = m_MaterialTileCount * MaterialFeatureVariantCount;
+            m_LocalMaterialFeatureTileList.desc.Stride = sizeof(uint);
+            m_LocalMaterialFeatureTileList.desc.Target = GraphicsBuffer.Target.Structured;
+            m_LocalMaterialFeatureIndirectArgs.desc.Count = MaterialFeatureVariantCount * IndirectArgsElementCount;
+            m_LocalMaterialFeatureIndirectArgs.desc.Stride = sizeof(uint);
+            m_LocalMaterialFeatureIndirectArgs.desc.Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments;
+        }
+
+        private void DrawMaterialFeatureVariantOverlay(RasterPassContext context)
+        {
+            if (!HasBoundMaterialFeatureDebugBuffer()
+                || !HasBoundMaterialFeatureVariantBuffers()
+                || m_MaterialFeatureTileList?.innerHandle.IsValid() != true
+                || m_MaterialFeatureIndirectArgs?.innerHandle.IsValid() != true
+                || m_MaterialTileFeatureFlags?.innerHandle.IsValid() != true)
+            {
+                return;
+            }
+
+            m_Material.SetBuffer(MaterialTileFeatureFlagsId, m_MaterialTileFeatureFlags);
+            m_Material.SetBuffer(MaterialFeatureTileListId, m_MaterialFeatureTileList);
+            m_Material.SetBuffer(MaterialFeatureIndirectArgsId, m_MaterialFeatureIndirectArgs);
+            m_Material.SetInt(MaterialFeatureDebugId, (int)m_ResolvedSettings.materialFeatureVariantDebug);
+            m_Material.SetInt(MaterialFeatureDebugAvailableId, 1);
+            m_Material.SetInt(MaterialTileCountId, m_MaterialTileCount);
+            m_Material.SetInt(MaterialTileCountXId, m_MaterialTileCountX);
+            m_Material.SetInt(MaterialTileCountYId, m_MaterialTileCountY);
+            m_Material.SetVector(ClusterDebugLightViewportSizeId, m_ClusterDebugLightViewportSize);
+
+            context.cmd.DrawProcedural(
+                Matrix4x4.identity,
+                m_Material,
+                MaterialFeatureVariantsOverlayPassIndex,
+                MeshTopology.Triangles,
+                m_MaterialTileCount * 6,
+                1);
+        }
+
         private void ApplyClusteredLightingProperties()
         {
             m_Material.SetInt(ClusteredPunctualLightGridEnabledId, m_SupportsClusteredPunctualLights ? 1 : 0);
@@ -519,6 +638,23 @@ namespace VividRP.Runtime.RenderPass.Core
             return !ReferenceEquals(m_BigTileLightListBuffer, m_LocalBigTileLightListBuffer);
         }
 
+        private bool HasBoundMaterialFeatureDebugBuffer()
+        {
+            return !ReferenceEquals(m_MaterialTileFeatureFlags, m_LocalMaterialTileFeatureFlags)
+                && m_MaterialTileFeatureFlags?.desc != null
+                && m_MaterialTileFeatureFlags.desc.Count >= m_MaterialTileCount;
+        }
+
+        private bool HasBoundMaterialFeatureVariantBuffers()
+        {
+            return !ReferenceEquals(m_MaterialFeatureTileList, m_LocalMaterialFeatureTileList)
+                && !ReferenceEquals(m_MaterialFeatureIndirectArgs, m_LocalMaterialFeatureIndirectArgs)
+                && m_MaterialFeatureTileList?.desc != null
+                && m_MaterialFeatureIndirectArgs?.desc != null
+                && m_MaterialFeatureTileList.desc.Count >= m_MaterialTileCount * MaterialFeatureVariantCount
+                && m_MaterialFeatureIndirectArgs.desc.Count >= MaterialFeatureVariantCount * IndirectArgsElementCount;
+        }
+
         private static bool HasClusteredLightingData(VividClusteredLightingData clusteredLightingData)
         {
             return clusteredLightingData != null
@@ -575,6 +711,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 return m_SourceTexture.desc;
 
             return m_SourceTexture?.desc;
+        }
+
+        private static RenderGraphBuffer CreateIndirectArgsBuffer(string name)
+        {
+            return new RenderGraphBuffer
+            {
+                desc = new RenderGraphBufferDesc
+                {
+                    Count = MaterialFeatureVariantCount * IndirectArgsElementCount,
+                    Stride = sizeof(uint),
+                    Target = GraphicsBuffer.Target.Structured | GraphicsBuffer.Target.IndirectArguments,
+                    Name = name
+                }
+            };
         }
 
     }

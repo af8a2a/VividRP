@@ -19,6 +19,8 @@ CBUFFER_START(UnityPerMaterial)
     float _ClearCoatSmoothness;
     float _AlphaClip;
     float _WorkflowMode;
+    float _ReceiveSSR;
+    float _ReceiveDecals;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);

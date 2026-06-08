@@ -36,6 +36,7 @@ float FUNCTION_NAME(uint2 pixelCoord, uint sampleIndex, uint sampleDimension) \
 }
 
 VIVID_DEFINE_BND_SEQUENCE_SAMPLE_FUNCTION(GetBNDSequenceSample, _SobolScramblingTile, _SobolRankingTile, 255)
+VIVID_DEFINE_BND_SEQUENCE_SAMPLE_FUNCTION(GetBNDSequenceSample1SPPTemporal, _SobolScramblingTile1SPP, _SobolRankingTile1SPP, 255)
 VIVID_DEFINE_BND_SEQUENCE_SAMPLE_FUNCTION(GetBNDSequenceSample1SPP, _SobolScramblingTile1SPP, _SobolRankingTile1SPP, 0)
 VIVID_DEFINE_BND_SEQUENCE_SAMPLE_FUNCTION(GetBNDSequenceSample8SPP, _SobolScramblingTile8SPP, _SobolRankingTile8SPP, 7)
 VIVID_DEFINE_BND_SEQUENCE_SAMPLE_FUNCTION(GetBNDSequenceSample256SPP, _SobolScramblingTile256SPP, _SobolRankingTile256SPP, 255)

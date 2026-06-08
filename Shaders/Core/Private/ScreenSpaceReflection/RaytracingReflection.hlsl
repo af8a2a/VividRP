@@ -336,8 +336,8 @@ float3 ClampSsrRayTracedRadiance(float3 radiance)
 float2 GetSsrBlueNoiseSample(uint2 coordSS)
 {
     return float2(
-        GetBNDSequenceSample1SPP(coordSS, (uint)_SsrFrameIndex, 0),
-        GetBNDSequenceSample1SPP(coordSS, (uint)_SsrFrameIndex, 1));
+        GetBNDSequenceSample1SPPTemporal(coordSS, (uint)_SsrFrameIndex, 0),
+        GetBNDSequenceSample1SPPTemporal(coordSS, (uint)_SsrFrameIndex, 1));
 }
 
 float GetSsrSampleWeight(float3 viewDirTS, float3 reflectionDirTS, float roughness)

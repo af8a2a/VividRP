@@ -47,7 +47,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string AccumulationHistoryKey = "SSRAccumulation";
         private const string HDRPAccumulationHistoryKey = "SSRHDRPAccumulation";
         private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
-        private const float HDRPDefaultAccumulationFactor = 0.75f;
         private const float HDRPDefaultSpeedRejection = 0.5f;
         private const string ReBlurLightingDistanceHistoryKey = "SSRReBlurLightingDistance";
         private const string ReBlurAccumulationHistoryKey = "SSRReBlurAccumulation";
@@ -1768,7 +1767,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ComputeShader,
                     SsrHDRPAccumulationAmountId,
                     m_HasValidHDRPAccumulationHistory
-                        ? Mathf.Pow(2.0f, Mathf.Lerp(0.0f, -7.0f, HDRPDefaultAccumulationFactor))
+                        ? Mathf.Pow(2.0f, Mathf.Lerp(0.0f, -7.0f, m_Settings.accumulationFactor))
                         : 1.0f);
                 cmd.SetComputeFloatParam(
                     m_ComputeShader,

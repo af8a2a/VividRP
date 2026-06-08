@@ -37,6 +37,9 @@ namespace VividRP.Runtime
         [Tooltip("Distance over which reflections fade near screen edges.")]
         public ClampedFloatParameter screenFadeDistance = new(0.1f, 0.0001f, 1.0f);
 
+        [Tooltip("Controls how much history the HDRP accumulation path keeps. Higher values accumulate more history.")]
+        public ClampedFloatParameter accumulationFactor = new(0.75f, 0.0f, 1.0f);
+
         [Tooltip("Maximum HiZ ray marching steps.")]
         public ClampedIntParameter rayMaxIterations = new(32, 1, 128);
 

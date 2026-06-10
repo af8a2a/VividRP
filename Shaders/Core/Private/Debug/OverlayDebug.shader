@@ -10,6 +10,7 @@ Shader "Hidden/VividRP/OverlayDebug"
             ZWrite Off
             ZTest Always
             Cull Off
+            Blend One Zero
 
             HLSLPROGRAM
             #pragma target 4.5
@@ -25,6 +26,11 @@ Shader "Hidden/VividRP/OverlayDebug"
             #define VIVID_OVERLAY_VISUALIZATION_MOTION_VECTORS 3
             #define VIVID_OVERLAY_DEPTHMODE_RAW 0
             #define VIVID_OVERLAY_DEPTHMODE_LINEAR01 1
+            #define VIVID_OVERLAY_CHANNEL_RGB 0
+            #define VIVID_OVERLAY_CHANNEL_RED 1
+            #define VIVID_OVERLAY_CHANNEL_GREEN 2
+            #define VIVID_OVERLAY_CHANNEL_BLUE 3
+            #define VIVID_OVERLAY_CHANNEL_ALPHA 4
             #define VIVID_OVERLAY_MOTION_VECTOR_ARROW_SPACING 28.0
             #define VIVID_OVERLAY_MOTION_VECTOR_ARROW_MIN_LENGTH 1.5
             #define VIVID_OVERLAY_MOTION_VECTOR_ARROW_OUTLINE_THICKNESS 1.75
@@ -46,6 +52,7 @@ Shader "Hidden/VividRP/OverlayDebug"
             int _DebugSlice;
             int _VisualizationMode;
             int _DepthMode;
+            int _DebugChannelMode;
             float _DebugExposure;
             float _DebugOpacity;
 
@@ -63,6 +70,23 @@ Shader "Hidden/VividRP/OverlayDebug"
             float2 ApplyScaleBias(float2 uv, float4 scaleBias)
             {
                 return uv * scaleBias.xy + scaleBias.zw;
+            }
+
+            float4 ApplyDebugChannelMode(float4 sampleColor, float exposureMultiplier)
+            {
+                if (_DebugChannelMode == VIVID_OVERLAY_CHANNEL_RED)
+                    return float4(sampleColor.rrr * exposureMultiplier, 1.0);
+
+                if (_DebugChannelMode == VIVID_OVERLAY_CHANNEL_GREEN)
+                    return float4(sampleColor.ggg * exposureMultiplier, 1.0);
+
+                if (_DebugChannelMode == VIVID_OVERLAY_CHANNEL_BLUE)
+                    return float4(sampleColor.bbb * exposureMultiplier, 1.0);
+
+                if (_DebugChannelMode == VIVID_OVERLAY_CHANNEL_ALPHA)
+                    return float4(sampleColor.aaa * exposureMultiplier, 1.0);
+
+                return float4(sampleColor.rgb * exposureMultiplier, 1.0);
             }
 
             Varyings Vert(Attributes input)
@@ -93,7 +117,7 @@ Shader "Hidden/VividRP/OverlayDebug"
                     return float4((float3(motion * 0.5 + 0.5, magnitude)) * exposureMultiplier, 1.0);
                 }
 
-                return float4(sampleColor.rgb * exposureMultiplier, 1.0);
+                return ApplyDebugChannelMode(sampleColor, exposureMultiplier);
             }
 
             float4 SampleDebugTextureRaw(float2 uv)

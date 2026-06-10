@@ -21,11 +21,9 @@ CBUFFER_END
 [numthreads(8, 8, 1)]
 void KCopyDepthToAtlas(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
-    uint width;
-    uint height;
-    _InputDepth.GetDimensions(width, height);
+    uint2 viewportSize = (uint2)_DstOffsetAndSize.zw;
 
-    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    if (dispatchThreadId.x >= viewportSize.x || dispatchThreadId.y >= viewportSize.y)
         return;
 
     _DepthMipChain[dispatchThreadId.xy] = _InputDepth.Load(int3(dispatchThreadId.xy, 0));

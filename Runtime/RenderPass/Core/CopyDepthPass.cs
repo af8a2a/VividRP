@@ -5,17 +5,26 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class CopyDepthPass : RasterPass
+    public class CopyDepthPass : ComputePass
     {
-        private const string CopyDepthShaderName = "Hidden/VividRP/CopyDepth";
+        private const int ThreadGroupSize = 8;
+
+        private static readonly int InputDepthId = Shader.PropertyToID("_InputDepth");
+        private static readonly int DepthMipChainId = Shader.PropertyToID("_DepthMipChain");
+        private static readonly int DstOffsetAndSizeId = Shader.PropertyToID("_DstOffsetAndSize");
 
         [RenderGraphResource(Name = "DepthAttachment", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthAttachment;
 
-        [RenderGraphResource(Name = "DepthTexture", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        [RenderGraphResource(Name = "DepthTexture", Access = AccessFlags.Write)]
         private RenderGraphTexture m_DepthTexture;
 
-        private Material m_Material;
+        private readonly int[] m_DstOffsetAndSize = new int[4];
+
+        private ComputeShader m_ComputeShader;
+        private int m_CopyDepthKernel = -1;
+        private int m_Width = 1;
+        private int m_Height = 1;
 
         public CopyDepthPass()
         {
@@ -23,19 +32,29 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture = RenderGraphTexture.CreateColorTarget("DepthTexture", GraphicsFormat.R32_SFloat);
             m_DepthTexture.desc.ClearBuffer = false;
             m_DepthTexture.desc.FilterMode = FilterMode.Point;
+            m_DepthTexture.desc.EnableRandomWrite = true;
         }
 
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            var shader = resources.CopyDepthShader;
-            if (shader == null)
+            m_ComputeShader = resources?.HDRPHZBCompute;
+            if (m_ComputeShader == null)
             {
-                Debug.LogWarning($"[VividRP] Could not find shader '{CopyDepthShaderName}' for {nameof(CopyDepthPass)}.");
+                Debug.LogWarning($"[VividRP] Could not find HDRP HZB compute shader for {nameof(CopyDepthPass)}.");
                 return;
             }
 
-            m_Material = CoreUtils.CreateEngineMaterial(shader);
+            try
+            {
+                m_CopyDepthKernel = m_ComputeShader.FindKernel("KCopyDepthToAtlas");
+            }
+            catch (System.ArgumentException)
+            {
+                Debug.LogWarning($"[VividRP] HDRPHZB.compute is missing KCopyDepthToAtlas. {nameof(CopyDepthPass)} will be skipped.");
+                m_ComputeShader = null;
+                m_CopyDepthKernel = -1;
+            }
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -49,6 +68,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var height = hasExplicitSourceSize
                 ? Mathf.Max(1, sourceDescriptor.Height)
                 : CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
+            m_Width = width;
+            m_Height = height;
 
             if (sourceDescriptor != null && !hasExplicitSourceSize)
             {
@@ -59,24 +80,35 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureDepthTextureOutput(width, height);
         }
 
-        public override void Record(RasterPassContext context)
+        public override void Record(ComputePassContext context)
         {
-            if (m_Material == null || !m_DepthAttachment.innerHandle.IsValid() || !m_DepthTexture.innerHandle.IsValid())
+            if (m_ComputeShader == null
+                || m_CopyDepthKernel < 0
+                || !m_DepthAttachment.innerHandle.IsValid()
+                || !m_DepthTexture.innerHandle.IsValid())
                 return;
 
-            RTHandle sourceHandle = m_DepthAttachment.innerHandle;
+            var cmd = context.cmd;
+            m_DstOffsetAndSize[0] = 0;
+            m_DstOffsetAndSize[1] = 0;
+            m_DstOffsetAndSize[2] = m_Width;
+            m_DstOffsetAndSize[3] = m_Height;
 
-
-            Blitter.BlitTexture(context.cmd, sourceHandle, Vector2.one, m_Material, 0);
+            cmd.SetComputeIntParams(m_ComputeShader, DstOffsetAndSizeId, m_DstOffsetAndSize);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyDepthKernel, InputDepthId, m_DepthAttachment.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_CopyDepthKernel, DepthMipChainId, m_DepthTexture.innerHandle);
+            cmd.DispatchCompute(
+                m_ComputeShader,
+                m_CopyDepthKernel,
+                CoreUtils.DivRoundUp(m_Width, ThreadGroupSize),
+                CoreUtils.DivRoundUp(m_Height, ThreadGroupSize),
+                1);
         }
 
         public override void Dispose()
         {
-            if (m_Material != null)
-            {
-                CoreUtils.Destroy(m_Material);
-                m_Material = null;
-            }
+            m_ComputeShader = null;
+            m_CopyDepthKernel = -1;
         }
 
         private void ConfigureDepthTextureOutput(int width, int height)
@@ -95,7 +127,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DepthTexture.desc.UseMipMap = false;
             m_DepthTexture.desc.AutoGenerateMips = false;
             m_DepthTexture.desc.MipCount = 1;
-            m_DepthTexture.desc.EnableRandomWrite = false;
+            m_DepthTexture.desc.EnableRandomWrite = true;
             m_DepthTexture.desc.BindTextureMS = false;
             m_DepthTexture.desc.Name = "DepthTexture";
 

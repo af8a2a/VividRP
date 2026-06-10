@@ -43,6 +43,15 @@ namespace VividRP.Runtime
                 return Matrix4x4.identity;
             }
 
+            if (ShouldUseCameraProjectionMatrix(camera))
+            {
+                var projectionMatrix = camera.projectionMatrix;
+                if (IsProjectionMatrixUsable(projectionMatrix))
+                {
+                    return projectionMatrix;
+                }
+            }
+
             if (ResolveEffectiveProjectionStateMode(camera) == CameraProjectionStateMode.Explicit)
             {
                 var projectionMatrix = camera.projectionMatrix;
@@ -68,6 +77,21 @@ namespace VividRP.Runtime
                 return Matrix4x4.identity;
             }
 
+            if (ShouldUseCameraProjectionMatrix(camera))
+            {
+                var projectionMatrix = camera.projectionMatrix;
+                if (IsProjectionMatrixUsable(projectionMatrix))
+                {
+                    return projectionMatrix;
+                }
+
+                var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
+                if (IsProjectionMatrixUsable(nonJitteredProjectionMatrix))
+                {
+                    return nonJitteredProjectionMatrix;
+                }
+            }
+
             if (ResolveEffectiveProjectionStateMode(camera) == CameraProjectionStateMode.Explicit)
             {
                 var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
@@ -84,6 +108,13 @@ namespace VividRP.Runtime
             }
 
             return BuildProjectionMatrix(camera);
+        }
+
+        private static bool ShouldUseCameraProjectionMatrix(Camera camera)
+        {
+            // SceneView projection can carry editor-specific viewport/aspect state that is not
+            // represented by Camera parameters. HDRP keeps this raw matrix for view constants.
+            return camera != null && camera.cameraType == CameraType.SceneView;
         }
 
         public static bool IsProjectionMatrixUsable(Matrix4x4 matrix)
@@ -280,6 +311,9 @@ namespace VividRP.Runtime
         {
             if (camera == null)
                 return CameraProjectionStateMode.Implicit;
+
+            if (ShouldUseCameraProjectionMatrix(camera))
+                return CameraProjectionStateMode.Explicit;
 
             var nonJitteredProjectionMatrix = camera.nonJitteredProjectionMatrix;
             var projectionMatrix = camera.projectionMatrix;

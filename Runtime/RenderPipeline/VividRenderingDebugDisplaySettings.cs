@@ -102,6 +102,9 @@ namespace VividRP.Runtime
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
         [SerializeField]
+        private OverlayDebugChannelMode m_ChannelMode = OverlayDebugChannelMode.RGB;
+
+        [SerializeField]
         private MaterialDebugVisualizationMode m_MaterialDebugMode = MaterialDebugVisualizationMode.None;
 
         [SerializeField]
@@ -258,6 +261,12 @@ namespace VividRP.Runtime
             set => m_DepthMode = value;
         }
 
+        internal OverlayDebugChannelMode channelMode
+        {
+            get => OverlayDebugPass.NormalizeChannelMode(m_ChannelMode);
+            set => m_ChannelMode = OverlayDebugPass.NormalizeChannelMode(value);
+        }
+
         internal MaterialDebugVisualizationMode materialDebugMode
         {
             get => m_MaterialDebugMode;
@@ -362,6 +371,7 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_OverlayOpacity, 1f)
             || visualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
+            || channelMode != OverlayDebugChannelMode.RGB
             || m_MaterialDebugMode != MaterialDebugVisualizationMode.None
             || !Mathf.Approximately(m_MaterialDebugExposure, 0f)
             || m_VisibilityBufferDebugMode != VisibilityBufferDebugVisualizationMode.Cluster
@@ -403,6 +413,7 @@ namespace VividRP.Runtime
             m_OverlayOpacity = 1f;
             m_VisualizationMode = OverlayDebugVisualizationMode.Auto;
             m_DepthMode = OverlayDebugDepthMode.Raw;
+            m_ChannelMode = OverlayDebugChannelMode.RGB;
             m_MaterialDebugMode = MaterialDebugVisualizationMode.None;
             m_MaterialDebugExposure = 0f;
             m_VisibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.Cluster;
@@ -587,6 +598,12 @@ namespace VividRP.Runtime
             {
                 name = "Depth Mode",
                 tooltip = "Select how depth textures are visualized in the overlay."
+            };
+
+            public static readonly NameAndTooltip ChannelMode = new()
+            {
+                name = "Channel Mode",
+                tooltip = "Select which debug texture channel is displayed in the overlay."
             };
 
             public static readonly NameAndTooltip MaterialDebugMode = new()
@@ -865,6 +882,10 @@ namespace VividRP.Runtime
                     Strings.DepthMode,
                     () => data.depthMode,
                     value => data.depthMode = value));
+                foldout.children.Add(CreateEnumField(
+                    Strings.ChannelMode,
+                    () => data.channelMode,
+                    value => data.channelMode = value));
                 return foldout;
             }
 

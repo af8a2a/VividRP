@@ -270,6 +270,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 Assert.That(component.executionPath.value, Is.EqualTo(ScreenSpaceReflectionExecutionPath.Vivid));
+                Assert.That(component.debugMode.value, Is.EqualTo(ScreenSpaceReflectionDebugMode.WorldPosition));
             }
             finally
             {
@@ -287,6 +288,7 @@ namespace VividRP.Editor.Tests
 
             ssr.enabled.value = true;
             ssr.executionPath.value = ScreenSpaceReflectionExecutionPath.Hybrid;
+            ssr.debugMode.value = ScreenSpaceReflectionDebugMode.HitDelta;
             ssr.reBlurDenoiserRadius.value = 0.25f;
             ssr.reBlurAntiFlickeringStrength.value = 0.75f;
 
@@ -302,6 +304,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(settings.enabled, Is.True);
                 Assert.That(settings.executionPath, Is.EqualTo(ScreenSpaceReflectionExecutionPath.Hybrid));
+                Assert.That(settings.debugMode, Is.EqualTo(ScreenSpaceReflectionDebugMode.HitDelta));
                 Assert.That(settings.reBlurDenoiserRadius, Is.EqualTo(0.25f).Within(0.0001f));
                 Assert.That(settings.reBlurAntiFlickeringStrength, Is.EqualTo(0.75f).Within(0.0001f));
             }
@@ -526,6 +529,40 @@ namespace VividRP.Editor.Tests
             Assert.That(method.Invoke(null, new object[] { 1920, 1080 }), Is.EqualTo(12));
             Assert.That(method.Invoke(null, new object[] { 1024, 1024 }), Is.EqualTo(11));
             Assert.That(method.Invoke(null, new object[] { 1, 1 }), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ScreenSpaceReflectionPass_UsesFrameContextViewProjectionMatrices_WhenAvailable()
+        {
+            var cameraData = new VividCameraData();
+            var viewProj = Matrix4x4.TRS(new Vector3(1.0f, 2.0f, 3.0f), Quaternion.Euler(10.0f, 20.0f, 30.0f), new Vector3(2.0f, 3.0f, 4.0f));
+            var invViewProj = viewProj.inverse;
+            var cameraPosition = new Vector4(5.0f, 6.0f, 7.0f, 1.0f);
+            cameraData.shaderVariablesGlobal = new ShaderVariablesGlobal
+            {
+                _VividViewProjMatrix = viewProj,
+                _VividInvViewProjMatrix = invViewProj,
+                _VividWorldSpaceCameraPos = cameraPosition
+            };
+            cameraData.hasShaderVariablesGlobal = true;
+
+            var resolvedViewProj = InvokePrivateStatic<Matrix4x4>(
+                typeof(ScreenSpaceReflectionPass),
+                "ResolveSsrViewProjMatrix",
+                cameraData);
+            var resolvedInvViewProj = InvokePrivateStatic<Matrix4x4>(
+                typeof(ScreenSpaceReflectionPass),
+                "ResolveSsrInvViewProjMatrix",
+                cameraData,
+                Matrix4x4.identity);
+            var resolvedCameraPosition = InvokePrivateStatic<Vector4>(
+                typeof(ScreenSpaceReflectionPass),
+                "ResolveSsrWorldSpaceCameraPos",
+                cameraData);
+
+            Assert.That(MaxAbsDiff(resolvedViewProj, viewProj), Is.LessThan(0.0001f));
+            Assert.That(MaxAbsDiff(resolvedInvViewProj, invViewProj), Is.LessThan(0.0001f));
+            Assert.That(resolvedCameraPosition, Is.EqualTo(cameraPosition));
         }
 
         [Test]
@@ -1052,7 +1089,6 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("public Matrix4x4 SsrViewProjMatrix;"));
             Assert.That(source, Does.Contain("public Matrix4x4 SsrInvViewProjMatrix;"));
             Assert.That(source, Does.Contain("public Matrix4x4 SsrPrevViewProjMatrix;"));
-            Assert.That(source, Does.Contain("cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);"));
             Assert.That(source, Does.Contain("ResolveSsrPrevViewProjMatrix(cameraData, viewProjMatrix);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))"));
@@ -1162,6 +1198,25 @@ namespace VividRP.Editor.Tests
             var method = instance.GetType().GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(method, Is.Not.Null, $"Method '{methodName}' not found on {instance.GetType().Name}");
             return (bool)method.Invoke(instance, null);
+        }
+
+        private static T InvokePrivateStatic<T>(System.Type type, string methodName, params object[] args)
+        {
+            var method = type.GetMethod(methodName, BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null, $"Method '{methodName}' not found on {type.Name}");
+            return (T)method.Invoke(null, args);
+        }
+
+        private static float MaxAbsDiff(Matrix4x4 lhs, Matrix4x4 rhs)
+        {
+            var max = 0.0f;
+            for (var row = 0; row < 4; row++)
+            {
+                for (var column = 0; column < 4; column++)
+                    max = Mathf.Max(max, Mathf.Abs(lhs[row, column] - rhs[row, column]));
+            }
+
+            return max;
         }
 
         private static string GetPackageFilePath(params string[] parts)

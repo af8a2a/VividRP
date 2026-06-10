@@ -16,6 +16,26 @@ namespace VividRP.Runtime.RenderPass.Core
         RayTracing = 4
     }
 
+    public enum ScreenSpaceReflectionDebugMode
+    {
+        WorldPosition = 0,
+        ScreenUV = 1,
+        HitUV = 2,
+        HitDelta = 3,
+        HitDepth = 4,
+        HitMotion = 5,
+        HitPreviousUV = 6,
+        ReprojectionValidity = 7,
+        DepthVsHzb = 8,
+        TextureSize = 9,
+        HitRayConsistency = 10,
+        PositionRoundTrip = 11,
+        HitMotionConsistency = 12,
+        ScreenSizeConsistency = 13,
+        CameraPositionConsistency = 14,
+        HitRayDetail = 15
+    }
+
     public sealed class ScreenSpaceReflectionPass : ComputePass, IStablePassResourceLayout, IRenderGraphPreparePass, IBlueNoiseConsumerPass
     {
         private const int ThreadGroupSize = 8;
@@ -197,6 +217,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public float ReBlurAntiFlickeringStrength;
             public float ReBlurHistoryValidity;
             public float SsrPBRBias;
+            public Vector4 SsrDebugParams;
         }
 
         [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
@@ -1280,6 +1301,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRNumFramesAccumTextureId, m_NumFramesHistoryCurrent.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, HZBTextureId, m_HZBTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRTileListId, m_TileListBuffer.innerHandle);
             cmd.SetComputeBufferParam(
@@ -1958,7 +1980,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 : 0.0f;
 
             var viewProjMatrix = ResolveSsrViewProjMatrix(cameraData);
-            var invViewProjMatrix = viewProjMatrix.inverse;
+            var invViewProjMatrix = ResolveSsrInvViewProjMatrix(cameraData, viewProjMatrix);
             var prevViewProjMatrix = ResolveSsrPrevViewProjMatrix(cameraData, viewProjMatrix);
             int reBlurFrameIndex = Time.frameCount & 31;
 
@@ -2015,7 +2037,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReBlurDenoiserRadius = Mathf.Lerp(0.5f, 1.0f, settings.reBlurDenoiserRadius),
                 ReBlurAntiFlickeringStrength = Mathf.Lerp(0.0f, 3.5f, settings.reBlurAntiFlickeringStrength),
                 ReBlurHistoryValidity = 0.0f,
-                SsrPBRBias = settings.biasFactor
+                SsrPBRBias = settings.biasFactor,
+                SsrDebugParams = new Vector4((float)settings.debugMode, 0.0f, 0.0f, 0.0f)
             };
         }
 
@@ -2031,7 +2054,18 @@ namespace VividRP.Runtime.RenderPass.Core
             if (cameraData == null)
                 return Matrix4x4.identity;
 
-            return cameraData.GetGPUViewProjectionMatrix(renderIntoTexture: true);
+            return cameraData.hasShaderVariablesGlobal
+                ? cameraData.shaderVariablesGlobal._VividViewProjMatrix
+                : cameraData.GetGPUViewProjectionMatrix();
+        }
+
+        private static Matrix4x4 ResolveSsrInvViewProjMatrix(
+            VividCameraData cameraData,
+            Matrix4x4 fallbackViewProjMatrix)
+        {
+            return cameraData != null && cameraData.hasShaderVariablesGlobal
+                ? cameraData.shaderVariablesGlobal._VividInvViewProjMatrix
+                : fallbackViewProjMatrix.inverse;
         }
 
         private static Matrix4x4 ResolveSsrPrevViewProjMatrix(
@@ -2047,6 +2081,9 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (cameraData == null)
                 return new Vector4(0.0f, 0.0f, 0.0f, 1.0f);
+
+            if (cameraData.hasShaderVariablesGlobal)
+                return cameraData.shaderVariablesGlobal._VividWorldSpaceCameraPos;
 
             var cameraPosition = cameraData.GetInverseViewMatrix().GetColumn(3);
             cameraPosition.w = 1.0f;

@@ -66,6 +66,7 @@ namespace VividRP.Editor.Tests
                 overlayOpacity = 0.4f,
                 visualizationMode = OverlayDebugVisualizationMode.MotionVectors,
                 depthMode = OverlayDebugDepthMode.Linear01,
+                channelMode = OverlayDebugChannelMode.Green,
             };
 
             var settings = OverlayDebugPass.ResolveSettings(data);
@@ -76,6 +77,7 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.opacity, Is.EqualTo(0.4f));
             Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.MotionVectors));
             Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
+            Assert.That(settings.channelMode, Is.EqualTo(OverlayDebugChannelMode.Green));
         }
 
         [Test]
@@ -177,10 +179,12 @@ namespace VividRP.Editor.Tests
             {
                 overlayExposure = 32f,
                 overlayOpacity = -1f,
+                channelMode = (OverlayDebugChannelMode)999,
             });
 
             Assert.That(settings.exposure, Is.EqualTo(16f));
             Assert.That(settings.opacity, Is.EqualTo(0f));
+            Assert.That(settings.channelMode, Is.EqualTo(OverlayDebugChannelMode.RGB));
         }
 
         [Test]
@@ -194,6 +198,18 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.opacity, Is.EqualTo(1f));
             Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.Auto));
             Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Raw));
+            Assert.That(settings.channelMode, Is.EqualTo(OverlayDebugChannelMode.RGB));
+        }
+
+        [Test]
+        public void NormalizeChannelMode_PreservesSupportedModes()
+        {
+            Assert.That(
+                OverlayDebugPass.NormalizeChannelMode(OverlayDebugChannelMode.Red),
+                Is.EqualTo(OverlayDebugChannelMode.Red));
+            Assert.That(
+                OverlayDebugPass.NormalizeChannelMode(OverlayDebugChannelMode.Alpha),
+                Is.EqualTo(OverlayDebugChannelMode.Alpha));
         }
 
         [Test]
@@ -208,6 +224,9 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
             Assert.That(shaderSource, Does.Contain("Linear01Depth(depthValue, _ZBufferParams)"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_DEPTHMODE_LINEAR01"));
+            Assert.That(shaderSource, Does.Contain("_DebugChannelMode"));
+            Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_CHANNEL_ALPHA"));
+            Assert.That(shaderSource, Does.Contain("ApplyDebugChannelMode"));
             Assert.That(shaderSource, Does.Contain("lerp(sourceColor, debugColor, saturate(_DebugOpacity))"));
             Assert.That(shaderSource, Does.Contain("motion * 0.5 + 0.5"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_MOTION_VECTOR_ARROW_SPACING"));

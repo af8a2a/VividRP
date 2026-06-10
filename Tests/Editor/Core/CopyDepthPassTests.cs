@@ -27,10 +27,11 @@ namespace VividRP.Editor.Tests
             Assert.That(inputEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.Depth32));
 
             Assert.That(outputEntry.Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(outputEntry.AttachmentIndex, Is.EqualTo(0));
+            Assert.That(outputEntry.AttachmentIndex, Is.EqualTo(-1));
             Assert.That(outputEntry.IsDepthAttachment, Is.False);
             Assert.That(outputEntry.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(outputEntry.Texture.desc.DepthBufferBits, Is.EqualTo(DepthBits.None));
+            Assert.That(outputEntry.Texture.desc.EnableRandomWrite, Is.True);
         }
 
         [Test]
@@ -79,6 +80,7 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.Slices, Is.EqualTo(2));
             Assert.That(outputTexture.desc.UseDynamicScale, Is.True);
             Assert.That(outputTexture.desc.UseDynamicScaleExplicit, Is.True);
+            Assert.That(outputTexture.desc.EnableRandomWrite, Is.True);
         }
 
         private static void AssertTextureSize(CopyDepthPass pass, string fieldName, int expectedWidth, int expectedHeight)

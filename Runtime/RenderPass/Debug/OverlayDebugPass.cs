@@ -19,6 +19,15 @@ namespace VividRP.Runtime.RenderPass.Core
         Linear01 = 1,
     }
 
+    public enum OverlayDebugChannelMode
+    {
+        RGB = 0,
+        Red = 1,
+        Green = 2,
+        Blue = 3,
+        Alpha = 4,
+    }
+
     public sealed class OverlayDebugPass : UnsafePass
     {
         internal const string OverlayDebugShaderName = "Hidden/VividRP/OverlayDebug";
@@ -36,6 +45,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DebugSliceId = Shader.PropertyToID("_DebugSlice");
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VisualizationMode");
         private static readonly int DepthModeId = Shader.PropertyToID("_DepthMode");
+        private static readonly int DebugChannelModeId = Shader.PropertyToID("_DebugChannelMode");
         private static readonly int DebugExposureId = Shader.PropertyToID("_DebugExposure");
         private static readonly int DebugOpacityId = Shader.PropertyToID("_DebugOpacity");
 
@@ -70,6 +80,9 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField]
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
+        [SerializeField]
+        private OverlayDebugChannelMode m_ChannelMode = OverlayDebugChannelMode.RGB;
+
         private Material m_Material;
         private MaterialPropertyBlock m_MaterialPropertyBlock;
         private float m_ResolvedOverlayAmount;
@@ -78,6 +91,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_ResolvedOpacity = 1f;
         private OverlayDebugVisualizationMode m_ResolvedVisualizationMode = OverlayDebugVisualizationMode.Auto;
         private OverlayDebugDepthMode m_ResolvedDepthMode = OverlayDebugDepthMode.Raw;
+        private OverlayDebugChannelMode m_ResolvedChannelMode = OverlayDebugChannelMode.RGB;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private Vector4 m_OverlayScreenSize = new(1f, 1f, 1f, 1f);
         private bool m_ShouldSkipExecution;
@@ -90,6 +104,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly float opacity;
             public readonly OverlayDebugVisualizationMode visualizationMode;
             public readonly OverlayDebugDepthMode depthMode;
+            public readonly OverlayDebugChannelMode channelMode;
 
             public OverlayDebugSettingsData(
                 float overlayAmount,
@@ -97,7 +112,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 float exposure,
                 float opacity,
                 OverlayDebugVisualizationMode visualizationMode,
-                OverlayDebugDepthMode depthMode)
+                OverlayDebugDepthMode depthMode,
+                OverlayDebugChannelMode channelMode)
             {
                 this.overlayAmount = overlayAmount;
                 this.arraySlice = arraySlice;
@@ -105,6 +121,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 this.opacity = opacity;
                 this.visualizationMode = visualizationMode;
                 this.depthMode = depthMode;
+                this.channelMode = channelMode;
             }
         }
 
@@ -144,6 +161,12 @@ namespace VividRP.Runtime.RenderPass.Core
             set => m_DepthMode = value;
         }
 
+        public OverlayDebugChannelMode ChannelMode
+        {
+            get => m_ChannelMode;
+            set => m_ChannelMode = NormalizeChannelMode(value);
+        }
+
         public OverlayDebugPass()
         {
             profilingSampler = new ProfilingSampler(nameof(OverlayDebugPass));
@@ -179,6 +202,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedOpacity = resolvedSettings.opacity;
             m_ResolvedVisualizationMode = resolvedSettings.visualizationMode;
             m_ResolvedDepthMode = resolvedSettings.depthMode;
+            m_ResolvedChannelMode = resolvedSettings.channelMode;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -255,6 +279,7 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetInt(DebugSliceId, resolvedSlice);
             mpb.SetInt(VisualizationModeId, (int)resolvedVisualizationMode);
             mpb.SetInt(DepthModeId, (int)m_ResolvedDepthMode);
+            mpb.SetInt(DebugChannelModeId, (int)m_ResolvedChannelMode);
             mpb.SetFloat(DebugExposureId, m_ResolvedExposure);
             mpb.SetFloat(DebugOpacityId, m_ResolvedOpacity);
             mpb.SetTexture(DebugTextureId, debugTexture != null && !isDebugTextureArray ? debugTexture : Texture2D.blackTexture);
@@ -285,10 +310,18 @@ namespace VividRP.Runtime.RenderPass.Core
             var opacity = 1f;
             var visualizationMode = OverlayDebugVisualizationMode.Auto;
             var depthMode = OverlayDebugDepthMode.Raw;
+            var channelMode = OverlayDebugChannelMode.RGB;
 
             if (data == null)
             {
-                return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
+                return new OverlayDebugSettingsData(
+                    overlayAmount,
+                    arraySlice,
+                    exposure,
+                    opacity,
+                    visualizationMode,
+                    depthMode,
+                    channelMode);
             }
 
             overlayAmount = Mathf.Clamp01(data.overlayAmount);
@@ -297,8 +330,16 @@ namespace VividRP.Runtime.RenderPass.Core
             opacity = Mathf.Clamp01(data.overlayOpacity);
             visualizationMode = NormalizeVisualizationMode(data.visualizationMode);
             depthMode = data.depthMode;
+            channelMode = NormalizeChannelMode(data.channelMode);
 
-            return new OverlayDebugSettingsData(overlayAmount, arraySlice, exposure, opacity, visualizationMode, depthMode);
+            return new OverlayDebugSettingsData(
+                overlayAmount,
+                arraySlice,
+                exposure,
+                opacity,
+                visualizationMode,
+                depthMode,
+                channelMode);
         }
 
         internal static Vector4 ResolveOverlayRect(float overlayAmount)
@@ -350,6 +391,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 OverlayDebugVisualizationMode.Depth => OverlayDebugVisualizationMode.Depth,
                 OverlayDebugVisualizationMode.MotionVectors => OverlayDebugVisualizationMode.MotionVectors,
                 _ => OverlayDebugVisualizationMode.Auto,
+            };
+        }
+
+        internal static OverlayDebugChannelMode NormalizeChannelMode(OverlayDebugChannelMode value)
+        {
+            return value switch
+            {
+                OverlayDebugChannelMode.RGB => OverlayDebugChannelMode.RGB,
+                OverlayDebugChannelMode.Red => OverlayDebugChannelMode.Red,
+                OverlayDebugChannelMode.Green => OverlayDebugChannelMode.Green,
+                OverlayDebugChannelMode.Blue => OverlayDebugChannelMode.Blue,
+                OverlayDebugChannelMode.Alpha => OverlayDebugChannelMode.Alpha,
+                _ => OverlayDebugChannelMode.RGB,
             };
         }
 

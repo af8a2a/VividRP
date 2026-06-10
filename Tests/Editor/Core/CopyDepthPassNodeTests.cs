@@ -23,11 +23,11 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CopyDepthPassNode_DoesNotExposeAsyncComputeOption()
+        public void CopyDepthPassNode_ExposesAsyncComputeOption()
         {
             var node = new AutoRegisteredCopyDepthPassNode();
 
-            Assert.That(node.HasAsyncComputeOption(), Is.False);
+            Assert.That(node.HasAsyncComputeOption(), Is.True);
         }
     }
 }

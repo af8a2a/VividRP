@@ -18,6 +18,7 @@ namespace VividRP.Runtime
         public int rayMaxIterations;
         public float accumulationFactor;
         public float biasFactor;
+        public ScreenSpaceReflectionDebugMode debugMode;
         public float reBlurDenoiserRadius;
         public float reBlurAntiFlickeringStrength;
 
@@ -37,6 +38,7 @@ namespace VividRP.Runtime
                 rayMaxIterations = 32,
                 accumulationFactor = 0.75f,
                 biasFactor = 0.5f,
+                debugMode = ScreenSpaceReflectionDebugMode.WorldPosition,
                 reBlurDenoiserRadius = 1.0f,
                 reBlurAntiFlickeringStrength = 0.5f
             };
@@ -68,6 +70,7 @@ namespace VividRP.Runtime
             settings.rayMaxIterations = Mathf.Clamp(ssr.rayMaxIterations.value, 1, 128);
             settings.accumulationFactor = Mathf.Clamp01(ssr.accumulationFactor.value);
             settings.biasFactor = Mathf.Clamp01(ssr.biasFactor.value);
+            settings.debugMode = ssr.debugMode?.value ?? ScreenSpaceReflectionDebugMode.WorldPosition;
             settings.reBlurDenoiserRadius = Mathf.Clamp01(ssr.reBlurDenoiserRadius.value);
             settings.reBlurAntiFlickeringStrength = Mathf.Clamp01(ssr.reBlurAntiFlickeringStrength.value);
             return settings;

@@ -100,6 +100,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (!CanExecute())
                     return;
 
+                m_DstOffsetAndSize[0] = 0;
+                m_DstOffsetAndSize[1] = 0;
+                m_DstOffsetAndSize[2] = m_Width;
+                m_DstOffsetAndSize[3] = m_Height;
+
+                cmd.SetComputeIntParams(m_ComputeShader, DstOffsetAndSizeId, m_DstOffsetAndSize);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_CopyDepthKernel, InputDepthId, m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_CopyDepthKernel, DepthMipChainId, m_HzbTexture.innerHandle);
                 cmd.DispatchCompute(

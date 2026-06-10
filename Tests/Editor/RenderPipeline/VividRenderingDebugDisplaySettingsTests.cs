@@ -38,6 +38,7 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Opacity"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Channel Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Exposure"), Is.Not.Null);
@@ -99,6 +100,27 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.materialDebugMode,
                 Is.EqualTo(MaterialDebugVisualizationMode.None));
             Assert.That(VividRenderingDebugDisplaySettings.Data.materialDebugExposure, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void OverlayChannelModeWidget_MapsDropdownIndexToEnumValue()
+        {
+            var widget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Channel Mode")
+                as DebugUI.EnumField;
+
+            Assert.That(widget, Is.Not.Null);
+            var alphaIndex = Array.IndexOf(
+                widget.enumValues,
+                (int)OverlayDebugChannelMode.Alpha);
+            Assert.That(alphaIndex, Is.GreaterThanOrEqualTo(0));
+
+            widget.setIndex(alphaIndex);
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.channelMode,
+                Is.EqualTo(OverlayDebugChannelMode.Alpha));
+            Assert.That(widget.getIndex(), Is.EqualTo(alphaIndex));
+            Assert.That(widget.getter(), Is.EqualTo((int)OverlayDebugChannelMode.Alpha));
         }
 
         [Test]
@@ -243,6 +265,21 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.materialDebugExposure = 1f;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksOverlayChannelMode()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.channelMode = OverlayDebugChannelMode.Blue;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.channelMode, Is.EqualTo(OverlayDebugChannelMode.RGB));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
         }
 
         [Test]

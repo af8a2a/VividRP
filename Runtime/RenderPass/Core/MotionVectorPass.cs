@@ -65,6 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                     SortingCriteria = SortingCriteria.CommonOpaque,
                     RendererConfiguration = PerObjectData.MotionVectors,
+                    ExcludeObjectMotionVectors = true,
                 }
             };
 
@@ -175,7 +176,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_FallbackRenderList.desc.ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
 
             m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
-            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = false;
+            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = true;
             m_FallbackRenderList.desc.OverrideMaterial = null;
             m_FallbackRenderList.desc.OverrideMaterialPassIndex = 0;
             m_FallbackRenderList.desc.OverrideShader = m_ObjectMotionVectorFallbackShader;

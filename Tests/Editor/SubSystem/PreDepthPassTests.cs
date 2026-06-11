@@ -3,6 +3,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -69,6 +70,19 @@ namespace VividRP.Editor.Tests
             Assert.That(sharedDepth.desc.UseDynamicScale, Is.True);
             Assert.That(sharedDepth.desc.UseDynamicScaleExplicit, Is.True);
             Assert.That(sharedDepth.desc.ScaleFactor, Is.EqualTo(new Vector2(0.5f, 0.5f)));
+        }
+
+        [Test]
+        public void ResourceLayout_UsesReadWriteDepthAttachment()
+        {
+            var pass = new PreDepthPass();
+
+            var resources = PassResourceCollector.Collect(pass);
+
+            Assert.That(resources.Textures, Has.Length.EqualTo(1));
+            Assert.That(resources.Textures[0].Name, Is.EqualTo("Depth"));
+            Assert.That(resources.Textures[0].IsDepthAttachment, Is.True);
+            Assert.That(resources.Textures[0].Access, Is.EqualTo(AccessFlags.ReadWrite));
         }
 
         private static RenderGraphTexture GetDepthTexture(PreDepthPass pass)

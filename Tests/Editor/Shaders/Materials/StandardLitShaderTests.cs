@@ -40,6 +40,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_PreDepthPassUsesDepthOnlyPass_WithoutGBufferVariants()
+        {
+            string shaderSource = File.ReadAllText(GetShaderSourcePath());
+
+            string preDepthPass = ExtractPassBlock(shaderSource, RenderGraphRenderListDesc.PreDepthShaderTagName);
+
+            Assert.That(preDepthPass, Does.Contain("StandardLitDepthOnlyPass.hlsl"));
+            Assert.That(preDepthPass, Does.Not.Contain("StandardLitGBufferPass.hlsl"));
+            Assert.That(preDepthPass, Does.Contain("#pragma shader_feature_local_fragment _ALPHATEST_ON"));
+            Assert.That(preDepthPass, Does.Contain("#pragma shader_feature_local_fragment _OPACITYMAP"));
+            AssertNoGBufferOnlyPreDepthVariants(preDepthPass);
+        }
+
+        [Test]
         public void StandardLayeredLitShader_DeclaresVirtualTextureGBufferPasses_ForSvtBaseColor()
         {
             string shaderSource = File.ReadAllText(GetStandardLayeredLitShaderSourcePath());
@@ -56,6 +70,20 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#define VIVIDRP_STANDARD_LIT_VIRTUAL_TEXTURE 1"));
             Assert.That(shaderSource, Does.Contain("#define VIVID_VT_ENABLE_FEEDBACK_RW 1"));
             Assert.That(shaderSource, Does.Contain("CustomEditor \"VividRP.Editor.StandardLayeredLitShaderGUI\""));
+        }
+
+        [Test]
+        public void StandardLayeredLitShader_PreDepthPassUsesDepthOnlyPass_WithoutGBufferVariants()
+        {
+            string shaderSource = File.ReadAllText(GetStandardLayeredLitShaderSourcePath());
+
+            string preDepthPass = ExtractPassBlock(shaderSource, RenderGraphRenderListDesc.PreDepthShaderTagName);
+
+            Assert.That(preDepthPass, Does.Contain("StandardLitDepthOnlyPass.hlsl"));
+            Assert.That(preDepthPass, Does.Not.Contain("StandardLitGBufferPass.hlsl"));
+            Assert.That(preDepthPass, Does.Contain("#pragma shader_feature_local_fragment _ALPHATEST_ON"));
+            Assert.That(preDepthPass, Does.Contain("#pragma shader_feature_local_fragment _OPACITYMAP"));
+            AssertNoGBufferOnlyPreDepthVariants(preDepthPass);
         }
 
         [Test]
@@ -347,6 +375,30 @@ namespace VividRP.Editor.Tests
         private static string GetStandardLayeredLitShaderSourcePath()
         {
             return GetPackageFilePath("Shaders", "Material", "StandardLayeredLit.shader");
+        }
+
+        private static string ExtractPassBlock(string shaderSource, string passName)
+        {
+            var match = Regex.Match(
+                shaderSource,
+                $@"Pass\s*\{{(?:(?!Pass\s*\{{).)*Name\s+""{Regex.Escape(passName)}""(?:(?!Pass\s*\{{).)*\}}",
+                RegexOptions.Singleline);
+
+            Assert.That(match.Success, Is.True, $"Expected pass '{passName}' in shader source.");
+            return match.Value;
+        }
+
+        private static void AssertNoGBufferOnlyPreDepthVariants(string preDepthPass)
+        {
+            Assert.That(preDepthPass, Does.Not.Contain("LIGHTMAP_ON"));
+            Assert.That(preDepthPass, Does.Not.Contain("DIRLIGHTMAP_COMBINED"));
+            Assert.That(preDepthPass, Does.Not.Contain("_NORMALMAP"));
+            Assert.That(preDepthPass, Does.Not.Contain("_METALLICSPECGLOSSMAP"));
+            Assert.That(preDepthPass, Does.Not.Contain("_ROUGHNESSMAP"));
+            Assert.That(preDepthPass, Does.Not.Contain("_OCCLUSIONMAP"));
+            Assert.That(preDepthPass, Does.Not.Contain("_EMISSION"));
+            Assert.That(preDepthPass, Does.Not.Contain("_CLEARCOAT"));
+            Assert.That(preDepthPass, Does.Not.Contain("_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

@@ -191,6 +191,37 @@ namespace VividRP.Editor.Tests
             Assert.That(motionVectorCBuffer, Is.EqualTo(gBufferCBuffer));
         }
 
+        [Test]
+        public void StandardLitDepthOnlyPass_UsesSameUnityPerMaterialLayout_AsGBufferPass()
+        {
+            var gBufferPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "com.af8a2a.vividrp",
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "StandardLitGBufferPass.hlsl"));
+            var depthOnlyPath = Path.GetFullPath(Path.Combine(
+                Application.dataPath,
+                "..",
+                "Packages",
+                "com.af8a2a.vividrp",
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "StandardLitDepthOnlyPass.hlsl"));
+
+            Assert.That(File.Exists(gBufferPath), Is.True, $"Expected shader source at '{gBufferPath}'.");
+            Assert.That(File.Exists(depthOnlyPath), Is.True, $"Expected shader source at '{depthOnlyPath}'.");
+
+            var gBufferCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(gBufferPath));
+            var depthOnlyCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(depthOnlyPath));
+
+            Assert.That(depthOnlyCBuffer, Is.EqualTo(gBufferCBuffer));
+        }
+
         private static string ExtractUnityPerMaterialBlock(string source)
         {
             var match = Regex.Match(
@@ -199,7 +230,7 @@ namespace VividRP.Editor.Tests
                 RegexOptions.Singleline);
 
             Assert.That(match.Success, Is.True, "Expected UnityPerMaterial cbuffer block.");
-            return match.Value;
+            return match.Value.Replace("\r\n", "\n");
         }
 
         private static ShaderTagId[] GetCachedShaderTagIds(RenderGraphRenderListDesc descriptor)

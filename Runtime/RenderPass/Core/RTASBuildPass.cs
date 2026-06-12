@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -18,12 +19,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string RenderPipelineShaderTagName = "RenderPipeline";
         private const string VividRenderPipelineShaderTagValue = "VividRenderPipeline";
         private const int DefaultMeshletInstanceBatchPoolCapacity = 256;
+        private const bool DiagnosticDisableSceneRendererLodCulling = true;
 
         private static readonly string[] s_DoubleSidedShaderKeywords = { "_DOUBLESIDED_ON" };
         private static readonly string[] s_AlphaTestShaderKeywords = { "_ALPHATEST_ON" };
         private static readonly string[] s_TransparentShaderKeywords = { "_SURFACE_TYPE_TRANSPARENT" };
         private static readonly ShaderTagId s_RenderPipelineShaderTagId = new(RenderPipelineShaderTagName);
         private static readonly ShaderTagId s_VividRenderPipelineShaderTagValueId = new(VividRenderPipelineShaderTagValue);
+        private static readonly ProfilerMarker s_ClearInstancesMarker =
+            new("VividRP.RenderPass.RTASBuild.Prepare.ClearInstances");
+        private static readonly ProfilerMarker s_CreateCullingConfigMarker =
+            new("VividRP.RenderPass.RTASBuild.Prepare.CreateCullingConfig");
+        private static readonly ProfilerMarker s_CullInstancesMarker =
+            new("VividRP.RenderPass.RTASBuild.Prepare.CullInstances.NoLOD");
+        private static readonly ProfilerMarker s_AddMeshletRendererInstancesMarker =
+            new("VividRP.RenderPass.RTASBuild.Prepare.AddMeshletRendererInstances");
+        private static readonly ProfilerMarker s_CollectStatsMarker =
+            new("VividRP.RenderPass.RTASBuild.Prepare.CollectStats");
 
         [RenderGraphResource(
             Name = "SceneRTAS",
@@ -666,7 +678,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_InstanceCullingTests,
                 useRenderPipelineTagFilter ? m_RequiredShaderTags : null,
                 extendedFrustumPlanes,
-                false);
+                false,
+                false,
+                !DiagnosticDisableSceneRendererLodCulling);
         }
 
         private static RayTracingInstanceCullingConfig CreateCullingConfig(
@@ -675,13 +689,20 @@ namespace VividRP.Runtime.RenderPass.Core
             RayTracingInstanceCullingTest[] instanceTests,
             RayTracingInstanceCullingShaderTagConfig[] requiredShaderTags,
             Plane[] extendedFrustumPlanes,
-            bool useOptionalMaterialKeywordFilters = true)
+            bool useOptionalMaterialKeywordFilters = true,
+            bool checkDoubleSidedGIMaterial = true,
+            bool enableLodCulling = true)
         {
+            var cullingFlags = RayTracingInstanceCullingFlags.IgnoreReflectionProbes;
+            if (enableLodCulling)
+            {
+                cullingFlags |= RayTracingInstanceCullingFlags.EnableLODCulling
+                    | RayTracingInstanceCullingFlags.EnableMeshLOD;
+            }
+
             var cullingConfig = new RayTracingInstanceCullingConfig
             {
-                flags = RayTracingInstanceCullingFlags.EnableLODCulling
-                    | RayTracingInstanceCullingFlags.IgnoreReflectionProbes
-                    | RayTracingInstanceCullingFlags.EnableMeshLOD,
+                flags = cullingFlags,
                 instanceTests = instanceTests
             };
 
@@ -697,8 +718,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cullingConfig.subMeshFlagsConfig.transparentMaterials =
                 RayTracingSubMeshFlags.Enabled | RayTracingSubMeshFlags.UniqueAnyHitCalls;
 
-            cullingConfig.triangleCullingConfig.checkDoubleSidedGIMaterial = true;
+            cullingConfig.triangleCullingConfig.checkDoubleSidedGIMaterial = checkDoubleSidedGIMaterial;
             cullingConfig.triangleCullingConfig.frontTriangleCounterClockwise = false;
+            cullingConfig.triangleCullingConfig.forceDoubleSided = !checkDoubleSidedGIMaterial;
 
             if (useOptionalMaterialKeywordFilters)
             {
@@ -819,36 +841,62 @@ namespace VividRP.Runtime.RenderPass.Core
             Camera camera,
             in ResolvedRayTracingSettings settings)
         {
-            accelerationStructure.ClearInstances();
+            using (s_ClearInstancesMarker.Auto())
+                accelerationStructure.ClearInstances();
 
             if (!ShouldUseAutomaticSceneRendererCulling(in settings))
             {
-                AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: false);
-                var manualInstanceCount = accelerationStructure.GetInstanceCount();
+                using (s_AddMeshletRendererInstancesMarker.Auto())
+                    AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: false);
+
+                uint manualInstanceCount;
+                ulong manualMemoryBytes;
+                using (s_CollectStatsMarker.Auto())
+                {
+                    manualInstanceCount = accelerationStructure.GetInstanceCount();
+                    manualMemoryBytes = accelerationStructure.GetSize();
+                }
+
                 return new SceneAccelerationStructureBuildStats(
                     0,
                     manualInstanceCount,
-                    accelerationStructure.GetSize(),
+                    manualMemoryBytes,
                     false);
             }
 
-            var cullingConfig = CreateCullingConfigNonAlloc(
-                camera,
-                in settings,
-                useRenderPipelineTagFilter: false);
-            accelerationStructure.CullInstances(ref cullingConfig);
-            AddMeshletRendererInstances(
-                accelerationStructure,
-                camera,
-                in settings,
-                requireVividRenderPipelineTag: false);
+            RayTracingInstanceCullingConfig cullingConfig;
+            using (s_CreateCullingConfigMarker.Auto())
+            {
+                cullingConfig = CreateCullingConfigNonAlloc(
+                    camera,
+                    in settings,
+                    useRenderPipelineTagFilter: false);
+            }
 
-            var instanceCount = accelerationStructure.GetInstanceCount();
+            using (s_CullInstancesMarker.Auto())
+                accelerationStructure.CullInstances(ref cullingConfig);
+
+            using (s_AddMeshletRendererInstancesMarker.Auto())
+            {
+                AddMeshletRendererInstances(
+                    accelerationStructure,
+                    camera,
+                    in settings,
+                    requireVividRenderPipelineTag: false);
+            }
+
+            uint instanceCount;
+            ulong memoryBytes;
+            using (s_CollectStatsMarker.Auto())
+            {
+                instanceCount = accelerationStructure.GetInstanceCount();
+                memoryBytes = accelerationStructure.GetSize();
+            }
 
             return new SceneAccelerationStructureBuildStats(
                 0,
                 instanceCount,
-                accelerationStructure.GetSize(),
+                memoryBytes,
                 false);
         }
 

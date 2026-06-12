@@ -21,12 +21,26 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly string[] s_DoubleSidedShaderKeywords = { "_DOUBLESIDED_ON" };
         private static readonly string[] s_AlphaTestShaderKeywords = { "_ALPHATEST_ON" };
         private static readonly string[] s_TransparentShaderKeywords = { "_SURFACE_TYPE_TRANSPARENT" };
+        private static readonly ShaderTagId s_RenderPipelineShaderTagId = new(RenderPipelineShaderTagName);
+        private static readonly ShaderTagId s_VividRenderPipelineShaderTagValueId = new(VividRenderPipelineShaderTagValue);
 
         [RenderGraphResource(
             Name = "SceneRTAS",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
+
+        private readonly RayTracingInstanceCullingTest[] m_InstanceCullingTests = new RayTracingInstanceCullingTest[1];
+        private readonly RayTracingInstanceCullingShaderTagConfig[] m_RequiredShaderTags =
+        {
+            new RayTracingInstanceCullingShaderTagConfig
+            {
+                tagId = s_RenderPipelineShaderTagId,
+                tagValueId = s_VividRenderPipelineShaderTagValueId,
+            }
+        };
+        private readonly Plane[] m_ExtendedFrustumPlanes = new Plane[6];
+        private readonly MeshletRTASInstanceBatchCache m_MeshletInstanceBatchCache = new();
 
         private bool m_SupportsRayTracing;
         private VividRayTracingAccelerationStructureStats m_LastStats;
@@ -166,15 +180,128 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal sealed class MeshletRTASInstanceBatch
         {
+            private List<Matrix4x4> m_ObjectToWorldMatrices;
+            private Matrix4x4 m_FirstObjectToWorldMatrix;
+            private int m_ObjectToWorldMatrixCount;
+
             public MeshletRTASInstanceBatch(RayTracingMeshInstanceConfig config)
             {
                 Config = config;
-                ObjectToWorldMatrices = new List<Matrix4x4>();
             }
 
-            public RayTracingMeshInstanceConfig Config { get; }
+            public RayTracingMeshInstanceConfig Config { get; private set; }
 
-            public List<Matrix4x4> ObjectToWorldMatrices { get; }
+            public List<Matrix4x4> ObjectToWorldMatrices
+            {
+                get
+                {
+                    EnsureObjectToWorldMatrices();
+                    return m_ObjectToWorldMatrices;
+                }
+            }
+
+            public Matrix4x4 FirstObjectToWorldMatrix => m_FirstObjectToWorldMatrix;
+
+            public int ObjectToWorldMatrixCount => m_ObjectToWorldMatrixCount;
+
+            public void Reset(RayTracingMeshInstanceConfig config)
+            {
+                Config = config;
+                m_FirstObjectToWorldMatrix = default;
+                m_ObjectToWorldMatrixCount = 0;
+                m_ObjectToWorldMatrices?.Clear();
+            }
+
+            public void AddObjectToWorldMatrix(Matrix4x4 objectToWorldMatrix)
+            {
+                if (m_ObjectToWorldMatrixCount == 0)
+                {
+                    m_FirstObjectToWorldMatrix = objectToWorldMatrix;
+                    m_ObjectToWorldMatrixCount = 1;
+                    return;
+                }
+
+                EnsureObjectToWorldMatrices();
+                if (m_ObjectToWorldMatrixCount == 1)
+                    m_ObjectToWorldMatrices.Add(m_FirstObjectToWorldMatrix);
+
+                m_ObjectToWorldMatrices.Add(objectToWorldMatrix);
+                m_ObjectToWorldMatrixCount++;
+            }
+
+            private void EnsureObjectToWorldMatrices()
+            {
+                m_ObjectToWorldMatrices ??= new List<Matrix4x4>();
+                if (m_ObjectToWorldMatrixCount == 1 && m_ObjectToWorldMatrices.Count == 0)
+                    m_ObjectToWorldMatrices.Add(m_FirstObjectToWorldMatrix);
+            }
+        }
+
+        private sealed class MeshletRTASInstanceBatchCache
+        {
+            private readonly Dictionary<MeshletRTASInstanceBatchKey, MeshletRTASInstanceBatch> m_BatchLookup = new();
+            private readonly List<MeshletRTASInstanceBatch> m_BatchPool = new();
+
+            public List<MeshletRTASInstanceBatch> Batches { get; } = new();
+
+            public void BeginCollect()
+            {
+                m_BatchLookup.Clear();
+
+                for (var batchIndex = 0; batchIndex < Batches.Count; batchIndex++)
+                {
+                    var batch = Batches[batchIndex];
+                    batch.Reset(default);
+                    m_BatchPool.Add(batch);
+                }
+
+                Batches.Clear();
+            }
+
+            public MeshletRTASInstanceBatch GetOrCreate(RayTracingMeshInstanceConfig config)
+            {
+                var batchKey = new MeshletRTASInstanceBatchKey(config);
+                if (m_BatchLookup.TryGetValue(batchKey, out var batch))
+                    return batch;
+
+                batch = Rent(config);
+                m_BatchLookup.Add(batchKey, batch);
+                Batches.Add(batch);
+                if (m_BatchPool.Capacity < Batches.Capacity)
+                    m_BatchPool.Capacity = Batches.Capacity;
+                return batch;
+            }
+
+            public void EndCollect()
+            {
+                m_BatchLookup.Clear();
+            }
+
+            public void Clear()
+            {
+                m_BatchLookup.Clear();
+
+                for (var batchIndex = 0; batchIndex < Batches.Count; batchIndex++)
+                    Batches[batchIndex].Reset(default);
+
+                for (var batchIndex = 0; batchIndex < m_BatchPool.Count; batchIndex++)
+                    m_BatchPool[batchIndex].Reset(default);
+
+                Batches.Clear();
+                m_BatchPool.Clear();
+            }
+
+            private MeshletRTASInstanceBatch Rent(RayTracingMeshInstanceConfig config)
+            {
+                var lastPoolIndex = m_BatchPool.Count - 1;
+                if (lastPoolIndex < 0)
+                    return new MeshletRTASInstanceBatch(config);
+
+                var batch = m_BatchPool[lastPoolIndex];
+                m_BatchPool.RemoveAt(lastPoolIndex);
+                batch.Reset(config);
+                return batch;
+            }
         }
 
         internal readonly struct ResolvedRayTracingSettings
@@ -325,6 +452,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_SceneAccelerationStructure?.Dispose();
+            m_MeshletInstanceBatchCache.Clear();
             m_LastStats = default;
             VividRayTracingAccelerationStructureStatsRegistry.Clear();
         }
@@ -431,12 +559,64 @@ namespace VividRP.Runtime.RenderPass.Core
             in ResolvedRayTracingSettings settings,
             bool useRenderPipelineTagFilter = true)
         {
+            var instanceTests = new[] { CreateInstanceCullingTest(settings.LayerMask) };
+            var requiredShaderTags = useRenderPipelineTagFilter
+                ? new[]
+                {
+                    new RayTracingInstanceCullingShaderTagConfig
+                    {
+                        tagId = s_RenderPipelineShaderTagId,
+                        tagValueId = s_VividRenderPipelineShaderTagValueId,
+                    }
+                }
+                : null;
+
+            var extendedFrustumPlanes = settings.CullingMode == VividRTASCullingMode.ExtendedFrustum
+                ? BuildExtendedFrustumPlanes(camera)
+                : null;
+
+            return CreateCullingConfig(
+                camera,
+                in settings,
+                instanceTests,
+                requiredShaderTags,
+                extendedFrustumPlanes);
+        }
+
+        private RayTracingInstanceCullingConfig CreateCullingConfigNonAlloc(
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            bool useRenderPipelineTagFilter = true)
+        {
+            m_InstanceCullingTests[0] = CreateInstanceCullingTest(settings.LayerMask);
+            Plane[] extendedFrustumPlanes = null;
+            if (settings.CullingMode == VividRTASCullingMode.ExtendedFrustum
+                && BuildExtendedFrustumPlanes(camera, m_ExtendedFrustumPlanes))
+            {
+                extendedFrustumPlanes = m_ExtendedFrustumPlanes;
+            }
+
+            return CreateCullingConfig(
+                camera,
+                in settings,
+                m_InstanceCullingTests,
+                useRenderPipelineTagFilter ? m_RequiredShaderTags : null,
+                extendedFrustumPlanes);
+        }
+
+        private static RayTracingInstanceCullingConfig CreateCullingConfig(
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            RayTracingInstanceCullingTest[] instanceTests,
+            RayTracingInstanceCullingShaderTagConfig[] requiredShaderTags,
+            Plane[] extendedFrustumPlanes)
+        {
             var cullingConfig = new RayTracingInstanceCullingConfig
             {
                 flags = RayTracingInstanceCullingFlags.EnableLODCulling
                     | RayTracingInstanceCullingFlags.IgnoreReflectionProbes
                     | RayTracingInstanceCullingFlags.EnableMeshLOD,
-                instanceTests = new[] { CreateInstanceCullingTest(settings.LayerMask) }
+                instanceTests = instanceTests
             };
 
             cullingConfig.lodParameters.fieldOfView = camera != null ? camera.fieldOfView : 60f;
@@ -458,17 +638,8 @@ namespace VividRP.Runtime.RenderPass.Core
             cullingConfig.alphaTestedMaterialConfig.optionalShaderKeywords = s_AlphaTestShaderKeywords;
             cullingConfig.transparentMaterialConfig.optionalShaderKeywords = s_TransparentShaderKeywords;
 
-            if (useRenderPipelineTagFilter)
-            {
-                cullingConfig.materialTest.requiredShaderTags = new[]
-                {
-                    new RayTracingInstanceCullingShaderTagConfig
-                    {
-                        tagId = new ShaderTagId(RenderPipelineShaderTagName),
-                        tagValueId = new ShaderTagId(VividRenderPipelineShaderTagValue),
-                    }
-                };
-            }
+            if (requiredShaderTags != null)
+                cullingConfig.materialTest.requiredShaderTags = requiredShaderTags;
 
             if (camera == null)
                 return cullingConfig;
@@ -486,7 +657,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     break;
                 default:
                     cullingConfig.flags |= RayTracingInstanceCullingFlags.EnablePlaneCulling;
-                    cullingConfig.planes = BuildExtendedFrustumPlanes(camera);
+                    cullingConfig.planes = extendedFrustumPlanes;
                     break;
             }
 
@@ -574,17 +745,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 buildStats.UsedShaderTagFallback);
         }
 
-        private static SceneAccelerationStructureBuildStats PopulateSceneAccelerationStructure(
+        private SceneAccelerationStructureBuildStats PopulateSceneAccelerationStructure(
             RayTracingAccelerationStructure accelerationStructure,
             Camera camera,
             in ResolvedRayTracingSettings settings)
         {
-            var candidateRendererCount = EstimateCandidateInstanceCount(settings.LayerMask, settings.RayTracingModeMask, true);
             var usedShaderTagFallback = false;
 
             accelerationStructure.ClearInstances();
 
-            var cullingConfig = CreateCullingConfig(camera, in settings);
+            var cullingConfig = CreateCullingConfigNonAlloc(camera, in settings);
             accelerationStructure.CullInstances(ref cullingConfig);
             AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: true);
 
@@ -592,16 +762,15 @@ namespace VividRP.Runtime.RenderPass.Core
             if (instanceCount == 0)
             {
                 usedShaderTagFallback = true;
-                candidateRendererCount = EstimateCandidateInstanceCount(settings.LayerMask, settings.RayTracingModeMask, false);
                 accelerationStructure.ClearInstances();
-                cullingConfig = CreateCullingConfig(camera, in settings, useRenderPipelineTagFilter: false);
+                cullingConfig = CreateCullingConfigNonAlloc(camera, in settings, useRenderPipelineTagFilter: false);
                 accelerationStructure.CullInstances(ref cullingConfig);
                 AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: false);
                 instanceCount = accelerationStructure.GetInstanceCount();
             }
 
             return new SceneAccelerationStructureBuildStats(
-                candidateRendererCount,
+                0,
                 instanceCount,
                 accelerationStructure.GetSize(),
                 usedShaderTagFallback);
@@ -628,8 +797,21 @@ namespace VividRP.Runtime.RenderPass.Core
             if (camera == null)
                 return null;
 
+            var planes = new Plane[6];
+            BuildExtendedFrustumPlanes(camera, planes);
+            return planes;
+        }
+
+        private static bool BuildExtendedFrustumPlanes(Camera camera, Plane[] planes)
+        {
+            if (camera == null || planes == null || planes.Length < 6)
+                return false;
+
             if (camera.orthographic)
-                return GeometryUtility.CalculateFrustumPlanes(camera);
+            {
+                GeometryUtility.CalculateFrustumPlanes(camera, planes);
+                return true;
+            }
 
             var cameraTransform = camera.transform;
             var cameraPosition = cameraTransform.position;
@@ -641,8 +823,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var halfHeight = Mathf.Tan(Mathf.Deg2Rad * camera.fieldOfView * 0.5f) * far;
             var horizontalFov = Camera.VerticalToHorizontalFieldOfView(camera.fieldOfView, camera.aspect);
             var halfWidth = Mathf.Tan(Mathf.Deg2Rad * horizontalFov * 0.5f) * far;
-
-            var planes = new Plane[6];
 
             planes[0].normal = -forward;
             planes[0].distance = -Vector3.Dot(cameraPosition + forward * far, planes[0].normal);
@@ -662,37 +842,7 @@ namespace VividRP.Runtime.RenderPass.Core
             planes[5].normal = up;
             planes[5].distance = -Vector3.Dot(cameraPosition - up * halfHeight, planes[5].normal);
 
-            return planes;
-        }
-
-        private static int EstimateCandidateInstanceCount(
-            LayerMask layerMask,
-            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
-            bool requireVividRenderPipelineTag)
-        {
-            return CountSceneRendererCandidateInstances(layerMask, rayTracingModeMask, requireVividRenderPipelineTag)
-                + CountMeshletCandidateInstances(
-                    VividMeshletRendererDatabase.instance,
-                    layerMask,
-                    rayTracingModeMask,
-                    requireVividRenderPipelineTag);
-        }
-
-        private static int CountSceneRendererCandidateInstances(
-            LayerMask layerMask,
-            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
-            bool requireVividRenderPipelineTag)
-        {
-            var renderers = UnityEngine.Object.FindObjectsByType<Renderer>(FindObjectsInactive.Exclude);
-            var count = 0;
-
-            for (var i = 0; i < renderers.Length; i++)
-            {
-                if (IsCandidateRenderer(renderers[i], layerMask, rayTracingModeMask, requireVividRenderPipelineTag))
-                    count++;
-            }
-
-            return count;
+            return true;
         }
 
         internal static int CountMeshletCandidateInstances(
@@ -760,28 +910,6 @@ namespace VividRP.Runtime.RenderPass.Core
             return false;
         }
 
-        private static bool IsCandidateRenderer(
-            Renderer renderer,
-            LayerMask layerMask,
-            RayTracingAccelerationStructure.RayTracingModeMask rayTracingModeMask,
-            bool requireVividRenderPipelineTag)
-        {
-            if (renderer == null
-                || !renderer.enabled
-                || renderer.gameObject == null
-                || !renderer.gameObject.activeInHierarchy
-                || !renderer.gameObject.scene.IsValid()
-                || !renderer.gameObject.scene.isLoaded
-                || !SupportsRayTracingRendererType(renderer)
-                || !IsLayerIncluded(renderer.gameObject.layer, layerMask)
-                || !MatchesRayTracingModeMask(renderer.rayTracingMode, rayTracingModeMask))
-            {
-                return false;
-            }
-
-            return !requireVividRenderPipelineTag || HasVividRenderPipelineMaterial(renderer);
-        }
-
         private static bool SupportsRayTracingRendererType(Renderer renderer)
         {
             return renderer is SkinnedMeshRenderer
@@ -820,38 +948,26 @@ namespace VividRP.Runtime.RenderPass.Core
             };
         }
 
-        private static bool HasVividRenderPipelineMaterial(Renderer renderer)
-        {
-            var materials = renderer.sharedMaterials;
-            if (materials == null || materials.Length == 0)
-                return false;
-
-            for (var i = 0; i < materials.Length; i++)
-            {
-                if (HasVividRenderPipelineMaterial(materials[i]))
-                    return true;
-            }
-
-            return false;
-        }
-
         private static bool HasVividRenderPipelineMaterial(Material material)
         {
             return material != null
                 && material.GetTag(RenderPipelineShaderTagName, false) == VividRenderPipelineShaderTagValue;
         }
 
-        private static void AddMeshletRendererInstances(
+        private void AddMeshletRendererInstances(
             RayTracingAccelerationStructure accelerationStructure,
             Camera camera,
             in ResolvedRayTracingSettings settings,
             bool requireVividRenderPipelineTag)
         {
-            var batches = CollectMeshletRendererInstanceBatches(
+            var batches = m_MeshletInstanceBatchCache.Batches;
+            CollectMeshletRendererInstanceBatches(
                 VividMeshletRendererDatabase.instance,
                 camera,
                 in settings,
-                requireVividRenderPipelineTag);
+                requireVividRenderPipelineTag,
+                m_MeshletInstanceBatchCache,
+                m_ExtendedFrustumPlanes);
 
             for (var batchIndex = 0; batchIndex < batches.Count; batchIndex++)
             {
@@ -865,17 +981,34 @@ namespace VividRP.Runtime.RenderPass.Core
             in ResolvedRayTracingSettings settings,
             bool requireVividRenderPipelineTag)
         {
-            var batches = new List<MeshletRTASInstanceBatch>();
+            var cache = new MeshletRTASInstanceBatchCache();
+            CollectMeshletRendererInstanceBatches(
+                database,
+                camera,
+                in settings,
+                requireVividRenderPipelineTag,
+                cache,
+                null);
+            return cache.Batches;
+        }
+
+        private static void CollectMeshletRendererInstanceBatches(
+            VividMeshletRendererDatabase database,
+            Camera camera,
+            in ResolvedRayTracingSettings settings,
+            bool requireVividRenderPipelineTag,
+            MeshletRTASInstanceBatchCache cache,
+            Plane[] reusableCullingPlanes)
+        {
+            cache.BeginCollect();
+
             if (database == null)
-                return batches;
+                return;
 
             var rendererData = database.rendererData;
             var rendererResources = database.rendererResources;
             var rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
-            var batchLookup = new Dictionary<MeshletRTASInstanceBatchKey, MeshletRTASInstanceBatch>();
-            var cullingPlanes = settings.CullingMode == VividRTASCullingMode.ExtendedFrustum
-                ? BuildExtendedFrustumPlanes(camera)
-                : null;
+            var cullingPlanes = BuildMeshletCullingPlanes(camera, settings.CullingMode, reusableCullingPlanes);
 
             for (var rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
             {
@@ -902,33 +1035,47 @@ namespace VividRP.Runtime.RenderPass.Core
                         meshletResources,
                         material,
                         subMeshIndex);
-                    var batchKey = new MeshletRTASInstanceBatchKey(config);
-                    if (!batchLookup.TryGetValue(batchKey, out var batch))
-                    {
-                        batch = new MeshletRTASInstanceBatch(config);
-                        batchLookup.Add(batchKey, batch);
-                        batches.Add(batch);
-                    }
+                    var batch = cache.GetOrCreate(config);
 
-                    batch.ObjectToWorldMatrices.Add(meshletRenderData.objectToWorldMatrix);
+                    batch.AddObjectToWorldMatrix(meshletRenderData.objectToWorldMatrix);
                 }
             }
 
-            return batches;
+            cache.EndCollect();
+        }
+
+        private static Plane[] BuildMeshletCullingPlanes(
+            Camera camera,
+            VividRTASCullingMode cullingMode,
+            Plane[] reusableCullingPlanes)
+        {
+            if (cullingMode != VividRTASCullingMode.ExtendedFrustum)
+                return null;
+
+            if (reusableCullingPlanes != null)
+                return BuildExtendedFrustumPlanes(camera, reusableCullingPlanes) ? reusableCullingPlanes : null;
+
+            return BuildExtendedFrustumPlanes(camera);
         }
 
         private static void AddMeshletRendererInstanceBatch(
             RayTracingAccelerationStructure accelerationStructure,
             MeshletRTASInstanceBatch batch)
         {
-            if (accelerationStructure == null || batch == null || batch.ObjectToWorldMatrices.Count == 0)
+            if (accelerationStructure == null || batch == null || batch.ObjectToWorldMatrixCount == 0)
                 return;
 
             var config = batch.Config;
             var objectToWorldMatrices = batch.ObjectToWorldMatrices;
-            if (CanUseAddInstances(config.material, objectToWorldMatrices.Count))
+            if (CanUseAddInstances(config.material, batch.ObjectToWorldMatrixCount))
             {
                 accelerationStructure.AddInstances(in config, objectToWorldMatrices, objectToWorldMatrices.Count, 0, 0u);
+                return;
+            }
+
+            if (batch.ObjectToWorldMatrixCount == 1)
+            {
+                accelerationStructure.AddInstance(in config, batch.FirstObjectToWorldMatrix, null, 0u);
                 return;
             }
 

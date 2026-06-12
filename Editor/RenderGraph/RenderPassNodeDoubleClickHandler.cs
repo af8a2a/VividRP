@@ -20,8 +20,15 @@ namespace VividRP.Editor.RenderGraph
         static RenderPassNodeDoubleClickHandler()
         {
             RenderGraphEditorWindowReflectionUtility.TryRepairPersistedInvalidSubgraphStacksFromUserLayouts();
+            EditorApplication.wantsToQuit += RepairPersistedRestoreStateBeforeQuit;
             EditorApplication.delayCall += RegisterCallbacks;
             EditorApplication.update += RegisterCallbacks;
+        }
+
+        private static bool RepairPersistedRestoreStateBeforeQuit()
+        {
+            RenderGraphEditorWindowReflectionUtility.TryRepairPersistedInvalidSubgraphStacksFromUserLayouts();
+            return true;
         }
 
         private static void RegisterCallbacks()
@@ -115,12 +122,21 @@ namespace VividRP.Editor.RenderGraph
         private const string ToolStatePropertyName = "ToolState";
         private const string SubgraphStackPropertyName = "SubgraphStack";
         private const string SubgraphStackFieldName = "m_SubgraphStack";
+        private const string CurrentGraphFieldName = "m_CurrentGraph";
+        private const string LastOpenedGraphFieldName = "m_LastOpenedGraph";
+        private const string CurrentGraphPropertyName = "CurrentGraph";
+        private const string GraphReferencePropertyName = "GraphReference";
+        private const string GraphReferenceTypeName = "Unity.GraphToolkit.Editor.GraphReference, UnityEditor.GraphToolkitModule";
+        private const string LabelPropertyName = "Label";
         private const string ResolveGraphModelMethodName = "ResolveGraphModel";
         private const string ResolveSubGraphMethodName = "ResolveSubGraph";
         private const string GetSubGraphModelMethodName = "GetSubGraphModel";
+        private const string GetGraphReferenceMethodName = "GetGraphReference";
+        private const string GetGraphModelReferenceMethodName = "GetGraphModelReference";
         private const string GraphContainerFieldName = "m_GraphContainer";
         private const string NodeModelsPropertyName = "NodeModels";
         private const string BackingNodePropertyName = "Node";
+        private const string GraphImplementationFieldName = "m_Implementation";
         private const string GraphObjectPropertyName = "GraphObject";
         private const string FilePathPropertyName = "FilePath";
         private const string DefaultGraphToolName = "UnnamedTool";
@@ -129,6 +145,7 @@ namespace VividRP.Editor.RenderGraph
         private const string ToolStateComponentTypeName = "Unity.GraphToolkit.Editor.ToolStateComponent, UnityEditor.GraphToolkitModule";
 
         private static readonly BindingFlags InstanceBindings = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        private static readonly string[] PersistedGraphToolKeys = { null, DefaultGraphToolName };
 
         internal static bool IsGraphViewEditorWindow(Type type)
         {
@@ -256,7 +273,7 @@ namespace VividRP.Editor.RenderGraph
                 var repairedCount = 0;
                 foreach (var windowId in EnumerateGraphToolkitWindowIdsFromUserLayouts())
                 {
-                    if (TryRepairPersistedInvalidSubgraphStack(windowId))
+                    if (TryRepairPersistedGraphRestoreState(windowId))
                         repairedCount++;
                 }
 
@@ -264,7 +281,7 @@ namespace VividRP.Editor.RenderGraph
                 {
                     FlushGraphToolkitPersistedState();
                     Debug.LogWarning(
-                        $"[VividRP] Recovered {repairedCount} persisted RenderGraph editor window state(s) with invalid GraphToolkit subgraph stacks.");
+                        $"[VividRP] Recovered {repairedCount} persisted RenderGraph editor window state(s) with invalid GraphToolkit restore data.");
                 }
 
                 return repairedCount;
@@ -288,16 +305,20 @@ namespace VividRP.Editor.RenderGraph
             if (!TryGetValue(graphTool, ToolStatePropertyName, out object toolState) || toolState == null)
                 return false;
 
-            if (!HasInvalidFirstSubgraphModel(toolState))
-                return false;
+            var hasCurrentGraph = TryGetCurrentGraphFromToolState(toolState, out var graph);
+            if (!hasCurrentGraph)
+                hasCurrentGraph = TryRestoreCurrentGraphModel(toolState, out graph);
 
-            if (!TryGetCurrentGraphFromToolState(toolState, out var graph))
+            if (!HasInvalidFirstSubgraphModel(toolState))
+                return hasCurrentGraph;
+
+            if (!hasCurrentGraph && !HasRecoverableRenderGraphReference(toolState))
                 return false;
 
             if (!TryClearSubgraphStack(toolState))
                 return false;
 
-            graphName = string.IsNullOrWhiteSpace(graph.Name) ? "RenderGraph" : graph.Name;
+            graphName = graph != null && !string.IsNullOrWhiteSpace(graph.Name) ? graph.Name : "RenderGraph";
             FlushGraphToolkitPersistedState();
             Debug.LogWarning(
                 $"[VividRP] Recovered RenderGraph editor window '{graphName}' from an invalid GraphToolkit subgraph restore state. " +
@@ -305,22 +326,56 @@ namespace VividRP.Editor.RenderGraph
             return true;
         }
 
-        private static bool TryRepairPersistedInvalidSubgraphStack(Hash128 windowId)
+        private static bool TryRepairPersistedGraphRestoreState(Hash128 windowId)
         {
-            var toolState = GetPersistedToolState(windowId);
+            var repaired = false;
+            foreach (var graphToolKey in PersistedGraphToolKeys)
+            {
+                if (TryRepairPersistedGraphRestoreState(windowId, graphToolKey))
+                    repaired = true;
+            }
+
+            return repaired;
+        }
+
+        private static bool TryRepairPersistedGraphRestoreState(Hash128 windowId, string graphToolKey)
+        {
+            var toolState = GetPersistedToolState(windowId, graphToolKey);
             if (toolState == null)
                 return false;
 
-            if (!HasInvalidFirstSubgraphModel(toolState))
-                return false;
+            var repaired = false;
+            var hasCurrentGraph = TryGetCurrentGraphFromToolState(toolState, out _);
+            if (!hasCurrentGraph)
+            {
+                hasCurrentGraph = TryRestoreCurrentGraphModel(toolState, out _);
+                repaired = hasCurrentGraph;
+            }
 
-            if (!TryGetCurrentGraphFromToolState(toolState, out _))
-                return false;
+            if (!HasSubgraphStackEntries(toolState))
+            {
+                if (repaired)
+                    TryStorePersistedToolState(toolState, windowId, graphToolKey);
 
-            return TryClearSubgraphStack(toolState);
+                return repaired;
+            }
+
+            if (!hasCurrentGraph && !HasRecoverableRenderGraphReference(toolState))
+            {
+                if (repaired)
+                    TryStorePersistedToolState(toolState, windowId, graphToolKey);
+
+                return repaired;
+            }
+
+            var clearedSubgraphStack = TryClearSubgraphStack(toolState);
+            if (repaired || clearedSubgraphStack)
+                TryStorePersistedToolState(toolState, windowId, graphToolKey);
+
+            return repaired || clearedSubgraphStack;
         }
 
-        private static object GetPersistedToolState(Hash128 windowId)
+        private static object GetPersistedToolState(Hash128 windowId, string graphToolKey)
         {
             var persistedStateType = Type.GetType(PersistedStateTypeName);
             var toolStateType = Type.GetType(ToolStateComponentTypeName);
@@ -338,7 +393,7 @@ namespace VividRP.Editor.RenderGraph
             try
             {
                 return method.MakeGenericMethod(toolStateType)
-                    .Invoke(null, new object[] { null, windowId, DefaultGraphToolName });
+                    .Invoke(null, new object[] { null, windowId, graphToolKey });
             }
             catch (TargetInvocationException)
             {
@@ -347,6 +402,38 @@ namespace VividRP.Editor.RenderGraph
             catch (Exception)
             {
                 return null;
+            }
+        }
+
+        private static bool TryStorePersistedToolState(object toolState, Hash128 windowId, string graphToolKey)
+        {
+            if (toolState == null)
+                return false;
+
+            var persistedStateType = Type.GetType(PersistedStateTypeName);
+            if (persistedStateType == null)
+                return false;
+
+            var method = persistedStateType.GetMethods(BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(candidate =>
+                    candidate.Name == "StoreStateComponent"
+                    && candidate.GetParameters().Length == 4);
+            if (method == null)
+                return false;
+
+            try
+            {
+                // GetOrCreate normalizes a null component name to the component type name; StoreStateComponent does not.
+                method.Invoke(null, new object[] { toolState, toolState.GetType().FullName, windowId, graphToolKey });
+                return true;
+            }
+            catch (TargetInvocationException)
+            {
+                return false;
+            }
+            catch (Exception)
+            {
+                return false;
             }
         }
 
@@ -378,9 +465,182 @@ namespace VividRP.Editor.RenderGraph
             return graphModel != null && TryResolveGraph(graphModel, out graph);
         }
 
+        private static bool TryRestoreCurrentGraphModel(object toolState, out RenderGraphEditorGraph graph)
+        {
+            graph = null;
+            if (!TryFindRenderGraphReferencePath(toolState, out var graphPath))
+                return false;
+
+            try
+            {
+                graph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(graphPath);
+            }
+            catch (Exception)
+            {
+                graph = null;
+            }
+
+            if (graph == null || !TryGetGraphModel(graph, out var graphModel))
+                return false;
+
+            TryGetValue(graphModel, GraphObjectPropertyName, out object graphObject);
+            TryGetGraphReference(toolState, graphModel, out var graphReference);
+
+            var restoredCurrentGraph = TrySetGraphInfo(
+                CurrentGraphFieldName,
+                toolState,
+                graphModel,
+                graphObject,
+                graphReference,
+                graph.Name);
+            var restoredLastOpenedGraph = TrySetGraphInfo(
+                LastOpenedGraphFieldName,
+                toolState,
+                graphModel,
+                graphObject,
+                graphReference,
+                graph.Name);
+
+            return restoredCurrentGraph || restoredLastOpenedGraph;
+        }
+
+        private static bool TryGetGraphModel(RenderGraphEditorGraph graph, out object graphModel)
+        {
+            graphModel = null;
+            if (graph == null)
+                return false;
+
+            try
+            {
+                graphModel = typeof(Graph).GetField(GraphImplementationFieldName, InstanceBindings)?.GetValue(graph);
+            }
+            catch (Exception)
+            {
+                graphModel = null;
+            }
+
+            return graphModel != null;
+        }
+
+        private static bool TryGetGraphReference(object toolState, object graphModel, out object graphReference)
+        {
+            graphReference = null;
+            if (graphModel == null)
+                return false;
+
+            var graphReferenceType = Type.GetType(GraphReferenceTypeName);
+            var graphModelType = graphModel.GetType();
+            var constructor = graphReferenceType?.GetConstructors(InstanceBindings)
+                .FirstOrDefault(candidate =>
+                {
+                    var parameters = candidate.GetParameters();
+                    return parameters.Length == 1 && parameters[0].ParameterType.IsAssignableFrom(graphModelType);
+                });
+            if (constructor != null)
+            {
+                try
+                {
+                    graphReference = constructor.Invoke(new[] { graphModel });
+                    return graphReference != null;
+                }
+                catch (Exception)
+                {
+                    graphReference = null;
+                }
+            }
+
+            if (TryInvokeMethod(toolState, GetGraphModelReferenceMethodName, new[] { graphModel }, out graphReference)
+                && graphReference != null)
+            {
+                return true;
+            }
+
+            var method = graphModel.GetType().GetMethod(GetGraphReferenceMethodName, InstanceBindings);
+            if (method == null)
+                return false;
+
+            try
+            {
+                graphReference = method.Invoke(graphModel, new object[] { true });
+                return graphReference != null;
+            }
+            catch (TargetInvocationException)
+            {
+                graphReference = null;
+                return false;
+            }
+            catch (Exception)
+            {
+                graphReference = null;
+                return false;
+            }
+        }
+
+        private static bool TrySetGraphInfo(
+            string fieldName,
+            object toolState,
+            object graphModel,
+            object graphObject,
+            object graphReference,
+            string graphLabel)
+        {
+            if (toolState == null || graphModel == null)
+                return false;
+
+            var field = toolState.GetType().GetField(fieldName, InstanceBindings);
+            if (field == null)
+                return false;
+
+            var graphInfo = field.GetValue(toolState);
+            if (graphInfo == null)
+                return false;
+
+            try
+            {
+                var graphInfoType = graphInfo.GetType();
+                var graphModelProperty = graphInfoType.GetProperty(GraphModelPropertyName, InstanceBindings);
+                if (graphModelProperty == null)
+                    return false;
+
+                graphModelProperty.SetValue(graphInfo, graphModel);
+
+                var graphReferenceProperty = graphInfoType.GetProperty(GraphReferencePropertyName, InstanceBindings);
+                if (graphReferenceProperty != null && graphReference != null)
+                    graphReferenceProperty.SetValue(graphInfo, graphReference);
+
+                var labelProperty = graphInfoType.GetProperty(LabelPropertyName, InstanceBindings);
+                if (labelProperty != null && !string.IsNullOrWhiteSpace(graphLabel))
+                    labelProperty.SetValue(graphInfo, graphLabel);
+
+                var graphObjectProperty = graphInfoType.GetProperty(GraphObjectPropertyName, InstanceBindings);
+                if (graphObjectProperty != null && graphObject != null)
+                    graphObjectProperty.SetValue(graphInfo, graphObject);
+
+                field.SetValue(toolState, graphInfo);
+                return true;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        internal static bool CanRecoverInvalidSubgraphStack(object toolState)
+        {
+            if (toolState == null || !HasInvalidFirstSubgraphModel(toolState))
+                return false;
+
+            return TryGetCurrentGraphFromToolState(toolState, out _) || HasRecoverableRenderGraphReference(toolState);
+        }
+
+        private static bool HasSubgraphStackEntries(object toolState)
+        {
+            return TryGetSubgraphStack(toolState, out var subgraphStack) && GetCount(subgraphStack) > 0;
+        }
+
         private static bool HasInvalidFirstSubgraphModel(object toolState)
         {
-            if (!TryGetValue(toolState, SubgraphStackPropertyName, out object subgraphStack) || GetCount(subgraphStack) <= 0)
+            if (!TryGetSubgraphStack(toolState, out var subgraphStack) || GetCount(subgraphStack) <= 0)
                 return false;
 
             if (TryInvokeMethod(toolState, ResolveSubGraphMethodName, new object[] { 0 }, out var resolvedSubgraphModel))
@@ -398,6 +658,76 @@ namespace VividRP.Editor.RenderGraph
             {
                 return true;
             }
+        }
+
+        private static bool TryGetSubgraphStack(object toolState, out object subgraphStack)
+        {
+            if (TryGetValue(toolState, SubgraphStackPropertyName, out subgraphStack) && subgraphStack != null)
+                return true;
+
+            return TryGetValue(toolState, SubgraphStackFieldName, out subgraphStack) && subgraphStack != null;
+        }
+
+        private static bool HasRecoverableRenderGraphReference(object toolState)
+        {
+            return TryFindRenderGraphReferencePath(toolState, out _);
+        }
+
+        private static bool TryFindRenderGraphReferencePath(object toolState, out string path)
+        {
+            if (toolState == null)
+            {
+                path = null;
+                return false;
+            }
+
+            if (TryGetRenderGraphReferencePath(toolState, CurrentGraphPropertyName, out path)
+                || TryGetRenderGraphReferencePath(toolState, CurrentGraphFieldName, out path)
+                || TryGetRenderGraphReferencePath(toolState, LastOpenedGraphFieldName, out path))
+                return true;
+
+            if (!TryGetValue(toolState, SubgraphStackFieldName, out System.Collections.IEnumerable graphInfos) || graphInfos == null)
+                return false;
+
+            foreach (var graphInfo in graphInfos)
+            {
+                if (TryGetRenderGraphReferencePath(graphInfo, GraphReferencePropertyName, out path))
+                    return true;
+            }
+
+            path = null;
+            return false;
+        }
+
+        private static bool TryGetRenderGraphReferencePath(object source, string memberName, out string path)
+        {
+            path = null;
+            if (!TryGetValue(source, memberName, out object referenceSource) || referenceSource == null)
+                return false;
+
+            if (TryGetValue(referenceSource, FilePathPropertyName, out string directPath)
+                && IsRenderGraphAssetPath(directPath))
+            {
+                path = directPath;
+                return true;
+            }
+
+            if (TryGetValue(referenceSource, GraphReferencePropertyName, out object graphReference)
+                && graphReference != null
+                && TryGetValue(graphReference, FilePathPropertyName, out string graphPath)
+                && IsRenderGraphAssetPath(graphPath))
+            {
+                path = graphPath;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool IsRenderGraphAssetPath(string path)
+        {
+            return !string.IsNullOrEmpty(path)
+                && path.EndsWith($".{RenderGraphEditorGraph.AssetExtension}", StringComparison.OrdinalIgnoreCase);
         }
 
         private static bool TryClearSubgraphStack(object toolState)
@@ -554,12 +884,8 @@ namespace VividRP.Editor.RenderGraph
 
         private static IEnumerable<Hash128> EnumerateGraphToolkitWindowIdsFromUserLayouts()
         {
-            var layoutDirectory = GetUserLayoutDirectory();
-            if (string.IsNullOrEmpty(layoutDirectory) || !Directory.Exists(layoutDirectory))
-                yield break;
-
             var yielded = new HashSet<Hash128>();
-            foreach (var layoutPath in Directory.EnumerateFiles(layoutDirectory, "*.dwlt", SearchOption.TopDirectoryOnly))
+            foreach (var layoutPath in EnumerateGraphToolkitLayoutPaths())
             {
                 foreach (var windowId in EnumerateGraphToolkitWindowIds(layoutPath))
                 {
@@ -569,7 +895,44 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
-        private static string GetUserLayoutDirectory()
+        internal static IEnumerable<string> EnumerateGraphToolkitLayoutPaths()
+        {
+            var yielded = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var layoutDirectory in EnumerateLayoutDirectories())
+            {
+                if (string.IsNullOrEmpty(layoutDirectory) || !Directory.Exists(layoutDirectory))
+                    continue;
+
+                foreach (var layoutPath in Directory.EnumerateFiles(layoutDirectory, "*.dwlt", SearchOption.TopDirectoryOnly))
+                {
+                    if (yielded.Add(layoutPath))
+                        yield return layoutPath;
+                }
+
+                foreach (var layoutPath in Directory.EnumerateFiles(layoutDirectory, "*.wlt", SearchOption.TopDirectoryOnly))
+                {
+                    if (yielded.Add(layoutPath))
+                        yield return layoutPath;
+                }
+            }
+        }
+
+        private static IEnumerable<string> EnumerateLayoutDirectories()
+        {
+            var projectLayoutDirectory = GetProjectLayoutDirectory();
+            if (!string.IsNullOrEmpty(projectLayoutDirectory))
+                yield return projectLayoutDirectory;
+
+            var unityPreferencesLayoutDirectory = GetUnityPreferencesLayoutDirectory();
+            if (string.IsNullOrEmpty(unityPreferencesLayoutDirectory))
+                yield break;
+
+            yield return Path.Combine(unityPreferencesLayoutDirectory, "current");
+            yield return Path.Combine(unityPreferencesLayoutDirectory, "default");
+            yield return Path.Combine(unityPreferencesLayoutDirectory, "safe_mode");
+        }
+
+        private static string GetProjectLayoutDirectory()
         {
             if (string.IsNullOrEmpty(Application.dataPath))
                 return null;
@@ -580,31 +943,88 @@ namespace VividRP.Editor.RenderGraph
                 : Path.Combine(projectRoot, "UserSettings", "Layouts");
         }
 
-        private static IEnumerable<Hash128> EnumerateGraphToolkitWindowIds(string layoutPath)
+        private static string GetUnityPreferencesLayoutDirectory()
+        {
+            var applicationData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            return string.IsNullOrEmpty(applicationData)
+                ? null
+                : Path.Combine(applicationData, "Unity", "Editor-5.x", "Preferences", "Layouts");
+        }
+
+        internal static IEnumerable<Hash128> EnumerateGraphToolkitWindowIds(string layoutPath)
         {
             if (string.IsNullOrEmpty(layoutPath) || !File.Exists(layoutPath))
                 yield break;
 
-            var inGraphToolkitWindow = false;
-            ulong value0 = 0;
-            ulong value1 = 0;
-            var hasValue0 = false;
-
-            foreach (var line in File.ReadLines(layoutPath))
+            var lines = File.ReadAllLines(layoutPath);
+            for (var lineIndex = 0; lineIndex < lines.Length; lineIndex++)
             {
-                if (line.Contains(GraphToolkitWindowIdentifier))
+                if (!lines[lineIndex].Contains(GraphToolkitWindowIdentifier))
+                    continue;
+
+                var blockEnd = FindSerializedObjectBlockEnd(lines, lineIndex + 1);
+                if (TryReadWindowHash(lines, lineIndex + 1, blockEnd, out var windowHash))
+                    yield return windowHash;
+                else if (TryReadWindowId(lines, lineIndex + 1, blockEnd, out var windowId))
+                    yield return windowId;
+
+                lineIndex = blockEnd - 1;
+            }
+        }
+
+        private static int FindSerializedObjectBlockEnd(string[] lines, int startIndex)
+        {
+            for (var lineIndex = startIndex; lineIndex < lines.Length; lineIndex++)
+            {
+                if (lines[lineIndex].StartsWith("--- !u!", StringComparison.Ordinal))
+                    return lineIndex;
+            }
+
+            return lines.Length;
+        }
+
+        private static bool TryReadWindowHash(string[] lines, int startIndex, int endIndex, out Hash128 windowHash)
+        {
+            windowHash = default;
+            var inWindowHash = false;
+
+            for (var lineIndex = startIndex; lineIndex < endIndex; lineIndex++)
+            {
+                var trimmed = lines[lineIndex].Trim();
+                if (trimmed.StartsWith("m_WindowHash:", StringComparison.Ordinal))
                 {
-                    inGraphToolkitWindow = true;
-                    value0 = 0;
-                    value1 = 0;
-                    hasValue0 = false;
+                    inWindowHash = true;
                     continue;
                 }
 
-                if (!inGraphToolkitWindow)
+                if (inWindowHash
+                    && trimmed.StartsWith("Hash:", StringComparison.Ordinal)
+                    && TryParseLayoutHash128(trimmed, out windowHash))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryReadWindowId(string[] lines, int startIndex, int endIndex, out Hash128 windowId)
+        {
+            windowId = default;
+            ulong value0 = 0;
+            var inWindowId = false;
+            var hasValue0 = false;
+
+            for (var lineIndex = startIndex; lineIndex < endIndex; lineIndex++)
+            {
+                var trimmed = lines[lineIndex].Trim();
+                if (trimmed.StartsWith("m_WindowID:", StringComparison.Ordinal))
+                {
+                    inWindowId = true;
+                    continue;
+                }
+
+                if (!inWindowId)
                     continue;
 
-                var trimmed = line.Trim();
                 if (trimmed.StartsWith("m_Value0:", StringComparison.Ordinal))
                 {
                     hasValue0 = TryParseLayoutUlong(trimmed, out value0);
@@ -613,11 +1033,32 @@ namespace VividRP.Editor.RenderGraph
 
                 if (hasValue0
                     && trimmed.StartsWith("m_Value1:", StringComparison.Ordinal)
-                    && TryParseLayoutUlong(trimmed, out value1))
+                    && TryParseLayoutUlong(trimmed, out var value1))
                 {
-                    yield return new Hash128(value0, value1);
-                    inGraphToolkitWindow = false;
+                    windowId = new Hash128(value0, value1);
+                    return true;
                 }
+            }
+
+            return false;
+        }
+
+        private static bool TryParseLayoutHash128(string line, out Hash128 value)
+        {
+            value = default;
+            var separatorIndex = line.IndexOf(':');
+            if (separatorIndex < 0 || separatorIndex >= line.Length - 1)
+                return false;
+
+            try
+            {
+                value = Hash128.Parse(line.Substring(separatorIndex + 1).Trim());
+                return value.isValid;
+            }
+            catch (Exception)
+            {
+                value = default;
+                return false;
             }
         }
 

@@ -17,6 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const uint DefaultInstanceMask = 0xFFu;
         private const string RenderPipelineShaderTagName = "RenderPipeline";
         private const string VividRenderPipelineShaderTagValue = "VividRenderPipeline";
+        private const int DefaultMeshletInstanceBatchPoolCapacity = 256;
 
         private static readonly string[] s_DoubleSidedShaderKeywords = { "_DOUBLESIDED_ON" };
         private static readonly string[] s_AlphaTestShaderKeywords = { "_ALPHATEST_ON" };
@@ -41,6 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
         };
         private readonly Plane[] m_ExtendedFrustumPlanes = new Plane[6];
         private readonly MeshletRTASInstanceBatchCache m_MeshletInstanceBatchCache = new();
+        private readonly List<Matrix4x4> m_SingleInstanceMatrices = new(1);
 
         private bool m_SupportsRayTracing;
         private VividRayTracingAccelerationStructureStats m_LastStats;
@@ -237,12 +239,59 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
+        private readonly struct MeshletRTASMaterialMetadata
+        {
+            public MeshletRTASMaterialMetadata(
+                bool hasVividRenderPipelineTag,
+                bool enableTriangleCulling,
+                RayTracingSubMeshFlags subMeshFlags)
+            {
+                HasVividRenderPipelineTag = hasVividRenderPipelineTag;
+                EnableTriangleCulling = enableTriangleCulling;
+                SubMeshFlags = subMeshFlags;
+            }
+
+            public bool HasVividRenderPipelineTag { get; }
+
+            public bool EnableTriangleCulling { get; }
+
+            public RayTracingSubMeshFlags SubMeshFlags { get; }
+
+            public static MeshletRTASMaterialMetadata Create(Material material)
+            {
+                return new MeshletRTASMaterialMetadata(
+                    HasVividRenderPipelineMaterial(material),
+                    ShouldEnableTriangleCulling(material),
+                    GetSubMeshFlags(material));
+            }
+        }
+
         private sealed class MeshletRTASInstanceBatchCache
         {
-            private readonly Dictionary<MeshletRTASInstanceBatchKey, MeshletRTASInstanceBatch> m_BatchLookup = new();
+            private readonly Dictionary<MeshletRTASInstanceBatchKey, MeshletRTASInstanceBatch> m_BatchLookup =
+                new(DefaultMeshletInstanceBatchPoolCapacity);
             private readonly List<MeshletRTASInstanceBatch> m_BatchPool = new();
+            private readonly Dictionary<Material, MeshletRTASMaterialMetadata> m_MaterialMetadata =
+                new(DefaultMeshletInstanceBatchPoolCapacity);
 
             public List<MeshletRTASInstanceBatch> Batches { get; } = new();
+
+            public void Prewarm(int capacity)
+            {
+                if (capacity <= 0)
+                    return;
+
+                if (Batches.Capacity < capacity)
+                    Batches.Capacity = capacity;
+
+                if (m_BatchPool.Capacity < capacity)
+                    m_BatchPool.Capacity = capacity;
+
+                while (m_BatchPool.Count < capacity)
+                {
+                    m_BatchPool.Add(new MeshletRTASInstanceBatch(default));
+                }
+            }
 
             public void BeginCollect()
             {
@@ -272,6 +321,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 return batch;
             }
 
+            public MeshletRTASMaterialMetadata GetMaterialMetadata(Material material)
+            {
+                if (material == null)
+                    return default;
+
+                if (m_MaterialMetadata.TryGetValue(material, out var metadata))
+                    return metadata;
+
+                metadata = MeshletRTASMaterialMetadata.Create(material);
+                m_MaterialMetadata.Add(material, metadata);
+                return metadata;
+            }
+
             public void EndCollect()
             {
                 m_BatchLookup.Clear();
@@ -289,6 +351,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 Batches.Clear();
                 m_BatchPool.Clear();
+                m_MaterialMetadata.Clear();
             }
 
             private MeshletRTASInstanceBatch Rent(RayTracingMeshInstanceConfig config)
@@ -366,6 +429,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public RTASBuildPass()
         {
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
+            m_MeshletInstanceBatchCache.Prewarm(DefaultMeshletInstanceBatchPoolCapacity);
         }
 
         public override void Create()
@@ -601,7 +665,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 in settings,
                 m_InstanceCullingTests,
                 useRenderPipelineTagFilter ? m_RequiredShaderTags : null,
-                extendedFrustumPlanes);
+                extendedFrustumPlanes,
+                false);
         }
 
         private static RayTracingInstanceCullingConfig CreateCullingConfig(
@@ -609,7 +674,8 @@ namespace VividRP.Runtime.RenderPass.Core
             in ResolvedRayTracingSettings settings,
             RayTracingInstanceCullingTest[] instanceTests,
             RayTracingInstanceCullingShaderTagConfig[] requiredShaderTags,
-            Plane[] extendedFrustumPlanes)
+            Plane[] extendedFrustumPlanes,
+            bool useOptionalMaterialKeywordFilters = true)
         {
             var cullingConfig = new RayTracingInstanceCullingConfig
             {
@@ -633,10 +699,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             cullingConfig.triangleCullingConfig.checkDoubleSidedGIMaterial = true;
             cullingConfig.triangleCullingConfig.frontTriangleCounterClockwise = false;
-            cullingConfig.triangleCullingConfig.optionalDoubleSidedShaderKeywords = s_DoubleSidedShaderKeywords;
 
-            cullingConfig.alphaTestedMaterialConfig.optionalShaderKeywords = s_AlphaTestShaderKeywords;
-            cullingConfig.transparentMaterialConfig.optionalShaderKeywords = s_TransparentShaderKeywords;
+            if (useOptionalMaterialKeywordFilters)
+            {
+                cullingConfig.triangleCullingConfig.optionalDoubleSidedShaderKeywords = s_DoubleSidedShaderKeywords;
+                cullingConfig.alphaTestedMaterialConfig.optionalShaderKeywords = s_AlphaTestShaderKeywords;
+                cullingConfig.transparentMaterialConfig.optionalShaderKeywords = s_TransparentShaderKeywords;
+            }
 
             if (requiredShaderTags != null)
                 cullingConfig.materialTest.requiredShaderTags = requiredShaderTags;
@@ -750,30 +819,42 @@ namespace VividRP.Runtime.RenderPass.Core
             Camera camera,
             in ResolvedRayTracingSettings settings)
         {
-            var usedShaderTagFallback = false;
-
             accelerationStructure.ClearInstances();
 
-            var cullingConfig = CreateCullingConfigNonAlloc(camera, in settings);
+            if (!ShouldUseAutomaticSceneRendererCulling(in settings))
+            {
+                AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: false);
+                var manualInstanceCount = accelerationStructure.GetInstanceCount();
+                return new SceneAccelerationStructureBuildStats(
+                    0,
+                    manualInstanceCount,
+                    accelerationStructure.GetSize(),
+                    false);
+            }
+
+            var cullingConfig = CreateCullingConfigNonAlloc(
+                camera,
+                in settings,
+                useRenderPipelineTagFilter: false);
             accelerationStructure.CullInstances(ref cullingConfig);
-            AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: true);
+            AddMeshletRendererInstances(
+                accelerationStructure,
+                camera,
+                in settings,
+                requireVividRenderPipelineTag: false);
 
             var instanceCount = accelerationStructure.GetInstanceCount();
-            if (instanceCount == 0)
-            {
-                usedShaderTagFallback = true;
-                accelerationStructure.ClearInstances();
-                cullingConfig = CreateCullingConfigNonAlloc(camera, in settings, useRenderPipelineTagFilter: false);
-                accelerationStructure.CullInstances(ref cullingConfig);
-                AddMeshletRendererInstances(accelerationStructure, camera, in settings, requireVividRenderPipelineTag: false);
-                instanceCount = accelerationStructure.GetInstanceCount();
-            }
 
             return new SceneAccelerationStructureBuildStats(
                 0,
                 instanceCount,
                 accelerationStructure.GetSize(),
-                usedShaderTagFallback);
+                false);
+        }
+
+        internal static bool ShouldUseAutomaticSceneRendererCulling(in ResolvedRayTracingSettings settings)
+        {
+            return settings.BuildMode == VividRTASBuildMode.Automatic;
         }
 
         private static RayTracingInstanceCullingTest CreateInstanceCullingTest(LayerMask layerMask)
@@ -1002,46 +1083,53 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             cache.BeginCollect();
 
-            if (database == null)
-                return;
-
-            var rendererData = database.rendererData;
-            var rendererResources = database.rendererResources;
-            var rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
-            var cullingPlanes = BuildMeshletCullingPlanes(camera, settings.CullingMode, reusableCullingPlanes);
-
-            for (var rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+            try
             {
-                var meshletRenderData = rendererData[rendererIndex];
-                var meshletResources = rendererResources[rendererIndex];
+                if (database == null)
+                    return;
 
-                if (!IsCandidateMeshletRenderer(meshletRenderData, meshletResources, settings.LayerMask, settings.RayTracingModeMask)
-                    || !PassesMeshletInstanceCulling(camera, in settings, meshletRenderData.worldBounds, cullingPlanes))
-                {
-                    continue;
-                }
+                var rendererData = database.rendererData;
+                var rendererResources = database.rendererResources;
+                var rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+                var cullingPlanes = BuildMeshletCullingPlanes(camera, settings.CullingMode, reusableCullingPlanes);
 
-                var subMeshCount = Mathf.Max(0, meshletRenderData.subMeshCount);
-                for (var subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+                for (var rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
                 {
-                    if (!IsCandidateMeshletSubMesh(meshletResources, subMeshIndex, requireVividRenderPipelineTag)
-                        || !TryResolveMeshletMaterial(meshletResources, subMeshIndex, out var material))
+                    var meshletRenderData = rendererData[rendererIndex];
+                    var meshletResources = rendererResources[rendererIndex];
+
+                    if (!IsCandidateMeshletRenderer(meshletRenderData, meshletResources, settings.LayerMask, settings.RayTracingModeMask)
+                        || !PassesMeshletInstanceCulling(camera, in settings, meshletRenderData.worldBounds, cullingPlanes))
                     {
                         continue;
                     }
 
-                    var config = CreateMeshletInstanceConfig(
-                        meshletRenderData,
-                        meshletResources,
-                        material,
-                        subMeshIndex);
-                    var batch = cache.GetOrCreate(config);
+                    var subMeshCount = Mathf.Max(0, meshletRenderData.subMeshCount);
+                    for (var subMeshIndex = 0; subMeshIndex < subMeshCount; subMeshIndex++)
+                    {
+                        if (!TryResolveMeshletMaterial(meshletResources, subMeshIndex, out var material))
+                            continue;
 
-                    batch.AddObjectToWorldMatrix(meshletRenderData.objectToWorldMatrix);
+                        var materialMetadata = cache.GetMaterialMetadata(material);
+                        if (requireVividRenderPipelineTag && !materialMetadata.HasVividRenderPipelineTag)
+                            continue;
+
+                        var config = CreateMeshletInstanceConfig(
+                            meshletRenderData,
+                            meshletResources,
+                            material,
+                            subMeshIndex,
+                            in materialMetadata);
+                        var batch = cache.GetOrCreate(config);
+
+                        batch.AddObjectToWorldMatrix(meshletRenderData.objectToWorldMatrix);
+                    }
                 }
             }
-
-            cache.EndCollect();
+            finally
+            {
+                cache.EndCollect();
+            }
         }
 
         private static Plane[] BuildMeshletCullingPlanes(
@@ -1058,7 +1146,7 @@ namespace VividRP.Runtime.RenderPass.Core
             return BuildExtendedFrustumPlanes(camera);
         }
 
-        private static void AddMeshletRendererInstanceBatch(
+        private void AddMeshletRendererInstanceBatch(
             RayTracingAccelerationStructure accelerationStructure,
             MeshletRTASInstanceBatch batch)
         {
@@ -1066,9 +1154,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             var config = batch.Config;
-            var objectToWorldMatrices = batch.ObjectToWorldMatrices;
             if (CanUseAddInstances(config.material, batch.ObjectToWorldMatrixCount))
             {
+                var objectToWorldMatrices = GetObjectToWorldMatrices(batch);
                 accelerationStructure.AddInstances(in config, objectToWorldMatrices, objectToWorldMatrices.Count, 0, 0u);
                 return;
             }
@@ -1079,15 +1167,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            for (var instanceIndex = 0; instanceIndex < objectToWorldMatrices.Count; instanceIndex++)
+            var fallbackObjectToWorldMatrices = batch.ObjectToWorldMatrices;
+            for (var instanceIndex = 0; instanceIndex < fallbackObjectToWorldMatrices.Count; instanceIndex++)
             {
-                accelerationStructure.AddInstance(in config, objectToWorldMatrices[instanceIndex], null, 0u);
+                accelerationStructure.AddInstance(in config, fallbackObjectToWorldMatrices[instanceIndex], null, 0u);
             }
+        }
+
+        private List<Matrix4x4> GetObjectToWorldMatrices(MeshletRTASInstanceBatch batch)
+        {
+            if (batch.ObjectToWorldMatrixCount != 1)
+                return batch.ObjectToWorldMatrices;
+
+            m_SingleInstanceMatrices.Clear();
+            m_SingleInstanceMatrices.Add(batch.FirstObjectToWorldMatrix);
+            return m_SingleInstanceMatrices;
         }
 
         internal static bool CanUseAddInstances(Material material, int instanceCount)
         {
-            return instanceCount > 1 && material != null && material.enableInstancing;
+            return instanceCount > 0 && material != null;
         }
 
         private static bool IsCandidateMeshletRenderer(
@@ -1204,12 +1303,13 @@ namespace VividRP.Runtime.RenderPass.Core
             in VividMeshletRendererRenderData meshletRenderData,
             in VividMeshletRendererResources meshletResources,
             Material material,
-            int subMeshIndex)
+            int subMeshIndex,
+            in MeshletRTASMaterialMetadata materialMetadata)
         {
             var rayTracingMode = GetMeshletRayTracingMode(meshletRenderData.flags);
             var config = new RayTracingMeshInstanceConfig
             {
-                enableTriangleCulling = ShouldEnableTriangleCulling(material),
+                enableTriangleCulling = materialMetadata.EnableTriangleCulling,
                 frontTriangleCounterClockwise = false,
                 layer = meshletResources.MeshletRenderer.gameObject.layer,
                 lightProbeProxyVolume = null,
@@ -1221,7 +1321,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 meshLod = -1,
                 motionVectorMode = meshletRenderData.motionVectorGenerationMode,
                 renderingLayerMask = meshletRenderData.renderingLayerMask,
-                subMeshFlags = GetSubMeshFlags(material),
+                subMeshFlags = materialMetadata.SubMeshFlags,
                 subMeshIndex = (uint)subMeshIndex,
             };
             config.rayTracingMode = rayTracingMode;

@@ -457,24 +457,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void CanUseAddInstances_RequiresMultipleInstancesAndMaterialInstancing()
+        public void CanUseAddInstances_RequiresMaterialAndPositiveInstanceCount()
         {
             var material = CreateTestMaterial();
 
             try
             {
-                Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.False);
                 Assert.That(RTASBuildPass.CanUseAddInstances(null, 2), Is.False);
-
-                material.enableInstancing = true;
-
-                Assert.That(RTASBuildPass.CanUseAddInstances(material, 1), Is.False);
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 0), Is.False);
+                Assert.That(RTASBuildPass.CanUseAddInstances(material, 1), Is.True);
                 Assert.That(RTASBuildPass.CanUseAddInstances(material, 2), Is.True);
             }
             finally
             {
                 Object.DestroyImmediate(material);
             }
+        }
+
+        [Test]
+        public void ShouldUseAutomaticSceneRendererCulling_DisablesCullInstances_WhenBuildModeIsManual()
+        {
+            var automaticSettings = CreateDefaultResolvedSettings();
+            var manualSettings = CreateResolvedSettings(VividRTASBuildMode.Manual);
+
+            Assert.That(RTASBuildPass.ShouldUseAutomaticSceneRendererCulling(in automaticSettings), Is.True);
+            Assert.That(RTASBuildPass.ShouldUseAutomaticSceneRendererCulling(in manualSettings), Is.False);
         }
 
         [Test]
@@ -578,8 +585,13 @@ namespace VividRP.Editor.Tests
 
         private static RTASBuildPass.ResolvedRayTracingSettings CreateDefaultResolvedSettings()
         {
+            return CreateResolvedSettings(VividRTASBuildMode.Automatic);
+        }
+
+        private static RTASBuildPass.ResolvedRayTracingSettings CreateResolvedSettings(VividRTASBuildMode buildMode)
+        {
             return new RTASBuildPass.ResolvedRayTracingSettings(
-                VividRTASBuildMode.Automatic,
+                buildMode,
                 VividRTASCullingMode.ExtendedFrustum,
                 RTASBuildPass.DefaultSphereCullingDistance,
                 RTASBuildPass.DefaultMinSolidAngle,

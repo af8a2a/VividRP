@@ -107,12 +107,10 @@ namespace VividRP.Editor.Tests
             Assert.That(fallbackRenderList.desc.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Opaque));
             Assert.That(fallbackRenderList.desc.SortingCriteria, Is.EqualTo(SortingCriteria.CommonOpaque));
             Assert.That(fallbackRenderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.MotionVectors));
-            Assert.That(fallbackRenderList.desc.ExcludeObjectMotionVectors, Is.True);
+            Assert.That(fallbackRenderList.desc.ExcludeObjectMotionVectors, Is.False);
             Assert.That(fallbackRenderList.desc.ShaderTagNames, Is.EqualTo(new[]
             {
-                "VividGBuffer",
-                RenderGraphRenderListDesc.ForwardShaderTagName,
-                RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
+                MotionVectorPass.ObjectMotionVectorFallbackShaderTagName,
             }));
         }
 
@@ -129,7 +127,11 @@ namespace VividRP.Editor.Tests
             var fallbackRenderList = GetRenderListField(pass, "m_FallbackRenderList");
 
             Assert.That(fallbackRenderList.desc.OverrideShader, Is.Not.Null);
-            Assert.That(fallbackRenderList.desc.ExcludeObjectMotionVectors, Is.True);
+            Assert.That(fallbackRenderList.desc.ExcludeObjectMotionVectors, Is.False);
+            Assert.That(fallbackRenderList.desc.ShaderTagNames, Is.EqualTo(new[]
+            {
+                MotionVectorPass.ObjectMotionVectorFallbackShaderTagName,
+            }));
             Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[]
             {
                 MotionVectorPass.MotionVectorsShaderTagName,
@@ -137,16 +139,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_RestoresFallbackObjectMotionExclusion_WhenSerializedDescHasOldValue()
+        public void Prepare_RestoresFallbackObjectMotionInclusion_WhenSerializedDescHasOldValue()
         {
             var pass = new MotionVectorPass();
             var frameData = new ContextContainer();
             var fallbackRenderList = GetRenderListField(pass, "m_FallbackRenderList");
-            fallbackRenderList.desc.ExcludeObjectMotionVectors = false;
+            fallbackRenderList.desc.ExcludeObjectMotionVectors = true;
+            fallbackRenderList.desc.ShaderTagNames = new[]
+            {
+                "VividGBuffer",
+                RenderGraphRenderListDesc.ForwardShaderTagName,
+                RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
+            };
 
             pass.Prepare(frameData);
 
-            Assert.That(fallbackRenderList.desc.ExcludeObjectMotionVectors, Is.True);
+            Assert.That(fallbackRenderList.desc.ExcludeObjectMotionVectors, Is.False);
+            Assert.That(fallbackRenderList.desc.ShaderTagNames, Is.EqualTo(new[]
+            {
+                MotionVectorPass.ObjectMotionVectorFallbackShaderTagName,
+            }));
         }
 
         [Test]

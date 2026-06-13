@@ -77,7 +77,6 @@ RWStructuredBuffer<uint> _SSRHybridCandidateBuffer;
 RWStructuredBuffer<uint> _SSRHybridDispatchIndirectArgs;
 Texture2D<float> _DepthTexture;
 Texture2D<float> _HZBTexture;
-StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;
 Texture2D<float4> _GBuffer0;
 Texture2D<float4> _GBuffer1;
 Texture2D<float4> _GBuffer2;
@@ -808,12 +807,12 @@ float LoadHZBDepth(int2 mipCoord, int mipLevel)
 
     uint width;
     uint height;
-    _HZBTexture.GetDimensions(width, height);
+    uint mipCount;
+    _HZBTexture.GetDimensions((uint)mipLevel, width, height, mipCount);
 
-    int2 atlasCoord = _DepthPyramidMipLevelOffsets[mipLevel] + mipCoord;
-    int2 maxAtlasCoord = int2(max((int)width - 1, 0), max((int)height - 1, 0));
-    atlasCoord = clamp(atlasCoord, int2(0, 0), maxAtlasCoord);
-    return _HZBTexture.Load(int3(atlasCoord, 0));
+    int2 maxMipCoord = int2(max((int)width - 1, 0), max((int)height - 1, 0));
+    mipCoord = clamp(mipCoord, int2(0, 0), maxMipCoord);
+    return _HZBTexture.Load(int3(mipCoord, mipLevel));
 }
 
 float PerceptualRoughnessFade(float perceptualRoughness)
@@ -1061,7 +1060,7 @@ bool TraceScreenSpaceReflection(
         tMax = Min3Value(dist.x, dist.y, dist.z);
     }
 
-    int maxMipLevel = min(_SsrDepthPyramidMaxMip, 14);
+    int maxMipLevel = min(_SsrDepthPyramidMaxMip, 12);
 
     float2 startDistance = abs(0.5 * rcpRayDir.xy);
     float t = min(startDistance.x, startDistance.y);
@@ -1188,7 +1187,7 @@ bool TraceScreenSpaceReflectionHDRP(
         tMax = Min3Value(dist.x, dist.y, dist.z);
     }
 
-    int maxMipLevel = min(_SsrDepthPyramidMaxMip, 14);
+    int maxMipLevel = min(_SsrDepthPyramidMaxMip, 12);
     float2 startDistance = abs(0.5 * rcpRayDir.xy);
     float t = min(startDistance.x, startDistance.y);
 
@@ -1209,14 +1208,13 @@ bool TraceScreenSpaceReflectionHDRP(
         rayPos.xy += raySign.xy * satEdgeDist;
 
         int2 mipCoord  = (int2)rayPos.xy >> mipLevel;
-        int2 mipOffset = _DepthPyramidMipLevelOffsets[mipLevel];
         // Bounds define 4 faces of a cube:
         // 2 walls in front of the ray, and a floor and a base below it.
 
 
         float4 bounds;
         bounds.xy = (float2)((mipCoord + rayStep) << mipLevel);
-        bounds.z = LOAD_TEXTURE2D_X(_HZBTexture,mipOffset + mipCoord);
+        bounds.z = LoadHZBDepth(mipCoord, mipLevel);
         // We define the depth of the base as the depth value as:
         // b = DeviceDepth((1 + thickness) * LinearDepth(d))
         // b = ((f - n) * d + n * (1 - (1 + thickness))) / ((f - n) * (1 + thickness))

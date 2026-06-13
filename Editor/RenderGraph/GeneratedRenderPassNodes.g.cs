@@ -78,9 +78,6 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class GenerateViewZPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class HDRPHZBPass : RenderPassNodeData { }
-
-    [Serializable]
     internal sealed class HZBGeneratePass : RenderPassNodeData { }
 
     [Serializable]

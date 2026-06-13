@@ -11,6 +11,7 @@ using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
+#pragma warning disable CS0618
 namespace VividRP.Editor.Tests
 {
     public sealed class HDRPHZBPassTests
@@ -85,7 +86,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ScreenSpaceReflectionPass_RegistersHDRPDepthPyramidOffsetInput()
+        public void ScreenSpaceReflectionPass_RegistersMippedHzbInputWithoutOffsetBuffer()
         {
             IRenderPass renderPass = new ScreenSpaceReflectionPass();
 
@@ -94,7 +95,7 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("HZB"));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("ScreenSpaceReflectionOutput"));
             Assert.That(resources.Textures.Single(entry => entry.Name == "MotionVectors").Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Buffers.Select(entry => entry.Name), Does.Contain("HZBMipLevelOffsets"));
+            Assert.That(resources.Buffers.Select(entry => entry.Name), Does.Not.Contain("HZBMipLevelOffsets"));
             Assert.That(resources.AccelerationStructures.Single(entry => entry.Name == "SceneRTAS").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionTrace").IsTransient, Is.True);
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionResolve").IsTransient, Is.True);
@@ -129,6 +130,14 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRHybridCandidateBuffer").IsTransient, Is.True);
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRHybridDispatchIndirectArgs").IsTransient, Is.True);
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("source"));
+        }
+
+        [Test]
+        public void GeneratedNodeRegistry_ExcludesDeprecatedHDRPHZBPass()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
+
+            Assert.That(source, Does.Not.Contain("internal sealed class HDRPHZBPass : RenderPassNodeData"));
         }
 
         [Test]
@@ -521,14 +530,64 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ScreenSpaceReflectionPass_CalculatesRoundedUpDepthPyramidMipCount_ForNonPowerOfTwoCamera()
+        public void ScreenSpaceReflectionPass_CalculatesTextureMipCount_ForNonPowerOfTwoCamera()
         {
             var method = typeof(ScreenSpaceReflectionPass).GetMethod("CalculateMipCount", BindingFlags.Static | BindingFlags.NonPublic);
             Assert.That(method, Is.Not.Null);
 
-            Assert.That(method.Invoke(null, new object[] { 1920, 1080 }), Is.EqualTo(12));
+            Assert.That(method.Invoke(null, new object[] { 1920, 1080 }), Is.EqualTo(11));
             Assert.That(method.Invoke(null, new object[] { 1024, 1024 }), Is.EqualTo(11));
             Assert.That(method.Invoke(null, new object[] { 1, 1 }), Is.EqualTo(1));
+        }
+
+        [Test]
+        public void ScreenSpaceReflectionPass_ResolvesDepthPyramidMaxMip_FromHzbDescriptor()
+        {
+            var hzbTexture = new RenderGraphTexture
+            {
+                desc = RenderGraphTextureDesc.CreateColorTarget(8192, 8192, GraphicsFormat.R16_SFloat)
+            };
+
+            hzbTexture.desc.UseMipMap = true;
+            hzbTexture.desc.MipCount = 4;
+            Assert.That(
+                InvokePrivateStatic<int>(
+                    typeof(ScreenSpaceReflectionPass),
+                    "ResolveDepthPyramidMaxMip",
+                    hzbTexture,
+                    8192,
+                    8192),
+                Is.EqualTo(3));
+
+            hzbTexture.desc.MipCount = 0;
+            Assert.That(
+                InvokePrivateStatic<int>(
+                    typeof(ScreenSpaceReflectionPass),
+                    "ResolveDepthPyramidMaxMip",
+                    hzbTexture,
+                    8192,
+                    8192),
+                Is.EqualTo(12));
+
+            Assert.That(
+                InvokePrivateStatic<int>(
+                    typeof(ScreenSpaceReflectionPass),
+                    "ResolveDepthPyramidMaxMip",
+                    hzbTexture,
+                    1920,
+                    1080),
+                Is.EqualTo(10));
+
+            hzbTexture.desc.UseMipMap = false;
+            hzbTexture.desc.MipCount = 1;
+            Assert.That(
+                InvokePrivateStatic<int>(
+                    typeof(ScreenSpaceReflectionPass),
+                    "ResolveDepthPyramidMaxMip",
+                    hzbTexture,
+                    8192,
+                    8192),
+                Is.EqualTo(0));
         }
 
         [Test]
@@ -577,6 +636,15 @@ namespace VividRP.Editor.Tests
             try
             {
                 pass.Prepare(frameData);
+
+                var hzbTexture = GetPrivateField<RenderGraphTexture>(pass, "m_HZBTexture");
+                Assert.That(hzbTexture.desc.Width, Is.EqualTo(1920));
+                Assert.That(hzbTexture.desc.Height, Is.EqualTo(1080));
+                Assert.That(hzbTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+                Assert.That(hzbTexture.desc.UseMipMap, Is.True);
+                Assert.That(hzbTexture.desc.AutoGenerateMips, Is.False);
+                Assert.That(hzbTexture.desc.MipCount, Is.EqualTo(11));
+                Assert.That(hzbTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
 
                 var traceTexture = GetPrivateField<RenderGraphTexture>(pass, "m_TraceTexture");
                 Assert.That(traceTexture.desc.Width, Is.EqualTo(1920));
@@ -724,6 +792,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRDispatchIndirectArgs;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRHybridCandidateBuffer;"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _SSRHybridDispatchIndirectArgs;"));
+            Assert.That(source, Does.Not.Contain("StructuredBuffer<int2> _DepthPyramidMipLevelOffsets;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRResolveTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float4> _SSRRayInfoTexture;"));
             Assert.That(source, Does.Contain("RWTexture2D<float2> _SsrHitPointTexture;"));
@@ -940,6 +1009,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("void ScreenSpaceReflectionsHDRPAccumulate("));
             Assert.That(source, Does.Contain("_SsrHitPointTexture[coordSS] = float2(0.0, 0.0);"));
             Assert.That(source, Does.Contain("_SsrHitPointTexture[coordSS] = hitScreenUV;"));
+            Assert.That(source, Does.Contain("_HZBTexture.GetDimensions((uint)mipLevel, width, height, mipCount);"));
+            Assert.That(source, Does.Contain("return _HZBTexture.Load(int3(mipCoord, mipLevel));"));
+            Assert.That(source, Does.Not.Contain("LOAD_TEXTURE2D_X(_HZBTexture,mipOffset + mipCoord)"));
             Assert.That(source, Does.Contain("float2 hitData = _SsrHitPointTexture[coordSS];"));
             Assert.That(source, Does.Contain("if (max(hitData.x, hitData.y) == 0.0)"));
             Assert.That(source, Does.Not.Contain("hitData.z <= 0.0"));
@@ -1254,3 +1326,4 @@ namespace VividRP.Editor.Tests
         }
     }
 }
+#pragma warning restore CS0618

@@ -7,6 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [Obsolete("HDRPHZBPass is deprecated. Use HZBGeneratePass for the mipped HZB texture consumed by screen-space effects.")]
     public sealed class HDRPHZBPass : ComputePass, IStablePassResourceLayout
     {
         private const int MaxMipLevelCount = 15;

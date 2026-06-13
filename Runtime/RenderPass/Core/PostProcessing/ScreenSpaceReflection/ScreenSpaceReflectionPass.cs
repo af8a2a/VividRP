@@ -41,7 +41,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int ThreadGroupSize = 8;
         private const int IndirectArgsElementCount = 4;
         private const int RayDispatchArgsElementCount = 3;
-        private const int MaxDepthPyramidMipCount = 15;
+        private const int MaxDepthPyramidMipCount = 13;
         private const string RenderSSRProfilerTag = "RenderSSR";
         private const string SSRClassifyTilesProfilerTag = "SSRClassifyTiles";
         private const string SSRTracingProfilerTag = "SSRTracing";
@@ -131,7 +131,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GBuffer2Id = Shader.PropertyToID("_GBuffer2");
         private static readonly int CameraMotionVectorsTextureId = Shader.PropertyToID("_CameraMotionVectorsTexture");
         private static readonly int PreviousColorPyramidTextureId = Shader.PropertyToID("_PreviousColorPyramidTexture");
-        private static readonly int DepthPyramidMipLevelOffsetsId = Shader.PropertyToID("_DepthPyramidMipLevelOffsets");
         private static readonly int SkyTextureId = Shader.PropertyToID("_SkyTexture");
         private static readonly int SkyTextureTintId = Shader.PropertyToID("_SkyTextureTint");
         private static readonly int SkyTextureParamsId = Shader.PropertyToID("_SkyTextureParams");
@@ -226,9 +225,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "HZB", Access = AccessFlags.Read)]
         private RenderGraphTexture m_HZBTexture;
 
-        [RenderGraphResource(Name = "HZBMipLevelOffsets", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_HZBMipLevelOffsets;
-
         [RenderGraphResource(Name = "GBuffer0", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer0;
 
@@ -252,7 +248,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader m_ComputeShader;
         private readonly RenderGraphTexture m_DefaultHZBTexture;
-        private readonly RenderGraphBuffer m_DefaultHZBMipLevelOffsets;
 
         [RenderGraphResource(
             Name = "ScreenSpaceReflectionTrace",
@@ -461,10 +456,8 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(RenderSSRProfilerTag);
 
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
-            m_HZBTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R32_SFloat);
-            m_HZBMipLevelOffsets = RenderGraphBuffer.CreateStructured("HZBMipLevelOffsets", MaxDepthPyramidMipCount, sizeof(int) * 2);
+            m_HZBTexture = RenderGraphTexture.CreateInput("HZB", GraphicsFormat.R16_SFloat);
             m_DefaultHZBTexture = m_HZBTexture;
-            m_DefaultHZBMipLevelOffsets = m_HZBMipLevelOffsets;
             m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_SRGB);
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GBuffer2 = RenderGraphTexture.CreateInput("GBuffer2", GraphicsFormat.R8G8B8A8_UNorm);
@@ -672,9 +665,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 ConfigureHZBDescriptor(m_HZBTexture);
             }
 
-            if (ReferenceEquals(m_HZBMipLevelOffsets, m_DefaultHZBMipLevelOffsets))
-                ConfigureHZBMipLevelOffsetBuffer(m_HZBMipLevelOffsets);
-
             UpdateOutputDescriptor(m_Width, m_Height);
             UpdateTileResourcesDescriptor(m_Width, m_Height);
             UpdateReBlurResourcesDescriptor(m_Width, m_Height);
@@ -683,6 +673,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData,
                 m_Width,
                 m_Height,
+                ResolveDepthPyramidMaxMip(m_HZBTexture, m_Width, m_Height),
                 m_Settings);
             m_ShaderVariablesRayTracing =
                 ShaderVariablesRayTracingUtility.Create(frameData.GetOrCreate<VividRayTracingSettingsData>());
@@ -1120,7 +1111,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_SSRTracingKernel >= 0
                 && m_SkyTexture?.innerHandle.IsValid() == true
                 && m_HZBTexture?.innerHandle.IsValid() == true
-                && m_HZBMipLevelOffsets?.innerHandle.IsValid() == true
                 && m_GBuffer0?.innerHandle.IsValid() == true
                 && m_GBuffer2?.innerHandle.IsValid() == true;
         }
@@ -1190,7 +1180,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 && output?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
                 && m_HZBTexture?.innerHandle.IsValid() == true
-                && m_HZBMipLevelOffsets?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true;
         }
 
@@ -1327,7 +1316,6 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, HZBTextureId, m_HZBTexture.innerHandle);
-            cmd.SetComputeBufferParam(m_ComputeShader, m_SSRTracingKernel, DepthPyramidMipLevelOffsetsId, m_HZBMipLevelOffsets.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, GBuffer2Id, m_GBuffer2.innerHandle);
@@ -1761,7 +1749,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, SsrHitPointTextureId, m_HDRPHitPointTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, DepthTextureId, m_DepthTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, HZBTextureId, m_HZBTexture.innerHandle);
-                cmd.SetComputeBufferParam(m_ComputeShader, m_SSRHDRPTracingKernel, DepthPyramidMipLevelOffsetsId, m_HZBMipLevelOffsets.innerHandle);
                 cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPTracingKernel, GBuffer1Id, m_GBuffer1.innerHandle);
                 DispatchFullScreen(cmd, m_SSRHDRPTracingKernel);
             }
@@ -1963,6 +1950,7 @@ namespace VividRP.Runtime.RenderPass.Core
             VividCameraData cameraData,
             int width,
             int height,
+            int depthPyramidMaxMip,
             ScreenSpaceReflectionSettingsData settings)
         {
             var camera = cameraData?.camera;
@@ -1994,7 +1982,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 SsrThicknessScale = thicknessScale,
                 SsrThicknessBias = thicknessBias,
                 SsrIterLimit = settings.rayMaxIterations,
-                SsrDepthPyramidMaxMip = Mathf.Clamp(CalculateMipCount(width, height) - 1, 0, MaxDepthPyramidMipCount - 1),
+                SsrDepthPyramidMaxMip = depthPyramidMaxMip,
                 SsrRoughnessFadeEnd = roughnessFadeEnd,
                 SsrRoughnessFadeRcpLength = roughnessFadeRcpLength,
                 SsrRoughnessFadeEndTimesRcpLength = roughnessFadeRcpLength > 0.0f
@@ -2093,7 +2081,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private static int CalculateMipCount(int width, int height)
         {
             int maxDimension = Mathf.Max(1, Mathf.Max(width, height));
-            return Mathf.CeilToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
+            return Mathf.FloorToInt(Mathf.Log(maxDimension, 2.0f)) + 1;
+        }
+
+        private static int ResolveDepthPyramidMaxMip(RenderGraphTexture hzbTexture, int width, int height)
+        {
+            var descriptor = hzbTexture?.desc;
+            if (descriptor == null)
+                return Mathf.Clamp(CalculateMipCount(width, height) - 1, 0, MaxDepthPyramidMipCount - 1);
+
+            if (!descriptor.UseMipMap)
+                return 0;
+
+            int mipCount = descriptor.MipCount;
+            if (mipCount <= 1)
+                mipCount = CalculateMipCount(width, height);
+
+            return Mathf.Clamp(mipCount - 1, 0, MaxDepthPyramidMipCount - 1);
         }
 
         private static Vector4 ResolvePreviousHistoryTextureSize(
@@ -2189,26 +2193,18 @@ namespace VividRP.Runtime.RenderPass.Core
             if (texture?.desc == null)
                 return;
 
-            texture.desc.ColorFormat = GraphicsFormat.R32_SFloat;
+            texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
             texture.desc.DepthBufferBits = DepthBits.None;
             texture.desc.MsaaSamples = MSAASamples.None;
             texture.desc.FilterMode = FilterMode.Point;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.UseMipMap = false;
+            texture.desc.UseMipMap = true;
             texture.desc.AutoGenerateMips = false;
-            texture.desc.MipCount = 1;
+            texture.desc.MipCount = Mathf.Clamp(
+                CalculateMipCount(texture.desc.Width, texture.desc.Height),
+                1,
+                MaxDepthPyramidMipCount);
             texture.desc.ClearBuffer = false;
-        }
-
-        private static void ConfigureHZBMipLevelOffsetBuffer(RenderGraphBuffer buffer)
-        {
-            if (buffer?.desc == null)
-                return;
-
-            buffer.desc.Count = MaxDepthPyramidMipCount;
-            buffer.desc.Stride = sizeof(int) * 2;
-            buffer.desc.Target = GraphicsBuffer.Target.Structured;
-            buffer.desc.Name = "HZBMipLevelOffsets";
         }
 
         private static void ConfigureTileListBuffer(RenderGraphBuffer buffer, int maxTileCount)

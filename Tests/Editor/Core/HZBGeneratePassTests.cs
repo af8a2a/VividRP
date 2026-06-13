@@ -105,7 +105,7 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
 
             Assert.That(source, Does.Contain("internal sealed class HZBGeneratePass : RenderPassNodeData"));
-            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.HZBGeneratePass, VividRP.Runtime"));
+            Assert.That(source, Does.Not.Contain("RegisteredPassTypeName"));
         }
 
         [Test]

@@ -43,6 +43,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int RayDispatchArgsElementCount = 3;
         private const int MaxDepthPyramidMipCount = 13;
         private const string RenderSSRProfilerTag = "RenderSSR";
+        private const string SSRClearProfilerTag = "SSRClear";
         private const string SSRClassifyTilesProfilerTag = "SSRClassifyTiles";
         private const string SSRTracingProfilerTag = "SSRTracing";
         private const string SSRHybridTraceProfilerTag = "SSRHybridTrace";
@@ -95,6 +96,7 @@ namespace VividRP.Runtime.RenderPass.Core
             0.687861f, 0.165974f, 0.440105f, 0.880075f, 0.829201f, 0.330337f, 0.228968f, 0.893372f,
             0.35036f, 0.68667f, 0.956468f, 0.58864f, 0.657304f, 0.858676f, 0.43956f, 0.92397f
         };
+        private static readonly ProfilingSampler s_SSRClearProfilingSampler = new(SSRClearProfilerTag);
         private static readonly ProfilingSampler s_SSRClassifyTilesProfilingSampler = new(SSRClassifyTilesProfilerTag);
         private static readonly ProfilingSampler s_SSRTracingProfilingSampler = new(SSRTracingProfilerTag);
         private static readonly ProfilingSampler s_SSRHybridTraceProfilingSampler = new(SSRHybridTraceProfilerTag);
@@ -402,6 +404,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurStabilizationHistoryCurrent;
 
+        private int m_SSRClearKernel = -1;
         private int m_SSRClassifyTilesKernel = -1;
         private int m_SSRTracingKernel = -1;
         private int m_SSRHybridCandidatesKernel = -1;
@@ -596,6 +599,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             try
             {
+                m_SSRClearKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsClear");
                 m_SSRClassifyTilesKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsClassifyTiles");
                 m_SSRTracingKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsTracing");
                 m_SSRResolveKernel = m_ComputeShader.FindKernel("ScreenSpaceReflectionsResolve");
@@ -608,6 +612,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
             catch (ArgumentException)
             {
+                m_SSRClearKernel = -1;
                 m_SSRClassifyTilesKernel = -1;
                 m_SSRTracingKernel = -1;
                 m_SSRHybridCandidatesKernel = -1;
@@ -697,6 +702,7 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(cmd, profilingSampler))
             {
                 BindSkyParameters(cmd);
+                BindDebugTexture(cmd, m_SSRClearKernel);
                 BindDebugTexture(cmd, m_SSRClassifyTilesKernel);
                 BindDebugTexture(cmd, m_SSRTracingKernel);
                 BindDebugTexture(cmd, m_SSRHybridCandidatesKernel);
@@ -739,6 +745,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     }
                     else
                     {
+                        using (new ProfilingScope(cmd, s_SSRClearProfilingSampler))
+                            DispatchClear(cmd);
+
                         ResetDispatchIndirectArgs(cmd);
 
                         using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))
@@ -782,6 +791,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_ComputeShader = null;
             m_HybridTraceRayTracingShader = null;
+            m_SSRClearKernel = -1;
             m_SSRClassifyTilesKernel = -1;
             m_SSRTracingKernel = -1;
             m_SSRHybridCandidatesKernel = -1;
@@ -1085,7 +1095,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool CanExecuteVividDenoisePath()
         {
-            return m_SSRClassifyTilesKernel >= 0
+            return m_SSRClearKernel >= 0
+                && m_SSRClassifyTilesKernel >= 0
                 && m_SSRResolveKernel >= 0
                 && m_SSRAccumulateKernel >= 0
                 && output?.innerHandle.IsValid() == true
@@ -1101,6 +1112,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_TileListBuffer?.innerHandle.IsValid() == true
                 && m_DispatchIndirectArgsBuffer?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer0?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true;
         }
 
@@ -1136,6 +1148,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_TraceTexture?.innerHandle.IsValid() == true
                 && m_RayInfoTexture?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer0?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true;
         }
 
@@ -1199,6 +1212,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_HybridCandidateBuffer?.innerHandle.IsValid() == true
                 && m_HybridDispatchIndirectArgsBuffer?.innerHandle.IsValid() == true
                 && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_GBuffer0?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true
                 && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true
                 && m_SkyTexture?.innerHandle.IsValid() == true;
@@ -1280,17 +1294,32 @@ namespace VividRP.Runtime.RenderPass.Core
                 1);
         }
 
+        private void DispatchClear(ComputeCommandBuffer cmd)
+        {
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClearKernel, OutputColorTextureId, output.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClearKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClearKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClearKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClearKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClearKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_SSRClearKernel,
+                SSRNumFramesAccumTextureId,
+                m_NumFramesHistoryCurrent.innerHandle);
+            cmd.DispatchCompute(
+                m_ComputeShader,
+                m_SSRClearKernel,
+                CoreUtils.DivRoundUp(m_Width, ThreadGroupSize),
+                CoreUtils.DivRoundUp(m_Height, ThreadGroupSize),
+                1);
+        }
+
         private void DispatchClassifyTiles(ComputeCommandBuffer cmd)
         {
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, OutputColorTextureId, output.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRAccumTextureId, m_ResolveAccumTexture.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);
-            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRNumFramesAccumTextureId, m_NumFramesHistoryCurrent.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, HZBTextureId, m_HZBTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRClassifyTilesKernel, SSRTileListId, m_TileListBuffer.innerHandle);
             cmd.SetComputeBufferParam(
@@ -1348,6 +1377,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHybridCandidatesKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRHybridCandidatesKernel, SSRTileListId, m_TileListBuffer.innerHandle);
             cmd.SetComputeBufferParam(
@@ -1648,6 +1678,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
         }
 
@@ -1657,6 +1688,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SSRResolveTextureId, m_ResolveTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SsrAccumPrevId, m_AccumulationHistoryPrevious.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRRayTracingTemporalKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);
@@ -1695,6 +1727,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, kernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, kernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, kernel, SSRTileListId, m_TileListBuffer.innerHandle);
         }
@@ -1707,6 +1740,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRTraceTextureId, m_TraceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRResolveKernel, SSRTileListId, m_TileListBuffer.innerHandle);
 
@@ -1721,6 +1755,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRAvgRadianceTextureId, m_AvgRadianceTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SSRRayInfoTextureId, m_RayInfoTexture.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, GBuffer0Id, m_GBuffer0.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, GBuffer1Id, m_GBuffer1.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SsrAccumPrevId, m_AccumulationHistoryPrevious.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, SsrAccumTextureId, m_AccumulationHistoryCurrent.innerHandle);

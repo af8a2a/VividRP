@@ -1,4 +1,5 @@
 
+#pragma kernel ScreenSpaceReflectionsClear
 #pragma kernel ScreenSpaceReflectionsClassifyTiles
 #pragma kernel ScreenSpaceReflectionsTracing
 #pragma kernel ScreenSpaceReflectionsResolve
@@ -1291,6 +1292,22 @@ bool TraceScreenSpaceReflectionHDRP(
 }
 
 [numthreads(8, 8, 1)]
+void ScreenSpaceReflectionsClear(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coordSS = dispatchThreadId.xy;
+    if (IsOutsideScreen(coordSS))
+        return;
+
+    StoreEmptySsrTrace(coordSS);
+    _SSRResolveTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+    _OutputColorTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+    _SSRDebugTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+    _SSRAccumTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+    _SsrAccumTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
+    _SSRNumFramesAccumTexture[coordSS] = 0.0;
+}
+
+[numthreads(8, 8, 1)]
 void ScreenSpaceReflectionsClassifyTiles(
     uint3 dispatchThreadId : SV_DispatchThreadID,
     uint3 groupThreadId : SV_GroupThreadID,
@@ -1303,14 +1320,6 @@ void ScreenSpaceReflectionsClassifyTiles(
     bool shouldTracePixel = false;
     if (!IsOutsideScreen(coordSS))
     {
-        StoreEmptySsrTrace(coordSS);
-        _SSRResolveTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
-        _OutputColorTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
-        _SSRDebugTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
-        _SSRAccumTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
-        _SsrAccumTexture[coordSS] = float4(0.0, 0.0, 0.0, 0.0);
-        _SSRNumFramesAccumTexture[coordSS] = 0.0;
-
         float debugDeviceDepth = _DepthTexture.Load(int3(coordSS, 0));
         float2 debugScreenUV = ((float2)coordSS + 0.5) * _SsrTraceScreenSize.zw;
         StoreSsrBaseDebug(coordSS, debugScreenUV, debugDeviceDepth);

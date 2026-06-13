@@ -766,6 +766,7 @@ namespace VividRP.Editor.Tests
                 "ScreenSpaceReflection",
                 "ScreenSpaceReflection.compute"));
 
+            Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsClear"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsClassifyTiles"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsTracing"));
             Assert.That(source, Does.Contain("#pragma kernel ScreenSpaceReflectionsResolve"));
@@ -1048,6 +1049,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_SSRAccumTexture[coordSS] = accumulatedReflection;"));
             Assert.That(source, Does.Not.Contain("_SSRHDRPOutputTexture[coordSS] = accumulatedReflection;"));
             Assert.That(source, Does.Not.Contain("if (_SsrWriteHDRPToOutput != 0)"));
+            Assert.That(source, Does.Contain("void ScreenSpaceReflectionsClear(uint3 dispatchThreadId : SV_DispatchThreadID)"));
             Assert.That(source, Does.Contain("void CopyHDRPScreenSpaceReflection("));
             Assert.That(source, Does.Contain("_OutputColorTexture[coordSS] = _SSRAccumTexture[coordSS];"));
             Assert.That(source, Does.Not.Contain("ClearScreenSpaceReflectionTiles"));
@@ -1068,6 +1070,7 @@ namespace VividRP.Editor.Tests
                 "ScreenSpaceReflectionPass.cs"));
 
             Assert.That(source, Does.Contain("private const string RenderSSRProfilerTag = \"RenderSSR\";"));
+            Assert.That(source, Does.Contain("private const string SSRClearProfilerTag = \"SSRClear\";"));
             Assert.That(source, Does.Contain("private const string SSRClassifyTilesProfilerTag = \"SSRClassifyTiles\";"));
             Assert.That(source, Does.Contain("private const string SSRTracingProfilerTag = \"SSRTracing\";"));
             Assert.That(source, Does.Contain("private const string SSRResolveProfilerTag = \"SSRResolve\";"));
@@ -1083,6 +1086,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private const string ReBlurTemporalStabilizationProfilerTag = \"ReBlurTemporalStabilization\";"));
             Assert.That(source, Does.Contain("private const string ReBlurCopyHistoryStabProfilerTag = \"ReBlurCopyHistoryStab\";"));
             Assert.That(source, Does.Contain("private const string ReBlurPostBlurProfilerTag = \"ReBlurPostBlur\";"));
+            Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsClear\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsClassifyTiles\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsTracing\")"));
             Assert.That(source, Does.Contain("FindKernel(\"ScreenSpaceReflectionsResolve\")"));
@@ -1154,6 +1158,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("AutoExposureShaderBindings.ResolvePreExposureBuffer"));
             Assert.That(source, Does.Contain("AutoExposureShaderBindings.PreExposureBufferId"));
             Assert.That(source, Does.Not.Contain("BlueNoise.Instance?.Bind(cmd);"));
+            Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRClearProfilingSampler))"));
+            Assert.That(source, Does.Contain("DispatchClear(cmd);"));
             Assert.That(source, Does.Contain("ResetDispatchIndirectArgs(cmd);"));
             Assert.That(source, Does.Contain("cmd.SetBufferData(dispatchIndirectArgsBuffer, s_InitialDispatchIndirectArgsData);"));
             Assert.That(source, Does.Contain("public int SsrFrameIndex;"));
@@ -1162,6 +1168,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("public Matrix4x4 SsrInvViewProjMatrix;"));
             Assert.That(source, Does.Contain("public Matrix4x4 SsrPrevViewProjMatrix;"));
             Assert.That(source, Does.Contain("ResolveSsrPrevViewProjMatrix(cameraData, viewProjMatrix);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRClassifyTilesKernel, GBuffer0Id, m_GBuffer0.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRResolveKernel, GBuffer0Id, m_GBuffer0.innerHandle);"));
+            Assert.That(source, Does.Contain("cmd.SetComputeTextureParam(m_ComputeShader, m_SSRAccumulateKernel, GBuffer0Id, m_GBuffer0.innerHandle);"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRClassifyTilesProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRTracingProfilingSampler))"));
             Assert.That(source, Does.Contain("using (new ProfilingScope(cmd, s_SSRResolveProfilingSampler))"));

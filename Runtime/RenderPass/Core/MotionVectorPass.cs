@@ -10,12 +10,11 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string CameraMotionVectorsShaderName = "Hidden/VividRP/CameraMotionVectors";
         internal const string ObjectMotionVectorFallbackShaderName = "Hidden/VividRP/ObjectMotionVectorFallback";
         internal const string MotionVectorsShaderTagName = "MotionVectors";
+        internal const string ObjectMotionVectorFallbackShaderTagName = "ObjectMotionVectorFallback";
 
-        private static readonly string[] s_DefaultShaderTagNames =
+        private static readonly string[] s_FallbackShaderTagNames =
         {
-            "VividGBuffer",
-            RenderGraphRenderListDesc.ForwardShaderTagName,
-            RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
+            ObjectMotionVectorFallbackShaderTagName,
         };
 
         private static readonly string[] s_MotionVectorShaderTagNames =
@@ -61,11 +60,10 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = new RenderGraphRenderListDesc
                 {
-                    ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone(),
+                    ShaderTagNames = (string[])s_FallbackShaderTagNames.Clone(),
                     RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                     SortingCriteria = SortingCriteria.CommonOpaque,
                     RendererConfiguration = PerObjectData.MotionVectors,
-                    ExcludeObjectMotionVectors = true,
                 }
             };
 
@@ -159,9 +157,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RenderList ??= new RenderGraphRenderList();
             m_RenderList.desc ??= new RenderGraphRenderListDesc();
 
-            if (m_RenderList.desc.ShaderTagNames == null || m_RenderList.desc.ShaderTagNames.Length == 0)
-                m_RenderList.desc.ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone();
-
+            m_RenderList.desc.ShaderTagNames = (string[])s_MotionVectorShaderTagNames.Clone();
             m_RenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
             m_RenderList.desc.ExcludeObjectMotionVectors = false;
             m_RenderList.desc.OverrideMaterial = null;
@@ -172,11 +168,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FallbackRenderList ??= new RenderGraphRenderList();
             m_FallbackRenderList.desc ??= new RenderGraphRenderListDesc();
 
-            if (m_FallbackRenderList.desc.ShaderTagNames == null || m_FallbackRenderList.desc.ShaderTagNames.Length == 0)
-                m_FallbackRenderList.desc.ShaderTagNames = (string[])s_DefaultShaderTagNames.Clone();
-
+            m_FallbackRenderList.desc.ShaderTagNames = (string[])s_FallbackShaderTagNames.Clone();
             m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
-            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = true;
+            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = false;
             m_FallbackRenderList.desc.OverrideMaterial = null;
             m_FallbackRenderList.desc.OverrideMaterialPassIndex = 0;
             m_FallbackRenderList.desc.OverrideShader = m_ObjectMotionVectorFallbackShader;

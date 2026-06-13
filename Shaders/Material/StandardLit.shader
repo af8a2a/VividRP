@@ -202,7 +202,7 @@ Shader "VividRP/Material/StandardLit"
             Cull [_Cull]
 
             HLSLPROGRAM
-                #pragma target 4.5
+                #pragma use_dxc
                 #pragma multi_compile_instancing
                 #pragma instancing_options renderinglayer
                 #pragma shader_feature_local_fragment _ALPHATEST_ON

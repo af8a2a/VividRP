@@ -122,7 +122,9 @@ namespace VividRP.Editor
                 DrawStatLine("Build Mode", stats.BuildMode.ToString());
                 DrawStatLine("Culling Mode", stats.CullingMode.ToString());
                 DrawStatLine("Instance Count", stats.InstanceCount.ToString("N0"));
-                DrawStatLine("Candidate Instances", stats.CandidateRendererCount.ToString("N0"));
+                DrawStatLine(
+                    "Candidate Instances",
+                    stats.HasCullRate ? stats.CandidateRendererCount.ToString("N0") : "N/A");
                 DrawStatLine("Cull Rate (Est.)", stats.HasCullRate ? FormatPercentage(stats.CullRate) : "N/A");
                 DrawStatLine("Memory Usage", FormatBytes(stats.MemoryBytes));
 

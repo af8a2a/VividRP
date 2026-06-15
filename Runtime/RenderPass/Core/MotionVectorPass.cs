@@ -11,6 +11,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string ObjectMotionVectorFallbackShaderName = "Hidden/VividRP/ObjectMotionVectorFallback";
         internal const string MotionVectorsShaderTagName = "MotionVectors";
         internal const string ObjectMotionVectorFallbackShaderTagName = "ObjectMotionVectorFallback";
+        internal const int ObjectMotionVectorStencilBit = 1 << 5;
+        private const int CameraDepthPrefillPassIndex = 0;
+        private const int CameraMotionVectorsPassIndex = 1;
 
         private static readonly string[] s_FallbackShaderTagNames =
         {
@@ -23,6 +26,8 @@ namespace VividRP.Runtime.RenderPass.Core
         };
 
         private static readonly int CameraDepthTextureId = Shader.PropertyToID("_CameraDepthTexture");
+        private static readonly int StencilRefId = Shader.PropertyToID("_StencilRef");
+        private static readonly int StencilMaskId = Shader.PropertyToID("_StencilMask");
 
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_RenderList;
@@ -105,7 +110,14 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_CameraMotionMaterial != null)
             {
                 m_CameraMotionMaterial.SetTexture(CameraDepthTextureId, m_CameraDepthTexture.innerHandle);
-                context.cmd.DrawProcedural(Matrix4x4.identity, m_CameraMotionMaterial, 0, MeshTopology.Triangles, 3, 1);
+                m_CameraMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
+                context.cmd.DrawProcedural(
+                    Matrix4x4.identity,
+                    m_CameraMotionMaterial,
+                    CameraDepthPrefillPassIndex,
+                    MeshTopology.Triangles,
+                    3,
+                    1);
             }
 
             if (m_RenderList != null && m_RenderList.IsValid)
@@ -116,6 +128,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_FallbackRenderList.IsValid)
             {
                 context.cmd.DrawRendererList(m_FallbackRenderList);
+            }
+
+            if (m_CameraMotionMaterial != null)
+            {
+                m_CameraMotionMaterial.SetInt(StencilRefId, ObjectMotionVectorStencilBit);
+                m_CameraMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
+                context.cmd.DrawProcedural(
+                    Matrix4x4.identity,
+                    m_CameraMotionMaterial,
+                    CameraMotionVectorsPassIndex,
+                    MeshTopology.Triangles,
+                    3,
+                    1);
             }
         }
 

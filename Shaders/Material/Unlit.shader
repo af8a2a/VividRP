@@ -180,6 +180,13 @@ Shader "VividRP/Material/Unlit"
             ZWrite On
             ZTest LEqual
             Cull [_CullMode]
+            Stencil
+            {
+                WriteMask 32
+                Ref 32
+                Comp Always
+                Pass Replace
+            }
 
             HLSLPROGRAM
                 #pragma target 4.5

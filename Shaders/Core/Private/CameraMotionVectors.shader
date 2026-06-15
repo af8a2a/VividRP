@@ -3,6 +3,8 @@ Shader "Hidden/VividRP/CameraMotionVectors"
     Properties
     {
         [NoScaleOffset] _CameraDepthTexture("Camera Depth", 2D) = "white" {}
+        [HideInInspector] _StencilRef("_StencilRef", Int) = 32
+        [HideInInspector] _StencilMask("_StencilMask", Int) = 32
     }
 
     SubShader
@@ -11,11 +13,78 @@ Shader "Hidden/VividRP/CameraMotionVectors"
 
         Pass
         {
+            Name "Camera Motion Vector Depth"
+            ColorMask 0
+            Cull Off
+            ZWrite On
+            ZTest Always
+            Stencil
+            {
+                WriteMask [_StencilMask]
+                Ref 0
+                Comp Always
+                Pass Replace
+            }
+
+            HLSLPROGRAM
+            #pragma target 3.5
+            #pragma vertex Vert
+            #pragma fragment FragDepth
+
+            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+
+            TEXTURE2D_X_FLOAT(_CameraDepthTexture);
+
+            struct Attributes
+            {
+                uint vertexID : SV_VertexID;
+                UNITY_VERTEX_INPUT_INSTANCE_ID
+            };
+
+            struct Varyings
+            {
+                float4 positionCS : SV_POSITION;
+                float2 uv : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
+            };
+
+            Varyings Vert(Attributes input)
+            {
+                Varyings output;
+
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
+
+                output.positionCS = GetFullScreenTriangleVertexPosition(input.vertexID);
+                output.uv = GetFullScreenTriangleTexCoord(input.vertexID);
+                return output;
+            }
+
+            half4 FragDepth(Varyings input, out float outputDepth : SV_Depth) : SV_Target
+            {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                float2 depthUV = ClampAndScaleUV(input.uv, _ScreenSize.zw, 0.5);
+                outputDepth = SAMPLE_TEXTURE2D_X_LOD(_CameraDepthTexture, sampler_PointClamp, depthUV, 0).x;
+                return 0.0;
+            }
+            ENDHLSL
+        }
+
+        Pass
+        {
             Name "Camera Motion Vectors"
             ColorMask RG
             Cull Off
             ZWrite On
             ZTest Always
+            Stencil
+            {
+                WriteMask [_StencilMask]
+                ReadMask [_StencilMask]
+                Ref [_StencilRef]
+                Comp NotEqual
+            }
 
             HLSLPROGRAM
             #pragma target 3.5

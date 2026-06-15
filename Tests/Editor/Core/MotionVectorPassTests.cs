@@ -67,6 +67,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ObjectMotionVectorStencilBit_UsesHDRPObjectMotionVectorBit()
+        {
+            Assert.That(MotionVectorPass.ObjectMotionVectorStencilBit, Is.EqualTo(1 << 5));
+        }
+
+        [Test]
         public void Prepare_DoesNotMutateCameraMotionVectorDepthFlags_WhenCameraIsAvailable()
         {
             var pass = new MotionVectorPass();

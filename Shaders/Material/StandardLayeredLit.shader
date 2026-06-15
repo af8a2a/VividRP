@@ -242,6 +242,13 @@ Shader "VividRP/Material/StandardLayeredLit"
             ZWrite [_ZWrite]
             ZTest LEqual
             Cull [_Cull]
+            Stencil
+            {
+                WriteMask 32
+                Ref 32
+                Comp Always
+                Pass Replace
+            }
 
             HLSLPROGRAM
                 #pragma target 4.5

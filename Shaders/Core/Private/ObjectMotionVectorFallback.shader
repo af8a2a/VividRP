@@ -20,6 +20,13 @@ Shader "Hidden/VividRP/ObjectMotionVectorFallback"
             Cull Back
             ZWrite On
             ZTest LEqual
+            Stencil
+            {
+                WriteMask 32
+                Ref 32
+                Comp Always
+                Pass Replace
+            }
 
             HLSLPROGRAM
             #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ObjectMotionVectors.hlsl"

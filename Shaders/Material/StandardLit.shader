@@ -200,6 +200,13 @@ Shader "VividRP/Material/StandardLit"
             ZWrite [_ZWrite]
             ZTest LEqual
             Cull [_Cull]
+            Stencil
+            {
+                WriteMask 32
+                Ref 32
+                Comp Always
+                Pass Replace
+            }
 
             HLSLPROGRAM
                 #pragma use_dxc

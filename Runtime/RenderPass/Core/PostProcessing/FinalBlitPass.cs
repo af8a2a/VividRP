@@ -405,7 +405,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 HDROutputUtils.ConfigureHDROutput(
                     material,
                     gamut,
-                    HDROutputUtils.Operation.ColorEncoding);
+                    HDROutputUtils.Operation.ColorConversion | HDROutputUtils.Operation.ColorEncoding);
                 return;
             }
 

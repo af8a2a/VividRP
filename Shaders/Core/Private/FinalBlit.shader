@@ -20,14 +20,14 @@ Shader "Hidden/VividRP/FinalBlit"
             #pragma multi_compile_local _ _BLOOM
             #pragma multi_compile_local _ _BLOOM_HQ
             #pragma multi_compile_local _ _BLOOM_DIRT
-            #pragma multi_compile_local _ HDR_ENCODING
+            #pragma multi_compile_local _ HDR_COLORSPACE_CONVERSION HDR_ENCODING HDR_COLORSPACE_CONVERSION_AND_ENCODING
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ACES.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
-            #if defined(HDR_ENCODING)
+            #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING) || defined(HDR_COLORSPACE_CONVERSION_AND_ENCODING)
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/HDROutput.hlsl"
             #endif
 
@@ -41,7 +41,7 @@ Shader "Hidden/VividRP/FinalBlit"
             StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;
             float4 _VividAutoExposureParams;
 
-            #if defined(HDR_ENCODING)
+            #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING)
             float4 _HDROutputParams;
             float4 _HDROutputParams2;
             #define _MinNits            _HDROutputParams.x
@@ -50,6 +50,29 @@ Shader "Hidden/VividRP/FinalBlit"
             #define _OneOverPaperWhite  _HDROutputParams.w
             #define _RangeReductionMode (int)_HDROutputParams2.x
             #define _HueShift           _HDROutputParams2.y
+            #endif
+
+            #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING)
+            float3 VividMapRec709ToHDROutput(float3 color)
+            {
+                return HDRMappingFromRec709(
+                    max(color, 0.0),
+                    _PaperWhite,
+                    _MinNits,
+                    _MaxNits,
+                    _RangeReductionMode,
+                    _HueShift,
+                    true);
+            }
+
+            float3 VividEncodeHDROutput(float3 color)
+            {
+                #if defined(HDR_ENCODING)
+                return OETF(color, _MaxNits);
+                #else
+                return color;
+                #endif
+            }
             #endif
 
             #if defined(_VIGNETTE)
@@ -127,7 +150,7 @@ Shader "Hidden/VividRP/FinalBlit"
 
                 if (_VividColorGradingParams.z > 0.5)
                 {
-                    #if defined(HDR_ENCODING)
+                    #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING)
                     float3 lutSpace = saturate(LinearToPQForLUT(max(postProcessed, 0.0) * 100.0));
                     #else
                     float3 lutSpace = saturate(LinearToLogC(max(postProcessed, 0.0)));
@@ -161,17 +184,10 @@ Shader "Hidden/VividRP/FinalBlit"
                     bloom += dirt * _VividBloomParams.y;
                     #endif
 
-                    #if defined(HDR_ENCODING)
+                    #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING)
                     if (_VividColorGradingParams.z > 0.5)
                     {
-                        bloom = HDRMappingFromRec709(
-                            max(bloom, 0.0),
-                            _PaperWhite,
-                            _MinNits,
-                            _MaxNits,
-                            _RangeReductionMode,
-                            _HueShift,
-                            true);
+                        bloom = VividMapRec709ToHDROutput(bloom);
                     }
                     #endif
 
@@ -201,7 +217,7 @@ Shader "Hidden/VividRP/FinalBlit"
 
                 #if defined(_FILM_GRAIN)
                 {
-                    #if !defined(HDR_ENCODING)
+                    #if !defined(HDR_COLORSPACE_CONVERSION) && !defined(HDR_ENCODING)
                     postProcessed = saturate(postProcessed);
                     #endif
 
@@ -212,7 +228,7 @@ Shader "Hidden/VividRP/FinalBlit"
                     grain = (grain - 0.5) * 2.0;
 
                     // Match HDRP's noisiness response curve based on scene luminance.
-                    #if defined(HDR_ENCODING)
+                    #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING)
                     float lum = Luminance(postProcessed * _OneOverPaperWhite);
                     #else
                     float lum = Luminance(postProcessed);
@@ -224,20 +240,13 @@ Shader "Hidden/VividRP/FinalBlit"
                 }
                 #endif
 
-                #if defined(HDR_ENCODING)
+                #if defined(HDR_COLORSPACE_CONVERSION) || defined(HDR_ENCODING)
                 if (_VividColorGradingParams.z <= 0.5)
                 {
-                    postProcessed = HDRMappingFromRec709(
-                        max(postProcessed, 0.0),
-                        _PaperWhite,
-                        _MinNits,
-                        _MaxNits,
-                        _RangeReductionMode,
-                        _HueShift,
-                        true);
+                    postProcessed = VividMapRec709ToHDROutput(postProcessed);
                 }
 
-                postProcessed = OETF(postProcessed, _MaxNits);
+                postProcessed = VividEncodeHDROutput(postProcessed);
                 #endif
 
                 return float4(postProcessed, color.a);

@@ -19,6 +19,7 @@ namespace VividRP.Runtime
         private static readonly ProfilerMarker s_RenderCameraMarker = new("VividRP.RenderPipeline.RenderCamera");
         private static readonly ProfilerMarker s_BeginCameraRenderingMarker = new("VividRP.RenderPipeline.RenderCamera.BeginCameraRendering");
         private static readonly ProfilerMarker s_RestoreProjectionStateMarker = new("VividRP.RenderPipeline.RenderCamera.RestoreProjectionState");
+        private static readonly ProfilerMarker s_HDRStateMarker = new("VividRP.RenderPipeline.RenderCamera.HDRState");
         private static readonly ProfilerMarker s_VolumeUpdateMarker = new("VividRP.RenderPipeline.RenderCamera.VolumeUpdate");
         private static readonly ProfilerMarker s_CullingParametersMarker = new("VividRP.RenderPipeline.RenderCamera.CullingParameters");
         private static readonly ProfilerMarker s_EmitGeometryMarker = new("VividRP.RenderPipeline.RenderCamera.EmitGeometry");
@@ -60,6 +61,7 @@ namespace VividRP.Runtime
 
         private readonly VividRenderPipelineAsset m_Asset;
         private readonly bool m_PreviousUseScriptableRenderPipelineBatching;
+        private bool m_EnableHdrOnce = true;
         private DebugDisplaySettingsUI m_DebugDisplaySettingsUI;
         private RenderGraph m_RenderGraph;
 
@@ -126,6 +128,11 @@ namespace VividRP.Runtime
                 using (s_RestoreProjectionStateMarker.Auto())
                 {
                     CameraProjectionMatrixUtility.RestoreProjectionState(camera, projectionState);
+                }
+
+                using (s_HDRStateMarker.Auto())
+                {
+                    VividHDROutputUtility.SetHDRState(camera, ref m_EnableHdrOnce);
                 }
 
                 using (s_VolumeUpdateMarker.Auto())

@@ -207,6 +207,14 @@ namespace VividRP.Runtime
                 cameraData.actualWidth = actualSize.x;
                 cameraData.actualHeight = actualSize.y;
                 cameraData.frameIndex = frameIndex;
+                cameraData.hdrOutputAllowed = VividHDROutputUtility.HDROutputAllowedForCamera(camera);
+                cameraData.hdrOutputActive = VividHDROutputUtility.HDROutputActiveForCamera(camera);
+                cameraData.hdrDisplayInformation = cameraData.hdrOutputActive
+                    ? VividHDROutputUtility.HDRDisplayInformationForCamera(camera)
+                    : VividHDROutputUtility.DefaultHDRDisplayInformation;
+                cameraData.hdrDisplayColorGamut = cameraData.hdrOutputActive
+                    ? VividHDROutputUtility.HDRDisplayColorGamutForCamera(camera)
+                    : ColorGamut.sRGB;
             }
 
             using (RenderPassProfilingUtility.InitializeContextPopulateRenderingDataMarker.Auto())

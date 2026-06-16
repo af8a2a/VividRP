@@ -8,6 +8,7 @@ namespace VividRP.Runtime
     public class ColorGradingPass : UnsafePass
     {
         private ColorGradingLutBuilder m_LutBuilder;
+        private readonly ColorCurves m_DefaultCurves = new();
         private ColorGradingSettingsData m_Settings;
         private ColorCurves m_Curves;
 
@@ -35,7 +36,25 @@ namespace VividRP.Runtime
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_Settings = ColorGradingSettingsResolver.Resolve(frameData, out m_Curves);
+            var cameraData = frameData != null && frameData.Contains<VividCameraData>()
+                ? frameData.Get<VividCameraData>()
+                : null;
+            var postProcessingAllowed = cameraData?.camera != null && CoreUtils.ArePostProcessesEnabled(cameraData.camera);
+            if (!postProcessingAllowed && cameraData?.hdrOutputActive == true)
+            {
+                m_Settings = ColorGradingSettingsResolver.ResolveHDROutput(frameData);
+                m_Curves = m_DefaultCurves;
+            }
+            else if (!postProcessingAllowed)
+            {
+                m_Settings = ColorGradingSettingsData.CreateDefault();
+                m_Curves = m_DefaultCurves;
+            }
+            else
+            {
+                m_Settings = ColorGradingSettingsResolver.Resolve(frameData, out m_Curves);
+                m_Curves ??= m_DefaultCurves;
+            }
 
             colorGradingTex.desc.Width = ColorGradingLutBuilder.LutSize;
             colorGradingTex.desc.Height = ColorGradingLutBuilder.LutSize;

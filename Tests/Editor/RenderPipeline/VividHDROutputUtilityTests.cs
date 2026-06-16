@@ -51,5 +51,24 @@ namespace VividRP.Editor.Tests
 
             Assert.That(enableHdrOnce, Is.True);
         }
+
+        [Test]
+        public void HDROutputActiveForCamera_ReturnsFalse_WhenCameraDisallowsHDR()
+        {
+            var gameObject = new GameObject("HDR Output Test Camera");
+            try
+            {
+                var camera = gameObject.AddComponent<Camera>();
+                camera.cameraType = CameraType.Game;
+                camera.allowHDR = false;
+
+                Assert.That(VividHDROutputUtility.HDROutputAllowedForCamera(camera), Is.False);
+                Assert.That(VividHDROutputUtility.HDROutputActiveForCamera(camera), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
     }
 }

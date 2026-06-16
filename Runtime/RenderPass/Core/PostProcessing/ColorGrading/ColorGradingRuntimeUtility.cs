@@ -72,8 +72,12 @@ namespace VividRP.Runtime
         public Vector4 midSegmentB;
         public Vector4 shoSegmentA;
         public Vector4 shoSegmentB;
+        public bool hdrOutputActive;
+        public ColorGamut hdrDisplayColorGamut;
+        public Vector4 hdrOutputParameters;
+        public Vector4 hdrOutputParameters2;
 
-        public bool RequiresLut => enableColorGrading || tonemappingMode != ColorGradingTonemappingShaderMode.None;
+        public bool RequiresLut => hdrOutputActive || enableColorGrading || tonemappingMode != ColorGradingTonemappingShaderMode.None;
 
         public bool RequiresPostProcessing => RequiresLut || !Mathf.Approximately(postExposureLinear, 1f);
 
@@ -128,6 +132,10 @@ namespace VividRP.Runtime
                 midSegmentB = Vector4.zero,
                 shoSegmentA = Vector4.zero,
                 shoSegmentB = Vector4.zero,
+                hdrOutputActive = false,
+                hdrDisplayColorGamut = ColorGamut.sRGB,
+                hdrOutputParameters = new Vector4(0f, 1000f, 300f, 1f / 300f),
+                hdrOutputParameters2 = Vector4.zero,
             };
         }
     }
@@ -148,22 +156,25 @@ namespace VividRP.Runtime
 
     internal static class ColorGradingSettingsResolver
     {
+        private const float DefaultHDRMinNits = 0.0f;
+        private const float DefaultHDRMaxNits = 1000.0f;
+        private const float DefaultHDRPaperWhite = 300.0f;
         private static readonly HableCurve s_CustomToneCurve = new();
 
         internal static ColorGradingSettingsData Resolve()
         {
-            return ResolveFromStack(VolumeManager.instance.stack, out _);
+            return ResolveFromStack(VolumeManager.instance.stack, null, out _);
         }
 
         internal static ColorGradingSettingsData Resolve(ContextContainer frameData, out ColorCurves curves)
         {
             if (frameData == null)
-                return ResolveFromStack(VolumeManager.instance.stack, out curves);
+                return ResolveFromStack(VolumeManager.instance.stack, null, out curves);
 
             var data = frameData.GetOrCreate<VividColorGradingData>();
             if (!data.isResolved)
             {
-                data.settings = ResolveFromStack(VolumeManager.instance.stack, out data.curves);
+                data.settings = ResolveFromStack(VolumeManager.instance.stack, frameData, out data.curves);
                 data.isResolved = true;
             }
 
@@ -200,12 +211,94 @@ namespace VividRP.Runtime
             frameData.Get<VividColorGradingData>().Reset();
         }
 
-        private static ColorGradingSettingsData ResolveFromStack(VolumeStack stack, out ColorCurves curves)
+        internal static ColorGradingSettingsData ResolveHDROutput(ContextContainer frameData)
+        {
+            var settings = ColorGradingSettingsData.CreateDefault();
+            ApplyHDROutputState(ref settings, frameData, null);
+            return settings;
+        }
+
+        internal static void ResolveHDROutputParameters(
+            HDROutputUtils.HDRDisplayInformation displayInformation,
+            ColorGamut displayColorGamut,
+            Tonemapping tonemapping,
+            out Vector4 hdrOutputParameters,
+            out Vector4 hdrOutputParameters2)
+        {
+            var minNits = (float)displayInformation.minToneMapLuminance;
+            var maxNits = (float)displayInformation.maxToneMapLuminance;
+            var paperWhite = displayInformation.paperWhiteNits;
+            var rangeReductionMode = 0;
+            var hueShift = 0.0f;
+
+            var detectBrightnessLimits = tonemapping == null || tonemapping.detectBrightnessLimits.value;
+            var detectPaperWhite = tonemapping != null && tonemapping.detectPaperWhite.value;
+
+            if ((minNits < 0f || maxNits <= 0f) && detectBrightnessLimits)
+            {
+                minNits = DefaultHDRMinNits;
+                maxNits = DefaultHDRMaxNits;
+                Debug.LogWarning(
+                    "[VividRP] The platform failed to detect HDR min/max nits; using 0/1000 nits defaults. A calibration screen should provide manual limits.");
+            }
+
+            if (paperWhite <= 0f && detectPaperWhite)
+            {
+                paperWhite = DefaultHDRPaperWhite;
+                Debug.LogWarning(
+                    "[VividRP] The platform failed to detect HDR paper white; using 300 nits default. A calibration screen should provide a manual value.");
+            }
+
+            var hdrTonemapMode = ResolveHDRTonemappingMode(tonemapping);
+            if (hdrTonemapMode == TonemappingMode.Neutral)
+            {
+                hueShift = tonemapping != null ? tonemapping.hueShiftAmount.value : 0.0f;
+                var neutralMode = tonemapping != null
+                    ? tonemapping.neutralHDRRangeReductionMode.value
+                    : NeutralRangeReductionMode.BT2390;
+
+                if (neutralMode == NeutralRangeReductionMode.BT2390)
+                    rangeReductionMode = (int)HDRRangeReduction.BT2390;
+                else if (neutralMode == NeutralRangeReductionMode.Reinhard)
+                    rangeReductionMode = (int)HDRRangeReduction.Reinhard;
+            }
+            else if (hdrTonemapMode == TonemappingMode.ACES)
+            {
+                rangeReductionMode = tonemapping != null
+                    ? (int)tonemapping.acesPreset.value
+                    : (int)HDRACESPreset.ACES1000Nits;
+            }
+
+            if (tonemapping == null || !tonemapping.detectPaperWhite.value)
+                paperWhite = tonemapping != null ? tonemapping.paperWhite.value : DefaultHDRPaperWhite;
+
+            if (tonemapping != null && !tonemapping.detectBrightnessLimits.value)
+            {
+                minNits = tonemapping.minNits.value;
+                maxNits = tonemapping.maxNits.value;
+            }
+
+            paperWhite = Mathf.Max(1e-4f, paperWhite);
+            hdrOutputParameters = new Vector4(minNits, maxNits, paperWhite, 1f / paperWhite);
+            hdrOutputParameters2 = new Vector4(
+                rangeReductionMode,
+                hueShift,
+                paperWhite,
+                (int)ColorGamutUtility.GetColorPrimaries(displayColorGamut));
+        }
+
+        private static ColorGradingSettingsData ResolveFromStack(
+            VolumeStack stack,
+            ContextContainer frameData,
+            out ColorCurves curves)
         {
             var settings = ColorGradingSettingsData.CreateDefault();
             curves = null;
             if (stack == null)
+            {
+                ApplyHDROutputState(ref settings, frameData, null);
                 return settings;
+            }
 
             var whiteBalance = stack.GetComponent<WhiteBalance>();
             var colorAdjustments = stack.GetComponent<ColorAdjustments>();
@@ -297,7 +390,7 @@ namespace VividRP.Runtime
                 settings.enableColorGrading |= curves.IsActive();
             }
 
-            ResolveTonemapping(ref settings, tonemapping);
+            ResolveTonemapping(ref settings, tonemapping, frameData);
             return settings;
         }
 
@@ -348,15 +441,25 @@ namespace VividRP.Runtime
                 || !Mathf.Approximately(colorAdjustments.saturation.value, 0f);
         }
 
-        private static void ResolveTonemapping(ref ColorGradingSettingsData settings, Tonemapping tonemapping)
+        private static void ResolveTonemapping(
+            ref ColorGradingSettingsData settings,
+            Tonemapping tonemapping,
+            ContextContainer frameData)
         {
             if (tonemapping == null)
             {
                 settings.tonemappingMode = ColorGradingTonemappingShaderMode.None;
+                ApplyHDROutputState(ref settings, frameData, null);
                 return;
             }
 
-            switch (tonemapping.mode.value)
+            ApplyHDROutputState(ref settings, frameData, tonemapping);
+
+            var tonemappingMode = settings.hdrOutputActive
+                ? ResolveHDRTonemappingMode(tonemapping)
+                : tonemapping.mode.value;
+
+            switch (tonemappingMode)
             {
                 case TonemappingMode.None:
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.None;
@@ -365,7 +468,7 @@ namespace VividRP.Runtime
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.Neutral;
                     break;
                 case TonemappingMode.ACES:
-                    settings.tonemappingMode = tonemapping.useFullACES.value
+                    settings.tonemappingMode = settings.hdrOutputActive || tonemapping.useFullACES.value
                         ? ColorGradingTonemappingShaderMode.AcesFull
                         : ColorGradingTonemappingShaderMode.AcesApprox;
                     break;
@@ -416,6 +519,36 @@ namespace VividRP.Runtime
             }
         }
 
+        private static TonemappingMode ResolveHDRTonemappingMode(Tonemapping tonemapping)
+        {
+            return tonemapping != null ? tonemapping.GetHDRTonemappingMode() : TonemappingMode.None;
+        }
+
+        private static void ApplyHDROutputState(
+            ref ColorGradingSettingsData settings,
+            ContextContainer frameData,
+            Tonemapping tonemapping)
+        {
+            var cameraData = frameData != null && frameData.Contains<VividCameraData>()
+                ? frameData.Get<VividCameraData>()
+                : null;
+            if (cameraData == null || !cameraData.hdrOutputActive)
+            {
+                settings.hdrOutputActive = false;
+                settings.hdrDisplayColorGamut = ColorGamut.sRGB;
+                return;
+            }
+
+            settings.hdrOutputActive = true;
+            settings.hdrDisplayColorGamut = cameraData.hdrDisplayColorGamut;
+            ResolveHDROutputParameters(
+                cameraData.hdrDisplayInformation,
+                cameraData.hdrDisplayColorGamut,
+                tonemapping,
+                out settings.hdrOutputParameters,
+                out settings.hdrOutputParameters2);
+        }
+
         private static Vector4 ToVector4(Color color)
         {
             return new Vector4(color.r, color.g, color.b, color.a);
@@ -456,6 +589,8 @@ namespace VividRP.Runtime
         private static readonly int MidSegmentBId = Shader.PropertyToID("_MidSegmentB");
         private static readonly int ShoSegmentAId = Shader.PropertyToID("_ShoSegmentA");
         private static readonly int ShoSegmentBId = Shader.PropertyToID("_ShoSegmentB");
+        private static readonly int HDROutputParamsId = Shader.PropertyToID("_HDROutputParams");
+        private static readonly int HDROutputParams2Id = Shader.PropertyToID("_HDROutputParams2");
         private static readonly int CurveMasterId = Shader.PropertyToID("_CurveMaster");
         private static readonly int CurveRedId = Shader.PropertyToID("_CurveRed");
         private static readonly int CurveGreenId = Shader.PropertyToID("_CurveGreen");
@@ -518,7 +653,17 @@ namespace VividRP.Runtime
                 return;
 
             var colorGradingSpace = ColorGradingSpaceUtility.ResolveColorGradingSpace(VividRenderPipelineAsset.GetActiveAsset());
-            SetKeywords(cmd, settings.tonemappingMode, colorGradingSpace);
+            SetKeywords(cmd, settings.tonemappingMode, colorGradingSpace, settings.hdrOutputActive);
+            if (settings.hdrOutputActive)
+            {
+                HDROutputUtils.ConfigureHDROutput(
+                    m_Shader,
+                    settings.hdrDisplayColorGamut,
+                    HDROutputUtils.Operation.ColorConversion);
+                cmd.SetComputeVectorParam(m_Shader, HDROutputParamsId, settings.hdrOutputParameters);
+                cmd.SetComputeVectorParam(m_Shader, HDROutputParams2Id, settings.hdrOutputParameters2);
+            }
+
             cmd.SetComputeVectorParam(m_Shader, SizeId, new Vector4(LutSize, 1f / (LutSize - 1f), 0f, 0f));
             cmd.SetComputeVectorParam(m_Shader, LogLut3DParamsId, new Vector4(1f / LutSize, LutSize - 1f, settings.externalLutContribution, 0f));
             cmd.SetComputeVectorParam(m_Shader, ColorBalanceId, settings.colorBalance);
@@ -568,7 +713,8 @@ namespace VividRP.Runtime
         private void SetKeywords(
             CommandBuffer cmd,
             ColorGradingTonemappingShaderMode tonemappingMode,
-            ColorGradingSpace colorGradingSpace)
+            ColorGradingSpace colorGradingSpace,
+            bool hdrOutputActive)
         {
             SetKeyword(cmd, m_TonemappingNoneKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.None);
             SetKeyword(cmd, m_TonemappingNeutralKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.Neutral);
@@ -582,7 +728,7 @@ namespace VividRP.Runtime
             var colorGradingSpaceKeyword = ColorGradingSpaceUtility.GetColorGradingSpaceKeyword(colorGradingSpace);
             SetKeyword(cmd, m_GradeInSrgbKeyword, colorGradingSpaceKeyword == ColorGradingSpaceUtility.GradeInSrgbKeyword);
             SetKeyword(cmd, m_GradeInAcesCgKeyword, colorGradingSpaceKeyword == ColorGradingSpaceUtility.GradeInAcesCgKeyword);
-            SetKeyword(cmd, m_HdrColorspaceConversionKeyword, false);
+            SetKeyword(cmd, m_HdrColorspaceConversionKeyword, hdrOutputActive);
         }
 
         private void SetKeyword(CommandBuffer cmd, LocalKeyword keyword, bool value)

@@ -147,6 +147,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_PreservesHDROutputSettings_WhenPostProcessingIsDisabled()
+        {
+            var pass = new FinalBlitPass();
+            using var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.pixelRect = new Rect(0f, 0f, 320f, 180f);
+            cameraData.hdrOutputActive = true;
+            cameraData.hdrDisplayColorGamut = ColorGamut.sRGB;
+            cameraData.hdrDisplayInformation = new HDROutputUtils.HDRDisplayInformation(1000, 1200, 1, 250f);
+
+            pass.Prepare(frameData);
+
+            var settingsField = typeof(FinalBlitPass).GetField(
+                "m_ColorGradingSettings",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(settingsField, Is.Not.Null);
+            var settings = (ColorGradingSettingsData)settingsField.GetValue(pass);
+            Assert.That(settings.hdrOutputActive, Is.True);
+            Assert.That(settings.RequiresLut, Is.True);
+        }
+
+        [Test]
         public void SetSourceTexture_MarksPassResourceLayoutDirty()
         {
             var pass = new FinalBlitPass();

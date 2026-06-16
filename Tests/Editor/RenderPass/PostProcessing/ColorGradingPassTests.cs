@@ -64,12 +64,56 @@ namespace VividRP.Editor.Tests
         {
             var pass = new ColorGradingPass();
             using var frameData = new ContextContainer();
+            var gameObject = new GameObject("ColorGradingPassTests_Camera");
+
+            try
+            {
+                frameData.GetOrCreate<VividCameraData>().camera = gameObject.AddComponent<Camera>();
+
+                pass.Prepare(frameData);
+
+                Assert.That(
+                    ColorGradingSettingsResolver.TryGetResolved(frameData, out _, out _),
+                    Is.True);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void Prepare_UsesDefaultCurves_WhenVolumeStackHasNoColorCurves()
+        {
+            var pass = new ColorGradingPass();
+            using var frameData = new ContextContainer();
 
             pass.Prepare(frameData);
 
-            Assert.That(
-                ColorGradingSettingsResolver.TryGetResolved(frameData, out _, out _),
-                Is.True);
+            var curvesField = typeof(ColorGradingPass).GetField("m_Curves", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(curvesField, Is.Not.Null);
+            Assert.That(curvesField.GetValue(pass), Is.Not.Null);
+        }
+
+        [Test]
+        public void Prepare_UsesHDROutputSettings_WhenPostProcessingIsDisabled()
+        {
+            var pass = new ColorGradingPass();
+            using var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.hdrOutputActive = true;
+            cameraData.hdrDisplayColorGamut = ColorGamut.sRGB;
+            cameraData.hdrDisplayInformation = new HDROutputUtils.HDRDisplayInformation(1000, 1200, 1, 250f);
+
+            pass.Prepare(frameData);
+
+            var settingsField = typeof(ColorGradingPass).GetField("m_Settings", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(settingsField, Is.Not.Null);
+            var settings = (ColorGradingSettingsData)settingsField.GetValue(pass);
+            Assert.That(settings.hdrOutputActive, Is.True);
+            Assert.That(settings.RequiresLut, Is.True);
         }
 
         [Test]

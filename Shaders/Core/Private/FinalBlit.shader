@@ -20,11 +20,16 @@ Shader "Hidden/VividRP/FinalBlit"
             #pragma multi_compile_local _ _BLOOM
             #pragma multi_compile_local _ _BLOOM_HQ
             #pragma multi_compile_local _ _BLOOM_DIRT
+            #pragma multi_compile_local _ HDR_ENCODING
 
             #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ACES.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
+            #if defined(HDR_ENCODING)
+            #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/HDROutput.hlsl"
+            #endif
 
             TEXTURE2D(_BlitTexture);
             SAMPLER(sampler_BlitTexture);
@@ -35,6 +40,17 @@ Shader "Hidden/VividRP/FinalBlit"
             StructuredBuffer<float4> _VividAutoExposureBuffer;
             StructuredBuffer<float4> _VividAutoExposurePreExposureBuffer;
             float4 _VividAutoExposureParams;
+
+            #if defined(HDR_ENCODING)
+            float4 _HDROutputParams;
+            float4 _HDROutputParams2;
+            #define _MinNits            _HDROutputParams.x
+            #define _MaxNits            _HDROutputParams.y
+            #define _PaperWhite         _HDROutputParams.z
+            #define _OneOverPaperWhite  _HDROutputParams.w
+            #define _RangeReductionMode (int)_HDROutputParams2.x
+            #define _HueShift           _HDROutputParams2.y
+            #endif
 
             #if defined(_VIGNETTE)
             TEXTURE2D(_VividVignetteMask);
@@ -111,7 +127,11 @@ Shader "Hidden/VividRP/FinalBlit"
 
                 if (_VividColorGradingParams.z > 0.5)
                 {
+                    #if defined(HDR_ENCODING)
+                    float3 lutSpace = saturate(LinearToPQForLUT(max(postProcessed, 0.0) * 100.0));
+                    #else
                     float3 lutSpace = saturate(LinearToLogC(max(postProcessed, 0.0)));
+                    #endif
                     postProcessed = ApplyLut3D(
                         TEXTURE3D_ARGS(_VividColorGradingLut, sampler_VividColorGradingLut),
                         lutSpace,
@@ -141,6 +161,20 @@ Shader "Hidden/VividRP/FinalBlit"
                     bloom += dirt * _VividBloomParams.y;
                     #endif
 
+                    #if defined(HDR_ENCODING)
+                    if (_VividColorGradingParams.z > 0.5)
+                    {
+                        bloom = HDRMappingFromRec709(
+                            max(bloom, 0.0),
+                            _PaperWhite,
+                            _MinNits,
+                            _MaxNits,
+                            _RangeReductionMode,
+                            _HueShift,
+                            true);
+                    }
+                    #endif
+
                     postProcessed += bloom;
                 }
                 #endif
@@ -167,7 +201,9 @@ Shader "Hidden/VividRP/FinalBlit"
 
                 #if defined(_FILM_GRAIN)
                 {
+                    #if !defined(HDR_ENCODING)
                     postProcessed = saturate(postProcessed);
+                    #endif
 
                     float2 grainUV = input.uv * _VividFilmGrainTexParams.xy + _VividFilmGrainTexParams.zw;
                     float grain = SAMPLE_TEXTURE2D(_VividFilmGrainTexture, sampler_LinearRepeat, grainUV).w;
@@ -176,12 +212,32 @@ Shader "Hidden/VividRP/FinalBlit"
                     grain = (grain - 0.5) * 2.0;
 
                     // Match HDRP's noisiness response curve based on scene luminance.
+                    #if defined(HDR_ENCODING)
+                    float lum = Luminance(postProcessed * _OneOverPaperWhite);
+                    #else
                     float lum = Luminance(postProcessed);
+                    #endif
                     lum = 1.0 - sqrt(lum);
                     lum = lerp(1.0, lum, _VividFilmGrainParams.y);
 
                     postProcessed += postProcessed * grain * _VividFilmGrainParams.x * lum;
                 }
+                #endif
+
+                #if defined(HDR_ENCODING)
+                if (_VividColorGradingParams.z <= 0.5)
+                {
+                    postProcessed = HDRMappingFromRec709(
+                        max(postProcessed, 0.0),
+                        _PaperWhite,
+                        _MinNits,
+                        _MaxNits,
+                        _RangeReductionMode,
+                        _HueShift,
+                        true);
+                }
+
+                postProcessed = OETF(postProcessed, _MaxNits);
                 #endif
 
                 return float4(postProcessed, color.a);

@@ -5,11 +5,30 @@ namespace VividRP.Runtime
 {
     internal static class VividHDROutputUtility
     {
+        internal static readonly HDROutputUtils.HDRDisplayInformation DefaultHDRDisplayInformation =
+            new(-1, -1, -1, 160.0f);
+
+        internal static bool HDRDisplayEnabledInPlayerSettings()
+        {
+#if UNITY_EDITOR
+            return UnityEditor.PlayerSettings.useHDRDisplay;
+#else
+            return true;
+#endif
+        }
+
         internal static bool HDROutputForMainDisplayIsActive()
         {
             return SystemInfo.hdrDisplaySupportFlags.HasFlag(HDRDisplaySupportFlags.Supported)
                 && HDROutputSettings.main.available
                 && HDROutputSettings.main.active;
+        }
+
+        internal static bool HDROutputAllowedForCamera(Camera camera)
+        {
+            return camera != null
+                && camera.allowHDR
+                && HDRDisplayEnabledInPlayerSettings();
         }
 
         internal static bool HDROutputActiveForCameraType(CameraType cameraType)
@@ -19,7 +38,7 @@ namespace VividRP.Runtime
 
         internal static bool HDROutputActiveForCamera(Camera camera)
         {
-            return camera != null && HDROutputActiveForCameraType(camera.cameraType);
+            return HDROutputAllowedForCamera(camera) && HDROutputActiveForCameraType(camera.cameraType);
         }
 
         internal static HDROutputUtils.HDRDisplayInformation HDRDisplayInformationForCamera(Camera camera)
@@ -43,23 +62,20 @@ namespace VividRP.Runtime
                 return;
 
             var displaySettings = HDROutputSettings.main;
-
-#if UNITY_EDITOR
-            var hdrEnabledInPlayerSettings = UnityEditor.PlayerSettings.useHDRDisplay;
-#else
-            var hdrEnabledInPlayerSettings = true;
-#endif
+            var hdrAllowedForCamera = HDROutputAllowedForCamera(camera);
             var supportsSwitchingHDR =
                 SystemInfo.hdrDisplaySupportFlags.HasFlag(HDRDisplaySupportFlags.RuntimeSwitchable);
             var hdrOutputAvailable = displaySettings.available;
             var hdrOutputActive = displaySettings.active;
 
-            if (hdrEnabledInPlayerSettings && supportsSwitchingHDR && hdrOutputAvailable)
+            if (supportsSwitchingHDR && hdrOutputAvailable)
             {
-                if (camera.cameraType != CameraType.Game)
+                if (!hdrAllowedForCamera || camera.cameraType != CameraType.Game)
                 {
                     if (hdrOutputActive)
                         displaySettings.RequestHDRModeChange(false);
+
+                    enableHdrOnce = true;
                 }
                 else if (enableHdrOnce)
                 {

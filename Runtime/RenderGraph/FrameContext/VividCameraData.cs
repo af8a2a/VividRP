@@ -28,6 +28,10 @@ namespace VividRP.Runtime
         internal float aspect = 1.0f;
         internal bool renderIntoTexture;
         internal bool hasCameraFrameProperties;
+        internal bool hdrOutputAllowed;
+        internal bool hdrOutputActive;
+        internal HDROutputUtils.HDRDisplayInformation hdrDisplayInformation = VividHDROutputUtility.DefaultHDRDisplayInformation;
+        internal ColorGamut hdrDisplayColorGamut = ColorGamut.sRGB;
         private Camera m_CameraNameSource;
         private Camera m_DepthTextureModeSource;
         private bool m_DepthTextureModeHasRequiredFlags;
@@ -229,6 +233,10 @@ namespace VividRP.Runtime
             aspect = 1.0f;
             renderIntoTexture = false;
             hasCameraFrameProperties = false;
+            hdrOutputAllowed = false;
+            hdrOutputActive = false;
+            hdrDisplayInformation = VividHDROutputUtility.DefaultHDRDisplayInformation;
+            hdrDisplayColorGamut = ColorGamut.sRGB;
             m_CameraNameSource = null;
             m_DepthTextureModeSource = null;
             m_DepthTextureModeHasRequiredFlags = false;

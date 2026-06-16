@@ -12,6 +12,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ColorGradingParamsId = Shader.PropertyToID("_VividColorGradingParams");
         private static readonly int AutoExposureBufferId = Shader.PropertyToID("_VividAutoExposureBuffer");
         private static readonly int AutoExposureMaterialParamsId = Shader.PropertyToID("_VividAutoExposureParams");
+        private static readonly int HDROutputParamsId = Shader.PropertyToID("_HDROutputParams");
+        private static readonly int HDROutputParams2Id = Shader.PropertyToID("_HDROutputParams2");
         private static readonly int FilmGrainTextureId = Shader.PropertyToID("_VividFilmGrainTexture");
         private static readonly int FilmGrainParamsId = Shader.PropertyToID("_VividFilmGrainParams");
         private static readonly int FilmGrainTexParamsId = Shader.PropertyToID("_VividFilmGrainTexParams");
@@ -49,6 +51,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private TextureUVOrigin m_CameraBackBufferTextureUVOrigin;
         private bool m_ShouldSetViewport;
         private bool m_PostProcessingAllowed;
+        private bool m_HDROutputActive;
         private bool m_EnableExposure;
         private Rect m_Viewport;
         private int m_FrameCount;
@@ -114,7 +117,8 @@ namespace VividRP.Runtime.RenderPass.Core
             using (s_PrepareCameraMarker.Auto())
             {
                 var cameraData = frameData.Get<VividCameraData>();
-                camera = cameraData.camera;
+                camera = cameraData?.camera;
+                m_HDROutputActive = cameraData != null && cameraData.hdrOutputActive;
                 var hasTargetTexture = camera != null && camera.targetTexture != null;
                 var cameraType = camera != null ? camera.cameraType : CameraType.Game;
 
@@ -124,7 +128,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CameraBackBufferTextureUVOrigin = GetCameraBackBufferTextureUVOrigin(cameraType, hasTargetTexture);
                 m_ShouldSetViewport = ShouldSetViewport(cameraType);
 
-                m_Viewport = GetViewport(cameraData);
+                m_Viewport = cameraData != null
+                    ? GetViewport(cameraData)
+                    : new Rect(0f, 0f, Screen.width, Screen.height);
                 m_PostProcessingAllowed = camera != null && CoreUtils.ArePostProcessesEnabled(camera);
             }
 
@@ -132,9 +138,13 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 using (s_PrepareColorGradingSettingsMarker.Auto())
                 {
-                    if (!m_PostProcessingAllowed)
+                    if (!m_PostProcessingAllowed && !m_HDROutputActive)
                     {
                         m_ColorGradingSettings = ColorGradingSettingsData.CreateDefault();
+                    }
+                    else if (!m_PostProcessingAllowed)
+                    {
+                        m_ColorGradingSettings = ColorGradingSettingsResolver.ResolveHDROutput(frameData);
                     }
                     else if (ColorGradingSettingsResolver.TryGetResolved(
                                  frameData,
@@ -219,7 +229,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 AutoExposureMaterialParamsId,
                 new Vector4(m_EnableExposure ? 1f : 0f, 0f, 0f, 0f));
 
+            ConfigureMaterialHDROutput(
+                m_Material,
+                m_ColorGradingSettings.hdrOutputActive,
+                m_ColorGradingSettings.hdrDisplayColorGamut);
+            if (m_ColorGradingSettings.hdrOutputActive)
+            {
+                m_Material.SetVector(HDROutputParamsId, m_ColorGradingSettings.hdrOutputParameters);
+                m_Material.SetVector(HDROutputParams2Id, m_ColorGradingSettings.hdrOutputParameters2);
+            }
+
             var useColorGradingLut = m_PostProcessingAllowed
+                || m_ColorGradingSettings.hdrOutputActive;
+            useColorGradingLut = useColorGradingLut
                 && m_ColorGradingSettings.RequiresLut
                 && colorGradingLut != null
                 && colorGradingLut.innerHandle.IsValid();
@@ -371,6 +393,26 @@ namespace VividRP.Runtime.RenderPass.Core
         private static bool ShouldSetViewport(CameraType cameraType)
         {
             return cameraType != CameraType.SceneView;
+        }
+
+        private static void ConfigureMaterialHDROutput(Material material, bool hdrOutputActive, ColorGamut gamut)
+        {
+            if (material == null)
+                return;
+
+            if (hdrOutputActive)
+            {
+                HDROutputUtils.ConfigureHDROutput(
+                    material,
+                    gamut,
+                    HDROutputUtils.Operation.ColorEncoding);
+                return;
+            }
+
+            CoreUtils.SetKeyword(material, HDROutputUtils.ShaderKeywords.HDR_ENCODING, false);
+            CoreUtils.SetKeyword(material, HDROutputUtils.ShaderKeywords.HDR_COLORSPACE_CONVERSION, false);
+            CoreUtils.SetKeyword(material, HDROutputUtils.ShaderKeywords.HDR_COLORSPACE_CONVERSION_AND_ENCODING, false);
+            CoreUtils.SetKeyword(material, HDROutputUtils.ShaderKeywords.HDR_INPUT, false);
         }
 
         private static Rect GetViewport(VividCameraData cameraData)

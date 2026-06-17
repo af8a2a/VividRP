@@ -74,7 +74,7 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_SHADERPASS_DEPTH_ONLY 1
                 #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitDepthOnlyPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitDepthOnlyPass.hlsl"
             ENDHLSL
         }
 
@@ -101,7 +101,7 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
                 #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitShadowCasterPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitShadowCasterPass.hlsl"
             ENDHLSL
         }
 
@@ -143,7 +143,7 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -187,7 +187,7 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
                 #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
                 #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
 
@@ -216,7 +216,7 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD2 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMetaPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitMetaPass.hlsl"
             ENDHLSL
         }
 
@@ -257,7 +257,7 @@ Shader "VividRP/Material/StandardLit"
 //                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
 //                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
 //                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
-//                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
+//                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitGBufferPass.hlsl"
 //            ENDHLSL
 //        }
 
@@ -293,7 +293,7 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_ATTRIBUTES_NEED_PREVIOUS_POSITION 1
                 #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #define VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMotionVectorPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitMotionVectorPass.hlsl"
             ENDHLSL
         }
 

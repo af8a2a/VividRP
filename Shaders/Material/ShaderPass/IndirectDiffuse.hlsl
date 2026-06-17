@@ -3,6 +3,7 @@
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl"
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
@@ -326,8 +327,11 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(VividIndirectDiffuseHitGeome
     surfaceData.materialFeatures = materialFeatures;
 
     surfaceData.emissive = SampleEmission(geometry.uv);
-    surfaceData.bakedGI = SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS);
-    surfaceData.hasBakedGI = HasStandardLitIndirectDiffuseBakedGI();
+    surfaceData.builtinData = BuildVividBuiltinData(
+        SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS),
+        HasStandardLitIndirectDiffuseBakedGI(),
+        geometry.lightmapUV,
+        geometry.positionWS);
     return surfaceData;
 }
 
@@ -415,9 +419,9 @@ void VividIndirectDiffuseEvaluateFrontFaceRadiance(
     mainDirectionalDirectionWS = float3(0.0, 0.0, 0.0);
     mainDirectionalRadiance = float3(0.0, 0.0, 0.0);
 
-    if (surfaceData.hasBakedGI > 0.5)
+    if (surfaceData.builtinData.hasBakedGI > 0.5)
     {
-        lightingRadiance += surfaceData.bakedGI * diffuseColor * INV_PI;
+        lightingRadiance += surfaceData.builtinData.bakeDiffuseLighting * diffuseColor * INV_PI;
     }
 
     DirectionalLightData sunLight;

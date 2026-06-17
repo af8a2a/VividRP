@@ -173,7 +173,7 @@ float3 EvaluateSimpleDeferredLighting(VividGBufferSurfaceData surfaceData, uint2
             viewDirectionWS),
         aggregateLighting);
 
-    bool useAmbientFallback = !VividHasSkyIBL() && surfaceData.hasBakedGI < 0.5;
+    bool useAmbientFallback = !VividHasSkyIBL() && surfaceData.builtinData.hasBakedGI < 0.5;
 #if defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
     useAmbientFallback = useAmbientFallback && _EnableProbeVolumes == 0;
 #endif

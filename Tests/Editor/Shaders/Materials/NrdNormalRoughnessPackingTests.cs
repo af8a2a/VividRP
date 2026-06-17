@@ -50,10 +50,27 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "GBuffer.hlsl"));
 
-            Assert.That(source, Does.Contain("RT4 (RGBA16_SFLOAT)            : BakedGI.rgb + HasBakedGI.a"));
-            Assert.That(source, Does.Contain("output.rt4 = float4(surfaceData.bakedGI, surfaceData.hasBakedGI);"));
-            Assert.That(source, Does.Contain("surfaceData.bakedGI = max(rt4.rgb, 0.0);"));
-            Assert.That(source, Does.Contain("surfaceData.hasBakedGI = saturate(rt4.a);"));
+            Assert.That(source, Does.Contain("RT4 (RGBA16_SFLOAT)            : BuiltinData.bakeDiffuseLighting.rgb + BuiltinData.hasBakedGI.a"));
+            Assert.That(source, Does.Contain("VividBuiltinData builtinData;"));
+            Assert.That(source, Does.Contain("output.rt4 = float4(surfaceData.builtinData.bakeDiffuseLighting, surfaceData.builtinData.hasBakedGI);"));
+            Assert.That(source, Does.Contain("surfaceData.builtinData.bakeDiffuseLighting = max(rt4.rgb, 0.0);"));
+            Assert.That(source, Does.Contain("surfaceData.builtinData.hasBakedGI = saturate(rt4.a);"));
+        }
+
+        [Test]
+        public void BuiltinData_StoresBakeLightingAndShadowMaskMaterialData()
+        {
+            var builtinDataSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "BuiltinData.hlsl"));
+            var bakedGiSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "BakedGI.hlsl"));
+
+            Assert.That(builtinDataSource, Does.Contain("struct VividBuiltinData"));
+            Assert.That(builtinDataSource, Does.Contain("float3 bakeDiffuseLighting;"));
+            Assert.That(builtinDataSource, Does.Contain("float3 backBakeDiffuseLighting;"));
+            Assert.That(builtinDataSource, Does.Contain("float4 shadowMask;"));
+            Assert.That(builtinDataSource, Does.Contain("float hasBakedGI;"));
+            Assert.That(builtinDataSource, Does.Contain("float isLightmap;"));
+            Assert.That(bakedGiSource, Does.Contain("float4 SampleVividShadowMask(float2 lightmapUV, float3 positionWS)"));
+            Assert.That(bakedGiSource, Does.Contain("SampleVividShadowMask(lightmapUV, positionWS)"));
         }
 
         [Test]

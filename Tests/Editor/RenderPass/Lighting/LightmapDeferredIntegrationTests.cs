@@ -17,13 +17,17 @@ namespace VividRP.Editor.Tests
 
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
+            Assert.That(standardLitShader, Does.Contain("#pragma multi_compile_fragment _ SHADOWS_SHADOWMASK"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
-            Assert.That(standardLitInput, Does.Contain("SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS, input.positionWS)"));
+            Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile_fragment _ SHADOWS_SHADOWMASK"));
+            Assert.That(standardLitInput, Does.Contain("BuildVividBuiltinData("));
+            Assert.That(standardLitInput, Does.Contain("SampleStandardLitBakedGI(lightmapUV, surfaceData.normalWS, input.positionRWS)"));
             Assert.That(standardLitInput, Does.Contain("SampleVividProbeVolume("));
             Assert.That(simpleLitPass, Does.Contain("SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS)"));
             Assert.That(bakedGiSource, Does.Contain("SampleSingleLightmap("));
             Assert.That(bakedGiSource, Does.Contain("SampleDirectionalLightmap("));
+            Assert.That(bakedGiSource, Does.Contain("SampleVividShadowMask(lightmapUV, positionWS)"));
             Assert.That(bakedGiSource, Does.Contain("unity_LightmapST"));
         }
 
@@ -33,8 +37,8 @@ namespace VividRP.Editor.Tests
             var hdrpLightingSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "HdrpLitLighting.hlsl"));
             var deferredComputeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "DeferredLit.compute"));
 
-            Assert.That(hdrpLightingSource, Does.Contain("surfaceData.hasBakedGI > 0.5"));
-            Assert.That(hdrpLightingSource, Does.Contain("? surfaceData.bakedGI"));
+            Assert.That(hdrpLightingSource, Does.Contain("surfaceData.builtinData.hasBakedGI > 0.5"));
+            Assert.That(hdrpLightingSource, Does.Contain("? surfaceData.builtinData.bakeDiffuseLighting"));
             Assert.That(deferredComputeSource, Does.Contain("Texture2D<float4> _GBuffer4;"));
             Assert.That(deferredComputeSource, Does.Contain("float4 rt4 = _GBuffer4.Load(int3(pixelCoord, 0));"));
         }

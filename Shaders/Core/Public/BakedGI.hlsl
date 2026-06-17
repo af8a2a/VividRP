@@ -2,6 +2,7 @@
 #define VIVIDRP_BAKED_GI_INCLUDED
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BuiltinData.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
 
 StructuredBuffer<float4> _VividAmbientProbeData;
@@ -47,6 +48,43 @@ float HasVividBakedGI()
 #else
     return 0.0;
 #endif
+}
+
+float VividBuiltinDataIsLightmap()
+{
+#if defined(LIGHTMAP_ON)
+    return 1.0;
+#else
+    return 0.0;
+#endif
+}
+
+float4 SampleVividShadowMask(float2 lightmapUV, float3 positionWS)
+{
+#if defined(SHADOWS_SHADOWMASK)
+#if defined(LIGHTMAP_ON)
+    return SAMPLE_TEXTURE2D(unity_ShadowMask, samplerunity_ShadowMask, lightmapUV);
+#elif defined(PROBE_VOLUMES_L1) || defined(PROBE_VOLUMES_L2)
+    return 1.0;
+#else
+    return unity_ProbesOcclusion;
+#endif
+#else
+    return 1.0;
+#endif
+}
+
+VividBuiltinData BuildVividBuiltinData(
+    float3 bakeDiffuseLighting,
+    float hasBakedGI,
+    float2 lightmapUV,
+    float3 positionWS)
+{
+    return CreateVividBuiltinData(
+        bakeDiffuseLighting,
+        hasBakedGI,
+        VividBuiltinDataIsLightmap(),
+        SampleVividShadowMask(lightmapUV, positionWS));
 }
 
 #endif

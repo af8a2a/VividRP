@@ -148,7 +148,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("ComputeDoubleSidedNormalFlipSign("));
             Assert.That(shaderSource, Does.Contain("#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
             Assert.That(shaderSource, Does.Contain("SampleVividProbeVolume("));
-            Assert.That(shaderSource, Does.Contain("surfaceData.hasBakedGI = VividHasProbeVolumeGI() ? 1.0f : 0.0f;"));
+            Assert.That(shaderSource, Does.Contain("surfaceData.builtinData = CreateVividBuiltinData("));
+            Assert.That(shaderSource, Does.Contain("VividHasProbeVolumeGI() ? 1.0f : 0.0f"));
             Assert.That(shaderSource, Does.Contain("discard;"));
             Assert.That(shaderSource, Does.Contain("ResolveVisibilityDepth("));
             Assert.That(shaderSource, Does.Contain("IsVisibilitySampleVisible("));

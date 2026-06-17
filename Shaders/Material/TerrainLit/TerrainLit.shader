@@ -102,6 +102,7 @@ Shader "VividRP/Terrain/TerrainLit"
                 #pragma instancing_options assumeuniformscaling nomatrices nolightprobe nolightmap renderinglayer
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
                 #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local _ALPHATEST_ON
                 #pragma shader_feature_local _TERRAIN_8_LAYERS
@@ -133,6 +134,7 @@ Shader "VividRP/Terrain/TerrainLit"
                 #pragma instancing_options assumeuniformscaling nomatrices nolightprobe nolightmap renderinglayer
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
                 #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local _ALPHATEST_ON
                 #pragma shader_feature_local _TERRAIN_8_LAYERS

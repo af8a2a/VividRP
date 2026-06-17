@@ -220,8 +220,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("SampleStandardLitIndirectDiffuseBakedGI("));
             Assert.That(source, Does.Contain("SampleVividBakedGI(geometry.lightmapUV, normalWS)"));
             Assert.That(source, Does.Contain("SampleVividProbeVolume("));
-            Assert.That(source, Does.Contain("surfaceData.bakedGI = SampleStandardLitIndirectDiffuseBakedGI(geometry, surfaceData.normalWS);"));
-            Assert.That(source, Does.Contain("lightingRadiance += surfaceData.bakedGI * diffuseColor * INV_PI;"));
+            Assert.That(source, Does.Contain("surfaceData.builtinData = BuildVividBuiltinData("));
+            Assert.That(source, Does.Contain("lightingRadiance += surfaceData.builtinData.bakeDiffuseLighting * diffuseColor * INV_PI;"));
         }
 
         [Test]

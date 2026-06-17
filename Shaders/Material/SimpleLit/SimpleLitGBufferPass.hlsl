@@ -99,8 +99,11 @@ VividGBufferSurfaceData BuildSimpleLitSurfaceData(Varyings input)
     surfaceData.customData1 = 0.0;
     surfaceData.materialFeatures = GetSimpleLitMaterialFeatures();
     surfaceData.emissive = _EmissiveColor.rgb;
-    surfaceData.bakedGI = SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS);
-    surfaceData.hasBakedGI = HasVividBakedGI();
+    surfaceData.builtinData = BuildVividBuiltinData(
+        SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS),
+        HasVividBakedGI(),
+        input.lightmapUV,
+        input.positionWS);
     return surfaceData;
 }
 

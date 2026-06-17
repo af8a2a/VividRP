@@ -231,7 +231,7 @@ Shader "Hidden/VividRP/MaterialDebug"
                     return Linear01Depth(deviceDepth, _ZBufferParams).xxx;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BAKE_DIFFUSE_LIGHTING_WITH_ALBEDO_PLUS_EMISSIVE)
-                    return (surfaceData.bakedGI * EvaluateDiffuseColor(surfaceData) + surfaceData.emissive) * exposureMultiplier;
+                    return (surfaceData.builtinData.bakeDiffuseLighting * EvaluateDiffuseColor(surfaceData) + surfaceData.emissive) * exposureMultiplier;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BASE_COLOR)
                     return surfaceData.baseColor;
@@ -296,10 +296,10 @@ Shader "Hidden/VividRP/MaterialDebug"
                     return surfaceData.emissive * exposureMultiplier;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_BAKED_GI)
-                    return surfaceData.bakedGI * exposureMultiplier;
+                    return surfaceData.builtinData.bakeDiffuseLighting * exposureMultiplier;
 
                 if (_MaterialDebugMode == VIVID_MATERIAL_DEBUG_HAS_BAKED_GI)
-                    return surfaceData.hasBakedGI.xxx;
+                    return surfaceData.builtinData.hasBakedGI.xxx;
 
                 return sourceColor.rgb;
             }

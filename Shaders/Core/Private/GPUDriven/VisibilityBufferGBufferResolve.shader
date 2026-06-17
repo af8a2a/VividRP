@@ -358,12 +358,15 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 surfaceData.customData1 = 0.0f;
                 surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
                 surfaceData.emissive = max(triangleData.materialData.Emission.rgb, 0.0f);
-                surfaceData.bakedGI = SampleVividProbeVolume(
-                    positionWS,
-                    normalWS,
-                    GetWorldSpaceNormalizeViewDir(positionWS),
-                    0xFFFFFFFFu);
-                surfaceData.hasBakedGI = VividHasProbeVolumeGI() ? 1.0f : 0.0f;
+                surfaceData.builtinData = CreateVividBuiltinData(
+                    SampleVividProbeVolume(
+                        positionWS,
+                        normalWS,
+                        GetWorldSpaceNormalizeViewDir(positionWS),
+                        0xFFFFFFFFu),
+                    VividHasProbeVolumeGI() ? 1.0f : 0.0f,
+                    0.0f,
+                    float4(1.0f, 1.0f, 1.0f, 1.0f));
                 return surfaceData;
             }
 

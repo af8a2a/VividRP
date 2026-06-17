@@ -250,11 +250,12 @@ VividGBufferSurfaceData BuildStandardLitSurfaceData(FragInputs input)
     surfaceData.materialFeatures = GetStandardLitMaterialFeatures(clearCoatMask);
 
     surfaceData.emissive = SampleEmission(uv);
-    surfaceData.bakedGI = SampleStandardLitBakedGI(
-        TransformVividLightmapUV(input.texCoord1.xy),
-        surfaceData.normalWS,
+    float2 lightmapUV = TransformVividLightmapUV(input.texCoord1.xy);
+    surfaceData.builtinData = BuildVividBuiltinData(
+        SampleStandardLitBakedGI(lightmapUV, surfaceData.normalWS, input.positionRWS),
+        HasStandardLitBakedGI(),
+        lightmapUV,
         input.positionRWS);
-    surfaceData.hasBakedGI = HasStandardLitBakedGI();
     return surfaceData;
 }
 

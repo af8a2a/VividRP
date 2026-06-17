@@ -252,8 +252,11 @@ VividGBufferSurfaceData BuildColorCheckerGBufferSurfaceData(Varyings input)
     surfaceData.customData1 = 0.0;
     surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
     surfaceData.emissive = checkerSurface.emission;
-    surfaceData.bakedGI = SampleVividBakedGI(input.lightmapUV, normalWS);
-    surfaceData.hasBakedGI = HasVividBakedGI();
+    surfaceData.builtinData = BuildVividBuiltinData(
+        SampleVividBakedGI(input.lightmapUV, normalWS),
+        HasVividBakedGI(),
+        input.lightmapUV,
+        input.positionWS);
     return surfaceData;
 }
 

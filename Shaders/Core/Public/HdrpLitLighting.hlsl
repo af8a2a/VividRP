@@ -403,8 +403,8 @@ VividCBSDF EvaluateBSDF(
 
 float3 EvaluateVividBakedDiffuseLighting(VividGBufferSurfaceData surfaceData)
 {
-    return surfaceData.hasBakedGI > 0.5
-        ? surfaceData.bakedGI
+    return surfaceData.builtinData.hasBakedGI > 0.5
+        ? surfaceData.builtinData.bakeDiffuseLighting
         : VividSampleAmbientProbe(surfaceData.normalWS);
 }
 
@@ -413,7 +413,7 @@ float3 EvaluateVividBakedDiffuseLighting(
     float3 positionWS,
     float3 viewDirectionWS)
 {
-    if (surfaceData.hasBakedGI <= 0.5 && VividHasProbeVolumeGI())
+    if (surfaceData.builtinData.hasBakedGI <= 0.5 && VividHasProbeVolumeGI())
         return SampleVividProbeVolume(positionWS, surfaceData.normalWS, viewDirectionWS, 0xFFFFFFFFu);
 
     return EvaluateVividBakedDiffuseLighting(surfaceData);

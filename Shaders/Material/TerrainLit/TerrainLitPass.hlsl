@@ -217,8 +217,11 @@ VividGBufferSurfaceData BuildTerrainGBufferSurfaceData(Varyings input)
     surfaceData.customData1 = 0.0;
     surfaceData.materialFeatures = GetTerrainMaterialFeatures();
     surfaceData.emissive = 0.0;
-    surfaceData.bakedGI = SampleTerrainBakedGI(input.lightmapUV, normalWS, input.positionWS);
-    surfaceData.hasBakedGI = HasTerrainBakedGI();
+    surfaceData.builtinData = BuildVividBuiltinData(
+        SampleTerrainBakedGI(input.lightmapUV, normalWS, input.positionWS),
+        HasTerrainBakedGI(),
+        input.lightmapUV,
+        input.positionWS);
     return surfaceData;
 }
 

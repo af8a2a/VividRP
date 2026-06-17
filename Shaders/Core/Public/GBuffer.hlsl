@@ -2,6 +2,7 @@
 #define VIVIDRP_GBUFFER_INCLUDED
 
 #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BuiltinData.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 #define VIVID_GBUFFER_MATERIAL_STANDARD  0u
@@ -27,7 +28,7 @@
 // RT1 (A2B10G10R10_UNORM)        : Octahedral Normal.xy + LinearRoughness.b + NRDMaterialId.a
 // RT2 (RGBA8_UNORM)              : Metallic.r + AO.g + MaterialData0.b + MaterialData1.a
 // RT3 (R11G11B10_UFLOAT)         : Emissive.rgb
-// RT4 (RGBA16_SFLOAT)            : BakedGI.rgb + HasBakedGI.a
+// RT4 (RGBA16_SFLOAT)            : BuiltinData.bakeDiffuseLighting.rgb + BuiltinData.hasBakedGI.a
 
 struct VividGBufferSurfaceData
 {
@@ -40,8 +41,7 @@ struct VividGBufferSurfaceData
     float customData1;
     uint materialFeatures;
     float3 emissive;
-    float3 bakedGI;
-    float hasBakedGI;
+    VividBuiltinData builtinData;
 };
 
 struct VividGBufferFragmentOutput
@@ -170,8 +170,7 @@ VividGBufferSurfaceData SanitizeVividGBufferSurfaceData(VividGBufferSurfaceData 
     surfaceData.customData1 = SanitizeCustomData1(surfaceData.customData1);
     surfaceData.materialFeatures = EncodeVividMaterialFeatureIdRaw(surfaceData.materialFeatures);
     surfaceData.emissive = max(surfaceData.emissive, 0.0);
-    surfaceData.bakedGI = max(surfaceData.bakedGI, 0.0);
-    surfaceData.hasBakedGI = saturate(surfaceData.hasBakedGI);
+    surfaceData.builtinData = SanitizeVividBuiltinData(surfaceData.builtinData);
     return surfaceData;
 }
 
@@ -191,7 +190,7 @@ VividGBufferFragmentOutput PackVividGBufferSurfaceData(VividGBufferSurfaceData s
         surfaceData.customData,
         surfaceData.customData1);
     output.rt3 = float4(surfaceData.emissive, 0.0);
-    output.rt4 = float4(surfaceData.bakedGI, surfaceData.hasBakedGI);
+    output.rt4 = float4(surfaceData.builtinData.bakeDiffuseLighting, surfaceData.builtinData.hasBakedGI);
     return output;
 }
 
@@ -207,8 +206,9 @@ VividGBufferSurfaceData UnpackVividGBufferSurfaceData(float4 rt0, float4 rt1, fl
     surfaceData.customData = SanitizeCustomData(rt2.b);
     surfaceData.customData1 = SanitizeCustomData1(rt2.a);
     surfaceData.emissive = max(rt3.rgb, 0.0);
-    surfaceData.bakedGI = max(rt4.rgb, 0.0);
-    surfaceData.hasBakedGI = saturate(rt4.a);
+    surfaceData.builtinData = InitVividBuiltinData();
+    surfaceData.builtinData.bakeDiffuseLighting = max(rt4.rgb, 0.0);
+    surfaceData.builtinData.hasBakedGI = saturate(rt4.a);
     return surfaceData;
 }
 

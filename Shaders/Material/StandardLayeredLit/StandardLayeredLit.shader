@@ -125,6 +125,7 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma instancing_options renderinglayer
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
                 #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP
@@ -172,6 +173,7 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma instancing_options renderinglayer
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
                 #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma shader_feature_local_fragment _OPACITYMAP

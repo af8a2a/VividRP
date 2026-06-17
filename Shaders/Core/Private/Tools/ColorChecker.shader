@@ -68,6 +68,7 @@ Shader "VividRP/Tools/ColorChecker"
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
                 #pragma vertex Vert
                 #pragma fragment FragGBuffer
 
@@ -90,6 +91,7 @@ Shader "VividRP/Tools/ColorChecker"
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ LIGHTMAP_ON
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
+                #pragma multi_compile_fragment _ SHADOWS_SHADOWMASK
                 #pragma vertex Vert
                 #pragma fragment FragDebug
 

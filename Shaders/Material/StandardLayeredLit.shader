@@ -74,6 +74,9 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment FragPreDepth
 
+                #define VIVIDRP_SHADERPASS_DEPTH_ONLY 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitDepthOnlyPass.hlsl"
             ENDHLSL
         }
@@ -97,6 +100,9 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment Frag
 
+                #define VIVIDRP_SHADERPASS_SHADOW_CASTER 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitShadowCasterPass.hlsl"
             ENDHLSL
         }
@@ -133,6 +139,15 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment FragGBuffer
 
+                #define VIVIDRP_SHADERPASS_GBUFFER 1
+                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
                 #define VIVIDRP_STANDARD_LIT_VIRTUAL_TEXTURE 1
                 #define VIVID_VT_ENABLE_FEEDBACK_RW 1
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
@@ -171,6 +186,15 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment FragGBuffer
 
+                #define VIVIDRP_SHADERPASS_GBUFFER 1
+                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
                 #define VIVIDRP_STANDARD_LIT_VIRTUAL_TEXTURE 1
                 #define VIVID_VT_ENABLE_FEEDBACK_RW 1
                 #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
@@ -197,6 +221,12 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment Frag
 
+                #define VIVIDRP_SHADERPASS_META 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD2 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS 1
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMetaPass.hlsl"
             ENDHLSL
         }
@@ -229,6 +259,15 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment FragDebug
 
+                #define VIVIDRP_SHADERPASS_DEBUG 1
+                #define VIVIDRP_ATTRIBUTES_NEED_NORMAL 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TANGENT 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD1 1
+                #define VIVIDRP_VARYINGS_NEED_POSITION_WS 1
+                #define VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD1 1
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitGBufferPass.hlsl"
             ENDHLSL
         }
@@ -259,6 +298,11 @@ Shader "VividRP/Material/StandardLayeredLit"
                 #pragma vertex Vert
                 #pragma fragment Frag
 
+                #define VIVIDRP_SHADERPASS_MOTION_VECTORS 1
+                #define VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0 1
+                #define VIVIDRP_ATTRIBUTES_NEED_PREVIOUS_POSITION 1
+                #define VIVIDRP_VARYINGS_NEED_TEXCOORD0 1
+                #define VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS 1
                 #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMotionVectorPass.hlsl"
             ENDHLSL
         }

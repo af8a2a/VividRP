@@ -54,6 +54,57 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_DeclaresVividShaderPassContractMacros_ForReusablePasses()
+        {
+            string shaderSource = File.ReadAllText(GetShaderSourcePath());
+
+            AssertPassContainsContract(
+                shaderSource,
+                RenderGraphRenderListDesc.PreDepthShaderTagName,
+                "VIVIDRP_SHADERPASS_DEPTH_ONLY",
+                "VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0",
+                "VIVIDRP_VARYINGS_NEED_TEXCOORD0");
+            AssertPassContainsContract(
+                shaderSource,
+                "ShadowCaster",
+                "VIVIDRP_SHADERPASS_SHADOW_CASTER",
+                "VIVIDRP_ATTRIBUTES_NEED_TEXCOORD0",
+                "VIVIDRP_VARYINGS_NEED_TEXCOORD0");
+            AssertPassContainsContract(
+                shaderSource,
+                "VividGBuffer",
+                "VIVIDRP_SHADERPASS_GBUFFER",
+                "VIVIDRP_ATTRIBUTES_NEED_NORMAL",
+                "VIVIDRP_ATTRIBUTES_NEED_TANGENT",
+                "VIVIDRP_VARYINGS_NEED_POSITION_WS",
+                "VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD");
+            AssertPassContainsContract(
+                shaderSource,
+                "VividGBufferGPUDrivenDecal",
+                "VIVIDRP_SHADERPASS_GBUFFER",
+                "VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER",
+                "VIVIDRP_VARYINGS_NEED_POSITION_WS");
+            AssertPassContainsContract(
+                shaderSource,
+                "Meta",
+                "VIVIDRP_SHADERPASS_META",
+                "VIVIDRP_ATTRIBUTES_NEED_TEXCOORD2",
+                "VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS");
+            AssertPassContainsContract(
+                shaderSource,
+                "SRPDefaultUnlit",
+                "VIVIDRP_SHADERPASS_DEBUG",
+                "VIVIDRP_ATTRIBUTES_NEED_TANGENT",
+                "VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD");
+            AssertPassContainsContract(
+                shaderSource,
+                "MotionVectors",
+                "VIVIDRP_SHADERPASS_MOTION_VECTORS",
+                "VIVIDRP_ATTRIBUTES_NEED_PREVIOUS_POSITION",
+                "VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS");
+        }
+
+        [Test]
         public void StandardLayeredLitShader_DeclaresVirtualTextureGBufferPasses_ForSvtBaseColor()
         {
             string shaderSource = File.ReadAllText(GetStandardLayeredLitShaderSourcePath());
@@ -84,6 +135,32 @@ namespace VividRP.Editor.Tests
             Assert.That(preDepthPass, Does.Contain("#pragma shader_feature_local_fragment _ALPHATEST_ON"));
             Assert.That(preDepthPass, Does.Contain("#pragma shader_feature_local_fragment _OPACITYMAP"));
             AssertNoGBufferOnlyPreDepthVariants(preDepthPass);
+        }
+
+        [Test]
+        public void StandardLayeredLitShader_DeclaresVividShaderPassContractMacros_ForSharedStandardLitPasses()
+        {
+            string shaderSource = File.ReadAllText(GetStandardLayeredLitShaderSourcePath());
+
+            AssertPassContainsContract(
+                shaderSource,
+                "VividVTGBuffer",
+                "VIVIDRP_SHADERPASS_GBUFFER",
+                "VIVIDRP_STANDARD_LIT_VIRTUAL_TEXTURE",
+                "VIVID_VT_ENABLE_FEEDBACK_RW",
+                "VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD");
+            AssertPassContainsContract(
+                shaderSource,
+                "VividVTGBufferGPUDrivenDecal",
+                "VIVIDRP_SHADERPASS_GBUFFER",
+                "VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER",
+                "VIVIDRP_VARYINGS_NEED_POSITION_WS");
+            AssertPassContainsContract(
+                shaderSource,
+                "MotionVectors",
+                "VIVIDRP_SHADERPASS_MOTION_VECTORS",
+                "VIVIDRP_ATTRIBUTES_NEED_PREVIOUS_POSITION",
+                "VIVIDRP_VARYINGS_NEED_MOTION_POSITIONS");
         }
 
         [Test]
@@ -386,6 +463,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(match.Success, Is.True, $"Expected pass '{passName}' in shader source.");
             return match.Value;
+        }
+
+        private static void AssertPassContainsContract(string shaderSource, string passName, params string[] expectedTokens)
+        {
+            string passBlock = ExtractPassBlock(shaderSource, passName);
+
+            foreach (var expectedToken in expectedTokens)
+                Assert.That(passBlock, Does.Contain(expectedToken), $"Expected pass '{passName}' to declare '{expectedToken}'.");
         }
 
         private static void AssertNoGBufferOnlyPreDepthVariants(string preDepthPass)

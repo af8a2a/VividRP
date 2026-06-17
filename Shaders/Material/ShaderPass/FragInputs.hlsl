@@ -3,6 +3,9 @@
 // This structure gather all possible varying/interpolator for this shader.
 //-------------------------------------------------------------------------------------
 
+#ifndef VIVIDRP_FRAG_INPUTS_INCLUDED
+#define VIVIDRP_FRAG_INPUTS_INCLUDED
+
 
 #ifndef FRAG_INPUTS_ENABLE_STRIPPING
     #define FRAG_INPUTS_USE_TEXCOORD0
@@ -65,6 +68,11 @@ struct FragInputs
         float4 diffuseGIData[3];
     #endif
 
+    #ifdef FRAG_INPUTS_USE_META_EDITOR_VIS
+        float2 metaVizUV;
+        float4 metaLightCoord;
+    #endif
+
     float4 color; // vertex color
 
     // TODO: confirm with Morten following statement
@@ -97,3 +105,5 @@ void AdjustFragInputsToOffScreenRendering(inout FragInputs input, bool offScreen
     input.positionSS.xy = offScreenRenderingEnabled ? (uint2)round(input.positionSS.xy * offScreenRenderingFactor) : input.positionSS.xy;
     input.positionPixel = offScreenRenderingEnabled ? (uint2)round(input.positionPixel * offScreenRenderingFactor) : input.positionPixel;
 }
+
+#endif

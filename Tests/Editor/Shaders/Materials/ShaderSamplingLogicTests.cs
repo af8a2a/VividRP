@@ -7,9 +7,9 @@ namespace VividRP.Editor.Tests
     public sealed class ShaderSamplingLogicTests
     {
         [Test]
-        public void StandardLitGBufferPass_UsesKeywordGuards_ForOptionalTextureSampling()
+        public void StandardLitInput_UsesKeywordGuards_ForOptionalTextureSampling()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitInput.hlsl"));
 
             Assert.That(source, Does.Contain("#if defined(_ALPHATEST_ON)"));
             Assert.That(source, Does.Contain("#if defined(_OPACITYMAP)"));
@@ -24,9 +24,9 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void StandardLitGBufferPass_UsesVirtualTextureBaseColorBranch_WhenKeywordIsEnabled()
+        public void StandardLitInput_UsesVirtualTextureBaseColorBranch_WhenKeywordIsEnabled()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitInput.hlsl"));
 
             Assert.That(source, Does.Contain("#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)"));
             Assert.That(source, Does.Contain("VirtualTexture/VirtualTexture.hlsl"));
@@ -36,6 +36,30 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VTWriteFeedback(uv, requestedMips.lowerMip);"));
             Assert.That(source, Does.Contain("VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved);"));
             Assert.That(source, Does.Contain("return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);"));
+        }
+
+        [Test]
+        public void StandardLitPassWrappers_UseSharedVividShaderPasses_WithoutLocalVaryingStructs()
+        {
+            string[] passFiles =
+            {
+                "StandardLitDepthOnlyPass.hlsl",
+                "StandardLitShadowCasterPass.hlsl",
+                "StandardLitGBufferPass.hlsl",
+                "StandardLitMetaPass.hlsl",
+                "StandardLitMotionVectorPass.hlsl",
+            };
+
+            foreach (var passFile in passFiles)
+            {
+                var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", passFile));
+
+                Assert.That(source, Does.Contain("StandardLitInput.hlsl"), passFile);
+                Assert.That(source, Does.Contain("VividShaderPass"), passFile);
+                Assert.That(source, Does.Not.Contain("struct Attributes"), passFile);
+                Assert.That(source, Does.Not.Contain("struct Varyings"), passFile);
+                Assert.That(source, Does.Not.Contain("Varyings Vert("), passFile);
+            }
         }
 
         [Test]

@@ -37,7 +37,7 @@ Shader "Hidden/VividRP/TerrainLit_BasemapGen"
                 #pragma vertex Vert
                 #pragma fragment FragMainTex
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/TerrainLitBasemapGenPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitBasemapGenPass.hlsl"
             ENDHLSL
         }
 
@@ -65,7 +65,7 @@ Shader "Hidden/VividRP/TerrainLit_BasemapGen"
                 #pragma vertex Vert
                 #pragma fragment FragMetallicTex
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/TerrainLitBasemapGenPass.hlsl"
+                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitBasemapGenPass.hlsl"
             ENDHLSL
         }
     }

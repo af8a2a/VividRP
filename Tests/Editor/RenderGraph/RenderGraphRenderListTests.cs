@@ -128,6 +128,7 @@ namespace VividRP.Editor.Tests
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
+                "SimpleLit",
                 "SimpleLit.shader"));
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
@@ -149,6 +150,7 @@ namespace VividRP.Editor.Tests
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
+                "StandardLit",
                 "StandardLit.shader"));
 
             Assert.That(File.Exists(shaderPath), Is.True, $"Expected shader source at '{shaderPath}'.");
@@ -157,21 +159,21 @@ namespace VividRP.Editor.Tests
 
             Assert.That(shaderSource, Does.Contain($"Name \"{MotionVectorPass.MotionVectorsShaderTagName}\""));
             Assert.That(shaderSource, Does.Contain($"\"LightMode\" = \"{MotionVectorPass.MotionVectorsShaderTagName}\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/StandardLitMotionVectorPass.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLitMotionVectorPass.hlsl\""));
         }
 
         [Test]
-        public void StandardLitMotionVectorPass_UsesSameUnityPerMaterialLayout_AsGBufferPass()
+        public void StandardLitMotionVectorPass_SharesUnityPerMaterialLayoutThroughStandardLitInput()
         {
-            var gBufferPath = Path.GetFullPath(Path.Combine(
+            var inputPath = Path.GetFullPath(Path.Combine(
                 Application.dataPath,
                 "..",
                 "Packages",
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
-                "ShaderPass",
-                "StandardLitGBufferPass.hlsl"));
+                "StandardLit",
+                "StandardLitInput.hlsl"));
             var motionVectorPath = Path.GetFullPath(Path.Combine(
                 Application.dataPath,
                 "..",
@@ -179,30 +181,32 @@ namespace VividRP.Editor.Tests
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
-                "ShaderPass",
+                "StandardLit",
                 "StandardLitMotionVectorPass.hlsl"));
 
-            Assert.That(File.Exists(gBufferPath), Is.True, $"Expected shader source at '{gBufferPath}'.");
+            Assert.That(File.Exists(inputPath), Is.True, $"Expected shader source at '{inputPath}'.");
             Assert.That(File.Exists(motionVectorPath), Is.True, $"Expected shader source at '{motionVectorPath}'.");
 
-            var gBufferCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(gBufferPath));
-            var motionVectorCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(motionVectorPath));
+            var inputCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(inputPath));
+            var motionVectorSource = File.ReadAllText(motionVectorPath);
 
-            Assert.That(motionVectorCBuffer, Is.EqualTo(gBufferCBuffer));
+            Assert.That(inputCBuffer, Does.Contain("float4 _BaseMap_ST;"));
+            Assert.That(motionVectorSource, Does.Contain("StandardLitInput.hlsl"));
+            Assert.That(motionVectorSource, Does.Not.Contain("CBUFFER_START(UnityPerMaterial)"));
         }
 
         [Test]
-        public void StandardLitDepthOnlyPass_UsesSameUnityPerMaterialLayout_AsGBufferPass()
+        public void StandardLitDepthOnlyPass_SharesUnityPerMaterialLayoutThroughStandardLitInput()
         {
-            var gBufferPath = Path.GetFullPath(Path.Combine(
+            var inputPath = Path.GetFullPath(Path.Combine(
                 Application.dataPath,
                 "..",
                 "Packages",
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
-                "ShaderPass",
-                "StandardLitGBufferPass.hlsl"));
+                "StandardLit",
+                "StandardLitInput.hlsl"));
             var depthOnlyPath = Path.GetFullPath(Path.Combine(
                 Application.dataPath,
                 "..",
@@ -210,16 +214,18 @@ namespace VividRP.Editor.Tests
                 "com.af8a2a.vividrp",
                 "Shaders",
                 "Material",
-                "ShaderPass",
+                "StandardLit",
                 "StandardLitDepthOnlyPass.hlsl"));
 
-            Assert.That(File.Exists(gBufferPath), Is.True, $"Expected shader source at '{gBufferPath}'.");
+            Assert.That(File.Exists(inputPath), Is.True, $"Expected shader source at '{inputPath}'.");
             Assert.That(File.Exists(depthOnlyPath), Is.True, $"Expected shader source at '{depthOnlyPath}'.");
 
-            var gBufferCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(gBufferPath));
-            var depthOnlyCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(depthOnlyPath));
+            var inputCBuffer = ExtractUnityPerMaterialBlock(File.ReadAllText(inputPath));
+            var depthOnlySource = File.ReadAllText(depthOnlyPath);
 
-            Assert.That(depthOnlyCBuffer, Is.EqualTo(gBufferCBuffer));
+            Assert.That(inputCBuffer, Does.Contain("float4 _BaseMap_ST;"));
+            Assert.That(depthOnlySource, Does.Contain("StandardLitInput.hlsl"));
+            Assert.That(depthOnlySource, Does.Not.Contain("CBUFFER_START(UnityPerMaterial)"));
         }
 
         private static string ExtractUnityPerMaterialBlock(string source)

@@ -45,7 +45,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SimpleForwardShader_AppliesPreExposureToForwardOutput()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleForward.shader"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleForward", "SimpleForward.shader"));
 
             Assert.That(source, Does.Contain("Shader \"VividRP/Material/SimpleForward\""));
             Assert.That(source, Does.Contain("#pragma target 3.5"));

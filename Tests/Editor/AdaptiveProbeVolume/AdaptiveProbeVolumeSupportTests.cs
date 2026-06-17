@@ -59,8 +59,8 @@ namespace VividRP.Editor.Tests
                 GetPackageFilePath("Shaders", "Material", "DeferredDirectionalLightingIndirectPass.hlsl"));
             var simpleDeferredSource = File.ReadAllText(
                 GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleDeferredLitPass.hlsl"));
-            var standardLitPassSource = File.ReadAllText(
-                GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
+            var standardLitInputSource = File.ReadAllText(
+                GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLitInput.hlsl"));
             var indirectDiffuseSource = File.ReadAllText(
                 GetPackageFilePath("Shaders", "Material", "ShaderPass", "IndirectDiffuse.hlsl"));
             var visibilityBufferResolveSource = File.ReadAllText(
@@ -76,7 +76,7 @@ namespace VividRP.Editor.Tests
             Assert.That(deferredDirectionalSource, Does.Contain("EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData)"));
             Assert.That(simpleDeferredSource, Does.Contain("EvaluateBSDF_Env(positionWS, viewDirectionWS, preLightData, surfaceData, bsdfData)"));
             Assert.That(simpleDeferredSource, Does.Contain("useAmbientFallback = useAmbientFallback && _EnableProbeVolumes == 0;"));
-            Assert.That(standardLitPassSource, Does.Contain("SampleVividProbeVolume("));
+            Assert.That(standardLitInputSource, Does.Contain("SampleVividProbeVolume("));
             Assert.That(indirectDiffuseSource, Does.Contain("SampleVividProbeVolume("));
             Assert.That(visibilityBufferResolveSource, Does.Contain("SampleVividProbeVolume("));
         }

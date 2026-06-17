@@ -9,7 +9,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void StandardLitInput_UsesKeywordGuards_ForOptionalTextureSampling()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitInput.hlsl"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLitInput.hlsl"));
 
             Assert.That(source, Does.Contain("#if defined(_ALPHATEST_ON)"));
             Assert.That(source, Does.Contain("#if defined(_OPACITYMAP)"));
@@ -26,7 +26,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void StandardLitInput_UsesVirtualTextureBaseColorBranch_WhenKeywordIsEnabled()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitInput.hlsl"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLitInput.hlsl"));
 
             Assert.That(source, Does.Contain("#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)"));
             Assert.That(source, Does.Contain("VirtualTexture/VirtualTexture.hlsl"));
@@ -52,7 +52,7 @@ namespace VividRP.Editor.Tests
 
             foreach (var passFile in passFiles)
             {
-                var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", passFile));
+                var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", passFile));
 
                 Assert.That(source, Does.Contain("StandardLitInput.hlsl"), passFile);
                 Assert.That(source, Does.Contain("VividShaderPass"), passFile);

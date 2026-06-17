@@ -12,8 +12,8 @@ namespace VividRP.Editor.Tests
 {
     public sealed class StandardLitShaderTests
     {
-        private const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit.shader";
-        private const string StandardLayeredLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLayeredLit.shader";
+        private const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLit.shader";
+        private const string StandardLayeredLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLayeredLit/StandardLayeredLit.shader";
 
         [Test]
         public void StandardLitShader_DeclaresRequiredPasses_ForDrawObjectPass()
@@ -441,7 +441,7 @@ namespace VividRP.Editor.Tests
 
         private static string GetShaderSourcePath()
         {
-            return GetPackageFilePath("Shaders", "Material", "StandardLit.shader");
+            return GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLit.shader");
         }
 
         private static string GetIndirectDiffuseSourcePath()
@@ -451,7 +451,7 @@ namespace VividRP.Editor.Tests
 
         private static string GetStandardLayeredLitShaderSourcePath()
         {
-            return GetPackageFilePath("Shaders", "Material", "StandardLayeredLit.shader");
+            return GetPackageFilePath("Shaders", "Material", "StandardLayeredLit", "StandardLayeredLit.shader");
         }
 
         private static string ExtractPassBlock(string shaderSource, string passName)

@@ -7,27 +7,50 @@ namespace VividRP.Editor.Tests
     public sealed class StandardLitShadowCasterPassTests
     {
         [Test]
-        public void StandardLitShadowCasterPass_TransformsDirectlyAndAppliesNearClipClamping()
+        public void StandardLitShadowCasterPass_UsesSharedMeshPassAndAppliesNearClipClamping()
         {
-            var source = File.ReadAllText(GetSourcePath());
+            var wrapperSource = File.ReadAllText(GetStandardLitShadowCasterSourcePath());
+            var sharedPassSource = File.ReadAllText(GetSharedShadowCasterSourcePath());
+            var vertMeshSource = File.ReadAllText(GetVividVertMeshSourcePath());
 
-            Assert.That(source, Does.Contain("float4 _ShadowBias;"));
-            Assert.That(source, Does.Not.Contain("float3 _LightDirection;"));
-            Assert.That(source, Does.Not.Contain("float3 _LightPosition;"));
-            Assert.That(source, Does.Contain("float3 normalOS : NORMAL;"));
-            Assert.That(source, Does.Not.Contain("float3 ApplyVividShadowBias(float3 positionWS, float3 lightDirectionWS)"));
-            Assert.That(source, Does.Contain("float4 ApplyVividShadowClamping(float4 positionCS)"));
-            Assert.That(source, Does.Contain("float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);"));
-            Assert.That(source, Does.Not.Contain("float3 normalWS = TransformObjectToWorldNormal(input.normalOS);"));
-            Assert.That(source, Does.Not.Contain("float normalOffsetScale = invNdotL * _ShadowBias.y;"));
-            Assert.That(source, Does.Not.Contain("return positionWS + lightDirectionWS * _ShadowBias.x;"));
-            Assert.That(source, Does.Contain("output.positionCS = TransformWorldToHClip(positionWS);"));
-            Assert.That(source, Does.Contain("output.positionCS = ApplyVividShadowClamping(output.positionCS);"));
+            Assert.That(wrapperSource, Does.Contain("StandardLitInput.hlsl"));
+            Assert.That(wrapperSource, Does.Contain("VividShaderPassShadowCaster.hlsl"));
+            Assert.That(wrapperSource, Does.Not.Contain("struct Attributes"));
+            Assert.That(wrapperSource, Does.Not.Contain("struct Varyings"));
+
+            Assert.That(sharedPassSource, Does.Contain("float4 _ShadowBias;"));
+            Assert.That(sharedPassSource, Does.Not.Contain("float3 _LightDirection;"));
+            Assert.That(sharedPassSource, Does.Not.Contain("float3 _LightPosition;"));
+            Assert.That(sharedPassSource, Does.Not.Contain("float3 ApplyVividShadowBias(float3 positionWS, float3 lightDirectionWS)"));
+            Assert.That(sharedPassSource, Does.Contain("float4 ApplyVividShadowClamping(float4 positionCS)"));
+            Assert.That(sharedPassSource, Does.Contain("VividVaryingsMesh output = VividVertMesh(input);"));
+            Assert.That(sharedPassSource, Does.Contain("output.positionCS = ApplyVividShadowClamping(output.positionCS);"));
+
+            Assert.That(vertMeshSource, Does.Contain("float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);"));
+            Assert.That(vertMeshSource, Does.Contain("output.positionCS = TransformWorldToHClip(positionWS);"));
+            Assert.That(vertMeshSource, Does.Not.Contain("float normalOffsetScale = invNdotL * _ShadowBias.y;"));
+            Assert.That(vertMeshSource, Does.Not.Contain("return positionWS + lightDirectionWS * _ShadowBias.x;"));
         }
 
-        private static string GetSourcePath()
+        private static string GetStandardLitShadowCasterSourcePath()
         {
-            var sourcePath = GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitShadowCasterPass.hlsl");
+            var sourcePath = GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLitShadowCasterPass.hlsl");
+
+            Assert.That(File.Exists(sourcePath), Is.True, $"Expected source at '{sourcePath}'.");
+            return sourcePath;
+        }
+
+        private static string GetSharedShadowCasterSourcePath()
+        {
+            var sourcePath = GetPackageFilePath("Shaders", "Material", "ShaderPass", "VividShaderPassShadowCaster.hlsl");
+
+            Assert.That(File.Exists(sourcePath), Is.True, $"Expected source at '{sourcePath}'.");
+            return sourcePath;
+        }
+
+        private static string GetVividVertMeshSourcePath()
+        {
+            var sourcePath = GetPackageFilePath("Shaders", "Material", "ShaderPass", "VividVertMesh.hlsl");
 
             Assert.That(File.Exists(sourcePath), Is.True, $"Expected source at '{sourcePath}'.");
             return sourcePath;

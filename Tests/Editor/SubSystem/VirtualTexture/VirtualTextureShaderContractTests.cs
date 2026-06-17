@@ -72,6 +72,7 @@ namespace VividRP.Editor.Tests
             string source = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Material",
+                "VirtualTextureDemo",
                 "VirtualTextureDemo.shader"));
 
             Assert.That(source, Does.Contain("Shader \"VividRP/Material/VirtualTextureDemo\""));

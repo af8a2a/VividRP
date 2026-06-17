@@ -8,7 +8,7 @@ namespace VividRP.Editor.Tests
 {
     public sealed class StandardLitMaterialImportUtilityTests
     {
-        private const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit.shader";
+        private const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLit.shader";
         private const string GeneratedAssetsFolderPath = "Assets/Tests/VividRP/GeneratedMaterialImportUtility";
         private const string NormalTextureAssetPath = GeneratedAssetsFolderPath + "/Wall_Normal_ImportTest.png";
 

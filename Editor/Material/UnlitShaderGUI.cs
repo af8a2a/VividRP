@@ -21,7 +21,7 @@ namespace VividRP.Editor
 
     internal static class UnlitMaterialUtility
     {
-        internal const string UnlitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit.shader";
+        internal const string UnlitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/Unlit.shader";
         internal const string UnlitShaderName = "VividRP/Material/Unlit";
         internal const float OpaqueSurface = 0.0f;
         internal const float TransparentSurface = 1.0f;

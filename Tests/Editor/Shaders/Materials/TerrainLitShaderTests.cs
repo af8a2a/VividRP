@@ -8,9 +8,9 @@ namespace VividRP.Editor.Tests
 {
     public sealed class TerrainLitShaderTests
     {
-        private const string TerrainLitShaderRelativePath = "Shaders/Material/TerrainLit.shader";
-        private const string TerrainLitBasemapShaderRelativePath = "Shaders/Material/TerrainLit_Basemap.shader";
-        private const string TerrainLitBasemapGenShaderRelativePath = "Shaders/Material/TerrainLit_BasemapGen.shader";
+        private const string TerrainLitShaderRelativePath = "Shaders/Material/TerrainLit/TerrainLit.shader";
+        private const string TerrainLitBasemapShaderRelativePath = "Shaders/Material/TerrainLit/TerrainLit_Basemap.shader";
+        private const string TerrainLitBasemapGenShaderRelativePath = "Shaders/Material/TerrainLit/TerrainLit_BasemapGen.shader";
 
         [Test]
         public void TerrainLitShader_LoadsAndDeclaresRequiredPasses()
@@ -142,7 +142,7 @@ namespace VividRP.Editor.Tests
         public void TerrainLitGBufferPath_MapsSsrAndDecalPropertiesToMaterialFeatures()
         {
             Material material = CreateTerrainLitMaterial();
-            string passSource = File.ReadAllText(GetPackageFilePath("Shaders/Material/ShaderPass/TerrainLitPass.hlsl"));
+            string passSource = File.ReadAllText(GetPackageFilePath("Shaders/Material/TerrainLit/TerrainLitPass.hlsl"));
 
             try
             {

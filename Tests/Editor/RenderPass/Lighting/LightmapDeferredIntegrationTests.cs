@@ -9,18 +9,18 @@ namespace VividRP.Editor.Tests
         [Test]
         public void LightmapAwareGBufferShaders_DeclareLightmapVariantsAndSamplingHelpers()
         {
-            var standardLitShader = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit.shader"));
-            var simpleLitShader = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit.shader"));
-            var standardLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
-            var simpleLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleLitGBufferPass.hlsl"));
+            var standardLitShader = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLit.shader"));
+            var simpleLitShader = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit", "SimpleLit.shader"));
+            var standardLitInput = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLitInput.hlsl"));
+            var simpleLitPass = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit", "SimpleLitGBufferPass.hlsl"));
             var bakedGiSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "BakedGI.hlsl"));
 
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(standardLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ LIGHTMAP_ON"));
             Assert.That(simpleLitShader, Does.Contain("#pragma multi_compile _ DIRLIGHTMAP_COMBINED"));
-            Assert.That(standardLitPass, Does.Contain("SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS, input.positionWS)"));
-            Assert.That(standardLitPass, Does.Contain("SampleVividProbeVolume("));
+            Assert.That(standardLitInput, Does.Contain("SampleStandardLitBakedGI(input.lightmapUV, surfaceData.normalWS, input.positionWS)"));
+            Assert.That(standardLitInput, Does.Contain("SampleVividProbeVolume("));
             Assert.That(simpleLitPass, Does.Contain("SampleVividBakedGI(input.lightmapUV, surfaceData.normalWS)"));
             Assert.That(bakedGiSource, Does.Contain("SampleSingleLightmap("));
             Assert.That(bakedGiSource, Does.Contain("SampleDirectionalLightmap("));

@@ -10,8 +10,8 @@ namespace VividRP.Editor.Tests
         [Test]
         public void StandardAndSimpleLitShaders_DeclareSeparateGPUDrivenDecalGBufferPasses()
         {
-            var standardLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit.shader"));
-            var simpleLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit.shader"));
+            var standardLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLit.shader"));
+            var simpleLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit", "SimpleLit.shader"));
 
             AssertDecalGBufferPass(standardLitSource);
             AssertDecalGBufferPass(simpleLitSource);
@@ -20,7 +20,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void StandardLitShader_KeepsDefaultGBufferPassFreeOfBindlessDecalRequirements()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit.shader"));
+            var source = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLit.shader"));
             var defaultPassStart = source.IndexOf("Name \"VividGBuffer\"", StringComparison.Ordinal);
             var decalPassStart = source.IndexOf("Name \"VividGBufferGPUDrivenDecal\"", StringComparison.Ordinal);
 
@@ -36,8 +36,8 @@ namespace VividRP.Editor.Tests
         [Test]
         public void MaterialGBufferPasses_ApplyGPUDrivenDecalsOnlyBehindDecalKeyword()
         {
-            var standardLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "StandardLitGBufferPass.hlsl"));
-            var simpleLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "ShaderPass", "SimpleLitGBufferPass.hlsl"));
+            var standardLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "StandardLit", "StandardLitGBufferPass.hlsl"));
+            var simpleLitSource = File.ReadAllText(GetPackageFilePath("Shaders", "Material", "SimpleLit", "SimpleLitGBufferPass.hlsl"));
 
             Assert.That(standardLitSource, Does.Contain("#if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)"));
             Assert.That(standardLitSource, Does.Contain("ApplyVividGPUDrivenDecalsToGBufferSurfaceData(surfaceData, input.positionWS"));

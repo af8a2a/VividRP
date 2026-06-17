@@ -34,7 +34,7 @@ namespace VividRP.Editor
 
     internal static class StandardLitMaterialImportUtility
     {
-        internal const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit.shader";
+        internal const string StandardLitShaderAssetPath = "Packages/com.af8a2a.vividrp/Shaders/Material/StandardLit/StandardLit.shader";
         internal const string StandardLitShaderName = "VividRP/Material/StandardLit";
 
         private const string PhysicalMaterialTypeName = "PHYSICAL_MTL";

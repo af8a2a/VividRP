@@ -4147,8 +4147,8 @@ MonoBehaviour:
           m_KeyList:
           - __option_DebugExport
           - m_RenderList
+          - m_CameraDepthStencilTexture_In
           - m_CameraDepthTexture
-          - m_MotionVectorDepthTexture_In
           - m_FallbackRenderList
           m_ValueList:
           - rid: 8515051663678505433

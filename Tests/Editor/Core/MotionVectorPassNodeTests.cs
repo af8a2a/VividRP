@@ -26,10 +26,10 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(node.GetInputPortByName("m_RenderList"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_FallbackRenderList"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_CameraDepthStencilTexture_In"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_CameraDepthTexture"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_MotionVectorDepthTexture_In"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_MotionVectorTexture"), Is.Not.Null);
-                Assert.That(node.GetOutputPortByName("m_MotionVectorDepthTexture_Out"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_CameraDepthStencilTexture_Out"), Is.Not.Null);
             }
             finally
             {

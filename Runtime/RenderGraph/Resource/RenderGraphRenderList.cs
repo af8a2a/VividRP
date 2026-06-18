@@ -88,6 +88,7 @@ namespace VividRP.Runtime
                     : (string[])s_DefaultShaderTagNames.Clone(),
                 RenderQueueRange = RenderGraphRenderQueueRange.Opaque,
                 SortingCriteria = SortingCriteria.CommonOpaque,
+                ExcludeObjectMotionVectors = true
             };
         }
 
@@ -100,6 +101,7 @@ namespace VividRP.Runtime
                     : (string[])s_DefaultShaderTagNames.Clone(),
                 RenderQueueRange = RenderGraphRenderQueueRange.Transparent,
                 SortingCriteria = SortingCriteria.CommonTransparent,
+                
             };
         }
 

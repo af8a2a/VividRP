@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Serialization;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -12,12 +13,11 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string MotionVectorsShaderTagName = "MotionVectors";
         internal const string ObjectMotionVectorFallbackShaderTagName = "ObjectMotionVectorFallback";
         internal const int ObjectMotionVectorStencilBit = 1 << 5;
-        private const int CameraDepthPrefillPassIndex = 0;
-        private const int CameraMotionVectorsPassIndex = 1;
+        private const int CameraMotionVectorsPassIndex = 0;
 
         private static readonly string[] s_FallbackShaderTagNames =
         {
-            MotionVectorsShaderTagName,
+            ObjectMotionVectorFallbackShaderTagName,
         };
 
         private static readonly string[] s_MotionVectorShaderTagNames =
@@ -35,14 +35,15 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "FallbackRenderList", Access = AccessFlags.Read)]
         private RenderGraphRenderList m_FallbackRenderList;
 
+        [FormerlySerializedAs("m_MotionVectorDepthTexture")]
+        [RenderGraphResource(Name = "CameraDepthStencil", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
+        private RenderGraphTexture m_CameraDepthStencilTexture;
+
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_CameraDepthTexture;
 
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_MotionVectorTexture;
-
-        [RenderGraphResource(Name = "MotionVectorDepth", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
-        private RenderGraphTexture m_MotionVectorDepthTexture;
 
         private Material m_CameraMotionMaterial;
         private Shader m_ObjectMotionVectorFallbackShader;
@@ -72,11 +73,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
             };
 
-            m_CameraDepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.None, DepthBits.Depth32);
+            m_CameraDepthStencilTexture = RenderGraphTexture.CreateInput("CameraDepthStencil", GraphicsFormat.None, DepthBits.Depth32);
+            m_CameraDepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.R32_SFloat);
+            m_CameraDepthTexture.desc.FilterMode = FilterMode.Point;
             m_MotionVectorTexture = RenderGraphTexture.CreateColorTarget("MotionVectors", GraphicsFormat.R16G16_SFloat);
             m_MotionVectorTexture.desc.ClearBuffer = false;
-            m_MotionVectorDepthTexture = RenderGraphTexture.CreateDepthTarget("MotionVectorDepth");
-            m_MotionVectorDepthTexture.desc.ClearBuffer = false;
+            m_MotionVectorTexture.desc.ClearColor = Color.clear;
         }
 
         public override void Create()
@@ -90,6 +92,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_Camera = cameraData.camera;
+            VividCameraData.EnsureCameraDepthTextureMode(m_Camera);
 
             ConfigureRenderLists();
             ConfigureTargets(cameraData);
@@ -100,24 +103,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Camera == null || m_Camera.cameraType == CameraType.Preview)
                 return;
 
-            if (!m_CameraDepthTexture.innerHandle.IsValid()
-                || !m_MotionVectorTexture.innerHandle.IsValid()
-                || !m_MotionVectorDepthTexture.innerHandle.IsValid())
+            if (!m_CameraDepthStencilTexture.innerHandle.IsValid()
+                || !m_MotionVectorTexture.innerHandle.IsValid())
             {
                 return;
-            }
-
-            if (m_CameraMotionMaterial != null)
-            {
-                m_CameraMotionMaterial.SetTexture(CameraDepthTextureId, m_CameraDepthTexture.innerHandle);
-                m_CameraMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
-                context.cmd.DrawProcedural(
-                    Matrix4x4.identity,
-                    m_CameraMotionMaterial,
-                    CameraDepthPrefillPassIndex,
-                    MeshTopology.Triangles,
-                    3,
-                    1);
             }
 
             if (m_RenderList != null && m_RenderList.IsValid)
@@ -132,6 +121,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (m_CameraMotionMaterial != null)
             {
+                var cameraDepthTexture = ResolveCameraDepthTextureForSampling();
+                if (cameraDepthTexture == null || !cameraDepthTexture.innerHandle.IsValid())
+                    return;
+
+                m_CameraMotionMaterial.SetTexture(CameraDepthTextureId, cameraDepthTexture.innerHandle);
                 m_CameraMotionMaterial.SetInt(StencilRefId, ObjectMotionVectorStencilBit);
                 m_CameraMotionMaterial.SetInt(StencilMaskId, ObjectMotionVectorStencilBit);
                 context.cmd.DrawProcedural(
@@ -198,7 +192,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void ConfigureTargets(VividCameraData cameraData)
         {
-            var sourceDescriptor = m_CameraDepthTexture?.desc;
+            var sourceDescriptor = m_CameraDepthStencilTexture?.desc ?? m_CameraDepthTexture?.desc;
             var hasExplicitSourceSize = RenderGraphTextureDescUtility.HasExplicitSize(sourceDescriptor);
 
             var width = hasExplicitSourceSize
@@ -209,7 +203,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 : CameraDimensionUtility.ResolveCameraDimension(cameraData.actualHeight, cameraData.pixelHeight, Screen.height);
 
             ConfigureMotionVectorTexture(width, height, sourceDescriptor);
-            ConfigureDepthTexture(width, height, sourceDescriptor);
         }
 
         private void ConfigureMotionVectorTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)
@@ -242,28 +235,27 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MotionVectorTexture.desc.ScaleFactor = sourceDescriptor.ScaleFactor;
         }
 
-        private void ConfigureDepthTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)
+        private RenderGraphTexture ResolveCameraDepthTextureForSampling()
         {
-            if (m_MotionVectorDepthTexture?.desc == null)
-                return;
+            if (m_CameraDepthTexture?.innerHandle.IsValid() != true)
+                return m_CameraDepthStencilTexture;
 
-            m_MotionVectorDepthTexture.Resize(width, height);
-            m_MotionVectorDepthTexture.desc.ColorFormat = GraphicsFormat.None;
-            m_MotionVectorDepthTexture.desc.DepthBufferBits = sourceDescriptor != null && sourceDescriptor.DepthBufferBits != DepthBits.None
-                ? sourceDescriptor.DepthBufferBits
-                : DepthBits.Depth32;
-            m_MotionVectorDepthTexture.desc.MsaaSamples = sourceDescriptor?.MsaaSamples ?? MSAASamples.None;
-            m_MotionVectorDepthTexture.desc.ClearBuffer = false;
-            m_MotionVectorDepthTexture.desc.Name = "MotionVectorDepth";
+            if (IsDefaultCameraDepthTexture(m_CameraDepthTexture, m_CameraDepthStencilTexture))
+                return m_CameraDepthStencilTexture;
 
-            if (sourceDescriptor == null)
-                return;
+            return m_CameraDepthTexture;
+        }
 
-            m_MotionVectorDepthTexture.desc.Dimension = sourceDescriptor.Dimension;
-            m_MotionVectorDepthTexture.desc.Slices = Mathf.Max(1, sourceDescriptor.Slices);
-            m_MotionVectorDepthTexture.desc.UseDynamicScale = sourceDescriptor.UseDynamicScale;
-            m_MotionVectorDepthTexture.desc.UseDynamicScaleExplicit = sourceDescriptor.UseDynamicScaleExplicit;
-            m_MotionVectorDepthTexture.desc.ScaleFactor = sourceDescriptor.ScaleFactor;
+        private static bool IsDefaultCameraDepthTexture(RenderGraphTexture cameraDepthTexture, RenderGraphTexture depthStencilTexture)
+        {
+            var cameraDepthDesc = cameraDepthTexture?.desc;
+            var depthStencilDesc = depthStencilTexture?.desc;
+            if (cameraDepthDesc == null || depthStencilDesc == null)
+                return false;
+
+            return cameraDepthDesc.Width <= 1
+                   && cameraDepthDesc.Height <= 1
+                   && (depthStencilDesc.Width > 1 || depthStencilDesc.Height > 1);
         }
 
     }

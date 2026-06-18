@@ -140,6 +140,8 @@ namespace VividRP.Runtime
                     VividVolumeManagerUtility.Update(camera);
                 }
 
+                VividCameraData.EnsureCameraDepthTextureMode(camera);
+
                 ScriptableCullingParameters cullingParameters;
                 using (s_CullingParametersMarker.Auto())
                 {

@@ -15,9 +15,45 @@ namespace VividRP.Runtime
         {
             bool supportProbeVolume = asset != null && asset.SupportProbeVolume;
 
+            SupportedRenderingFeatures.active = new SupportedRenderingFeatures()
+            {
+                reflectionProbeModes = SupportedRenderingFeatures.ReflectionProbeModes.Rotation,
+                defaultMixedLightingModes = SupportedRenderingFeatures.LightmapMixedBakeModes.IndirectOnly,
+                mixedLightingModes = SupportedRenderingFeatures.LightmapMixedBakeModes.IndirectOnly | SupportedRenderingFeatures.LightmapMixedBakeModes.Shadowmask,
+                lightmapBakeTypes = LightmapBakeType.Baked | LightmapBakeType.Mixed | LightmapBakeType.Realtime,
+                lightmapsModes = LightmapsMode.NonDirectional | LightmapsMode.CombinedDirectional,
+                lightProbeProxyVolumes = true,
+                motionVectors = true,
+                receiveShadows = false,
+                reflectionProbes = false,
+                rendererPriority = true,
+                overridesFog = true,
+                overridesOtherLightingSettings = true,
+                editableMaterialRenderQueue = false,
+                enlighten = true
+                ,
+                overridesLODBias = true
+                ,
+                overridesMaximumLODLevel = true
+                ,
+                overridesShadowmask = true // Don't display the shadow mask UI in Quality Settings
+                ,
+                overridesRealtimeReflectionProbes = true // Don't display the real time reflection probes checkbox UI in Quality Settings
+                ,
+                ambientProbeBaking = false
+                ,
+                defaultReflectionProbeBaking = false
+                ,
+                rendersUIOverlay = true,
+                supportsHDR = true,
+                supportsClouds = true
+            };
+
+            
             SupportedRenderingFeatures.active.overridesLightProbeSystem = supportProbeVolume;
             SupportedRenderingFeatures.active.rendererProbes = !supportProbeVolume;
             SupportedRenderingFeatures.active.skyOcclusion = supportProbeVolume;
+
 
             if (!supportProbeVolume)
                 return;

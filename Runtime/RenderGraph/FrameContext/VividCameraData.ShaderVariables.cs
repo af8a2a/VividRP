@@ -201,6 +201,19 @@ namespace VividRP.Runtime
             }
         }
 
+        internal static void EnsureCameraDepthTextureMode(Camera currentCamera)
+        {
+            if (currentCamera == null)
+                return;
+
+            const DepthTextureMode requiredMode = DepthTextureMode.Depth | DepthTextureMode.MotionVectors;
+            var depthTextureMode = currentCamera.depthTextureMode;
+            if ((depthTextureMode & requiredMode) == requiredMode)
+                return;
+
+            currentCamera.depthTextureMode = depthTextureMode | requiredMode;
+        }
+
         private void EnsureRequiredDepthTextureMode(Camera currentCamera)
         {
             if (currentCamera == null)
@@ -222,7 +235,7 @@ namespace VividRP.Runtime
                 return;
             }
 
-            currentCamera.depthTextureMode = depthTextureMode | requiredMode;
+            EnsureCameraDepthTextureMode(currentCamera);
             m_DepthTextureModeHasRequiredFlags = true;
         }
 

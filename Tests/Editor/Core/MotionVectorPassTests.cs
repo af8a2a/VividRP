@@ -4,6 +4,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -23,9 +24,13 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "CameraDepth",
-                "MotionVectorDepth",
+                "CameraDepthStencil",
                 "MotionVectors",
             }));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepth").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepth").IsDepthAttachment, Is.False);
+            Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepthStencil").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(resources.Textures.Single(entry => entry.Name == "CameraDepthStencil").IsDepthAttachment, Is.True);
             Assert.That(renderListEntries.Select(entry => entry.Name), Is.EqualTo(new[] { "FallbackRenderList", "RenderList" }));
         }
 
@@ -35,20 +40,25 @@ namespace VividRP.Editor.Tests
             var pass = new MotionVectorPass();
             var frameData = new ContextContainer();
 
-            var sourceTexture = GetTextureField(pass, "m_CameraDepthTexture");
-            sourceTexture.desc.Width = 320;
-            sourceTexture.desc.Height = 180;
-            sourceTexture.desc.Slices = 2;
-            sourceTexture.desc.Dimension = TextureDimension.Tex2DArray;
-            sourceTexture.desc.DepthBufferBits = DepthBits.Depth24;
-            sourceTexture.desc.UseDynamicScale = true;
-            sourceTexture.desc.UseDynamicScaleExplicit = true;
-            sourceTexture.desc.ScaleFactor = new Vector2(0.5f, 0.5f);
+            var depthStencilTexture = GetTextureField(pass, "m_CameraDepthStencilTexture");
+            depthStencilTexture.desc.Width = 320;
+            depthStencilTexture.desc.Height = 180;
+            depthStencilTexture.desc.Slices = 2;
+            depthStencilTexture.desc.Dimension = TextureDimension.Tex2DArray;
+            depthStencilTexture.desc.DepthBufferBits = DepthBits.Depth24;
+            depthStencilTexture.desc.UseDynamicScale = true;
+            depthStencilTexture.desc.UseDynamicScaleExplicit = true;
+            depthStencilTexture.desc.ScaleFactor = new Vector2(0.5f, 0.5f);
 
             pass.Prepare(frameData);
 
+            var cameraDepthTexture = GetTextureField(pass, "m_CameraDepthTexture");
             var motionVectorTexture = GetTextureField(pass, "m_MotionVectorTexture");
-            var motionVectorDepthTexture = GetTextureField(pass, "m_MotionVectorDepthTexture");
+
+            Assert.That(cameraDepthTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
+            Assert.That(cameraDepthTexture.desc.DepthBufferBits, Is.EqualTo(DepthBits.None));
+            Assert.That(cameraDepthTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+            Assert.That(cameraDepthTexture.desc.ClearBuffer, Is.False);
 
             Assert.That(motionVectorTexture.desc.Width, Is.EqualTo(320));
             Assert.That(motionVectorTexture.desc.Height, Is.EqualTo(180));
@@ -58,12 +68,8 @@ namespace VividRP.Editor.Tests
             Assert.That(motionVectorTexture.desc.UseDynamicScale, Is.True);
             Assert.That(motionVectorTexture.desc.UseDynamicScaleExplicit, Is.True);
             Assert.That(motionVectorTexture.desc.ScaleFactor, Is.EqualTo(new Vector2(0.5f, 0.5f)));
-
-            Assert.That(motionVectorDepthTexture.desc.Width, Is.EqualTo(320));
-            Assert.That(motionVectorDepthTexture.desc.Height, Is.EqualTo(180));
-            Assert.That(motionVectorDepthTexture.desc.DepthBufferBits, Is.EqualTo(DepthBits.Depth24));
-            Assert.That(motionVectorDepthTexture.desc.Dimension, Is.EqualTo(TextureDimension.Tex2DArray));
-            Assert.That(motionVectorDepthTexture.desc.Slices, Is.EqualTo(2));
+            Assert.That(motionVectorTexture.desc.ClearBuffer, Is.False);
+            Assert.That(motionVectorTexture.desc.ClearColor, Is.EqualTo(Color.clear));
         }
 
         [Test]
@@ -73,7 +79,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_DoesNotMutateCameraMotionVectorDepthFlags_WhenCameraIsAvailable()
+        public void Prepare_EnablesCameraDepthAndMotionVectorFlags_WhenCameraIsAvailable()
         {
             var pass = new MotionVectorPass();
             var frameData = new ContextContainer();
@@ -90,7 +96,8 @@ namespace VividRP.Editor.Tests
 
                 pass.Prepare(frameData);
 
-                Assert.That(camera.depthTextureMode, Is.EqualTo(DepthTextureMode.None));
+                Assert.That((camera.depthTextureMode & DepthTextureMode.Depth) != 0, Is.True);
+                Assert.That((camera.depthTextureMode & DepthTextureMode.MotionVectors) != 0, Is.True);
             }
             finally
             {

@@ -4,6 +4,7 @@ using System.Reflection;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Serialization;
 
 namespace VividRP.Runtime
 {
@@ -85,6 +86,15 @@ namespace VividRP.Runtime
             {
                 if (field.Name == fieldName)
                     return field;
+            }
+
+            foreach (var field in EnumerateInstanceFields(type))
+            {
+                foreach (var formerlySerializedAs in field.GetCustomAttributes<FormerlySerializedAsAttribute>())
+                {
+                    if (formerlySerializedAs.oldName == fieldName)
+                        return field;
+                }
             }
 
             return null;

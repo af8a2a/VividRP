@@ -177,6 +177,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void EnsureCameraDepthTextureMode_EnablesMotionVectorsBeforeFrameContextUpdate()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            camera.depthTextureMode = DepthTextureMode.None;
+
+            VividCameraData.EnsureCameraDepthTextureMode(camera);
+
+            Assert.That((camera.depthTextureMode & DepthTextureMode.Depth) != 0, Is.True);
+            Assert.That((camera.depthTextureMode & DepthTextureMode.MotionVectors) != 0, Is.True);
+        }
+
+        [Test]
+        public void RenderPipeline_EnablesMotionVectorDepthModeBeforeCullingParameters()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipeline.cs"));
+            var ensureIndex = source.IndexOf(
+                "VividCameraData.EnsureCameraDepthTextureMode(camera);",
+                System.StringComparison.Ordinal);
+            var cullingIndex = source.IndexOf(
+                "camera.TryGetCullingParameters(out cullingParameters)",
+                System.StringComparison.Ordinal);
+
+            Assert.That(ensureIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(cullingIndex, Is.GreaterThan(ensureIndex));
+        }
+
+        [Test]
         public void BuildShaderVariables_OnlyWritesDepthTextureMode_WhenRequiredFlagsAreMissing()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));

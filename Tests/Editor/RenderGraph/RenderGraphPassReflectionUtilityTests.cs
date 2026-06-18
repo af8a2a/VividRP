@@ -28,5 +28,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(resourceName, Is.EqualTo("texture"));
         }
+
+        [Test]
+        public void GetInstanceField_ReturnsRenamedField_WhenFormerSerializedNameMatches()
+        {
+            var field = RenderGraphPassReflectionUtility.GetInstanceField(
+                typeof(MotionVectorPass),
+                "m_MotionVectorDepthTexture");
+
+            Assert.That(field, Is.Not.Null);
+            Assert.That(field.Name, Is.EqualTo("m_CameraDepthStencilTexture"));
+        }
     }
 }

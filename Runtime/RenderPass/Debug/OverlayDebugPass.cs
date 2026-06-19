@@ -45,6 +45,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DebugSliceId = Shader.PropertyToID("_DebugSlice");
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VisualizationMode");
         private static readonly int DepthModeId = Shader.PropertyToID("_DepthMode");
+        private static readonly int DebugDepthPyramidParamsId = Shader.PropertyToID("_DebugDepthPyramidParams");
+        private static readonly int FullScreenDebugDepthRemapId = Shader.PropertyToID("_FullScreenDebugDepthRemap");
+        private static readonly int DepthRemapEnabledId = Shader.PropertyToID("_DepthRemapEnabled");
         private static readonly int DebugChannelModeId = Shader.PropertyToID("_DebugChannelMode");
         private static readonly int DebugExposureId = Shader.PropertyToID("_DebugExposure");
         private static readonly int DebugOpacityId = Shader.PropertyToID("_DebugOpacity");
@@ -80,6 +83,18 @@ namespace VividRP.Runtime.RenderPass.Core
         [SerializeField]
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
+        [SerializeField, Range(0f, 1f)]
+        private float m_DepthMipLevel;
+
+        [SerializeField, Range(0f, 1f)]
+        private float m_DepthRemapEnabled;
+
+        [SerializeField, Range(0f, 1f)]
+        private float m_DepthRemapMin;
+
+        [SerializeField, Range(0f, 1f)]
+        private float m_DepthRemapMax = 1f;
+
         [SerializeField]
         private OverlayDebugChannelMode m_ChannelMode = OverlayDebugChannelMode.RGB;
 
@@ -91,9 +106,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_ResolvedOpacity = 1f;
         private OverlayDebugVisualizationMode m_ResolvedVisualizationMode = OverlayDebugVisualizationMode.Auto;
         private OverlayDebugDepthMode m_ResolvedDepthMode = OverlayDebugDepthMode.Raw;
+        private float m_ResolvedDepthMipLevel;
+        private bool m_ResolvedDepthRemapEnabled;
+        private float m_ResolvedDepthRemapMin;
+        private float m_ResolvedDepthRemapMax = 1f;
         private OverlayDebugChannelMode m_ResolvedChannelMode = OverlayDebugChannelMode.RGB;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private Vector4 m_OverlayScreenSize = new(1f, 1f, 1f, 1f);
+        private float m_ResolvedNearClipPlane = 0.3f;
+        private float m_ResolvedFarClipPlane = 1000.0f;
         private bool m_ShouldSkipExecution;
 
         internal readonly struct OverlayDebugSettingsData
@@ -104,6 +125,10 @@ namespace VividRP.Runtime.RenderPass.Core
             public readonly float opacity;
             public readonly OverlayDebugVisualizationMode visualizationMode;
             public readonly OverlayDebugDepthMode depthMode;
+            public readonly float depthMipLevel;
+            public readonly bool depthRemapEnabled;
+            public readonly float depthRemapMin;
+            public readonly float depthRemapMax;
             public readonly OverlayDebugChannelMode channelMode;
 
             public OverlayDebugSettingsData(
@@ -113,6 +138,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 float opacity,
                 OverlayDebugVisualizationMode visualizationMode,
                 OverlayDebugDepthMode depthMode,
+                float depthMipLevel,
+                bool depthRemapEnabled,
+                float depthRemapMin,
+                float depthRemapMax,
                 OverlayDebugChannelMode channelMode)
             {
                 this.overlayAmount = overlayAmount;
@@ -121,6 +150,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 this.opacity = opacity;
                 this.visualizationMode = visualizationMode;
                 this.depthMode = depthMode;
+                this.depthMipLevel = depthMipLevel;
+                this.depthRemapEnabled = depthRemapEnabled;
+                this.depthRemapMin = depthRemapMin;
+                this.depthRemapMax = depthRemapMax;
                 this.channelMode = channelMode;
             }
         }
@@ -159,6 +192,30 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             get => m_DepthMode;
             set => m_DepthMode = value;
+        }
+
+        public float DepthMipLevel
+        {
+            get => Mathf.Clamp01(m_DepthMipLevel);
+            set => m_DepthMipLevel = Mathf.Clamp01(value);
+        }
+
+        public bool DepthRemapEnabled
+        {
+            get => m_DepthRemapEnabled >= 0.5f;
+            set => m_DepthRemapEnabled = value ? 1f : 0f;
+        }
+
+        public float DepthRemapMin
+        {
+            get => Mathf.Clamp01(m_DepthRemapMin);
+            set => m_DepthRemapMin = Mathf.Clamp01(value);
+        }
+
+        public float DepthRemapMax
+        {
+            get => Mathf.Clamp01(m_DepthRemapMax);
+            set => m_DepthRemapMax = Mathf.Clamp01(value);
         }
 
         public OverlayDebugChannelMode ChannelMode
@@ -202,9 +259,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ResolvedOpacity = resolvedSettings.opacity;
             m_ResolvedVisualizationMode = resolvedSettings.visualizationMode;
             m_ResolvedDepthMode = resolvedSettings.depthMode;
+            m_ResolvedDepthMipLevel = resolvedSettings.depthMipLevel;
+            m_ResolvedDepthRemapEnabled = resolvedSettings.depthRemapEnabled;
+            m_ResolvedDepthRemapMin = resolvedSettings.depthRemapMin;
+            m_ResolvedDepthRemapMax = resolvedSettings.depthRemapMax;
             m_ResolvedChannelMode = resolvedSettings.channelMode;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_ResolvedNearClipPlane = Mathf.Max(0.0001f, cameraData.nearClipPlane);
+            m_ResolvedFarClipPlane = Mathf.Max(m_ResolvedNearClipPlane + 0.0001f, cameraData.farClipPlane);
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
             var width = RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
                 cameraData.actualWidth,
@@ -262,6 +325,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ResolvedVisualizationMode,
                 m_DebugTexture?.desc,
                 debugTexture);
+            var depthMipIndex = resolvedVisualizationMode == OverlayDebugVisualizationMode.Depth
+                ? ResolveDepthMipIndex(m_ResolvedDepthMipLevel, m_DebugTexture?.desc, debugTexture)
+                : 0;
+            var depthRemapParams = ResolveDepthRemapParams(
+                m_ResolvedDepthRemapEnabled,
+                m_ResolvedDepthRemapMin,
+                m_ResolvedDepthRemapMax,
+                m_ResolvedNearClipPlane,
+                m_ResolvedFarClipPlane);
             var debugTextureScaleBias = m_DebugTexture != null && m_DebugTexture.innerHandle.IsValid()
                 ? TextureScaleBiasUtility.GetScaleBias(m_DebugTexture.innerHandle)
                 : new Vector4(1f, 1f, 0f, 0f);
@@ -279,6 +351,9 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetInt(DebugSliceId, resolvedSlice);
             mpb.SetInt(VisualizationModeId, (int)resolvedVisualizationMode);
             mpb.SetInt(DepthModeId, (int)m_ResolvedDepthMode);
+            mpb.SetVector(DebugDepthPyramidParamsId, new Vector4(depthMipIndex, 0f, 0f, 0f));
+            mpb.SetVector(FullScreenDebugDepthRemapId, depthRemapParams);
+            mpb.SetInt(DepthRemapEnabledId, m_ResolvedDepthRemapEnabled ? 1 : 0);
             mpb.SetInt(DebugChannelModeId, (int)m_ResolvedChannelMode);
             mpb.SetFloat(DebugExposureId, m_ResolvedExposure);
             mpb.SetFloat(DebugOpacityId, m_ResolvedOpacity);
@@ -310,6 +385,10 @@ namespace VividRP.Runtime.RenderPass.Core
             var opacity = 1f;
             var visualizationMode = OverlayDebugVisualizationMode.Auto;
             var depthMode = OverlayDebugDepthMode.Raw;
+            var depthMipLevel = 0f;
+            var depthRemapEnabled = false;
+            var depthRemapMin = 0f;
+            var depthRemapMax = 1f;
             var channelMode = OverlayDebugChannelMode.RGB;
 
             if (data == null)
@@ -321,6 +400,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     opacity,
                     visualizationMode,
                     depthMode,
+                    depthMipLevel,
+                    depthRemapEnabled,
+                    depthRemapMin,
+                    depthRemapMax,
                     channelMode);
             }
 
@@ -330,6 +413,11 @@ namespace VividRP.Runtime.RenderPass.Core
             opacity = Mathf.Clamp01(data.overlayOpacity);
             visualizationMode = NormalizeVisualizationMode(data.visualizationMode);
             depthMode = data.depthMode;
+            depthMipLevel = Mathf.Clamp01(data.depthMipLevel);
+            depthRemapEnabled = data.depthRemapEnabled;
+            var remapRange = ResolveDepthRemapRange(data.depthRemapMin, data.depthRemapMax);
+            depthRemapMin = remapRange.x;
+            depthRemapMax = remapRange.y;
             channelMode = NormalizeChannelMode(data.channelMode);
 
             return new OverlayDebugSettingsData(
@@ -339,6 +427,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 opacity,
                 visualizationMode,
                 depthMode,
+                depthMipLevel,
+                depthRemapEnabled,
+                depthRemapMin,
+                depthRemapMax,
                 channelMode);
         }
 
@@ -411,6 +503,50 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var maxSliceIndex = Mathf.Max(0, sliceCount - 1);
             return Mathf.Clamp(requestedSlice, 0, maxSliceIndex);
+        }
+
+        internal static int ResolveDepthMipIndex(
+            float normalizedMipLevel,
+            RenderGraphTextureDesc descriptor,
+            Texture texture)
+        {
+            var mipCount = ResolveTextureMipCount(descriptor, texture);
+            var requestedMip = Mathf.FloorToInt(Mathf.Clamp01(normalizedMipLevel) * mipCount);
+            return Mathf.Clamp(requestedMip, 0, mipCount - 1);
+        }
+
+        internal static int ResolveTextureMipCount(RenderGraphTextureDesc descriptor, Texture texture)
+        {
+            if (texture != null)
+                return Mathf.Max(1, texture.mipmapCount);
+
+            if (descriptor != null && descriptor.UseMipMap)
+                return Mathf.Max(1, descriptor.MipCount);
+
+            return 1;
+        }
+
+        internal static Vector2 ResolveDepthRemapRange(float rangeMin, float rangeMax)
+        {
+            var max = Mathf.Clamp(rangeMax, 0.01f, 1f);
+            var min = Mathf.Min(Mathf.Clamp01(rangeMin), max);
+            return new Vector2(min, max);
+        }
+
+        internal static Vector4 ResolveDepthRemapParams(
+            bool enabled,
+            float rangeMin,
+            float rangeMax,
+            float nearClipPlane,
+            float farClipPlane)
+        {
+            if (!enabled)
+                return new Vector4(0f, 1f, 0f, 1f);
+
+            var range = ResolveDepthRemapRange(rangeMin, rangeMax);
+            var nearClip = Mathf.Max(0.0001f, nearClipPlane);
+            var farClip = Mathf.Max(nearClip + 0.0001f, farClipPlane);
+            return new Vector4(range.x, range.y, nearClip, farClip);
         }
 
         internal static int ResolveTextureSliceCount(RenderGraphTextureDesc descriptor, Texture texture)

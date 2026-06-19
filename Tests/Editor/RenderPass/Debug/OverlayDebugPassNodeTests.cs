@@ -43,6 +43,26 @@ namespace VividRP.Editor.Tests
             {
                 return TryGetEnumParameterValue("m_DepthMode", out value);
             }
+
+            internal bool TryGetDepthMipLevel(out float value)
+            {
+                return TryGetFloatParameterValue("m_DepthMipLevel", out value);
+            }
+
+            internal bool TryGetDepthRemapEnabled(out float value)
+            {
+                return TryGetFloatParameterValue("m_DepthRemapEnabled", out value);
+            }
+
+            internal bool TryGetDepthRemapMin(out float value)
+            {
+                return TryGetFloatParameterValue("m_DepthRemapMin", out value);
+            }
+
+            internal bool TryGetDepthRemapMax(out float value)
+            {
+                return TryGetFloatParameterValue("m_DepthRemapMax", out value);
+            }
         }
 
         [Test]
@@ -64,12 +84,20 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.TryGetOpacity(out var opacity), Is.True);
                 Assert.That(node.TryGetVisualizationMode(out var visualizationMode), Is.True);
                 Assert.That(node.TryGetDepthMode(out var depthMode), Is.True);
+                Assert.That(node.TryGetDepthMipLevel(out var depthMipLevel), Is.True);
+                Assert.That(node.TryGetDepthRemapEnabled(out var depthRemapEnabled), Is.True);
+                Assert.That(node.TryGetDepthRemapMin(out var depthRemapMin), Is.True);
+                Assert.That(node.TryGetDepthRemapMax(out var depthRemapMax), Is.True);
                 Assert.That(overlayAmount, Is.EqualTo(0f));
                 Assert.That(arraySlice, Is.EqualTo(0f));
                 Assert.That(exposure, Is.EqualTo(0f));
                 Assert.That(opacity, Is.EqualTo(1f));
                 Assert.That(visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.Auto));
                 Assert.That(depthMode, Is.EqualTo(OverlayDebugDepthMode.Raw));
+                Assert.That(depthMipLevel, Is.EqualTo(0f));
+                Assert.That(depthRemapEnabled, Is.EqualTo(0f));
+                Assert.That(depthRemapMin, Is.EqualTo(0f));
+                Assert.That(depthRemapMax, Is.EqualTo(1f));
             }
             finally
             {
@@ -96,6 +124,10 @@ namespace VividRP.Editor.Tests
                     "m_ArraySlice",
                     "m_Exposure",
                     "m_Opacity",
+                    "m_DepthMipLevel",
+                    "m_DepthRemapEnabled",
+                    "m_DepthRemapMin",
+                    "m_DepthRemapMax",
                 }));
                 Assert.That(result.Passes[0].EnumParameters, Has.Count.EqualTo(2));
                 Assert.That(result.Passes[0].EnumParameters.Select(parameter => parameter.FieldName), Is.EquivalentTo(new[]

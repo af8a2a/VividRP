@@ -102,6 +102,18 @@ namespace VividRP.Runtime
         private OverlayDebugDepthMode m_DepthMode = OverlayDebugDepthMode.Raw;
 
         [SerializeField]
+        private float m_DepthMipLevel;
+
+        [SerializeField]
+        private bool m_DepthRemapEnabled;
+
+        [SerializeField]
+        private float m_DepthRemapMin;
+
+        [SerializeField]
+        private float m_DepthRemapMax = 1f;
+
+        [SerializeField]
         private OverlayDebugChannelMode m_ChannelMode = OverlayDebugChannelMode.RGB;
 
         [SerializeField]
@@ -261,6 +273,30 @@ namespace VividRP.Runtime
             set => m_DepthMode = value;
         }
 
+        internal float depthMipLevel
+        {
+            get => Mathf.Clamp01(m_DepthMipLevel);
+            set => m_DepthMipLevel = Mathf.Clamp01(value);
+        }
+
+        internal bool depthRemapEnabled
+        {
+            get => m_DepthRemapEnabled;
+            set => m_DepthRemapEnabled = value;
+        }
+
+        internal float depthRemapMin
+        {
+            get => Mathf.Min(Mathf.Clamp01(m_DepthRemapMin), depthRemapMax);
+            set => m_DepthRemapMin = Mathf.Min(Mathf.Clamp01(value), depthRemapMax);
+        }
+
+        internal float depthRemapMax
+        {
+            get => Mathf.Max(Mathf.Clamp(m_DepthRemapMax, 0.01f, 1f), Mathf.Clamp01(m_DepthRemapMin));
+            set => m_DepthRemapMax = Mathf.Max(Mathf.Clamp(value, 0.01f, 1f), Mathf.Clamp01(m_DepthRemapMin));
+        }
+
         internal OverlayDebugChannelMode channelMode
         {
             get => OverlayDebugPass.NormalizeChannelMode(m_ChannelMode);
@@ -371,6 +407,10 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_OverlayOpacity, 1f)
             || visualizationMode != OverlayDebugVisualizationMode.Auto
             || m_DepthMode != OverlayDebugDepthMode.Raw
+            || !Mathf.Approximately(depthMipLevel, 0f)
+            || m_DepthRemapEnabled
+            || !Mathf.Approximately(depthRemapMin, 0f)
+            || !Mathf.Approximately(depthRemapMax, 1f)
             || channelMode != OverlayDebugChannelMode.RGB
             || m_MaterialDebugMode != MaterialDebugVisualizationMode.None
             || !Mathf.Approximately(m_MaterialDebugExposure, 0f)
@@ -413,6 +453,10 @@ namespace VividRP.Runtime
             m_OverlayOpacity = 1f;
             m_VisualizationMode = OverlayDebugVisualizationMode.Auto;
             m_DepthMode = OverlayDebugDepthMode.Raw;
+            m_DepthMipLevel = 0f;
+            m_DepthRemapEnabled = false;
+            m_DepthRemapMin = 0f;
+            m_DepthRemapMax = 1f;
             m_ChannelMode = OverlayDebugChannelMode.RGB;
             m_MaterialDebugMode = MaterialDebugVisualizationMode.None;
             m_MaterialDebugExposure = 0f;
@@ -598,6 +642,30 @@ namespace VividRP.Runtime
             {
                 name = "Depth Mode",
                 tooltip = "Select how depth textures are visualized in the overlay."
+            };
+
+            public static readonly NameAndTooltip DepthMipLevel = new()
+            {
+                name = "Depth Mip Level",
+                tooltip = "Normalized mip level used when sampling depth pyramid debug textures."
+            };
+
+            public static readonly NameAndTooltip DepthRemapEnabled = new()
+            {
+                name = "Enable Depth Remap",
+                tooltip = "Remap depth visualization to a normalized eye-depth range."
+            };
+
+            public static readonly NameAndTooltip DepthRemapMin = new()
+            {
+                name = "Depth Remap Min",
+                tooltip = "Minimum normalized depth range used by depth remapping."
+            };
+
+            public static readonly NameAndTooltip DepthRemapMax = new()
+            {
+                name = "Depth Remap Max",
+                tooltip = "Maximum normalized depth range used by depth remapping."
             };
 
             public static readonly NameAndTooltip ChannelMode = new()
@@ -882,6 +950,38 @@ namespace VividRP.Runtime
                     Strings.DepthMode,
                     () => data.depthMode,
                     value => data.depthMode = value));
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.DepthMipLevel,
+                    getter = () => data.depthMipLevel,
+                    setter = value => data.depthMipLevel = value,
+                    min = () => 0f,
+                    max = () => 1f,
+                });
+                foldout.children.Add(new DebugUI.BoolField
+                {
+                    nameAndTooltip = Strings.DepthRemapEnabled,
+                    getter = () => data.depthRemapEnabled,
+                    setter = value => data.depthRemapEnabled = value,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.DepthRemapMin,
+                    getter = () => data.depthRemapMin,
+                    setter = value => data.depthRemapMin = value,
+                    min = () => 0f,
+                    max = () => data.depthRemapMax,
+                    isHiddenCallback = () => !data.depthRemapEnabled,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.DepthRemapMax,
+                    getter = () => data.depthRemapMax,
+                    setter = value => data.depthRemapMax = value,
+                    min = () => data.depthRemapMin,
+                    max = () => 1f,
+                    isHiddenCallback = () => !data.depthRemapEnabled,
+                });
                 foldout.children.Add(CreateEnumField(
                     Strings.ChannelMode,
                     () => data.channelMode,

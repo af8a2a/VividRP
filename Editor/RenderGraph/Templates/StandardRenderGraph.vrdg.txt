@@ -13021,6 +13021,10 @@ MonoBehaviour:
           - __option_FloatParameter:m_ArraySlice
           - __option_FloatParameter:m_Exposure
           - __option_FloatParameter:m_Opacity
+          - __option_FloatParameter:m_DepthMipLevel
+          - __option_FloatParameter:m_DepthRemapEnabled
+          - __option_FloatParameter:m_DepthRemapMin
+          - __option_FloatParameter:m_DepthRemapMax
           - __option_EnumParameter:m_VisualizationMode
           - __option_EnumParameter:m_DepthMode
           - __option_DebugExport
@@ -13031,6 +13035,10 @@ MonoBehaviour:
           - rid: 8515051898187808869
           - rid: 8515051898187808870
           - rid: 8515051898187808871
+          - rid: 8515051898187809000
+          - rid: 8515051898187809001
+          - rid: 8515051898187809002
+          - rid: 8515051898187809003
           - rid: 8515051898187808872
           - rid: 8515051898187808873
           - rid: 8515051898187808874
@@ -13064,6 +13072,22 @@ MonoBehaviour:
       data:
         m_Value: 0
     - rid: 8515051898187808871
+      type: {class: 'Constant`1[[System.Single, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 1
+    - rid: 8515051898187809000
+      type: {class: 'Constant`1[[System.Single, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 0
+    - rid: 8515051898187809001
+      type: {class: 'Constant`1[[System.Single, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 0
+    - rid: 8515051898187809002
+      type: {class: 'Constant`1[[System.Single, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 0
+    - rid: 8515051898187809003
       type: {class: 'Constant`1[[System.Single, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
         m_Value: 1

@@ -39,6 +39,11 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Channel Mode"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Depth Mip Level"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Enable Depth Remap"), Is.Not.Null);
+            VividRenderingDebugDisplaySettings.Data.depthRemapEnabled = true;
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Depth Remap Min"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Depth Remap Max"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Exposure"), Is.Not.Null);
@@ -100,6 +105,48 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.materialDebugMode,
                 Is.EqualTo(MaterialDebugVisualizationMode.None));
             Assert.That(VividRenderingDebugDisplaySettings.Data.materialDebugExposure, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void Reset_RestoresOverlayDepthDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data.depthMipLevel = 0.75f;
+            VividRenderingDebugDisplaySettings.Data.depthRemapEnabled = true;
+            VividRenderingDebugDisplaySettings.Data.depthRemapMin = 0.2f;
+            VividRenderingDebugDisplaySettings.Data.depthRemapMax = 0.8f;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.depthMipLevel, Is.EqualTo(0f));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.depthRemapEnabled, Is.False);
+            Assert.That(VividRenderingDebugDisplaySettings.Data.depthRemapMin, Is.EqualTo(0f));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.depthRemapMax, Is.EqualTo(1f));
+        }
+
+        [Test]
+        public void OverlayDepthRemapWidgets_ClampRangeAndTrackVisibility()
+        {
+            var remapEnabledWidget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Enable Depth Remap")
+                as DebugUI.BoolField;
+            var remapMinWidget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Depth Remap Min")
+                as DebugUI.FloatField;
+            var remapMaxWidget = DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Depth Remap Max")
+                as DebugUI.FloatField;
+
+            Assert.That(remapEnabledWidget, Is.Not.Null);
+            Assert.That(remapMinWidget, Is.Not.Null);
+            Assert.That(remapMaxWidget, Is.Not.Null);
+            Assert.That(remapMinWidget.isHiddenCallback(), Is.True);
+            Assert.That(remapMaxWidget.isHiddenCallback(), Is.True);
+
+            remapEnabledWidget.setter(true);
+            remapMaxWidget.setter(0.5f);
+            remapMinWidget.setter(0.75f);
+
+            Assert.That(remapMinWidget.isHiddenCallback(), Is.False);
+            Assert.That(remapMaxWidget.isHiddenCallback(), Is.False);
+            Assert.That(VividRenderingDebugDisplaySettings.Data.depthRemapMin, Is.EqualTo(0.5f));
+            Assert.That(VividRenderingDebugDisplaySettings.Data.depthRemapMax, Is.EqualTo(0.5f));
         }
 
         [Test]
@@ -263,6 +310,26 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.Reset();
             VividRenderingDebugDisplaySettings.Data.materialDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksOverlayDepthOverrides()
+        {
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
+
+            VividRenderingDebugDisplaySettings.Data.depthMipLevel = 0.5f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.depthRemapEnabled = true;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.depthRemapMax = 0.5f;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

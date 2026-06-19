@@ -50,11 +50,14 @@ Shader "Hidden/VividRP/OverlayDebug"
             float4 _DebugTextureScaleBias;
             float4 _OverlayRect;
             float4 _OverlayScreenSize;
+            float4 _DebugDepthPyramidParams;
+            float4 _FullScreenDebugDepthRemap;
             int _DebugTextureAvailable;
             int _DebugTextureIsArray;
             int _DebugSlice;
             int _VisualizationMode;
             int _DepthMode;
+            int _DepthRemapEnabled;
             int _DebugChannelMode;
             float _DebugExposure;
             float _DebugOpacity;
@@ -104,14 +107,6 @@ Shader "Hidden/VividRP/OverlayDebug"
             {
                 float exposureMultiplier = exp2(_DebugExposure);
 
-                if (_VisualizationMode == VIVID_OVERLAY_VISUALIZATION_DEPTH)
-                {
-                    float depthValue = sampleColor.r;
-                    if (_DepthMode == VIVID_OVERLAY_DEPTHMODE_LINEAR01)
-                        depthValue = Linear01Depth(depthValue, _ZBufferParams);
-
-                    return float4(depthValue.xxx * exposureMultiplier, 1.0);
-                }
 
                 return ApplyDebugChannelMode(sampleColor, exposureMultiplier);
             }
@@ -124,12 +119,42 @@ Shader "Hidden/VividRP/OverlayDebug"
                     : SAMPLE_TEXTURE2D(_DebugTexture, sampler_DebugTexture, debugUv);
             }
 
-            float4 SampleDebugTextureRawPoint(float2 uv)
+            float4 SampleDebugTextureRawLod(float2 uv, float mipLevel)
             {
                 float2 debugUv = ApplyScaleBias(uv, _DebugTextureScaleBias);
                 return _DebugTextureIsArray != 0
-                    ? SAMPLE_TEXTURE2D_ARRAY(_DebugTextureArray, sampler_PointClamp, debugUv, (float)_DebugSlice)
-                    : SAMPLE_TEXTURE2D(_DebugTexture, sampler_PointClamp, debugUv);
+                    ? SAMPLE_TEXTURE2D_ARRAY_LOD(_DebugTextureArray, sampler_PointClamp, debugUv, (float)_DebugSlice, mipLevel)
+                    : SAMPLE_TEXTURE2D_LOD(_DebugTexture, sampler_PointClamp, debugUv, mipLevel);
+            }
+
+            float RemapLinearEyeDepth(float deviceDepth)
+            {
+                float linearDepth = LinearEyeDepth(deviceDepth, _ZBufferParams);
+                float remappedFar = min(
+                    _FullScreenDebugDepthRemap.w,
+                    _FullScreenDebugDepthRemap.y * _FullScreenDebugDepthRemap.y * _FullScreenDebugDepthRemap.w);
+                float remappedNear = max(
+                    _FullScreenDebugDepthRemap.z,
+                    _FullScreenDebugDepthRemap.x * _FullScreenDebugDepthRemap.x * _FullScreenDebugDepthRemap.w);
+                return saturate((linearDepth - remappedNear) / max(remappedFar - remappedNear, 1e-5));
+            }
+
+            float4 EvaluateDepthDebug(float2 uv)
+            {
+                float mipLevel = max(_DebugDepthPyramidParams.x, 0.0);
+                float depthValue = SampleDebugTextureRawLod(uv, mipLevel).r;
+
+                if (_DepthRemapEnabled != 0)
+                    depthValue = RemapLinearEyeDepth(depthValue);
+                else if (_DepthMode == VIVID_OVERLAY_DEPTHMODE_LINEAR01)
+                    depthValue = Linear01Depth(depthValue, _ZBufferParams);
+
+                return float4(depthValue.xxx * exp2(_DebugExposure), 1.0);
+            }
+
+            float4 SampleDebugTextureRawPoint(float2 uv)
+            {
+                return SampleDebugTextureRawLod(uv, 0.0);
             }
 
             float2 SampleMotionVectors(float2 overlayUv)
@@ -272,6 +297,9 @@ Shader "Hidden/VividRP/OverlayDebug"
             {
                 if (_VisualizationMode == VIVID_OVERLAY_VISUALIZATION_MOTION_VECTORS)
                     return EvaluateMotionVectorDebug(uv);
+
+                if (_VisualizationMode == VIVID_OVERLAY_VISUALIZATION_DEPTH)
+                    return EvaluateDepthDebug(uv);
 
                 float4 sampleColor = SampleDebugTextureRaw(uv);
                 return EvaluateDebugColor(sampleColor);

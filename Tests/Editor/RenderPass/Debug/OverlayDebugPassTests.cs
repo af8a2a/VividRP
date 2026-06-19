@@ -66,6 +66,10 @@ namespace VividRP.Editor.Tests
                 overlayOpacity = 0.4f,
                 visualizationMode = OverlayDebugVisualizationMode.MotionVectors,
                 depthMode = OverlayDebugDepthMode.Linear01,
+                depthMipLevel = 0.5f,
+                depthRemapEnabled = true,
+                depthRemapMin = 0.2f,
+                depthRemapMax = 0.75f,
                 channelMode = OverlayDebugChannelMode.Green,
             };
 
@@ -77,6 +81,10 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.opacity, Is.EqualTo(0.4f));
             Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.MotionVectors));
             Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Linear01));
+            Assert.That(settings.depthMipLevel, Is.EqualTo(0.5f));
+            Assert.That(settings.depthRemapEnabled, Is.True);
+            Assert.That(settings.depthRemapMin, Is.EqualTo(0.2f));
+            Assert.That(settings.depthRemapMax, Is.EqualTo(0.75f));
             Assert.That(settings.channelMode, Is.EqualTo(OverlayDebugChannelMode.Green));
         }
 
@@ -179,11 +187,17 @@ namespace VividRP.Editor.Tests
             {
                 overlayExposure = 32f,
                 overlayOpacity = -1f,
+                depthMipLevel = 2f,
+                depthRemapMax = 0.5f,
+                depthRemapMin = 0.75f,
                 channelMode = (OverlayDebugChannelMode)999,
             });
 
             Assert.That(settings.exposure, Is.EqualTo(16f));
             Assert.That(settings.opacity, Is.EqualTo(0f));
+            Assert.That(settings.depthMipLevel, Is.EqualTo(1f));
+            Assert.That(settings.depthRemapMin, Is.EqualTo(0.5f));
+            Assert.That(settings.depthRemapMax, Is.EqualTo(0.5f));
             Assert.That(settings.channelMode, Is.EqualTo(OverlayDebugChannelMode.RGB));
         }
 
@@ -198,7 +212,39 @@ namespace VividRP.Editor.Tests
             Assert.That(settings.opacity, Is.EqualTo(1f));
             Assert.That(settings.visualizationMode, Is.EqualTo(OverlayDebugVisualizationMode.Auto));
             Assert.That(settings.depthMode, Is.EqualTo(OverlayDebugDepthMode.Raw));
+            Assert.That(settings.depthMipLevel, Is.EqualTo(0f));
+            Assert.That(settings.depthRemapEnabled, Is.False);
+            Assert.That(settings.depthRemapMin, Is.EqualTo(0f));
+            Assert.That(settings.depthRemapMax, Is.EqualTo(1f));
             Assert.That(settings.channelMode, Is.EqualTo(OverlayDebugChannelMode.RGB));
+        }
+
+        [Test]
+        public void ResolveDepthMipIndex_MapsNormalizedValueToMipChain()
+        {
+            var descriptor = new RenderGraphTextureDesc
+            {
+                UseMipMap = true,
+                MipCount = 5,
+            };
+
+            Assert.That(OverlayDebugPass.ResolveDepthMipIndex(0f, descriptor, null), Is.EqualTo(0));
+            Assert.That(OverlayDebugPass.ResolveDepthMipIndex(0.5f, descriptor, null), Is.EqualTo(2));
+            Assert.That(OverlayDebugPass.ResolveDepthMipIndex(1f, descriptor, null), Is.EqualTo(4));
+            Assert.That(OverlayDebugPass.ResolveDepthMipIndex(0.75f, new RenderGraphTextureDesc(), null), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void ResolveDepthRemapParams_UsesDefaultsWhenDisabledAndCameraRangeWhenEnabled()
+        {
+            var disabled = OverlayDebugPass.ResolveDepthRemapParams(false, 0.2f, 0.8f, 0.3f, 100f);
+            AssertDepthRemap(disabled, 0f, 1f, 0f, 1f);
+
+            var enabled = OverlayDebugPass.ResolveDepthRemapParams(true, 0.2f, 0.8f, 0.3f, 100f);
+            AssertDepthRemap(enabled, 0.2f, 0.8f, 0.3f, 100f);
+
+            var clamped = OverlayDebugPass.ResolveDepthRemapParams(true, 0.9f, 0.25f, -1f, 0f);
+            AssertDepthRemap(clamped, 0.25f, 0.25f, 0.0001f, 0.0002f);
         }
 
         [Test]
@@ -222,6 +268,15 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY(_DebugTextureArray"));
             Assert.That(shaderSource, Does.Contain("_OverlayRect"));
             Assert.That(shaderSource, Does.Contain("exp2(_DebugExposure)"));
+            Assert.That(shaderSource, Does.Contain("_DebugDepthPyramidParams"));
+            Assert.That(shaderSource, Does.Contain("_FullScreenDebugDepthRemap"));
+            Assert.That(shaderSource, Does.Contain("_DepthRemapEnabled"));
+            Assert.That(shaderSource, Does.Contain("SampleDebugTextureRawLod"));
+            Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_LOD(_DebugTexture"));
+            Assert.That(shaderSource, Does.Contain("SAMPLE_TEXTURE2D_ARRAY_LOD(_DebugTextureArray"));
+            Assert.That(shaderSource, Does.Contain("max(_DebugDepthPyramidParams.x, 0.0)"));
+            Assert.That(shaderSource, Does.Contain("RemapLinearEyeDepth"));
+            Assert.That(shaderSource, Does.Contain("LinearEyeDepth(deviceDepth, _ZBufferParams)"));
             Assert.That(shaderSource, Does.Contain("Linear01Depth(depthValue, _ZBufferParams)"));
             Assert.That(shaderSource, Does.Contain("VIVID_OVERLAY_DEPTHMODE_LINEAR01"));
             Assert.That(shaderSource, Does.Contain("_DebugChannelMode"));
@@ -243,6 +298,13 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Not.Contain("EvaluateAutoExposure"));
         }
 
+        private static void AssertDepthRemap(Vector4 actual, float x, float y, float z, float w)
+        {
+            Assert.That(actual.x, Is.EqualTo(x).Within(0.0001f));
+            Assert.That(actual.y, Is.EqualTo(y).Within(0.0001f));
+            Assert.That(actual.z, Is.EqualTo(z).Within(0.0001f));
+            Assert.That(actual.w, Is.EqualTo(w).Within(0.0001f));
+        }
         private static RenderGraphTexture GetTextureField(OverlayDebugPass pass, string fieldName)
         {
             var field = typeof(OverlayDebugPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);

@@ -16,8 +16,8 @@ Shader "Hidden/VividRP/ReGIRDebug"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ReGIR.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ReGIR.hlsl"
 
             #define VIVID_REGIR_DEBUG_NONE 0
             #define VIVID_REGIR_DEBUG_CELLS 1

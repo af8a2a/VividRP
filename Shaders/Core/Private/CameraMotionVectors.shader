@@ -31,7 +31,7 @@ Shader "Hidden/VividRP/CameraMotionVectors"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
             TEXTURE2D_X_FLOAT(_CameraDepthTexture);
 

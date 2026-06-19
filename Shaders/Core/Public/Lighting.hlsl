@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_LIGHTING_INCLUDED
 #define VIVIDRP_LIGHTING_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"

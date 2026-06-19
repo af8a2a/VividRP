@@ -1,8 +1,8 @@
 #ifndef VIVIDRP_LIGHTING_LOOP_INCLUDED
 #define VIVIDRP_LIGHTING_LOOP_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ClusteredLighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ClusteredLighting.hlsl"
 
 struct VividLightingLoopContext
 {

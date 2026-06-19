@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_TSR_COMMON_INCLUDED
 #define VIVIDRP_TSR_COMMON_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
 #if defined(VIVID_TSR_WAVE_OPS) && defined(UNITY_COMPILER_DXC)
 #define VIVID_TSR_USE_WAVE_OPS 1

@@ -5,7 +5,7 @@
 #error VividShaderPassGBuffer requires VIVIDRP_SHADERPASS_GBUFFER or VIVIDRP_SHADERPASS_DEBUG.
 #endif
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
 
 VividPackedVaryingsMesh Vert(VividAttributesMesh input)
 {

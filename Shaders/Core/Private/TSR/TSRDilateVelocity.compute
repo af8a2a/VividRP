@@ -3,8 +3,8 @@
 #pragma multi_compile_local _ VIVID_TSR_WAVE_OPS
 #pragma multi_compile _ UNITY_DEVICE_SUPPORTS_NATIVE_16BIT
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/TSR/TSRCommon.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/TSR/TSRCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
 Texture2D<float> _InputDepth;
 Texture2D<float4> _InputMotionVectors;

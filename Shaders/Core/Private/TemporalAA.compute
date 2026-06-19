@@ -5,8 +5,8 @@
 #pragma kernel ProcessCandidatesCS
 #pragma kernel DeferredColorApply2x2CS
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
 Texture2D<float4> _InputColor;
 Texture2D<float4> _MotionVectors;
@@ -162,4 +162,4 @@ void CopyColor(uint3 dispatchThreadId : SV_DispatchThreadID)
 #define CMAA2_SUPPORT_HDR_COLOR_RANGE 1
 #define CMAA2_EDGE_DETECTION_LUMA_PATH 1
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/CMAA2.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CMAA2.hlsl"

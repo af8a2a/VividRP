@@ -17,8 +17,8 @@ Shader "Hidden/VividRP/OverlayDebug"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 
             #define VIVID_OVERLAY_VISUALIZATION_AUTO 0
             #define VIVID_OVERLAY_VISUALIZATION_COLOR 1

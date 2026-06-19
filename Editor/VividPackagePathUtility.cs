@@ -7,7 +7,7 @@ namespace VividRP.Editor
     {
         private static readonly string[] s_PackageRoots =
         {
-            "Packages/com.af8a2a.vividrp",
+            "Packages/com.vivid.render-pipelines",
             "Packages/VividRP",
         };
 

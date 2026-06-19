@@ -2,7 +2,7 @@
 #define VIVIDRP_TERRAIN_LIT_BASEMAP_GEN_PASS_INCLUDED
 
 #define VIVID_TERRAIN_LIGHTWEIGHT_INCLUDE 1
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitSampling.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitSampling.hlsl"
 
 struct Varyings
 {

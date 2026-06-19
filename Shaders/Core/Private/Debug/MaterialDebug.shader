@@ -16,8 +16,8 @@ Shader "Hidden/VividRP/MaterialDebug"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 
             #define CLASSIFY_TILE_SIZE 8
             #define VIVID_MATERIAL_DEBUG_NONE 0

@@ -1,14 +1,14 @@
 #pragma max_recursion_depth 1
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
 
 #define SSR_MIN_GGX_ROUGHNESS 0.00001f
 #define SSR_MAX_GGX_ROUGHNESS 0.99999f

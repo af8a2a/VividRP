@@ -3,7 +3,7 @@
 #pragma kernel ComputeFinalMask
 #pragma kernel DilateMask
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
 #define VBUFFER_MAX_Z_GROUP_SIZE 8
 #define VBUFFER_MAX_Z_FAR_DEPTH 1.0e10

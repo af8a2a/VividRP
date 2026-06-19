@@ -1,13 +1,13 @@
 #ifndef VIVIDRP_HDRP_LIT_LIGHTING_INCLUDED
 #define VIVIDRP_HDRP_LIT_LIGHTING_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LTCAreaLight.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PreIntegratedFGD.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PunctualLightCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LTCAreaLight.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PreIntegratedFGD.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/BSDF.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"

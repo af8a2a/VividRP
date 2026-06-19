@@ -7,7 +7,7 @@ Shader "Hidden/VividRP/PostProcessing/LensFlareDataDriven"
         #pragma multi_compile _ FLARE_HAS_OCCLUSION
 
         #define DISABLE_TEXTURE2D_X_ARRAY
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
         TEXTURE2D_X_FLOAT(_CameraDepthTexture);
 

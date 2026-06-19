@@ -3,7 +3,7 @@ Shader "Hidden/VividRP/CoreBlit"
     HLSLINCLUDE
         #pragma target 2.0
         #pragma editor_sync_compilation
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.core/Runtime/Utilities/Blit.hlsl"
     ENDHLSL
 

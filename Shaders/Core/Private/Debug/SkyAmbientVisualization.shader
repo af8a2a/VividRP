@@ -21,9 +21,9 @@ Shader "VividRP/Material/SkyAmbientVisualization"
         #pragma target 4.5
         #pragma multi_compile_instancing
 
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BakedGI.hlsl"
 
         CBUFFER_START(UnityPerMaterial)
             float4 _Tint;

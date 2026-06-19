@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_PREINTEGRATED_FGD_INCLUDED
 #define VIVIDRP_PREINTEGRATED_FGD_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 
 #define VIVID_FGD_TEXTURE_RESOLUTION 64

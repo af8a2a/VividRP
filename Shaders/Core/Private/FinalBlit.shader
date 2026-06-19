@@ -22,7 +22,7 @@ Shader "Hidden/VividRP/FinalBlit"
             #pragma multi_compile_local _ _BLOOM_DIRT
             #pragma multi_compile_local _ HDR_COLORSPACE_CONVERSION HDR_ENCODING HDR_COLORSPACE_CONVERSION_AND_ENCODING
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ACES.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"

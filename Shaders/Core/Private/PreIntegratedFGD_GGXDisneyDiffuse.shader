@@ -17,7 +17,7 @@ Shader "Hidden/VividRP/PreIntegratedFGD_GGXDisneyDiffuse"
             #pragma target 4.5
             #define PREFER_HALF 0
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ImageBasedLighting.hlsl"
 
             #define VIVID_FGD_TEXTURE_RESOLUTION 64

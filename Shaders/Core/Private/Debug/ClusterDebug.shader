@@ -19,7 +19,7 @@ Shader "Hidden/VividRP/ClusterDebug"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
 
             #define VIVID_TILE_CLUSTER_DEBUG_NONE 0
             #define VIVID_TILE_CLUSTER_DEBUG_TILE 1
@@ -302,8 +302,8 @@ Shader "Hidden/VividRP/ClusterDebug"
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Debug.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
             StructuredBuffer<uint> _MaterialTileFeatureFlags;
             StructuredBuffer<uint> _MaterialFeatureTileList;

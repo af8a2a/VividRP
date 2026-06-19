@@ -11,8 +11,8 @@ Shader "Hidden/VividRP/Debug/Exposure"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/ACES.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
 
         #define VIVID_EXPOSURE_EPSILON 1e-4
         #define VIVID_EXPOSURE_HISTOGRAM_BINS 64

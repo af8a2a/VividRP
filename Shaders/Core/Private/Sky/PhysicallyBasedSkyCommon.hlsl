@@ -6,7 +6,7 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Sampling/Sampling.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesGlobal.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ShaderVariablesGlobal.hlsl"
 #include "ShaderVariablesPhysicallyBasedSky.cs.hlsl"
 
 TEXTURE2D(_GroundIrradianceTexture);

@@ -23,7 +23,7 @@
 
 #pragma use_dxc
 #pragma kernel CS
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
 #define FFX_GPU 1
 #define FFX_HLSL 1

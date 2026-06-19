@@ -46,7 +46,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
                 #pragma fragment FragPreDepth
 
                 #define VIVID_TERRAIN_BASEMAP 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
             ENDHLSL
         }
 
@@ -72,7 +72,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
 
                 #define VIVID_TERRAIN_BASEMAP 1
                 #define VIVID_TERRAIN_PASS_SHADOW 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
             ENDHLSL
         }
 
@@ -101,7 +101,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
                 #pragma fragment FragGBuffer
 
                 #define VIVID_TERRAIN_BASEMAP 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
             ENDHLSL
         }
 
@@ -131,8 +131,8 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
 
                 #define VIVID_TERRAIN_BASEMAP 1
                 #define VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER 1
-                #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
+                #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
             ENDHLSL
         }
 
@@ -155,7 +155,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
 
                 #define VIVID_TERRAIN_BASEMAP 1
                 #define VIVID_TERRAIN_PASS_META 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
             ENDHLSL
         }
 
@@ -187,7 +187,7 @@ Shader "Hidden/VividRP/TerrainLit_Basemap"
                 #pragma fragment FragMotionVectors
 
                 #define VIVID_TERRAIN_BASEMAP 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitPass.hlsl"
             ENDHLSL
         }
 

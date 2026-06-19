@@ -30,7 +30,7 @@ Shader "Hidden/VividRP/ObjectMotionVectorFallback"
             }
 
             HLSLPROGRAM
-            #include_with_pragmas "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/ObjectMotionVectors.hlsl"
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ObjectMotionVectors.hlsl"
             ENDHLSL
         }
     }

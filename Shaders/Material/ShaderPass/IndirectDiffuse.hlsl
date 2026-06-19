@@ -1,12 +1,12 @@
 #ifndef VIVIDRP_INDIRECT_DIFFUSE_PASS_INCLUDED
 #define VIVIDRP_INDIRECT_DIFFUSE_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/PunctualLightCommon.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BakedGI.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/PunctualLightCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
 
 #define ATTRIBUTES_NEED_TEXCOORD0
 #if defined(LIGHTMAP_ON)
@@ -15,8 +15,8 @@
 #if defined(_NORMALMAP)
     #define ATTRIBUTES_NEED_TANGENT
 #endif
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Raytracing/RayTracingCommon.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Raytracing/RaytracingIntersection.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Raytracing/RayTracingCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Raytracing/RaytracingIntersection.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 

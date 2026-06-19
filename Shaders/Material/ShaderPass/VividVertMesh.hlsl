@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_VERT_MESH_INCLUDED
 #define VIVIDRP_VERT_MESH_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/VividVaryingMesh.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVaryingMesh.hlsl"
 
 VividVaryingsMesh VividVertMesh(VividAttributesMesh input)
 {

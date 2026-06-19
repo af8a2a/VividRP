@@ -1,9 +1,9 @@
 #ifndef VIVIDRP_COLOR_CHECKER_PASS_INCLUDED
 #define VIVIDRP_COLOR_CHECKER_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BakedGI.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 #define VIVID_COLOR_CHECKER_TEXTURE_SIZE 8.0

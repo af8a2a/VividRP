@@ -21,7 +21,7 @@ Shader "Hidden/VividRP/OpaqueAtmosphericScattering"
             #pragma vertex Vert
             #pragma fragment FragOpaqueAtmosphericScattering
             #define OPAQUE_FOG_PASS
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl"
             ENDHLSL
         }
 
@@ -39,7 +39,7 @@ Shader "Hidden/VividRP/OpaqueAtmosphericScattering"
             #pragma fragment FragOpaqueAtmosphericScatteringForHDRISky
             #define OPAQUE_FOG_PASS
             #define ATMOSPHERE_NO_AERIAL_PERSPECTIVE
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/AtmosphericScattering/AtmosphericScattering.hlsl"
             ENDHLSL
         }
     }

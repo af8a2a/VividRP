@@ -6,7 +6,7 @@
 #endif
 
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MetaPass.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
 
 VividPackedVaryingsMesh Vert(VividAttributesMesh input)
 {

@@ -15,7 +15,7 @@
 #define USING_STEREO_MATRICES
 #endif
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesGlobal.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ShaderVariablesGlobal.hlsl"
 
 #define UNITY_LIGHTMODEL_AMBIENT (glstate_lightmodel_ambient * 2)
 

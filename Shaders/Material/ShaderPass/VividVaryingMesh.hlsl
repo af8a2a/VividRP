@@ -1,12 +1,12 @@
 #ifndef VIVIDRP_VARYING_MESH_INCLUDED
 #define VIVIDRP_VARYING_MESH_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
 #if defined(VIVIDRP_VARYINGS_NEED_META_EDITOR_VIS)
 #define FRAG_INPUTS_USE_META_EDITOR_VIS
 #endif
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/FragInputs.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/FragInputs.hlsl"
 
 #if defined(VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD) && !defined(VIVIDRP_ATTRIBUTES_NEED_NORMAL)
 #error VIVIDRP_VARYINGS_NEED_TANGENT_TO_WORLD requires VIVIDRP_ATTRIBUTES_NEED_NORMAL.

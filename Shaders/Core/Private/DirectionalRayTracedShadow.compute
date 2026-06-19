@@ -6,11 +6,11 @@
 #pragma enable_d3d11_debug_symbols
 
 #include "UnityRayQuery.cginc"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/RaytracingCommon.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BlueNoise.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ml.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/RaytracingCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ml.hlsl"
 RaytracingAccelerationStructure _AccelerationStructure;
 Texture2D<float> _DepthTexture;
 Texture2D<float4> _GBuffer1;

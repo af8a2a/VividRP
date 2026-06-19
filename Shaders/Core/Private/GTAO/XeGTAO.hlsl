@@ -103,7 +103,7 @@ uint HilbertIndex(uint posX, uint posY)
 RWTexture2D<float4>         g_outputDbgImage    : register( u2 );
 #endif
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
 
 #define XE_GTAO_PI               	(3.1415926535897932384626433832795)
 #define XE_GTAO_PI_HALF             (1.5707963267948966192313216916398)

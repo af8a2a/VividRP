@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_PUNCTUAL_LIGHT_COMMON_INCLUDED
 #define VIVIDRP_PUNCTUAL_LIGHT_COMMON_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Lighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Lighting.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/CommonLighting.hlsl"
 
 void ModifyVividPunctualLightDistancesForFillLighting(inout float4 distances, float lightSqRadius)

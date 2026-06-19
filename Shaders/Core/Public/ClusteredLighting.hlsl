@@ -1,10 +1,10 @@
 #ifndef VIVIDRP_CLUSTERED_LIGHTING_INCLUDED
 #define VIVIDRP_CLUSTERED_LIGHTING_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Lighting/ShaderConfig.cs.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Lighting/ShaderVariablesGlobalLightLoop.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Lighting/LightLoop.cs.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Lighting/ShaderConfig.cs.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Lighting/ShaderVariablesGlobalLightLoop.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Lighting/LightLoop.cs.hlsl"
 
 StructuredBuffer<uint> g_vLayeredLightList;
 StructuredBuffer<uint> g_LayeredOffset;

@@ -36,10 +36,10 @@ Shader "VividRP/Material/VirtualTextureDemo"
 
                 #define VIVID_VT_ENABLE_FEEDBACK_RW 1
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
 
                 CBUFFER_START(UnityPerMaterial)
                     float4 _BaseTint;

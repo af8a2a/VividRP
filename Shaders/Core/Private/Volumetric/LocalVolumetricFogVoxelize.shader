@@ -47,8 +47,8 @@ Shader "Hidden/VividRP/LocalVolumetricFogVoxelize"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma multi_compile_fragment _ _ENABLE_VOLUMETRIC_FOG_MASK
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/VolumeRendering.hlsl"
 
             #define LOCALVOLUMETRICFOGBLENDINGMODE_OVERWRITE 0

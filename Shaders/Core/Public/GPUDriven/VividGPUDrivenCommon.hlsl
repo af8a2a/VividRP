@@ -13,7 +13,7 @@
 #define VIVIDRENDERERLISTID_COUNT 8u
 #define VIVID_MAX_MESHLET_INDICES 384u
 #define VIVID_INVALID_FORCED_MESH_LOD_NODE_DEPTH 0xffffffffu
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
 struct VividInstanceData
 {
     float4x4 ObjectToWorldMatrix;

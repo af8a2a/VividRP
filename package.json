@@ -1,6 +1,6 @@
 {
-  "name": "com.af8a2a.vividrp",
-  "displayName": "VividRP",
+  "name": "com.vivid.render-pipelines",
+  "displayName": "Vivid Render Pipeline",
   "version": "0.1.0",
   "unity": "6000.6",
   "unityRelease": "0a3",

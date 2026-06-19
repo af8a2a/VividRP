@@ -2,7 +2,7 @@
 
 #pragma use_dxc
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
 
 #define THREAD_GROUP_SIZE 32
 

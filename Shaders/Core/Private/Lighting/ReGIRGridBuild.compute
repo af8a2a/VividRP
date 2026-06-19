@@ -4,7 +4,7 @@
 #pragma kernel ReGIRPresampleLocalLights
 #pragma enable_d3d11_debug_symbols
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ReGIR.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ReGIR.hlsl"
 
 #define VIVID_REGIR_PRESAMPLED_LIGHT_TILE_SIZE 1024u
 #define VIVID_REGIR_PRESAMPLED_LIGHT_TILE_COUNT 128u

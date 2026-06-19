@@ -9,10 +9,10 @@ Shader "Hidden/VividRP/HDRISky"
     }
 
     HLSLINCLUDE
-    #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+    #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
     #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/EntityLighting.hlsl"
-    #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Sky/SkyUtils.hlsl"
+    #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Sky/SkyUtils.hlsl"
     TEXTURE2D_X_FLOAT(_DepthTexture);
     SAMPLER(sampler_DepthTexture);
     TEXTURECUBE(_SkyCubemap);
@@ -129,7 +129,7 @@ Shader "Hidden/VividRP/HDRISky"
             #pragma vertex Vert
             #pragma fragment FragRender
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
             float4 FragRender(Varyings input) : SV_Target
             {
                 return float4(RenderSky(input,VividGetPreExposure()));

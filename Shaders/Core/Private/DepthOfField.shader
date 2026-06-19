@@ -17,7 +17,7 @@ Shader "Hidden/VividRP/DepthOfField"
             #pragma fragment Frag
             #pragma multi_compile_local _ _DOF_HQ_FILTERING
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
 
             TEXTURE2D(_BlitTexture);

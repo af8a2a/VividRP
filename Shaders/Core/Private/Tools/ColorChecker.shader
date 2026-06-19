@@ -49,7 +49,7 @@ Shader "VividRP/Tools/ColorChecker"
                 #pragma fragment FragPreDepth
 
                 #define VIVID_COLOR_CHECKER_PRE_DEPTH 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Tools/ColorCheckerPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Tools/ColorCheckerPass.hlsl"
             ENDHLSL
         }
 
@@ -72,7 +72,7 @@ Shader "VividRP/Tools/ColorChecker"
                 #pragma vertex Vert
                 #pragma fragment FragGBuffer
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Tools/ColorCheckerPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Tools/ColorCheckerPass.hlsl"
             ENDHLSL
         }
 
@@ -95,7 +95,7 @@ Shader "VividRP/Tools/ColorChecker"
                 #pragma vertex Vert
                 #pragma fragment FragDebug
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Tools/ColorCheckerPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Tools/ColorCheckerPass.hlsl"
             ENDHLSL
         }
     }

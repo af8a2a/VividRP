@@ -1,10 +1,10 @@
 #ifndef VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 #define VIVIDRP_SIMPLE_DEFERRED_LIT_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/HdrpLitLighting.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/HdrpLitLighting.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
 
 TEXTURE2D_X(_GBuffer0);
 TEXTURE2D_X(_GBuffer1);

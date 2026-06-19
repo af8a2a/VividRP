@@ -2,8 +2,8 @@
 #pragma use_dxc
 #pragma only_renderers d3d11 xboxseries ps5
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;

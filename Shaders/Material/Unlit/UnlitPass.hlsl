@@ -1,12 +1,12 @@
 #ifndef VIVIDRP_UNLIT_PASS_INCLUDED
 #define VIVIDRP_UNLIT_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
 #if defined(VIVIDRP_UNLIT_MOTION_VECTOR_PASS)
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 #endif
 
 #if defined(VIVIDRP_UNLIT_META_PASS)

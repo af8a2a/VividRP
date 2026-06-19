@@ -5,8 +5,8 @@
 #error VividShaderPassMotionVectors requires VIVIDRP_SHADERPASS_MOTION_VECTORS.
 #endif
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
 
 VividPackedVaryingsMesh Vert(VividAttributesMesh input)
 {

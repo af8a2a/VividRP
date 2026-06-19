@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_PHYSICALLY_BASED_SKY_RENDERING_INCLUDED
 #define VIVIDRP_PHYSICALLY_BASED_SKY_RENDERING_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GeometricTools.hlsl"

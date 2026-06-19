@@ -16,8 +16,8 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
 
             #define VIVID_VT_VISUALIZATION_USE_PASS_SETTINGS 0
             #define VIVID_VT_VISUALIZATION_NONE 1

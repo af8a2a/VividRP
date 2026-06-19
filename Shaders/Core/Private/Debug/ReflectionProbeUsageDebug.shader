@@ -25,9 +25,9 @@ Shader "VividRP/Material/ReflectionProbeUsageDebug"
         #pragma target 4.5
         #pragma multi_compile_instancing
 
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/AutoExposure.hlsl"
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/LightingLoop.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/LightingLoop.hlsl"
 
         #define VIVID_REFLECTION_PROBE_USAGE_DEBUG_WEIGHTED_RADIANCE 0
         #define VIVID_REFLECTION_PROBE_USAGE_DEBUG_AVERAGE_RADIANCE 1

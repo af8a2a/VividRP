@@ -5,7 +5,7 @@
 #error VividShaderPassShadowCaster requires VIVIDRP_SHADERPASS_SHADOW_CASTER.
 #endif
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/VividVertMesh.hlsl"
 
 float4 _ShadowBias;
 

@@ -5,7 +5,7 @@ Shader "Hidden/VividRP/PostProcessing/Diffusion"
         Tags { "RenderPipeline" = "VividRenderPipeline" }
 
         HLSLINCLUDE
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
         #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
         TEXTURE2D(_BlitTexture);

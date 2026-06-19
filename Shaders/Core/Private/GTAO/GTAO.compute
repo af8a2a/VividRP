@@ -9,10 +9,10 @@
 #pragma kernel CSDenoisePass
 #pragma kernel CSDenoiseLastPass
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/ShaderVariablesFunctions.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ShaderVariablesFunctions.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GTAO/XeGTAO.hlsl"
 
 cbuffer GTAOConstantBuffer
 {

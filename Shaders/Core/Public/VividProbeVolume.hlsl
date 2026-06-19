@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_PROBE_VOLUME_INCLUDED
 #define VIVIDRP_PROBE_VOLUME_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BakedGI.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BakedGI.hlsl"
 
 #ifndef __AMBIENTPROBE_HLSL__
 #define __AMBIENTPROBE_HLSL__

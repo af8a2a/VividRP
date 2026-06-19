@@ -5,18 +5,18 @@
 #define FRAG_INPUTS_USE_META_EDITOR_VIS
 #endif
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/FragInputs.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/FragInputs.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 #if defined(VIVIDRP_SHADERPASS_META)
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MetaPass.hlsl"
 #endif
 #if defined(_VIRTUAL_TEXTURE_BASE_COLOR)
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
 #endif
 #if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
 #endif
 
 CBUFFER_START(UnityPerMaterial)

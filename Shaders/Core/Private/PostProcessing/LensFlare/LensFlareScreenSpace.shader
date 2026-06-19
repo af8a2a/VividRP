@@ -4,7 +4,7 @@ Shader "Hidden/VividRP/PostProcessing/LensFlareScreenSpace"
         #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
         #pragma target 5.0
 
-        #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+        #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
         #define URP_LENS_FLARE_SCREEN_SPACE
     ENDHLSL
 

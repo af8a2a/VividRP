@@ -9,7 +9,7 @@ Shader "Hidden/VividRP/DLSSBiasColorMask"
     HLSLINCLUDE
     #pragma target 4.5
     #pragma only_renderers d3d11 d3d12 playstation xboxone xboxseries vulkan metal switch switch2
-    #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+    #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
 
     struct Attributes

@@ -1,13 +1,13 @@
 #ifndef VIVIDRP_TERRAIN_LIT_PASS_INCLUDED
 #define VIVIDRP_TERRAIN_LIT_PASS_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/VividProbeVolume.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/MotionVectorsCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/MotionVectorsCommon.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/MetaPass.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/TerrainLit/TerrainLitSampling.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/TerrainLit/TerrainLitSampling.hlsl"
 #if defined(VIVIDRP_GPU_DRIVEN_DECAL_GBUFFER)
-#include "Packages/com.af8a2a.vividrp/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/GPUDrivenDecalGBuffer.hlsl"
 #endif
 
 float4 _ShadowBias;

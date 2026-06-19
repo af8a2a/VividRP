@@ -4,8 +4,8 @@
 
 #define CLASSIFY_TILE_SIZE 8
 #define BUILD_INDIRECT_THREADS 64
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
 #define VIVID_MATERIAL_FEATURE_VARIANT_COUNT 7
 #define VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL 6

@@ -1,8 +1,8 @@
 #ifndef VIVIDRP_VBUFFER_INCLUDED
 #define VIVIDRP_VBUFFER_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/ShaderVariablesVolumetric.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Volumetric/ShaderVariablesVolumetric.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Filtering.hlsl"
 //has been define in Common.hlsl
 // float EncodeLogarithmicDepthGeneralized(float distance, float4 encodingParams)

@@ -1,8 +1,8 @@
 #ifndef VIVIDRP_GBUFFER_INCLUDED
 #define VIVIDRP_GBUFFER_INCLUDED
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/BuiltinData.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BuiltinData.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Packing.hlsl"
 
 #define VIVID_GBUFFER_MATERIAL_STANDARD  0u

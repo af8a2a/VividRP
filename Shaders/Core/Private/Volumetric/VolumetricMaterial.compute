@@ -3,7 +3,7 @@
 #pragma kernel ClearVolumetricMaterialRenderingParameters
 #pragma kernel ComputeVolumetricMaterialRenderingParameters
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
 struct VividVolumetricMaterialBounds
 {

@@ -72,7 +72,7 @@ Shader "Hidden/VividRP/TileDebug"
 
             #define CLASSIFY_TILE_SIZE 8
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
             StructuredBuffer<uint> _TileIndices;
 

@@ -74,7 +74,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma vertex Vert
                 #pragma fragment FragPreDepth
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/UnlitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL
         }
 
@@ -97,7 +97,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma fragment FragShadow
 
                 #define VIVIDRP_UNLIT_SHADOW_CASTER_PASS 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/UnlitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL
         }
 
@@ -121,7 +121,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma vertex Vert
                 #pragma fragment FragForward
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/UnlitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL
         }
 
@@ -145,7 +145,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma vertex Vert
                 #pragma fragment FragForward
 
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/UnlitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL
         }
 
@@ -167,7 +167,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma fragment FragMeta
 
                 #define VIVIDRP_UNLIT_META_PASS 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/UnlitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL
         }
 
@@ -197,7 +197,7 @@ Shader "VividRP/Material/Unlit"
                 #pragma fragment FragMotionVectors
 
                 #define VIVIDRP_UNLIT_MOTION_VECTOR_PASS 1
-                #include "Packages/com.af8a2a.vividrp/Shaders/Material/Unlit/UnlitPass.hlsl"
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/Unlit/UnlitPass.hlsl"
             ENDHLSL
         }
     }

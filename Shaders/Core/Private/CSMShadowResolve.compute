@@ -13,9 +13,9 @@
 #pragma require Native16Bit
 
 // #pragma enable_d3d11_debug_symbols
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Input.hlsl"
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Input.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 
 Texture2D<float>  _DepthTexture;
 Texture2D<float4> _GBuffer1;
@@ -78,7 +78,7 @@ bool IsSkyPixel(float deviceDepth)
 }
 
 #if defined(VIVID_BEND_ENABLED)
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Shadows/VividBendScreenSpaceShadow.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Shadows/VividBendScreenSpaceShadow.hlsl"
 
 DispatchParameters SetupCSMBendDispatchParameters()
 {

@@ -2,7 +2,7 @@
 #pragma kernel ClearVBufferDensity
 #pragma kernel VoxelizeVBufferDensity
 
-#include "Packages/com.af8a2a.vividrp/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Volumetric/VBuffer.hlsl"
 
 RWTexture3D<float4> _VBufferDensity;
 RWTexture3D<float> _VBufferAnisotropy;

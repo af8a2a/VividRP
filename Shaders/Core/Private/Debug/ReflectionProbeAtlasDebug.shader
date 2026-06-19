@@ -16,7 +16,7 @@ Shader "Hidden/VividRP/ReflectionProbeAtlasDebug"
             #pragma vertex Vert
             #pragma fragment Frag
 
-            #include "Packages/com.af8a2a.vividrp/Shaders/Core/Public/Core.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 
             #define VIVID_REFLECTION_PROBE_ATLAS_DEBUG_NONE 0
             #define VIVID_REFLECTION_PROBE_ATLAS_DEBUG_ATLAS 1

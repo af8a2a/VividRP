@@ -66,6 +66,12 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderVariables.projectionParams.y, Is.EqualTo(0.5f).Within(0.00001f));
             Assert.That(shaderVariables.projectionParams.z, Is.EqualTo(250.0f).Within(0.00001f));
             Assert.That(shaderVariables.projectionParams.w, Is.EqualTo(1.0f / 250.0f).Within(0.00001f));
+            AssertVectorAreEqual(
+                VividCameraData.CreateZBufferParams(
+                    camera.nearClipPlane,
+                    camera.farClipPlane,
+                    ProjectionUsesReversedZ(expectedGpuProjectionMatrix, camera.nearClipPlane, camera.farClipPlane)),
+                shaderVariables.zBufferParams);
             Assert.That(shaderVariables.orthoParams, Is.EqualTo(Vector4.zero));
 
             AssertMatrixAreEqual(jitteredProjectionMatrix, shaderVariables.cameraProjection);
@@ -83,6 +89,61 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderVariables.frustumPlanes, Has.Length.EqualTo(6));
             AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[3], shaderVariables.frustumPlanes[2]);
             AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[2], shaderVariables.frustumPlanes[3]);
+        }
+
+        [Test]
+        public void UpdateAllViewConstants_StoresCurrentAndPreviousMatrices_WhenTemporalDataIsAvailable()
+        {
+            var camera = m_GameObject.AddComponent<Camera>();
+            var additionalData = camera.GetVividAdditionalCameraData();
+            camera.aspect = 16.0f / 9.0f;
+            camera.nearClipPlane = 0.3f;
+            camera.farClipPlane = 250.0f;
+            camera.transform.position = new Vector3(1.0f, 2.0f, -3.0f);
+            camera.transform.rotation = Quaternion.Euler(8.0f, 18.0f, 0.0f);
+
+            var firstProjection = Matrix4x4.Perspective(57.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
+            var firstJitter = Matrix4x4.Translate(new Vector3(0.02f, -0.03f, 0.0f));
+            camera.nonJitteredProjectionMatrix = firstProjection;
+            camera.projectionMatrix = firstJitter * firstProjection;
+            additionalData.UpdateCameraMatrices(true);
+
+            var cameraData = new VividCameraData
+            {
+                camera = camera,
+                additionalData = additionalData,
+                actualWidth = 960,
+                actualHeight = 540,
+                pixelWidth = 1920,
+                pixelHeight = 1080,
+                frameIndex = 20,
+            };
+
+            var temporalData = FrameContextSystem.GetOrCreate(camera);
+            temporalData.Update(cameraData);
+            var firstViewProjection = temporalData.ViewProjection;
+
+            camera.transform.position = new Vector3(-2.0f, 4.0f, -6.0f);
+            camera.transform.rotation = Quaternion.Euler(11.0f, -22.0f, 0.0f);
+            var secondProjection = Matrix4x4.Perspective(49.0f, camera.aspect, camera.nearClipPlane, camera.farClipPlane);
+            var secondJitter = Matrix4x4.Translate(new Vector3(-0.01f, 0.04f, 0.0f));
+            camera.nonJitteredProjectionMatrix = secondProjection;
+            camera.projectionMatrix = secondJitter * secondProjection;
+            additionalData.UpdateCameraMatrices(true);
+            cameraData.frameIndex = 21;
+
+            temporalData.Update(cameraData);
+            cameraData.UpdateAllViewConstants(temporalData);
+
+            Assert.That(cameraData.frameMetrics.scaledWidth, Is.EqualTo(960));
+            Assert.That(cameraData.frameMetrics.scaledHeight, Is.EqualTo(540));
+            Assert.That(cameraData.frameMetrics.referenceWidth, Is.EqualTo(1920));
+            Assert.That(cameraData.frameMetrics.referenceHeight, Is.EqualTo(1080));
+            AssertMatrixAreEqual(additionalData.GetGPUProjectionMatrix(), cameraData.mainViewConstants.projMatrix);
+            AssertMatrixAreEqual(temporalData.ProjectionMatrix, cameraData.mainViewConstants.nonJitteredProjMatrix);
+            AssertMatrixAreEqual(temporalData.ViewProjection, cameraData.mainViewConstants.nonJitteredViewProjMatrix);
+            AssertMatrixAreEqual(firstViewProjection, cameraData.mainViewConstants.prevViewProjMatrix);
+            AssertVectorAreEqual(new Vector4(-2.0f, 4.0f, -6.0f, 1.0f), cameraData.mainViewConstants.worldSpaceCameraPos);
         }
 
         [Test]
@@ -278,7 +339,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BuildShaderVariables_ExtractsFrustumPlanesMatchingUnityCamera()
+        public void BuildShaderVariables_ExtractsGpuFrustumPlanesWithExplicitNearFarPlanes()
         {
             var camera = m_GameObject.AddComponent<Camera>();
             camera.fieldOfView = 53.0f;
@@ -296,20 +357,19 @@ namespace VividRP.Editor.Tests
             };
 
             var shaderVariables = cameraData.BuildShaderVariables();
-            var expectedPlanes = GeometryUtility.CalculateFrustumPlanes(camera);
+            var expectedNearPlane = CreatePlane(GetViewDirection(shaderVariables.invViewMatrix), GetViewPosition(shaderVariables.invViewMatrix), camera.nearClipPlane);
+            var expectedFarPlane = CreatePlane(-GetViewDirection(shaderVariables.invViewMatrix), GetViewPosition(shaderVariables.invViewMatrix), -camera.farClipPlane);
 
-            for (var index = 0; index < expectedPlanes.Length; index++)
+            for (var index = 0; index < 4; index++)
             {
-                var expectedPlane = expectedPlanes[index];
-                var expected = new Vector4(
-                    expectedPlane.normal.x,
-                    expectedPlane.normal.y,
-                    expectedPlane.normal.z,
-                    expectedPlane.distance);
-
-                AssertVectorAreEqual(expected, shaderVariables.cameraWorldClipPlanes[index], 0.0001f);
+                AssertVectorAreEqual(
+                    ExtractSideFrustumPlane(shaderVariables.viewProjMatrix, index),
+                    shaderVariables.cameraWorldClipPlanes[index],
+                    0.0001f);
             }
 
+            AssertVectorAreEqual(expectedNearPlane, shaderVariables.cameraWorldClipPlanes[4], 0.0001f);
+            AssertVectorAreEqual(expectedFarPlane, shaderVariables.cameraWorldClipPlanes[5], 0.0001f);
             AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[3], shaderVariables.frustumPlanes[2]);
             AssertVectorAreEqual(shaderVariables.cameraWorldClipPlanes[2], shaderVariables.frustumPlanes[3]);
         }
@@ -319,8 +379,10 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "FrameContext", "VividCameraData.ShaderVariables.cs"));
 
-            Assert.That(source, Does.Contain("UpdateFrustumPlanes(currentCamera, cameraProjection * viewMatrix);"));
-            Assert.That(source, Does.Contain("CullingUtility.ExtractFrustumPlanes(viewProjectionMatrix, m_CameraWorldClipPlanes);"));
+            Assert.That(source, Does.Contain("UpdateFrustumPlanes(currentCamera, mainViewConstants);"));
+            Assert.That(source, Does.Contain("ExtractGpuFrustumPlanes(viewConstants, m_CameraWorldClipPlanes);"));
+            Assert.That(source, Does.Contain("AnalyzeProjectionDepth(glstateMatrixProjection"));
+            Assert.That(source, Does.Contain("CreateZBufferParams(metrics.nearClip, metrics.farClip, viewConstants.reversedZ);"));
             Assert.That(source, Does.Not.Contain("GeometryUtility.CalculateFrustumPlanes"));
             Assert.That(source, Does.Not.Contain("new Plane[6]"));
         }
@@ -537,6 +599,75 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(tolerance));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(tolerance));
             Assert.That(actual.w, Is.EqualTo(expected.w).Within(tolerance));
+        }
+
+        private static bool ProjectionUsesReversedZ(Matrix4x4 projectionMatrix, float nearClip, float farClip)
+        {
+            var scale = projectionMatrix[2, 3] / (farClip * nearClip) * (farClip - nearClip);
+            return scale > 0.0f;
+        }
+
+        private static Vector4 ExtractSideFrustumPlane(Matrix4x4 viewProjectionMatrix, int planeIndex)
+        {
+            return planeIndex switch
+            {
+                0 => NormalizePlane(
+                    viewProjectionMatrix.m30 + viewProjectionMatrix.m00,
+                    viewProjectionMatrix.m31 + viewProjectionMatrix.m01,
+                    viewProjectionMatrix.m32 + viewProjectionMatrix.m02,
+                    viewProjectionMatrix.m33 + viewProjectionMatrix.m03),
+                1 => NormalizePlane(
+                    viewProjectionMatrix.m30 - viewProjectionMatrix.m00,
+                    viewProjectionMatrix.m31 - viewProjectionMatrix.m01,
+                    viewProjectionMatrix.m32 - viewProjectionMatrix.m02,
+                    viewProjectionMatrix.m33 - viewProjectionMatrix.m03),
+                2 => NormalizePlane(
+                    viewProjectionMatrix.m30 + viewProjectionMatrix.m10,
+                    viewProjectionMatrix.m31 + viewProjectionMatrix.m11,
+                    viewProjectionMatrix.m32 + viewProjectionMatrix.m12,
+                    viewProjectionMatrix.m33 + viewProjectionMatrix.m13),
+                3 => NormalizePlane(
+                    viewProjectionMatrix.m30 - viewProjectionMatrix.m10,
+                    viewProjectionMatrix.m31 - viewProjectionMatrix.m11,
+                    viewProjectionMatrix.m32 - viewProjectionMatrix.m12,
+                    viewProjectionMatrix.m33 - viewProjectionMatrix.m13),
+                _ => throw new System.ArgumentOutOfRangeException(nameof(planeIndex)),
+            };
+        }
+
+        private static Vector3 GetViewPosition(Matrix4x4 invViewMatrix)
+        {
+            var viewPosition = invViewMatrix.GetColumn(3);
+            return new Vector3(viewPosition.x, viewPosition.y, viewPosition.z);
+        }
+
+        private static Vector3 GetViewDirection(Matrix4x4 invViewMatrix)
+        {
+            var viewDirectionColumn = -invViewMatrix.GetColumn(2);
+            var viewDirection = new Vector3(viewDirectionColumn.x, viewDirectionColumn.y, viewDirectionColumn.z);
+            viewDirection.Normalize();
+            return viewDirection;
+        }
+
+        private static Vector4 NormalizePlane(float x, float y, float z, float distance)
+        {
+            var length = Mathf.Sqrt(x * x + y * y + z * z);
+            var reciprocalLength = 1.0f / length;
+            return new Vector4(
+                x * reciprocalLength,
+                y * reciprocalLength,
+                z * reciprocalLength,
+                distance * reciprocalLength);
+        }
+
+        private static Vector4 CreatePlane(Vector3 normal, Vector3 point, float distanceOffset)
+        {
+            normal.Normalize();
+            return new Vector4(
+                normal.x,
+                normal.y,
+                normal.z,
+                -Vector3.Dot(normal, point) - distanceOffset);
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

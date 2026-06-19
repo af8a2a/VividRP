@@ -78,6 +78,8 @@ namespace VividRP.Runtime
             CameraTemporalData temporalData,
             VividSkyData skyData)
         {
+            _ = temporalData;
+
             var currentTime = Time.timeSinceLevelLoad;
             var deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
             var smoothDeltaTime = Mathf.Max(Time.smoothDeltaTime > 0.0f ? Time.smoothDeltaTime : deltaTime, 1e-6f);
@@ -137,15 +139,13 @@ namespace VividRP.Runtime
                 _VividScreenSize = shaderVariables.screenSize,
                 _VividGlobalMipBias = new Vector4(shaderVariables.globalMipBias.x, shaderVariables.globalMipBias.y, 0.0f, 0.0f),
                 _VividScaledScreenParams = shaderVariables.scaledScreenParams,
-                _VividPrevViewMatrix = temporalData != null ? temporalData.PreviousViewMatrix : shaderVariables.matrixV,
-                _VividPrevProjMatrix = temporalData != null ? temporalData.PreviousProjectionMatrix : shaderVariables.projMatrix,
-                _VividJitterParams = temporalData != null
-                    ? new Vector4(
-                        temporalData.Jitter.x,
-                        temporalData.Jitter.y,
-                        temporalData.PreviousJitter.x,
-                        temporalData.PreviousJitter.y)
-                    : Vector4.zero,
+                _VividPrevViewMatrix = shaderVariables.prevViewMatrix,
+                _VividPrevProjMatrix = shaderVariables.prevProjMatrix,
+                _VividJitterParams = new Vector4(
+                    shaderVariables.jitter.x,
+                    shaderVariables.jitter.y,
+                    shaderVariables.previousJitter.x,
+                    shaderVariables.previousJitter.y),
                 _VividLightModelAmbient = ToVector4(RenderSettings.ambientLight),
                 _VividAmbientSky = ToVector4(RenderSettings.ambientSkyColor),
                 _VividAmbientEquator = ToVector4(RenderSettings.ambientEquatorColor),

@@ -19,6 +19,8 @@ namespace VividRP.Runtime
         internal EntityId cameraEntityId = EntityId.None;
         internal ShaderVariablesGlobal shaderVariablesGlobal;
         internal bool hasShaderVariablesGlobal;
+        internal ViewConstants mainViewConstants = ViewConstants.Identity;
+        internal FrameMetrics frameMetrics = FrameMetrics.Default;
         internal int scaledPixelWidth;
         internal int scaledPixelHeight;
         internal float nearClipPlane = 0.3f;
@@ -224,6 +226,8 @@ namespace VividRP.Runtime
             cameraEntityId = EntityId.None;
             shaderVariablesGlobal = default;
             hasShaderVariablesGlobal = false;
+            mainViewConstants = ViewConstants.Identity;
+            frameMetrics = FrameMetrics.Default;
             scaledPixelWidth = 0;
             scaledPixelHeight = 0;
             nearClipPlane = 0.3f;

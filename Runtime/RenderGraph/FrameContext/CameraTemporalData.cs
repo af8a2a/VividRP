@@ -50,12 +50,15 @@ namespace VividRP.Runtime
             var frameIndex = ResolveFrameIndex(cameraData);
             var aspectRatio = ResolveAspectRatio(cameraData);
 
-            var gpuProjNoJitter = cameraData.GetGPUProjectionMatrixNoJitter();
-            var view = cameraData.GetViewMatrix();
-            var currentVP = gpuProjNoJitter * view;
-            var currentJitter = cameraData.GetJitter();
-            var width = ResolveWidth(cameraData);
-            var height = ResolveHeight(cameraData);
+            cameraData.UpdateAllViewConstants();
+            var viewConstants = cameraData.mainViewConstants;
+            var metrics = cameraData.frameMetrics;
+            var gpuProjNoJitter = viewConstants.nonJitteredProjMatrix;
+            var view = viewConstants.viewMatrix;
+            var currentVP = viewConstants.nonJitteredViewProjMatrix;
+            var currentJitter = viewConstants.jitter;
+            var width = ResolveWidth(cameraData, metrics);
+            var height = ResolveHeight(cameraData, metrics);
             var deltaTime = Time.deltaTime;
 
             var hasValidHistory = LastFrameIndex >= 0
@@ -171,12 +174,22 @@ namespace VividRP.Runtime
                 Screen.width);
         }
 
+        private static int ResolveWidth(VividCameraData cameraData, VividCameraData.FrameMetrics metrics)
+        {
+            return metrics.scaledWidth > 0 ? metrics.scaledWidth : ResolveWidth(cameraData);
+        }
+
         private static int ResolveHeight(VividCameraData cameraData)
         {
             return CameraDimensionUtility.ResolveCameraDimension(
                 cameraData?.actualHeight ?? 0,
                 cameraData?.pixelHeight ?? 0,
                 Screen.height);
+        }
+
+        private static int ResolveHeight(VividCameraData cameraData, VividCameraData.FrameMetrics metrics)
+        {
+            return metrics.scaledHeight > 0 ? metrics.scaledHeight : ResolveHeight(cameraData);
         }
     }
 }

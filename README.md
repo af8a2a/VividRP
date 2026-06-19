@@ -2,17 +2,12 @@
 
 [English](README_EN.md) | 简体中文
 
-VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。它延续了 legacy [VividRP](https://github.com/af8a2a/VividRP) 的方向，但当前代码库已经不再是旧版 README 那份"大而全功能清单"的直接同步版本。现阶段的重点是先把一个可运行、可扩展、可测试的 RenderGraph-first 渲染管线基础搭起来，再逐步把 GPU Driven、Bindless、Ray Tracing 等能力接回到统一工作流里。
-
+VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。
 > [!IMPORTANT]
 > - 当前开发目标为 Unity `6000.6.0a5` / `6000.6`
 > - 当前最可靠的运行路径是 Windows + DirectX 12
 > - Bindless 与 Ray Tracing 相关流程默认按 DX12 / DXR 能力设计
 > - legacy README 中列出的功能不应直接视为当前包已全部实现，请以本文档和当前源码为准
-
-## 当前定位
-
-与 legacy README 把 VividRP 描述成"自定义 URP 变体"不同，当前包更适合被理解为一个独立的自定义 SRP 包，核心由以下部分组成：
 
 - `VividRenderPipeline` / `VividRenderPipelineAsset` / `VividRenderPipelineGlobalSettings`
 - 基于 `com.unity.graphtoolkit` 的 `.vrdg` RenderGraph 编辑器
@@ -20,9 +15,9 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - 通过 `PassRecorder` 执行的反射驱动 RenderGraph 运行时
 - 围绕 GPU Driven、Bindless、Ray Tracing 构建的实验性子系统
 
-## 当前已落地的能力
+## 当前功能
 
-### RenderGraph 工作流
+### 数据驱动的RenderGraph 工作流
 
 - 使用 `Assets/Create/VividRP/Standard Render Graph` 创建基于内置模板的可运行 `.vrdg`，或用 `Assets/Create/VividRP/Render Graph` 创建空图
 - `ScriptedImporter` 在导入时把 `.vrdg` 编译为运行时 `RenderGraphData`
@@ -41,7 +36,8 @@ VividRP 是一个面向 Unity 6 的自定义 Scriptable Render Pipeline 包。�
 - `IRenderGraphPreparePass` 提供在所有 Pass 完成 Prepare() 后刷新资源的钩子
 - `IRenderGraphRecordingPass` 用于抗锯齿类 Pass 的图录制回调
 - `IRenderGizmoPrePostProcessBoundaryPass` 标记后处理中的 Gizmo 渲染边界
-
+  ![img.png](Documentation~/Image/RenderGraph.png)
+- ![img.png](Documentation~/Image/SubGraph.png)
 ### 核心渲染与调试
 
 **基础 Pass：**

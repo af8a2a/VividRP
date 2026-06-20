@@ -15,6 +15,12 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
         float4 _ShoSegmentB;
         float4 _GTToneMap_Params0;
         float4 _GTToneMap_Params1;
+        float4 _LPM_Params0;
+        float4 _LPM_Params1;
+        float4 _LPM_Params2;
+        float4 _LPM_Params3;
+        float4 _LPM_Params6;
+        float4 _LPM_Flags;
         float4 _Variants; // x: disabled state, y: x-scale, z: preview mode, w: unused
 
         float EvalCustomSegment(float x, float4 segmentA, float2 segmentB)
@@ -215,10 +221,50 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
             return result;
         }
 
+        float3 LpmTonemap(float3 color)
+        {
+            const float epsilon = 1e-6;
+            float3 lumaT = float3(_LPM_Params1.z, _LPM_Params1.w, _LPM_Params2.x);
+            float3 crosstalk = _LPM_Params2.yzw;
+            float3 rcpLumaT = _LPM_Params3.xyz;
+
+            float peak = max(color.r, max(color.g, color.b));
+            if (peak <= epsilon)
+                return float3(0.0, 0.0, 0.0);
+
+            float3 ratio = color * rcp(peak);
+            ratio = pow(saturate(ratio), max(_LPM_Params0.xyz, 0.0));
+
+            float luma = max(dot(color, lumaT), 0.0);
+            luma = pow(max(luma, epsilon), _LPM_Params0.w);
+            float lumaShoulder = _LPM_Flags.x > 0.5
+                ? pow(max(luma, epsilon), _LPM_Params6.x)
+                : luma;
+            luma = luma * rcp(max(lumaShoulder * _LPM_Params1.x + _LPM_Params1.y, epsilon));
+
+            float lumaRatio = max(dot(ratio, lumaT), epsilon);
+            float ratioScale = saturate(luma / lumaRatio);
+            color = saturate(ratio * ratioScale);
+
+            float3 cap = -crosstalk * color + crosstalk;
+            float lumaAdd = saturate(dot(-color, lumaT) + luma);
+            float capLuma = max(dot(cap, lumaT), epsilon);
+            color = saturate((lumaAdd / capLuma) * cap + color);
+
+            lumaAdd = saturate(dot(-color, lumaT) + luma);
+            color = saturate(lumaAdd * rcpLumaT + color);
+
+            return color;
+        }
+
         float4 DrawCurve(v2f_img i, float3 background, float3 curveColor)
         {
             float y;
-            if (_Variants.z > 5.5)
+            if (_Variants.z > 6.5)
+            {
+                y = LpmTonemap(i.uv.xxx).x;
+            }
+            else if (_Variants.z > 5.5)
             {
                 y = i.uv.x; // None: linear identity
             }

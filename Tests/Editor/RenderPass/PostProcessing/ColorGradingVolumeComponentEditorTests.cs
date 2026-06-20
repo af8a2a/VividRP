@@ -128,7 +128,51 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_MaxBrightness", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_LinearSectionLength", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_BlackMin", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_LpmHdrMax", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_LpmSaturation", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_LpmCrosstalk", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_Material", flags)?.GetValue(editor), Is.Not.Null);
+            }
+            finally
+            {
+                if (editor != null)
+                    UnityEngine.Object.DestroyImmediate(editor);
+
+                UnityEngine.Object.DestroyImmediate(component);
+            }
+        }
+
+        [Test]
+        public void TonemappingEditor_ConfigureLpmPreview_SetsLpmVariantAndParams()
+        {
+            var component = ScriptableObject.CreateInstance<Tonemapping>();
+            component.mode.value = TonemappingMode.LPM;
+            component.lpmShoulder.value = true;
+            component.lpmContrast.value = 0.25f;
+            UnityEditor.Editor editor = null;
+
+            try
+            {
+                editor = UnityEditor.Editor.CreateEditor(component);
+
+                Assert.That(editor, Is.Not.Null);
+
+                var editorType = editor.GetType();
+                var flags = BindingFlags.Instance | BindingFlags.NonPublic;
+                var configureMethod = editorType.GetMethod("ConfigureLpmCurvePreview", flags);
+                var material = editorType.GetField("m_Material", flags)?.GetValue(editor) as Material;
+
+                Assert.That(configureMethod, Is.Not.Null);
+                Assert.That(material, Is.Not.Null);
+
+                configureMethod.Invoke(editor, null);
+
+                var variants = material.GetVector("_Variants");
+                var lpmParams0 = material.GetVector("_LPM_Params0");
+                var lpmFlags = material.GetVector("_LPM_Flags");
+                Assert.That(variants.z, Is.EqualTo(7f));
+                Assert.That(lpmParams0.w, Is.EqualTo(1.25f).Within(1e-5f));
+                Assert.That(lpmFlags.x, Is.EqualTo(1f));
             }
             finally
             {

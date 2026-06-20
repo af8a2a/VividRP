@@ -1,6 +1,6 @@
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
 
-#pragma multi_compile_local TONEMAPPING_NONE TONEMAPPING_NEUTRAL TONEMAPPING_ACES_APPROX TONEMAPPING_ACES_FULL TONEMAPPING_GRAN_TURISMO TONEMAPPING_AGX TONEMAPPING_KHRONOS_PBR TONEMAPPING_CUSTOM TONEMAPPING_EXTERNAL
+#pragma multi_compile_local TONEMAPPING_NONE TONEMAPPING_NEUTRAL TONEMAPPING_ACES_APPROX TONEMAPPING_ACES_FULL TONEMAPPING_GRAN_TURISMO TONEMAPPING_AGX TONEMAPPING_KHRONOS_PBR TONEMAPPING_LPM TONEMAPPING_CUSTOM TONEMAPPING_EXTERNAL
 #pragma multi_compile_local _ HDR_COLORSPACE_CONVERSION
 #pragma multi_compile_local GRADE_IN_SRGB GRADE_IN_ACESCG
 
@@ -56,6 +56,14 @@ CBUFFER_START(cb0)
     // Gran Turismo tonemapping settings
     float4 _GTToneMap_Params0;
     float4 _GTToneMap_Params1;
+
+    // FidelityFX LPM tonemapping settings
+    float4 _LPM_Params0; // xyz: saturation exponents, w: contrast
+    float4 _LPM_Params1; // xy: tone scale/bias, zw: luma transform xy
+    float4 _LPM_Params2; // x: luma transform z, yzw: crosstalk
+    float4 _LPM_Params3; // xyz: reciprocal luma transform, w: unused
+    float4 _LPM_Params6; // x: shoulder contrast, yzw: luma weights
+    float4 _LPM_Flags;   // x: shoulder enabled, yzw: unused
 
     // Custom tonemapping settings
     float4 _CustomToneCurve;
@@ -175,6 +183,42 @@ float3 KhronosPbrNeutralTonemap(float3 color)
 
     float g = 1.0 - 1.0 / (desaturation * (peak - newPeak) + 1.0);
     return lerp(color, newPeak.xxx, g);
+}
+
+float3 LpmTonemap(float3 color)
+{
+    const float epsilon = 1e-6;
+    float3 lumaT = float3(_LPM_Params1.z, _LPM_Params1.w, _LPM_Params2.x);
+    float3 crosstalk = _LPM_Params2.yzw;
+    float3 rcpLumaT = _LPM_Params3.xyz;
+
+    float peak = max(color.r, max(color.g, color.b));
+    if (peak <= epsilon)
+        return float3(0.0, 0.0, 0.0);
+
+    float3 ratio = color * rcp(peak);
+    ratio = pow(saturate(ratio), max(_LPM_Params0.xyz, 0.0));
+
+    float luma = max(dot(color, lumaT), 0.0);
+    luma = pow(max(luma, epsilon), _LPM_Params0.w);
+    float lumaShoulder = _LPM_Flags.x > 0.5
+        ? pow(max(luma, epsilon), _LPM_Params6.x)
+        : luma;
+    luma = luma * rcp(max(lumaShoulder * _LPM_Params1.x + _LPM_Params1.y, epsilon));
+
+    float lumaRatio = max(dot(ratio, lumaT), epsilon);
+    float ratioScale = saturate(luma / lumaRatio);
+    color = saturate(ratio * ratioScale);
+
+    float3 cap = -crosstalk * color + crosstalk;
+    float lumaAdd = saturate(dot(-color, lumaT) + luma);
+    float capLuma = max(dot(cap, lumaT), epsilon);
+    color = saturate((lumaAdd / capLuma) * cap + color);
+
+    lumaAdd = saturate(dot(-color, lumaT) + luma);
+    color = saturate(lumaAdd * rcpLumaT + color);
+
+    return color;
 }
 
 float EvaluateCurve(TEXTURE2D(curve), float t)
@@ -389,6 +433,10 @@ float3 Tonemap(float3 colorLinear)
     #elif defined(TONEMAPPING_KHRONOS_PBR)
     {
         colorLinear = KhronosPbrNeutralTonemap(colorLinear);
+    }
+    #elif defined(TONEMAPPING_LPM)
+    {
+        colorLinear = LpmTonemap(colorLinear);
     }
     #elif defined(TONEMAPPING_ACES)
     {

@@ -14,6 +14,7 @@ namespace VividRP.Runtime
         GranTurismo,
         AgX,
         KhronosPBR,
+        LPM,
         Custom,
         External
     }
@@ -65,6 +66,12 @@ namespace VividRP.Runtime
         public Vector4 splitHighlights;
         public Vector4 granTurismoParams0;
         public Vector4 granTurismoParams1;
+        public Vector4 lpmParams0;
+        public Vector4 lpmParams1;
+        public Vector4 lpmParams2;
+        public Vector4 lpmParams3;
+        public Vector4 lpmParams6;
+        public Vector4 lpmFlags;
         public Vector4 customToneCurve;
         public Vector4 toeSegmentA;
         public Vector4 toeSegmentB;
@@ -125,6 +132,12 @@ namespace VividRP.Runtime
                 splitHighlights = splitToning.Item2,
                 granTurismoParams0 = Vector4.zero,
                 granTurismoParams1 = Vector4.zero,
+                lpmParams0 = Vector4.zero,
+                lpmParams1 = Vector4.zero,
+                lpmParams2 = Vector4.zero,
+                lpmParams3 = Vector4.zero,
+                lpmParams6 = Vector4.zero,
+                lpmFlags = Vector4.zero,
                 customToneCurve = Vector4.zero,
                 toeSegmentA = Vector4.zero,
                 toeSegmentB = Vector4.zero,
@@ -489,6 +502,23 @@ namespace VividRP.Runtime
                 case TonemappingMode.KhronosPBR:
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.KhronosPBR;
                     break;
+                case TonemappingMode.LPM:
+                    settings.tonemappingMode = ColorGradingTonemappingShaderMode.LPM;
+                    var lpmData = LpmTonemapperUtility.Create709Ldr(
+                        tonemapping.lpmShoulder.value,
+                        tonemapping.lpmHdrMax.value,
+                        tonemapping.lpmExposure.value,
+                        tonemapping.lpmContrast.value,
+                        tonemapping.lpmShoulderContrast.value,
+                        tonemapping.lpmSaturation.value,
+                        tonemapping.lpmCrosstalk.value);
+                    settings.lpmParams0 = lpmData.Params0;
+                    settings.lpmParams1 = lpmData.Params1;
+                    settings.lpmParams2 = lpmData.Params2;
+                    settings.lpmParams3 = lpmData.Params3;
+                    settings.lpmParams6 = lpmData.Params6;
+                    settings.lpmFlags = lpmData.Flags;
+                    break;
                 case TonemappingMode.Custom:
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.Custom;
                     s_CustomToneCurve.Init(
@@ -582,6 +612,12 @@ namespace VividRP.Runtime
         private static readonly int ParamsId = Shader.PropertyToID("_Params");
         private static readonly int GtToneMapParams0Id = Shader.PropertyToID("_GTToneMap_Params0");
         private static readonly int GtToneMapParams1Id = Shader.PropertyToID("_GTToneMap_Params1");
+        private static readonly int LpmParams0Id = Shader.PropertyToID("_LPM_Params0");
+        private static readonly int LpmParams1Id = Shader.PropertyToID("_LPM_Params1");
+        private static readonly int LpmParams2Id = Shader.PropertyToID("_LPM_Params2");
+        private static readonly int LpmParams3Id = Shader.PropertyToID("_LPM_Params3");
+        private static readonly int LpmParams6Id = Shader.PropertyToID("_LPM_Params6");
+        private static readonly int LpmFlagsId = Shader.PropertyToID("_LPM_Flags");
         private static readonly int CustomToneCurveId = Shader.PropertyToID("_CustomToneCurve");
         private static readonly int ToeSegmentAId = Shader.PropertyToID("_ToeSegmentA");
         private static readonly int ToeSegmentBId = Shader.PropertyToID("_ToeSegmentB");
@@ -609,6 +645,7 @@ namespace VividRP.Runtime
         private readonly LocalKeyword m_TonemappingGranTurismoKeyword;
         private readonly LocalKeyword m_TonemappingAgXKeyword;
         private readonly LocalKeyword m_TonemappingKhronosPbrKeyword;
+        private readonly LocalKeyword m_TonemappingLpmKeyword;
         private readonly LocalKeyword m_TonemappingCustomKeyword;
         private readonly LocalKeyword m_TonemappingExternalKeyword;
         private readonly LocalKeyword m_GradeInSrgbKeyword;
@@ -627,6 +664,7 @@ namespace VividRP.Runtime
             m_TonemappingGranTurismoKeyword = CreateKeyword("TONEMAPPING_GRAN_TURISMO");
             m_TonemappingAgXKeyword = CreateKeyword("TONEMAPPING_AGX");
             m_TonemappingKhronosPbrKeyword = CreateKeyword("TONEMAPPING_KHRONOS_PBR");
+            m_TonemappingLpmKeyword = CreateKeyword("TONEMAPPING_LPM");
             m_TonemappingCustomKeyword = CreateKeyword("TONEMAPPING_CUSTOM");
             m_TonemappingExternalKeyword = CreateKeyword("TONEMAPPING_EXTERNAL");
             m_GradeInSrgbKeyword = CreateKeyword("GRADE_IN_SRGB");
@@ -684,6 +722,12 @@ namespace VividRP.Runtime
             cmd.SetComputeVectorParam(m_Shader, ParamsId, new Vector4(settings.enableColorGrading ? 1f : 0f, 0f, 0f, 0f));
             cmd.SetComputeVectorParam(m_Shader, GtToneMapParams0Id, settings.granTurismoParams0);
             cmd.SetComputeVectorParam(m_Shader, GtToneMapParams1Id, settings.granTurismoParams1);
+            cmd.SetComputeVectorParam(m_Shader, LpmParams0Id, settings.lpmParams0);
+            cmd.SetComputeVectorParam(m_Shader, LpmParams1Id, settings.lpmParams1);
+            cmd.SetComputeVectorParam(m_Shader, LpmParams2Id, settings.lpmParams2);
+            cmd.SetComputeVectorParam(m_Shader, LpmParams3Id, settings.lpmParams3);
+            cmd.SetComputeVectorParam(m_Shader, LpmParams6Id, settings.lpmParams6);
+            cmd.SetComputeVectorParam(m_Shader, LpmFlagsId, settings.lpmFlags);
             cmd.SetComputeVectorParam(m_Shader, CustomToneCurveId, settings.customToneCurve);
             cmd.SetComputeVectorParam(m_Shader, ToeSegmentAId, settings.toeSegmentA);
             cmd.SetComputeVectorParam(m_Shader, ToeSegmentBId, settings.toeSegmentB);
@@ -723,6 +767,7 @@ namespace VividRP.Runtime
             SetKeyword(cmd, m_TonemappingGranTurismoKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.GranTurismo);
             SetKeyword(cmd, m_TonemappingAgXKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.AgX);
             SetKeyword(cmd, m_TonemappingKhronosPbrKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.KhronosPBR);
+            SetKeyword(cmd, m_TonemappingLpmKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.LPM);
             SetKeyword(cmd, m_TonemappingCustomKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.Custom);
             SetKeyword(cmd, m_TonemappingExternalKeyword, tonemappingMode == ColorGradingTonemappingShaderMode.External);
             var colorGradingSpaceKeyword = ColorGradingSpaceUtility.GetColorGradingSpaceKeyword(colorGradingSpace);

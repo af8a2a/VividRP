@@ -44,6 +44,12 @@ namespace VividRP.Runtime
         KhronosPBR = 7,
 
         /// <summary>
+        /// AMD FidelityFX Luma Preserving Mapper tonemapper.
+        /// </summary>
+        [InspectorName("LPM")]
+        LPM = 8,
+
+        /// <summary>
         /// A tweakable, artist-friendly tonemapping curve.
         /// </summary>
         Custom = 3,
@@ -244,6 +250,55 @@ namespace VividRP.Runtime
         public ClampedFloatParameter blackMin = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
 
         /// <summary>
+        /// Enables the FidelityFX LPM shoulder curve.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Enables the FidelityFX LPM shoulder curve.")]
+        public BoolParameter lpmShoulder = new BoolParameter(false);
+
+        /// <summary>
+        /// Maximum input HDR value used by FidelityFX LPM.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Maximum input HDR value used by FidelityFX LPM.")]
+        public MinFloatParameter lpmHdrMax = new MinFloatParameter(16.0f, 0.001f);
+
+        /// <summary>
+        /// Exposure offset in stops used by FidelityFX LPM.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Exposure offset in stops used by FidelityFX LPM.")]
+        public ClampedFloatParameter lpmExposure = new ClampedFloatParameter(0.0f, -16.0f, 16.0f);
+
+        /// <summary>
+        /// Contrast control used by FidelityFX LPM.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Contrast control used by FidelityFX LPM.")]
+        public ClampedFloatParameter lpmContrast = new ClampedFloatParameter(0.0f, 0.0f, 1.0f);
+
+        /// <summary>
+        /// Shoulder contrast control used by FidelityFX LPM.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Shoulder contrast control used by FidelityFX LPM.")]
+        public ClampedFloatParameter lpmShoulderContrast = new ClampedFloatParameter(1.0f, 0.1f, 4.0f);
+
+        /// <summary>
+        /// Per-channel saturation controls used by FidelityFX LPM.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Per-channel saturation controls used by FidelityFX LPM.")]
+        public Vector3Parameter lpmSaturation = new Vector3Parameter(Vector3.zero);
+
+        /// <summary>
+        /// Per-channel crosstalk controls used by FidelityFX LPM.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Per-channel crosstalk controls used by FidelityFX LPM.")]
+        public Vector3Parameter lpmCrosstalk = new Vector3Parameter(Vector3.one);
+
+        /// <summary>
         /// Controls the transition between the toe and the mid section of the curve. A value of 0
         /// results in no transition and a value of 1 results in a very hard transition.
         /// This parameter is only used when <see cref="TonemappingMode.Custom"/> is set.
@@ -372,6 +427,7 @@ namespace VividRP.Runtime
         {
             if (mode.value == TonemappingMode.GranTurismo ||
                 mode.value == TonemappingMode.KhronosPBR ||
+                mode.value == TonemappingMode.LPM ||
                 mode.value == TonemappingMode.Custom ||
                 mode.value == TonemappingMode.External)
             {

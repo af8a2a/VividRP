@@ -1077,6 +1077,12 @@ namespace VividRP.Editor
     {
         static readonly int s_GtToneMapParams0Id = Shader.PropertyToID("_GTToneMap_Params0");
         static readonly int s_GtToneMapParams1Id = Shader.PropertyToID("_GTToneMap_Params1");
+        static readonly int s_LpmParams0Id = Shader.PropertyToID("_LPM_Params0");
+        static readonly int s_LpmParams1Id = Shader.PropertyToID("_LPM_Params1");
+        static readonly int s_LpmParams2Id = Shader.PropertyToID("_LPM_Params2");
+        static readonly int s_LpmParams3Id = Shader.PropertyToID("_LPM_Params3");
+        static readonly int s_LpmParams6Id = Shader.PropertyToID("_LPM_Params6");
+        static readonly int s_LpmFlagsId = Shader.PropertyToID("_LPM_Flags");
         static readonly int s_VariantsId = Shader.PropertyToID("_Variants");
 
         SerializedDataParameter m_Mode;
@@ -1087,6 +1093,13 @@ namespace VividRP.Editor
         SerializedDataParameter m_LinearSectionLength;
         SerializedDataParameter m_BlackPow;
         SerializedDataParameter m_BlackMin;
+        SerializedDataParameter m_LpmShoulder;
+        SerializedDataParameter m_LpmHdrMax;
+        SerializedDataParameter m_LpmExposure;
+        SerializedDataParameter m_LpmContrast;
+        SerializedDataParameter m_LpmShoulderContrast;
+        SerializedDataParameter m_LpmSaturation;
+        SerializedDataParameter m_LpmCrosstalk;
         SerializedDataParameter m_ToeStrength;
         SerializedDataParameter m_ToeLength;
         SerializedDataParameter m_ShoulderStrength;
@@ -1127,6 +1140,13 @@ namespace VividRP.Editor
             m_LinearSectionLength = Unpack(o.Find(x => x.linearSectionLength));
             m_BlackPow = Unpack(o.Find(x => x.blackPow));
             m_BlackMin = Unpack(o.Find(x => x.blackMin));
+            m_LpmShoulder = Unpack(o.Find(x => x.lpmShoulder));
+            m_LpmHdrMax = Unpack(o.Find(x => x.lpmHdrMax));
+            m_LpmExposure = Unpack(o.Find(x => x.lpmExposure));
+            m_LpmContrast = Unpack(o.Find(x => x.lpmContrast));
+            m_LpmShoulderContrast = Unpack(o.Find(x => x.lpmShoulderContrast));
+            m_LpmSaturation = Unpack(o.Find(x => x.lpmSaturation));
+            m_LpmCrosstalk = Unpack(o.Find(x => x.lpmCrosstalk));
             m_ToeStrength = Unpack(o.Find(x => x.toeStrength));
             m_ToeLength = Unpack(o.Find(x => x.toeLength));
             m_ShoulderStrength = Unpack(o.Find(x => x.shoulderStrength));
@@ -1249,6 +1269,29 @@ namespace VividRP.Editor
             m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 3f, 0f));
         }
 
+        void ConfigureLpmCurvePreview()
+        {
+            if (m_Material == null)
+                return;
+
+            float alpha = GUI.enabled ? 1f : 0.5f;
+            var lpmData = LpmTonemapperUtility.Create709Ldr(
+                m_LpmShoulder.value.boolValue,
+                m_LpmHdrMax.value.floatValue,
+                m_LpmExposure.value.floatValue,
+                m_LpmContrast.value.floatValue,
+                m_LpmShoulderContrast.value.floatValue,
+                m_LpmSaturation.value.vector3Value,
+                m_LpmCrosstalk.value.vector3Value);
+
+            m_Material.SetVector(s_LpmParams0Id, lpmData.Params0);
+            m_Material.SetVector(s_LpmParams1Id, lpmData.Params1);
+            m_Material.SetVector(s_LpmParams2Id, lpmData.Params2);
+            m_Material.SetVector(s_LpmParams3Id, lpmData.Params3);
+            m_Material.SetVector(s_LpmParams6Id, lpmData.Params6);
+            m_Material.SetVector(s_LpmFlagsId, lpmData.Flags);
+            m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 7f, 0f));
+        }
         void ConfigureACESCurvePreview()
         {
             if (m_Material == null)
@@ -1315,6 +1358,19 @@ namespace VividRP.Editor
                 ConfigureKhronosPbrCurvePreview();
                 DrawCurvePreview();
             }
+            else if (m_Mode.value.intValue == (int)TonemappingMode.LPM)
+            {
+                ConfigureLpmCurvePreview();
+                DrawCurvePreview();
+
+                PropertyField(m_LpmShoulder);
+                PropertyField(m_LpmHdrMax);
+                PropertyField(m_LpmExposure);
+                PropertyField(m_LpmContrast);
+                PropertyField(m_LpmShoulderContrast);
+                PropertyField(m_LpmSaturation);
+                PropertyField(m_LpmCrosstalk);
+            }
             else if (m_Mode.value.intValue == (int)TonemappingMode.Custom)
             {
                 ConfigureCustomCurvePreview();
@@ -1359,6 +1415,7 @@ namespace VividRP.Editor
                 int hdrTonemapMode = m_Mode.value.intValue;
                 if (hdrTonemapMode == (int)TonemappingMode.GranTurismo ||
                     hdrTonemapMode == (int)TonemappingMode.KhronosPBR ||
+                    hdrTonemapMode == (int)TonemappingMode.LPM ||
                     hdrTonemapMode == (int)TonemappingMode.Custom ||
                     hdrTonemapMode == (int)TonemappingMode.External)
                 {

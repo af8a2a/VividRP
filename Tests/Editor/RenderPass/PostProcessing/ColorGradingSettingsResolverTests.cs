@@ -48,6 +48,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildLpmParams_PacksFidelityFx709Inputs()
+        {
+            var result = LpmTonemapperUtility.Create709Ldr(
+                true,
+                16f,
+                1f,
+                0.25f,
+                1.5f,
+                new Vector3(0.1f, 0.2f, 0.3f),
+                new Vector3(0.7f, 0.8f, 0.9f));
+
+            Assert.That(result.Params0.x, Is.EqualTo(1.35f).Within(1e-5f));
+            Assert.That(result.Params0.y, Is.EqualTo(1.45f).Within(1e-5f));
+            Assert.That(result.Params0.z, Is.EqualTo(1.55f).Within(1e-5f));
+            Assert.That(result.Params0.w, Is.EqualTo(1.25f).Within(1e-5f));
+            Assert.That(result.Params1.z, Is.EqualTo(0.212639f).Within(1e-5f));
+            Assert.That(result.Params1.w, Is.EqualTo(0.715169f).Within(1e-5f));
+            Assert.That(result.Params2.x, Is.EqualTo(0.072192f).Within(1e-5f));
+            Assert.That(result.Params2.y, Is.EqualTo(0.7f).Within(1e-5f));
+            Assert.That(result.Params2.z, Is.EqualTo(0.8f).Within(1e-5f));
+            Assert.That(result.Params2.w, Is.EqualTo(0.9f).Within(1e-5f));
+            Assert.That(result.Flags.x, Is.EqualTo(1f));
+            Assert.That(float.IsNaN(result.Params1.x) || float.IsInfinity(result.Params1.x), Is.False);
+            Assert.That(float.IsNaN(result.Params1.y) || float.IsInfinity(result.Params1.y), Is.False);
+        }
+
+        [Test]
         public void ResolveColorGradingSpace_DefaultsToSrgb_WhenPipelineAssetIsNull()
         {
             var result = ColorGradingSpaceUtility.ResolveColorGradingSpace(null);
@@ -101,6 +128,16 @@ namespace VividRP.Editor.Tests
             tonemapping.fallbackMode.value = FallbackHDRTonemap.Neutral;
 
             Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.Neutral));
+        }
+
+        [Test]
+        public void GetHDRTonemappingMode_UsesFallback_WhenLpmIsSelected()
+        {
+            var tonemapping = new Tonemapping();
+            tonemapping.mode.value = TonemappingMode.LPM;
+            tonemapping.fallbackMode.value = FallbackHDRTonemap.ACES;
+
+            Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.ACES));
         }
 
         [Test]

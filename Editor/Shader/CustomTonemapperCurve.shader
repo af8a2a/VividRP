@@ -15,18 +15,18 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
         float4 _ShoSegmentB;
         float4 _GTToneMap_Params0;
         float4 _GTToneMap_Params1;
-        float4 _LPM_Params0;
-        float4 _LPM_Params1;
-        float4 _LPM_Params2;
-        float4 _LPM_Params3;
-        float4 _LPM_Params4;
-        float4 _LPM_Params5;
-        float4 _LPM_Params6;
-        float4 _LPM_Params7;
-        float4 _LPM_Params8;
-        float4 _LPM_Params9;
-        float4 _LPM_Flags;
-        float4 _LPM_Flags2;
+        float4 _LPM_ToneParams;
+        float4 _LPM_ToneLuma;
+        float4 _LPM_ScaleBiasSoftGap;
+        float4 _LPM_TargetLuma;
+        float4 _LPM_RcpTargetLuma;
+        float4 _LPM_Crosstalk;
+        float4 _LPM_ConR;
+        float4 _LPM_ConG;
+        float4 _LPM_ConB;
+        float4 _LPM_Con2R;
+        float4 _LPM_Con2G;
+        float4 _LPM_Con2B;
         float4 _Variants; // x: disabled state, y: x-scale, z: preview mode, w: unused
 
         float EvalCustomSegment(float x, float4 segmentA, float2 segmentB)
@@ -242,74 +242,56 @@ Shader "Hidden/VividRP/Editor/Custom Tonemapper Curve"
         float3 LpmTonemap(float3 color)
         {
             const float epsilon = 1e-6;
-            float3 lumaW = _LPM_Params6.yzw;
-            float3 lumaT = float3(_LPM_Params1.z, _LPM_Params1.w, _LPM_Params2.x);
-            float3 rcpLumaT = _LPM_Params3.xyz;
-            float3 saturation = max(_LPM_Params0.xyz, 0.0);
-            float contrast = _LPM_Params0.w;
-            bool shoulder = _LPM_Flags.x > 0.5;
-            bool con = _LPM_Flags.y > 0.5;
-            bool soft = _LPM_Flags.z > 0.5;
-            bool con2 = _LPM_Flags.w > 0.5;
-            bool clip = _LPM_Flags2.x > 0.5;
-            bool scaleOnly = _LPM_Flags2.y > 0.5;
-
-            float3 con2R = float3(_LPM_Params3.w, _LPM_Params4.x, _LPM_Params4.y);
-            float3 con2G = float3(_LPM_Params4.z, _LPM_Params4.w, _LPM_Params5.x);
-            float3 con2B = _LPM_Params5.yzw;
-            float3 conR = float3(_LPM_Params7.z, _LPM_Params7.w, _LPM_Params8.x);
-            float3 conG = _LPM_Params8.yzw;
-            float3 conB = _LPM_Params9.xyz;
-            float2 softGap = _LPM_Params7.xy;
-            float3 crosstalk = _LPM_Params2.yzw;
+            bool shoulder = _LPM_TargetLuma.w > 0.5;
+            bool soft = _LPM_Crosstalk.w > 0.5;
+            bool con2 = _LPM_ConR.w > 0.5;
+            bool clip = _LPM_ConG.w > 0.5;
+            bool scaleOnly = _LPM_ConB.w > 0.5;
 
             float peak = max(color.r, max(color.g, color.b));
             if (peak <= epsilon)
                 return float3(0.0, 0.0, 0.0);
 
             float3 ratio = color * rcp(peak);
-            ratio = pow(max(ratio, 0.0), saturation);
+            ratio = pow(max(ratio, 0.0), _LPM_ToneParams.xyz);
 
-            float luma = soft ? dot(color, lumaW) : dot(color, lumaT);
-            luma = pow(max(luma, epsilon), contrast);
-            float lumaShoulder = shoulder ? pow(max(luma, epsilon), _LPM_Params6.x) : luma;
-            luma = luma * rcp(max(lumaShoulder * _LPM_Params1.x + _LPM_Params1.y, epsilon));
+            float luma = dot(color, _LPM_ToneLuma.xyz);
+            luma = pow(max(luma, epsilon), _LPM_ToneParams.w);
+            float lumaShoulder = shoulder ? pow(max(luma, epsilon), _LPM_ToneLuma.w) : luma;
+            luma = luma * rcp(max(lumaShoulder * _LPM_ScaleBiasSoftGap.x + _LPM_ScaleBiasSoftGap.y, epsilon));
 
             if (soft)
             {
-                if (con)
-                {
-                    ratio = LpmApplyMatrix(ratio, conR, conG, conB);
-                    ratio *= rcp(max(max(ratio.r, max(ratio.g, ratio.b)), epsilon));
-                }
+                ratio = LpmApplyMatrix(ratio, _LPM_ConR.xyz, _LPM_ConG.xyz, _LPM_ConB.xyz);
+                ratio *= rcp(max(max(ratio.r, max(ratio.g, ratio.b)), epsilon));
 
                 ratio = float3(
-                    LpmSoftClipChannel(ratio.r, softGap),
-                    LpmSoftClipChannel(ratio.g, softGap),
-                    LpmSoftClipChannel(ratio.b, softGap));
+                    LpmSoftClipChannel(ratio.r, _LPM_ScaleBiasSoftGap.zw),
+                    LpmSoftClipChannel(ratio.g, _LPM_ScaleBiasSoftGap.zw),
+                    LpmSoftClipChannel(ratio.b, _LPM_ScaleBiasSoftGap.zw));
             }
 
-            float lumaRatio = max(dot(ratio, lumaT), epsilon);
+            float lumaRatio = max(dot(ratio, _LPM_TargetLuma.xyz), epsilon);
             float ratioScale = saturate(luma / lumaRatio);
             color = saturate(ratio * ratioScale);
 
-            float3 cap = -crosstalk * color + crosstalk;
-            float lumaAdd = saturate(dot(-color, lumaT) + luma);
-            float capLuma = max(dot(cap, lumaT), epsilon);
+            float3 cap = -_LPM_Crosstalk.xyz * color + _LPM_Crosstalk.xyz;
+            float lumaAdd = saturate(dot(-color, _LPM_TargetLuma.xyz) + luma);
+            float capLuma = max(dot(cap, _LPM_TargetLuma.xyz), epsilon);
             color = saturate((lumaAdd / capLuma) * cap + color);
 
-            lumaAdd = saturate(dot(-color, lumaT) + luma);
-            color = saturate(lumaAdd * rcpLumaT + color);
+            lumaAdd = saturate(dot(-color, _LPM_TargetLuma.xyz) + luma);
+            color = saturate(lumaAdd * _LPM_RcpTargetLuma.xyz + color);
 
             if (con2)
             {
-                color = LpmApplyMatrix(color, con2R, con2G, con2B);
+                color = LpmApplyMatrix(color, _LPM_Con2R.xyz, _LPM_Con2G.xyz, _LPM_Con2B.xyz);
                 if (clip)
                     color = saturate(color);
             }
 
             if (scaleOnly)
-                color *= con2R.x;
+                color *= _LPM_RcpTargetLuma.w;
 
             return color;
         }

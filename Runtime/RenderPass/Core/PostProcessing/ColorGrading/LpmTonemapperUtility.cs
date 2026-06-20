@@ -19,6 +19,18 @@ namespace VividRP.Runtime
         internal readonly Vector4 Params9;
         internal readonly Vector4 Flags;
         internal readonly Vector4 Flags2;
+        internal readonly Vector4 ToneParams;
+        internal readonly Vector4 ToneLuma;
+        internal readonly Vector4 ScaleBiasSoftGap;
+        internal readonly Vector4 TargetLuma;
+        internal readonly Vector4 RcpTargetLuma;
+        internal readonly Vector4 Crosstalk;
+        internal readonly Vector4 ConR;
+        internal readonly Vector4 ConG;
+        internal readonly Vector4 ConB;
+        internal readonly Vector4 Con2R;
+        internal readonly Vector4 Con2G;
+        internal readonly Vector4 Con2B;
 
         internal LpmTonemapperShaderData(
             Vector4 params0,
@@ -46,6 +58,22 @@ namespace VividRP.Runtime
             Params9 = params9;
             Flags = flags;
             Flags2 = flags2;
+
+            var usesSoft = flags.z > 0.5f;
+            ToneParams = params0;
+            ToneLuma = usesSoft
+                ? new Vector4(params6.y, params6.z, params6.w, params6.x)
+                : new Vector4(params1.z, params1.w, params2.x, params6.x);
+            ScaleBiasSoftGap = new Vector4(params1.x, params1.y, params7.x, params7.y);
+            TargetLuma = new Vector4(params1.z, params1.w, params2.x, flags.x);
+            RcpTargetLuma = new Vector4(params3.x, params3.y, params3.z, params3.w);
+            Crosstalk = new Vector4(params2.y, params2.z, params2.w, flags.z);
+            ConR = new Vector4(params7.z, params7.w, params8.x, flags.w);
+            ConG = new Vector4(params8.y, params8.z, params8.w, flags2.x);
+            ConB = new Vector4(params9.x, params9.y, params9.z, flags2.y);
+            Con2R = new Vector4(params3.w, params4.x, params4.y, 0f);
+            Con2G = new Vector4(params4.z, params4.w, params5.x, 0f);
+            Con2B = new Vector4(params5.y, params5.z, params5.w, 0f);
         }
     }
 
@@ -147,6 +175,7 @@ namespace VividRP.Runtime
             saturation = ClampVector(saturation, -1f, 1f) + new Vector3(contrast, contrast, contrast);
             crosstalk = ClampVector(crosstalk, 0f, 1f);
             softGap = Mathf.Max(SoftGapMinimum, softGap);
+            con |= soft;
 
             var midIn = hdrMax * MidGray * Mathf.Pow(2f, -exposure);
             midIn = Mathf.Max(Epsilon, midIn);

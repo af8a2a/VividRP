@@ -1077,18 +1077,18 @@ namespace VividRP.Editor
     {
         static readonly int s_GtToneMapParams0Id = Shader.PropertyToID("_GTToneMap_Params0");
         static readonly int s_GtToneMapParams1Id = Shader.PropertyToID("_GTToneMap_Params1");
-        static readonly int s_LpmParams0Id = Shader.PropertyToID("_LPM_Params0");
-        static readonly int s_LpmParams1Id = Shader.PropertyToID("_LPM_Params1");
-        static readonly int s_LpmParams2Id = Shader.PropertyToID("_LPM_Params2");
-        static readonly int s_LpmParams3Id = Shader.PropertyToID("_LPM_Params3");
-        static readonly int s_LpmParams4Id = Shader.PropertyToID("_LPM_Params4");
-        static readonly int s_LpmParams5Id = Shader.PropertyToID("_LPM_Params5");
-        static readonly int s_LpmParams6Id = Shader.PropertyToID("_LPM_Params6");
-        static readonly int s_LpmParams7Id = Shader.PropertyToID("_LPM_Params7");
-        static readonly int s_LpmParams8Id = Shader.PropertyToID("_LPM_Params8");
-        static readonly int s_LpmParams9Id = Shader.PropertyToID("_LPM_Params9");
-        static readonly int s_LpmFlagsId = Shader.PropertyToID("_LPM_Flags");
-        static readonly int s_LpmFlags2Id = Shader.PropertyToID("_LPM_Flags2");
+        static readonly int s_LpmToneParamsId = Shader.PropertyToID("_LPM_ToneParams");
+        static readonly int s_LpmToneLumaId = Shader.PropertyToID("_LPM_ToneLuma");
+        static readonly int s_LpmScaleBiasSoftGapId = Shader.PropertyToID("_LPM_ScaleBiasSoftGap");
+        static readonly int s_LpmTargetLumaId = Shader.PropertyToID("_LPM_TargetLuma");
+        static readonly int s_LpmRcpTargetLumaId = Shader.PropertyToID("_LPM_RcpTargetLuma");
+        static readonly int s_LpmCrosstalkId = Shader.PropertyToID("_LPM_Crosstalk");
+        static readonly int s_LpmConRId = Shader.PropertyToID("_LPM_ConR");
+        static readonly int s_LpmConGId = Shader.PropertyToID("_LPM_ConG");
+        static readonly int s_LpmConBId = Shader.PropertyToID("_LPM_ConB");
+        static readonly int s_LpmCon2RId = Shader.PropertyToID("_LPM_Con2R");
+        static readonly int s_LpmCon2GId = Shader.PropertyToID("_LPM_Con2G");
+        static readonly int s_LpmCon2BId = Shader.PropertyToID("_LPM_Con2B");
         static readonly int s_VariantsId = Shader.PropertyToID("_Variants");
 
         SerializedDataParameter m_Mode;
@@ -1298,18 +1298,18 @@ namespace VividRP.Editor
                 m_LpmSaturation.value.vector3Value,
                 m_LpmCrosstalk.value.vector3Value);
 
-            m_Material.SetVector(s_LpmParams0Id, lpmData.Params0);
-            m_Material.SetVector(s_LpmParams1Id, lpmData.Params1);
-            m_Material.SetVector(s_LpmParams2Id, lpmData.Params2);
-            m_Material.SetVector(s_LpmParams3Id, lpmData.Params3);
-            m_Material.SetVector(s_LpmParams4Id, lpmData.Params4);
-            m_Material.SetVector(s_LpmParams5Id, lpmData.Params5);
-            m_Material.SetVector(s_LpmParams6Id, lpmData.Params6);
-            m_Material.SetVector(s_LpmParams7Id, lpmData.Params7);
-            m_Material.SetVector(s_LpmParams8Id, lpmData.Params8);
-            m_Material.SetVector(s_LpmParams9Id, lpmData.Params9);
-            m_Material.SetVector(s_LpmFlagsId, lpmData.Flags);
-            m_Material.SetVector(s_LpmFlags2Id, lpmData.Flags2);
+            m_Material.SetVector(s_LpmToneParamsId, lpmData.ToneParams);
+            m_Material.SetVector(s_LpmToneLumaId, lpmData.ToneLuma);
+            m_Material.SetVector(s_LpmScaleBiasSoftGapId, lpmData.ScaleBiasSoftGap);
+            m_Material.SetVector(s_LpmTargetLumaId, lpmData.TargetLuma);
+            m_Material.SetVector(s_LpmRcpTargetLumaId, lpmData.RcpTargetLuma);
+            m_Material.SetVector(s_LpmCrosstalkId, lpmData.Crosstalk);
+            m_Material.SetVector(s_LpmConRId, lpmData.ConR);
+            m_Material.SetVector(s_LpmConGId, lpmData.ConG);
+            m_Material.SetVector(s_LpmConBId, lpmData.ConB);
+            m_Material.SetVector(s_LpmCon2RId, lpmData.Con2R);
+            m_Material.SetVector(s_LpmCon2GId, lpmData.Con2G);
+            m_Material.SetVector(s_LpmCon2BId, lpmData.Con2B);
             m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 7f, 0f));
         }
         void ConfigureACESCurvePreview()

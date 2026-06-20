@@ -172,15 +172,17 @@ namespace VividRP.Editor.Tests
                 configureMethod.Invoke(editor, null);
 
                 var variants = material.GetVector("_Variants");
-                var lpmParams0 = material.GetVector("_LPM_Params0");
-                var lpmParams7 = material.GetVector("_LPM_Params7");
-                var lpmFlags = material.GetVector("_LPM_Flags");
+                var lpmToneParams = material.GetVector("_LPM_ToneParams");
+                var lpmScaleBiasSoftGap = material.GetVector("_LPM_ScaleBiasSoftGap");
+                var lpmTargetLuma = material.GetVector("_LPM_TargetLuma");
+                var lpmCrosstalk = material.GetVector("_LPM_Crosstalk");
+                var lpmConR = material.GetVector("_LPM_ConR");
                 Assert.That(variants.z, Is.EqualTo(7f));
-                Assert.That(lpmParams0.w, Is.EqualTo(1.25f).Within(1e-5f));
-                Assert.That(lpmFlags.x, Is.EqualTo(1f));
-                Assert.That(lpmFlags.y, Is.EqualTo(1f));
-                Assert.That(lpmFlags.z, Is.EqualTo(1f));
-                Assert.That(lpmParams7.x, Is.EqualTo(0.05f).Within(1e-5f));
+                Assert.That(lpmToneParams.w, Is.EqualTo(1.25f).Within(1e-5f));
+                Assert.That(lpmTargetLuma.w, Is.EqualTo(1f));
+                Assert.That(lpmCrosstalk.w, Is.EqualTo(1f));
+                Assert.That(new Vector3(lpmConR.x, lpmConR.y, lpmConR.z).sqrMagnitude, Is.GreaterThan(0f));
+                Assert.That(lpmScaleBiasSoftGap.z, Is.EqualTo(0.05f).Within(1e-5f));
             }
             finally
             {

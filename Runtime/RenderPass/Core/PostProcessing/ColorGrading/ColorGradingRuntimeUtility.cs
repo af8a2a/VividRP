@@ -66,18 +66,18 @@ namespace VividRP.Runtime
         public Vector4 splitHighlights;
         public Vector4 granTurismoParams0;
         public Vector4 granTurismoParams1;
-        public Vector4 lpmParams0;
-        public Vector4 lpmParams1;
-        public Vector4 lpmParams2;
-        public Vector4 lpmParams3;
-        public Vector4 lpmParams4;
-        public Vector4 lpmParams5;
-        public Vector4 lpmParams6;
-        public Vector4 lpmParams7;
-        public Vector4 lpmParams8;
-        public Vector4 lpmParams9;
-        public Vector4 lpmFlags;
-        public Vector4 lpmFlags2;
+        public Vector4 lpmToneParams;
+        public Vector4 lpmToneLuma;
+        public Vector4 lpmScaleBiasSoftGap;
+        public Vector4 lpmTargetLuma;
+        public Vector4 lpmRcpTargetLuma;
+        public Vector4 lpmCrosstalk;
+        public Vector4 lpmConR;
+        public Vector4 lpmConG;
+        public Vector4 lpmConB;
+        public Vector4 lpmCon2R;
+        public Vector4 lpmCon2G;
+        public Vector4 lpmCon2B;
         public Vector4 customToneCurve;
         public Vector4 toeSegmentA;
         public Vector4 toeSegmentB;
@@ -138,18 +138,18 @@ namespace VividRP.Runtime
                 splitHighlights = splitToning.Item2,
                 granTurismoParams0 = Vector4.zero,
                 granTurismoParams1 = Vector4.zero,
-                lpmParams0 = Vector4.zero,
-                lpmParams1 = Vector4.zero,
-                lpmParams2 = Vector4.zero,
-                lpmParams3 = Vector4.zero,
-                lpmParams4 = Vector4.zero,
-                lpmParams5 = Vector4.zero,
-                lpmParams6 = Vector4.zero,
-                lpmParams7 = Vector4.zero,
-                lpmParams8 = Vector4.zero,
-                lpmParams9 = Vector4.zero,
-                lpmFlags = Vector4.zero,
-                lpmFlags2 = Vector4.zero,
+                lpmToneParams = Vector4.zero,
+                lpmToneLuma = Vector4.zero,
+                lpmScaleBiasSoftGap = Vector4.zero,
+                lpmTargetLuma = Vector4.zero,
+                lpmRcpTargetLuma = Vector4.zero,
+                lpmCrosstalk = Vector4.zero,
+                lpmConR = Vector4.zero,
+                lpmConG = Vector4.zero,
+                lpmConB = Vector4.zero,
+                lpmCon2R = Vector4.zero,
+                lpmCon2G = Vector4.zero,
+                lpmCon2B = Vector4.zero,
                 customToneCurve = Vector4.zero,
                 toeSegmentA = Vector4.zero,
                 toeSegmentB = Vector4.zero,
@@ -529,18 +529,18 @@ namespace VividRP.Runtime
                         tonemapping.lpmShoulderContrast.value,
                         tonemapping.lpmSaturation.value,
                         tonemapping.lpmCrosstalk.value);
-                    settings.lpmParams0 = lpmData.Params0;
-                    settings.lpmParams1 = lpmData.Params1;
-                    settings.lpmParams2 = lpmData.Params2;
-                    settings.lpmParams3 = lpmData.Params3;
-                    settings.lpmParams4 = lpmData.Params4;
-                    settings.lpmParams5 = lpmData.Params5;
-                    settings.lpmParams6 = lpmData.Params6;
-                    settings.lpmParams7 = lpmData.Params7;
-                    settings.lpmParams8 = lpmData.Params8;
-                    settings.lpmParams9 = lpmData.Params9;
-                    settings.lpmFlags = lpmData.Flags;
-                    settings.lpmFlags2 = lpmData.Flags2;
+                    settings.lpmToneParams = lpmData.ToneParams;
+                    settings.lpmToneLuma = lpmData.ToneLuma;
+                    settings.lpmScaleBiasSoftGap = lpmData.ScaleBiasSoftGap;
+                    settings.lpmTargetLuma = lpmData.TargetLuma;
+                    settings.lpmRcpTargetLuma = lpmData.RcpTargetLuma;
+                    settings.lpmCrosstalk = lpmData.Crosstalk;
+                    settings.lpmConR = lpmData.ConR;
+                    settings.lpmConG = lpmData.ConG;
+                    settings.lpmConB = lpmData.ConB;
+                    settings.lpmCon2R = lpmData.Con2R;
+                    settings.lpmCon2G = lpmData.Con2G;
+                    settings.lpmCon2B = lpmData.Con2B;
                     break;
                 case TonemappingMode.Custom:
                     settings.tonemappingMode = ColorGradingTonemappingShaderMode.Custom;
@@ -635,18 +635,18 @@ namespace VividRP.Runtime
         private static readonly int ParamsId = Shader.PropertyToID("_Params");
         private static readonly int GtToneMapParams0Id = Shader.PropertyToID("_GTToneMap_Params0");
         private static readonly int GtToneMapParams1Id = Shader.PropertyToID("_GTToneMap_Params1");
-        private static readonly int LpmParams0Id = Shader.PropertyToID("_LPM_Params0");
-        private static readonly int LpmParams1Id = Shader.PropertyToID("_LPM_Params1");
-        private static readonly int LpmParams2Id = Shader.PropertyToID("_LPM_Params2");
-        private static readonly int LpmParams3Id = Shader.PropertyToID("_LPM_Params3");
-        private static readonly int LpmParams4Id = Shader.PropertyToID("_LPM_Params4");
-        private static readonly int LpmParams5Id = Shader.PropertyToID("_LPM_Params5");
-        private static readonly int LpmParams6Id = Shader.PropertyToID("_LPM_Params6");
-        private static readonly int LpmParams7Id = Shader.PropertyToID("_LPM_Params7");
-        private static readonly int LpmParams8Id = Shader.PropertyToID("_LPM_Params8");
-        private static readonly int LpmParams9Id = Shader.PropertyToID("_LPM_Params9");
-        private static readonly int LpmFlagsId = Shader.PropertyToID("_LPM_Flags");
-        private static readonly int LpmFlags2Id = Shader.PropertyToID("_LPM_Flags2");
+        private static readonly int LpmToneParamsId = Shader.PropertyToID("_LPM_ToneParams");
+        private static readonly int LpmToneLumaId = Shader.PropertyToID("_LPM_ToneLuma");
+        private static readonly int LpmScaleBiasSoftGapId = Shader.PropertyToID("_LPM_ScaleBiasSoftGap");
+        private static readonly int LpmTargetLumaId = Shader.PropertyToID("_LPM_TargetLuma");
+        private static readonly int LpmRcpTargetLumaId = Shader.PropertyToID("_LPM_RcpTargetLuma");
+        private static readonly int LpmCrosstalkId = Shader.PropertyToID("_LPM_Crosstalk");
+        private static readonly int LpmConRId = Shader.PropertyToID("_LPM_ConR");
+        private static readonly int LpmConGId = Shader.PropertyToID("_LPM_ConG");
+        private static readonly int LpmConBId = Shader.PropertyToID("_LPM_ConB");
+        private static readonly int LpmCon2RId = Shader.PropertyToID("_LPM_Con2R");
+        private static readonly int LpmCon2GId = Shader.PropertyToID("_LPM_Con2G");
+        private static readonly int LpmCon2BId = Shader.PropertyToID("_LPM_Con2B");
         private static readonly int CustomToneCurveId = Shader.PropertyToID("_CustomToneCurve");
         private static readonly int ToeSegmentAId = Shader.PropertyToID("_ToeSegmentA");
         private static readonly int ToeSegmentBId = Shader.PropertyToID("_ToeSegmentB");
@@ -751,18 +751,18 @@ namespace VividRP.Runtime
             cmd.SetComputeVectorParam(m_Shader, ParamsId, new Vector4(settings.enableColorGrading ? 1f : 0f, 0f, 0f, 0f));
             cmd.SetComputeVectorParam(m_Shader, GtToneMapParams0Id, settings.granTurismoParams0);
             cmd.SetComputeVectorParam(m_Shader, GtToneMapParams1Id, settings.granTurismoParams1);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams0Id, settings.lpmParams0);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams1Id, settings.lpmParams1);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams2Id, settings.lpmParams2);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams3Id, settings.lpmParams3);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams4Id, settings.lpmParams4);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams5Id, settings.lpmParams5);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams6Id, settings.lpmParams6);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams7Id, settings.lpmParams7);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams8Id, settings.lpmParams8);
-            cmd.SetComputeVectorParam(m_Shader, LpmParams9Id, settings.lpmParams9);
-            cmd.SetComputeVectorParam(m_Shader, LpmFlagsId, settings.lpmFlags);
-            cmd.SetComputeVectorParam(m_Shader, LpmFlags2Id, settings.lpmFlags2);
+            cmd.SetComputeVectorParam(m_Shader, LpmToneParamsId, settings.lpmToneParams);
+            cmd.SetComputeVectorParam(m_Shader, LpmToneLumaId, settings.lpmToneLuma);
+            cmd.SetComputeVectorParam(m_Shader, LpmScaleBiasSoftGapId, settings.lpmScaleBiasSoftGap);
+            cmd.SetComputeVectorParam(m_Shader, LpmTargetLumaId, settings.lpmTargetLuma);
+            cmd.SetComputeVectorParam(m_Shader, LpmRcpTargetLumaId, settings.lpmRcpTargetLuma);
+            cmd.SetComputeVectorParam(m_Shader, LpmCrosstalkId, settings.lpmCrosstalk);
+            cmd.SetComputeVectorParam(m_Shader, LpmConRId, settings.lpmConR);
+            cmd.SetComputeVectorParam(m_Shader, LpmConGId, settings.lpmConG);
+            cmd.SetComputeVectorParam(m_Shader, LpmConBId, settings.lpmConB);
+            cmd.SetComputeVectorParam(m_Shader, LpmCon2RId, settings.lpmCon2R);
+            cmd.SetComputeVectorParam(m_Shader, LpmCon2GId, settings.lpmCon2G);
+            cmd.SetComputeVectorParam(m_Shader, LpmCon2BId, settings.lpmCon2B);
             cmd.SetComputeVectorParam(m_Shader, CustomToneCurveId, settings.customToneCurve);
             cmd.SetComputeVectorParam(m_Shader, ToeSegmentAId, settings.toeSegmentA);
             cmd.SetComputeVectorParam(m_Shader, ToeSegmentBId, settings.toeSegmentB);

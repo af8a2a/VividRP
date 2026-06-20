@@ -121,6 +121,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildLpmParams_PrecomputesShaderInputs_WhenOutputGamutDiffers()
+        {
+            var result = LpmTonemapperUtility.CreateForLinearOutput(
+                LpmColorGamut.Rec2020,
+                LpmColorGamut.Rec709,
+                true,
+                0.05f,
+                16f,
+                0f,
+                0.25f,
+                1.5f,
+                Vector3.zero,
+                Vector3.one);
+
+            Assert.That(result.ToneParams.w, Is.EqualTo(1.25f).Within(1e-5f));
+            Assert.That(result.ToneLuma.x, Is.EqualTo(0.2627f).Within(1e-4f));
+            Assert.That(result.ToneLuma.y, Is.EqualTo(0.6780f).Within(1e-4f));
+            Assert.That(result.ToneLuma.z, Is.EqualTo(0.0593f).Within(1e-4f));
+            Assert.That(result.ToneLuma.w, Is.EqualTo(1.5f).Within(1e-5f));
+            Assert.That(result.TargetLuma.x, Is.EqualTo(0.212639f).Within(1e-5f));
+            Assert.That(result.TargetLuma.w, Is.EqualTo(1f));
+            Assert.That(result.Crosstalk.w, Is.EqualTo(1f));
+            Assert.That(result.ScaleBiasSoftGap.z, Is.EqualTo(0.05f).Within(1e-5f));
+            Assert.That(result.ConR.x, Is.Not.EqualTo(0f));
+        }
+
+        [Test]
         public void ResolveColorGradingSpace_DefaultsToSrgb_WhenPipelineAssetIsNull()
         {
             var result = ColorGradingSpaceUtility.ResolveColorGradingSpace(null);

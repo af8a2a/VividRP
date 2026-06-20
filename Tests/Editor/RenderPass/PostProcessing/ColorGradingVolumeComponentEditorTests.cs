@@ -129,6 +129,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_LinearSectionLength", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_BlackMin", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_LpmHdrMax", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_LpmColorGamut", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_LpmSoftGap", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_LpmSaturation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_LpmCrosstalk", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_Material", flags)?.GetValue(editor), Is.Not.Null);
@@ -149,6 +151,8 @@ namespace VividRP.Editor.Tests
             component.mode.value = TonemappingMode.LPM;
             component.lpmShoulder.value = true;
             component.lpmContrast.value = 0.25f;
+            component.lpmColorGamut.value = LpmColorGamut.Rec2020;
+            component.lpmSoftGap.value = 0.05f;
             UnityEditor.Editor editor = null;
 
             try
@@ -169,10 +173,14 @@ namespace VividRP.Editor.Tests
 
                 var variants = material.GetVector("_Variants");
                 var lpmParams0 = material.GetVector("_LPM_Params0");
+                var lpmParams7 = material.GetVector("_LPM_Params7");
                 var lpmFlags = material.GetVector("_LPM_Flags");
                 Assert.That(variants.z, Is.EqualTo(7f));
                 Assert.That(lpmParams0.w, Is.EqualTo(1.25f).Within(1e-5f));
                 Assert.That(lpmFlags.x, Is.EqualTo(1f));
+                Assert.That(lpmFlags.y, Is.EqualTo(1f));
+                Assert.That(lpmFlags.z, Is.EqualTo(1f));
+                Assert.That(lpmParams7.x, Is.EqualTo(0.05f).Within(1e-5f));
             }
             finally
             {

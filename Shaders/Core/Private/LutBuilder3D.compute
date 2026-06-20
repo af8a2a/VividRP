@@ -61,10 +61,15 @@ CBUFFER_START(cb0)
     float4 _LPM_Params0; // xyz: saturation exponents, w: contrast
     float4 _LPM_Params1; // xy: tone scale/bias, zw: luma transform xy
     float4 _LPM_Params2; // x: luma transform z, yzw: crosstalk
-    float4 _LPM_Params3; // xyz: reciprocal luma transform, w: unused
+    float4 _LPM_Params3; // xyz: reciprocal luma transform, w: con2R.x
+    float4 _LPM_Params4; // xy: con2R.yz, zw: con2G.xy
+    float4 _LPM_Params5; // x: con2G.z, yzw: con2B.xyz
     float4 _LPM_Params6; // x: shoulder contrast, yzw: luma weights
-    float4 _LPM_Flags;   // x: shoulder enabled, yzw: unused
-
+    float4 _LPM_Params7; // xy: soft gap, zw: conR.xy
+    float4 _LPM_Params8; // x: conR.z, yzw: conG.xyz
+    float4 _LPM_Params9; // xyz: conB.xyz, w: unused
+    float4 _LPM_Flags;   // x: shoulder, y: con, z: soft, w: con2
+    float4 _LPM_Flags2;  // x: clip, y: scaleOnly, zw: unused
     // Custom tonemapping settings
     float4 _CustomToneCurve;
     float4 _ToeSegmentA;
@@ -185,26 +190,67 @@ float3 KhronosPbrNeutralTonemap(float3 color)
     return lerp(color, newPeak.xxx, g);
 }
 
+float3 LpmApplyMatrix(float3 color, float3 rowR, float3 rowG, float3 rowB)
+{
+    return float3(dot(color, rowR), dot(color, rowG), dot(color, rowB));
+}
+
+float LpmSoftClipChannel(float value, float2 softGap)
+{
+    return min(
+        max(softGap.x, saturate(value * -softGap.x + value)),
+        saturate(softGap.x * exp2(value * softGap.y)));
+}
+
 float3 LpmTonemap(float3 color)
 {
     const float epsilon = 1e-6;
+    float3 lumaW = _LPM_Params6.yzw;
     float3 lumaT = float3(_LPM_Params1.z, _LPM_Params1.w, _LPM_Params2.x);
-    float3 crosstalk = _LPM_Params2.yzw;
     float3 rcpLumaT = _LPM_Params3.xyz;
+    float3 saturation = max(_LPM_Params0.xyz, 0.0);
+    float contrast = _LPM_Params0.w;
+    bool shoulder = _LPM_Flags.x > 0.5;
+    bool con = _LPM_Flags.y > 0.5;
+    bool soft = _LPM_Flags.z > 0.5;
+    bool con2 = _LPM_Flags.w > 0.5;
+    bool clip = _LPM_Flags2.x > 0.5;
+    bool scaleOnly = _LPM_Flags2.y > 0.5;
+
+    float3 con2R = float3(_LPM_Params3.w, _LPM_Params4.x, _LPM_Params4.y);
+    float3 con2G = float3(_LPM_Params4.z, _LPM_Params4.w, _LPM_Params5.x);
+    float3 con2B = _LPM_Params5.yzw;
+    float3 conR = float3(_LPM_Params7.z, _LPM_Params7.w, _LPM_Params8.x);
+    float3 conG = _LPM_Params8.yzw;
+    float3 conB = _LPM_Params9.xyz;
+    float2 softGap = _LPM_Params7.xy;
+    float3 crosstalk = _LPM_Params2.yzw;
 
     float peak = max(color.r, max(color.g, color.b));
     if (peak <= epsilon)
         return float3(0.0, 0.0, 0.0);
 
     float3 ratio = color * rcp(peak);
-    ratio = pow(saturate(ratio), max(_LPM_Params0.xyz, 0.0));
+    ratio = pow(max(ratio, 0.0), saturation);
 
-    float luma = max(dot(color, lumaT), 0.0);
-    luma = pow(max(luma, epsilon), _LPM_Params0.w);
-    float lumaShoulder = _LPM_Flags.x > 0.5
-        ? pow(max(luma, epsilon), _LPM_Params6.x)
-        : luma;
+    float luma = soft ? dot(color, lumaW) : dot(color, lumaT);
+    luma = pow(max(luma, epsilon), contrast);
+    float lumaShoulder = shoulder ? pow(max(luma, epsilon), _LPM_Params6.x) : luma;
     luma = luma * rcp(max(lumaShoulder * _LPM_Params1.x + _LPM_Params1.y, epsilon));
+
+    if (soft)
+    {
+        if (con)
+        {
+            ratio = LpmApplyMatrix(ratio, conR, conG, conB);
+            ratio *= rcp(max(max(ratio.r, max(ratio.g, ratio.b)), epsilon));
+        }
+
+        ratio = float3(
+            LpmSoftClipChannel(ratio.r, softGap),
+            LpmSoftClipChannel(ratio.g, softGap),
+            LpmSoftClipChannel(ratio.b, softGap));
+    }
 
     float lumaRatio = max(dot(ratio, lumaT), epsilon);
     float ratioScale = saturate(luma / lumaRatio);
@@ -217,6 +263,16 @@ float3 LpmTonemap(float3 color)
 
     lumaAdd = saturate(dot(-color, lumaT) + luma);
     color = saturate(lumaAdd * rcpLumaT + color);
+
+    if (con2)
+    {
+        color = LpmApplyMatrix(color, con2R, con2G, con2B);
+        if (clip)
+            color = saturate(color);
+    }
+
+    if (scaleOnly)
+        color *= con2R.x;
 
     return color;
 }
@@ -464,6 +520,9 @@ float3 ProcessColorForHDR(float3 gradedColor)
     gradedColor = ACEScg_to_ACES(gradedColor);
     return HDRMappingACES(gradedColor.rgb, _PaperWhite, _MinNits, _MaxNits, _RangeReductionMode, true);
 #else
+#ifdef TONEMAPPING_LPM
+    gradedColor = LpmTonemap(gradedColor);
+#endif
     return HDRMappingFromRec2020(gradedColor.rgb, _PaperWhite, _MinNits, _MaxNits, _RangeReductionMode, _HueShift, true);
 #endif
 

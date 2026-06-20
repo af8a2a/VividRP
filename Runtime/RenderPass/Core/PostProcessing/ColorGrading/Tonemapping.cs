@@ -101,6 +101,30 @@ namespace VividRP.Runtime
     }
 
     /// <summary>
+    /// Output color gamut used by FidelityFX LPM when gamut mapping is enabled.
+    /// </summary>
+    public enum LpmColorGamut
+    {
+        /// <summary>
+        /// Rec.709 / sRGB display primaries.
+        /// </summary>
+        [InspectorName("Rec.709")]
+        Rec709 = 0,
+
+        /// <summary>
+        /// Display P3 primaries with D65 white point.
+        /// </summary>
+        [InspectorName("Display P3")]
+        DisplayP3 = 1,
+
+        /// <summary>
+        /// Rec.2020 display primaries.
+        /// </summary>
+        [InspectorName("Rec.2020")]
+        Rec2020 = 2
+    }
+
+    /// <summary>
     /// Tonemap mode to be used when outputting to HDR device and when the main mode is not supported on HDR.
     /// </summary>
     public enum FallbackHDRTonemap
@@ -150,6 +174,22 @@ namespace VividRP.Runtime
         /// <param name="value">The initial value to store in the parameter.</param>
         /// <param name="overrideState">The initial override state for the parameter.</param>
         public HDRACESPresetParameter(HDRACESPreset value, bool overrideState = false) : base(value, overrideState)
+        {
+        }
+    }
+
+    /// <summary>
+    /// A <see cref="VolumeParameter"/> that holds a <see cref="LpmColorGamut"/> value.
+    /// </summary>
+    [Serializable]
+    public sealed class LpmColorGamutParameter : VolumeParameter<LpmColorGamut>
+    {
+        /// <summary>
+        /// Creates a new <see cref="LpmColorGamutParameter"/> instance.
+        /// </summary>
+        /// <param name="value">The initial value to store in the parameter.</param>
+        /// <param name="overrideState">The initial override state for the parameter.</param>
+        public LpmColorGamutParameter(LpmColorGamut value, bool overrideState = false) : base(value, overrideState)
         {
         }
     }
@@ -262,6 +302,20 @@ namespace VividRP.Runtime
         /// </summary>
         [Tooltip("Maximum input HDR value used by FidelityFX LPM.")]
         public MinFloatParameter lpmHdrMax = new MinFloatParameter(16.0f, 0.001f);
+
+        /// <summary>
+        /// Output color gamut used by FidelityFX LPM. HDR output uses linear Rec.2020 before the final HDR mapping step.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Output color gamut used by FidelityFX LPM. HDR output uses linear Rec.2020 before the final HDR mapping step.")]
+        public LpmColorGamutParameter lpmColorGamut = new LpmColorGamutParameter(LpmColorGamut.Rec709);
+
+        /// <summary>
+        /// Soft gamut mapping feather amount used when FidelityFX LPM converts between gamuts.
+        /// This parameter is only used when <see cref="TonemappingMode.LPM"/> is set.
+        /// </summary>
+        [Tooltip("Soft gamut mapping feather amount used when FidelityFX LPM converts between gamuts.")]
+        public ClampedFloatParameter lpmSoftGap = new ClampedFloatParameter(1.0f / 1024.0f, 1.0f / 1024.0f, 1.0f);
 
         /// <summary>
         /// Exposure offset in stops used by FidelityFX LPM.
@@ -427,7 +481,6 @@ namespace VividRP.Runtime
         {
             if (mode.value == TonemappingMode.GranTurismo ||
                 mode.value == TonemappingMode.KhronosPBR ||
-                mode.value == TonemappingMode.LPM ||
                 mode.value == TonemappingMode.Custom ||
                 mode.value == TonemappingMode.External)
             {

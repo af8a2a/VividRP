@@ -1081,8 +1081,14 @@ namespace VividRP.Editor
         static readonly int s_LpmParams1Id = Shader.PropertyToID("_LPM_Params1");
         static readonly int s_LpmParams2Id = Shader.PropertyToID("_LPM_Params2");
         static readonly int s_LpmParams3Id = Shader.PropertyToID("_LPM_Params3");
+        static readonly int s_LpmParams4Id = Shader.PropertyToID("_LPM_Params4");
+        static readonly int s_LpmParams5Id = Shader.PropertyToID("_LPM_Params5");
         static readonly int s_LpmParams6Id = Shader.PropertyToID("_LPM_Params6");
+        static readonly int s_LpmParams7Id = Shader.PropertyToID("_LPM_Params7");
+        static readonly int s_LpmParams8Id = Shader.PropertyToID("_LPM_Params8");
+        static readonly int s_LpmParams9Id = Shader.PropertyToID("_LPM_Params9");
         static readonly int s_LpmFlagsId = Shader.PropertyToID("_LPM_Flags");
+        static readonly int s_LpmFlags2Id = Shader.PropertyToID("_LPM_Flags2");
         static readonly int s_VariantsId = Shader.PropertyToID("_Variants");
 
         SerializedDataParameter m_Mode;
@@ -1095,6 +1101,8 @@ namespace VividRP.Editor
         SerializedDataParameter m_BlackMin;
         SerializedDataParameter m_LpmShoulder;
         SerializedDataParameter m_LpmHdrMax;
+        SerializedDataParameter m_LpmColorGamut;
+        SerializedDataParameter m_LpmSoftGap;
         SerializedDataParameter m_LpmExposure;
         SerializedDataParameter m_LpmContrast;
         SerializedDataParameter m_LpmShoulderContrast;
@@ -1142,6 +1150,8 @@ namespace VividRP.Editor
             m_BlackMin = Unpack(o.Find(x => x.blackMin));
             m_LpmShoulder = Unpack(o.Find(x => x.lpmShoulder));
             m_LpmHdrMax = Unpack(o.Find(x => x.lpmHdrMax));
+            m_LpmColorGamut = Unpack(o.Find(x => x.lpmColorGamut));
+            m_LpmSoftGap = Unpack(o.Find(x => x.lpmSoftGap));
             m_LpmExposure = Unpack(o.Find(x => x.lpmExposure));
             m_LpmContrast = Unpack(o.Find(x => x.lpmContrast));
             m_LpmShoulderContrast = Unpack(o.Find(x => x.lpmShoulderContrast));
@@ -1275,8 +1285,12 @@ namespace VividRP.Editor
                 return;
 
             float alpha = GUI.enabled ? 1f : 0.5f;
-            var lpmData = LpmTonemapperUtility.Create709Ldr(
+            var outputGamut = (LpmColorGamut)m_LpmColorGamut.value.intValue;
+            var lpmData = LpmTonemapperUtility.CreateForLinearOutput(
+                LpmColorGamut.Rec709,
+                outputGamut,
                 m_LpmShoulder.value.boolValue,
+                m_LpmSoftGap.value.floatValue,
                 m_LpmHdrMax.value.floatValue,
                 m_LpmExposure.value.floatValue,
                 m_LpmContrast.value.floatValue,
@@ -1288,8 +1302,14 @@ namespace VividRP.Editor
             m_Material.SetVector(s_LpmParams1Id, lpmData.Params1);
             m_Material.SetVector(s_LpmParams2Id, lpmData.Params2);
             m_Material.SetVector(s_LpmParams3Id, lpmData.Params3);
+            m_Material.SetVector(s_LpmParams4Id, lpmData.Params4);
+            m_Material.SetVector(s_LpmParams5Id, lpmData.Params5);
             m_Material.SetVector(s_LpmParams6Id, lpmData.Params6);
+            m_Material.SetVector(s_LpmParams7Id, lpmData.Params7);
+            m_Material.SetVector(s_LpmParams8Id, lpmData.Params8);
+            m_Material.SetVector(s_LpmParams9Id, lpmData.Params9);
             m_Material.SetVector(s_LpmFlagsId, lpmData.Flags);
+            m_Material.SetVector(s_LpmFlags2Id, lpmData.Flags2);
             m_Material.SetVector(s_VariantsId, new Vector4(alpha, 1f, 7f, 0f));
         }
         void ConfigureACESCurvePreview()
@@ -1365,6 +1385,8 @@ namespace VividRP.Editor
 
                 PropertyField(m_LpmShoulder);
                 PropertyField(m_LpmHdrMax);
+                PropertyField(m_LpmColorGamut);
+                PropertyField(m_LpmSoftGap);
                 PropertyField(m_LpmExposure);
                 PropertyField(m_LpmContrast);
                 PropertyField(m_LpmShoulderContrast);
@@ -1415,7 +1437,6 @@ namespace VividRP.Editor
                 int hdrTonemapMode = m_Mode.value.intValue;
                 if (hdrTonemapMode == (int)TonemappingMode.GranTurismo ||
                     hdrTonemapMode == (int)TonemappingMode.KhronosPBR ||
-                    hdrTonemapMode == (int)TonemappingMode.LPM ||
                     hdrTonemapMode == (int)TonemappingMode.Custom ||
                     hdrTonemapMode == (int)TonemappingMode.External)
                 {
@@ -1431,6 +1452,24 @@ namespace VividRP.Editor
                     PropertyField(m_NeutralHDRRangeReductionMode);
                     PropertyField(m_HueShiftAmount);
 
+                    PropertyField(m_HDRDetectPaperWhite);
+                    EditorGUI.indentLevel++;
+                    using (new EditorGUI.DisabledScope(m_HDRDetectPaperWhite.value.boolValue))
+                    {
+                        PropertyField(m_HDRPaperwhite);
+                    }
+                    EditorGUI.indentLevel--;
+                    PropertyField(m_HDRDetectNitLimits);
+                    EditorGUI.indentLevel++;
+                    using (new EditorGUI.DisabledScope(m_HDRDetectNitLimits.value.boolValue))
+                    {
+                        PropertyField(m_HDRMinNits);
+                        PropertyField(m_HDRMaxNits);
+                    }
+                    EditorGUI.indentLevel--;
+                }
+                if (hdrTonemapMode == (int)TonemappingMode.LPM)
+                {
                     PropertyField(m_HDRDetectPaperWhite);
                     EditorGUI.indentLevel++;
                     using (new EditorGUI.DisabledScope(m_HDRDetectPaperWhite.value.boolValue))

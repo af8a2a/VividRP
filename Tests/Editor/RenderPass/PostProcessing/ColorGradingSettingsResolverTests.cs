@@ -75,6 +75,52 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildLpmParams_PacksRec2020Luma_WhenRec2020IsSelected()
+        {
+            var result = LpmTonemapperUtility.CreateForLinearOutput(
+                LpmColorGamut.Rec2020,
+                LpmColorGamut.Rec2020,
+                false,
+                1f / 1024f,
+                16f,
+                0f,
+                0f,
+                1f,
+                Vector3.zero,
+                Vector3.one);
+
+            Assert.That(result.Params1.z, Is.EqualTo(0.2627f).Within(1e-4f));
+            Assert.That(result.Params1.w, Is.EqualTo(0.6780f).Within(1e-4f));
+            Assert.That(result.Params2.x, Is.EqualTo(0.0593f).Within(1e-4f));
+            Assert.That(result.Flags.y, Is.EqualTo(0f));
+            Assert.That(result.Flags.z, Is.EqualTo(0f));
+        }
+
+        [Test]
+        public void BuildLpmParams_EnablesSoftConversion_WhenOutputGamutDiffers()
+        {
+            var result = LpmTonemapperUtility.CreateForLinearOutput(
+                LpmColorGamut.Rec2020,
+                LpmColorGamut.Rec709,
+                false,
+                0.05f,
+                16f,
+                0f,
+                0f,
+                1f,
+                Vector3.zero,
+                Vector3.one);
+
+            Assert.That(result.Flags.y, Is.EqualTo(1f));
+            Assert.That(result.Flags.z, Is.EqualTo(1f));
+            Assert.That(result.Flags.w, Is.EqualTo(0f));
+            Assert.That(result.Params7.x, Is.EqualTo(0.05f).Within(1e-5f));
+            Assert.That(result.Params7.y, Is.GreaterThan(0f));
+            Assert.That(result.Params7.z, Is.Not.EqualTo(0f));
+            Assert.That(result.Params8.y, Is.Not.EqualTo(0f));
+        }
+
+        [Test]
         public void ResolveColorGradingSpace_DefaultsToSrgb_WhenPipelineAssetIsNull()
         {
             var result = ColorGradingSpaceUtility.ResolveColorGradingSpace(null);
@@ -131,13 +177,13 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetHDRTonemappingMode_UsesFallback_WhenLpmIsSelected()
+        public void GetHDRTonemappingMode_ReturnsLpm_WhenLpmIsSelected()
         {
             var tonemapping = new Tonemapping();
             tonemapping.mode.value = TonemappingMode.LPM;
             tonemapping.fallbackMode.value = FallbackHDRTonemap.ACES;
 
-            Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.ACES));
+            Assert.That(tonemapping.GetHDRTonemappingMode(), Is.EqualTo(TonemappingMode.LPM));
         }
 
         [Test]

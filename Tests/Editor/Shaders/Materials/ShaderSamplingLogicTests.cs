@@ -30,11 +30,12 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("#if defined(_VIRTUAL_TEXTURE_BASE_COLOR)"));
             Assert.That(source, Does.Contain("VirtualTexture/VirtualTexture.hlsl"));
+            Assert.That(source, Does.Contain("float4 SampleVirtualTextureBase(float2 uv, float4 positionSS)"));
             Assert.That(source, Does.Contain("float4 SampleVirtualTextureBase(float2 uv)"));
             Assert.That(source, Does.Contain("VTMipRange requestedMips = VTComputeRequestedMipRange(uv);"));
             Assert.That(source, Does.Contain("VTResolvedAddress lowerResolved = VTResolveAddress(uv, requestedMips.lowerMip);"));
-            Assert.That(source, Does.Contain("VTWriteFeedback(uv, requestedMips.lowerMip);"));
-            Assert.That(source, Does.Contain("VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved);"));
+            Assert.That(source, Does.Contain("VTWriteFeedback(uv, requestedMips.lowerMip, positionSS);"));
+            Assert.That(source, Does.Contain("VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved, positionSS);"));
             Assert.That(source, Does.Contain("return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);"));
         }
 

@@ -360,6 +360,44 @@ namespace VividRP.Runtime
             return floats;
         }
 
+        internal void CopyTo(float[] destination)
+        {
+            if (destination == null)
+                return;
+
+            int length = Mathf.Min(IntCount, destination.Length);
+            for (int index = 0; index < length; index++)
+                destination[index] = GetValue(index);
+        }
+
+        private int GetValue(int index)
+        {
+            return index switch
+            {
+                0 => SpaceId,
+                1 => PageSize,
+                2 => BorderSize,
+                3 => PhysicalPageSize,
+                4 => VirtualPageCountX,
+                5 => VirtualPageCountY,
+                6 => MipCount,
+                7 => CachePageCount,
+                8 => FeedbackCapacity,
+                9 => PageTableEntryCount,
+                10 => PhysicalPageWidth,
+                11 => PhysicalPageHeight,
+                12 => LayerCount,
+                13 => BaseColorLayerIndex,
+                14 => NormalLayerIndex,
+                15 => MaskLayerIndex,
+                16 => Layer0SRGB,
+                17 => Layer1SRGB,
+                18 => Layer2SRGB,
+                19 => Layer3SRGB,
+                _ => 0,
+            };
+        }
+
         private static int GetLayerSRGBFlag(in VTStackDesc stackDesc, int layerIndex)
         {
             return layerIndex >= 0 && layerIndex < stackDesc.LayerCount && stackDesc.GetLayer(layerIndex).SRGB
@@ -590,6 +628,7 @@ namespace VividRP.Runtime
         public static readonly int _VTFeedbackRequests = Shader.PropertyToID(nameof(_VTFeedbackRequests));
         public static readonly int _VTFeedbackCounter = Shader.PropertyToID(nameof(_VTFeedbackCounter));
         public static readonly int _VTFeedbackEnabled = Shader.PropertyToID(nameof(_VTFeedbackEnabled));
+        public static readonly int _VTFeedbackViewParams = Shader.PropertyToID(nameof(_VTFeedbackViewParams));
         public static readonly int _VTSpaceParams = Shader.PropertyToID(nameof(_VTSpaceParams));
         public static readonly int _VTMipOffsets = Shader.PropertyToID(nameof(_VTMipOffsets));
         public static readonly int _VTLayerFallbacks = Shader.PropertyToID(nameof(_VTLayerFallbacks));

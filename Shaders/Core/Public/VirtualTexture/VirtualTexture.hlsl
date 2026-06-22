@@ -24,6 +24,7 @@ int _VTDebugMode;
 int _VTFeedbackEnabled;
 int _VTFeedbackFrameIndex;
 int _VTFeedbackSampleRate;
+float4 _VTFeedbackViewParams;
 
 #define VT_SPACE_ID               ((int)_VTSpaceParams[0])
 #define VT_PAGE_SIZE              ((int)_VTSpaceParams[1])
@@ -362,6 +363,32 @@ bool VTShouldWriteFeedback(float2 virtualUv, uint requestedMip)
     return (VTFeedbackHash(virtualTexel, requestedMip) % sampleRate) == 0u;
 }
 
+bool VTShouldWriteFeedback(float4 svPosition, float2 virtualUv, uint requestedMip)
+{
+    if (_VTFeedbackViewParams.w == 0.0)
+        return VTShouldWriteFeedback(virtualUv, requestedMip);
+
+    uint tileMask = (uint)max(_VTFeedbackViewParams.x, 0.0);
+    uint tileShift = (uint)max(_VTFeedbackViewParams.y, 0.0);
+    if (tileMask == 0u)
+        return true;
+
+    uint2 pixelTilePos = (uint2)svPosition.xy & tileMask;
+    uint pixelTileIndex = (pixelTilePos.y << tileShift) + pixelTilePos.x;
+    return pixelTileIndex == (uint)max(_VTFeedbackViewParams.z, 0.0);
+}
+
+void VTWriteFeedbackRequest(float2 virtualUv, uint clampedMip)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    uint2 pageCoord = VTGetPageCoord(virtualUv, clampedMip);
+    uint requestIndex = 0u;
+    InterlockedAdd(_VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX], 1u, requestIndex);
+    if (requestIndex < (uint)VT_FEEDBACK_CAPACITY)
+        _VTFeedbackRequests[requestIndex] = VTEncodeFeedbackKey(pageCoord, clampedMip);
+#endif
+}
+
 void VTWriteFeedback(float2 virtualUv, uint requestedMip)
 {
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
@@ -372,11 +399,21 @@ void VTWriteFeedback(float2 virtualUv, uint requestedMip)
     if (!VTShouldWriteFeedback(virtualUv, clampedMip))
         return;
 
-    uint2 pageCoord = VTGetPageCoord(virtualUv, clampedMip);
-    uint requestIndex = 0u;
-    InterlockedAdd(_VTFeedbackCounter[VT_FEEDBACK_REQUEST_COUNTER_INDEX], 1u, requestIndex);
-    if (requestIndex < (uint)VT_FEEDBACK_CAPACITY)
-        _VTFeedbackRequests[requestIndex] = VTEncodeFeedbackKey(pageCoord, clampedMip);
+    VTWriteFeedbackRequest(virtualUv, clampedMip);
+#endif
+}
+
+void VTWriteFeedback(float2 virtualUv, uint requestedMip, float4 svPosition)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (_VTFeedbackEnabled == 0)
+        return;
+
+    uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    if (!VTShouldWriteFeedback(svPosition, virtualUv, clampedMip))
+        return;
+
+    VTWriteFeedbackRequest(virtualUv, clampedMip);
 #endif
 }
 
@@ -394,6 +431,17 @@ void VTWriteFallbackSample(VTResolvedAddress resolved)
 #endif
 }
 
+void VTWriteFallbackSampleWeighted(uint sampleRate)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    uint previousFallbackSampleCount = 0u;
+    InterlockedAdd(
+        _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
+        sampleRate,
+        previousFallbackSampleCount);
+#endif
+}
+
 void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddress resolved)
 {
 #if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
@@ -405,11 +453,22 @@ void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddres
     if (!VTShouldWriteFeedback(virtualUv, clampedMip))
         return;
 
-    uint previousFallbackSampleCount = 0u;
-    InterlockedAdd(
-        _VTFeedbackCounter[VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX],
-        sampleRate,
-        previousFallbackSampleCount);
+    VTWriteFallbackSampleWeighted(sampleRate);
+#endif
+}
+
+void VTWriteFallbackSample(float2 virtualUv, uint requestedMip, VTResolvedAddress resolved, float4 svPosition)
+{
+#if defined(VIVID_VT_ENABLE_FEEDBACK_RW)
+    if (_VTFeedbackEnabled == 0 || !resolved.fallback)
+        return;
+
+    uint clampedMip = min(requestedMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    uint sampleRate = (uint)max(_VTFeedbackSampleRate, 1);
+    if (!VTShouldWriteFeedback(svPosition, virtualUv, clampedMip))
+        return;
+
+    VTWriteFallbackSampleWeighted(sampleRate);
 #endif
 }
 

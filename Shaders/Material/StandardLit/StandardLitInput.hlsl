@@ -72,30 +72,35 @@ float3 UnpackVividNormalScale(float4 packedNormal, float scale)
 }
 
 #if defined(_VIRTUAL_TEXTURE_BASE_COLOR)
-float4 SampleVirtualTextureBase(float2 uv)
+float4 SampleVirtualTextureBase(float2 uv, float4 positionSS)
 {
     VTMipRange requestedMips = VTComputeRequestedMipRange(uv);
     VTResolvedAddress lowerResolved = VTResolveAddress(uv, requestedMips.lowerMip);
     VTResolvedAddress upperResolved = VTResolveAddress(uv, requestedMips.upperMip);
 
     if (!lowerResolved.resident)
-        VTWriteFeedback(uv, requestedMips.lowerMip);
+        VTWriteFeedback(uv, requestedMips.lowerMip, positionSS);
 
     if (requestedMips.upperMip != requestedMips.lowerMip && !upperResolved.resident)
-        VTWriteFeedback(uv, requestedMips.upperMip);
+        VTWriteFeedback(uv, requestedMips.upperMip, positionSS);
 
-    VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved);
+    VTWriteFallbackSample(uv, requestedMips.lowerMip, lowerResolved, positionSS);
     if (!VTResolvedAddressMatches(lowerResolved, upperResolved))
-        VTWriteFallbackSample(uv, requestedMips.upperMip, upperResolved);
+        VTWriteFallbackSample(uv, requestedMips.upperMip, upperResolved, positionSS);
 
     return VTSampleBaseColor(uv, lowerResolved, upperResolved, requestedMips.blend);
 }
+
+float4 SampleVirtualTextureBase(float2 uv)
+{
+    return SampleVirtualTextureBase(uv, float4(0.0, 0.0, 0.0, 0.0));
+}
 #endif
 
-float4 SampleBase(float2 uv)
+float4 SampleBase(float2 uv, float4 positionSS)
 {
 #if defined(_VIRTUAL_TEXTURE_BASE_COLOR)
-    float4 baseSample = SampleVirtualTextureBase(uv) * _BaseColor;
+    float4 baseSample = SampleVirtualTextureBase(uv, positionSS) * _BaseColor;
 #else
     float4 baseSample = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, uv) * _BaseColor;
 #endif
@@ -103,6 +108,11 @@ float4 SampleBase(float2 uv)
     baseSample.a *= SAMPLE_TEXTURE2D(_OpacityMap, sampler_OpacityMap, uv).r;
 #endif
     return baseSample;
+}
+
+float4 SampleBase(float2 uv)
+{
+    return SampleBase(uv, float4(0.0, 0.0, 0.0, 0.0));
 }
 
 void ApplyAlphaClip(float alpha)
@@ -114,7 +124,7 @@ void ApplyAlphaClip(float alpha)
 
 void VividApplyAlphaClip(FragInputs input)
 {
-    ApplyAlphaClip(SampleBase(GetStandardLitBaseUV(input)).a);
+    ApplyAlphaClip(SampleBase(GetStandardLitBaseUV(input), input.positionSS).a);
 }
 
 float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
@@ -227,7 +237,7 @@ uint GetStandardLitMaterialFeatures(float clearCoatMask)
 VividGBufferSurfaceData BuildStandardLitSurfaceData(FragInputs input)
 {
     float2 uv = GetStandardLitBaseUV(input);
-    float4 baseSample = SampleBase(uv);
+    float4 baseSample = SampleBase(uv, input.positionSS);
     ApplyAlphaClip(baseSample.a);
 
     float2 metallicSmoothness = SampleMetallicSmoothness(uv, baseSample.a);

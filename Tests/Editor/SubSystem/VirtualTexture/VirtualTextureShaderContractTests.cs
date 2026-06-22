@@ -30,6 +30,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("int _VTFeedbackEnabled;"));
             Assert.That(source, Does.Contain("int _VTFeedbackFrameIndex;"));
             Assert.That(source, Does.Contain("int _VTFeedbackSampleRate;"));
+            Assert.That(source, Does.Contain("float4 _VTFeedbackViewParams;"));
             Assert.That(source, Does.Contain("struct VTMipRange"));
             Assert.That(source, Does.Contain("float VTComputeRequestedMipLevel"));
             Assert.That(source, Does.Contain("uint VTComputeRequestedMip"));
@@ -58,6 +59,7 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureShaderIDs._VTFeedbackRequests, Is.EqualTo(Shader.PropertyToID("_VTFeedbackRequests")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackCounter, Is.EqualTo(Shader.PropertyToID("_VTFeedbackCounter")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackEnabled, Is.EqualTo(Shader.PropertyToID("_VTFeedbackEnabled")));
+            Assert.That(VirtualTextureShaderIDs._VTFeedbackViewParams, Is.EqualTo(Shader.PropertyToID("_VTFeedbackViewParams")));
             Assert.That(VirtualTextureShaderIDs._VTSpaceParams, Is.EqualTo(Shader.PropertyToID("_VTSpaceParams")));
             Assert.That(VirtualTextureShaderIDs._VTMipOffsets, Is.EqualTo(Shader.PropertyToID("_VTMipOffsets")));
             Assert.That(VirtualTextureShaderIDs._VTLayerFallbacks, Is.EqualTo(Shader.PropertyToID("_VTLayerFallbacks")));
@@ -85,7 +87,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VTComputeRequestedMipRange"));
             Assert.That(source, Does.Contain("VTSampleBaseColor"));
             Assert.That(source, Does.Contain("VTWriteFeedback"));
-            Assert.That(source, Does.Contain("VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved)"));
+            Assert.That(source, Does.Contain("VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved, input.positionCS)"));
         }
 
         private static string GetPackageFilePath(params string[] parts)

@@ -135,14 +135,14 @@ Shader "VividRP/Material/VirtualTextureDemo"
                     VTResolvedAddress upperResolved = VTResolveAddress(input.uv, requestedMips.upperMip);
                     bool resolvedMipsDiffer = !VTResolvedAddressMatches(lowerResolved, upperResolved);
 
-                    VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved);
+                    VTWriteFallbackSample(input.uv, requestedMips.lowerMip, lowerResolved, input.positionCS);
                     if (resolvedMipsDiffer)
-                        VTWriteFallbackSample(input.uv, requestedMips.upperMip, upperResolved);
+                        VTWriteFallbackSample(input.uv, requestedMips.upperMip, upperResolved, input.positionCS);
 
                     if (!lowerResolved.resident)
-                        VTWriteFeedback(input.uv, requestedMips.lowerMip);
+                        VTWriteFeedback(input.uv, requestedMips.lowerMip, input.positionCS);
                     if (requestedMips.upperMip != requestedMips.lowerMip && !upperResolved.resident)
-                        VTWriteFeedback(input.uv, requestedMips.upperMip);
+                        VTWriteFeedback(input.uv, requestedMips.upperMip, input.positionCS);
 
                     float4 sampledColor = VTSampleBaseColor(
                         input.uv,

@@ -156,6 +156,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class VirtualTextureDemoPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class VirtualTextureFeedbackPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class VirtualTextureVisualizationPass : RenderPassNodeData { }
 
     [Serializable]

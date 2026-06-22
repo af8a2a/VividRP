@@ -247,15 +247,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            BindVirtualTextureGlobals(nativeCmd, binding);
+            VirtualTextureFeedbackBindingUtility.BindSpaceGlobals(
+                nativeCmd,
+                binding,
+                m_VTSpaceParams,
+                m_VTMipOffsets,
+                m_VTLayerFallbacks,
+                m_FrameIndex,
+                m_VirtualTextureFeedbackSampleRate,
+                VirtualTextureDebugMode.None);
 
-            bool hasFeedback = binding.HasFeedback;
-            if (hasFeedback)
-            {
-                nativeCmd.SetRandomWriteTarget(1, binding.FeedbackRequests, preserveCounterValue: false);
-                nativeCmd.SetRandomWriteTarget(2, binding.FeedbackCounter, preserveCounterValue: true);
-            }
-
+            bool hasFeedback = VirtualTextureFeedbackBindingUtility.BindFeedbackTargets(nativeCmd, binding);
             nativeCmd.DrawRendererList(m_VirtualTextureRenderList);
 
             if (hasFeedback)
@@ -509,41 +511,5 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetRenderTarget(m_GBufferColorTargets, m_GBufferDepth);
         }
 
-        private void BindVirtualTextureGlobals(CommandBuffer cmd, in VirtualTextureSpaceBinding binding)
-        {
-            Array.Clear(m_VTSpaceParams, 0, m_VTSpaceParams.Length);
-            Array.Clear(m_VTMipOffsets, 0, m_VTMipOffsets.Length);
-            Array.Clear(m_VTLayerFallbacks, 0, m_VTLayerFallbacks.Length);
-
-            float[] shaderParams = binding.ShaderParams.ToFloatArray();
-            for (int paramIndex = 0; paramIndex < shaderParams.Length && paramIndex < m_VTSpaceParams.Length; paramIndex++)
-                m_VTSpaceParams[paramIndex] = shaderParams[paramIndex];
-
-            int[] mipOffsets = binding.MipOffsets;
-            if (mipOffsets != null)
-            {
-                for (int mipIndex = 0; mipIndex < mipOffsets.Length && mipIndex < m_VTMipOffsets.Length; mipIndex++)
-                    m_VTMipOffsets[mipIndex] = mipOffsets[mipIndex];
-            }
-
-            Vector4[] layerFallbacks = binding.LayerFallbacks;
-            if (layerFallbacks != null)
-            {
-                for (int layerIndex = 0; layerIndex < layerFallbacks.Length && layerIndex < m_VTLayerFallbacks.Length; layerIndex++)
-                    m_VTLayerFallbacks[layerIndex] = layerFallbacks[layerIndex];
-            }
-
-            cmd.SetGlobalBuffer(VirtualTextureShaderIDs._VTPageTable, binding.PageTableBuffer);
-            cmd.SetGlobalTexture(VirtualTextureShaderIDs._VTPhysicalCache, binding.PhysicalCache);
-            cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTSpaceParams, m_VTSpaceParams);
-            cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTMipOffsets, m_VTMipOffsets);
-            cmd.SetGlobalVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, m_VTLayerFallbacks);
-            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackEnabled, binding.HasFeedback ? 1 : 0);
-            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTFeedbackFrameIndex, m_FrameIndex);
-            cmd.SetGlobalInt(
-                VirtualTextureShaderIDs._VTFeedbackSampleRate,
-                Mathf.Max(1, m_VirtualTextureFeedbackSampleRate));
-            cmd.SetGlobalInt(VirtualTextureShaderIDs._VTDebugMode, (int)VirtualTextureDebugMode.None);
-        }
     }
 }

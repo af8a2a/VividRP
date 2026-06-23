@@ -73,6 +73,15 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Constructor_IncludesObjectMotionVectorRenderers_InPreDepthRenderList()
+        {
+            var pass = new PreDepthPass();
+            var renderList = GetRenderList(pass);
+
+            Assert.That(renderList.desc.ExcludeObjectMotionVectors, Is.False);
+        }
+
+        [Test]
         public void ResourceLayout_UsesReadWriteDepthAttachment()
         {
             var pass = new PreDepthPass();
@@ -99,6 +108,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             field.SetValue(pass, texture);
+        }
+
+        private static RenderGraphRenderList GetRenderList(PreDepthPass pass)
+        {
+            var field = typeof(PreDepthPass).GetField("m_RenderList", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphRenderList)field.GetValue(pass);
         }
     }
 }

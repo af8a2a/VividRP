@@ -79,6 +79,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateOpaque_IncludesObjectMotionVectorRenderers_ByDefault()
+        {
+            var descriptor = RenderGraphRenderListDesc.CreateOpaque();
+
+            Assert.That(descriptor.ExcludeObjectMotionVectors, Is.False);
+        }
+
+        [Test]
         public void Constructor_DoesNotCreateShaderTagIds_WhenRenderListIsCreated()
         {
             var renderList = new RenderGraphRenderList();

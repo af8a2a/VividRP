@@ -106,6 +106,15 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Constructor_IncludesObjectMotionVectorRenderers_InDefaultRenderList()
+        {
+            var pass = new DrawObjectPass();
+            var renderList = GetRenderListField(pass);
+
+            Assert.That(renderList.desc.ExcludeObjectMotionVectors, Is.False);
+        }
+
+        [Test]
         public void Initialize_RegistersSequentialColorAttachments_WhenAdditionalTargetsAreAdded()
         {
             IRenderPass renderPass = new DrawObjectPass();
@@ -172,6 +181,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             field.SetValue(pass, value);
+        }
+
+        private static RenderGraphRenderList GetRenderListField(DrawObjectPass pass)
+        {
+            var field = typeof(DrawObjectPass).GetField("m_RenderList", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (RenderGraphRenderList)field.GetValue(pass);
         }
     }
 }

@@ -87,7 +87,7 @@ namespace VividRP.Runtime
             DLSSExtension.Initialize();
 #endif
 
-            m_RenderGraph = new RenderGraph(RenderGraphName);
+            m_RenderGraph = new RenderGraph(RenderGraphName); 
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
             m_DebugDisplaySettingsUI.RegisterDebug(VividRenderingDebugDisplaySettings.Instance);
         }

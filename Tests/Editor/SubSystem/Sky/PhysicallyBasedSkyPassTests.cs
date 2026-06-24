@@ -30,6 +30,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BuildRendererContext_AllowsMissingExposureData_WhenPhysicalSkyRunsBeforeAutoExposure()
+        {
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            var method = typeof(SkyManager).GetMethod("BuildRendererContext", BindingFlags.Static | BindingFlags.NonPublic);
+
+            Assert.That(method, Is.Not.Null);
+
+            var context = (SkyRendererContext)method.Invoke(null, new object[] { frameData, cameraData, SkyType.PhysicallyBased });
+
+            Assert.That(context.cameraData, Is.SameAs(cameraData));
+            Assert.That(context.lightData, Is.Not.Null);
+            Assert.That(context.exposureData, Is.Null);
+            Assert.That(frameData.Contains<VividExposureData>(), Is.False);
+        }
+
+        [Test]
         public void Source_UsesSkyInjectionPassForRendererDrivenSkyDrawing()
         {
             var injectionPassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Sky", "SkyInjectionPass.cs"));
@@ -73,7 +90,7 @@ namespace VividRP.Editor.Tests
             Assert.That(skyManagerSource, Does.Not.Contain("private static readonly PhysicallyBasedSkyAtmosphereLutCache"));
             Assert.That(skyManagerSource, Does.Contain("renderer.UpdateFrameResources(context, s_CachedSkyData, cmd);"));
             Assert.That(skyManagerSource, Does.Contain("BuildRendererContext(frameData, cameraData, activeSkyType)"));
-            Assert.That(skyManagerSource, Does.Contain("frameData.Get<VividExposureData>()"));
+            Assert.That(skyManagerSource, Does.Contain("var exposureData = frameData.Contains<VividExposureData>()"));
             Assert.That(skyManagerSource, Does.Not.Contain("s_PhysicallyBasedSkyAtmosphereLutCache.Update(context, cmd);"));
             Assert.That(skyRendererContextSource, Does.Contain("VividExposureData exposureData = null"));
             Assert.That(skyRendererContextSource, Does.Contain("internal VividExposureData exposureData { get; }"));

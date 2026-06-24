@@ -319,12 +319,17 @@ namespace VividRP.Runtime
             VividCameraData cameraData,
             SkyType skyType)
         {
-            return skyType == SkyType.PhysicallyBased
-                ? new SkyRendererContext(
-                    cameraData,
-                    frameData.GetOrCreate<VividLightData>(),
-                    frameData.Get<VividExposureData>())
-                : new SkyRendererContext(cameraData, null);
+            if (skyType != SkyType.PhysicallyBased)
+                return new SkyRendererContext(cameraData, null);
+
+            var exposureData = frameData.Contains<VividExposureData>()
+                ? frameData.Get<VividExposureData>()
+                : null;
+
+            return new SkyRendererContext(
+                cameraData,
+                frameData.GetOrCreate<VividLightData>(),
+                exposureData);
         }
 
         private sealed class SkyTypeComparer : IEqualityComparer<SkyType>

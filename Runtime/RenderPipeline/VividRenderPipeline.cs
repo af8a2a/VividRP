@@ -13,6 +13,19 @@ namespace VividRP.Runtime
     public class VividRenderPipeline : RenderPipeline, IRenderGraphEnabledRenderPipeline
     {
         private const string RenderGraphName = "VividRP RenderGraph";
+        private const string CoreBlitShaderName = "Hidden/VividRP/CoreBlit";
+        private const string CoreBlitColorAndDepthShaderName = "Hidden/VividRP/CoreBlitColorAndDepth";
+        private const string CoreBlitResourcePath = "Shaders/Core/Private/CoreBlit";
+        private const string CoreBlitColorAndDepthResourcePath = "Shaders/Core/Private/CoreBlitColorAndDepth";
+#if UNITY_EDITOR
+        private static readonly string[] s_EditorPackageRootFallbacks =
+        {
+            "Packages/com.vivid.render-pipelines",
+            "Packages/com.af8a2a.vividrp",
+            "Packages/VividRP",
+            "Packages/Custom_URP",
+        };
+#endif
         private static readonly ProfilerMarker s_RenderMarker = new("VividRP.RenderPipeline.Render");
         private static readonly ProfilerMarker s_ApplySRPBatcherMarker = new("VividRP.RenderPipeline.ApplySRPBatcherSetting");
         private static readonly ProfilerMarker s_EndFrameMarker = new("VividRP.RenderPipeline.RenderGraph.EndFrame");
@@ -64,6 +77,8 @@ namespace VividRP.Runtime
         private bool m_EnableHdrOnce = true;
         private DebugDisplaySettingsUI m_DebugDisplaySettingsUI;
         private RenderGraph m_RenderGraph;
+        private bool m_RuntimeResourcesInitialized;
+        private bool m_RequiredResourcesWarningLogged;
 
         public VividRenderPipeline(VividRenderPipelineAsset asset)
         {
@@ -71,25 +86,11 @@ namespace VividRP.Runtime
             m_PreviousUseScriptableRenderPipelineBatching = GraphicsSettings.useScriptableRenderPipelineBatching;
             ApplySRPBatcherSetting(asset);
 
-            VividVolumeManagerUtility.Initialize();
-            // PipelineResourceManager.Initialize();
-            // SkyManager.Initialize();
-            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            Blitter.Initialize(resources.CoreBlitShader, resources.CoreBlitColorAndDepthShader);
-            BlueNoise.Initialize();
-            Hammersley.Initialize();
-            RTHandles.Initialize(Screen.width, Screen.height);
-            LensFlareCommonSRP.Initialize();
-            VividAdaptiveProbeVolumeUtility.Initialize(asset);
-            VividReflectionProbeAtlasSystem.Initialize();
-            VividGPUDrivenSystem.Initialize();
-#if DLSS_PLUGIN_INTEGRATE
-            DLSSExtension.Initialize();
-#endif
-
             m_RenderGraph = new RenderGraph(RenderGraphName); 
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
             m_DebugDisplaySettingsUI.RegisterDebug(VividRenderingDebugDisplaySettings.Instance);
+
+            TryInitializeRuntimeResources();
         }
 
         protected override void Render(ScriptableRenderContext context, List<Camera> cameras)
@@ -99,6 +100,9 @@ namespace VividRP.Runtime
             {
                 ApplySRPBatcherSetting(m_Asset);
             }
+
+            if (!TryInitializeRuntimeResources())
+                return;
 
             foreach (var camera in cameras)
                 RenderCamera(context, camera);
@@ -295,6 +299,138 @@ namespace VividRP.Runtime
                     EndCameraRendering(context, camera);
                 }
             }
+        }
+
+        private bool TryInitializeRuntimeResources()
+        {
+            if (m_RuntimeResourcesInitialized)
+                return true;
+
+            var resources = PipelineResourceManager.Get<VividRPCoreResources>();
+            TryResolveRequiredBlitShaders(
+                resources,
+                out var coreBlitShader,
+                out var coreBlitColorAndDepthShader);
+
+#if UNITY_EDITOR
+            if (coreBlitShader == null || coreBlitColorAndDepthShader == null)
+            {
+                PipelineResourceManager.InvalidateCache();
+                resources = PipelineResourceManager.Get<VividRPCoreResources>();
+                TryResolveRequiredBlitShaders(
+                    resources,
+                    out coreBlitShader,
+                    out coreBlitColorAndDepthShader);
+            }
+#endif
+
+            if (coreBlitShader == null || coreBlitColorAndDepthShader == null)
+            {
+                LogRequiredResourcesNotReady();
+                RequestEditorResourceRetry();
+                return false;
+            }
+
+            VividVolumeManagerUtility.Initialize();
+            Blitter.Initialize(coreBlitShader, coreBlitColorAndDepthShader);
+            BlueNoise.Initialize();
+            Hammersley.Initialize();
+            RTHandles.Initialize(Screen.width, Screen.height);
+            LensFlareCommonSRP.Initialize();
+            VividAdaptiveProbeVolumeUtility.Initialize(m_Asset);
+            VividReflectionProbeAtlasSystem.Initialize();
+            VividGPUDrivenSystem.Initialize();
+#if DLSS_PLUGIN_INTEGRATE
+            DLSSExtension.Initialize();
+#endif
+
+            m_RuntimeResourcesInitialized = true;
+            m_RequiredResourcesWarningLogged = false;
+            return true;
+        }
+
+        internal static bool TryResolveRequiredBlitShaders(
+            VividRPCoreResources resources,
+            out Shader coreBlitShader,
+            out Shader coreBlitColorAndDepthShader)
+        {
+            coreBlitShader = ResolveRequiredShader(
+                resources?.CoreBlitShader,
+                CoreBlitShaderName,
+                CoreBlitResourcePath);
+            coreBlitColorAndDepthShader = ResolveRequiredShader(
+                resources?.CoreBlitColorAndDepthShader,
+                CoreBlitColorAndDepthShaderName,
+                CoreBlitColorAndDepthResourcePath);
+
+            return coreBlitShader != null && coreBlitColorAndDepthShader != null;
+        }
+
+        private static Shader ResolveRequiredShader(Shader resourceShader, string shaderName, string resourcePath)
+        {
+            if (resourceShader != null)
+                return resourceShader;
+
+            var shader = Shader.Find(shaderName);
+            if (shader != null)
+                return shader;
+
+#if UNITY_EDITOR
+            return LoadEditorShaderResource(resourcePath);
+#else
+            return null;
+#endif
+        }
+
+#if UNITY_EDITOR
+        private static Shader LoadEditorShaderResource(string resourcePath)
+        {
+            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(typeof(VividRenderPipeline).Assembly);
+            var shader = LoadEditorShaderResource(packageInfo?.assetPath, resourcePath);
+            if (shader != null)
+                return shader;
+
+            for (var i = 0; i < s_EditorPackageRootFallbacks.Length; i++)
+            {
+                shader = LoadEditorShaderResource(s_EditorPackageRootFallbacks[i], resourcePath);
+                if (shader != null)
+                    return shader;
+            }
+
+            return null;
+        }
+
+        private static Shader LoadEditorShaderResource(string packageRoot, string resourcePath)
+        {
+            if (string.IsNullOrEmpty(packageRoot) || string.IsNullOrEmpty(resourcePath))
+                return null;
+
+            var normalizedPackageRoot = packageRoot.Replace('\\', '/').TrimEnd('/');
+            var normalizedResourcePath = resourcePath.TrimStart('/', '\\').Replace('\\', '/');
+            return UnityEditor.AssetDatabase.LoadAssetAtPath<Shader>(
+                $"{normalizedPackageRoot}/{normalizedResourcePath}.shader");
+        }
+#endif
+
+        private void LogRequiredResourcesNotReady()
+        {
+#if UNITY_EDITOR
+            if (UnityEditor.EditorApplication.isUpdating || UnityEditor.EditorApplication.isCompiling)
+                return;
+#endif
+            if (m_RequiredResourcesWarningLogged)
+                return;
+
+            Debug.LogWarning(
+                "[VividRP] Required blit shaders are not ready. VividRP will skip rendering and retry after Unity finishes importing pipeline resources.");
+            m_RequiredResourcesWarningLogged = true;
+        }
+
+        private static void RequestEditorResourceRetry()
+        {
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+#endif
         }
 
         private void DispatchBeginCameraRendering(ScriptableRenderContext context, Camera camera)

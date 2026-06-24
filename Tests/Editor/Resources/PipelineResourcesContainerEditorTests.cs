@@ -70,5 +70,39 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(container);
             }
         }
+
+        [Test]
+        public void UpdateContainerResources_InvalidatesPipelineResourceManagerCache()
+        {
+            PipelineResourceManager.Cleanup();
+            var cachedResources = PipelineResourceManager.Get<VividRPCoreResources>();
+            var container = ScriptableObject.CreateInstance<PipelineResourcesContainer>();
+
+            try
+            {
+                PipelineResourceUpdater.UpdateContainerResources(container);
+
+                var refreshedResources = PipelineResourceManager.Get<VividRPCoreResources>();
+
+                Assert.That(refreshedResources, Is.Not.SameAs(cachedResources));
+            }
+            finally
+            {
+                Object.DestroyImmediate(container);
+                PipelineResourceManager.Cleanup();
+            }
+        }
+
+        [Test]
+        public void PackagePathUtility_IncludesCurrentAndLegacyPackageRoots()
+        {
+            var packageRoots = VividPackagePathUtility.GetCandidatePackageRoots();
+
+            Assert.That(packageRoots, Does.Contain("Packages/com.vivid.render-pipelines"));
+            Assert.That(packageRoots, Does.Contain("Packages/com.af8a2a.vividrp"));
+            Assert.That(packageRoots, Does.Contain("Packages/VividRP"));
+            Assert.That(packageRoots, Does.Contain("Packages/Custom_URP"));
+            Assert.That(packageRoots.Distinct().Count(), Is.EqualTo(packageRoots.Length));
+        }
     }
 }

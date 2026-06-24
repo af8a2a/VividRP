@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using UnityEditor;
 using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace VividRP.Runtime
 {
@@ -83,6 +85,11 @@ namespace VividRP.Runtime
         }
 
         public static void Cleanup()
+        {
+            InvalidateCache();
+        }
+
+        internal static void InvalidateCache()
         {
             s_Cache.Clear();
             s_ResourceLookup.Clear();

@@ -170,6 +170,21 @@ namespace VividRP.Tests
 
             Assert.That(enabled, Is.False);
         }
+
+        [Test]
+        public void TryResolveRequiredBlitShaders_FallsBack_WhenResourceFieldsAreMissing()
+        {
+            var resources = new VividRPCoreResources();
+
+            var resolved = VividRenderPipeline.TryResolveRequiredBlitShaders(
+                resources,
+                out var coreBlitShader,
+                out var coreBlitColorAndDepthShader);
+
+            Assert.That(resolved, Is.True);
+            Assert.That(coreBlitShader, Is.Not.Null);
+            Assert.That(coreBlitColorAndDepthShader, Is.Not.Null);
+        }
     }
 
     public class VividRenderPipelineRenderGraphRecoveryTests

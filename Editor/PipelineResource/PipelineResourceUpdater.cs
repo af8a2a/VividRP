@@ -65,6 +65,8 @@ namespace VividRP.Editor
             if (!string.IsNullOrEmpty(assetPath))
                 AssetDatabase.SaveAssetIfDirty(container);
 
+            PipelineResourceManager.InvalidateCache();
+
             if (logSummary)
             {
                 if (string.IsNullOrEmpty(assetPath))

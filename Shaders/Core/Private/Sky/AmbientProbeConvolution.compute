@@ -17,7 +17,7 @@
 // Ambient probe convolution for clouds.
 // Does not output diffuse and volumetric buffer and does not use input texture mips.
 #pragma kernel AmbientProbeConvolutionClouds KERNEL_NAME=AmbientProbeConvolutionClouds NO_MIPS OUTPUT_CLOUDS
-
+ 
 // Input Cubemap
 TEXTURECUBE(_AmbientProbeInputCubemap);
 // Output buffer

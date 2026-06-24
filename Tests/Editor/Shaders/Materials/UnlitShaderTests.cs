@@ -98,6 +98,25 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void SetupMaterial_PreservesInstancingChoice_WhenInstancingIsDisabled()
+        {
+            Material material = CreateMaterial();
+
+            try
+            {
+                material.enableInstancing = false;
+
+                UnlitMaterialUtility.SetupMaterial(material, null, false);
+
+                Assert.That(material.enableInstancing, Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
         private static Material CreateMaterial()
         {
             Shader shader = UnlitMaterialUtility.GetUnlitShader();

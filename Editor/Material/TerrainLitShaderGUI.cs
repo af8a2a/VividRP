@@ -200,7 +200,6 @@ namespace VividRP.Editor
             material.SetOverrideTag("RenderType", alphaClip ? "TransparentCutout" : "Opaque");
             material.renderQueue = alphaClip ? (int)RenderQueue.AlphaTest : (int)RenderQueue.Geometry;
             material.globalIlluminationFlags |= MaterialGlobalIlluminationFlags.EmissiveIsBlack;
-            material.enableInstancing = true;
         }
 
         internal static bool IsHeightBlendEnabled(Material material)

@@ -368,7 +368,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SetupMaterial_EnablesInstancing_ForRayTracingInstanceBatches()
+        public void SetupMaterial_PreservesInstancingChoice_WhenInstancingIsDisabled()
         {
             UnityEngine.Material material = CreateMaterial();
 
@@ -378,7 +378,7 @@ namespace VividRP.Editor.Tests
 
                 StandardLitMaterialUtility.SetupMaterial(material, null, false);
 
-                Assert.That(material.enableInstancing, Is.True);
+                Assert.That(material.enableInstancing, Is.False);
             }
             finally
             {

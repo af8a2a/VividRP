@@ -109,7 +109,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.IsKeywordEnabled("_ALPHATEST_ON"), Is.False);
                 Assert.That(material.renderQueue, Is.EqualTo((int)RenderQueue.Geometry));
                 Assert.That(material.GetTag("RenderType", false), Is.EqualTo("Opaque"));
-                Assert.That(material.enableInstancing, Is.True);
+                Assert.That(material.enableInstancing, Is.False);
             }
             finally
             {

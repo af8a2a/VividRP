@@ -316,7 +316,7 @@ legacy README 中提到的大量高级特性目前并不是当前包的已交付
 - `Runtime/SubSystem/Decal` — DBuffer Decal 系统（DecalProjector / DecalData / DecalSystem）
 - `Runtime/SubSystem/AreaLight` — LTC 面光源系统（多 BRDF 支持）
 - `Runtime/SubSystem/Volumetric` — 体积雾系统（全局/局部雾、VBuffer、体素化）
-- `Runtime/SubSystem/VirtualTexture` — Virtual Texture 系统（地址空间/页表/驻留管理）
+- `Runtime/SubSystem/VirtualTexture` — Virtual Texture 系统；通用运行时核心位于 `Runtime/SubSystem/VirtualTexture/Core`，资产/示例集成保留在上层目录
 - `Runtime/SubSystem/Sky` — 天空系统（HDRI / PhysicallyBased / SkyManager）
 - `Runtime/SubSystem/Reflection` — 反射探针图集系统（Atlas / Probe Cache / Settings）
 - `Runtime/SubSystem/Plugin` — 原生插件绑定（Bindless / METIS / MeshOptimizer / NVAPI / NeuralRadianceCache）

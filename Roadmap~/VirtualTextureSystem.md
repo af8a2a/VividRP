@@ -4,7 +4,7 @@
 Implement a runnable VT MVP for exactly one 2D address space, one stack, and one physical cache, with a dedicated demo rendering path rather than touching `StandardLit`. The runtime will guarantee a resident locked lowest mip, automatic page uploads with fence-backed double buffering, deterministic cache pressure behavior, and a debug surface inside the existing VividRP debug panel so fallback and eviction are directly visible in-scene.
 
 ### Key Changes
-- **VT core in `Runtime/SubSystem/VirtualTexture/`**
+- **VT core in `Runtime/SubSystem/VirtualTexture/Core/`**
     - Keep the existing page-table and residency foundation, but add an internal upload scheduler that owns:
         - a queued upload list,
         - two staging upload batches,

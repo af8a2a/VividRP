@@ -808,11 +808,11 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Update_ReusesFeedbackScratchCollectionsAndCommitCallbacks_ToAvoidPreRenderGc()
         {
-            string systemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
-            string feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureFeedback.cs"));
-            string debugStatsSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTDebugStats.cs"));
-            string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTAddressSpace.cs"));
-            string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VTUploadScheduler.cs"));
+            string systemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
+            string feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureFeedback.cs"));
+            string debugStatsSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTDebugStats.cs"));
+            string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
+            string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
 
             Assert.That(systemSource, Does.Contain("private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();"));
             Assert.That(systemSource, Does.Contain("private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();"));

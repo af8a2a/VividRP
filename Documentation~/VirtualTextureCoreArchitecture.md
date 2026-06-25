@@ -17,7 +17,7 @@ VirtualTexture Core 是 VividRP 中负责虚拟纹理运行时调度的通用设
 
 ### `VirtualTextureSystem`
 
-路径：`Runtime/SubSystem/VirtualTexture/VirtualTextureSystem.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VirtualTextureSystem.cs`
 
 `VirtualTextureSystem` 是全局 VT runtime 的协调者。它持有以下核心表：
 
@@ -32,7 +32,7 @@ VirtualTexture Core 是 VividRP 中负责虚拟纹理运行时调度的通用设
 
 ### Producer Registry
 
-路径：`VTProducerRegistry.cs`、`VTProducer.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTProducerRegistry.cs`、`Runtime/SubSystem/VirtualTexture/Core/VTProducer.cs`
 
 `VTProducerHandle` 是 VT Core 对 producer 的稳定引用。注册 producer 后，`VTProducerRegistry` 会：
 
@@ -45,7 +45,7 @@ VirtualTexture Core 是 VividRP 中负责虚拟纹理运行时调度的通用设
 
 ### Allocation
 
-路径：`VTAllocation.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTAllocation.cs`
 
 `VTAllocationDesc` 描述一个可被材质采样的 VT 对象：
 
@@ -70,9 +70,9 @@ RegisterProducer -> AllocateVirtualTexture -> frame binding lookup
 
 ### Page-Table Space
 
-路径：`VTAddressSpace.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTAddressSpace.cs`
 
-文件名仍为 `VTAddressSpace.cs`，核心类型已经收窄为 `VTPageTableSpace`。它现在代表一个 page-table space，而不是某个具体 asset。
+文件名仍为 `VTAddressSpace.cs`，核心类型已经收窄为 `VTPageTableSpace`。它现在位于 `Core/`，代表一个 page-table space，而不是某个具体 asset。
 
 主要职责：
 
@@ -88,7 +88,7 @@ RegisterProducer -> AllocateVirtualTexture -> frame binding lookup
 
 ### Stack 与 Layer
 
-路径：`VTStackDesc.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTStackDesc.cs`
 
 `VTStackDesc` 描述一个 VT stack 的 page 和 layer 结构：
 
@@ -117,7 +117,7 @@ RegisterProducer -> AllocateVirtualTexture -> frame binding lookup
 
 ### Physical Pool
 
-路径：`VTPhysicalPool.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTPhysicalPool.cs`
 
 `VTPhysicalPool` 是 physical page 的共享缓存。多个 page-table space 可以共享同一个 physical pool，只要它们的 `VTPhysicalPoolDesc` 完全匹配。
 
@@ -161,7 +161,7 @@ slice         = physicalPageId * groupLayerCount + localLayer
 
 ### Residency
 
-路径：`VTResidencyManager.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTResidencyManager.cs`
 
 `VTResidencyManager` 是单个 page-table space 的 residency 状态机。
 
@@ -186,7 +186,7 @@ slice         = physicalPageId * groupLayerCount + localLayer
 
 ### Page Table
 
-路径：`VTPageTableUpdater.cs`、`VirtualTextureTypes.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTPageTableUpdater.cs`、`Runtime/SubSystem/VirtualTexture/Core/VirtualTextureTypes.cs`
 
 `VTPageTableUpdater` 将 residency 状态构建为 GPU 可读的 structured buffer：
 
@@ -207,7 +207,7 @@ rebuild 时从最低 mip 向最高精度 mip 传播最佳可用 parent mapping�
 
 ### Feedback
 
-路径：`VirtualTextureFeedback.cs`、`VirtualTextureFeedbackBindingUtility.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VirtualTextureFeedback.cs`、`Runtime/SubSystem/VirtualTexture/Core/VirtualTextureFeedbackBindingUtility.cs`
 
 shader 通过 `_VTFeedbackRequests` 和 `_VTFeedbackCounter` 写入反馈。CPU 侧按 camera/space 管理双缓冲 readback 状态，并形成 `VirtualTextureFeedbackBatch`。
 
@@ -222,7 +222,7 @@ shader 通过 `_VTFeedbackRequests` 和 `_VTFeedbackCounter` 写入反馈。CPU 
 
 ### Upload Scheduler
 
-路径：`VTUploadScheduler.cs`
+路径：`Runtime/SubSystem/VirtualTexture/Core/VTUploadScheduler.cs`
 
 `VTUploadScheduler` 负责把 pending page request 转换为 GPU texture copy：
 
@@ -242,7 +242,7 @@ producer finalizer -> staging Texture2DArray -> physical group Texture2DArray
 
 ### Frame Binding Table
 
-路径：`VividVirtualTextureFrameData.cs`、`VirtualTextureTypes.cs`
+路径：`Runtime/RenderGraph/FrameContext/VividVirtualTextureFrameData.cs`、`Runtime/SubSystem/VirtualTexture/Core/VirtualTextureTypes.cs`
 
 `VividVirtualTextureFrameData` 是 RenderGraph frame context 中的 VT binding table。每帧由 `VirtualTextureSystem` 重建。
 

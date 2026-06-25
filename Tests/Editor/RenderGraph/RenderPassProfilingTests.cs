@@ -93,7 +93,7 @@ namespace VividRP.Editor.Tests
             var gpuDrivenCullingDispatcherSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenCullingDispatcher.cs"));
             var gpuDrivenCullingContextSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "GPUDriven", "VividGPUDrivenCullingContextUtility.cs"));
             var skySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
-            var virtualTextureSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "VirtualTextureSystem.cs"));
+            var virtualTextureSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
 
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.InitializeContext/LightData.Update"));

@@ -289,7 +289,7 @@ If you are looking for a feature based on the old README, check the current sour
 - `Runtime/SubSystem/Decal` — DBuffer decal system (DecalProjector / DecalData / DecalSystem)
 - `Runtime/SubSystem/AreaLight` — LTC area light system (multi-BRDF support)
 - `Runtime/SubSystem/Volumetric` — Volumetric fog system (global/local fog, VBuffer, voxelization)
-- `Runtime/SubSystem/VirtualTexture` — Virtual Texture system (address space / page table / residency management)
+- `Runtime/SubSystem/VirtualTexture` — Virtual Texture system; shared runtime core lives in `Runtime/SubSystem/VirtualTexture/Core`, with asset/demo integrations kept in the parent folder
 - `Runtime/SubSystem/Sky` — Sky system (HDRI / PhysicallyBased / SkyManager)
 - `Runtime/SubSystem/Plugin` — Native plugin bindings (Bindless / METIS / MeshOptimizer / NVAPI / NeuralRadianceCache)
 - `Runtime/ComponentData` — Custom component data (VividAdditionalCameraData / VividAdditionalLightData)

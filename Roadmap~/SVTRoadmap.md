@@ -34,17 +34,17 @@
 
 当前实现的核心文件：
 
-- `Runtime/SubSystem/VirtualTexture/VirtualTextureSystem.cs`
+- `Runtime/SubSystem/VirtualTexture/Core/VirtualTextureSystem.cs`
     - 管理全局 address space 注册、feedback readback 聚合、按 space 分发请求、统计输出。
-- `Runtime/SubSystem/VirtualTexture/VTAddressSpace.cs`
+- `Runtime/SubSystem/VirtualTexture/Core/VTAddressSpace.cs`
     - 持有 descriptor、residency manager、page table updater、runtime producer、upload scheduler。
-- `Runtime/SubSystem/VirtualTexture/VTResidencyManager.cs`
+- `Runtime/SubSystem/VirtualTexture/Core/VTResidencyManager.cs`
     - 管理 page resident/pending/locked 状态，维护 physical page LRU 和 eviction。
-- `Runtime/SubSystem/VirtualTexture/VTPageTableUpdater.cs`
+- `Runtime/SubSystem/VirtualTexture/Core/VTPageTableUpdater.cs`
     - 重建完整 page table，未 resident 的 page 会 fallback 到可用 ancestor mip。
-- `Runtime/SubSystem/VirtualTexture/VTUploadScheduler.cs`
+- `Runtime/SubSystem/VirtualTexture/Core/VTUploadScheduler.cs`
     - 使用双 staging `Texture2DArray` 和 graphics fence 提交 copy upload。
-- `Runtime/SubSystem/VirtualTexture/VTProducer.cs`
+- `Runtime/SubSystem/VirtualTexture/Core/VTProducer.cs`
     - 当前包含 procedural、checker、Texture2D source producer。
 - `Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl`
     - page table decode、mip 请求、feedback 写入、physical cache sampling。

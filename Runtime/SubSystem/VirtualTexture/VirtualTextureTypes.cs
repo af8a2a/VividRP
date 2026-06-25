@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 using UnityEngine;
@@ -250,7 +251,7 @@ namespace VividRP.Runtime
 
     public readonly struct VirtualTextureSpaceShaderParams
     {
-        internal const int IntCount = 20;
+        internal const int IntCount = 32;
 
         public VirtualTextureSpaceShaderParams(
             int spaceId,
@@ -281,6 +282,18 @@ namespace VividRP.Runtime
             Layer1SRGB = GetLayerSRGBFlag(desc.StackDesc, 1);
             Layer2SRGB = GetLayerSRGBFlag(desc.StackDesc, 2);
             Layer3SRGB = GetLayerSRGBFlag(desc.StackDesc, 3);
+            PhysicalGroup0LayerCount = GetPhysicalGroupLayerCount(desc.StackDesc, 0);
+            PhysicalGroup1LayerCount = GetPhysicalGroupLayerCount(desc.StackDesc, 1);
+            PhysicalGroup2LayerCount = GetPhysicalGroupLayerCount(desc.StackDesc, 2);
+            PhysicalGroup3LayerCount = GetPhysicalGroupLayerCount(desc.StackDesc, 3);
+            Layer0PhysicalGroup = GetLayerPhysicalGroup(desc.StackDesc, 0);
+            Layer1PhysicalGroup = GetLayerPhysicalGroup(desc.StackDesc, 1);
+            Layer2PhysicalGroup = GetLayerPhysicalGroup(desc.StackDesc, 2);
+            Layer3PhysicalGroup = GetLayerPhysicalGroup(desc.StackDesc, 3);
+            Layer0PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 0);
+            Layer1PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 1);
+            Layer2PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 2);
+            Layer3PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 3);
         }
 
         public int SpaceId { get; }
@@ -323,6 +336,30 @@ namespace VividRP.Runtime
 
         public int Layer3SRGB { get; }
 
+        public int PhysicalGroup0LayerCount { get; }
+
+        public int PhysicalGroup1LayerCount { get; }
+
+        public int PhysicalGroup2LayerCount { get; }
+
+        public int PhysicalGroup3LayerCount { get; }
+
+        public int Layer0PhysicalGroup { get; }
+
+        public int Layer1PhysicalGroup { get; }
+
+        public int Layer2PhysicalGroup { get; }
+
+        public int Layer3PhysicalGroup { get; }
+
+        public int Layer0PhysicalLayerIndex { get; }
+
+        public int Layer1PhysicalLayerIndex { get; }
+
+        public int Layer2PhysicalLayerIndex { get; }
+
+        public int Layer3PhysicalLayerIndex { get; }
+
         public int[] ToIntArray()
         {
             return new[]
@@ -347,6 +384,18 @@ namespace VividRP.Runtime
                 Layer1SRGB,
                 Layer2SRGB,
                 Layer3SRGB,
+                PhysicalGroup0LayerCount,
+                PhysicalGroup1LayerCount,
+                PhysicalGroup2LayerCount,
+                PhysicalGroup3LayerCount,
+                Layer0PhysicalGroup,
+                Layer1PhysicalGroup,
+                Layer2PhysicalGroup,
+                Layer3PhysicalGroup,
+                Layer0PhysicalLayerIndex,
+                Layer1PhysicalLayerIndex,
+                Layer2PhysicalLayerIndex,
+                Layer3PhysicalLayerIndex,
             };
         }
 
@@ -394,6 +443,18 @@ namespace VividRP.Runtime
                 17 => Layer1SRGB,
                 18 => Layer2SRGB,
                 19 => Layer3SRGB,
+                20 => PhysicalGroup0LayerCount,
+                21 => PhysicalGroup1LayerCount,
+                22 => PhysicalGroup2LayerCount,
+                23 => PhysicalGroup3LayerCount,
+                24 => Layer0PhysicalGroup,
+                25 => Layer1PhysicalGroup,
+                26 => Layer2PhysicalGroup,
+                27 => Layer3PhysicalGroup,
+                28 => Layer0PhysicalLayerIndex,
+                29 => Layer1PhysicalLayerIndex,
+                30 => Layer2PhysicalLayerIndex,
+                31 => Layer3PhysicalLayerIndex,
                 _ => 0,
             };
         }
@@ -403,6 +464,44 @@ namespace VividRP.Runtime
             return layerIndex >= 0 && layerIndex < stackDesc.LayerCount && stackDesc.GetLayer(layerIndex).SRGB
                 ? 1
                 : 0;
+        }
+
+        private static int GetPhysicalGroupLayerCount(in VTStackDesc stackDesc, int physicalGroup)
+        {
+            if (physicalGroup < 0)
+                return 0;
+
+            int count = 0;
+            for (int layerIndex = 0; layerIndex < stackDesc.LayerCount; layerIndex++)
+            {
+                if (stackDesc.GetLayer(layerIndex).PhysicalGroup == physicalGroup)
+                    count += 1;
+            }
+
+            return count;
+        }
+
+        private static int GetLayerPhysicalGroup(in VTStackDesc stackDesc, int layerIndex)
+        {
+            return layerIndex >= 0 && layerIndex < stackDesc.LayerCount
+                ? stackDesc.GetLayer(layerIndex).PhysicalGroup
+                : 0;
+        }
+
+        private static int GetLayerPhysicalLayerIndex(in VTStackDesc stackDesc, int layerIndex)
+        {
+            if (layerIndex < 0 || layerIndex >= stackDesc.LayerCount)
+                return 0;
+
+            int physicalGroup = stackDesc.GetLayer(layerIndex).PhysicalGroup;
+            int physicalLayerIndex = 0;
+            for (int candidateIndex = 0; candidateIndex < layerIndex; candidateIndex++)
+            {
+                if (stackDesc.GetLayer(candidateIndex).PhysicalGroup == physicalGroup)
+                    physicalLayerIndex += 1;
+            }
+
+            return physicalLayerIndex;
         }
     }
 
@@ -415,7 +514,7 @@ namespace VividRP.Runtime
             string spaceName,
             VTProducerHandle producerHandle,
             GraphicsBuffer pageTableBuffer,
-            Texture2DArray physicalCache,
+            IReadOnlyList<Texture2DArray> physicalCaches,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
             VirtualTextureSpaceShaderParams shaderParams,
@@ -428,7 +527,8 @@ namespace VividRP.Runtime
             SpaceName = spaceName;
             ProducerHandle = producerHandle;
             PageTableBuffer = pageTableBuffer;
-            PhysicalCache = physicalCache;
+            PhysicalCaches = physicalCaches ?? Array.Empty<Texture2DArray>();
+            PhysicalCache = PhysicalCaches.Count > 0 ? PhysicalCaches[0] : null;
             FeedbackRequests = feedbackRequests;
             FeedbackCounter = feedbackCounter;
             ShaderParams = shaderParams;
@@ -449,6 +549,8 @@ namespace VividRP.Runtime
         public GraphicsBuffer PageTableBuffer { get; }
 
         public Texture2DArray PhysicalCache { get; }
+
+        public IReadOnlyList<Texture2DArray> PhysicalCaches { get; }
 
         public ComputeBuffer FeedbackRequests { get; }
 
@@ -473,7 +575,7 @@ namespace VividRP.Runtime
                 SpaceName,
                 ProducerHandle,
                 PageTableBuffer,
-                PhysicalCache,
+                PhysicalCaches,
                 FeedbackRequests,
                 FeedbackCounter,
                 ShaderParams,
@@ -654,6 +756,9 @@ namespace VividRP.Runtime
     {
         public static readonly int _VTPageTable = Shader.PropertyToID(nameof(_VTPageTable));
         public static readonly int _VTPhysicalCache = Shader.PropertyToID(nameof(_VTPhysicalCache));
+        public static readonly int _VTPhysicalCache1 = Shader.PropertyToID(nameof(_VTPhysicalCache1));
+        public static readonly int _VTPhysicalCache2 = Shader.PropertyToID(nameof(_VTPhysicalCache2));
+        public static readonly int _VTPhysicalCache3 = Shader.PropertyToID(nameof(_VTPhysicalCache3));
         public static readonly int _VTFeedbackRequests = Shader.PropertyToID(nameof(_VTFeedbackRequests));
         public static readonly int _VTFeedbackCounter = Shader.PropertyToID(nameof(_VTFeedbackCounter));
         public static readonly int _VTFeedbackEnabled = Shader.PropertyToID(nameof(_VTFeedbackEnabled));
@@ -664,6 +769,14 @@ namespace VividRP.Runtime
         public static readonly int _VTDebugMode = Shader.PropertyToID(nameof(_VTDebugMode));
         public static readonly int _VTFeedbackFrameIndex = Shader.PropertyToID(nameof(_VTFeedbackFrameIndex));
         public static readonly int _VTFeedbackSampleRate = Shader.PropertyToID(nameof(_VTFeedbackSampleRate));
+
+        public static readonly int[] PhysicalCaches =
+        {
+            _VTPhysicalCache,
+            _VTPhysicalCache1,
+            _VTPhysicalCache2,
+            _VTPhysicalCache3,
+        };
     }
 
     internal static class VirtualTextureSpaceUtility

@@ -6,24 +6,126 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    internal readonly struct VTPhysicalPoolLayerDesc : IEquatable<VTPhysicalPoolLayerDesc>
+    {
+        internal VTPhysicalPoolLayerDesc(
+            VTLayerSemantic semantic,
+            int physicalGroup,
+            GraphicsFormat graphicsFormat,
+            bool sRGB)
+        {
+            Semantic = semantic;
+            PhysicalGroup = Mathf.Max(0, physicalGroup);
+            GraphicsFormat = graphicsFormat;
+            StorageFormat = VTPhysicalPoolDesc.ResolveStorageFormat(graphicsFormat);
+            SRGB = sRGB;
+        }
+
+        internal VTLayerSemantic Semantic { get; }
+
+        internal int PhysicalGroup { get; }
+
+        internal GraphicsFormat GraphicsFormat { get; }
+
+        internal GraphicsFormat StorageFormat { get; }
+
+        internal bool SRGB { get; }
+
+        internal static VTPhysicalPoolLayerDesc FromLayer(in VTLayerDesc layer)
+        {
+            return new VTPhysicalPoolLayerDesc(
+                layer.Semantic,
+                layer.PhysicalGroup,
+                layer.GraphicsFormat,
+                layer.SRGB);
+        }
+
+        public bool Equals(VTPhysicalPoolLayerDesc other)
+        {
+            return Semantic == other.Semantic
+                   && PhysicalGroup == other.PhysicalGroup
+                   && GraphicsFormat == other.GraphicsFormat
+                   && StorageFormat == other.StorageFormat
+                   && SRGB == other.SRGB;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VTPhysicalPoolLayerDesc other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(Semantic, PhysicalGroup, GraphicsFormat, StorageFormat, SRGB);
+        }
+    }
+
     internal readonly struct VTPhysicalPoolDesc : IEquatable<VTPhysicalPoolDesc>
     {
         internal VTPhysicalPoolDesc(
             int pageSize,
             int borderSize,
             int pageCount,
-            int layerCount,
-            GraphicsFormat graphicsFormat,
-            string layerGroup)
+            IReadOnlyList<VTLayerDesc> layers)
         {
+            if (layers == null || layers.Count == 0)
+                throw new ArgumentException("Physical pool must contain at least one layer.", nameof(layers));
+
             PageSize = pageSize;
             BorderSize = borderSize;
             PhysicalPageSize = pageSize + borderSize * 2;
             PageCount = pageCount;
-            LayerCount = Mathf.Max(1, layerCount);
-            GraphicsFormat = ResolveStorageFormat(graphicsFormat);
-            LayerGroup = string.IsNullOrWhiteSpace(layerGroup) ? "Default" : layerGroup;
+            LayerCount = Mathf.Max(1, layers.Count);
+            m_Layers = new VTPhysicalPoolLayerDesc[LayerCount];
+            m_GroupLayerCounts = new int[VTStackDesc.MaxLayerCount];
+            m_GroupStorageFormats = new GraphicsFormat[VTStackDesc.MaxLayerCount];
+            m_LayerPhysicalLayerIndices = new int[LayerCount];
+            int maxPhysicalGroup = 0;
+            for (int layerIndex = 0; layerIndex < LayerCount; layerIndex++)
+            {
+                m_Layers[layerIndex] = VTPhysicalPoolLayerDesc.FromLayer(layers[layerIndex]);
+                if (m_Layers[layerIndex].PhysicalGroup >= VTStackDesc.MaxLayerCount)
+                    throw new ArgumentOutOfRangeException(
+                        nameof(layers),
+                        $"Physical group index must be smaller than {VTStackDesc.MaxLayerCount}.");
+
+                maxPhysicalGroup = Mathf.Max(maxPhysicalGroup, m_Layers[layerIndex].PhysicalGroup);
+                GraphicsFormat groupFormat = m_GroupStorageFormats[m_Layers[layerIndex].PhysicalGroup];
+                if (groupFormat == GraphicsFormat.None)
+                {
+                    m_GroupStorageFormats[m_Layers[layerIndex].PhysicalGroup] = m_Layers[layerIndex].StorageFormat;
+                }
+                else if (groupFormat != m_Layers[layerIndex].StorageFormat)
+                {
+                    throw new ArgumentException(
+                        $"Physical group {m_Layers[layerIndex].PhysicalGroup} mixes layer storage formats. " +
+                        "Use a separate physical group for layers with different formats.",
+                        nameof(layers));
+                }
+
+                m_LayerPhysicalLayerIndices[layerIndex] = m_GroupLayerCounts[m_Layers[layerIndex].PhysicalGroup];
+                m_GroupLayerCounts[m_Layers[layerIndex].PhysicalGroup] += 1;
+            }
+
+            GraphicsFormat = m_Layers[0].StorageFormat;
+            PhysicalGroupCount = maxPhysicalGroup + 1;
+            for (int groupIndex = 0; groupIndex < PhysicalGroupCount; groupIndex++)
+            {
+                if (m_GroupLayerCounts[groupIndex] <= 0)
+                {
+                    throw new ArgumentException(
+                        "Physical group indices must be compact and start at zero.",
+                        nameof(layers));
+                }
+            }
+
+            LayerGroup = BuildLayerGroupKey(m_Layers);
         }
+
+        private readonly VTPhysicalPoolLayerDesc[] m_Layers;
+        private readonly int[] m_GroupLayerCounts;
+        private readonly GraphicsFormat[] m_GroupStorageFormats;
+        private readonly int[] m_LayerPhysicalLayerIndices;
 
         internal int PageSize { get; }
 
@@ -37,7 +139,47 @@ namespace VividRP.Runtime
 
         internal GraphicsFormat GraphicsFormat { get; }
 
+        internal int PhysicalGroupCount { get; }
+
         internal string LayerGroup { get; }
+
+        internal IReadOnlyList<VTPhysicalPoolLayerDesc> Layers => m_Layers ?? Array.Empty<VTPhysicalPoolLayerDesc>();
+
+        internal int GetGroupLayerCount(int physicalGroup)
+        {
+            return m_GroupLayerCounts != null && physicalGroup >= 0 && physicalGroup < m_GroupLayerCounts.Length
+                ? m_GroupLayerCounts[physicalGroup]
+                : 0;
+        }
+
+        internal GraphicsFormat GetGroupStorageFormat(int physicalGroup)
+        {
+            return m_GroupStorageFormats != null
+                   && physicalGroup >= 0
+                   && physicalGroup < m_GroupStorageFormats.Length
+                ? m_GroupStorageFormats[physicalGroup]
+                : GraphicsFormat.None;
+        }
+
+        internal int GetLayerPhysicalGroup(int layerIndex)
+        {
+            if (m_Layers == null || layerIndex < 0 || layerIndex >= m_Layers.Length)
+                return 0;
+
+            return m_Layers[layerIndex].PhysicalGroup;
+        }
+
+        internal int GetLayerPhysicalLayerIndex(int layerIndex)
+        {
+            if (m_LayerPhysicalLayerIndices == null
+                || layerIndex < 0
+                || layerIndex >= m_LayerPhysicalLayerIndices.Length)
+            {
+                return 0;
+            }
+
+            return m_LayerPhysicalLayerIndices[layerIndex];
+        }
 
         internal static VTPhysicalPoolDesc FromSpaceDesc(in VirtualTextureSpaceDesc desc)
         {
@@ -45,9 +187,7 @@ namespace VividRP.Runtime
                 desc.PageSize,
                 desc.BorderSize,
                 desc.CachePageCount,
-                desc.StackDesc.LayerCount,
-                desc.GraphicsFormat,
-                "Default");
+                desc.StackDesc.Layers);
         }
 
         internal static GraphicsFormat ResolveStorageFormat(GraphicsFormat graphicsFormat)
@@ -64,6 +204,8 @@ namespace VividRP.Runtime
                    && PageCount == other.PageCount
                    && LayerCount == other.LayerCount
                    && GraphicsFormat == other.GraphicsFormat
+                   && PhysicalGroupCount == other.PhysicalGroupCount
+                   && LayersEqual(other)
                    && string.Equals(LayerGroup, other.LayerGroup, StringComparison.Ordinal);
         }
 
@@ -74,7 +216,59 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(PageSize, BorderSize, PageCount, LayerCount, GraphicsFormat, LayerGroup);
+            var hashCode = new HashCode();
+            hashCode.Add(PageSize);
+            hashCode.Add(BorderSize);
+            hashCode.Add(PageCount);
+            hashCode.Add(LayerCount);
+            hashCode.Add(GraphicsFormat);
+            hashCode.Add(PhysicalGroupCount);
+            hashCode.Add(StringComparer.Ordinal.GetHashCode(LayerGroup ?? string.Empty));
+            for (int layerIndex = 0; layerIndex < LayerCount; layerIndex++)
+                hashCode.Add(m_Layers[layerIndex]);
+
+            return hashCode.ToHashCode();
+        }
+
+        private bool LayersEqual(in VTPhysicalPoolDesc other)
+        {
+            if (m_Layers == null || other.m_Layers == null)
+                return m_Layers == other.m_Layers;
+
+            if (m_Layers.Length != other.m_Layers.Length)
+                return false;
+
+            for (int layerIndex = 0; layerIndex < m_Layers.Length; layerIndex++)
+            {
+                if (!m_Layers[layerIndex].Equals(other.m_Layers[layerIndex]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static string BuildLayerGroupKey(IReadOnlyList<VTPhysicalPoolLayerDesc> layers)
+        {
+            if (layers == null || layers.Count == 0)
+                return "Default";
+
+            var keyBuilder = new System.Text.StringBuilder();
+            for (int layerIndex = 0; layerIndex < layers.Count; layerIndex++)
+            {
+                if (layerIndex > 0)
+                    keyBuilder.Append('|');
+
+                VTPhysicalPoolLayerDesc layer = layers[layerIndex];
+                keyBuilder.Append((int)layer.Semantic);
+                keyBuilder.Append(':');
+                keyBuilder.Append(layer.PhysicalGroup);
+                keyBuilder.Append(':');
+                keyBuilder.Append((int)layer.GraphicsFormat);
+                keyBuilder.Append(':');
+                keyBuilder.Append(layer.SRGB ? 1 : 0);
+            }
+
+            return keyBuilder.ToString();
         }
     }
 
@@ -183,7 +377,7 @@ namespace VividRP.Runtime
         private readonly LinkedList<int> m_LruPhysicalPages = new();
         private readonly LinkedListNode<int>[] m_LruNodes;
         private readonly List<PhysicalPageBinding>[] m_Bindings;
-        private readonly Texture2DArray m_Texture;
+        private readonly Texture2DArray[] m_Textures;
 
         private int m_NextGeneration;
         private int m_RefCount;
@@ -210,24 +404,39 @@ namespace VividRP.Runtime
             for (int slotIndex = m_Slots.Length - 1; slotIndex >= 0; slotIndex--)
                 m_FreePhysicalPages.Push(slotIndex);
 
-            m_Texture = new Texture2DArray(
-                desc.PhysicalPageSize,
-                desc.PhysicalPageSize,
-                m_Slots.Length * desc.LayerCount,
-                desc.GraphicsFormat,
-                TextureCreationFlags.None)
-            {
-                name = $"VividVT_{poolName}_PhysicalPool",
-                hideFlags = HideFlags.HideAndDontSave,
-                wrapMode = TextureWrapMode.Clamp,
-                filterMode = FilterMode.Bilinear,
-            };
-            m_Texture.Apply(false, false);
+            m_Textures = new Texture2DArray[Mathf.Max(1, desc.PhysicalGroupCount)];
+            for (int groupIndex = 0; groupIndex < m_Textures.Length; groupIndex++)
+                m_Textures[groupIndex] = CreatePhysicalTexture(poolName, desc, groupIndex, m_Slots.Length);
         }
 
         internal VTPhysicalPoolDesc Desc { get; }
 
-        internal Texture2DArray Texture => m_Texture;
+        internal Texture2DArray Texture => GetTextureForGroup(0);
+
+        internal IReadOnlyList<Texture2DArray> Textures => m_Textures ?? Array.Empty<Texture2DArray>();
+
+        internal Texture2DArray GetTextureForGroup(int physicalGroup)
+        {
+            if (m_Textures == null || physicalGroup < 0 || physicalGroup >= m_Textures.Length)
+                return null;
+
+            return m_Textures[physicalGroup];
+        }
+
+        internal int GetGroupLayerCount(int physicalGroup)
+        {
+            return Desc.GetGroupLayerCount(physicalGroup);
+        }
+
+        internal int GetLayerPhysicalGroup(int layerIndex)
+        {
+            return Desc.GetLayerPhysicalGroup(layerIndex);
+        }
+
+        internal int GetLayerPhysicalLayerIndex(int layerIndex)
+        {
+            return Desc.GetLayerPhysicalLayerIndex(layerIndex);
+        }
 
         internal int RefCount => m_RefCount;
 
@@ -520,8 +729,43 @@ namespace VividRP.Runtime
             for (int slotIndex = 0; slotIndex < m_Bindings.Length; slotIndex++)
                 m_Bindings[slotIndex].Clear();
 
-            if (m_Texture != null)
-                CoreUtils.Destroy(m_Texture);
+            if (m_Textures == null)
+                return;
+
+            for (int textureIndex = 0; textureIndex < m_Textures.Length; textureIndex++)
+            {
+                if (m_Textures[textureIndex] != null)
+                    CoreUtils.Destroy(m_Textures[textureIndex]);
+            }
+        }
+
+        private static Texture2DArray CreatePhysicalTexture(
+            string poolName,
+            in VTPhysicalPoolDesc desc,
+            int physicalGroup,
+            int physicalPageCount)
+        {
+            int groupLayerCount = Mathf.Max(1, desc.GetGroupLayerCount(physicalGroup));
+            GraphicsFormat storageFormat = desc.GetGroupStorageFormat(physicalGroup);
+            if (storageFormat == GraphicsFormat.None)
+                storageFormat = desc.GraphicsFormat;
+
+            var texture = new Texture2DArray(
+                desc.PhysicalPageSize,
+                desc.PhysicalPageSize,
+                Mathf.Max(1, physicalPageCount) * groupLayerCount,
+                storageFormat,
+                TextureCreationFlags.None)
+            {
+                name = physicalGroup == 0
+                    ? $"VividVT_{poolName}_PhysicalPool"
+                    : $"VividVT_{poolName}_PhysicalPool_Group{physicalGroup}",
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            texture.Apply(false, false);
+            return texture;
         }
 
         private bool TryGetSlot(int physicalPageId, int generation, out PhysicalPageSlotState slotState)

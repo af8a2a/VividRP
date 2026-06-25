@@ -61,7 +61,7 @@ namespace VividRP.Runtime
             CopyLayerFallbacks(binding.LayerFallbacks, layerFallbacks);
 
             cmd.SetGlobalBuffer(VirtualTextureShaderIDs._VTPageTable, binding.PageTableBuffer);
-            cmd.SetGlobalTexture(VirtualTextureShaderIDs._VTPhysicalCache, binding.PhysicalCache);
+            BindPhysicalCaches(cmd, binding);
             cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTSpaceParams, spaceParams);
             cmd.SetGlobalFloatArray(VirtualTextureShaderIDs._VTMipOffsets, mipOffsets);
             cmd.SetGlobalVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, layerFallbacks);
@@ -115,6 +115,20 @@ namespace VividRP.Runtime
         {
             if (values != null)
                 Array.Clear(values, 0, values.Length);
+        }
+
+        private static void BindPhysicalCaches(CommandBuffer cmd, in VirtualTextureSpaceBinding binding)
+        {
+            Texture2DArray fallback = binding.PhysicalCache;
+            var physicalCaches = binding.PhysicalCaches;
+            int[] shaderIds = VirtualTextureShaderIDs.PhysicalCaches;
+            for (int physicalGroup = 0; physicalGroup < shaderIds.Length; physicalGroup++)
+            {
+                Texture2DArray cache = physicalCaches != null && physicalGroup < physicalCaches.Count
+                    ? physicalCaches[physicalGroup]
+                    : null;
+                cmd.SetGlobalTexture(shaderIds[physicalGroup], cache != null ? cache : fallback);
+            }
         }
 
         private static int PositiveModulo(int value, int divisor)

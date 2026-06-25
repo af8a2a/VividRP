@@ -133,6 +133,8 @@ namespace VividRP.Runtime
 
         internal int PendingRequestCount => m_PendingRequests.Count;
 
+        internal VTPhysicalPool PhysicalPool => m_PhysicalPool;
+
         internal Texture2DArray PhysicalCache => m_PhysicalPool.Texture;
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_PendingRequests;

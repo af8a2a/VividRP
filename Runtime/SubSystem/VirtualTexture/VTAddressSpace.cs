@@ -5,7 +5,7 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal sealed class VTAddressSpace : IDisposable, IVTUploadRequestCommitter
+    internal sealed class VTPageTableSpace : IDisposable, IVTUploadRequestCommitter
     {
         private readonly int[] m_MipOffsets;
         private readonly VTResidencyManager m_ResidencyManager;
@@ -17,14 +17,12 @@ namespace VividRP.Runtime
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
 
-        internal VTAddressSpace(
-            int allocationId,
+        internal VTPageTableSpace(
             int spaceId,
             in VirtualTextureSpaceDesc desc,
             in VTRegisteredProducer producer,
             VTPhysicalPool physicalPool)
         {
-            AllocationId = allocationId;
             SpaceId = spaceId;
             Descriptor = desc;
             ProducerHandle = producer.Handle;
@@ -50,8 +48,6 @@ namespace VividRP.Runtime
             m_ResidencyManager.ClearDirtyPageTableUpdates();
             m_PageTableUpdater.RefreshBuffer();
         }
-
-        internal int AllocationId { get; }
 
         internal int SpaceId { get; }
 
@@ -158,17 +154,18 @@ namespace VividRP.Runtime
         }
 
         internal VirtualTextureSpaceBinding CreateBinding(
+            int allocationId,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter)
         {
             return new VirtualTextureSpaceBinding(
                 -1,
-                AllocationId,
+                allocationId,
                 SpaceId,
                 Descriptor.SpaceName,
                 ProducerHandle,
                 m_PageTableUpdater.PageTableBuffer,
-                m_ResidencyManager.PhysicalCache,
+                m_ResidencyManager.PhysicalPool.Textures,
                 feedbackRequests,
                 feedbackCounter,
                 m_ShaderParams,
@@ -248,15 +245,22 @@ namespace VividRP.Runtime
                         }
 
                         bootstrapTexture.Apply(false, false);
-                        int destinationBaseSlice = request.PhysicalPageId * StackDesc.LayerCount;
                         for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
                         {
+                            int physicalGroup = PhysicalPool.GetLayerPhysicalGroup(layerIndex);
+                            Texture2DArray physicalCache = PhysicalPool.GetTextureForGroup(physicalGroup);
+                            if (physicalCache == null)
+                                continue;
+
+                            int groupLayerCount = Mathf.Max(1, PhysicalPool.GetGroupLayerCount(physicalGroup));
+                            int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                            int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
                             Graphics.CopyTexture(
                                 bootstrapTexture,
                                 layerIndex,
                                 0,
-                                m_ResidencyManager.PhysicalCache,
-                                destinationBaseSlice + layerIndex,
+                                physicalCache,
+                                destinationSlice,
                                 0);
                         }
                     }
@@ -367,7 +371,7 @@ namespace VividRP.Runtime
                 uploadScheduler.EnqueueReservedUpload(
                     Descriptor.SpaceName,
                     Descriptor,
-                    m_ResidencyManager.PhysicalCache,
+                    m_ResidencyManager.PhysicalPool,
                     m_UploadPayloads[payloadIndex]);
             }
 

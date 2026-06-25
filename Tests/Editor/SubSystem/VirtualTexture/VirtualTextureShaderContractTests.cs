@@ -19,11 +19,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("StructuredBuffer<uint> _VTPageTable;"));
             Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache);"));
+            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache1);"));
+            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache2);"));
+            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache3);"));
             Assert.That(source, Does.Contain("_VTFeedbackRequests"));
             Assert.That(source, Does.Contain("_VTFeedbackCounter"));
             Assert.That(source, Does.Contain("register(u1)"));
             Assert.That(source, Does.Contain("register(u2)"));
-            Assert.That(source, Does.Contain("float _VTSpaceParams[20];"));
+            Assert.That(source, Does.Contain("float _VTSpaceParams[32];"));
             Assert.That(source, Does.Contain("float4 _VTLayerFallbacks[4];"));
             Assert.That(source, Does.Contain("float _VTMipOffsets[VIVID_VT_MAX_MIPS];"));
             Assert.That(source, Does.Contain("int _VTDebugMode;"));
@@ -38,8 +41,12 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VTResolvedAddress VTResolveAddress"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVW"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVWLayer"));
+            Assert.That(source, Does.Contain("uint VTGetPhysicalGroupLayerCount"));
+            Assert.That(source, Does.Contain("uint VTGetLayerPhysicalGroup"));
+            Assert.That(source, Does.Contain("uint VTGetLayerPhysicalLayer"));
+            Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheGroup"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCache"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0)"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0)"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheTrilinear"));
             Assert.That(source, Does.Contain("float4 VTSampleBaseColor"));
             Assert.That(source, Does.Contain("float3 VTSampleNormal"));
@@ -56,6 +63,9 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(VirtualTextureShaderIDs._VTPageTable, Is.EqualTo(Shader.PropertyToID("_VTPageTable")));
             Assert.That(VirtualTextureShaderIDs._VTPhysicalCache, Is.EqualTo(Shader.PropertyToID("_VTPhysicalCache")));
+            Assert.That(VirtualTextureShaderIDs._VTPhysicalCache1, Is.EqualTo(Shader.PropertyToID("_VTPhysicalCache1")));
+            Assert.That(VirtualTextureShaderIDs._VTPhysicalCache2, Is.EqualTo(Shader.PropertyToID("_VTPhysicalCache2")));
+            Assert.That(VirtualTextureShaderIDs._VTPhysicalCache3, Is.EqualTo(Shader.PropertyToID("_VTPhysicalCache3")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackRequests, Is.EqualTo(Shader.PropertyToID("_VTFeedbackRequests")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackCounter, Is.EqualTo(Shader.PropertyToID("_VTFeedbackCounter")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackEnabled, Is.EqualTo(Shader.PropertyToID("_VTFeedbackEnabled")));

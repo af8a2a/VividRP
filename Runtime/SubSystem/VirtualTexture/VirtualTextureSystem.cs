@@ -7,7 +7,7 @@ namespace VividRP.Runtime
 {
     internal sealed class VirtualTextureSystem : VividSubsystem<VirtualTextureSystem>
     {
-        private static readonly Dictionary<int, VTAddressSpace> s_AddressSpaces = new();
+        private static readonly Dictionary<int, VTPageTableSpace> s_PageTableSpaces = new();
         private static readonly Dictionary<string, int> s_SpaceIdsByName = new(StringComparer.Ordinal);
         private static readonly Dictionary<int, VTAllocatedVirtualTexture> s_Allocations = new();
         private static readonly Dictionary<string, int> s_AllocationIdsByName = new(StringComparer.Ordinal);
@@ -84,13 +84,13 @@ namespace VividRP.Runtime
 
         protected override void OnDeinitialize()
         {
-            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
                 pair.Value.Dispose();
 
             foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
                 pool.Dispose();
 
-            s_AddressSpaces.Clear();
+            s_PageTableSpaces.Clear();
             s_SpaceIdsByName.Clear();
             s_Allocations.Clear();
             s_AllocationIdsByName.Clear();
@@ -178,7 +178,7 @@ namespace VividRP.Runtime
 
             if (s_SpaceIdsByName.TryGetValue(desc.SpaceName, out int existingSpaceId))
             {
-                VTAddressSpace existingAddressSpace = s_AddressSpaces[existingSpaceId];
+                VTPageTableSpace existingAddressSpace = s_PageTableSpaces[existingSpaceId];
                 if (!existingAddressSpace.Descriptor.Equals(desc))
                 {
                     throw new InvalidOperationException(
@@ -214,7 +214,7 @@ namespace VividRP.Runtime
 
             if (s_SpaceIdsByName.TryGetValue(desc.SpaceName, out int existingSpaceId))
             {
-                VTAddressSpace existingAddressSpace = s_AddressSpaces[existingSpaceId];
+                VTPageTableSpace existingAddressSpace = s_PageTableSpaces[existingSpaceId];
                 bool sameProducer = s_ProducerRegistry.IsSameProducer(existingAddressSpace.ProducerHandle, producer);
                 if (existingAddressSpace.Descriptor.Equals(desc)
                     && sameProducer)
@@ -222,7 +222,7 @@ namespace VividRP.Runtime
                     return existingSpaceId;
                 }
 
-                ReplaceAddressSpace(existingSpaceId, desc, producer);
+                ReplacePageTableSpace(existingSpaceId, desc, producer);
                 return existingSpaceId;
             }
 
@@ -233,10 +233,10 @@ namespace VividRP.Runtime
         {
             Initialize();
 
-            if (!s_AddressSpaces.ContainsKey(spaceId))
+            if (!s_PageTableSpaces.ContainsKey(spaceId))
                 return false;
 
-            RemoveAddressSpace(spaceId);
+            RemovePageTableSpace(spaceId);
             return true;
         }
 
@@ -317,9 +317,9 @@ namespace VividRP.Runtime
             int prefetchRequestCount = 0;
             s_UploadScheduler.BeginFrame();
             s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);
-            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
-                VTAddressSpace addressSpace = pair.Value;
+                VTPageTableSpace addressSpace = pair.Value;
                 VTResidencyProcessResult residencyResult;
                 s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
                 if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
@@ -339,7 +339,7 @@ namespace VividRP.Runtime
             int inFlightUploadBatchCount = s_UploadScheduler.InFlightBatchCount;
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
-            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
                 pair.Value.RebuildPageTableIfDirty();
                 pair.Value.RefreshPageTableBuffer();
@@ -359,11 +359,11 @@ namespace VividRP.Runtime
             int freePageCount = 0;
             int pendingUploadCount = 0;
             int feedbackCapacity = 0;
-            string statusMessage = s_AddressSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
+            string statusMessage = s_PageTableSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
 
-            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
-                VTAddressSpace addressSpace = pair.Value;
+                VTPageTableSpace addressSpace = pair.Value;
                 ComputeBuffer feedbackRequests = null;
                 ComputeBuffer feedbackCounter = null;
                 feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
@@ -395,7 +395,13 @@ namespace VividRP.Runtime
                 residentPageCount += addressSpace.ResidentPageCount;
                 freePageCount += addressSpace.FreePageCount;
                 pendingUploadCount += addressSpace.PendingRequestCount;
-                virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(feedbackRequests, feedbackCounter));
+                int allocationId = s_AllocationIdBySpaceId.TryGetValue(addressSpace.SpaceId, out int mappedAllocationId)
+                    ? mappedAllocationId
+                    : 0;
+                virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(
+                    allocationId,
+                    feedbackRequests,
+                    feedbackCounter));
             }
 
             VTPhysicalPoolStats physicalPoolStats = CollectPhysicalPoolStats();
@@ -403,7 +409,7 @@ namespace VividRP.Runtime
             freePageCount = physicalPoolStats.FreePageCount;
 
             var globalStats = new VTDebugStats(
-                s_AddressSpaces.Count,
+                s_PageTableSpaces.Count,
                 residentPageCount,
                 freePageCount,
                 pendingUploadCount,
@@ -442,7 +448,7 @@ namespace VividRP.Runtime
             if (camera != null)
             {
                 var viewStats = new VTDebugStats(
-                    s_AddressSpaces.Count,
+                    s_PageTableSpaces.Count,
                     residentPageCount,
                     freePageCount,
                     pendingUploadCount,
@@ -482,7 +488,7 @@ namespace VividRP.Runtime
 
         internal static bool TryGetPendingRequests(int spaceId, out IReadOnlyList<VTRequest> requests)
         {
-            if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
             {
                 requests = addressSpace.PendingRequests;
                 return true;
@@ -494,7 +500,7 @@ namespace VividRP.Runtime
 
         internal static bool TryGetPendingUploadRequests(int spaceId, out IReadOnlyList<VirtualTextureUploadRequest> requests)
         {
-            if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
             {
                 IReadOnlyList<VTRequest> pendingRequests = addressSpace.PendingRequests;
                 var uploadRequests = new List<VirtualTextureUploadRequest>(pendingRequests.Count);
@@ -511,7 +517,7 @@ namespace VividRP.Runtime
 
         internal static bool CommitRequest(in VTRequest request)
         {
-            return s_AddressSpaces.TryGetValue(request.SpaceId, out VTAddressSpace addressSpace)
+            return s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace)
                    && addressSpace.TryCommitRequest(request);
         }
 
@@ -525,7 +531,7 @@ namespace VividRP.Runtime
             Initialize();
 
             VTProducer resolvedProducer = ResolveStoredProducer(producer);
-            foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
                 if (s_ProducerRegistry.IsSameProducer(pair.Value.ProducerHandle, resolvedProducer))
                     s_UploadScheduler.CancelUploadsForSpace(pair.Key);
@@ -538,7 +544,7 @@ namespace VividRP.Runtime
 
             if (flushedCount > 0)
             {
-                foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
+                foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
                     pair.Value.RebuildPageTableIfDirty();
             }
 
@@ -547,7 +553,7 @@ namespace VividRP.Runtime
 
         internal static int FlushRegion(int spaceId, int mip, RectInt pageRegion)
         {
-            if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
                 return 0;
 
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
@@ -556,7 +562,7 @@ namespace VividRP.Runtime
 
         internal static bool SetPageLocked(int spaceId, in VirtualTexturePageCoord coord, bool locked = true)
         {
-            return s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace)
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                    && addressSpace.TrySetPageLocked(coord, locked);
         }
 
@@ -636,7 +642,7 @@ namespace VividRP.Runtime
             in VirtualTexturePageCoord coord,
             out VirtualTexturePageTableEntry entry)
         {
-            if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
                 return addressSpace.TryGetPageTableEntry(coord, out entry);
 
             entry = default;
@@ -645,21 +651,21 @@ namespace VividRP.Runtime
 
         internal static int GetResidentPageCountForTesting(int spaceId)
         {
-            return s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace)
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                 ? addressSpace.ResidentPageCount
                 : 0;
         }
 
         internal static int GetFreePageCountForTesting(int spaceId)
         {
-            return s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace)
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                 ? addressSpace.FreePageCount
                 : 0;
         }
 
         internal static int GetPendingUploadCountForTesting(int spaceId)
         {
-            return s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace)
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                 ? addressSpace.PendingRequestCount
                 : 0;
         }
@@ -676,10 +682,18 @@ namespace VividRP.Runtime
 
         internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2DArray physicalCache)
         {
-            if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            return TryGetPhysicalCacheForTesting(spaceId, 0, out physicalCache);
+        }
+
+        internal static bool TryGetPhysicalCacheForTesting(
+            int spaceId,
+            int physicalGroup,
+            out Texture2DArray physicalCache)
+        {
+            if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
             {
-                physicalCache = addressSpace.PhysicalPool.Texture;
-                return true;
+                physicalCache = addressSpace.PhysicalPool.GetTextureForGroup(physicalGroup);
+                return physicalCache != null;
             }
 
             physicalCache = null;
@@ -702,7 +716,7 @@ namespace VividRP.Runtime
 
         internal static bool TryGetProducerNameForTesting(int spaceId, out string producerName)
         {
-            if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
             {
                 return s_ProducerRegistry.TryGetProducerName(addressSpace.ProducerHandle, out producerName);
             }
@@ -739,7 +753,7 @@ namespace VividRP.Runtime
         {
             public IVTUploadRequestCommitter ResolveCommitter(int spaceId)
             {
-                return s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace)
+                return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                     ? addressSpace
                     : null;
             }
@@ -763,8 +777,7 @@ namespace VividRP.Runtime
             return pool;
         }
 
-        private static VTAddressSpace CreateAddressSpace(
-            int allocationId,
+        private static VTPageTableSpace CreatePageTableSpace(
             int spaceId,
             in VirtualTextureSpaceDesc desc,
             VTProducerHandle producerHandle)
@@ -775,7 +788,7 @@ namespace VividRP.Runtime
             VTPhysicalPool physicalPool = AcquirePhysicalPool(desc);
             try
             {
-                return new VTAddressSpace(allocationId, spaceId, desc, producer, physicalPool);
+                return new VTPageTableSpace(spaceId, desc, producer, physicalPool);
             }
             catch
             {
@@ -788,14 +801,13 @@ namespace VividRP.Runtime
         {
             int allocationId = s_NextAllocationId++;
             int spaceId = s_NextSpaceId++;
-            VTAddressSpace addressSpace = CreateAddressSpace(
-                allocationId,
+            VTPageTableSpace addressSpace = CreatePageTableSpace(
                 spaceId,
                 desc.SpaceDesc,
                 desc.ProducerHandle);
 
             var allocation = new VTAllocatedVirtualTexture(allocationId, spaceId, desc);
-            s_AddressSpaces.Add(spaceId, addressSpace);
+            s_PageTableSpaces.Add(spaceId, addressSpace);
             s_SpaceIdsByName.Add(desc.SpaceDesc.SpaceName, spaceId);
             s_Allocations.Add(allocationId, allocation);
             s_AllocationIdsByName.Add(desc.Name, allocationId);
@@ -834,13 +846,18 @@ namespace VividRP.Runtime
                 evictedPageCount);
         }
 
-        private static void ReplaceAddressSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
+        private static void ReplacePageTableSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)
         {
-            if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace existingAddressSpace))
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace existingAddressSpace))
                 return;
 
             VTProducerHandle producerHandle = s_ProducerRegistry.Register(desc, producer);
-            int allocationId = existingAddressSpace.AllocationId;
+            if (!s_AllocationIdBySpaceId.TryGetValue(spaceId, out int allocationId))
+            {
+                s_ProducerRegistry.Release(producerHandle);
+                throw new InvalidOperationException($"[VividRP] VT page-table space '{spaceId}' has no allocation.");
+            }
+
             string allocationName = existingAddressSpace.Descriptor.SpaceName;
             if (s_Allocations.TryGetValue(allocationId, out VTAllocatedVirtualTexture existingAllocation))
                 allocationName = existingAllocation.Name;
@@ -854,12 +871,12 @@ namespace VividRP.Runtime
             RemoveFeedbackStateForSpace(spaceId);
             try
             {
-                s_AddressSpaces[spaceId] = CreateAddressSpace(allocationId, spaceId, desc, producerHandle);
+                s_PageTableSpaces[spaceId] = CreatePageTableSpace(spaceId, desc, producerHandle);
             }
             catch
             {
                 s_ProducerRegistry.Release(producerHandle);
-                s_AddressSpaces.Remove(spaceId);
+                s_PageTableSpaces.Remove(spaceId);
                 s_SpaceIdsByName.Remove(existingAddressSpace.Descriptor.SpaceName);
                 s_AllocationIdBySpaceId.Remove(spaceId);
                 s_Allocations.Remove(allocationId);
@@ -875,12 +892,12 @@ namespace VividRP.Runtime
             }
         }
 
-        private static void RemoveAddressSpace(int spaceId)
+        private static void RemovePageTableSpace(int spaceId)
         {
-            if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
                 return;
 
-            s_AddressSpaces.Remove(spaceId);
+            s_PageTableSpaces.Remove(spaceId);
             s_SpaceIdsByName.Remove(addressSpace.Descriptor.SpaceName);
             if (s_AllocationIdBySpaceId.TryGetValue(spaceId, out int allocationId))
             {
@@ -1018,7 +1035,7 @@ namespace VividRP.Runtime
             for (int requestIndex = 0; requestIndex < aggregatedRequests.Count; requestIndex++)
             {
                 VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
-                if (!s_AddressSpaces.TryGetValue(request.SpaceId, out VTAddressSpace addressSpace))
+                if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace))
                     continue;
 
                 if (!VirtualTextureSpaceUtility.IsCoordValid(addressSpace.Descriptor, request.PageCoord))

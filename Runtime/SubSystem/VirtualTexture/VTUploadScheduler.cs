@@ -137,17 +137,17 @@ namespace VividRP.Runtime
         {
             internal QueuedUpload(
                 UploadPoolKey key,
-                Texture2DArray physicalCache,
+                VTPhysicalPool physicalPool,
                 in VTPageUploadPayload payload)
             {
                 Key = key;
-                PhysicalCache = physicalCache;
+                PhysicalPool = physicalPool;
                 Payload = payload;
             }
 
             internal UploadPoolKey Key { get; }
 
-            internal Texture2DArray PhysicalCache { get; }
+            internal VTPhysicalPool PhysicalPool { get; }
 
             internal VTPageUploadPayload Payload { get; }
         }
@@ -188,7 +188,7 @@ namespace VividRP.Runtime
         {
             private readonly Texture2DArray m_StagingTexture;
             private readonly VTRequest[] m_Requests;
-            private readonly Texture2DArray[] m_PhysicalCaches;
+            private readonly VTPhysicalPool[] m_PhysicalPools;
 
             private int m_RequestCount;
             private IVTUploadFenceHandle m_Fence;
@@ -203,7 +203,7 @@ namespace VividRP.Runtime
                     Capacity * LayerCount,
                     $"UploadBatch{batchIndex}");
                 m_Requests = new VTRequest[Capacity];
-                m_PhysicalCaches = new Texture2DArray[Capacity];
+                m_PhysicalPools = new VTPhysicalPool[Capacity];
             }
 
             internal int Capacity { get; }
@@ -254,20 +254,20 @@ namespace VividRP.Runtime
                 m_Requests[index] = request;
             }
 
-            internal void SetPhysicalCache(int index, Texture2DArray physicalCache)
+            internal void SetPhysicalPool(int index, VTPhysicalPool physicalPool)
             {
                 if (index < 0 || index >= Capacity)
                     throw new ArgumentOutOfRangeException(nameof(index));
 
-                m_PhysicalCaches[index] = physicalCache;
+                m_PhysicalPools[index] = physicalPool;
             }
 
-            internal Texture2DArray GetPhysicalCache(int index)
+            internal VTPhysicalPool GetPhysicalPool(int index)
             {
                 if (index < 0 || index >= m_RequestCount)
                     throw new ArgumentOutOfRangeException(nameof(index));
 
-                return m_PhysicalCaches[index];
+                return m_PhysicalPools[index];
             }
 
             internal void SealRequests(int requestCount)
@@ -288,7 +288,7 @@ namespace VividRP.Runtime
             internal void Reset()
             {
                 m_Fence = null;
-                Array.Clear(m_PhysicalCaches, 0, m_PhysicalCaches.Length);
+                Array.Clear(m_PhysicalPools, 0, m_PhysicalPools.Length);
                 m_RequestCount = 0;
             }
 
@@ -300,7 +300,7 @@ namespace VividRP.Runtime
                 {
                     if (m_Requests[readIndex].SpaceId == spaceId)
                     {
-                        m_PhysicalCaches[readIndex] = null;
+                        m_PhysicalPools[readIndex] = null;
                         removedCount += 1;
                         continue;
                     }
@@ -308,14 +308,14 @@ namespace VividRP.Runtime
                     if (writeIndex != readIndex)
                     {
                         m_Requests[writeIndex] = m_Requests[readIndex];
-                        m_PhysicalCaches[writeIndex] = m_PhysicalCaches[readIndex];
+                        m_PhysicalPools[writeIndex] = m_PhysicalPools[readIndex];
                     }
 
                     writeIndex += 1;
                 }
 
                 if (writeIndex < m_RequestCount)
-                    Array.Clear(m_PhysicalCaches, writeIndex, m_RequestCount - writeIndex);
+                    Array.Clear(m_PhysicalPools, writeIndex, m_RequestCount - writeIndex);
 
                 m_RequestCount = writeIndex;
                 return removedCount;
@@ -470,7 +470,7 @@ namespace VividRP.Runtime
                     {
                         QueuedUpload upload = uploads[startIndex + uploadIndex];
                         VTPageUploadPayload payload = upload.Payload;
-                        if (!payload.IsValid || upload.PhysicalCache == null)
+                        if (!payload.IsValid || upload.PhysicalPool == null)
                         {
                             skippedUploadCount += 1;
                             continue;
@@ -495,7 +495,7 @@ namespace VividRP.Runtime
                         }
 
                         batch.SetRequest(requestCount, payload.Request);
-                        batch.SetPhysicalCache(requestCount, upload.PhysicalCache);
+                        batch.SetPhysicalPool(requestCount, upload.PhysicalPool);
                         requestCount += 1;
                     }
                 }
@@ -512,20 +512,27 @@ namespace VividRP.Runtime
                 for (int uploadIndex = 0; uploadIndex < requestCount; uploadIndex++)
                 {
                     VTRequest request = batch.GetRequest(uploadIndex);
-                    Texture2DArray physicalCache = batch.GetPhysicalCache(uploadIndex);
-                    if (physicalCache == null)
+                    VTPhysicalPool physicalPool = batch.GetPhysicalPool(uploadIndex);
+                    if (physicalPool == null)
                         continue;
 
                     int sourceBaseSlice = uploadIndex * batch.LayerCount;
-                    int destinationBaseSlice = request.PhysicalPageId * batch.LayerCount;
                     for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
                     {
+                        int physicalGroup = physicalPool.GetLayerPhysicalGroup(layerIndex);
+                        Texture2DArray physicalCache = physicalPool.GetTextureForGroup(physicalGroup);
+                        if (physicalCache == null)
+                            continue;
+
+                        int groupLayerCount = Mathf.Max(1, physicalPool.GetGroupLayerCount(physicalGroup));
+                        int physicalLayerIndex = physicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                        int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
                         cmd.CopyTexture(
                             batch.StagingTexture,
                             sourceBaseSlice + layerIndex,
                             0,
                             physicalCache,
-                            destinationBaseSlice + layerIndex,
+                            destinationSlice,
                             0);
                     }
                 }
@@ -744,12 +751,12 @@ namespace VividRP.Runtime
         internal void EnqueueReservedUpload(
             string spaceName,
             in VirtualTextureSpaceDesc desc,
-            Texture2DArray physicalCache,
+            VTPhysicalPool physicalPool,
             in VTPageUploadPayload payload)
         {
             UploadPoolKey key = new(desc);
             GetOrCreatePool(spaceName, key, desc.MaxUploadsPerFrame);
-            m_QueuedUploads.Add(new QueuedUpload(key, physicalCache, payload));
+            m_QueuedUploads.Add(new QueuedUpload(key, physicalPool, payload));
         }
 
         internal bool FinalizeUploads(CommandBuffer cmd)

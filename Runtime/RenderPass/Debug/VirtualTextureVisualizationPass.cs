@@ -180,10 +180,24 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             mpb.SetBuffer(VirtualTextureShaderIDs._VTPageTable, binding.PageTableBuffer);
-            mpb.SetTexture(VirtualTextureShaderIDs._VTPhysicalCache, binding.PhysicalCache);
+            BindPhysicalCaches(mpb, binding);
             mpb.SetFloatArray(VirtualTextureShaderIDs._VTSpaceParams, m_SpaceParams);
             mpb.SetFloatArray(VirtualTextureShaderIDs._VTMipOffsets, m_MipOffsets);
             mpb.SetVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, m_LayerFallbacks);
+        }
+
+        private static void BindPhysicalCaches(MaterialPropertyBlock mpb, in VirtualTextureSpaceBinding binding)
+        {
+            Texture2DArray fallback = binding.PhysicalCache;
+            var physicalCaches = binding.PhysicalCaches;
+            int[] shaderIds = VirtualTextureShaderIDs.PhysicalCaches;
+            for (int physicalGroup = 0; physicalGroup < shaderIds.Length; physicalGroup++)
+            {
+                Texture2DArray cache = physicalCaches != null && physicalGroup < physicalCaches.Count
+                    ? physicalCaches[physicalGroup]
+                    : null;
+                mpb.SetTexture(shaderIds[physicalGroup], cache != null ? cache : fallback);
+            }
         }
 
         private void ConfigureOutputTexture(int width, int height, RenderGraphTextureDesc sourceDescriptor)

@@ -100,7 +100,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EvaluatePageTableResidencyColor"));
             Assert.That(source, Does.Contain("_VTOverlayRect"));
             Assert.That(source, Does.Contain("_VTVisualizationAvailable"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_ARRAY(_VTPhysicalCache"));
+            Assert.That(source, Does.Contain("VTSamplePhysicalCacheGroup"));
             Assert.That(source, Does.Contain("_VTPageTable[flatIndex]"));
         }
 

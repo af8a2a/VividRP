@@ -127,6 +127,10 @@ namespace VividRP.Runtime
             {
                 if (layers[layerIndex].GraphicsFormat == GraphicsFormat.None)
                     throw new ArgumentException("Layer graphics format must be valid.", nameof(layers));
+                if (layers[layerIndex].PhysicalGroup >= MaxLayerCount)
+                    throw new ArgumentOutOfRangeException(
+                        nameof(layers),
+                        $"Physical group index must be smaller than {MaxLayerCount}.");
 
                 m_Layers[layerIndex] = layers[layerIndex];
             }

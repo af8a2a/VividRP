@@ -311,8 +311,67 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.ShaderParams.NormalLayerIndex, Is.EqualTo(1));
                 Assert.That(binding.ShaderParams.Layer0SRGB, Is.EqualTo(1));
                 Assert.That(binding.ShaderParams.Layer1SRGB, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.PhysicalGroup0LayerCount, Is.EqualTo(2));
+                Assert.That(binding.ShaderParams.PhysicalGroup1LayerCount, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.Layer0PhysicalGroup, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.Layer1PhysicalGroup, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.Layer0PhysicalLayerIndex, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.Layer1PhysicalLayerIndex, Is.EqualTo(1));
                 Assert.That(binding.LayerFallbacks[0], Is.EqualTo(ToVector(baseFallback)));
                 Assert.That(binding.LayerFallbacks[1], Is.EqualTo(ToVector(normalFallback)));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_BindsPhysicalCachesAndShaderParams_ForSplitPhysicalGroups()
+        {
+            var stackDesc = new VTStackDesc(
+                pageSize: 64,
+                borderSize: 2,
+                cachePageCount: 3,
+                layers: new[]
+                {
+                    new VTLayerDesc(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: true,
+                        new Color32(0, 0, 0, 255),
+                        physicalGroup: 0),
+                    new VTLayerDesc(
+                        VTLayerSemantic.Normal,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: false,
+                        new Color32(128, 128, 255, 255),
+                        physicalGroup: 1),
+                },
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32);
+            var desc = new VirtualTextureSpaceDesc("SplitPhysicalBinding", 4, 4, 3, stackDesc);
+            VirtualTextureSystem.RegisterSpace(desc);
+            var frameData = new ContextContainer();
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VirtualTextureSpaceBinding binding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
+                Assert.That(binding.PhysicalCaches.Count, Is.EqualTo(2));
+                Assert.That(binding.PhysicalCaches[0], Is.Not.Null);
+                Assert.That(binding.PhysicalCaches[1], Is.Not.Null);
+                Assert.That(ReferenceEquals(binding.PhysicalCaches[0], binding.PhysicalCaches[1]), Is.False);
+                Assert.That(binding.PhysicalCaches[0].depth, Is.EqualTo(desc.CachePageCount));
+                Assert.That(binding.PhysicalCaches[1].depth, Is.EqualTo(desc.CachePageCount));
+                Assert.That(binding.ShaderParams.PhysicalGroup0LayerCount, Is.EqualTo(1));
+                Assert.That(binding.ShaderParams.PhysicalGroup1LayerCount, Is.EqualTo(1));
+                Assert.That(binding.ShaderParams.Layer0PhysicalGroup, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.Layer1PhysicalGroup, Is.EqualTo(1));
+                Assert.That(binding.ShaderParams.Layer0PhysicalLayerIndex, Is.EqualTo(0));
+                Assert.That(binding.ShaderParams.Layer1PhysicalLayerIndex, Is.EqualTo(0));
             }
             finally
             {

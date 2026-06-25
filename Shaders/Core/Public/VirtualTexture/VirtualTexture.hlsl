@@ -7,6 +7,9 @@
 
 StructuredBuffer<uint> _VTPageTable;
 TEXTURE2D_ARRAY(_VTPhysicalCache);
+TEXTURE2D_ARRAY(_VTPhysicalCache1);
+TEXTURE2D_ARRAY(_VTPhysicalCache2);
+TEXTURE2D_ARRAY(_VTPhysicalCache3);
 SAMPLER(sampler_VTPhysicalCache);
 float4 _VTLayerFallbacks[4];
 
@@ -18,7 +21,7 @@ StructuredBuffer<uint2> _VTFeedbackRequests;
 StructuredBuffer<uint> _VTFeedbackCounter;
 #endif
 
-float _VTSpaceParams[20];
+float _VTSpaceParams[32];
 float _VTMipOffsets[VIVID_VT_MAX_MIPS];
 int _VTDebugMode;
 int _VTFeedbackEnabled;
@@ -46,6 +49,18 @@ float4 _VTFeedbackViewParams;
 #define VT_LAYER1_SRGB            ((int)_VTSpaceParams[17])
 #define VT_LAYER2_SRGB            ((int)_VTSpaceParams[18])
 #define VT_LAYER3_SRGB            ((int)_VTSpaceParams[19])
+#define VT_PHYSICAL_GROUP0_LAYER_COUNT ((int)_VTSpaceParams[20])
+#define VT_PHYSICAL_GROUP1_LAYER_COUNT ((int)_VTSpaceParams[21])
+#define VT_PHYSICAL_GROUP2_LAYER_COUNT ((int)_VTSpaceParams[22])
+#define VT_PHYSICAL_GROUP3_LAYER_COUNT ((int)_VTSpaceParams[23])
+#define VT_LAYER0_PHYSICAL_GROUP  ((int)_VTSpaceParams[24])
+#define VT_LAYER1_PHYSICAL_GROUP  ((int)_VTSpaceParams[25])
+#define VT_LAYER2_PHYSICAL_GROUP  ((int)_VTSpaceParams[26])
+#define VT_LAYER3_PHYSICAL_GROUP  ((int)_VTSpaceParams[27])
+#define VT_LAYER0_PHYSICAL_LAYER  ((int)_VTSpaceParams[28])
+#define VT_LAYER1_PHYSICAL_LAYER  ((int)_VTSpaceParams[29])
+#define VT_LAYER2_PHYSICAL_LAYER  ((int)_VTSpaceParams[30])
+#define VT_LAYER3_PHYSICAL_LAYER  ((int)_VTSpaceParams[31])
 #define VT_FEEDBACK_REQUEST_COUNTER_INDEX 0
 #define VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX 1
 
@@ -149,6 +164,45 @@ VTResolvedAddress VTResolveAddress(float2 virtualUv, uint requestedMip)
     return resolved;
 }
 
+uint VTGetPhysicalGroupLayerCount(uint physicalGroup)
+{
+    uint clampedGroup = min(physicalGroup, 3u);
+    if (clampedGroup == 0u)
+        return max((uint)VT_PHYSICAL_GROUP0_LAYER_COUNT, 1u);
+    if (clampedGroup == 1u)
+        return max((uint)VT_PHYSICAL_GROUP1_LAYER_COUNT, 1u);
+    if (clampedGroup == 2u)
+        return max((uint)VT_PHYSICAL_GROUP2_LAYER_COUNT, 1u);
+
+    return max((uint)VT_PHYSICAL_GROUP3_LAYER_COUNT, 1u);
+}
+
+uint VTGetLayerPhysicalGroup(uint layerIndex)
+{
+    uint clampedLayer = min(layerIndex, 3u);
+    if (clampedLayer == 0u)
+        return (uint)max(VT_LAYER0_PHYSICAL_GROUP, 0);
+    if (clampedLayer == 1u)
+        return (uint)max(VT_LAYER1_PHYSICAL_GROUP, 0);
+    if (clampedLayer == 2u)
+        return (uint)max(VT_LAYER2_PHYSICAL_GROUP, 0);
+
+    return (uint)max(VT_LAYER3_PHYSICAL_GROUP, 0);
+}
+
+uint VTGetLayerPhysicalLayer(uint layerIndex)
+{
+    uint clampedLayer = min(layerIndex, 3u);
+    if (clampedLayer == 0u)
+        return (uint)max(VT_LAYER0_PHYSICAL_LAYER, 0);
+    if (clampedLayer == 1u)
+        return (uint)max(VT_LAYER1_PHYSICAL_LAYER, 0);
+    if (clampedLayer == 2u)
+        return (uint)max(VT_LAYER2_PHYSICAL_LAYER, 0);
+
+    return (uint)max(VT_LAYER3_PHYSICAL_LAYER, 0);
+}
+
 float3 VTComputePhysicalUVWLayer(float2 virtualUv, VTResolvedAddress resolved, uint layerIndex)
 {
     if (!resolved.valid)
@@ -160,9 +214,24 @@ float3 VTComputePhysicalUVWLayer(float2 virtualUv, VTResolvedAddress resolved, u
     // Address page edges on the gutter boundary so bilinear sampling spans baked borders.
     float2 texelCoord = localUv * VT_PAGE_SIZE + VT_BORDER_SIZE;
     float2 physicalUv = texelCoord / max((float)VT_PHYSICAL_PAGE_SIZE, 1.0);
-    uint layerCount = max((uint)VT_LAYER_COUNT, 1u);
-    uint physicalSlice = resolved.physicalPageId * layerCount + min(layerIndex, layerCount - 1u);
+    uint physicalGroup = VTGetLayerPhysicalGroup(layerIndex);
+    uint groupLayerCount = VTGetPhysicalGroupLayerCount(physicalGroup);
+    uint physicalLayer = min(VTGetLayerPhysicalLayer(layerIndex), groupLayerCount - 1u);
+    uint physicalSlice = resolved.physicalPageId * groupLayerCount + physicalLayer;
     return float3(physicalUv, (float)physicalSlice);
+}
+
+float4 VTSamplePhysicalCacheGroup(uint physicalGroup, float3 uvw)
+{
+    uint clampedGroup = min(physicalGroup, 3u);
+    if (clampedGroup == 1u)
+        return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache1, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    if (clampedGroup == 2u)
+        return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache2, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    if (clampedGroup == 3u)
+        return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+
+    return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
 }
 
 float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)
@@ -176,7 +245,7 @@ float4 VTSamplePhysicalCache(float2 virtualUv, VTResolvedAddress resolved)
         return float4(1.0, 0.0, 1.0, 1.0);
 
     float3 uvw = VTComputePhysicalUVW(virtualUv, resolved);
-    return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    return VTSamplePhysicalCacheGroup(VTGetLayerPhysicalGroup(0u), uvw);
 }
 
 float4 VTGetLayerFallback(uint layerIndex)
@@ -216,7 +285,7 @@ float4 VTSamplePhysicalCacheLayer(float2 virtualUv, VTResolvedAddress resolved, 
         return VTGetLayerFallback(layerIndex);
 
     float3 uvw = VTComputePhysicalUVWLayer(virtualUv, resolved, layerIndex);
-    return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    return VTSamplePhysicalCacheGroup(VTGetLayerPhysicalGroup(layerIndex), uvw);
 }
 
 bool VTResolvedAddressMatches(VTResolvedAddress left, VTResolvedAddress right)

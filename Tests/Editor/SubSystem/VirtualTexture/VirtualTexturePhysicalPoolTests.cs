@@ -46,6 +46,61 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RegisterAddressSpace_SeparatesPhysicalPools_WhenLayerPhysicalGroupDiffers()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateLayeredDesc("PhysicalGroupA", normalPhysicalGroup: 0);
+            VirtualTextureSpaceDesc secondDesc = CreateLayeredDesc("PhysicalGroupB", normalPhysicalGroup: 1);
+
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(firstDesc, new NamedProducer("GroupProducerA"));
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, new NamedProducer("GroupProducerB"));
+
+            Assert.That(VirtualTextureSystem.GetPhysicalPoolCountForTesting(), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2DArray firstCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2DArray secondCache), Is.True);
+            Assert.That(ReferenceEquals(firstCache, secondCache), Is.False);
+        }
+
+        [Test]
+        public void RegisterAddressSpace_SeparatesPhysicalPools_WhenLayerFormatDiffers()
+        {
+            VirtualTextureSpaceDesc firstDesc = CreateLayeredDesc(
+                "LayerFormatA",
+                normalFormat: GraphicsFormat.R8G8B8A8_UNorm,
+                normalPhysicalGroup: 1);
+            VirtualTextureSpaceDesc secondDesc = CreateLayeredDesc(
+                "LayerFormatB",
+                normalFormat: GraphicsFormat.R8G8B8A8_SRGB,
+                normalPhysicalGroup: 1);
+
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(firstDesc, new NamedProducer("FormatProducerA"));
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, new NamedProducer("FormatProducerB"));
+
+            Assert.That(VirtualTextureSystem.GetPhysicalPoolCountForTesting(), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2DArray firstCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2DArray secondCache), Is.True);
+            Assert.That(ReferenceEquals(firstCache, secondCache), Is.False);
+        }
+
+        [Test]
+        public void RegisterAddressSpace_CreatesPhysicalTexturePerGroup()
+        {
+            VirtualTextureSpaceDesc desc = CreateLayeredDesc("SplitPhysicalGroups", normalPhysicalGroup: 1);
+
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new NamedProducer("SplitGroupProducer"));
+
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 0, out Texture2DArray baseCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 1, out Texture2DArray normalCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 2, out _), Is.False);
+            Assert.That(ReferenceEquals(baseCache, normalCache), Is.False);
+            Assert.That(baseCache.width, Is.EqualTo(desc.PhysicalPageSize));
+            Assert.That(baseCache.height, Is.EqualTo(desc.PhysicalPageSize));
+            Assert.That(baseCache.depth, Is.EqualTo(desc.CachePageCount));
+            Assert.That(normalCache.width, Is.EqualTo(desc.PhysicalPageSize));
+            Assert.That(normalCache.height, Is.EqualTo(desc.PhysicalPageSize));
+            Assert.That(normalCache.depth, Is.EqualTo(desc.CachePageCount));
+        }
+
+        [Test]
         public void ProcessRequests_ReusesResidentPhysicalPage_ForSameProducerAndPageIdentity()
         {
             var producer = new NamedProducer("SharedProducer");
@@ -166,6 +221,41 @@ namespace VividRP.Editor.Tests
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: 4,
                 feedbackCapacity: 32);
+        }
+
+        private static VirtualTextureSpaceDesc CreateLayeredDesc(
+            string name,
+            GraphicsFormat normalFormat = GraphicsFormat.R8G8B8A8_UNorm,
+            int normalPhysicalGroup = 0)
+        {
+            var stackDesc = new VTStackDesc(
+                pageSize: 128,
+                borderSize: 4,
+                cachePageCount: 6,
+                layers: new[]
+                {
+                    new VTLayerDesc(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: true,
+                        new Color32(0, 0, 0, 255),
+                        physicalGroup: 0),
+                    new VTLayerDesc(
+                        VTLayerSemantic.Normal,
+                        normalFormat,
+                        sRGB: false,
+                        new Color32(128, 128, 255, 255),
+                        physicalGroup: normalPhysicalGroup),
+                },
+                maxUploadsPerFrame: 4,
+                feedbackCapacity: 32);
+
+            return new VirtualTextureSpaceDesc(
+                name,
+                virtualPageCountX: 4,
+                virtualPageCountY: 4,
+                mipCount: 3,
+                stackDesc);
         }
 
         private static VirtualTextureUploadRequest RequestPage(

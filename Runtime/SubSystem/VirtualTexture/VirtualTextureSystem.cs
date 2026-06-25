@@ -9,7 +9,11 @@ namespace VividRP.Runtime
     {
         private static readonly Dictionary<int, VTAddressSpace> s_AddressSpaces = new();
         private static readonly Dictionary<string, int> s_SpaceIdsByName = new(StringComparer.Ordinal);
+        private static readonly Dictionary<int, VTAllocatedVirtualTexture> s_Allocations = new();
+        private static readonly Dictionary<string, int> s_AllocationIdsByName = new(StringComparer.Ordinal);
+        private static readonly Dictionary<int, int> s_AllocationIdBySpaceId = new();
         private static readonly Dictionary<VTPhysicalPoolDesc, VTPhysicalPool> s_PhysicalPools = new();
+        private static readonly VTProducerRegistry s_ProducerRegistry = new();
         private static readonly VirtualTextureFeedbackCameraSystem s_FeedbackCameraSystem = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_CompletedReadbacks = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
@@ -23,6 +27,7 @@ namespace VividRP.Runtime
         private static VTUploadScheduler s_UploadScheduler = new();
 
         private static int s_NextSpaceId = 1;
+        private static int s_NextAllocationId = 1;
         private static int s_FallbackFrameIndex = -1;
 
         private readonly struct FeedbackMotionKey : IEquatable<FeedbackMotionKey>
@@ -87,7 +92,11 @@ namespace VividRP.Runtime
 
             s_AddressSpaces.Clear();
             s_SpaceIdsByName.Clear();
+            s_Allocations.Clear();
+            s_AllocationIdsByName.Clear();
+            s_AllocationIdBySpaceId.Clear();
             s_PhysicalPools.Clear();
+            s_ProducerRegistry.Dispose();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
             s_AggregatedRequests.Clear();
@@ -98,6 +107,7 @@ namespace VividRP.Runtime
             s_FeedbackMotionKeysToRemove.Clear();
             s_FeedbackCameraSystem.Dispose();
             s_NextSpaceId = 1;
+            s_NextAllocationId = 1;
             s_FallbackFrameIndex = -1;
             s_UploadScheduler.Dispose();
             s_UploadScheduler = new VTUploadScheduler();
@@ -115,6 +125,53 @@ namespace VividRP.Runtime
             return RegisterAddressSpace(desc, null);
         }
 
+        internal static VTProducerHandle RegisterProducer(in VirtualTextureSpaceDesc desc, VTProducer producer)
+        {
+            Initialize();
+            return s_ProducerRegistry.Register(desc, producer);
+        }
+
+        internal static void ReleaseProducer(VTProducerHandle producerHandle)
+        {
+            Initialize();
+            s_ProducerRegistry.Release(producerHandle);
+        }
+
+        internal static VTAllocatedVirtualTexture AllocateVirtualTexture(in VTAllocationDesc desc)
+        {
+            Initialize();
+
+            if (!s_ProducerRegistry.TryGet(desc.ProducerHandle, out _))
+                throw new ArgumentException($"[VividRP] VT producer handle '{desc.ProducerHandle}' is not registered.");
+
+            if (s_SpaceIdsByName.TryGetValue(desc.SpaceDesc.SpaceName, out int existingSpaceId)
+                && s_AllocationIdBySpaceId.TryGetValue(existingSpaceId, out int existingSpaceAllocationId))
+            {
+                VTAllocatedVirtualTexture existingSpaceAllocation = s_Allocations[existingSpaceAllocationId];
+                if (!existingSpaceAllocation.Description.Equals(desc))
+                {
+                    throw new InvalidOperationException(
+                        $"[VividRP] VT space '{desc.SpaceDesc.SpaceName}' is already allocated by '{existingSpaceAllocation.Name}'.");
+                }
+
+                return existingSpaceAllocation;
+            }
+
+            if (s_AllocationIdsByName.TryGetValue(desc.Name, out int existingAllocationId))
+            {
+                VTAllocatedVirtualTexture existingAllocation = s_Allocations[existingAllocationId];
+                if (!existingAllocation.Description.Equals(desc))
+                {
+                    throw new InvalidOperationException(
+                        $"[VividRP] VT allocation '{desc.Name}' is already registered with a different descriptor.");
+                }
+
+                return existingAllocation;
+            }
+
+            return CreateAllocation(desc);
+        }
+
         internal static int RegisterAddressSpace(in VirtualTextureSpaceDesc desc, VTProducer producer)
         {
             Initialize();
@@ -128,14 +185,27 @@ namespace VividRP.Runtime
                         $"[VividRP] VT space '{desc.SpaceName}' is already registered with a different descriptor.");
                 }
 
+                if (!s_ProducerRegistry.IsSameProducer(existingAddressSpace.ProducerHandle, producer))
+                {
+                    throw new InvalidOperationException(
+                        $"[VividRP] VT space '{desc.SpaceName}' is already registered with a different producer.");
+                }
+
                 return existingSpaceId;
             }
 
-            int spaceId = s_NextSpaceId++;
-            VTAddressSpace addressSpace = CreateAddressSpace(spaceId, desc, producer);
-            s_AddressSpaces.Add(spaceId, addressSpace);
-            s_SpaceIdsByName.Add(desc.SpaceName, spaceId);
-            return spaceId;
+            VTProducerHandle producerHandle = s_ProducerRegistry.Register(desc, producer);
+            try
+            {
+                VTAllocatedVirtualTexture allocation = AllocateVirtualTexture(
+                    VTAllocationDesc.FromSpaceDesc(desc, producerHandle));
+                return allocation.SpaceId;
+            }
+            catch
+            {
+                s_ProducerRegistry.Release(producerHandle);
+                throw;
+            }
         }
 
         internal static int RegisterOrReconfigureAddressSpace(in VirtualTextureSpaceDesc desc, VTProducer producer)
@@ -145,9 +215,9 @@ namespace VividRP.Runtime
             if (s_SpaceIdsByName.TryGetValue(desc.SpaceName, out int existingSpaceId))
             {
                 VTAddressSpace existingAddressSpace = s_AddressSpaces[existingSpaceId];
-                VTProducer resolvedProducer = ResolveStoredProducer(producer);
+                bool sameProducer = s_ProducerRegistry.IsSameProducer(existingAddressSpace.ProducerHandle, producer);
                 if (existingAddressSpace.Descriptor.Equals(desc)
-                    && ReferenceEquals(existingAddressSpace.Producer, resolvedProducer))
+                    && sameProducer)
                 {
                     return existingSpaceId;
                 }
@@ -457,13 +527,14 @@ namespace VividRP.Runtime
             VTProducer resolvedProducer = ResolveStoredProducer(producer);
             foreach (KeyValuePair<int, VTAddressSpace> pair in s_AddressSpaces)
             {
-                if (IsSameProducer(pair.Value.Producer, resolvedProducer))
+                if (s_ProducerRegistry.IsSameProducer(pair.Value.ProducerHandle, resolvedProducer))
                     s_UploadScheduler.CancelUploadsForSpace(pair.Key);
             }
 
+            string producerName = resolvedProducer.Name;
             int flushedCount = 0;
             foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
-                flushedCount += pool.FlushProducer(resolvedProducer);
+                flushedCount += pool.FlushProducer(VTProducerHandle.Invalid, producerName);
 
             if (flushedCount > 0)
             {
@@ -633,11 +704,24 @@ namespace VividRP.Runtime
         {
             if (s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace addressSpace))
             {
-                producerName = addressSpace.Producer?.Name;
-                return true;
+                return s_ProducerRegistry.TryGetProducerName(addressSpace.ProducerHandle, out producerName);
             }
 
             producerName = null;
+            return false;
+        }
+
+        internal static bool TryGetAllocationForTesting(
+            int spaceId,
+            out VTAllocatedVirtualTexture allocation)
+        {
+            if (s_AllocationIdBySpaceId.TryGetValue(spaceId, out int allocationId)
+                && s_Allocations.TryGetValue(allocationId, out allocation))
+            {
+                return true;
+            }
+
+            allocation = null;
             return false;
         }
 
@@ -666,17 +750,6 @@ namespace VividRP.Runtime
             return producer ?? VTNullProducer.Instance;
         }
 
-        private static bool IsSameProducer(VTProducer left, VTProducer right)
-        {
-            if (ReferenceEquals(left, right))
-                return true;
-
-            if (left == null || right == null)
-                return false;
-
-            return string.Equals(left.Name, right.Name, StringComparison.Ordinal);
-        }
-
         private static VTPhysicalPool AcquirePhysicalPool(in VirtualTextureSpaceDesc desc)
         {
             VTPhysicalPoolDesc poolDesc = VTPhysicalPoolDesc.FromSpaceDesc(desc);
@@ -691,20 +764,43 @@ namespace VividRP.Runtime
         }
 
         private static VTAddressSpace CreateAddressSpace(
+            int allocationId,
             int spaceId,
             in VirtualTextureSpaceDesc desc,
-            VTProducer producer)
+            VTProducerHandle producerHandle)
         {
+            if (!s_ProducerRegistry.TryGet(producerHandle, out VTRegisteredProducer producer))
+                throw new ArgumentException($"[VividRP] VT producer handle '{producerHandle}' is not registered.");
+
             VTPhysicalPool physicalPool = AcquirePhysicalPool(desc);
             try
             {
-                return new VTAddressSpace(spaceId, desc, producer, physicalPool);
+                return new VTAddressSpace(allocationId, spaceId, desc, producer, physicalPool);
             }
             catch
             {
                 ReleasePhysicalPool(physicalPool);
                 throw;
             }
+        }
+
+        private static VTAllocatedVirtualTexture CreateAllocation(in VTAllocationDesc desc)
+        {
+            int allocationId = s_NextAllocationId++;
+            int spaceId = s_NextSpaceId++;
+            VTAddressSpace addressSpace = CreateAddressSpace(
+                allocationId,
+                spaceId,
+                desc.SpaceDesc,
+                desc.ProducerHandle);
+
+            var allocation = new VTAllocatedVirtualTexture(allocationId, spaceId, desc);
+            s_AddressSpaces.Add(spaceId, addressSpace);
+            s_SpaceIdsByName.Add(desc.SpaceDesc.SpaceName, spaceId);
+            s_Allocations.Add(allocationId, allocation);
+            s_AllocationIdsByName.Add(desc.Name, allocationId);
+            s_AllocationIdBySpaceId.Add(spaceId, allocationId);
+            return allocation;
         }
 
         private static void ReleasePhysicalPool(VTPhysicalPool pool)
@@ -743,12 +839,40 @@ namespace VividRP.Runtime
             if (!s_AddressSpaces.TryGetValue(spaceId, out VTAddressSpace existingAddressSpace))
                 return;
 
+            VTProducerHandle producerHandle = s_ProducerRegistry.Register(desc, producer);
+            int allocationId = existingAddressSpace.AllocationId;
+            string allocationName = existingAddressSpace.Descriptor.SpaceName;
+            if (s_Allocations.TryGetValue(allocationId, out VTAllocatedVirtualTexture existingAllocation))
+                allocationName = existingAllocation.Name;
+            var allocationDesc = VTAllocationDesc.FromSpaceDesc(desc, producerHandle);
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
             VTPhysicalPool oldPhysicalPool = existingAddressSpace.PhysicalPool;
+            VTProducerHandle oldProducerHandle = existingAddressSpace.ProducerHandle;
             existingAddressSpace.Dispose();
             ReleasePhysicalPool(oldPhysicalPool);
+            s_ProducerRegistry.Release(oldProducerHandle);
             RemoveFeedbackStateForSpace(spaceId);
-            s_AddressSpaces[spaceId] = CreateAddressSpace(spaceId, desc, producer);
+            try
+            {
+                s_AddressSpaces[spaceId] = CreateAddressSpace(allocationId, spaceId, desc, producerHandle);
+            }
+            catch
+            {
+                s_ProducerRegistry.Release(producerHandle);
+                s_AddressSpaces.Remove(spaceId);
+                s_SpaceIdsByName.Remove(existingAddressSpace.Descriptor.SpaceName);
+                s_AllocationIdBySpaceId.Remove(spaceId);
+                s_Allocations.Remove(allocationId);
+                s_AllocationIdsByName.Remove(allocationName);
+                throw;
+            }
+
+            if (s_AllocationIdBySpaceId.TryGetValue(spaceId, out int existingAllocationId)
+                && s_Allocations.ContainsKey(existingAllocationId))
+            {
+                s_Allocations[existingAllocationId] =
+                    new VTAllocatedVirtualTexture(existingAllocationId, spaceId, allocationDesc);
+            }
         }
 
         private static void RemoveAddressSpace(int spaceId)
@@ -758,10 +882,20 @@ namespace VividRP.Runtime
 
             s_AddressSpaces.Remove(spaceId);
             s_SpaceIdsByName.Remove(addressSpace.Descriptor.SpaceName);
+            if (s_AllocationIdBySpaceId.TryGetValue(spaceId, out int allocationId))
+            {
+                s_AllocationIdBySpaceId.Remove(spaceId);
+                if (s_Allocations.TryGetValue(allocationId, out VTAllocatedVirtualTexture allocation))
+                    s_AllocationIdsByName.Remove(allocation.Name);
+                s_Allocations.Remove(allocationId);
+            }
+
             s_UploadScheduler.CancelUploadsForSpace(spaceId);
             VTPhysicalPool physicalPool = addressSpace.PhysicalPool;
+            VTProducerHandle producerHandle = addressSpace.ProducerHandle;
             addressSpace.Dispose();
             ReleasePhysicalPool(physicalPool);
+            s_ProducerRegistry.Release(producerHandle);
             RemoveFeedbackStateForSpace(spaceId);
         }
 

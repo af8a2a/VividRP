@@ -44,7 +44,10 @@ namespace VividRP.Editor.Tests
 
                 VirtualTextureSpaceBinding binding = virtualTextureFrameData.Bindings.Single();
                 Assert.That(binding.SpaceId, Is.EqualTo(spaceId));
+                Assert.That(binding.BindingIndex, Is.EqualTo(0));
                 Assert.That(binding.SpaceName, Is.EqualTo(desc.SpaceName));
+                Assert.That(binding.AllocationId, Is.GreaterThan(0));
+                Assert.That(binding.ProducerHandle.IsValid, Is.True);
                 Assert.That(binding.PageTableBuffer, Is.Not.Null);
                 Assert.That(binding.PageTableBuffer.count, Is.EqualTo(binding.ShaderParams.PageTableEntryCount));
                 Assert.That(binding.PhysicalCache, Is.Not.Null);
@@ -65,6 +68,91 @@ namespace VividRP.Editor.Tests
             {
                 commandBuffer.Dispose();
                 Object.DestroyImmediate(cameraGameObject);
+            }
+        }
+
+        [Test]
+        public void RegisterProducerAndAllocateVirtualTexture_CreateSampleableAllocationBinding()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("AllocatedVT", cachePageCount: 2, maxUploadsPerFrame: 1);
+            var producer = new TestProducer();
+            VTProducerHandle producerHandle = VirtualTextureSystem.RegisterProducer(desc, producer);
+            VTAllocatedVirtualTexture allocation = VirtualTextureSystem.AllocateVirtualTexture(
+                VTAllocationDesc.FromSpaceDesc(desc, producerHandle));
+            var frameData = new ContextContainer();
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Assert.That(producerHandle.IsValid, Is.True);
+                Assert.That(allocation.IsValid, Is.True);
+                Assert.That(allocation.ProducerHandle, Is.EqualTo(producerHandle));
+                Assert.That(allocation.SpaceDesc, Is.EqualTo(desc));
+                Assert.That(VirtualTextureSystem.TryGetAllocationForTesting(
+                    allocation.SpaceId,
+                    out VTAllocatedVirtualTexture storedAllocation), Is.True);
+                Assert.That(storedAllocation, Is.SameAs(allocation));
+                Assert.That(VirtualTextureSystem.TryGetProducerNameForTesting(
+                    allocation.SpaceId,
+                    out string producerName), Is.True);
+                Assert.That(producerName, Is.EqualTo(nameof(TestProducer)));
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VividVirtualTextureFrameData virtualTextureFrameData = frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(virtualTextureFrameData.BindingCount, Is.EqualTo(1));
+                Assert.That(virtualTextureFrameData.TryGetBinding(0, out VirtualTextureSpaceBinding binding), Is.True);
+                Assert.That(binding.BindingIndex, Is.EqualTo(0));
+                Assert.That(binding.AllocationId, Is.EqualTo(allocation.AllocationId));
+                Assert.That(binding.ProducerHandle, Is.EqualTo(producerHandle));
+                Assert.That(virtualTextureFrameData.TryGetBindingForAllocation(
+                    allocation.AllocationId,
+                    out VirtualTextureSpaceBinding allocationBinding), Is.True);
+                Assert.That(allocationBinding.SpaceId, Is.EqualTo(allocation.SpaceId));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_PopulatesBindingTable_ForMultipleAllocatedVirtualTextures()
+        {
+            int firstSpaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("BindingTableA", cachePageCount: 4, maxUploadsPerFrame: 1));
+            int secondSpaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("BindingTableB", cachePageCount: 4, maxUploadsPerFrame: 1));
+            var frameData = new ContextContainer();
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                Assert.That(VirtualTextureSystem.TryGetAllocationForTesting(
+                    firstSpaceId,
+                    out VTAllocatedVirtualTexture firstAllocation), Is.True);
+                Assert.That(VirtualTextureSystem.TryGetAllocationForTesting(
+                    secondSpaceId,
+                    out VTAllocatedVirtualTexture secondAllocation), Is.True);
+
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VividVirtualTextureFrameData virtualTextureFrameData = frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(virtualTextureFrameData.BindingCount, Is.EqualTo(2));
+                Assert.That(virtualTextureFrameData.TryGetBinding(0, out VirtualTextureSpaceBinding firstBinding), Is.True);
+                Assert.That(virtualTextureFrameData.TryGetBinding(1, out VirtualTextureSpaceBinding secondBinding), Is.True);
+                Assert.That(firstBinding.BindingIndex, Is.EqualTo(0));
+                Assert.That(secondBinding.BindingIndex, Is.EqualTo(1));
+                Assert.That(firstBinding.AllocationId, Is.EqualTo(firstAllocation.AllocationId));
+                Assert.That(secondBinding.AllocationId, Is.EqualTo(secondAllocation.AllocationId));
+                Assert.That(virtualTextureFrameData.TryGetBindingForAllocation(
+                    secondAllocation.AllocationId,
+                    out VirtualTextureSpaceBinding lookupBinding), Is.True);
+                Assert.That(lookupBinding.SpaceId, Is.EqualTo(secondSpaceId));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
             }
         }
 

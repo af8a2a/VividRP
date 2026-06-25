@@ -9,26 +9,51 @@ namespace VividRP.Runtime
 
         internal IReadOnlyList<VirtualTextureSpaceBinding> Bindings => m_Bindings;
 
+        internal int BindingCount => m_Bindings.Count;
+
         public override void Reset()
         {
             m_Bindings.Clear();
         }
 
-        internal void AddBinding(in VirtualTextureSpaceBinding binding)
+        internal int AddBinding(in VirtualTextureSpaceBinding binding)
         {
-            m_Bindings.Add(binding);
+            int bindingIndex = m_Bindings.Count;
+            m_Bindings.Add(binding.WithBindingIndex(bindingIndex));
+            return bindingIndex;
         }
 
-        internal bool TryGetPrimaryBinding(out VirtualTextureSpaceBinding binding)
+        internal bool TryGetBinding(int bindingIndex, out VirtualTextureSpaceBinding binding)
         {
-            if (m_Bindings.Count > 0)
+            if (bindingIndex >= 0 && bindingIndex < m_Bindings.Count)
             {
-                binding = m_Bindings[0];
+                binding = m_Bindings[bindingIndex];
                 return true;
             }
 
             binding = default;
             return false;
+        }
+
+        internal bool TryGetBindingForAllocation(int allocationId, out VirtualTextureSpaceBinding binding)
+        {
+            for (int bindingIndex = 0; bindingIndex < m_Bindings.Count; bindingIndex++)
+            {
+                VirtualTextureSpaceBinding candidate = m_Bindings[bindingIndex];
+                if (candidate.AllocationId != allocationId)
+                    continue;
+
+                binding = candidate;
+                return true;
+            }
+
+            binding = default;
+            return false;
+        }
+
+        internal bool TryGetDefaultBinding(out VirtualTextureSpaceBinding binding)
+        {
+            return TryGetBinding(0, out binding);
         }
     }
 }

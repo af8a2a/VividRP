@@ -91,7 +91,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_RenderList == null
                 || !m_RenderList.IsValid
                 || m_VirtualTextureFrameData == null
-                || !m_VirtualTextureFrameData.TryGetPrimaryBinding(out VirtualTextureSpaceBinding binding)
+                || !m_VirtualTextureFrameData.TryGetDefaultBinding(out VirtualTextureSpaceBinding binding)
                 || !binding.IsValid)
             {
                 return;

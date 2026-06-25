@@ -107,14 +107,17 @@ namespace VividRP.Runtime
 
     internal readonly struct VTPhysicalPageIdentity : IEquatable<VTPhysicalPageIdentity>
     {
-        internal VTPhysicalPageIdentity(VTProducer producer, in VirtualTexturePageCoord pageCoord)
+        internal VTPhysicalPageIdentity(
+            VTProducerHandle producerHandle,
+            string producerName,
+            in VirtualTexturePageCoord pageCoord)
         {
-            Producer = producer;
-            ProducerName = producer?.Name;
+            ProducerHandle = producerHandle;
+            ProducerName = producerName;
             PageCoord = pageCoord;
         }
 
-        internal VTProducer Producer { get; }
+        internal VTProducerHandle ProducerHandle { get; }
 
         internal string ProducerName { get; }
 
@@ -122,9 +125,10 @@ namespace VividRP.Runtime
 
         public bool Equals(VTPhysicalPageIdentity other)
         {
-            bool sameProducer = ReferenceEquals(Producer, other.Producer)
-                                || (!string.IsNullOrEmpty(ProducerName)
-                                    && string.Equals(ProducerName, other.ProducerName, StringComparison.Ordinal));
+            bool sameProducer = ProducerHandle.IsValid && other.ProducerHandle.IsValid
+                ? ProducerHandle.Equals(other.ProducerHandle)
+                : !string.IsNullOrEmpty(ProducerName)
+                  && string.Equals(ProducerName, other.ProducerName, StringComparison.Ordinal);
             return sameProducer && PageCoord.Equals(other.PageCoord);
         }
 
@@ -135,7 +139,9 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(ProducerName ?? string.Empty, PageCoord);
+            return ProducerHandle.IsValid
+                ? HashCode.Combine(ProducerHandle, PageCoord)
+                : HashCode.Combine(ProducerName ?? string.Empty, PageCoord);
         }
     }
 
@@ -272,7 +278,8 @@ namespace VividRP.Runtime
 
         internal bool TryAllocatePage(
             IVTPhysicalPoolOwner owner,
-            VTProducer producer,
+            VTProducerHandle producerHandle,
+            string producerName,
             int pageIndex,
             int pageMip,
             in VirtualTexturePageCoord pageCoord,
@@ -313,7 +320,7 @@ namespace VividRP.Runtime
             slotState.VirtualPageMip = pageMip;
             slotState.Generation = generation;
             slotState.LastAllocationFrame = frameIndex;
-            slotState.Identity = new VTPhysicalPageIdentity(producer, pageCoord);
+            slotState.Identity = new VTPhysicalPageIdentity(producerHandle, producerName, pageCoord);
             slotState.Resident = !pendingUpload;
             slotState.PendingUpload = pendingUpload;
             slotState.Locked = locked;
@@ -328,7 +335,8 @@ namespace VividRP.Runtime
 
         internal bool TryAttachResidentPage(
             IVTPhysicalPoolOwner owner,
-            VTProducer producer,
+            VTProducerHandle producerHandle,
+            string producerName,
             int pageIndex,
             in VirtualTexturePageCoord pageCoord,
             VirtualTextureViewId viewId,
@@ -342,7 +350,7 @@ namespace VividRP.Runtime
             if (owner == null)
                 return false;
 
-            if (!TryFindPhysicalPage(producer, pageCoord, out physicalPageId, out generation))
+            if (!TryFindPhysicalPage(producerHandle, producerName, pageCoord, out physicalPageId, out generation))
                 return false;
 
             PhysicalPageSlotState slotState = m_Slots[physicalPageId];
@@ -359,12 +367,13 @@ namespace VividRP.Runtime
         }
 
         internal bool TryFindPhysicalPage(
-            VTProducer producer,
+            VTProducerHandle producerHandle,
+            string producerName,
             in VirtualTexturePageCoord pageCoord,
             out int physicalPageId,
             out int generation)
         {
-            var identity = new VTPhysicalPageIdentity(producer, pageCoord);
+            var identity = new VTPhysicalPageIdentity(producerHandle, producerName, pageCoord);
             for (int slotIndex = 0; slotIndex < m_Slots.Length; slotIndex++)
             {
                 PhysicalPageSlotState slotState = m_Slots[slotIndex];
@@ -447,13 +456,13 @@ namespace VividRP.Runtime
             }
         }
 
-        internal int FlushProducer(VTProducer producer)
+        internal int FlushProducer(VTProducerHandle producerHandle, string producerName)
         {
             int flushedCount = 0;
             for (int slotIndex = m_Slots.Length - 1; slotIndex >= 0; slotIndex--)
             {
                 PhysicalPageSlotState slotState = m_Slots[slotIndex];
-                if (!IsOccupied(slotState) || !IsSameProducer(slotState.Identity.Producer, producer))
+                if (!IsOccupied(slotState) || !IsSameProducer(slotState.Identity, producerHandle, producerName))
                     continue;
 
                 FlushPhysicalPage(slotIndex);
@@ -820,15 +829,22 @@ namespace VividRP.Runtime
             return viewId.IsValid || viewId.IsCameraTypeOnly;
         }
 
-        private static bool IsSameProducer(VTProducer left, VTProducer right)
+        private static bool IsSameProducer(
+            in VTPhysicalPageIdentity identity,
+            VTProducerHandle producerHandle,
+            string producerName)
         {
-            if (ReferenceEquals(left, right))
+            if (producerHandle.IsValid
+                && identity.ProducerHandle.IsValid
+                && identity.ProducerHandle.Equals(producerHandle))
+            {
                 return true;
+            }
 
-            if (left == null || right == null)
+            if (string.IsNullOrEmpty(identity.ProducerName) || string.IsNullOrEmpty(producerName))
                 return false;
 
-            return string.Equals(left.Name, right.Name, StringComparison.Ordinal);
+            return string.Equals(identity.ProducerName, producerName, StringComparison.Ordinal);
         }
     }
 }

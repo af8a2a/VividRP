@@ -116,7 +116,7 @@ namespace VividRP.Runtime.RenderPass.Core
             VirtualTextureSpaceBinding binding = default;
             bool hasBinding =
                 m_VirtualTextureFrameData != null
-                && m_VirtualTextureFrameData.TryGetPrimaryBinding(out binding)
+                && m_VirtualTextureFrameData.TryGetDefaultBinding(out binding)
                 && binding.IsValid;
             mpb.SetInt(VisualizationAvailableId, hasBinding ? 1 : 0);
 

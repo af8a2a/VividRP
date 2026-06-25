@@ -89,7 +89,8 @@ namespace VividRP.Runtime
         }
 
         private readonly int m_SpaceId;
-        private readonly VTProducer m_Producer;
+        private readonly VTProducerHandle m_ProducerHandle;
+        private readonly string m_ProducerName;
         private readonly VirtualTextureSpaceDesc m_Desc;
         private readonly int[] m_MipOffsets;
         private readonly VTPageRuntimeState[] m_PageStates;
@@ -103,7 +104,8 @@ namespace VividRP.Runtime
 
         internal VTResidencyManager(
             int spaceId,
-            VTProducer producer,
+            VTProducerHandle producerHandle,
+            string producerName,
             string spaceName,
             in VirtualTextureSpaceDesc desc,
             int totalPageCount,
@@ -111,7 +113,8 @@ namespace VividRP.Runtime
             VTPhysicalPool physicalPool)
         {
             m_SpaceId = spaceId;
-            m_Producer = producer ?? VTNullProducer.Instance;
+            m_ProducerHandle = producerHandle;
+            m_ProducerName = producerName;
             m_Desc = desc;
             m_MipOffsets = mipOffsets;
             m_PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));
@@ -170,7 +173,8 @@ namespace VividRP.Runtime
 
             if (m_PhysicalPool.TryAttachResidentPage(
                     this,
-                    m_Producer,
+                    m_ProducerHandle,
+                    m_ProducerName,
                     pageIndex,
                     coord,
                     viewId,
@@ -200,7 +204,8 @@ namespace VividRP.Runtime
 
             if (!m_PhysicalPool.TryAllocatePage(
                     this,
-                    m_Producer,
+                    m_ProducerHandle,
+                    m_ProducerName,
                     pageIndex,
                     m_PageMips[pageIndex],
                     coord,
@@ -526,7 +531,8 @@ namespace VividRP.Runtime
             VirtualTextureViewId attachViewId = isPrefetch ? VirtualTextureViewId.Invalid : request.ViewId;
             if (m_PhysicalPool.TryAttachResidentPage(
                     this,
-                    m_Producer,
+                    m_ProducerHandle,
+                    m_ProducerName,
                     pageIndex,
                     request.PageCoord,
                     attachViewId,
@@ -557,7 +563,8 @@ namespace VividRP.Runtime
             bool updateAffinity = !isPrefetch && HasViewAffinity(request.ViewId);
             if (!m_PhysicalPool.TryAllocatePage(
                     this,
-                    m_Producer,
+                    m_ProducerHandle,
+                    m_ProducerName,
                     pageIndex,
                     m_PageMips[pageIndex],
                     request.PageCoord,

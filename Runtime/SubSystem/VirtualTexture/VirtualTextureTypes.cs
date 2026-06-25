@@ -409,8 +409,11 @@ namespace VividRP.Runtime
     internal readonly struct VirtualTextureSpaceBinding
     {
         internal VirtualTextureSpaceBinding(
+            int bindingIndex,
+            int allocationId,
             int spaceId,
             string spaceName,
+            VTProducerHandle producerHandle,
             GraphicsBuffer pageTableBuffer,
             Texture2DArray physicalCache,
             ComputeBuffer feedbackRequests,
@@ -419,8 +422,11 @@ namespace VividRP.Runtime
             int[] mipOffsets,
             Vector4[] layerFallbacks)
         {
+            BindingIndex = bindingIndex;
+            AllocationId = allocationId;
             SpaceId = spaceId;
             SpaceName = spaceName;
+            ProducerHandle = producerHandle;
             PageTableBuffer = pageTableBuffer;
             PhysicalCache = physicalCache;
             FeedbackRequests = feedbackRequests;
@@ -430,9 +436,15 @@ namespace VividRP.Runtime
             LayerFallbacks = layerFallbacks ?? Array.Empty<Vector4>();
         }
 
+        public int BindingIndex { get; }
+
+        public int AllocationId { get; }
+
         public int SpaceId { get; }
 
         public string SpaceName { get; }
+
+        public VTProducerHandle ProducerHandle { get; }
 
         public GraphicsBuffer PageTableBuffer { get; }
 
@@ -451,6 +463,23 @@ namespace VividRP.Runtime
         public bool HasFeedback => FeedbackRequests != null && FeedbackCounter != null;
 
         public bool IsValid => PageTableBuffer != null && PhysicalCache != null;
+
+        internal VirtualTextureSpaceBinding WithBindingIndex(int bindingIndex)
+        {
+            return new VirtualTextureSpaceBinding(
+                bindingIndex,
+                AllocationId,
+                SpaceId,
+                SpaceName,
+                ProducerHandle,
+                PageTableBuffer,
+                PhysicalCache,
+                FeedbackRequests,
+                FeedbackCounter,
+                ShaderParams,
+                MipOffsets,
+                LayerFallbacks);
+        }
     }
 
     internal readonly struct VirtualTextureStats

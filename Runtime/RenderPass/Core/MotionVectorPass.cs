@@ -39,8 +39,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "CameraDepthStencil", Access = AccessFlags.ReadWrite, IsDepthAttachment = true)]
         private RenderGraphTexture m_CameraDepthStencilTexture;
 
-        [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_CameraDepthTexture;
 
         [RenderGraphResource(Name = "MotionVectors", Access = AccessFlags.Write, AttachmentIndex = 0)]
         private RenderGraphTexture m_MotionVectorTexture;
@@ -74,8 +72,6 @@ namespace VividRP.Runtime.RenderPass.Core
             };
 
             m_CameraDepthStencilTexture = RenderGraphTexture.CreateInput("CameraDepthStencil", GraphicsFormat.None, DepthBits.Depth32);
-            m_CameraDepthTexture = RenderGraphTexture.CreateInput("CameraDepth", GraphicsFormat.R32_SFloat);
-            m_CameraDepthTexture.desc.FilterMode = FilterMode.Point;
             m_MotionVectorTexture = RenderGraphTexture.CreateColorTarget("MotionVectors", GraphicsFormat.R16G16_SFloat);
             m_MotionVectorTexture.desc.ClearBuffer = false;
             m_MotionVectorTexture.desc.ClearColor = Color.clear;
@@ -192,7 +188,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void ConfigureTargets(VividCameraData cameraData)
         {
-            var sourceDescriptor = m_CameraDepthStencilTexture?.desc ?? m_CameraDepthTexture?.desc;
+            var sourceDescriptor = m_CameraDepthStencilTexture.desc;
             var hasExplicitSourceSize = RenderGraphTextureDescUtility.HasExplicitSize(sourceDescriptor);
 
             var width = hasExplicitSourceSize
@@ -237,13 +233,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private RenderGraphTexture ResolveCameraDepthTextureForSampling()
         {
-            if (m_CameraDepthTexture?.innerHandle.IsValid() != true)
-                return m_CameraDepthStencilTexture;
-
-            if (IsDefaultCameraDepthTexture(m_CameraDepthTexture, m_CameraDepthStencilTexture))
-                return m_CameraDepthStencilTexture;
-
-            return m_CameraDepthTexture;
+            return m_CameraDepthStencilTexture;
         }
 
         private static bool IsDefaultCameraDepthTexture(RenderGraphTexture cameraDepthTexture, RenderGraphTexture depthStencilTexture)

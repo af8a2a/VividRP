@@ -4747,7 +4747,6 @@ MonoBehaviour:
         m_Name: Lighting
         m_GraphNodeModels:
         - rid: 8515051663678505535
-        - rid: 8515051663678505536
         - rid: 8515051663678505537
         - rid: 8515051663678505538
         - rid: 8515051663678505539
@@ -4778,8 +4777,6 @@ MonoBehaviour:
         - rid: 5491569450071621802
         - rid: 5491569450071621806
         m_GraphWireModels:
-        - rid: 8515051663678505556
-        - rid: 8515051663678505557
         - rid: 8515051663678505558
         - rid: 8515051663678505559
         - rid: 8515053000000000000
@@ -4960,14 +4957,6 @@ MonoBehaviour:
             Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
           m_Category: 0
           m_Index: 0
-        - m_Guid:
-            m_Value0: 11122011513891877756
-            m_Value1: 18249261315362888321
-          m_HashGuid:
-            serializedVersion: 2
-            Hash: 7c7354818b52599a819a7b437a6642fd
-          m_Category: 0
-          m_Index: 1
         - m_Guid:
             m_Value0: 3909162738669154818
             m_Value1: 11300202351240014241
@@ -6788,8 +6777,6 @@ MonoBehaviour:
           - m_LayeredOffsetBuffer
           - m_LayeredLightListBuffer
           - m_LogBaseBuffer
-          - m_PreIntegratedFGDGGXDisneyDiffuseTexture
-          - m_PreIntegratedFGDCharlieAndFabricTexture
           - m_GBuffer4
           - m_AreaLightBuffer
           - m_GTAOTexture
@@ -6812,8 +6799,6 @@ MonoBehaviour:
           - rid: 8515051663678505648
           - rid: 8515051663678505649
           - rid: 8515051663678505650
-          - rid: 8515051663678505651
-          - rid: 8515051663678505652
           - rid: 8515051663678505653
           - rid: 8515051684490641477
           - rid: 8515051720831926335
@@ -6834,40 +6819,6 @@ MonoBehaviour:
           m_HasUserColor: 0
         m_Node:
           rid: 8515051663678505654
-    - rid: 8515051663678505536
-      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 11122011513891877756
-          m_Value1: 18249261315362888321
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: 7c7354818b52599a819a7b437a6642fd
-        m_Version: 2
-        m_Position: {x: 943.8659, y: 576.3361}
-        m_Title: 
-        m_Tooltip: 
-        m_NodePreviewModel:
-          rid: -2
-        m_State: 0
-        m_InputConstantsById:
-          m_KeyList: []
-          m_ValueList: []
-        m_InputPortInfos:
-          expandedPortsById:
-            m_KeyList: []
-            m_ValueList: {_typeName: UInt8, _data: }
-        m_OutputPortInfos:
-          expandedPortsById:
-            m_KeyList: []
-            m_ValueList: {_typeName: UInt8, _data: }
-        m_Collapsed: 0
-        m_CurrentModeIndex: 0
-        m_ElementColor:
-          m_Color: {r: 0, g: 0, b: 0, a: 0}
-          m_HasUserColor: 0
-        m_Node:
-          rid: 8515051663678505655
     - rid: 8515051663678505537
       type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7359,70 +7310,6 @@ MonoBehaviour:
         m_DeclarationModelHashGuid:
           serializedVersion: 2
           Hash: f60d267dd72f99ca7c3bb0f122f587e1
-    - rid: 8515051663678505556
-      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 14869335483841385268
-          m_Value1: 15024914890261134014
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: 34137a68d77d5acebefa7dbe7c3883d0
-        m_Version: 2
-        m_FromPortReference:
-          m_NodeModelGuid:
-            m_Value0: 11122011513891877756
-            m_Value1: 18249261315362888321
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: 7c7354818b52599a819a7b437a6642fd
-          m_UniqueId: m_GGXDisneyDiffuseTexture
-          m_PortDirection: 2
-          m_PortOrientation: 0
-          m_Title: PreIntegratedFGD_GGXDisneyDiffuse (W)
-        m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 8157211344893881794
-            m_Value1: 17810888210725321172
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
-          m_UniqueId: m_PreIntegratedFGDGGXDisneyDiffuseTexture
-          m_PortDirection: 1
-          m_PortOrientation: 0
-          m_Title: PreIntegratedFGD_GGXDisneyDiffuse (R)
-    - rid: 8515051663678505557
-      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 10837479496556066901
-          m_Value1: 7585033116381728105
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: 55b8cdc42e76669669cd819f6e734369
-        m_Version: 2
-        m_FromPortReference:
-          m_NodeModelGuid:
-            m_Value0: 11122011513891877756
-            m_Value1: 18249261315362888321
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: 7c7354818b52599a819a7b437a6642fd
-          m_UniqueId: m_CharlieAndFabricTexture
-          m_PortDirection: 2
-          m_PortOrientation: 0
-          m_Title: PreIntegratedFGD_CharlieAndFabric (W)
-        m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 8157211344893881794
-            m_Value1: 17810888210725321172
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: c2ad2fda7f3c3471d4b9792676fc2cf7
-          m_UniqueId: m_PreIntegratedFGDCharlieAndFabricTexture
-          m_PortDirection: 1
-          m_PortOrientation: 0
-          m_Title: PreIntegratedFGD_CharlieAndFabric (R)
     - rid: 8515051663678505558
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -8744,62 +8631,6 @@ MonoBehaviour:
             Stride: 4
             Target: 16
             Name: Buffer
-    - rid: 8515051663678505651
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Width: 1920
-            Height: 1080
-            Slices: 1
-            Dimension: 2
-            ColorFormat: 4
-            DepthBufferBits: 0
-            MsaaSamples: 1
-            FilterMode: 1
-            WrapMode: 1
-            AnisoLevel: 1
-            MipMapBias: 0
-            UseMipMap: 0
-            AutoGenerateMips: 0
-            MipCount: 1
-            ClearBuffer: 0
-            ClearColor: {r: 0, g: 0, b: 0, a: 0}
-            IsShadowMap: 0
-            EnableRandomWrite: 0
-            BindTextureMS: 0
-            UseDynamicScale: 0
-            UseDynamicScaleExplicit: 0
-            ScaleFactor: {x: 1, y: 1}
-            Name: Texture
-    - rid: 8515051663678505652
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            Width: 1920
-            Height: 1080
-            Slices: 1
-            Dimension: 2
-            ColorFormat: 4
-            DepthBufferBits: 0
-            MsaaSamples: 1
-            FilterMode: 1
-            WrapMode: 1
-            AnisoLevel: 1
-            MipMapBias: 0
-            UseMipMap: 0
-            AutoGenerateMips: 0
-            MipCount: 1
-            ClearBuffer: 0
-            ClearColor: {r: 0, g: 0, b: 0, a: 0}
-            IsShadowMap: 0
-            EnableRandomWrite: 0
-            BindTextureMS: 0
-            UseDynamicScale: 0
-            UseDynamicScaleExplicit: 0
-            ScaleFactor: {x: 1, y: 1}
-            Name: Texture
     - rid: 8515051663678505653
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -8830,9 +8661,6 @@ MonoBehaviour:
             Name: Texture
     - rid: 8515051663678505654
       type: {class: DeferredLightingPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
-      data: 
-    - rid: 8515051663678505655
-      type: {class: PreIntegratedFGDPreparePass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data: 
     - rid: 8515051663678505656
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}

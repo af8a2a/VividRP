@@ -34,8 +34,6 @@ namespace VividRP.Editor.Tests
                 "GBuffer3",
                 "GBuffer4",
                 "GTAOTexture",
-                "PreIntegratedFGD_CharlieAndFabric",
-                "PreIntegratedFGD_GGXDisneyDiffuse",
                 "ScreenSpaceReflectionOutput",
                 "SkyIBLCubemap"
             }));
@@ -44,8 +42,7 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Single(entry => entry.Name == "DeferredLightingDebug").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(textureEntries.Single(entry => entry.Name == "DeferredLightingDebug").AttachmentIndex, Is.EqualTo(-1));
             Assert.That(textureEntries.Single(entry => entry.Name == "SkyIBLCubemap").Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_GGXDisneyDiffuse").Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(textureEntries.Single(entry => entry.Name == "PreIntegratedFGD_CharlieAndFabric").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries.Any(entry => entry.Name.StartsWith("PreIntegratedFGD_")), Is.False);
             Assert.That(
                 textureEntries
                     .Where(entry => entry.Name != "Color" && entry.Name != "DeferredLightingDebug")
@@ -193,6 +190,25 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_DebugTexture_In"), Is.Null);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void DeferredLightingPassNode_DoesNotExposePreIntegratedFgdInputPorts()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var node = new VividRP.Editor.RenderGraph.Generated.DeferredLightingPass();
+                RenderGraphTestUtility.AddTestNode(graph, node);
+
+                Assert.That(node.GetInputPortByName("m_PreIntegratedFGDGGXDisneyDiffuseTexture"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_PreIntegratedFGDCharlieAndFabricTexture"), Is.Null);
             }
             finally
             {

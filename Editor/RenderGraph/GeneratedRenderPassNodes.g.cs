@@ -108,9 +108,6 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class PreDepthPass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class PreIntegratedFGDPreparePass : RenderPassNodeData { }
-
-    [Serializable]
     internal sealed class RTASBuildPass : RenderPassNodeData { }
 
     [Serializable]

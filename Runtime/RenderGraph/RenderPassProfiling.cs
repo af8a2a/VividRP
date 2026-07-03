@@ -158,6 +158,7 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameContextSubsystemPreRenderMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender");
         public static readonly ProfilerMarker PrepareFrameSubsystemAutoExposureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividAutoExposureSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemLTCAreaLightMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem");
+        public static readonly ProfilerMarker PrepareFrameSubsystemPreIntegratedFGDMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividPreIntegratedFGDSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/DecalSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/DecalSystem.Kick");
         public static readonly ProfilerMarker PrepareFrameSubsystemDecalCullScheduleMarker = new("VividRP.RenderPipeline.RenderCamera.DecalSystem.CullSchedule");

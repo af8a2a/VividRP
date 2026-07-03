@@ -1,6 +1,8 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
+using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
 {
@@ -155,14 +157,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PreIntegratedFGDPreparePass_ExposesReusablePreparedLutOutputs()
+        public void PreIntegratedFGDFrameData_StoresPreparedLutHandlesForDeferredLighting()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "Lighting", "PreIntegratedFGDPreparePass.cs"));
+            RTHandles.Initialize(1, 1);
+            var ggxDisneyDiffuse = VividPreIntegratedFGD.CreatePersistentTexture("TestPreIntegratedFGD_GGXDisneyDiffuse");
+            var charlieAndFabric = VividPreIntegratedFGD.CreatePersistentTexture("TestPreIntegratedFGD_CharlieAndFabric");
+            var data = new VividPreIntegratedFGDData();
 
-            Assert.That(source, Does.Contain("PreIntegratedFGD_GGXDisneyDiffuse"));
-            Assert.That(source, Does.Contain("PreIntegratedFGD_CharlieAndFabric"));
-            Assert.That(source, Does.Contain("PassOwnedOverrideable"));
-            Assert.That(source, Does.Contain("PassRecorder.ImportTexture"));
+            try
+            {
+                data.SetTextures(ggxDisneyDiffuse, charlieAndFabric);
+
+                Assert.That(data.hasValidTextures, Is.True);
+                Assert.That(data.ggxDisneyDiffuseTexture, Is.SameAs(ggxDisneyDiffuse));
+                Assert.That(data.charlieAndFabricTexture, Is.SameAs(charlieAndFabric));
+            }
+            finally
+            {
+                ggxDisneyDiffuse?.Release();
+                charlieAndFabric?.Release();
+            }
         }
 
         [Test]

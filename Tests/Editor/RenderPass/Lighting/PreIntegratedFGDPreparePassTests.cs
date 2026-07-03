@@ -1,72 +1,58 @@
-using System.IO;
 using System.Linq;
 using NUnit.Framework;
-using UnityEngine;
 using UnityEngine.Rendering;
-using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
-    public sealed class PreIntegratedFGDPreparePassTests
+    public sealed class PreIntegratedFGDFrameContextTests
     {
         [Test]
-        public void Initialize_RegistersTwoPreIntegratedFgdOutputs_WhenPassIsCreated()
+        public void DeferredLightingPass_DoesNotRegisterPreIntegratedFgdInputs_WhenInitialized()
         {
-            IRenderPass renderPass = new PreIntegratedFGDPreparePass();
+            IRenderPass renderPass = new DeferredLightingPass();
 
             var resources = renderPass.Initialize();
-            var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
 
-            Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
-            {
-                "PreIntegratedFGD_CharlieAndFabric",
-                "PreIntegratedFGD_GGXDisneyDiffuse"
-            }));
-            Assert.That(textureEntries.Select(entry => entry.Access).Distinct(), Is.EqualTo(new[] { AccessFlags.Write }));
+            Assert.That(resources.Textures.Any(entry => entry.Name.StartsWith("PreIntegratedFGD_")), Is.False);
         }
 
         [Test]
-        public void PreIntegratedFGDPreparePass_InheritsFromUnsafePass()
+        public void VividPreIntegratedFGDData_SetTexturesMarksValidAndResetClearsHandles()
         {
-            Assert.That(typeof(UnsafePass).IsAssignableFrom(typeof(PreIntegratedFGDPreparePass)), Is.True);
-        }
+            RTHandles.Initialize(1, 1);
+            var ggxDisneyDiffuse = VividPreIntegratedFGD.CreatePersistentTexture("TestPreIntegratedFGD_GGXDisneyDiffuse");
+            var charlieAndFabric = VividPreIntegratedFGD.CreatePersistentTexture("TestPreIntegratedFGD_CharlieAndFabric");
+            var data = new VividPreIntegratedFGDData();
 
-        [Test]
-        public void PreIntegratedFGDPreparePass_ImportsPersistentLutTextures_WithoutGlobalBindings()
-        {
-            var source = File.ReadAllText(GetPackageFilePath(
-                "Runtime",
-                "RenderPass",
-                "Core",
-                "Lighting",
-                "PreIntegratedFGDPreparePass.cs"));
-
-            Assert.That(source, Does.Contain("VividPreIntegratedFGDTextures"));
-            Assert.That(source, Does.Contain("PassRecorder.ImportTexture"));
-            Assert.That(source, Does.Not.Contain("SetGlobalTexture("));
-            Assert.That(source, Does.Not.Contain("SetGlobalColor("));
-            Assert.That(source, Does.Not.Contain("SetGlobalVector("));
-        }
-
-        private static string GetPackageFilePath(params string[] relativeParts)
-        {
-            var projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
-            var packageRoots = new[]
+            try
             {
-                Path.Combine(projectRoot, "Packages", "VividRP"),
-                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp")
-            };
+                data.SetTextures(ggxDisneyDiffuse, charlieAndFabric);
 
-            foreach (var packageRoot in packageRoots)
-            {
-                var fullPath = Path.Combine(packageRoot, Path.Combine(relativeParts));
-                if (File.Exists(fullPath))
-                    return fullPath;
+                Assert.That(data.hasValidTextures, Is.True);
+                Assert.That(data.ggxDisneyDiffuseTexture, Is.SameAs(ggxDisneyDiffuse));
+                Assert.That(data.charlieAndFabricTexture, Is.SameAs(charlieAndFabric));
+
+                data.Reset();
+
+                Assert.That(data.hasValidTextures, Is.False);
+                Assert.That(data.ggxDisneyDiffuseTexture, Is.Null);
+                Assert.That(data.charlieAndFabricTexture, Is.Null);
             }
+            finally
+            {
+                ggxDisneyDiffuse?.Release();
+                charlieAndFabric?.Release();
+            }
+        }
 
-            return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        [Test]
+        public void VividPreIntegratedFGDSystem_InheritsFromFrameContextSubsystem()
+        {
+            Assert.That(
+                typeof(VividSubsystem<VividPreIntegratedFGDSystem>).IsAssignableFrom(typeof(VividPreIntegratedFGDSystem)),
+                Is.True);
         }
     }
 }

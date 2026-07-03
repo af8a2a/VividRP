@@ -109,7 +109,7 @@ namespace VividRP.Runtime
 
         internal RTHandle CharlieAndFabricTexture => m_CharlieFabricLambertTexture;
 
-        internal void Create(VividRPCoreResources resources)
+        internal void Create(VividRPCoreResources resources, CommandBuffer cmd = null)
         {
             if (m_IsBuilt)
                 return;
@@ -119,11 +119,15 @@ namespace VividRP.Runtime
             m_GgxDisneyDiffuseTexture ??= VividPreIntegratedFGD.CreatePersistentTexture("PreIntegratedFGD_GGXDisneyDiffuse");
             m_CharlieFabricLambertTexture ??= VividPreIntegratedFGD.CreatePersistentTexture("PreIntegratedFGD_CharlieAndFabric");
 
-            var cmd = CommandBufferPool.Get(nameof(VividPreIntegratedFGDTextures));
-            VividPreIntegratedFGD.BuildTexture(cmd, m_GgxDisneyDiffuseMaterial, m_GgxDisneyDiffuseTexture);
-            VividPreIntegratedFGD.BuildTexture(cmd, m_CharlieFabricLambertMaterial, m_CharlieFabricLambertTexture);
-            Graphics.ExecuteCommandBuffer(cmd);
-            CommandBufferPool.Release(cmd);
+            var pooledCmd = cmd == null ? CommandBufferPool.Get(nameof(VividPreIntegratedFGDTextures)) : null;
+            var buildCmd = cmd ?? pooledCmd;
+            VividPreIntegratedFGD.BuildTexture(buildCmd, m_GgxDisneyDiffuseMaterial, m_GgxDisneyDiffuseTexture);
+            VividPreIntegratedFGD.BuildTexture(buildCmd, m_CharlieFabricLambertMaterial, m_CharlieFabricLambertTexture);
+            if (pooledCmd != null)
+            {
+                Graphics.ExecuteCommandBuffer(pooledCmd);
+                CommandBufferPool.Release(pooledCmd);
+            }
 
             m_IsBuilt = true;
         }

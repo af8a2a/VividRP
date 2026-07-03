@@ -1,8 +1,9 @@
 using System.IO;
-using System.Reflection;
+using System.Linq;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
+using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
 
@@ -54,6 +55,7 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("DeferredLitCompute"));
             Assert.That(passSource, Does.Contain("VividPreIntegratedFGD"));
             Assert.That(passSource, Does.Contain("PreparePreIntegratedFGDResources"));
+            Assert.That(passSource, Does.Contain("VividPreIntegratedFGDData"));
             Assert.That(passSource, Does.Contain("BindIndirectLightingParameters"));
             Assert.That(passSource, Does.Contain("BindSkyTextureParameters"));
             Assert.That(passSource, Does.Contain("BindLightLoopParameters"));
@@ -73,8 +75,8 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();"));
             Assert.That(passSource, Does.Contain("BindSkyTextureParameters(cmd, m_ClearDeferredLitKernel);"));
             Assert.That(passSource, Does.Contain("SetComputeMatrixParam(m_DeferredLitCompute, PixelCoordToViewDirWSId, m_PixelCoordToViewDirWS);"));
-            Assert.That(passSource, Does.Contain("VividPreIntegratedFGDTextures"));
-            Assert.That(passSource, Does.Contain("PassRecorder.ImportTexture"));
+            Assert.That(passSource, Does.Contain("ImportPreIntegratedFGDTexture"));
+            Assert.That(passSource, Does.Contain("Import(source)"));
             Assert.That(passSource, Does.Contain("DirectionalLightsId"));
             Assert.That(passSource, Does.Contain("PunctualLightsId"));
             Assert.That(passSource, Does.Contain("AreaLightsId"));
@@ -120,11 +122,25 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GeneratedNodeRegistry_ContainsDeferredLightingPassNode()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "RenderGraph", "GeneratedRenderPassNodes.g.cs"));
+            var registrations = RenderPassNodeRegistryBuilder.BuildRegistrations(new[]
+            {
+                typeof(DeferredLightingPass),
+                typeof(DeferredDirectionalLightingPass),
+            });
 
-            Assert.That(source, Does.Contain("internal sealed class DeferredLightingPass : RenderPassNodeData"));
-            Assert.That(source, Does.Contain("VividRP.Runtime.RenderPass.Core.DeferredLightingPass, VividRP.Runtime"));
-            Assert.That(source, Does.Contain("internal sealed class DeferredDirectionalLightingPass : RenderPassNodeData"));
+            Assert.That(
+                registrations.Any(registration =>
+                    registration.NodeClassName == nameof(DeferredLightingPass)
+                    && registration.PassType == typeof(DeferredLightingPass)),
+                Is.True);
+            Assert.That(
+                registrations.Any(registration =>
+                    registration.NodeClassName == nameof(DeferredDirectionalLightingPass)
+                    && registration.PassType == typeof(DeferredDirectionalLightingPass)),
+                Is.True);
+            Assert.That(
+                registrations.Any(registration => registration.NodeClassName.Contains("PreIntegratedFGD")),
+                Is.False);
         }
 
         [Test]

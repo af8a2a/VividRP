@@ -109,6 +109,237 @@ namespace VividRP.Runtime.ECS
         }
     }
 
+    internal readonly struct VividEcsTileRange : IEquatable<VividEcsTileRange>
+    {
+        public static readonly VividEcsTileRange Invalid = new(-1, 0);
+
+        public VividEcsTileRange(int startTile, int tileCount)
+        {
+            StartTile = startTile;
+            TileCount = tileCount;
+        }
+
+        public int StartTile { get; }
+
+        public int TileCount { get; }
+
+        public int StartEntry => StartTile * VividEcsConstants.PageEntryCount;
+
+        public int EntryCapacity => TileCount * VividEcsConstants.PageEntryCount;
+
+        public bool IsValid => StartTile >= 0 && TileCount > 0;
+
+        public bool Equals(VividEcsTileRange other)
+        {
+            return StartTile == other.StartTile && TileCount == other.TileCount;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividEcsTileRange other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (StartTile * 397) ^ TileCount;
+            }
+        }
+    }
+
+    internal sealed class VividEcsTileAllocator
+    {
+        private readonly List<VividEcsTileRange> m_FreeRanges = new();
+        private int m_NextTile;
+        private int m_LiveTileCount;
+
+        public int liveTileCount => m_LiveTileCount;
+
+        public int highWatermarkTileCount => m_NextTile;
+
+        public int freeRangeCount => m_FreeRanges.Count;
+
+        public VividEcsTileRange AllocateEntries(int entryCount)
+        {
+            int tileCount = Math.Max(
+                1,
+                (Math.Max(1, entryCount) + VividEcsConstants.PageEntryCount - 1) / VividEcsConstants.PageEntryCount);
+            return AllocateTiles(tileCount);
+        }
+
+        public VividEcsTileRange AllocateTiles(int tileCount)
+        {
+            tileCount = Math.Max(1, tileCount);
+            for (int index = 0; index < m_FreeRanges.Count; index++)
+            {
+                VividEcsTileRange range = m_FreeRanges[index];
+                if (range.TileCount < tileCount)
+                    continue;
+
+                var allocated = new VividEcsTileRange(range.StartTile, tileCount);
+                int remainingCount = range.TileCount - tileCount;
+                if (remainingCount > 0)
+                    m_FreeRanges[index] = new VividEcsTileRange(range.StartTile + tileCount, remainingCount);
+                else
+                    m_FreeRanges.RemoveAt(index);
+
+                m_LiveTileCount += tileCount;
+                return allocated;
+            }
+
+            var newRange = new VividEcsTileRange(m_NextTile, tileCount);
+            m_NextTile += tileCount;
+            m_LiveTileCount += tileCount;
+            return newRange;
+        }
+
+        public void Free(VividEcsTileRange range)
+        {
+            if (!range.IsValid)
+                return;
+
+            m_LiveTileCount = Math.Max(0, m_LiveTileCount - range.TileCount);
+            m_FreeRanges.Add(range);
+            m_FreeRanges.Sort((left, right) => left.StartTile.CompareTo(right.StartTile));
+            MergeFreeRanges();
+        }
+
+        public void Clear()
+        {
+            m_FreeRanges.Clear();
+            m_NextTile = 0;
+            m_LiveTileCount = 0;
+        }
+
+        private void MergeFreeRanges()
+        {
+            for (int index = 0; index < m_FreeRanges.Count - 1;)
+            {
+                VividEcsTileRange current = m_FreeRanges[index];
+                VividEcsTileRange next = m_FreeRanges[index + 1];
+                int currentEnd = current.StartTile + current.TileCount;
+                if (currentEnd < next.StartTile)
+                {
+                    index++;
+                    continue;
+                }
+
+                int mergedEnd = Math.Max(currentEnd, next.StartTile + next.TileCount);
+                m_FreeRanges[index] = new VividEcsTileRange(current.StartTile, mergedEnd - current.StartTile);
+                m_FreeRanges.RemoveAt(index + 1);
+            }
+        }
+    }
+
+    internal readonly struct VividEcsSharedComponentKey : IEquatable<VividEcsSharedComponentKey>
+    {
+        private readonly VividEcsTypeIndex[] m_Types;
+        private readonly object[] m_Values;
+
+        public VividEcsSharedComponentKey(VividEcsTypeIndex[] types, object[] values)
+        {
+            m_Types = types ?? Array.Empty<VividEcsTypeIndex>();
+            m_Values = values ?? Array.Empty<object>();
+            Count = Math.Min(m_Types.Length, m_Values.Length);
+            Hash = ComputeHash(m_Types, m_Values, Count);
+        }
+
+        public int Count { get; }
+
+        public int Hash { get; }
+
+        public bool Equals(VividEcsSharedComponentKey other)
+        {
+            if (Hash != other.Hash || Count != other.Count)
+                return false;
+
+            for (int index = 0; index < Count; index++)
+            {
+                if (m_Types[index] != other.m_Types[index]
+                    || !Equals(m_Values[index], other.m_Values[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividEcsSharedComponentKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return Hash;
+        }
+
+        private static int ComputeHash(VividEcsTypeIndex[] types, object[] values, int count)
+        {
+            unchecked
+            {
+                int hash = 17;
+                for (int index = 0; index < count; index++)
+                {
+                    hash = (hash * 397) ^ types[index].GetHashCode();
+                    hash = (hash * 397) ^ (values[index]?.GetHashCode() ?? 0);
+                }
+
+                return hash;
+            }
+        }
+    }
+
+    internal sealed class VividEcsArchetypeLineGroup
+    {
+        private readonly List<VividEcsArchetypeLine> m_Lines;
+
+        public VividEcsArchetypeLineGroup(
+            VividEcsSharedComponentKey sharedKey,
+            List<VividEcsArchetypeLine> lines)
+        {
+            SharedKey = sharedKey;
+            m_Lines = lines ?? new List<VividEcsArchetypeLine>();
+        }
+
+        public VividEcsSharedComponentKey SharedKey { get; }
+
+        public IReadOnlyList<VividEcsArchetypeLine> lines => m_Lines;
+
+        public int lineCount => m_Lines.Count;
+
+        public int activeCount
+        {
+            get
+            {
+                int count = 0;
+                for (int index = 0; index < m_Lines.Count; index++)
+                    count += m_Lines[index].activeCount;
+
+                return count;
+            }
+        }
+
+        public VividEcsPageGroup CreatePageGroup(Allocator allocator)
+        {
+            List<VividEcsPageInfo> pageInfos = new();
+            for (int lineIndex = 0; lineIndex < m_Lines.Count; lineIndex++)
+            {
+                using VividEcsPageGroup group = m_Lines[lineIndex].CreatePageGroup(Allocator.Temp);
+                for (int pageIndex = 0; pageIndex < group.pageCount; pageIndex++)
+                    pageInfos.Add(group[pageIndex]);
+            }
+
+            var pages = new NativeArray<VividEcsPageInfo>(pageInfos.Count, allocator, NativeArrayOptions.UninitializedMemory);
+            for (int index = 0; index < pageInfos.Count; index++)
+                pages[index] = pageInfos[index];
+
+            return new VividEcsPageGroup(pages);
+        }
+    }
+
     internal sealed class VividEcsArchetypeLine : IDisposable
     {
         private readonly Dictionary<VividEcsTypeIndex, IVividEcsColumn> m_Columns = new();
@@ -138,6 +369,8 @@ namespace VividRP.Runtime.ECS
         public int activeCount => math.clamp(m_ActiveCount, 0, math.min(capacity, m_MaxEntries));
 
         public IReadOnlyList<VividEcsTypeIndex> types => m_Types;
+
+        public int sharedComponentCount => m_SharedComponents.Count;
 
         public void EnsureCapacity(int maxEntries)
         {
@@ -233,6 +466,7 @@ namespace VividRP.Runtime.ECS
                 m_Types.Add(typeIndex);
 
             m_SharedComponents[typeIndex] = value;
+            m_Types.Sort();
         }
 
         public bool TryGetSharedComponent<T>(out T value)
@@ -247,6 +481,42 @@ namespace VividRP.Runtime.ECS
 
             value = default;
             return false;
+        }
+
+        public bool TryGetSharedComponentBoxed(VividEcsTypeIndex typeIndex, out object value)
+        {
+            if (typeIndex.IsValid && m_SharedComponents.TryGetValue(typeIndex, out value))
+                return true;
+
+            value = null;
+            return false;
+        }
+
+        public VividEcsSharedComponentKey GetSharedComponentKey()
+        {
+            if (m_SharedComponents.Count == 0)
+                return new VividEcsSharedComponentKey(Array.Empty<VividEcsTypeIndex>(), Array.Empty<object>());
+
+            var types = new VividEcsTypeIndex[m_SharedComponents.Count];
+            var values = new object[m_SharedComponents.Count];
+            int writeIndex = 0;
+            for (int typeIndex = 0; typeIndex < m_Types.Count; typeIndex++)
+            {
+                VividEcsTypeIndex type = m_Types[typeIndex];
+                if (!m_SharedComponents.TryGetValue(type, out object value))
+                    continue;
+
+                types[writeIndex] = type;
+                values[writeIndex] = value;
+                writeIndex++;
+            }
+
+            if (writeIndex == types.Length)
+                return new VividEcsSharedComponentKey(types, values);
+
+            Array.Resize(ref types, writeIndex);
+            Array.Resize(ref values, writeIndex);
+            return new VividEcsSharedComponentKey(types, values);
         }
 
         public void Clear()

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -8,6 +9,12 @@ using Unity.Profiling;
 
 namespace VividRP.Runtime.ECS
 {
+    internal delegate bool VividEcsManagerJobEnabledDelegate<TContext>(TContext context);
+
+    internal delegate JobHandle VividEcsManagerJobScheduleDelegate<TContext>(
+        TContext context,
+        JobHandle dependency);
+
     internal enum VividEcsPageDispatchMode
     {
         Dynamic = 0,
@@ -180,6 +187,123 @@ namespace VividRP.Runtime.ECS
             int2 range = PageGroups[index];
             if (range.y > 0)
                 JobData.Execute(new VividEcsPageGroupInfo(Pages, range.x, range.y));
+        }
+    }
+
+    internal sealed class VividEcsManagerJobRegistry<TContext>
+    {
+        private readonly List<Entry> m_Entries = new();
+        private int m_NextId;
+        private bool m_Sorted = true;
+
+        public int count => m_Entries.Count;
+
+        public int Register(
+            string name,
+            int order,
+            VividEcsManagerJobScheduleDelegate<TContext> schedule,
+            VividEcsManagerJobEnabledDelegate<TContext> enabled = null)
+        {
+            if (schedule == null)
+                throw new ArgumentNullException(nameof(schedule));
+
+            int id = ++m_NextId;
+            m_Entries.Add(new Entry(id, name ?? string.Empty, order, enabled, schedule));
+            m_Sorted = false;
+            return id;
+        }
+
+        public bool Unregister(int id)
+        {
+            for (int index = 0; index < m_Entries.Count; index++)
+            {
+                if (m_Entries[index].Id != id)
+                    continue;
+
+                m_Entries.RemoveAt(index);
+                return true;
+            }
+
+            return false;
+        }
+
+        public int EnabledCount(TContext context)
+        {
+            int count = 0;
+            for (int index = 0; index < m_Entries.Count; index++)
+            {
+                if (m_Entries[index].IsEnabled(context))
+                    count++;
+            }
+
+            return count;
+        }
+
+        public JobHandle ScheduleEnabled(TContext context, JobHandle dependency = default)
+        {
+            SortIfNeeded();
+            JobHandle handle = dependency;
+            for (int index = 0; index < m_Entries.Count; index++)
+            {
+                Entry entry = m_Entries[index];
+                if (entry.IsEnabled(context))
+                    handle = entry.Schedule(context, handle);
+            }
+
+            return handle;
+        }
+
+        public void Clear()
+        {
+            m_Entries.Clear();
+            m_NextId = 0;
+            m_Sorted = true;
+        }
+
+        private void SortIfNeeded()
+        {
+            if (m_Sorted)
+                return;
+
+            m_Entries.Sort((left, right) =>
+            {
+                int orderCompare = left.Order.CompareTo(right.Order);
+                return orderCompare != 0 ? orderCompare : left.Id.CompareTo(right.Id);
+            });
+            m_Sorted = true;
+        }
+
+        private readonly struct Entry
+        {
+            public Entry(
+                int id,
+                string name,
+                int order,
+                VividEcsManagerJobEnabledDelegate<TContext> enabled,
+                VividEcsManagerJobScheduleDelegate<TContext> schedule)
+            {
+                Id = id;
+                Name = name;
+                Order = order;
+                Enabled = enabled;
+                ScheduleDelegate = schedule;
+            }
+
+            public readonly int Id;
+            public readonly string Name;
+            public readonly int Order;
+            private readonly VividEcsManagerJobEnabledDelegate<TContext> Enabled;
+            private readonly VividEcsManagerJobScheduleDelegate<TContext> ScheduleDelegate;
+
+            public bool IsEnabled(TContext context)
+            {
+                return Enabled == null || Enabled(context);
+            }
+
+            public JobHandle Schedule(TContext context, JobHandle dependency)
+            {
+                return ScheduleDelegate(context, dependency);
+            }
         }
     }
 }

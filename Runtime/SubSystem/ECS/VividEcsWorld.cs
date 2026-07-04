@@ -39,6 +39,115 @@ namespace VividRP.Runtime.ECS
         }
     }
 
+    internal sealed class VividEcsSparseTable<T>
+    {
+        private const int EmptyIndex = -1;
+
+        private readonly List<int> m_Sparse = new();
+        private readonly List<int> m_DenseKeys = new();
+        private readonly List<T> m_DenseValues = new();
+
+        public int count => m_DenseKeys.Count;
+
+        public int sparseCapacity => m_Sparse.Count;
+
+        public int denseCapacity => m_DenseValues.Capacity;
+
+        public bool ContainsKey(int key)
+        {
+            return TryGetDenseIndex(key, out _);
+        }
+
+        public void Set(int key, T value)
+        {
+            if (key < 0)
+                throw new ArgumentOutOfRangeException(nameof(key));
+
+            EnsureSparseCapacity(key + 1);
+            int denseIndex = m_Sparse[key];
+            if (denseIndex >= 0)
+            {
+                m_DenseValues[denseIndex] = value;
+                return;
+            }
+
+            m_Sparse[key] = m_DenseKeys.Count;
+            m_DenseKeys.Add(key);
+            m_DenseValues.Add(value);
+        }
+
+        public bool TryGetValue(int key, out T value)
+        {
+            if (TryGetDenseIndex(key, out int denseIndex))
+            {
+                value = m_DenseValues[denseIndex];
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
+
+        public bool Remove(int key)
+        {
+            if (!TryGetDenseIndex(key, out int denseIndex))
+                return false;
+
+            int lastDenseIndex = m_DenseKeys.Count - 1;
+            int lastKey = m_DenseKeys[lastDenseIndex];
+            if (denseIndex != lastDenseIndex)
+            {
+                m_DenseKeys[denseIndex] = lastKey;
+                m_DenseValues[denseIndex] = m_DenseValues[lastDenseIndex];
+                m_Sparse[lastKey] = denseIndex;
+            }
+
+            m_DenseKeys.RemoveAt(lastDenseIndex);
+            m_DenseValues.RemoveAt(lastDenseIndex);
+            m_Sparse[key] = EmptyIndex;
+            return true;
+        }
+
+        public int GetKeyAtDenseIndex(int denseIndex)
+        {
+            return m_DenseKeys[denseIndex];
+        }
+
+        public T GetValueAtDenseIndex(int denseIndex)
+        {
+            return m_DenseValues[denseIndex];
+        }
+
+        public void Clear()
+        {
+            for (int index = 0; index < m_DenseKeys.Count; index++)
+                m_Sparse[m_DenseKeys[index]] = EmptyIndex;
+
+            m_DenseKeys.Clear();
+            m_DenseValues.Clear();
+        }
+
+        private bool TryGetDenseIndex(int key, out int denseIndex)
+        {
+            if ((uint)key >= (uint)m_Sparse.Count)
+            {
+                denseIndex = EmptyIndex;
+                return false;
+            }
+
+            denseIndex = m_Sparse[key];
+            return denseIndex >= 0
+                && denseIndex < m_DenseKeys.Count
+                && m_DenseKeys[denseIndex] == key;
+        }
+
+        private void EnsureSparseCapacity(int capacity)
+        {
+            while (m_Sparse.Count < capacity)
+                m_Sparse.Add(EmptyIndex);
+        }
+    }
+
     internal sealed class VividEcsWorld : IDisposable
     {
         private readonly List<VividEcsArchetypeLine> m_Lines = new();
@@ -132,6 +241,31 @@ namespace VividRP.Runtime.ECS
             return new VividEcsPageGroup(pages);
         }
 
+        public List<VividEcsArchetypeLineGroup> CreateArchetypeLineGroups(VividEcsQuery query)
+        {
+            if (query == null)
+                throw new ArgumentNullException(nameof(query));
+
+            var groups = new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
+            foreach (VividEcsArchetypeLine line in query.MatchLines())
+            {
+                VividEcsSharedComponentKey key = line.GetSharedComponentKey();
+                if (!groups.TryGetValue(key, out List<VividEcsArchetypeLine> lines))
+                {
+                    lines = new List<VividEcsArchetypeLine>();
+                    groups.Add(key, lines);
+                }
+
+                lines.Add(line);
+            }
+
+            var result = new List<VividEcsArchetypeLineGroup>(groups.Count);
+            foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
+                result.Add(new VividEcsArchetypeLineGroup(pair.Key, pair.Value));
+
+            return result;
+        }
+
         public void Dispose()
         {
             for (int index = 0; index < m_Lines.Count; index++)
@@ -175,6 +309,7 @@ namespace VividRP.Runtime.ECS
         private readonly List<VividEcsTypeIndex> m_All = new();
         private readonly List<VividEcsTypeIndex> m_Any = new();
         private readonly List<VividEcsTypeIndex> m_None = new();
+        private readonly List<SharedFilter> m_SharedFilters = new();
 
         public VividEcsQuery(IReadOnlyList<VividEcsArchetypeLine> lines)
         {
@@ -196,6 +331,17 @@ namespace VividRP.Runtime.ECS
         public VividEcsQuery WithNone(params VividEcsTypeIndex[] types)
         {
             AddRange(m_None, types);
+            return this;
+        }
+
+        public VividEcsQuery WithShared<T>(T value)
+            where T : struct, IVividEcsSharedComponentData
+        {
+            VividEcsTypeIndex typeIndex = VividEcsTypeManager.GetTypeIndex<T>();
+            if (!typeIndex.IsValid)
+                typeIndex = VividEcsTypeManager.RegisterShared<T>();
+
+            m_SharedFilters.Add(new SharedFilter(typeIndex, value));
             return this;
         }
 
@@ -251,6 +397,16 @@ namespace VividRP.Runtime.ECS
                     return false;
             }
 
+            for (int index = 0; index < m_SharedFilters.Count; index++)
+            {
+                SharedFilter filter = m_SharedFilters[index];
+                if (!line.TryGetSharedComponentBoxed(filter.TypeIndex, out object value)
+                    || !Equals(value, filter.Value))
+                {
+                    return false;
+                }
+            }
+
             return true;
         }
 
@@ -265,6 +421,18 @@ namespace VividRP.Runtime.ECS
                 if (type.IsValid && !target.Contains(type))
                     target.Add(type);
             }
+        }
+
+        private readonly struct SharedFilter
+        {
+            public SharedFilter(VividEcsTypeIndex typeIndex, object value)
+            {
+                TypeIndex = typeIndex;
+                Value = value;
+            }
+
+            public readonly VividEcsTypeIndex TypeIndex;
+            public readonly object Value;
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Burst;
 using Unity.Collections;
@@ -39,6 +40,58 @@ namespace VividRP.Editor.Tests
             Assert.That(VividEcsConstants.AlignToPage(1), Is.EqualTo(256));
             Assert.That(VividEcsConstants.AlignToPage(256), Is.EqualTo(256));
             Assert.That(VividEcsConstants.AlignToPage(257), Is.EqualTo(512));
+        }
+
+        [Test]
+        public void TileAllocator_ReusesAndMergesFreedRanges()
+        {
+            var allocator = new VividEcsTileAllocator();
+
+            VividEcsTileRange first = allocator.AllocateEntries(300);
+            VividEcsTileRange second = allocator.AllocateTiles(1);
+
+            Assert.That(first.StartTile, Is.EqualTo(0));
+            Assert.That(first.TileCount, Is.EqualTo(2));
+            Assert.That(first.EntryCapacity, Is.EqualTo(512));
+            Assert.That(second.StartTile, Is.EqualTo(2));
+            Assert.That(allocator.liveTileCount, Is.EqualTo(3));
+            Assert.That(allocator.highWatermarkTileCount, Is.EqualTo(3));
+
+            allocator.Free(first);
+            VividEcsTileRange reused = allocator.AllocateEntries(128);
+
+            Assert.That(reused.StartTile, Is.EqualTo(0));
+            Assert.That(reused.TileCount, Is.EqualTo(1));
+            Assert.That(allocator.freeRangeCount, Is.EqualTo(1));
+
+            allocator.Free(reused);
+            allocator.Free(second);
+
+            Assert.That(allocator.liveTileCount, Is.EqualTo(0));
+            Assert.That(allocator.freeRangeCount, Is.EqualTo(1));
+            Assert.That(allocator.highWatermarkTileCount, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void SparseTable_SetRemoveAndDenseAccess_UsesSwapBack()
+        {
+            var table = new VividEcsSparseTable<int>();
+
+            table.Set(12, 120);
+            table.Set(3, 30);
+            table.Set(12, 121);
+
+            Assert.That(table.count, Is.EqualTo(2));
+            Assert.That(table.TryGetValue(12, out int value), Is.True);
+            Assert.That(value, Is.EqualTo(121));
+            Assert.That(table.ContainsKey(3), Is.True);
+
+            Assert.That(table.Remove(12), Is.True);
+
+            Assert.That(table.count, Is.EqualTo(1));
+            Assert.That(table.ContainsKey(12), Is.False);
+            Assert.That(table.GetKeyAtDenseIndex(0), Is.EqualTo(3));
+            Assert.That(table.GetValueAtDenseIndex(0), Is.EqualTo(30));
         }
 
         [Test]
@@ -112,6 +165,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void World_QueryAndLineGroups_FilterBySharedComponent()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine third = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestShared(1));
+            third.SetSharedComponent(new TestShared(2));
+
+            world.CreateEntity(first);
+            world.CreateEntity(second);
+            world.CreateEntity(third);
+
+            VividEcsQuery allData = world.CreateQuery().WithAll(dataIndex);
+            VividEcsQuery sharedOne = world.CreateQuery().WithAll(dataIndex).WithShared(new TestShared(1));
+            List<VividEcsArchetypeLineGroup> groups = world.CreateArchetypeLineGroups(allData);
+
+            Assert.That(sharedOne.MatchingLineCount(), Is.EqualTo(2));
+            Assert.That(sharedOne.MatchingEntriesCount(), Is.EqualTo(2));
+            Assert.That(groups.Count, Is.EqualTo(2));
+            Assert.That(groups[0].SharedKey.Equals(groups[1].SharedKey), Is.False);
+            Assert.That(groups[0].activeCount + groups[1].activeCount, Is.EqualTo(3));
+        }
+
+        [Test]
         public void PageJob_ScheduleParallel_VisitsEachLivePage()
         {
             VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
@@ -177,6 +257,62 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void ManagerJobRegistry_SchedulesEnabledJobsInOrder()
+        {
+            var values = new NativeArray<int>(3, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            try
+            {
+                var registry = new VividEcsManagerJobRegistry<RegistryContext>();
+                registry.Register(
+                    "late",
+                    10,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 1,
+                        Value = 2,
+                    }.Schedule(dependency));
+                registry.Register(
+                    "disabled",
+                    5,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 2,
+                        Value = 99,
+                    }.Schedule(dependency),
+                    context => context.DisabledJobsEnabled);
+                registry.Register(
+                    "early",
+                    0,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 0,
+                        Value = 1,
+                    }.Schedule(dependency));
+
+                var context = new RegistryContext
+                {
+                    Values = values,
+                    DisabledJobsEnabled = false,
+                };
+                JobHandle handle = registry.ScheduleEnabled(context);
+                handle.Complete();
+
+                Assert.That(registry.count, Is.EqualTo(3));
+                Assert.That(registry.EnabledCount(context), Is.EqualTo(2));
+                Assert.That(values[0], Is.EqualTo(1));
+                Assert.That(values[1], Is.EqualTo(2));
+                Assert.That(values[2], Is.EqualTo(0));
+            }
+            finally
+            {
+                values.Dispose();
+            }
+        }
+
         private readonly struct TestData : IVividEcsComponentData
         {
             public TestData(float value)
@@ -189,6 +325,11 @@ namespace VividRP.Editor.Tests
 
         private readonly struct TestShared : IVividEcsSharedComponentData
         {
+            public TestShared(int value)
+            {
+                Value = value;
+            }
+
             public readonly int Value;
         }
 
@@ -247,6 +388,24 @@ namespace VividRP.Editor.Tests
                     count += pageGroup[index].EntryCount;
 
                 Counts[pageGroup.StartIndex == 0 ? 0 : 1] = count;
+            }
+        }
+
+        private struct RegistryContext
+        {
+            public NativeArray<int> Values;
+            public bool DisabledJobsEnabled;
+        }
+
+        private struct WriteRegistryValueJob : IJob
+        {
+            public NativeArray<int> Values;
+            public int Index;
+            public int Value;
+
+            public void Execute()
+            {
+                Values[Index] = Value;
             }
         }
     }

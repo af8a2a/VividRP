@@ -7,7 +7,9 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class StopNaNPass : RasterPass
     {
-        [RenderGraphResource(Access = AccessFlags.Read)]
+        internal const string StopNaNShaderName = "Hidden/VividRP/StopNaN";
+
+        [RenderGraphResource(Access = AccessFlags.Read, InputAttachmentIndex = 0)]
         private RenderGraphTexture m_Source = new();
 
         [RenderGraphResource(
@@ -28,10 +30,10 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
-            m_Material = CoreUtils.CreateEngineMaterial(resources.BlitShader);
-
-            if (m_Material != null)
-                CoreUtils.SetKeyword(m_Material, "_STOP_NANS", true);
+            var shader = resources?.StopNaNShader;
+            shader ??= Shader.Find(StopNaNShaderName);
+            if (shader != null)
+                m_Material = CoreUtils.CreateEngineMaterial(shader);
         }
 
         public override bool IsActive(ContextContainer frameData)
@@ -80,13 +82,13 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_Source == null || m_Source.innerHandle.IsValid() != true || m_OutputTexture?.innerHandle.IsValid() != true)
                 return;
 
-            RTHandle sourceHandle = m_Source.innerHandle;
-            var scaleBias = TextureScaleBiasUtility.GetScaleBias(
-                sourceHandle,
-                context.GetTextureUVOrigin(m_Source.innerHandle),
-                context.GetTextureUVOrigin(m_OutputTexture.innerHandle));
-
-            Blitter.BlitTexture(context.cmd, sourceHandle, scaleBias, m_Material, 0);
+            context.cmd.DrawProcedural(
+                Matrix4x4.identity,
+                m_Material,
+                0,
+                MeshTopology.Triangles,
+                3,
+                1);
         }
 
         public override void Dispose()

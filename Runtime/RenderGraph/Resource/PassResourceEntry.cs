@@ -50,6 +50,11 @@ namespace VividRP.Runtime
         public int AttachmentIndex = -1;
 
         /// <summary>
+        /// For raster passes: input attachment index used by framebuffer fetch. -1 means not an input attachment.
+        /// </summary>
+        public int InputAttachmentIndex = -1;
+
+        /// <summary>
         /// For raster passes: true if this is the depth attachment.
         /// </summary>
         public bool IsDepthAttachment;

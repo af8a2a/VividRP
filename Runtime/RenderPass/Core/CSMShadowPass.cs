@@ -197,7 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     return;
 
                 nativeCmd.SetRenderTarget(m_ShadowAtlas.innerHandle,RenderBufferLoadAction.DontCare, RenderBufferStoreAction.Store);
-                nativeCmd.ClearRenderTarget(true, false, Color.clear);
+                // nativeCmd.ClearRenderTarget(true, false, Color.clear);
                 nativeCmd.SetGlobalDepthBias(1.0f, m_SlopeScaleDepthBias);
 
                 for (int cascadeIndex = 0; cascadeIndex < m_CascadeCount; cascadeIndex++)

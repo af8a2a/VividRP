@@ -15,7 +15,6 @@ Shader "Hidden/VividRP/Blit"
             #pragma target 3.5
             #pragma vertex Vert
             #pragma fragment Frag
-            #pragma multi_compile_local _ _STOP_NANS
 
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
@@ -61,14 +60,7 @@ Shader "Hidden/VividRP/Blit"
 
             float4 Frag(Varyings input) : SV_Target
             {
-                float4 color = SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
-
-                #if defined(_STOP_NANS)
-                if (AnyIsNaN(color) || AnyIsInf(color))
-                    color = 0.0;
-                #endif
-
-                return color;
+                return SAMPLE_TEXTURE2D(_BlitTexture, sampler_BlitTexture, input.uv);
             }
             ENDHLSL
         }

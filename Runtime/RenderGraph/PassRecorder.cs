@@ -660,7 +660,11 @@ namespace VividRP.Runtime
                         : GetOrCreateTextureHandle(renderGraph, texture, textureCache);
                     texture.innerHandle = handle;
 
-                    if (entry.IsDepthAttachment)
+                    if (entry.InputAttachmentIndex >= 0)
+                    {
+                        builder.SetInputAttachment(handle, entry.InputAttachmentIndex, entry.Access);
+                    }
+                    else if (entry.IsDepthAttachment)
                     {
                         builder.SetRenderAttachmentDepth(handle, entry.Access);
                     }

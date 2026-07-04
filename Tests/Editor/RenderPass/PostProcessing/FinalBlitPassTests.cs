@@ -1,11 +1,14 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Editor;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass;
@@ -262,13 +265,51 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void BlitShader_SupportsStopNaNsKeyword_AndNaNFiltering()
+        public void StopNaNPass_UsesDedicatedFramebufferFetchShader()
         {
-            var blitShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "Blit.shader"));
+            var stopNaNShader = LoadPackageAsset<Shader>("Shaders/Core/Private/StopNaN.shader");
+            var blitShader = LoadPackageAsset<Shader>("Shaders/Core/Private/Blit.shader");
 
-            Assert.That(blitShaderSource, Does.Contain("#pragma multi_compile_local _ _STOP_NANS"));
-            Assert.That(blitShaderSource, Does.Contain("AnyIsNaN(color) || AnyIsInf(color)"));
-            Assert.That(blitShaderSource, Does.Contain("color = 0.0;"));
+            Assert.That(stopNaNShader, Is.Not.Null);
+            Assert.That(stopNaNShader.name, Is.EqualTo("Hidden/VividRP/StopNaN"));
+            Assert.That(blitShader, Is.Not.Null);
+            Assert.That(blitShader.name, Is.EqualTo("Hidden/VividRP/Blit"));
+
+            var container = ScriptableObject.CreateInstance<PipelineResourcesContainer>();
+            try
+            {
+                PipelineResourceUpdater.UpdateContainerResources(container);
+                var stopNaNEntry = container.Entries.FirstOrDefault(entry =>
+                    entry.ResourceName == "Shaders/Core/Private/StopNaN");
+
+                Assert.That(stopNaNEntry, Is.Not.Null);
+                Assert.That(stopNaNEntry.ResourceObject, Is.SameAs(stopNaNShader));
+
+                var pass = new StopNaNPass();
+                try
+                {
+                    PipelineResourceManager.Cleanup();
+                    pass.Create();
+
+                    var materialField = typeof(StopNaNPass).GetField(
+                        "m_Material",
+                        BindingFlags.Instance | BindingFlags.NonPublic);
+
+                    Assert.That(materialField, Is.Not.Null);
+                    var material = (Material)materialField.GetValue(pass);
+                    Assert.That(material, Is.Not.Null);
+                    Assert.That(material.shader, Is.SameAs(stopNaNShader));
+                }
+                finally
+                {
+                    pass.Dispose();
+                    PipelineResourceManager.Cleanup();
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(container);
+            }
         }
 
         [Test]
@@ -284,9 +325,11 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries[0].Name, Is.EqualTo("m_Source"));
             Assert.That(textureEntries[0].Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries[0].AttachmentIndex, Is.EqualTo(-1));
+            Assert.That(textureEntries[0].InputAttachmentIndex, Is.EqualTo(0));
             Assert.That(textureEntries[1].Name, Is.EqualTo("StopNaNOutput"));
             Assert.That(textureEntries[1].Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(textureEntries[1].AttachmentIndex, Is.EqualTo(0));
+            Assert.That(textureEntries[1].InputAttachmentIndex, Is.EqualTo(-1));
             Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
             Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("m_Source"));
             Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("m_OutputTexture"));
@@ -358,6 +401,19 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(packageRoots[0], Path.Combine(relativeParts));
+        }
+
+        private static T LoadPackageAsset<T>(string relativeAssetPath)
+            where T : UnityEngine.Object
+        {
+            foreach (var candidatePath in VividPackagePathUtility.GetCandidateAssetPaths(relativeAssetPath))
+            {
+                var asset = AssetDatabase.LoadAssetAtPath<T>(candidatePath);
+                if (asset != null)
+                    return asset;
+            }
+
+            return null;
         }
 
         private static void AssertSourceOverrideBehavior(

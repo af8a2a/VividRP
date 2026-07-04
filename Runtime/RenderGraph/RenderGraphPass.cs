@@ -175,6 +175,7 @@ namespace VividRP.Runtime
                             PassResourceType.Texture,
                             texture,
                             attr.AttachmentIndex,
+                            attr.InputAttachmentIndex,
                             attr.IsDepthAttachment,
                             isTransient));
                         break;
@@ -189,6 +190,7 @@ namespace VividRP.Runtime
                             PassResourceType.Buffer,
                             buffer,
                             attr.AttachmentIndex,
+                            attr.InputAttachmentIndex,
                             attr.IsDepthAttachment,
                             isTransient));
                         break;
@@ -200,6 +202,7 @@ namespace VividRP.Runtime
                             PassResourceType.RenderList,
                             renderList,
                             attr.AttachmentIndex,
+                            attr.InputAttachmentIndex,
                             attr.IsDepthAttachment,
                             isTransient: false));
                         break;
@@ -211,6 +214,7 @@ namespace VividRP.Runtime
                             PassResourceType.AccelerationStructure,
                             accelerationStructure,
                             attr.AttachmentIndex,
+                            attr.InputAttachmentIndex,
                             attr.IsDepthAttachment,
                             isTransient: false));
                         break;
@@ -412,6 +416,7 @@ namespace VividRP.Runtime
             PassResourceType resourceType,
             object descriptor,
             int attachmentIndex,
+            int inputAttachmentIndex,
             bool isDepthAttachment,
             bool isTransient)
         {
@@ -423,6 +428,7 @@ namespace VividRP.Runtime
                 ResourceType = resourceType,
                 Descriptor = descriptor,
                 AttachmentIndex = attachmentIndex,
+                InputAttachmentIndex = inputAttachmentIndex,
                 IsDepthAttachment = isDepthAttachment,
                 IsTransient = isTransient,
             };
@@ -442,6 +448,9 @@ namespace VividRP.Runtime
                 var entryAttachmentIndex = attr.AttachmentIndex >= 0
                     ? attr.AttachmentIndex + collectionIndex
                     : -1;
+                var entryInputAttachmentIndex = attr.InputAttachmentIndex >= 0
+                    ? attr.InputAttachmentIndex + collectionIndex
+                    : -1;
 
                 if (texture != null)
                 {
@@ -452,6 +461,7 @@ namespace VividRP.Runtime
                         PassResourceType.Texture,
                         texture,
                         entryAttachmentIndex,
+                        entryInputAttachmentIndex,
                         attr.IsDepthAttachment,
                         isTransient: false));
                 }

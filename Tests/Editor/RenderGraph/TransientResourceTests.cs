@@ -220,6 +220,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SetupRasterResources_BindsTransientInputAttachment_WithoutTextureSampling()
+        {
+            IRenderPass renderPass = new TransientInputAttachmentPass();
+            var resources = renderPass.Initialize();
+            var builder = new FakeRenderGraphBuilder();
+
+            InvokeSetupRasterResources(builder, resources);
+
+            Assert.That(builder.CreateTransientTextureCount, Is.EqualTo(2));
+            Assert.That(builder.SetInputAttachmentCount, Is.EqualTo(1));
+            Assert.That(builder.LastInputAttachmentIndex, Is.EqualTo(0));
+            Assert.That(builder.LastInputAttachmentAccess, Is.EqualTo(AccessFlags.Read));
+            Assert.That(builder.SetRenderAttachmentCount, Is.EqualTo(1));
+            Assert.That(builder.UseTextureCount, Is.Zero);
+        }
+
+        [Test]
         public void Compile_SkipsLegacyRuntimeBinding_WhenBindingTargetsTransientField()
         {
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
@@ -439,6 +456,35 @@ namespace VividRP.Editor.Tests
         }
     }
 
+    public sealed class TransientInputAttachmentPass : RasterPass
+    {
+        [RenderGraphResource(Name = "Source", Access = AccessFlags.Read, InputAttachmentIndex = 0)]
+        [TransientResource]
+        private RenderGraphTexture m_Source =
+            RenderGraphTexture.CreateColorTarget("Source", GraphicsFormat.R8G8B8A8_UNorm);
+
+        [RenderGraphResource(Name = "Output", Access = AccessFlags.Write, AttachmentIndex = 0)]
+        [TransientResource]
+        private RenderGraphTexture m_Output =
+            RenderGraphTexture.CreateColorTarget("Output", GraphicsFormat.R8G8B8A8_UNorm);
+
+        public override void Create()
+        {
+        }
+
+        public override void Prepare(ContextContainer frameData)
+        {
+        }
+
+        public override void Record(RasterPassContext context)
+        {
+        }
+
+        public override void Dispose()
+        {
+        }
+    }
+
     public sealed class MissingRenderGraphResourceTransientPass : ComputePass
     {
         [TransientResource]
@@ -535,6 +581,9 @@ namespace VividRP.Editor.Tests
         internal int UseBufferCount;
         internal int SetRenderAttachmentCount;
         internal int SetRenderAttachmentDepthCount;
+        internal int SetInputAttachmentCount;
+        internal int LastInputAttachmentIndex = -1;
+        internal AccessFlags LastInputAttachmentAccess;
 
         public void Dispose()
         {
@@ -638,6 +687,9 @@ namespace VividRP.Editor.Tests
 
         public void SetInputAttachment(TextureHandle tex, int index, AccessFlags flags, int mipLevel, int depthSlice)
         {
+            SetInputAttachmentCount++;
+            LastInputAttachmentIndex = index;
+            LastInputAttachmentAccess = flags;
         }
 
         public void SetShadingRateImageAttachment(in TextureHandle tex)

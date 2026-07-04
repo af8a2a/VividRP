@@ -163,6 +163,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: b3c91ed48e4997345a128588bd90704e, type: 3}
   - ResourceName: Shaders/Core/Private/Sky/SkyLUTGenerator.compute
     ResourceObject: {fileID: 7200000, guid: cd6ae8fe1afb47eba654a15718311401, type: 3}
+  - ResourceName: Shaders/Core/Private/StopNaN
+    ResourceObject: {fileID: 4800000, guid: 6b3c8738bb72ff64e8769b709dc62246, type: 3}
   - ResourceName: Shaders/Core/Private/TSR/TSRDilateVelocity.compute
     ResourceObject: {fileID: 7200000, guid: 8b0f8d77c3ee99147988386c8768ff02, type: 3}
   - ResourceName: Shaders/Core/Private/TSR/TSRRejectShading.compute

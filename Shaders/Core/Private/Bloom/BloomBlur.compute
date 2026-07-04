@@ -4,6 +4,8 @@
 
 #pragma kernel KMain          MAIN=KMain
 #pragma kernel KDownsample    MAIN=KDownsample  DOWNSAMPLE
+#pragma kernel KSpdDownsample
+#pragma use_dxc
 
 TEXTURE2D(_InputTexture);
 SAMPLER(sampler_LinearClamp);
@@ -123,4 +125,166 @@ void MAIN(uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThreadID, ui
     GroupMemoryBarrierWithGroupSync();
 
     BlurVertically(dispatchThreadId.xy, (groupThreadId.y << 3u) + groupThreadId.x);
+}
+
+#define A_GPU 1
+#define A_HLSL 1
+#define FFX_WAVE 1
+#include "Packages/com.unity.render-pipelines.core/Runtime/PostProcessing/Shaders/ffx/ffx_a.hlsl"
+
+#if !defined(UNITY_COMPILER_DXC)
+    #error "BloomBlur.compute requires DXC (#pragma use_dxc) for the SPD wave path."
+#endif
+
+cbuffer spdConstants
+{
+    AU1 mips;
+    AU1 numWorkGroups;
+    AU2 workGroupOffset;
+}
+
+RWTexture2D<float4> _SpdMip0;
+RWTexture2D<float4> _SpdMip1;
+RWTexture2D<float4> _SpdMip2;
+RWTexture2D<float4> _SpdMip3;
+RWTexture2D<float4> _SpdMip4;
+RWTexture2D<float4> _SpdMip5;
+globallycoherent RWTexture2D<float4> _SpdMip6;
+RWTexture2D<float4> _SpdMip7;
+RWTexture2D<float4> _SpdMip8;
+RWTexture2D<float4> _SpdMip9;
+RWTexture2D<float4> _SpdMip10;
+RWTexture2D<float4> _SpdMip11;
+RWTexture2D<float4> _SpdMip12;
+
+float4 _SpdSourceSize;
+float4 _SpdMip6Size;
+
+struct SpdGlobalAtomicBuffer
+{
+    uint counter;
+};
+
+globallycoherent RWStructuredBuffer<SpdGlobalAtomicBuffer> spdGlobalAtomic;
+
+groupshared AU1 spdCounter;
+groupshared AF1 spdIntermediateR[16][16];
+groupshared AF1 spdIntermediateG[16][16];
+groupshared AF1 spdIntermediateB[16][16];
+groupshared AF1 spdIntermediateA[16][16];
+
+uint2 ClampSpdCoord(ASU2 coord, float2 size)
+{
+    return min(uint2(coord), uint2(size) - 1u);
+}
+
+AF4 SpdLoadSourceImage(ASU2 tex)
+{
+    return _SpdMip0[ClampSpdCoord(tex, _SpdSourceSize.xy)];
+}
+
+AF4 SpdLoad(ASU2 tex)
+{
+    return _SpdMip6[ClampSpdCoord(tex, _SpdMip6Size.xy)];
+}
+
+void SpdStoreMip(ASU2 pix, AF4 outValue, AU1 mip)
+{
+    switch (mip)
+    {
+        case 0:
+            _SpdMip1[pix] = outValue;
+            break;
+        case 1:
+            _SpdMip2[pix] = outValue;
+            break;
+        case 2:
+            _SpdMip3[pix] = outValue;
+            break;
+        case 3:
+            _SpdMip4[pix] = outValue;
+            break;
+        case 4:
+            _SpdMip5[pix] = outValue;
+            break;
+        case 5:
+            _SpdMip6[pix] = outValue;
+            break;
+        case 6:
+            _SpdMip7[pix] = outValue;
+            break;
+        case 7:
+            _SpdMip8[pix] = outValue;
+            break;
+        case 8:
+            _SpdMip9[pix] = outValue;
+            break;
+        case 9:
+            _SpdMip10[pix] = outValue;
+            break;
+        case 10:
+            _SpdMip11[pix] = outValue;
+            break;
+        case 11:
+            _SpdMip12[pix] = outValue;
+            break;
+        default:
+            break;
+    }
+}
+
+void SpdStore(ASU2 pix, AF4 outValue, AU1 mip)
+{
+    SpdStoreMip(pix, outValue, mip);
+}
+
+void SpdIncreaseAtomicCounter(AU1 slice)
+{
+    InterlockedAdd(spdGlobalAtomic[0].counter, 1, spdCounter);
+}
+
+AU1 SpdGetAtomicCounter()
+{
+    return spdCounter;
+}
+
+void SpdResetAtomicCounter(AU1 slice)
+{
+    spdGlobalAtomic[0].counter = 0;
+}
+
+AF4 SpdLoadIntermediate(AU1 x, AU1 y)
+{
+    return AF4(
+        spdIntermediateR[x][y],
+        spdIntermediateG[x][y],
+        spdIntermediateB[x][y],
+        spdIntermediateA[x][y]);
+}
+
+void SpdStoreIntermediate(AU1 x, AU1 y, AF4 value)
+{
+    spdIntermediateR[x][y] = value.x;
+    spdIntermediateG[x][y] = value.y;
+    spdIntermediateB[x][y] = value.z;
+    spdIntermediateA[x][y] = value.w;
+}
+
+AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
+{
+    return (v0 + v1 + v2 + v3) * 0.25;
+}
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/FidelityFX/ffx_spd.hlsl"
+
+[numthreads(256, 1, 1)]
+void KSpdDownsample(uint3 workGroupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+    SpdDownsample(
+        AU2(workGroupId.xy),
+        AU1(localThreadIndex),
+        AU1(mips),
+        AU1(numWorkGroups),
+        AU1(workGroupId.z),
+        AU2(workGroupOffset));
 }

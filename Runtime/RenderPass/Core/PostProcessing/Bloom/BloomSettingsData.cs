@@ -17,7 +17,8 @@ namespace VividRP.Runtime
             anamorphic = 0f,
             resolution = BloomResolution.Half,
             highQualityPrefiltering = false,
-            highQualityFiltering = true
+            highQualityFiltering = true,
+            experimentalSpdDownsample = false
         };
 
         public bool enabled;
@@ -31,6 +32,7 @@ namespace VividRP.Runtime
         public BloomResolution resolution;
         public bool highQualityPrefiltering;
         public bool highQualityFiltering;
+        public bool experimentalSpdDownsample;
 
         public static BloomSettingsData CreateDefault()
         {
@@ -62,6 +64,7 @@ namespace VividRP.Runtime
             settings.resolution = bloom.resolution.value;
             settings.highQualityPrefiltering = bloom.highQualityPrefiltering.value;
             settings.highQualityFiltering = bloom.highQualityFiltering.value;
+            settings.experimentalSpdDownsample = bloom.experimentalSpdDownsample.value;
             return settings;
         }
     }

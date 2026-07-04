@@ -10,6 +10,8 @@ namespace VividRP.Runtime
     public class BloomPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private const int k_MaxBloomMipCount = 16;
+        private const int k_MaxBloomSpdMipCount = 13;
+        private const int k_SpdTileSize = 64;
 
         private static readonly int TexelSizeId          = Shader.PropertyToID("_TexelSize");
         private static readonly int InputTexelSizeId     = Shader.PropertyToID("_InputTexelSize");
@@ -20,6 +22,12 @@ namespace VividRP.Runtime
         private static readonly int OutputTextureId      = Shader.PropertyToID("_OutputTexture");
         private static readonly int ParamsId             = Shader.PropertyToID("_Params");
         private static readonly int BloomBicubicParamsId = Shader.PropertyToID("_BloomBicubicParams");
+        private static readonly int SpdMipsId            = Shader.PropertyToID("mips");
+        private static readonly int SpdNumWorkGroupsId   = Shader.PropertyToID("numWorkGroups");
+        private static readonly int SpdWorkGroupOffsetId = Shader.PropertyToID("workGroupOffset");
+        private static readonly int SpdGlobalAtomicBufferId = Shader.PropertyToID("spdGlobalAtomic");
+        private static readonly int SpdSourceSizeId      = Shader.PropertyToID("_SpdSourceSize");
+        private static readonly int SpdMip6SizeId        = Shader.PropertyToID("_SpdMip6Size");
         private static readonly int VividBloomTextureId  = Shader.PropertyToID("_VividBloomTexture");
         private static readonly int VividBloomParamsId   = Shader.PropertyToID("_VividBloomParams");
         private static readonly int VividBloomTintId     = Shader.PropertyToID("_VividBloomTint");
@@ -30,6 +38,8 @@ namespace VividRP.Runtime
         private static readonly ProfilerMarker s_PrepareMipsMarker = new("VividRP.RenderPass.Bloom.Prepare.Mips");
         private static readonly string[] s_MipDownNames = CreateMipNames("BloomMipDown");
         private static readonly string[] s_MipUpNames = CreateMipNames("BloomMipUp");
+        private static readonly int[] s_SpdMipTextureIds = CreateSpdMipTextureIds();
+        private static readonly uint[] s_ZeroSpdAtomicCounterData = { 0u };
 
         [RenderGraphResource(Access = AccessFlags.Read)]
         private RenderGraphTexture source = new();
@@ -54,6 +64,7 @@ namespace VividRP.Runtime
         private int m_BlurKernel;
         private int m_DownsampleKernel;
         private int m_UpsampleKernel;
+        private int m_SpdDownsampleKernel = -1;
 
         // RTHandle arrays — allocated once, resized on demand, released in Dispose().
         private readonly RTHandle[] m_MipDownHandles = new RTHandle[k_MaxBloomMipCount];
@@ -65,12 +76,17 @@ namespace VividRP.Runtime
 
         private BloomSettingsData m_Settings;
         private ScreenSpaceLensFlareSettingsData m_ScreenSpaceLensFlareSettings;
+        private GraphicsBuffer m_SpdGlobalAtomicBuffer;
         private int m_MipCount;
         private int m_ScreenSpaceLensFlareBloomMip;
         private int m_ScreenWidth;
         private int m_ScreenHeight;
+        private int m_SpdDispatchGroupCountX;
+        private int m_SpdDispatchGroupCountY;
+        private int m_SpdNumWorkGroups;
         private bool m_ShouldOutputBloomTexture;
         private bool m_ShouldOutputScreenSpaceLensFlareMip;
+        private bool m_UseSpdDownsample;
         private bool m_IsPassResourceLayoutDirty;
         private RenderGraphTexture m_OriginalSource;
         private bool m_HasSourceTextureOverride;
@@ -142,6 +158,14 @@ namespace VividRP.Runtime
             {
                 m_BlurKernel       = m_BlurCS.FindKernel("KMain");
                 m_DownsampleKernel = m_BlurCS.FindKernel("KDownsample");
+                try
+                {
+                    m_SpdDownsampleKernel = m_BlurCS.FindKernel("KSpdDownsample");
+                }
+                catch (ArgumentException)
+                {
+                    m_SpdDownsampleKernel = -1;
+                }
             }
             if (m_UpsampleCS != null)
                 m_UpsampleKernel = m_UpsampleCS.FindKernel("KMain");
@@ -156,6 +180,8 @@ namespace VividRP.Runtime
                 m_MipUpHandles[i]?.Release();
                 m_MipUpHandles[i] = null;
             }
+
+            ReleaseSpdAtomicCounterBuffer();
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -189,6 +215,10 @@ namespace VividRP.Runtime
                 m_ScreenSpaceLensFlareBloomMip = 0;
                 m_ShouldOutputBloomTexture = m_Settings.enabled;
                 m_ShouldOutputScreenSpaceLensFlareMip = m_ScreenSpaceLensFlareSettings.enabled;
+                m_UseSpdDownsample = false;
+                m_SpdDispatchGroupCountX = 0;
+                m_SpdDispatchGroupCountY = 0;
+                m_SpdNumWorkGroups = 0;
             }
 
             if (!m_Settings.enabled && !m_ScreenSpaceLensFlareSettings.enabled
@@ -232,6 +262,26 @@ namespace VividRP.Runtime
                     m_MipDownTH[i] = Import(m_MipDownHandles[i]);
                     m_MipUpTH[i]   = Import(m_MipUpHandles[i]);
                 }
+
+                bool spdRequested = m_Settings.experimentalSpdDownsample
+                    && m_MipCount > 1
+                    && m_MipCount <= k_MaxBloomSpdMipCount
+                    && m_SpdDownsampleKernel >= 0;
+
+                if (spdRequested)
+                {
+                    EnsureSpdAtomicCounterBuffer();
+                    ZeroSpdAtomicCounterBuffer();
+                    m_SpdDispatchGroupCountX = DivUp(baseW, k_SpdTileSize);
+                    m_SpdDispatchGroupCountY = DivUp(baseH, k_SpdTileSize);
+                    m_SpdNumWorkGroups = m_SpdDispatchGroupCountX * m_SpdDispatchGroupCountY;
+                }
+
+                m_UseSpdDownsample = ShouldUseSpdDownsample(
+                    m_Settings.experimentalSpdDownsample,
+                    m_MipCount,
+                    m_SpdDownsampleKernel >= 0,
+                    m_SpdGlobalAtomicBuffer != null);
             }
         }
 
@@ -278,16 +328,10 @@ namespace VividRP.Runtime
             }
 
             // ---- 2. Downsample chain ----
-            for (int i = 0; i < m_MipCount - 1; i++)
-            {
-                int sw = m_MipDownHandles[i].rt.width,     sh = m_MipDownHandles[i].rt.height;
-                int dw = m_MipDownHandles[i+1].rt.width,   dh = m_MipDownHandles[i+1].rt.height;
-                cmd.SetComputeVectorParam(m_BlurCS, TexelSizeId,      new Vector4(dw, dh, 1f/dw, 1f/dh));
-                cmd.SetComputeVectorParam(m_BlurCS, InputTexelSizeId, new Vector4(sw, sh, 1f/sw, 1f/sh));
-                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, InputTextureId,  m_MipDownTH[i]);
-                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, OutputTextureId, m_MipDownTH[i+1]);
-                cmd.DispatchCompute(m_BlurCS, m_DownsampleKernel, DivUp(dw, 8), DivUp(dh, 8), 1);
-            }
+            if (m_UseSpdDownsample)
+                ExecuteSpdDownsample(cmd);
+            else
+                ExecuteDownsampleChain(cmd);
 
             // ---- 3. Seed mipUp[last] from mipDown[last] ----
             float scatter = Mathf.Lerp(0.05f, 0.95f, m_Settings.scatter);
@@ -380,6 +424,50 @@ namespace VividRP.Runtime
             }
         }
 
+        private void ExecuteDownsampleChain(CommandBuffer cmd)
+        {
+            for (int i = 0; i < m_MipCount - 1; i++)
+            {
+                int sw = m_MipDownHandles[i].rt.width;
+                int sh = m_MipDownHandles[i].rt.height;
+                int dw = m_MipDownHandles[i + 1].rt.width;
+                int dh = m_MipDownHandles[i + 1].rt.height;
+
+                cmd.SetComputeVectorParam(m_BlurCS, TexelSizeId, new Vector4(dw, dh, 1f / dw, 1f / dh));
+                cmd.SetComputeVectorParam(m_BlurCS, InputTexelSizeId, new Vector4(sw, sh, 1f / sw, 1f / sh));
+                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, InputTextureId, m_MipDownTH[i]);
+                cmd.SetComputeTextureParam(m_BlurCS, m_DownsampleKernel, OutputTextureId, m_MipDownTH[i + 1]);
+                cmd.DispatchCompute(m_BlurCS, m_DownsampleKernel, DivUp(dw, 8), DivUp(dh, 8), 1);
+            }
+        }
+
+        private void ExecuteSpdDownsample(CommandBuffer cmd)
+        {
+            if (m_MipCount <= 1 || m_SpdGlobalAtomicBuffer == null)
+                return;
+
+            int sourceW = m_MipDownHandles[0].rt.width;
+            int sourceH = m_MipDownHandles[0].rt.height;
+            int mip6Index = Mathf.Min(6, m_MipCount - 1);
+            int mip6W = m_MipDownHandles[mip6Index].rt.width;
+            int mip6H = m_MipDownHandles[mip6Index].rt.height;
+
+            cmd.SetComputeIntParam(m_BlurCS, SpdMipsId, m_MipCount - 1);
+            cmd.SetComputeIntParam(m_BlurCS, SpdNumWorkGroupsId, m_SpdNumWorkGroups);
+            cmd.SetComputeVectorParam(m_BlurCS, SpdWorkGroupOffsetId, Vector4.zero);
+            cmd.SetComputeVectorParam(m_BlurCS, SpdSourceSizeId, new Vector4(sourceW, sourceH, 1f / sourceW, 1f / sourceH));
+            cmd.SetComputeVectorParam(m_BlurCS, SpdMip6SizeId, new Vector4(mip6W, mip6H, 1f / mip6W, 1f / mip6H));
+            cmd.SetComputeBufferParam(m_BlurCS, m_SpdDownsampleKernel, SpdGlobalAtomicBufferId, m_SpdGlobalAtomicBuffer);
+
+            BindSpdMipTextures(cmd);
+            cmd.DispatchCompute(
+                m_BlurCS,
+                m_SpdDownsampleKernel,
+                Mathf.Max(1, m_SpdDispatchGroupCountX),
+                Mathf.Max(1, m_SpdDispatchGroupCountY),
+                1);
+        }
+
         private void SetBloomDisabled(CommandBuffer cmd)
         {
             cmd.SetGlobalVector(VividBloomParamsId, Vector4.zero);
@@ -402,6 +490,60 @@ namespace VividRP.Runtime
             texture.desc.ClearBuffer = true;
             texture.desc.ClearColor = Color.clear;
             texture.desc.Name = name;
+        }
+
+        private void BindSpdMipTextures(CommandBuffer cmd)
+        {
+            for (int shaderMipIndex = 0; shaderMipIndex < s_SpdMipTextureIds.Length; shaderMipIndex++)
+            {
+                int boundMipIndex = GetBoundSpdMipIndex(shaderMipIndex, m_MipCount);
+                cmd.SetComputeTextureParam(
+                    m_BlurCS,
+                    m_SpdDownsampleKernel,
+                    s_SpdMipTextureIds[shaderMipIndex],
+                    m_MipDownTH[boundMipIndex]);
+            }
+        }
+
+        private void EnsureSpdAtomicCounterBuffer()
+        {
+            if (m_SpdGlobalAtomicBuffer != null
+                && m_SpdGlobalAtomicBuffer.count == 1
+                && m_SpdGlobalAtomicBuffer.stride == sizeof(uint))
+                return;
+
+            m_SpdGlobalAtomicBuffer?.Dispose();
+            m_SpdGlobalAtomicBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, sizeof(uint));
+        }
+
+        private void ZeroSpdAtomicCounterBuffer()
+        {
+            m_SpdGlobalAtomicBuffer?.SetData(s_ZeroSpdAtomicCounterData);
+        }
+
+        private void ReleaseSpdAtomicCounterBuffer()
+        {
+            m_SpdGlobalAtomicBuffer?.Dispose();
+            m_SpdGlobalAtomicBuffer = null;
+        }
+
+        internal static bool ShouldUseSpdDownsample(
+            bool requested,
+            int mipCount,
+            bool hasKernel,
+            bool hasCounterBuffer)
+        {
+            return requested
+                && mipCount > 1
+                && mipCount <= k_MaxBloomSpdMipCount
+                && hasKernel
+                && hasCounterBuffer;
+        }
+
+        internal static int GetBoundSpdMipIndex(int shaderMipIndex, int mipCount)
+        {
+            int clampedMipCount = Mathf.Clamp(mipCount, 1, k_MaxBloomSpdMipCount);
+            return Mathf.Clamp(shaderMipIndex, 0, clampedMipCount - 1);
         }
 
         private static void ClearTexture(CommandBuffer cmd, RTHandle texture)
@@ -433,6 +575,15 @@ namespace VividRP.Runtime
                 names[i] = $"{prefix}{i}";
 
             return names;
+        }
+
+        private static int[] CreateSpdMipTextureIds()
+        {
+            var ids = new int[k_MaxBloomSpdMipCount];
+            for (int i = 0; i < ids.Length; i++)
+                ids[i] = Shader.PropertyToID($"_SpdMip{i}");
+
+            return ids;
         }
 
         private static void SetKeyword(ComputeShader cs, string keyword, bool enabled)

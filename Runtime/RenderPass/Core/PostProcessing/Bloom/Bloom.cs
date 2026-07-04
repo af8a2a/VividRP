@@ -53,6 +53,9 @@ namespace VividRP.Runtime
         [Tooltip("Use bicubic sampling during upsample (slower, smoother).")]
         public BoolParameter highQualityFiltering = new(true);
 
+        [Tooltip("Experimental: use FidelityFX SPD to build the downsample chain in one compute dispatch.")]
+        public BoolParameter experimentalSpdDownsample = new(false);
+
         public bool IsActive()
         {
             return intensity.value > 0f;

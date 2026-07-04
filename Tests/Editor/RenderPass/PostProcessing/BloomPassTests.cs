@@ -26,6 +26,36 @@ namespace VividRP.Editor.Tests
             Assert.That(upNames[15], Is.EqualTo("BloomMipUp15"));
         }
 
+        [Test]
+        public void BloomSettingsData_DefaultsExperimentalSpdDownsampleOff()
+        {
+            var settings = BloomSettingsData.CreateDefault();
+
+            Assert.That(settings.experimentalSpdDownsample, Is.False);
+        }
+
+        [Test]
+        public void ShouldUseSpdDownsample_RequiresRequestAndEligibleResources()
+        {
+            Assert.That(BloomPass.ShouldUseSpdDownsample(false, 8, true, true), Is.False);
+            Assert.That(BloomPass.ShouldUseSpdDownsample(true, 1, true, true), Is.False);
+            Assert.That(BloomPass.ShouldUseSpdDownsample(true, 14, true, true), Is.False);
+            Assert.That(BloomPass.ShouldUseSpdDownsample(true, 8, false, true), Is.False);
+            Assert.That(BloomPass.ShouldUseSpdDownsample(true, 8, true, false), Is.False);
+            Assert.That(BloomPass.ShouldUseSpdDownsample(true, 8, true, true), Is.True);
+            Assert.That(BloomPass.ShouldUseSpdDownsample(true, 13, true, true), Is.True);
+        }
+
+        [Test]
+        public void GetBoundSpdMipIndex_ClampsToLastAvailableMip()
+        {
+            Assert.That(BloomPass.GetBoundSpdMipIndex(0, 8), Is.EqualTo(0));
+            Assert.That(BloomPass.GetBoundSpdMipIndex(7, 8), Is.EqualTo(7));
+            Assert.That(BloomPass.GetBoundSpdMipIndex(12, 8), Is.EqualTo(7));
+            Assert.That(BloomPass.GetBoundSpdMipIndex(12, 13), Is.EqualTo(12));
+            Assert.That(BloomPass.GetBoundSpdMipIndex(12, 0), Is.EqualTo(0));
+        }
+
         private static string[] GetPrivateStaticStringArray(string fieldName)
         {
             var field = typeof(BloomPass).GetField(fieldName, BindingFlags.Static | BindingFlags.NonPublic);

@@ -73,6 +73,14 @@ namespace VividRP.Editor.Tests
             Assert.That(renderer.renderQueueOffset, Is.EqualTo(0));
             Assert.That(renderer.shadowCastingMode, Is.EqualTo(ShadowCastingMode.Off));
             Assert.That(renderer.receiveShadows, Is.False);
+            Assert.That(renderer.colorDataMode, Is.EqualTo(VividParticleGpuDataMode.PerParticle));
+            Assert.That(renderer.rotationDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
+            Assert.That(renderer.velocityDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
+            Assert.That(renderer.sizeDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
+            Assert.That(renderer.uvDataEnabled, Is.False);
+            Assert.That(renderer.customData1Enabled, Is.False);
+            Assert.That(renderer.customData2Enabled, Is.False);
+            Assert.That(renderer.meshIndexDataEnabled, Is.False);
         }
 
         [Test]
@@ -125,6 +133,8 @@ namespace VividRP.Editor.Tests
             asset.rendererModule.renderMode = VividParticleRenderMode.Stretch;
             asset.rendererModule.color = Color.cyan;
             asset.rendererModule.stretchSpeedScale = 0.5f;
+            asset.rendererModule.colorDataMode = VividParticleGpuDataMode.Shared;
+            asset.rendererModule.customData1Enabled = true;
 
             VividParticleSystem system = CreateActiveSystem();
             system.asset = asset;
@@ -137,18 +147,24 @@ namespace VividRP.Editor.Tests
             Assert.That(system.rendererModule.renderMode, Is.EqualTo(VividParticleRenderMode.Stretch));
             Assert.That(system.rendererModule.color, Is.EqualTo(Color.cyan));
             Assert.That(system.rendererModule.stretchSpeedScale, Is.EqualTo(0.5f));
+            Assert.That(system.rendererModule.colorDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
+            Assert.That(system.rendererModule.customData1Enabled, Is.True);
 
             asset.main.startLifetime = 9.0f;
             asset.emission.bursts[0] = new VividParticleBurst(0.25f, 9);
             asset.rendererModule.renderMode = VividParticleRenderMode.Billboard;
             asset.rendererModule.color = Color.red;
             asset.rendererModule.stretchSpeedScale = 3.0f;
+            asset.rendererModule.colorDataMode = VividParticleGpuDataMode.PerParticle;
+            asset.rendererModule.customData1Enabled = false;
 
             Assert.That(system.main.startLifetime, Is.EqualTo(2.5f));
             Assert.That(system.emission.bursts[0].count, Is.EqualTo(2));
             Assert.That(system.rendererModule.renderMode, Is.EqualTo(VividParticleRenderMode.Stretch));
             Assert.That(system.rendererModule.color, Is.EqualTo(Color.cyan));
             Assert.That(system.rendererModule.stretchSpeedScale, Is.EqualTo(0.5f));
+            Assert.That(system.rendererModule.colorDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
+            Assert.That(system.rendererModule.customData1Enabled, Is.True);
         }
 
         [Test]
@@ -298,7 +314,7 @@ namespace VividRP.Editor.Tests
         public void Manager_RegistersParticleSimulationAndRenderJobs_InEcsRegistry()
         {
             Assert.That(VividParticleSystemManager.registeredSimulationJobCount, Is.EqualTo(1));
-            Assert.That(VividParticleSystemManager.registeredRenderJobCount, Is.EqualTo(4));
+            Assert.That(VividParticleSystemManager.registeredRenderJobCount, Is.EqualTo(7));
 
             VividParticleSystem system = CreateActiveSystem();
             system.rendererModule.enabled = true;
@@ -671,10 +687,13 @@ namespace VividRP.Editor.Tests
             VividParticleSystemManager.VividParticleGpuBufferDataInfo[] stretchInfos =
                 stretchLayout.CreateBufferInfos(capacity, sharpCapacity: 1, spanCapacity: 1);
             MetadataValue metadata = VividParticleSystemManager.CreatePerInstanceMetadata(123, billboardInfos[2].ByteOffset);
-            MetadataValue sharedMetadata = VividParticleSystemManager.CreateSharedMetadata(456, billboardInfos[4].ByteOffset);
+            MetadataValue sharedMetadata = VividParticleSystemManager.CreateSharedMetadata(456, billboardInfos[5].ByteOffset);
 
-            Assert.That(billboardLayout.Count, Is.EqualTo(6));
-            Assert.That(billboardLayout.DataPerSharpBits, Is.EqualTo(1u << (int)VividParticleSystemManager.VividParticleGpuDataId.SharedData));
+            uint expectedDefaultPerSharpBits =
+                (1u << (int)VividParticleSystemManager.VividParticleGpuDataId.SharedData)
+                | (1u << (int)VividParticleSystemManager.VividParticleGpuDataId.Scale);
+            Assert.That(billboardLayout.Count, Is.EqualTo(7));
+            Assert.That(billboardLayout.DataPerSharpBits, Is.EqualTo(expectedDefaultPerSharpBits));
             Assert.That(billboardInfos[0].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.SharedData));
             Assert.That(billboardInfos[0].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp));
             Assert.That(billboardInfos[1].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.SpanSharedData));
@@ -684,10 +703,12 @@ namespace VividRP.Editor.Tests
             Assert.That(billboardInfos[2].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
             Assert.That(billboardInfos[3].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.BaseColor));
             Assert.That(billboardInfos[3].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
-            Assert.That(billboardInfos[4].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.Rotation));
-            Assert.That(billboardInfos[4].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.Shared));
-            Assert.That(billboardInfos[5].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.VelocityStretch));
+            Assert.That(billboardInfos[4].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.Scale));
+            Assert.That(billboardInfos[4].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp));
+            Assert.That(billboardInfos[5].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.Rotation));
             Assert.That(billboardInfos[5].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.Shared));
+            Assert.That(billboardInfos[6].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.VelocityStretch));
+            Assert.That(billboardInfos[6].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.Shared));
 
             Assert.That(billboardInfos[0].ByteOffset, Is.EqualTo(VividParticleSystemManager.ZeroBlockByteSize));
             Assert.That(billboardInfos[1].ByteOffset, Is.EqualTo(billboardInfos[0].ByteOffset + VividParticleSystemManager.SharedDataByteSize));
@@ -695,21 +716,22 @@ namespace VividRP.Editor.Tests
             Assert.That(billboardInfos[3].ByteOffset, Is.EqualTo(billboardInfos[2].ByteOffset + capacity * VividParticleSystemManager.SizeOfFloat4));
             Assert.That(billboardInfos[4].ByteOffset, Is.EqualTo(billboardInfos[3].ByteOffset + capacity * VividParticleSystemManager.SizeOfFloat4));
             Assert.That(billboardInfos[5].ByteOffset, Is.EqualTo(billboardInfos[4].ByteOffset + VividParticleSystemManager.SizeOfFloat4));
+            Assert.That(billboardInfos[6].ByteOffset, Is.EqualTo(billboardInfos[5].ByteOffset + VividParticleSystemManager.SizeOfFloat4));
             Assert.That(
                 billboardLayout.CalculateByteSize(capacity, sharpCapacity: 1, spanCapacity: 1),
                 Is.EqualTo(VividParticleSystemManager.ZeroBlockByteSize
                     + VividParticleSystemManager.SharedDataByteSize
                     + VividParticleSystemManager.SpanSharedDataByteSize
                     + capacity * VividParticleSystemManager.SizeOfFloat4 * 2
-                    + VividParticleSystemManager.SizeOfFloat4 * 2));
-            Assert.That(stretchInfos[5].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+                    + VividParticleSystemManager.SizeOfFloat4 * 3));
+            Assert.That(stretchInfos[6].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
             Assert.That(
                 stretchLayout.CalculateByteSize(capacity, sharpCapacity: 1, spanCapacity: 1),
                 Is.EqualTo(VividParticleSystemManager.ZeroBlockByteSize
                     + VividParticleSystemManager.SharedDataByteSize
                     + VividParticleSystemManager.SpanSharedDataByteSize
                     + capacity * VividParticleSystemManager.SizeOfFloat4 * 3
-                    + VividParticleSystemManager.SizeOfFloat4));
+                    + VividParticleSystemManager.SizeOfFloat4 * 2));
             for (int index = 0; index < billboardInfos.Length; index++)
                 Assert.That(billboardInfos[index].ByteOffset % 16, Is.EqualTo(0));
 
@@ -723,6 +745,41 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.UsesPerInstanceRotationData(VividParticleRenderMode.Mesh), Is.False);
             Assert.That(VividParticleSystemManager.UsesPerInstanceVelocityStretchData(VividParticleRenderMode.Billboard), Is.False);
             Assert.That(VividParticleSystemManager.UsesPerInstanceVelocityStretchData(VividParticleRenderMode.Stretch), Is.True);
+        }
+
+        [Test]
+        public void Manager_GpuDataLayout_IsDerivedFromRendererModule()
+        {
+            VividParticleRendererModule renderer = VividParticleRendererModule.CreateDefault();
+            renderer.colorDataMode = VividParticleGpuDataMode.Shared;
+            renderer.rotationDataMode = VividParticleGpuDataMode.PerParticle;
+            renderer.velocityDataMode = VividParticleGpuDataMode.PerParticle;
+            renderer.sizeDataMode = VividParticleGpuDataMode.PerParticle;
+            renderer.uvDataEnabled = true;
+            renderer.customData1Enabled = true;
+            renderer.customData2Enabled = true;
+            renderer.meshIndexDataEnabled = true;
+
+            VividParticleSystemManager.VividParticleGpuDataLayout layout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(renderer);
+
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.BaseColor, out var colorInfo), Is.True);
+            Assert.That(colorInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp));
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.Rotation, out var rotationInfo), Is.True);
+            Assert.That(rotationInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.VelocityStretch, out var velocityInfo), Is.True);
+            Assert.That(velocityInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.Scale, out var scaleInfo), Is.True);
+            Assert.That(scaleInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.UV, out var uvInfo), Is.True);
+            Assert.That(uvInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.CustomData1, out _), Is.True);
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.CustomData2, out _), Is.True);
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.MeshIndex, out _), Is.True);
+            Assert.That(
+                layout.DataPerSharpBits,
+                Is.EqualTo((1u << (int)VividParticleSystemManager.VividParticleGpuDataId.SharedData)
+                    | (1u << (int)VividParticleSystemManager.VividParticleGpuDataId.BaseColor)));
         }
 
         [Test]

@@ -34,6 +34,12 @@ namespace VividRP.Runtime.Particle
         None,
     }
 
+    public enum VividParticleGpuDataMode
+    {
+        Shared,
+        PerParticle,
+    }
+
     [Serializable]
     public struct VividParticleBurst
     {
@@ -421,6 +427,30 @@ namespace VividRP.Runtime.Particle
         [SerializeField]
         private bool m_ReceiveShadows;
 
+        [SerializeField]
+        private VividParticleGpuDataMode m_ColorDataMode = VividParticleGpuDataMode.PerParticle;
+
+        [SerializeField]
+        private VividParticleGpuDataMode m_RotationDataMode = VividParticleGpuDataMode.Shared;
+
+        [SerializeField]
+        private VividParticleGpuDataMode m_VelocityDataMode = VividParticleGpuDataMode.Shared;
+
+        [SerializeField]
+        private VividParticleGpuDataMode m_SizeDataMode = VividParticleGpuDataMode.Shared;
+
+        [SerializeField]
+        private bool m_UVDataEnabled;
+
+        [SerializeField]
+        private bool m_CustomData1Enabled;
+
+        [SerializeField]
+        private bool m_CustomData2Enabled;
+
+        [SerializeField]
+        private bool m_MeshIndexDataEnabled;
+
         public bool enabled
         {
             get => m_Enabled;
@@ -487,6 +517,54 @@ namespace VividRP.Runtime.Particle
             set => m_ReceiveShadows = value;
         }
 
+        public VividParticleGpuDataMode colorDataMode
+        {
+            get => m_ColorDataMode;
+            set => m_ColorDataMode = value;
+        }
+
+        public VividParticleGpuDataMode rotationDataMode
+        {
+            get => m_RotationDataMode;
+            set => m_RotationDataMode = value;
+        }
+
+        public VividParticleGpuDataMode velocityDataMode
+        {
+            get => m_VelocityDataMode;
+            set => m_VelocityDataMode = value;
+        }
+
+        public VividParticleGpuDataMode sizeDataMode
+        {
+            get => m_SizeDataMode;
+            set => m_SizeDataMode = value;
+        }
+
+        public bool uvDataEnabled
+        {
+            get => m_UVDataEnabled;
+            set => m_UVDataEnabled = value;
+        }
+
+        public bool customData1Enabled
+        {
+            get => m_CustomData1Enabled;
+            set => m_CustomData1Enabled = value;
+        }
+
+        public bool customData2Enabled
+        {
+            get => m_CustomData2Enabled;
+            set => m_CustomData2Enabled = value;
+        }
+
+        public bool meshIndexDataEnabled
+        {
+            get => m_MeshIndexDataEnabled;
+            set => m_MeshIndexDataEnabled = value;
+        }
+
         internal static VividParticleRendererModule CreateDefault()
         {
             return new VividParticleRendererModule();
@@ -515,6 +593,14 @@ namespace VividRP.Runtime.Particle
             m_RenderQueueOffset = source.m_RenderQueueOffset;
             m_ShadowCastingMode = source.m_ShadowCastingMode;
             m_ReceiveShadows = source.m_ReceiveShadows;
+            m_ColorDataMode = source.m_ColorDataMode;
+            m_RotationDataMode = source.m_RotationDataMode;
+            m_VelocityDataMode = source.m_VelocityDataMode;
+            m_SizeDataMode = source.m_SizeDataMode;
+            m_UVDataEnabled = source.m_UVDataEnabled;
+            m_CustomData1Enabled = source.m_CustomData1Enabled;
+            m_CustomData2Enabled = source.m_CustomData2Enabled;
+            m_MeshIndexDataEnabled = source.m_MeshIndexDataEnabled;
             Validate();
         }
 

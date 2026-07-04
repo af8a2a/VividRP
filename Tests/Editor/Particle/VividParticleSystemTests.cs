@@ -172,6 +172,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void OnEnable_PlayOnAwakeStartsPlaying_WhenInEditMode()
+        {
+            Assert.That(Application.isPlaying, Is.False);
+
+            var gameObject = new GameObject("Vivid Particle System Test");
+            m_ToDestroy.Add(gameObject);
+
+            VividParticleSystem system = gameObject.AddComponent<VividParticleSystem>();
+
+            Assert.That(system.main.playOnAwake, Is.True);
+            Assert.That(system.isPlaying, Is.True);
+            Assert.That(system.isPaused, Is.False);
+        }
+
+        [Test]
+        public void Manager_UpdateSystemWithDelta_EmitsContinuously_WhenPlayingInEditMode()
+        {
+            Assert.That(Application.isPlaying, Is.False);
+
+            VividParticleSystem system = CreateSystem();
+            system.main.maxParticles = 16;
+            system.main.startLifetime = 10.0f;
+            system.main.useAutoRandomSeed = false;
+            system.emission.rateOverTime = 20.0f;
+            system.shape.enabled = false;
+
+            system.Play(withChildren: false);
+            VividParticleSystemManager.UpdateSystem(system, 0.25f);
+
+            Assert.That(system.particleCount, Is.EqualTo(5));
+            Assert.That(system.time, Is.EqualTo(0.25f).Within(0.0001f));
+        }
+
+        [Test]
         public void Stop_StopEmitting_AgesExistingParticlesUntilClear()
         {
             VividParticleSystem system = CreateSystem();

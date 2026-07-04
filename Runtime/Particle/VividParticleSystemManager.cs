@@ -50,12 +50,24 @@ namespace VividRP.Runtime.Particle
             if (system == null)
                 return;
 
+            if (Application.isPlaying)
+            {
+                UpdateSystem(system, Time.deltaTime);
+                return;
+            }
+
+            UpdateRendering(system);
+        }
+
+        internal static void UpdateSystem(VividParticleSystem system, float deltaTime)
+        {
+            if (system == null)
+                return;
+
             if (!s_RenderStates.ContainsKey(system))
                 Register(system);
 
-            if (Application.isPlaying)
-                system.UpdateAutomatic(Time.deltaTime);
-
+            system.UpdateAutomatic(deltaTime);
             UpdateRendering(system);
         }
 

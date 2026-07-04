@@ -161,6 +161,34 @@ namespace VividRP.Runtime.Particle.ECS
             return m_Line.CreatePageGroup(allocator);
         }
 
+        public bool TryGetCommonArrays(
+            out NativeArray<float3> positions,
+            out NativeArray<float3> velocities,
+            out NativeArray<float> startLifetimes,
+            out NativeArray<float> remainingLifetimes,
+            out NativeArray<float4> colors,
+            out NativeArray<float> sizes)
+        {
+            positions = default;
+            velocities = default;
+            startLifetimes = default;
+            remainingLifetimes = default;
+            colors = default;
+            sizes = default;
+
+            if (!isCreated)
+                return false;
+
+            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
+            positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
+            velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
+            startLifetimes = common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex);
+            remainingLifetimes = common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
+            colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
+            sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+            return true;
+        }
+
         private VividEcsSoaColumn<VividParticleCommon> commonColumn =>
             m_Line.GetColumn<VividEcsSoaColumn<VividParticleCommon>>(m_CommonTypeIndex);
 

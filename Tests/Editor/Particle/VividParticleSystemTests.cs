@@ -719,6 +719,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_RendererManager_BatchesDefaultMaterialSystems_AndLocksOnce()
+        {
+            VividParticleSystem first = CreateSystem();
+            VividParticleSystem second = CreateSystem();
+            first.rendererModule.enabled = true;
+            second.rendererModule.enabled = true;
+            first.main.maxParticles = 4;
+            second.main.maxParticles = 4;
+            first.emission.enabled = false;
+            second.emission.enabled = false;
+            first.shape.enabled = false;
+            second.shape.enabled = false;
+
+            first.Emit(1);
+            second.Emit(1);
+
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+            Assert.That(rendererStats.RenderRecordCount, Is.EqualTo(2));
+            Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastLockCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastCopyOperationCount, Is.GreaterThan(0));
+        }
+
+        [Test]
         public void Renderer_NoneMode_SimulatesButDoesNotInitializeRendering()
         {
             VividParticleSystem system = CreateActiveSystem();

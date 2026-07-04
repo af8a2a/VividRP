@@ -1,0 +1,26 @@
+#pragma kernel CopyParticleBufferRanges
+
+ByteAddressBuffer _VividParticleUploadSrc;
+RWByteAddressBuffer _VividParticleUploadDst;
+StructuredBuffer<uint3> _VividParticleUploadOperations;
+uint _VividParticleUploadOperationCount;
+uint _VividParticleUploadOperationBase;
+
+[numthreads(64, 1, 1)]
+void CopyParticleBufferRanges(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    uint operationIndex = _VividParticleUploadOperationBase + groupId.x;
+    if (operationIndex >= _VividParticleUploadOperationCount)
+        return;
+
+    uint3 operation = _VividParticleUploadOperations[operationIndex];
+    uint srcOffset = operation.x;
+    uint dstOffset = operation.y;
+    uint byteCount = operation.z;
+
+    for (uint byteOffset = groupThreadId.x * 4u; byteOffset < byteCount; byteOffset += 64u * 4u)
+    {
+        uint value = _VividParticleUploadSrc.Load(srcOffset + byteOffset);
+        _VividParticleUploadDst.Store(dstOffset + byteOffset, value);
+    }
+}

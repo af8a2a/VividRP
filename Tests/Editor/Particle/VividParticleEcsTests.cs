@@ -3,6 +3,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using UnityEngine;
+using VividRP.Runtime.ECS;
 using VividRP.Runtime.Particle;
 using VividRP.Runtime.Particle.ECS;
 
@@ -13,22 +14,24 @@ namespace VividRP.Editor.Tests
         [Test]
         public void TypeManager_RegistersParticleTypes_WithStableSoaOffsets()
         {
-            VividParticleTypeIndex commonIndex = VividParticleTypeManager.GetTypeIndex<VividParticleCommon>();
-            VividParticleTypeIndex systemIdIndex = VividParticleTypeManager.GetTypeIndex<VividParticleSystemId>();
-            VividParticleTypeInfo commonType = VividParticleTypeManager.GetTypeInfo(commonIndex);
+            VividParticleEcsBootstrap.RegisterTypes();
+            VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividEcsTypeIndex systemIdIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
+            VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
 
             Assert.That(commonIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
-            Assert.That(VividParticleTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
+            Assert.That(systemIdIndex.IsSharedComponentType, Is.True);
+            Assert.That(VividEcsTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
             Assert.That(commonType.IsSoa, Is.True);
-            Assert.That(commonType.FieldCount, Is.EqualTo(VividParticleCommon.FieldCountValue));
+            Assert.That(commonType.SoaFieldCount, Is.EqualTo(VividParticleCommon.FieldCountValue));
             Assert.That(commonType.SizeInPage, Is.EqualTo(VividParticleCommon.TypeSizeInBytes));
-            Assert.That(commonType.GetFieldInfo(VividParticleCommon.PositionFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.PositionOffsetInPage));
-            Assert.That(commonType.GetFieldInfo(VividParticleCommon.PositionFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float3SizeInBytes));
-            Assert.That(commonType.GetFieldInfo(VividParticleCommon.VelocityFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.VelocityOffsetInPage));
-            Assert.That(commonType.GetFieldInfo(VividParticleCommon.StartColorFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float4SizeInBytes));
-            Assert.That(commonType.GetFieldInfo(VividParticleCommon.SizeFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.SizeOffsetInPage));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.PositionFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.PositionOffsetInPage));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.PositionFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float3SizeInBytes));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.VelocityFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.VelocityOffsetInPage));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.StartColorFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float4SizeInBytes));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.SizeFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.SizeOffsetInPage));
         }
 
         [Test]
@@ -38,7 +41,7 @@ namespace VividRP.Editor.Tests
             storage.systemId = new VividParticleSystemId(17);
             storage.EnsureCapacity(300);
 
-            Assert.That(VividParticleEcsConstants.PageEntryCount, Is.EqualTo(VividParticleStorage.PageSize));
+            Assert.That(VividEcsConstants.PageEntryCount, Is.EqualTo(VividParticleStorage.PageSize));
             Assert.That(storage.capacity, Is.EqualTo(512));
             Assert.That(storage.pageCount, Is.EqualTo(2));
 
@@ -57,11 +60,11 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Constants_AlignToPage_UsesFixedPageEntryCount()
         {
-            Assert.That(VividParticleEcsConstants.PageEntryCount, Is.EqualTo(256));
-            Assert.That(VividParticleEcsConstants.AlignToPage(0), Is.EqualTo(256));
-            Assert.That(VividParticleEcsConstants.AlignToPage(1), Is.EqualTo(256));
-            Assert.That(VividParticleEcsConstants.AlignToPage(256), Is.EqualTo(256));
-            Assert.That(VividParticleEcsConstants.AlignToPage(257), Is.EqualTo(512));
+            Assert.That(VividEcsConstants.PageEntryCount, Is.EqualTo(256));
+            Assert.That(VividEcsConstants.AlignToPage(0), Is.EqualTo(256));
+            Assert.That(VividEcsConstants.AlignToPage(1), Is.EqualTo(256));
+            Assert.That(VividEcsConstants.AlignToPage(256), Is.EqualTo(256));
+            Assert.That(VividEcsConstants.AlignToPage(257), Is.EqualTo(512));
         }
 
         [Test]
@@ -84,12 +87,12 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.GetSize(259), Is.EqualTo(260.0f));
             AssertColor(new Color(0.25f, 0.5f, 0.75f, 1.0f), storage.GetColor(259));
 
-            using VividParticlePageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
+            using VividEcsPageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
             Assert.That(pageGroup.pageCount, Is.EqualTo(2));
             Assert.That(pageGroup[0].EntryCount, Is.EqualTo(256));
             Assert.That(pageGroup[1].EntryCount, Is.EqualTo(4));
             Assert.That(pageGroup[1].StartIndex, Is.EqualTo(256));
-            Assert.That(pageGroup[1].SystemId, Is.EqualTo(new VividParticleSystemId(17)));
+            Assert.That(storage.systemId, Is.EqualTo(new VividParticleSystemId(17)));
         }
 
         [Test]
@@ -100,7 +103,7 @@ namespace VividRP.Editor.Tests
             for (int index = 0; index < 300; index++)
                 Assert.That(AddParticle(storage, index), Is.True);
 
-            using VividParticlePageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
+            using VividEcsPageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
             var counts = new NativeArray<int>(pageGroup.pageCount, Allocator.TempJob, NativeArrayOptions.ClearMemory);
             try
             {
@@ -215,11 +218,11 @@ namespace VividRP.Editor.Tests
         }
 
         [BurstCompile]
-        private struct CapturePageCountsJob : IVividParticlePageJob
+        private struct CapturePageCountsJob : IVividEcsPageJob
         {
             public NativeArray<int> Counts;
 
-            public void Execute(VividParticlePageInfo page)
+            public void Execute(VividEcsPageInfo page)
             {
                 Counts[page.PageIndex] = page.EntryCount;
             }

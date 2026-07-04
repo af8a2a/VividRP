@@ -5,45 +5,6 @@ using Unity.Mathematics;
 
 namespace VividRP.Runtime.Particle.ECS
 {
-    internal interface IVividParticlePageJob
-    {
-        void Execute(VividParticlePageInfo page);
-    }
-
-    internal static class VividParticlePageJobExtensions
-    {
-        public static JobHandle Schedule<TJob>(
-            this TJob jobData,
-            NativeArray<VividParticlePageInfo> pages,
-            JobHandle dependency = default)
-            where TJob : struct, IVividParticlePageJob
-        {
-            if (!pages.IsCreated || pages.Length == 0)
-                return dependency;
-
-            var wrapper = new VividParticlePageJobWrapper<TJob>
-            {
-                Pages = pages,
-                JobData = jobData,
-            };
-            return wrapper.Schedule(pages.Length, 1, dependency);
-        }
-    }
-
-    internal struct VividParticlePageJobWrapper<TJob> : IJobParallelFor
-        where TJob : struct, IVividParticlePageJob
-    {
-        [ReadOnly]
-        public NativeArray<VividParticlePageInfo> Pages;
-
-        public TJob JobData;
-
-        public void Execute(int index)
-        {
-            JobData.Execute(Pages[index]);
-        }
-    }
-
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct VividParticleEcsIntegrateJob : IJob
     {

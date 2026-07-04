@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.LowLevel;
 using UnityEngine.PlayerLoop;
 using UnityEngine.Rendering;
+using VividRP.Runtime.ECS;
 using VividRP.Runtime.Particle.ECS;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -180,7 +181,7 @@ namespace VividRP.Runtime.Particle
 
         internal static int GetParticleStoragePageSize(VividParticleSystem system)
         {
-            return VividParticleEcsConstants.PageEntryCount;
+            return VividEcsConstants.PageEntryCount;
         }
 
         internal static int GetParticleStorageCapacity(VividParticleSystem system)

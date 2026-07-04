@@ -660,7 +660,7 @@ namespace VividRP.Runtime.Particle
 
             using (s_BRGUploadMarker.Auto())
             {
-                s_RendererManager.UpdateAll(s_States.Values, forceUpload);
+                s_RendererManager.UpdateAll(s_States, forceUpload);
             }
 
             s_LastCompleteAndUploadFrame = Time.frameCount;
@@ -874,6 +874,7 @@ namespace VividRP.Runtime.Particle
             private VividParticleRenderMode m_LastUploadedRenderMode;
             private VividParticleGpuDataLayoutDescriptor m_CachedGpuLayoutDescriptor;
             private VividParticleGpuDataLayout m_CachedGpuLayout;
+            private VividParticleRendererSharedKey m_LastRendererSharedKey;
             private bool m_BatchCreated;
             private bool m_OwnedMesh;
             private bool m_ResourcesDirty = true;
@@ -883,6 +884,7 @@ namespace VividRP.Runtime.Particle
             private bool m_PendingAllowEmission;
             private bool m_HasUploadedRenderStateSnapshot;
             private bool m_HasCachedGpuLayout;
+            private bool m_HasRendererSharedKey;
             private bool m_RendererInitialized;
 
             public ParticleSystemState(VividParticleSystem system)
@@ -1147,7 +1149,7 @@ namespace VividRP.Runtime.Particle
                     gpuLayout.DataPerSharpBits,
                     (int)m_System.rendererModule.shadowCastingMode,
                     m_System.rendererModule.receiveShadows);
-                m_Storage.rendererSharedKey = rendererSharedKey;
+                UpdateRendererSharedKey(rendererSharedKey);
                 entry = new ParticleRenderEntry(
                     this,
                     m_RegisteredMaterial,
@@ -1168,6 +1170,16 @@ namespace VividRP.Runtime.Particle
                     m_System.gameObject.GetEntityId(),
                     IsSelectedForEditorOutline(m_System));
                 return true;
+            }
+
+            private void UpdateRendererSharedKey(VividParticleRendererSharedKey rendererSharedKey)
+            {
+                if (m_HasRendererSharedKey && m_LastRendererSharedKey.Equals(rendererSharedKey))
+                    return;
+
+                m_Storage.rendererSharedKey = rendererSharedKey;
+                m_LastRendererSharedKey = rendererSharedKey;
+                m_HasRendererSharedKey = true;
             }
 
             private VividParticleGpuDataLayout GetGpuDataLayout(VividParticleGpuDataLayoutDescriptor descriptor)
@@ -2774,6 +2786,7 @@ namespace VividRP.Runtime.Particle
 
         internal readonly struct VividParticleGpuDataLayout
         {
+            private static readonly Dictionary<VividParticleGpuDataLayoutDescriptor, VividParticleGpuDataLayout> s_LayoutCache = new();
             private readonly VividParticleGpuDataInfo[] m_DataInfos;
 
             private VividParticleGpuDataLayout(VividParticleGpuDataInfo[] dataInfos)
@@ -2802,6 +2815,16 @@ namespace VividRP.Runtime.Particle
             }
 
             public static VividParticleGpuDataLayout Create(VividParticleGpuDataLayoutDescriptor descriptor)
+            {
+                if (s_LayoutCache.TryGetValue(descriptor, out VividParticleGpuDataLayout layout))
+                    return layout;
+
+                layout = CreateUncached(descriptor);
+                s_LayoutCache.Add(descriptor, layout);
+                return layout;
+            }
+
+            private static VividParticleGpuDataLayout CreateUncached(VividParticleGpuDataLayoutDescriptor descriptor)
             {
                 int dataInfoCount = 7
                     + (descriptor.IncludeUV ? 1 : 0)
@@ -3679,12 +3702,15 @@ namespace VividRP.Runtime.Particle
                 return material;
             }
 
-            public void UpdateAll(IEnumerable<ParticleSystemState> states, bool forceUpload)
+            public void UpdateAll(
+                Dictionary<VividParticleSystem, ParticleSystemState> states,
+                bool forceUpload)
             {
                 CompletePendingUpload();
                 m_SeenStates.Clear();
-                foreach (ParticleSystemState state in states)
+                foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in states)
                 {
+                    ParticleSystemState state = pair.Value;
                     if (state == null)
                         continue;
 

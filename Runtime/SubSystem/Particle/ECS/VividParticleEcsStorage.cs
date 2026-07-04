@@ -17,6 +17,7 @@ namespace VividRP.Runtime.Particle.ECS
         private NativeArray<int> m_ActiveCountOutput;
         private NativeArray<byte> m_KeepMask;
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
+        private VividParticleRendererSharedKey m_RendererSharedKey = VividParticleRendererSharedKey.Invalid;
 
         public VividParticleEcsStorage()
         {
@@ -64,10 +65,8 @@ namespace VividRP.Runtime.Particle.ECS
 
         public VividParticleRendererSharedKey rendererSharedKey
         {
-            get => m_Line.TryGetSharedComponent(out VividParticleRendererSharedKey value)
-                ? value
-                : VividParticleRendererSharedKey.Invalid;
-            set => m_Line.SetSharedComponent(value);
+            get => m_RendererSharedKey;
+            set => m_RendererSharedKey = value;
         }
 
         public void EnsureCapacity(int maxParticles)
@@ -240,6 +239,7 @@ namespace VividRP.Runtime.Particle.ECS
 
         public System.Collections.Generic.List<VividEcsArchetypeLineGroup> CreateLineGroups()
         {
+            SyncRendererSharedKeyForQueries();
             VividEcsQuery query = m_World.CreateQuery().WithAll(m_CommonTypeIndex);
             return m_World.CreateArchetypeLineGroups(query);
         }
@@ -300,6 +300,11 @@ namespace VividRP.Runtime.Particle.ECS
                 requestedPageCount,
                 Allocator.Persistent,
                 NativeArrayOptions.UninitializedMemory);
+        }
+
+        private void SyncRendererSharedKeyForQueries()
+        {
+            m_Line.SetSharedComponent(m_RendererSharedKey);
         }
 
         private static float3 ToFloat3(Vector3 value)

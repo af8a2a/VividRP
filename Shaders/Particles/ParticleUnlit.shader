@@ -46,6 +46,21 @@ Shader "VividRP/Particles/Unlit"
         }
 
         HLSLINCLUDE
+            #ifdef DOTS_INSTANCING_ON
+                cbuffer UnityDOTSInstancing_BuiltinPropertyMetadata
+                {
+                    uint unity_DOTSInstancingF48_Metadataunity_ObjectToWorld;
+                    uint unity_DOTSInstancingF48_Metadataunity_WorldToObject;
+                    uint unity_DOTSInstancingF48_Metadataunity_MatrixPreviousM;
+                    uint unity_DOTSInstancingF48_Metadataunity_MatrixPreviousMI;
+                }
+
+                #define unity_WorldTransformParams LoadDOTSInstancedData_WorldTransformParams()
+                #define unity_RenderingLayer LoadDOTSInstancedData_RenderingLayer()
+                #define UNITY_SETUP_DOTS_SH_COEFFS
+                #define UNITY_SETUP_DOTS_RENDER_BOUNDS
+            #endif
+
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
@@ -74,21 +89,18 @@ Shader "VividRP/Particles/Unlit"
                     UNITY_DOTS_INSTANCED_PROP(float4, _VividParticleVelocityStretch)
                 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
-                #define VIVID_PARTICLE_POSITION_SIZE UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _VividParticlePositionSize, float4(0.0, 0.0, 0.0, 1.0))
-                #define VIVID_PARTICLE_INSTANCE_COLOR UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _BaseColor, float4(1.0, 1.0, 1.0, 1.0))
-                #define VIVID_PARTICLE_ROTATION UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _VividParticleRotation, float4(0.0, 0.0, 0.0, 1.0))
-                #define VIVID_PARTICLE_VELOCITY_STRETCH UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _VividParticleVelocityStretch, float4(0.0, 1.0, 0.0, 1.0))
+                #define VIVID_PARTICLE_POSITION_SIZE_METADATA UNITY_DOTS_INSTANCED_METADATA_NAME(float4, _VividParticlePositionSize)
+                #define VIVID_PARTICLE_INSTANCE_COLOR_METADATA UNITY_DOTS_INSTANCED_METADATA_NAME(float4, _BaseColor)
+                #define VIVID_PARTICLE_ROTATION_METADATA UNITY_DOTS_INSTANCED_METADATA_NAME(float4, _VividParticleRotation)
+                #define VIVID_PARTICLE_VELOCITY_STRETCH_METADATA UNITY_DOTS_INSTANCED_METADATA_NAME(float4, _VividParticleVelocityStretch)
             #else
-                #define VIVID_PARTICLE_POSITION_SIZE _VividParticlePositionSize
-                #define VIVID_PARTICLE_INSTANCE_COLOR _BaseColor
-                #define VIVID_PARTICLE_ROTATION _VividParticleRotation
-                #define VIVID_PARTICLE_VELOCITY_STRETCH _VividParticleVelocityStretch
             #endif
 
             struct Attributes
             {
                 float3 positionOS : POSITION;
                 float2 uv : TEXCOORD0;
+                float2 particleSlot : TEXCOORD1;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
             };
 
@@ -96,9 +108,71 @@ Shader "VividRP/Particles/Unlit"
             {
                 float4 positionCS : SV_POSITION;
                 float2 uv : TEXCOORD0;
+                float particleVisible : TEXCOORD1;
+                float4 instanceColor : TEXCOORD2;
                 UNITY_VERTEX_INPUT_INSTANCE_ID
                 UNITY_VERTEX_OUTPUT_STEREO
             };
+
+            struct VividParticleData
+            {
+                float4 positionSize;
+                float4 instanceColor;
+                float4 rotation;
+                float4 velocityStretch;
+                float visible;
+            };
+
+            #ifdef UNITY_DOTS_INSTANCING_ENABLED
+                static const uint VIVID_PARTICLE_PAGE_BASE_MASK = 0x00ffffffu;
+                static const uint VIVID_PARTICLE_PAGE_COUNT_SHIFT = 24u;
+
+                float4 VividLoadParticleFloat4(uint metadata, uint particleIndex, float4 defaultValue)
+                {
+                    if (!IsDOTSInstancedProperty(metadata))
+                        return defaultValue;
+
+                    uint address = (metadata & kAddressMask) + particleIndex * 16u;
+                    return asfloat(DOTSInstanceData_Load4(address));
+                }
+
+                uint VividResolveParticleIndex(Attributes input, out float visible)
+                {
+                    uint instanceIndex = GetDOTSInstanceIndex();
+                    if (_VividParticleRenderMode < 3.5)
+                    {
+                        uint slot = (uint)(input.particleSlot.x + 0.5);
+                        uint pageActiveMinusOne = instanceIndex >> VIVID_PARTICLE_PAGE_COUNT_SHIFT;
+                        visible = slot <= pageActiveMinusOne ? 1.0 : 0.0;
+                        return (instanceIndex & VIVID_PARTICLE_PAGE_BASE_MASK) + slot;
+                    }
+
+                    visible = 1.0;
+                    return instanceIndex;
+                }
+
+                VividParticleData VividLoadParticleData(Attributes input)
+                {
+                    VividParticleData data;
+                    uint particleIndex = VividResolveParticleIndex(input, data.visible);
+                    data.positionSize = VividLoadParticleFloat4(VIVID_PARTICLE_POSITION_SIZE_METADATA, particleIndex, float4(0.0, 0.0, 0.0, 1.0));
+                    data.instanceColor = VividLoadParticleFloat4(VIVID_PARTICLE_INSTANCE_COLOR_METADATA, particleIndex, float4(1.0, 1.0, 1.0, 1.0));
+                    data.rotation = VividLoadParticleFloat4(VIVID_PARTICLE_ROTATION_METADATA, particleIndex, float4(0.0, 0.0, 0.0, 1.0));
+                    data.velocityStretch = VividLoadParticleFloat4(VIVID_PARTICLE_VELOCITY_STRETCH_METADATA, particleIndex, float4(0.0, 1.0, 0.0, 1.0));
+                    return data;
+                }
+            #else
+                VividParticleData VividLoadParticleData(Attributes input)
+                {
+                    VividParticleData data;
+                    data.positionSize = _VividParticlePositionSize;
+                    data.instanceColor = _BaseColor;
+                    data.rotation = _VividParticleRotation;
+                    data.velocityStretch = _VividParticleVelocityStretch;
+                    data.visible = 1.0;
+                    return data;
+                }
+            #endif
 
             float2 TransformParticleUnlitUV(float2 uv)
             {
@@ -143,9 +217,19 @@ Shader "VividRP/Particles/Unlit"
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-                float4 positionSize = VIVID_PARTICLE_POSITION_SIZE;
-                float4 rotation = VIVID_PARTICLE_ROTATION;
-                float4 velocityStretch = VIVID_PARTICLE_VELOCITY_STRETCH;
+                VividParticleData particle = VividLoadParticleData(input);
+                output.particleVisible = particle.visible;
+                output.instanceColor = particle.instanceColor;
+                output.uv = TransformParticleUnlitUV(input.uv);
+                if (particle.visible <= 0.0)
+                {
+                    output.positionCS = float4(0.0, 0.0, 0.0, 1.0);
+                    return output;
+                }
+
+                float4 positionSize = particle.positionSize;
+                float4 rotation = particle.rotation;
+                float4 velocityStretch = particle.velocityStretch;
                 float3 centerRWS = positionSize.xyz;
                 float size = max(positionSize.w, 0.0001);
                 float4x4 viewToWorld = GetViewToWorldMatrix();
@@ -196,7 +280,6 @@ Shader "VividRP/Particles/Unlit"
                 }
 
                 output.positionCS = TransformWorldToHClip(positionRWS);
-                output.uv = TransformParticleUnlitUV(input.uv);
                 return output;
             }
 
@@ -205,7 +288,8 @@ Shader "VividRP/Particles/Unlit"
                 UNITY_SETUP_INSTANCE_ID(input);
                 UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
-                float4 color = SampleParticleUnlitColor(input.uv) * VIVID_PARTICLE_INSTANCE_COLOR;
+                clip(input.particleVisible - 0.5);
+                float4 color = SampleParticleUnlitColor(input.uv) * input.instanceColor;
                 ApplyParticleUnlitAlphaClip(color.a);
                 return float4((color.rgb), color.a);
             }

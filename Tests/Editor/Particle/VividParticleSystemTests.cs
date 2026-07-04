@@ -850,6 +850,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Renderer_VisibleInstanceCount_UsesPagesForBillboards_AndParticlesForMesh()
+        {
+            const int particleCount = 1024;
+
+            Assert.That(
+                VividParticleSystemManager.GetVisibleInstanceCount(VividParticleRenderMode.Billboard, particleCount),
+                Is.EqualTo(4));
+            Assert.That(
+                VividParticleSystemManager.GetVisibleInstanceCount(VividParticleRenderMode.Stretch, particleCount),
+                Is.EqualTo(4));
+            Assert.That(
+                VividParticleSystemManager.GetVisibleInstanceCount(VividParticleRenderMode.HorizontalBillboard, particleCount),
+                Is.EqualTo(4));
+            Assert.That(
+                VividParticleSystemManager.GetVisibleInstanceCount(VividParticleRenderMode.VerticalBillboard, particleCount),
+                Is.EqualTo(4));
+            Assert.That(
+                VividParticleSystemManager.GetVisibleInstanceCount(VividParticleRenderMode.Mesh, particleCount),
+                Is.EqualTo(1024));
+        }
+
+        [Test]
         public void Manager_UpdateRendering_WithNoParticlesKeepsDrawCountEmpty()
         {
             VividParticleSystem system = CreateSystem();

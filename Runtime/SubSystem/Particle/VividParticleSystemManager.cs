@@ -27,8 +27,11 @@ namespace VividRP.Runtime.Particle
         internal const int SizeOfFloat4 = sizeof(float) * 4;
         internal const int SizeOfParticleGpuData = SizeOfFloat4 * 4;
         internal const int ZeroBlockByteSize = SizeOfFloat4;
+        internal const int BillboardPageSize = VividEcsConstants.PageEntryCount;
 
         private const int InstanceDataBufferCount = 3;
+        private const int BillboardPageInstanceBaseMask = 0x00ffffff;
+        private const int BillboardPageInstanceCountShift = 24;
         private const float GravityAcceleration = 9.81f;
         private const float MinimumSimulationStep = 0.000001f;
         private const float MaximumEditorSimulationStep = 0.1f;
@@ -406,6 +409,29 @@ namespace VividRP.Runtime.Particle
             return VelocityStretchByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
         }
 
+        internal static bool UsesPageBillboardRenderMode(VividParticleRenderMode renderMode)
+        {
+            return renderMode is VividParticleRenderMode.Billboard
+                or VividParticleRenderMode.Stretch
+                or VividParticleRenderMode.HorizontalBillboard
+                or VividParticleRenderMode.VerticalBillboard;
+        }
+
+        internal static int GetVisibleInstanceCount(VividParticleRenderMode renderMode, int particleCount)
+        {
+            particleCount = Mathf.Max(0, particleCount);
+            return UsesPageBillboardRenderMode(renderMode)
+                ? (particleCount + BillboardPageSize - 1) / BillboardPageSize
+                : particleCount;
+        }
+
+        internal static int EncodeBillboardPageVisibleInstance(int baseParticleIndex, int pageParticleCount)
+        {
+            int count = pageParticleCount < 1 ? 1 : pageParticleCount > BillboardPageSize ? BillboardPageSize : pageParticleCount;
+            return (baseParticleIndex & BillboardPageInstanceBaseMask)
+                | ((count - 1) << BillboardPageInstanceCountShift);
+        }
+
         internal static uint ResolveBufferWindowSize()
         {
             return BatchRendererGroup.BufferTarget == BatchBufferTarget.ConstantBuffer
@@ -740,6 +766,7 @@ namespace VividRP.Runtime.Particle
                 LastVisible,
                 LastViewType,
                 LastDrawCommandCount,
+                LastVisibleInstanceCount,
                 m_HasPendingJob ? 1 : 0,
                 ScheduledJobCount,
                 CompletedJobCount,
@@ -761,6 +788,8 @@ namespace VividRP.Runtime.Particle
             private BatchCullingViewType LastViewType { get; set; }
 
             private int LastDrawCommandCount { get; set; }
+
+            private int LastVisibleInstanceCount { get; set; }
 
             private int ScheduledJobCount { get; set; }
 
@@ -970,6 +999,7 @@ namespace VividRP.Runtime.Particle
                 m_LastUploadedCount = 0;
                 LastVisible = false;
                 LastDrawCommandCount = 0;
+                LastVisibleInstanceCount = 0;
             }
 
             public Matrix4x4 GetParticleObjectToWorldMatrix(int particleIndex)
@@ -1360,7 +1390,7 @@ namespace VividRP.Runtime.Particle
                 m_RenderQueueOffset = renderQueueOffset;
                 m_RenderMode = renderMode;
                 m_RegisteredMaterial = material;
-                m_QuadMesh = renderMesh != null ? renderMesh : CreateQuadMesh();
+                m_QuadMesh = renderMesh != null ? renderMesh : CreateBillboardPageMesh();
                 m_OwnedMesh = renderMesh == null;
 
                 m_BatchCreated = true;
@@ -1716,12 +1746,17 @@ namespace VividRP.Runtime.Particle
                 m_LastUploadBufferIndex = lastUploadBufferIndex;
             }
 
-            internal void RecordCulling(BatchCullingViewType viewType, bool visible, int drawCommandCount)
+            internal void RecordCulling(
+                BatchCullingViewType viewType,
+                bool visible,
+                int drawCommandCount,
+                int visibleInstanceCount)
             {
                 CullingCallCount++;
                 LastViewType = viewType;
                 LastVisible = visible;
                 LastDrawCommandCount = drawCommandCount;
+                LastVisibleInstanceCount = visibleInstanceCount;
                 if (visible)
                     VisibleCullingCallCount++;
             }
@@ -1733,6 +1768,7 @@ namespace VividRP.Runtime.Particle
                 LastVisible = false;
                 LastViewType = default;
                 LastDrawCommandCount = 0;
+                LastVisibleInstanceCount = 0;
             }
 
             private int SelectUploadBufferIndex(int activeCount)
@@ -1965,30 +2001,59 @@ namespace VividRP.Runtime.Particle
                 cullingOutput.drawCommands[0] = new BatchCullingOutputDrawCommands();
             }
 
-            private static Mesh CreateQuadMesh()
+            private static Mesh CreateBillboardPageMesh()
             {
                 var mesh = new Mesh
                 {
-                    name = "Vivid Particle Billboard Quad",
+                    name = $"Vivid Particle Billboard Page ({BillboardPageSize})",
                     hideFlags = HideFlags.HideAndDontSave,
                 };
 
-                mesh.SetVertices(new[]
+                int vertexCount = BillboardPageSize * 4;
+                int indexCount = BillboardPageSize * 6;
+                var vertices = new Vector3[vertexCount];
+                var uvs = new Vector2[vertexCount];
+                var slots = new Vector2[vertexCount];
+                var indices = new int[indexCount];
+                Vector3[] quadVertices =
                 {
-                    new Vector3(-0.5f, -0.5f, 0.0f),
-                    new Vector3(-0.5f, 0.5f, 0.0f),
-                    new Vector3(0.5f, 0.5f, 0.0f),
-                    new Vector3(0.5f, -0.5f, 0.0f),
-                });
-                mesh.SetUVs(0, new[]
+                    new(-0.5f, -0.5f, 0.0f),
+                    new(-0.5f, 0.5f, 0.0f),
+                    new(0.5f, 0.5f, 0.0f),
+                    new(0.5f, -0.5f, 0.0f),
+                };
+                Vector2[] quadUvs =
                 {
-                    new Vector2(0.0f, 0.0f),
-                    new Vector2(0.0f, 1.0f),
-                    new Vector2(1.0f, 1.0f),
-                    new Vector2(1.0f, 0.0f),
-                });
-                mesh.SetTriangles(new[] { 0, 1, 2, 0, 2, 3 }, 0);
-                mesh.RecalculateBounds();
+                    new(0.0f, 0.0f),
+                    new(0.0f, 1.0f),
+                    new(1.0f, 1.0f),
+                    new(1.0f, 0.0f),
+                };
+
+                for (int slot = 0; slot < BillboardPageSize; slot++)
+                {
+                    int vertexOffset = slot * 4;
+                    int indexOffset = slot * 6;
+                    for (int vertex = 0; vertex < 4; vertex++)
+                    {
+                        vertices[vertexOffset + vertex] = quadVertices[vertex];
+                        uvs[vertexOffset + vertex] = quadUvs[vertex];
+                        slots[vertexOffset + vertex] = new Vector2(slot, 0.0f);
+                    }
+
+                    indices[indexOffset] = vertexOffset;
+                    indices[indexOffset + 1] = vertexOffset + 1;
+                    indices[indexOffset + 2] = vertexOffset + 2;
+                    indices[indexOffset + 3] = vertexOffset;
+                    indices[indexOffset + 4] = vertexOffset + 2;
+                    indices[indexOffset + 5] = vertexOffset + 3;
+                }
+
+                mesh.SetVertices(vertices);
+                mesh.SetUVs(0, uvs);
+                mesh.SetUVs(1, slots);
+                mesh.SetTriangles(indices, 0);
+                mesh.bounds = new Bounds(Vector3.zero, Vector3.one);
                 return mesh;
             }
 
@@ -2487,6 +2552,7 @@ namespace VividRP.Runtime.Particle
             public BatchID BatchId;
             public BatchMeshID MeshId;
             public BatchMaterialID MaterialId;
+            public bool UsesPageBillboard;
             public int Capacity;
             public int DataOffset;
             public bool ZeroBlockDirty;
@@ -2497,6 +2563,25 @@ namespace VividRP.Runtime.Particle
             public ParticleRenderRecord Record;
             public int StartIndex;
             public int Count;
+        }
+
+        private struct ParticleVisibleRecord
+        {
+            public int BatchBaseIndex;
+            public int ActiveCount;
+            public int UsesPageBillboard;
+        }
+
+        private struct ParticleDrawCommandInput
+        {
+            public int VisibleOffset;
+            public int VisibleCount;
+            public int RecordStart;
+            public int RecordCount;
+            public int Layer;
+            public BatchID BatchId;
+            public BatchMeshID MeshId;
+            public BatchMaterialID MaterialId;
         }
 
         private readonly struct ParticleMaterialVariantKey : IEquatable<ParticleMaterialVariantKey>
@@ -2560,6 +2645,8 @@ namespace VividRP.Runtime.Particle
             private readonly HashSet<ParticleSystemState> m_SeenStates = new();
             private readonly List<ParticleUploadWork> m_UploadWorks = new();
             private readonly List<ParticleDrawBatch> m_VisibleBatches = new();
+            private readonly List<ParticleVisibleRecord> m_VisibleRecords = new();
+            private readonly List<ParticleDrawCommandInput> m_DrawCommandInputs = new();
             private readonly Dictionary<ParticleMaterialVariantKey, Material> m_DefaultMaterials = new();
             private readonly VividParticleGPUBuffer m_GPUBuffer = new();
             private BatchRendererGroup m_BRG;
@@ -2649,6 +2736,8 @@ namespace VividRP.Runtime.Particle
                 m_SeenStates.Clear();
                 m_UploadWorks.Clear();
                 m_VisibleBatches.Clear();
+                m_VisibleRecords.Clear();
+                m_DrawCommandInputs.Clear();
                 foreach (Material material in m_DefaultMaterials.Values)
                     CoreUtils.Destroy(material);
 
@@ -2718,6 +2807,7 @@ namespace VividRP.Runtime.Particle
                                 Key = record.Key,
                                 Material = record.Material,
                                 Mesh = record.Mesh,
+                                UsesPageBillboard = UsesPageBillboardRenderMode(record.RenderMode),
                                 BatchId = BatchID.Null,
                                 ZeroBlockDirty = true,
                             };
@@ -2976,12 +3066,14 @@ namespace VividRP.Runtime.Particle
                 IntPtr userContext)
             {
                 m_VisibleBatches.Clear();
-                int drawCommandCount = 0;
+                m_VisibleRecords.Clear();
+                m_DrawCommandInputs.Clear();
                 int visibleInstanceCount = 0;
 
                 for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
                 {
                     ParticleDrawBatch batch = m_DrawBatches[batchIndex];
+                    int batchVisibleRecordStart = m_VisibleRecords.Count;
                     int batchVisibleCount = 0;
                     for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
                     {
@@ -2989,19 +3081,45 @@ namespace VividRP.Runtime.Particle
                         bool visible = record.State != null
                             && record.ActiveCount > 0
                             && record.State.IsVisibleInCullingContext(cullingContext);
-                        record.State?.RecordCulling(cullingContext.viewType, visible, visible ? 1 : 0);
-                        if (visible)
-                            batchVisibleCount += record.ActiveCount;
+                        int recordVisibleInstanceCount = visible
+                            ? GetVisibleInstanceCount(record.RenderMode, record.ActiveCount)
+                            : 0;
+                        record.State?.RecordCulling(
+                            cullingContext.viewType,
+                            visible,
+                            visible ? 1 : 0,
+                            recordVisibleInstanceCount);
+                        if (!visible)
+                            continue;
+
+                        m_VisibleRecords.Add(new ParticleVisibleRecord
+                        {
+                            BatchBaseIndex = record.BatchBaseIndex,
+                            ActiveCount = record.ActiveCount,
+                            UsesPageBillboard = batch.UsesPageBillboard ? 1 : 0,
+                        });
+                        batchVisibleCount += recordVisibleInstanceCount;
                     }
 
                     if (batchVisibleCount <= 0)
                         continue;
 
                     m_VisibleBatches.Add(batch);
-                    drawCommandCount++;
+                    m_DrawCommandInputs.Add(new ParticleDrawCommandInput
+                    {
+                        VisibleOffset = visibleInstanceCount,
+                        VisibleCount = batchVisibleCount,
+                        RecordStart = batchVisibleRecordStart,
+                        RecordCount = m_VisibleRecords.Count - batchVisibleRecordStart,
+                        Layer = Mathf.Clamp(batch.Key.Layer, 0, 31),
+                        BatchId = batch.BatchId,
+                        MeshId = batch.MeshId,
+                        MaterialId = batch.MaterialId,
+                    });
                     visibleInstanceCount += batchVisibleCount;
                 }
 
+                int drawCommandCount = m_DrawCommandInputs.Count;
                 if (drawCommandCount <= 0 || visibleInstanceCount <= 0)
                 {
                     WriteEmptyDrawCommands(cullingOutput);
@@ -3030,58 +3148,34 @@ namespace VividRP.Runtime.Particle
                     instanceSortingPositionFloatCount = 0,
                 };
 
-                int commandIndex = 0;
-                int visibleOffset = 0;
-                for (int visibleBatchIndex = 0; visibleBatchIndex < m_VisibleBatches.Count; visibleBatchIndex++)
+                var commandInputs = new NativeArray<ParticleDrawCommandInput>(
+                    drawCommandCount,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+                for (int index = 0; index < drawCommandCount; index++)
+                    commandInputs[index] = m_DrawCommandInputs[index];
+
+                var visibleRecords = new NativeArray<ParticleVisibleRecord>(
+                    m_VisibleRecords.Count,
+                    Allocator.TempJob,
+                    NativeArrayOptions.UninitializedMemory);
+                for (int index = 0; index < m_VisibleRecords.Count; index++)
+                    visibleRecords[index] = m_VisibleRecords[index];
+
+                var job = new ParticleDrawCommandOutputJob
                 {
-                    ParticleDrawBatch batch = m_VisibleBatches[visibleBatchIndex];
-                    int batchVisibleOffset = visibleOffset;
-                    int batchVisibleCount = 0;
-
-                    for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
-                    {
-                        ParticleRenderRecord record = batch.Records[recordIndex];
-                        if (record.ActiveCount <= 0 || !record.State.IsVisibleInCullingContext(cullingContext))
-                            continue;
-
-                        for (int instanceIndex = 0; instanceIndex < record.ActiveCount; instanceIndex++)
-                            draws.visibleInstances[visibleOffset++] = record.BatchBaseIndex + instanceIndex;
-
-                        batchVisibleCount += record.ActiveCount;
-                    }
-
-                    draws.drawCommands[commandIndex] = new BatchDrawCommand
-                    {
-                        visibleOffset = (uint)batchVisibleOffset,
-                        visibleCount = (uint)batchVisibleCount,
-                        batchID = batch.BatchId,
-                        materialID = batch.MaterialId,
-                        meshID = batch.MeshId,
-                        submeshIndex = 0,
-                        splitVisibilityMask = 0xff,
-                        flags = BatchDrawCommandFlags.None,
-                        sortingPosition = 0,
-                    };
-
-                    draws.drawRanges[commandIndex] = new BatchDrawRange
-                    {
-                        drawCommandsBegin = (uint)commandIndex,
-                        drawCommandsCount = 1,
-                        drawCommandsType = BatchDrawCommandType.Direct,
-                        filterSettings = new BatchFilterSettings
-                        {
-                            renderingLayerMask = uint.MaxValue,
-                            layer = (byte)Mathf.Clamp(batch.Key.Layer, 0, 31),
-                            shadowCastingMode = ShadowCastingMode.Off,
-                            receiveShadows = false,
-                        },
-                    };
-
-                    commandIndex++;
-                }
+                    Commands = commandInputs,
+                    VisibleRecords = visibleRecords,
+                    DrawCommands = draws.drawCommands,
+                    DrawRanges = draws.drawRanges,
+                    VisibleInstances = draws.visibleInstances,
+                };
+                JobHandle outputHandle = job.Schedule();
+                JobHandle disposeCommandsHandle = commandInputs.Dispose(outputHandle);
+                JobHandle disposeRecordsHandle = visibleRecords.Dispose(outputHandle);
 
                 cullingOutput.drawCommands[0] = draws;
-                return default;
+                return JobHandle.CombineDependencies(disposeCommandsHandle, disposeRecordsHandle);
             }
 
             private static int AlignTo16(int value)
@@ -3342,6 +3436,87 @@ namespace VividRP.Runtime.Particle
         }
 
         [BurstCompile]
+        private unsafe struct ParticleDrawCommandOutputJob : IJob
+        {
+            [ReadOnly]
+            public NativeArray<ParticleDrawCommandInput> Commands;
+            [ReadOnly]
+            public NativeArray<ParticleVisibleRecord> VisibleRecords;
+
+            [NativeDisableUnsafePtrRestriction]
+            public BatchDrawCommand* DrawCommands;
+            [NativeDisableUnsafePtrRestriction]
+            public BatchDrawRange* DrawRanges;
+            [NativeDisableUnsafePtrRestriction]
+            public int* VisibleInstances;
+
+            public void Execute()
+            {
+                for (int commandIndex = 0; commandIndex < Commands.Length; commandIndex++)
+                {
+                    ParticleDrawCommandInput command = Commands[commandIndex];
+                    WriteVisibleInstances(command);
+
+                    DrawCommands[commandIndex] = new BatchDrawCommand
+                    {
+                        visibleOffset = (uint)command.VisibleOffset,
+                        visibleCount = (uint)command.VisibleCount,
+                        batchID = command.BatchId,
+                        materialID = command.MaterialId,
+                        meshID = command.MeshId,
+                        submeshIndex = 0,
+                        splitVisibilityMask = 0xff,
+                        flags = BatchDrawCommandFlags.None,
+                        sortingPosition = 0,
+                    };
+
+                    DrawRanges[commandIndex] = new BatchDrawRange
+                    {
+                        drawCommandsBegin = (uint)commandIndex,
+                        drawCommandsCount = 1,
+                        drawCommandsType = BatchDrawCommandType.Direct,
+                        filterSettings = new BatchFilterSettings
+                        {
+                            renderingLayerMask = uint.MaxValue,
+                            layer = (byte)math.clamp(command.Layer, 0, 31),
+                            shadowCastingMode = ShadowCastingMode.Off,
+                            receiveShadows = false,
+                        },
+                    };
+                }
+            }
+
+            private void WriteVisibleInstances(ParticleDrawCommandInput command)
+            {
+                int visibleOffset = command.VisibleOffset;
+                int recordEnd = command.RecordStart + command.RecordCount;
+                for (int recordIndex = command.RecordStart; recordIndex < recordEnd; recordIndex++)
+                {
+                    ParticleVisibleRecord record = VisibleRecords[recordIndex];
+                    if (record.UsesPageBillboard != 0)
+                    {
+                        int remaining = record.ActiveCount;
+                        int pageStart = 0;
+                        while (remaining > 0)
+                        {
+                            int pageCount = math.min(BillboardPageSize, remaining);
+                            VisibleInstances[visibleOffset++] = EncodeBillboardPageVisibleInstance(
+                                record.BatchBaseIndex + pageStart,
+                                pageCount);
+                            remaining -= pageCount;
+                            pageStart += BillboardPageSize;
+                        }
+
+                        continue;
+                    }
+
+                    for (int particleIndex = 0; particleIndex < record.ActiveCount; particleIndex++)
+                        VisibleInstances[visibleOffset++] = record.BatchBaseIndex + particleIndex;
+                }
+            }
+        }
+
+        [BurstCompile]
         private unsafe struct ParticleRenderUploadJob : IJob
         {
             [ReadOnly]
@@ -3495,6 +3670,7 @@ namespace VividRP.Runtime.Particle
             public readonly bool LastVisible;
             public readonly BatchCullingViewType LastViewType;
             public readonly int LastDrawCommandCount;
+            public readonly int LastVisibleInstanceCount;
             public readonly int PendingJobCount;
             public readonly int ScheduledJobCount;
             public readonly int CompletedJobCount;
@@ -3514,6 +3690,7 @@ namespace VividRP.Runtime.Particle
                 bool lastVisible,
                 BatchCullingViewType lastViewType,
                 int lastDrawCommandCount,
+                int lastVisibleInstanceCount,
                 int pendingJobCount,
                 int scheduledJobCount,
                 int completedJobCount,
@@ -3532,6 +3709,7 @@ namespace VividRP.Runtime.Particle
                 LastVisible = lastVisible;
                 LastViewType = lastViewType;
                 LastDrawCommandCount = lastDrawCommandCount;
+                LastVisibleInstanceCount = lastVisibleInstanceCount;
                 PendingJobCount = pendingJobCount;
                 ScheduledJobCount = scheduledJobCount;
                 CompletedJobCount = completedJobCount;

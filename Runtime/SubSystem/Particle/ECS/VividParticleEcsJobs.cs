@@ -1,5 +1,6 @@
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using VividRP.Runtime.ECS;
@@ -57,18 +58,29 @@ namespace VividRP.Runtime.Particle.ECS
     }
 
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct VividParticleEcsIntegratePageJob : IVividEcsPageJob
+    internal struct VividParticleEcsIntegratePagesJob : IJobParallelFor
     {
+        [ReadOnly]
+        public NativeArray<VividEcsPageInfo> Pages;
+
         public float DeltaTime;
         public float3 Gravity;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<float3> Positions;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<float3> Velocities;
-        public NativeArray<float> StartLifetimes;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<float> RemainingLifetimes;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<byte> KeepMask;
 
-        public void Execute(VividEcsPageInfo page)
+        public void Execute(int pageIndex)
         {
+            VividEcsPageInfo page = Pages[pageIndex];
             int pageEnd = math.min(page.StartIndex + page.EntryCount, Positions.Length);
             for (int index = page.StartIndex; index < pageEnd; index++)
             {

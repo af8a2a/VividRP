@@ -18,6 +18,7 @@ namespace VividRP.Runtime.Particle.ECS
         private NativeArray<byte> m_KeepMask;
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
         private VividParticleRendererSharedKey m_RendererSharedKey = VividParticleRendererSharedKey.Invalid;
+        private int m_PendingIntegrateActiveCount;
 
         public VividParticleEcsStorage()
         {
@@ -100,6 +101,7 @@ namespace VividRP.Runtime.Particle.ECS
             m_ActiveCountOutput = default;
             m_KeepMask = default;
             m_SimulationPages = default;
+            m_PendingIntegrateActiveCount = 0;
         }
 
         public bool Add(
@@ -120,6 +122,9 @@ namespace VividRP.Runtime.Particle.ECS
             common.SetFieldValue(VividParticleCommon.RemainingLifetimeFieldIndex, index, remainingLifetime);
             common.SetFieldValue(VividParticleCommon.StartColorFieldIndex, index, ToFloat4(color));
             common.SetFieldValue(VividParticleCommon.SizeFieldIndex, index, size);
+            if (m_KeepMask.IsCreated && index < m_KeepMask.Length)
+                m_KeepMask[index] = 1;
+
             return true;
         }
 
@@ -140,6 +145,7 @@ namespace VividRP.Runtime.Particle.ECS
                 return false;
 
             m_ActiveCountOutput[0] = count;
+            m_PendingIntegrateActiveCount = count;
             int livePageCount = (count + VividEcsConstants.PageEntryCount - 1) / VividEcsConstants.PageEntryCount;
             if (livePageCount <= 0)
                 return false;
@@ -149,23 +155,19 @@ namespace VividRP.Runtime.Particle.ECS
                 m_SimulationPages[pageIndex] = m_Line.GetPageInfo(pageIndex);
 
             VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
-            var job = new VividParticleEcsIntegratePageJob
+            NativeArray<VividEcsPageInfo> pages = m_SimulationPages.GetSubArray(0, livePageCount);
+            var job = new VividParticleEcsIntegratePagesJob
             {
+                Pages = pages,
                 DeltaTime = deltaTime,
                 Gravity = ToFloat3(gravity),
                 Positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex),
                 Velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex),
-                StartLifetimes = common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex),
                 RemainingLifetimes = common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex),
                 KeepMask = m_KeepMask,
             };
 
-            NativeArray<VividEcsPageInfo> pages = m_SimulationPages.GetSubArray(0, livePageCount);
-            handle = job.ScheduleParallel(
-                pages,
-                dependency,
-                innerloopBatchCount: 1,
-                dispatchMode: VividEcsPageDispatchMode.Average);
+            handle = job.Schedule(livePageCount, innerloopBatchCount: 1, dependency);
             return true;
         }
 
@@ -174,7 +176,9 @@ namespace VividRP.Runtime.Particle.ECS
             if (!m_ActiveCountOutput.IsCreated)
                 return;
 
-            int originalActiveCount = math.min(activeCount, m_KeepMask.IsCreated ? m_KeepMask.Length : activeCount);
+            int originalActiveCount = math.min(
+                m_PendingIntegrateActiveCount > 0 ? m_PendingIntegrateActiveCount : activeCount,
+                m_KeepMask.IsCreated ? m_KeepMask.Length : activeCount);
             for (int index = originalActiveCount - 1; index >= 0; index--)
             {
                 if (m_KeepMask[index] != 0)
@@ -184,6 +188,7 @@ namespace VividRP.Runtime.Particle.ECS
             }
 
             m_ActiveCountOutput[0] = activeCount;
+            m_PendingIntegrateActiveCount = 0;
         }
 
         public bool IsValidIndex(int index)

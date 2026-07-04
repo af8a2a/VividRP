@@ -871,6 +871,7 @@ namespace VividRP.Runtime.Particle
             private float m_LastUploadedSizeScale;
             private float m_LastUploadedStretchLengthScale;
             private float m_LastUploadedStretchSpeedScale;
+            private int m_LastUploadedRenderStateActiveCount;
             private VividParticleRenderMode m_LastUploadedRenderMode;
             private VividParticleGpuDataLayoutDescriptor m_CachedGpuLayoutDescriptor;
             private VividParticleGpuDataLayout m_CachedGpuLayout;
@@ -1968,25 +1969,38 @@ namespace VividRP.Runtime.Particle
                 float stretchLengthScale = m_System.rendererModule.stretchLengthScale;
                 float stretchSpeedScale = m_System.rendererModule.stretchSpeedScale;
                 VividParticleRenderMode renderMode = m_System.rendererModule.renderMode;
-                if (m_HasUploadedRenderStateSnapshot
-                    && m_LastUploadedLocalToWorldMatrix == localToWorld
-                    && m_LastUploadedRendererColor == rendererColor
-                    && Mathf.Approximately(m_LastUploadedSizeScale, sizeScale)
-                    && Mathf.Approximately(m_LastUploadedStretchLengthScale, stretchLengthScale)
-                    && Mathf.Approximately(m_LastUploadedStretchSpeedScale, stretchSpeedScale)
-                    && m_LastUploadedRenderMode == renderMode)
-                {
+                int previousActiveCount = m_LastUploadedRenderStateActiveCount;
+                bool activeCountChanged = !m_HasUploadedRenderStateSnapshot || previousActiveCount != count;
+                bool renderStateChanged = !m_HasUploadedRenderStateSnapshot
+                    || m_LastUploadedLocalToWorldMatrix != localToWorld
+                    || m_LastUploadedRendererColor != rendererColor
+                    || !Mathf.Approximately(m_LastUploadedSizeScale, sizeScale)
+                    || !Mathf.Approximately(m_LastUploadedStretchLengthScale, stretchLengthScale)
+                    || !Mathf.Approximately(m_LastUploadedStretchSpeedScale, stretchSpeedScale)
+                    || m_LastUploadedRenderMode != renderMode;
+                if (!renderStateChanged && !activeCountChanged)
                     return;
-                }
 
-                if (count > 0)
-                    MarkInstanceRangeDirty(0, count);
+                if (renderStateChanged)
+                {
+                    if (count > 0)
+                        MarkInstanceRangeDirty(0, count);
+                }
+                else if (activeCountChanged && count < previousActiveCount)
+                {
+                    int dirtyStart = UsesPageBillboardRenderMode(renderMode)
+                        ? Mathf.Max(0, count / BillboardPageSize * BillboardPageSize)
+                        : Mathf.Max(0, count);
+                    int dirtyEnd = Mathf.Max(previousActiveCount, count);
+                    MarkInstanceRangeDirty(dirtyStart, dirtyEnd - dirtyStart);
+                }
 
                 m_LastUploadedLocalToWorldMatrix = localToWorld;
                 m_LastUploadedRendererColor = rendererColor;
                 m_LastUploadedSizeScale = sizeScale;
                 m_LastUploadedStretchLengthScale = stretchLengthScale;
                 m_LastUploadedStretchSpeedScale = stretchSpeedScale;
+                m_LastUploadedRenderStateActiveCount = count;
                 m_LastUploadedRenderMode = renderMode;
                 m_HasUploadedRenderStateSnapshot = true;
             }

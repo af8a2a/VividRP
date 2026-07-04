@@ -6,6 +6,7 @@
 #pragma kernel KDownsample    MAIN=KDownsample  DOWNSAMPLE
 #pragma kernel KSpdDownsample
 #pragma use_dxc
+#pragma require Native16Bit
 
 TEXTURE2D(_InputTexture);
 SAMPLER(sampler_LinearClamp);

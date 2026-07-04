@@ -12,11 +12,6 @@ namespace VividRP.Runtime.Particle
     public sealed class VividParticleSystem : MonoBehaviour
     {
         internal const float FixedSimulationStep = 1.0f / 60.0f;
-        private const float GravityAcceleration = 9.81f;
-        private const float MinimumSimulationStep = 0.000001f;
-#if UNITY_EDITOR
-        private const float MaximumEditorSimulationStep = 0.1f;
-#endif
 
         [SerializeField]
         private VividParticleSystemAsset m_Asset;
@@ -33,17 +28,9 @@ namespace VividRP.Runtime.Particle
         [SerializeField]
         private VividParticleRendererModule m_Renderer = VividParticleRendererModule.CreateDefault();
 
-        private VividParticleStorage m_Particles = new();
-        private bool[] m_BurstTriggered = Array.Empty<bool>();
-        private System.Random m_Random;
-        private float m_Time;
-        private float m_EmissionAccumulator;
         private bool m_IsPlaying;
         private bool m_IsPaused;
         private bool m_StopEmitting;
-#if UNITY_EDITOR
-        private double m_LastEditorUpdateTime;
-#endif
 
         public VividParticleSystemAsset asset
         {
@@ -53,6 +40,7 @@ namespace VividRP.Runtime.Particle
                 if (m_Asset == value)
                     return;
 
+                VividParticleSystemManager.Drain(this);
                 m_Asset = value;
                 CopySettingsFromAsset();
                 VividParticleSystemManager.MarkRendererDirty(this);
@@ -67,13 +55,13 @@ namespace VividRP.Runtime.Particle
 
         public VividParticleRendererModule rendererModule => m_Renderer ??= VividParticleRendererModule.CreateDefault();
 
-        public int particleCount => validParticleCount;
+        public int particleCount => VividParticleSystemManager.GetParticleCount(this);
 
         public bool isPlaying => m_IsPlaying;
 
         public bool isPaused => m_IsPaused;
 
-        public float time => m_Time;
+        public float time => VividParticleSystemManager.GetTime(this);
 
         public void Play(bool withChildren = true)
         {
@@ -104,105 +92,108 @@ namespace VividRP.Runtime.Particle
         public void Emit(int count)
         {
             EmitInternal(count);
-            VividParticleSystemManager.UpdateRendering(this);
             RequestEditorRenderUpdate();
         }
 
-        internal int aliveParticleCount => validParticleCount;
+        internal int aliveParticleCount => VividParticleSystemManager.GetParticleCount(this);
 
-        internal Bounds worldBounds => CalculateWorldBounds();
+        internal Bounds worldBounds => VividParticleSystemManager.GetWorldBounds(this);
 
-        internal bool shouldRender => isActiveAndEnabled && rendererModule.enabled && validParticleCount > 0;
+        internal bool shouldRender => isActiveAndEnabled && rendererModule.enabled && aliveParticleCount > 0;
 
         internal bool requiresAutomaticUpdate => !m_IsPaused
-            && (m_IsPlaying || (m_StopEmitting && validParticleCount > 0));
+            && (m_IsPlaying || (m_StopEmitting && aliveParticleCount > 0));
 
         internal int maxParticles => main.maxParticles;
 
-        internal int particleStoragePageSize => VividParticleStorage.PageSize;
+        internal int particleStoragePageSize => VividParticleSystemManager.GetParticleStoragePageSize(this);
 
-        internal int particleStorageCapacity => m_Particles?.capacity ?? 0;
+        internal int particleStorageCapacity => VividParticleSystemManager.GetParticleStorageCapacity(this);
 
-        internal int particleStorageActiveCount => validParticleCount;
+        internal int particleStorageActiveCount => VividParticleSystemManager.GetParticleCount(this);
 
-        private int validParticleCount => Mathf.Min(m_Particles?.activeCount ?? 0, main.maxParticles);
+        internal bool stopEmitting => m_StopEmitting;
+
+        internal Matrix4x4 localToWorldMatrixSnapshot => transform.localToWorldMatrix;
+
+        internal Quaternion worldRotationSnapshot => transform.rotation;
 
         internal Matrix4x4 GetParticleObjectToWorldMatrix(int particleIndex)
         {
-            if (particleIndex < 0
-                || particleIndex >= validParticleCount
-                || m_Particles == null
-                || !m_Particles.IsValidIndex(particleIndex))
-            {
-                return Matrix4x4.identity;
-            }
-
-            Vector3 position = GetParticleWorldPosition(m_Particles.GetPosition(particleIndex));
-            float size = Mathf.Max(
-                VividParticleMainModule.MinimumStartSize,
-                m_Particles.GetSize(particleIndex) * rendererModule.sizeScale);
-
-            return Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * size);
+            return VividParticleSystemManager.GetParticleObjectToWorldMatrix(this, particleIndex);
         }
 
         internal Color GetParticleRenderColor(int particleIndex)
         {
-            if (particleIndex < 0
-                || particleIndex >= validParticleCount
-                || m_Particles == null
-                || !m_Particles.IsValidIndex(particleIndex))
-            {
-                return Color.clear;
-            }
-
-            float startLifetime = m_Particles.GetStartLifetime(particleIndex);
-            float lifetimeRatio = startLifetime > 0.0f
-                ? Mathf.Clamp01(m_Particles.GetRemainingLifetime(particleIndex) / startLifetime)
-                : 0.0f;
-            Color color = m_Particles.GetColor(particleIndex) * rendererModule.color;
-            color.a *= lifetimeRatio;
-            return color;
+            return VividParticleSystemManager.GetParticleRenderColor(this, particleIndex);
         }
 
         internal void UpdateAutomatic(float deltaTime)
         {
-            if (m_IsPaused)
-                return;
-
-            bool ageOnly = m_StopEmitting && particleCount > 0;
-            if (!m_IsPlaying && !ageOnly)
-                return;
-
-            SimulateDelta(deltaTime, allowEmission: m_IsPlaying && !m_StopEmitting);
+            VividParticleSystemManager.UpdateSystem(this, deltaTime);
         }
 
         internal void EmitInternal(int count)
         {
-            if (count <= 0)
-                return;
-
-            EnsureModules();
-            EnsureRuntimeStorage();
-            EnsureRandom();
-
-            int available = Mathf.Max(0, main.maxParticles - particleCount);
-            int spawnCount = Mathf.Min(count, available);
-            for (int index = 0; index < spawnCount; index++)
-                SpawnParticle();
+            VividParticleSystemManager.Emit(this, count);
         }
 
         internal void SimulateDelta(float deltaTime, bool allowEmission)
         {
-            if (deltaTime <= 0.0f)
-                return;
+            VividParticleSystemManager.SimulateDeltaImmediate(this, deltaTime, allowEmission);
+        }
 
-            EnsureModules();
-            EnsureRuntimeStorage();
-            IntegrateParticles(deltaTime);
-            AdvanceEmission(deltaTime, allowEmission);
-
-            if (m_StopEmitting && particleCount == 0)
+        internal void CompleteStopEmittingIfEmpty()
+        {
+            if (m_StopEmitting && aliveParticleCount == 0)
                 m_StopEmitting = false;
+        }
+
+        internal VividParticleSystemFrameSnapshot CaptureFrameSnapshot(float deltaTime)
+        {
+            EnsureModules();
+            ValidateModules();
+
+            VividParticleBurst[] sourceBursts = emission.bursts;
+            VividParticleBurst[] bursts = sourceBursts != null && sourceBursts.Length > 0
+                ? (VividParticleBurst[])sourceBursts.Clone()
+                : Array.Empty<VividParticleBurst>();
+
+            return new VividParticleSystemFrameSnapshot(
+                deltaTime,
+                isActiveAndEnabled,
+                m_IsPlaying,
+                m_IsPaused,
+                m_StopEmitting,
+                main.duration,
+                main.loop,
+                main.startLifetime,
+                main.startSpeed,
+                main.startSize,
+                main.startColor,
+                main.gravityModifier,
+                main.simulationSpace,
+                main.maxParticles,
+                main.randomSeed,
+                main.useAutoRandomSeed,
+                emission.enabled,
+                emission.rateOverTime,
+                bursts,
+                shape.enabled,
+                shape.shapeType,
+                shape.radius,
+                shape.boxSize,
+                shape.angle,
+                rendererModule.enabled,
+                rendererModule.material,
+                rendererModule.color,
+                rendererModule.sizeScale,
+                rendererModule.renderQueueOffset,
+                gameObject.layer,
+                transform.position,
+                transform.localToWorldMatrix,
+                transform.rotation,
+                GetEntityId().GetHashCode());
         }
 
         internal static void SampleShape(
@@ -256,205 +247,90 @@ namespace VividRP.Runtime.Particle
         {
             EnsureModules();
             ValidateModules();
-            EnsureRuntimeStorage();
             VividParticleSystemManager.Register(this);
-#if UNITY_EDITOR
-            RegisterEditorUpdate();
-            ResetEditorUpdateTime();
-#endif
 
             if (main.playOnAwake)
                 Play(withChildren: false);
         }
 
-        private void Update()
-        {
-            if (Application.isPlaying)
-            {
-                VividParticleSystemManager.UpdateSystem(this);
-                return;
-            }
-
-            VividParticleSystemManager.UpdateRendering(this);
-        }
-
         private void OnDisable()
         {
-#if UNITY_EDITOR
-            UnregisterEditorUpdate();
-#endif
             VividParticleSystemManager.Unregister(this);
-            ReleaseRuntimeStorage();
+            m_IsPlaying = false;
+            m_IsPaused = false;
+            m_StopEmitting = false;
         }
 
         private void OnDestroy()
         {
-#if UNITY_EDITOR
-            UnregisterEditorUpdate();
-#endif
             VividParticleSystemManager.Unregister(this);
-            ReleaseRuntimeStorage();
         }
 
         private void OnValidate()
         {
             EnsureModules();
             ValidateModules();
-            if (m_Particles != null && m_Particles.isCreated)
-                EnsureRuntimeStorage();
-            else
-                EnsureBurstState();
+            VividParticleSystemManager.NotifySettingsChanged(this);
             VividParticleSystemManager.MarkRendererDirty(this);
         }
-
-#if UNITY_EDITOR
-        private void RegisterEditorUpdate()
-        {
-            if (Application.isPlaying)
-                return;
-
-            EditorApplication.update -= EditorUpdate;
-            EditorApplication.update += EditorUpdate;
-        }
-
-        private void UnregisterEditorUpdate()
-        {
-            EditorApplication.update -= EditorUpdate;
-        }
-
-        private void EditorUpdate()
-        {
-            if (Application.isPlaying || !isActiveAndEnabled)
-                return;
-
-            float deltaTime = ConsumeEditorDeltaTime();
-            if (!requiresAutomaticUpdate)
-                return;
-
-            VividParticleSystemManager.UpdateSystem(this, deltaTime);
-            RequestEditorRenderUpdate();
-        }
-
-        private float ConsumeEditorDeltaTime()
-        {
-            double currentTime = EditorApplication.timeSinceStartup;
-            if (m_LastEditorUpdateTime <= 0.0)
-            {
-                m_LastEditorUpdateTime = currentTime;
-                return 0.0f;
-            }
-
-            float deltaTime = (float)(currentTime - m_LastEditorUpdateTime);
-            m_LastEditorUpdateTime = currentTime;
-            return Mathf.Clamp(deltaTime, 0.0f, MaximumEditorSimulationStep);
-        }
-
-        private void ResetEditorUpdateTime()
-        {
-            if (!Application.isPlaying)
-                m_LastEditorUpdateTime = EditorApplication.timeSinceStartup;
-        }
-
-        private static void RequestEditorRenderUpdate()
-        {
-            if (Application.isPlaying)
-                return;
-
-            EditorApplication.QueuePlayerLoopUpdate();
-            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
-        }
-#else
-        private static void ResetEditorUpdateTime()
-        {
-        }
-
-        private static void RequestEditorRenderUpdate()
-        {
-        }
-#endif
 
         private void CopySettingsFromAsset()
         {
             EnsureModules();
             m_Asset?.CopyModulesTo(m_Main, m_Emission, m_Shape, m_Renderer);
             ValidateModules();
-            EnsureRuntimeStorage();
-            ResetBurstState();
+            VividParticleSystemManager.NotifySettingsChanged(this);
         }
 
         private void PlaySelf()
         {
             EnsureModules();
             ValidateModules();
-            EnsureRuntimeStorage();
-            EnsureRandom();
+            VividParticleSystemManager.Drain(this);
 
-            if (!main.loop && m_Time >= main.duration && particleCount == 0)
-                ResetSimulation(clearParticles: true);
+            if (!main.loop && time >= main.duration && particleCount == 0)
+                VividParticleSystemManager.ResetSimulation(this, clearParticles: true);
 
             m_IsPlaying = true;
             m_IsPaused = false;
             m_StopEmitting = false;
-            ResetEditorUpdateTime();
+            VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }
 
         private void StopSelf(VividParticleSystemStopBehavior stopBehavior)
         {
+            VividParticleSystemManager.Drain(this);
             m_IsPlaying = false;
             m_IsPaused = false;
 
             if (stopBehavior == VividParticleSystemStopBehavior.StopEmittingAndClear)
             {
                 m_StopEmitting = false;
-                ResetSimulation(clearParticles: true);
+                VividParticleSystemManager.ResetSimulation(this, clearParticles: true);
                 VividParticleSystemManager.UpdateRendering(this);
                 RequestEditorRenderUpdate();
                 return;
             }
 
             m_StopEmitting = particleCount > 0;
-            ResetEditorUpdateTime();
+            VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }
 
         private void PauseSelf()
         {
+            VividParticleSystemManager.Drain(this);
             m_IsPaused = true;
             m_IsPlaying = false;
-            ResetEditorUpdateTime();
+            VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }
 
         private void SimulateSelf(float t, bool restart, bool fixedTimeStep)
         {
-            if (restart)
-                ResetSimulation(clearParticles: true);
-
-            if (t <= 0.0f)
-            {
-                VividParticleSystemManager.UpdateRendering(this);
-                RequestEditorRenderUpdate();
-                return;
-            }
-
-            float remaining = t;
-            if (fixedTimeStep)
-            {
-                while (remaining > MinimumSimulationStep)
-                {
-                    float step = Mathf.Min(FixedSimulationStep, remaining);
-                    SimulateDelta(step, allowEmission: true);
-                    remaining -= step;
-                }
-            }
-            else
-            {
-                SimulateDelta(remaining, allowEmission: true);
-            }
-
-            VividParticleSystemManager.UpdateRendering(this);
-            ResetEditorUpdateTime();
+            VividParticleSystemManager.Simulate(this, t, restart, fixedTimeStep);
+            VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }
 
@@ -474,16 +350,6 @@ namespace VividRP.Runtime.Particle
             }
         }
 
-        private void ResetSimulation(bool clearParticles)
-        {
-            m_Time = 0.0f;
-            m_EmissionAccumulator = 0.0f;
-            ResetBurstState();
-            if (clearParticles)
-                m_Particles?.Clear();
-            ResetRandom();
-        }
-
         private void EnsureModules()
         {
             m_Main ??= VividParticleMainModule.CreateDefault();
@@ -500,184 +366,15 @@ namespace VividRP.Runtime.Particle
             rendererModule.Validate();
         }
 
-        private void EnsureRuntimeStorage()
+        private static void RequestEditorRenderUpdate()
         {
-            m_Particles ??= new VividParticleStorage();
-            m_Particles.EnsureCapacity(main.maxParticles);
-            EnsureBurstState();
-        }
-
-        private void ReleaseRuntimeStorage()
-        {
-            m_Particles?.Dispose();
-            m_Time = 0.0f;
-            m_EmissionAccumulator = 0.0f;
-            m_IsPlaying = false;
-            m_IsPaused = false;
-            m_StopEmitting = false;
-            m_Random = null;
-            ResetBurstState();
-        }
-
-        private void EnsureBurstState()
-        {
-            VividParticleBurst[] bursts = emission.bursts;
-            int burstCount = bursts?.Length ?? 0;
-            if (m_BurstTriggered == null || m_BurstTriggered.Length != burstCount)
-                m_BurstTriggered = new bool[burstCount];
-        }
-
-        private void ResetBurstState()
-        {
-            EnsureBurstState();
-            Array.Clear(m_BurstTriggered, 0, m_BurstTriggered.Length);
-        }
-
-        private void EnsureRandom()
-        {
-            m_Random ??= CreateRandom();
-        }
-
-        private void ResetRandom()
-        {
-            m_Random = CreateRandom();
-        }
-
-        private System.Random CreateRandom()
-        {
-            uint seed = main.useAutoRandomSeed
-                ? unchecked((uint)Environment.TickCount ^ (uint)GetEntityId().GetHashCode())
-                : main.randomSeed;
-            return new System.Random(unchecked((int)seed));
-        }
-
-        private void IntegrateParticles(float deltaTime)
-        {
-            Vector3 gravity = Vector3.down * (GravityAcceleration * main.gravityModifier);
-            m_Particles.Integrate(deltaTime, gravity);
-        }
-
-        private void AdvanceEmission(float deltaTime, bool allowEmission)
-        {
-            float remaining = deltaTime;
-            float duration = main.duration;
-
-            while (remaining > MinimumSimulationStep)
-            {
-                float segmentEnd = main.loop
-                    ? Mathf.Min(duration, m_Time + remaining)
-                    : Mathf.Min(duration, m_Time + remaining);
-                float segmentDelta = Mathf.Max(0.0f, segmentEnd - m_Time);
-
-                if (allowEmission && emission.enabled && segmentDelta > 0.0f)
-                    EmitForTimeRange(m_Time, segmentEnd, segmentDelta);
-
-                remaining -= segmentDelta;
-                m_Time = segmentEnd;
-
-                if (m_Time < duration)
-                    break;
-
-                if (!main.loop)
-                {
-                    m_Time = duration;
-                    break;
-                }
-
-                m_Time = 0.0f;
-                ResetBurstState();
-
-                if (segmentDelta <= 0.0f)
-                    break;
-            }
-        }
-
-        private void EmitForTimeRange(float startTime, float endTime, float deltaTime)
-        {
-            m_EmissionAccumulator += emission.rateOverTime * deltaTime;
-            int continuousCount = Mathf.FloorToInt(m_EmissionAccumulator);
-            if (continuousCount > 0)
-            {
-                m_EmissionAccumulator -= continuousCount;
-                EmitInternal(continuousCount);
-            }
-
-            VividParticleBurst[] bursts = emission.bursts;
-            if (bursts == null || bursts.Length == 0)
+#if UNITY_EDITOR
+            if (Application.isPlaying)
                 return;
 
-            EnsureBurstState();
-            for (int index = 0; index < bursts.Length; index++)
-            {
-                if (m_BurstTriggered[index])
-                    continue;
-
-                VividParticleBurst burst = bursts[index];
-                if (burst.time < startTime || burst.time > endTime)
-                    continue;
-
-                m_BurstTriggered[index] = true;
-                EmitInternal(burst.count);
-            }
-        }
-
-        private void SpawnParticle()
-        {
-            SampleShape(shape, m_Random, out Vector3 localPosition, out Vector3 localDirection);
-            localDirection = localDirection.sqrMagnitude > 0.000001f
-                ? localDirection.normalized
-                : Vector3.forward;
-
-            Vector3 position = localPosition;
-            Vector3 velocity = localDirection * main.startSpeed;
-            if (main.simulationSpace == VividParticleSystemSimulationSpace.World)
-            {
-                position = transform.TransformPoint(localPosition);
-                velocity = transform.TransformDirection(localDirection).normalized * main.startSpeed;
-            }
-
-            m_Particles.Add(
-                position,
-                velocity,
-                main.startLifetime,
-                main.startLifetime,
-                main.startSize,
-                main.startColor);
-        }
-
-        private Bounds CalculateWorldBounds()
-        {
-            int particleCount = validParticleCount;
-            if (particleCount <= 0 || m_Particles == null || !m_Particles.isCreated || !m_Particles.IsValidIndex(0))
-                return new Bounds(transform.position, Vector3.zero);
-
-            Vector3 firstPosition = GetParticleWorldPosition(m_Particles.GetPosition(0));
-            float firstExtent = GetParticleWorldExtent(m_Particles.GetSize(0));
-            var bounds = new Bounds(firstPosition, Vector3.one * (firstExtent * 2.0f));
-
-            for (int index = 1; index < particleCount; index++)
-            {
-                Vector3 position = GetParticleWorldPosition(m_Particles.GetPosition(index));
-                float extent = GetParticleWorldExtent(m_Particles.GetSize(index));
-                bounds.Encapsulate(position + Vector3.one * extent);
-                bounds.Encapsulate(position - Vector3.one * extent);
-            }
-
-            return bounds;
-        }
-
-        private Vector3 GetParticleWorldPosition(Vector3 position)
-        {
-            return main.simulationSpace == VividParticleSystemSimulationSpace.Local
-                ? transform.TransformPoint(position)
-                : position;
-        }
-
-        private float GetParticleWorldExtent(float size)
-        {
-            return Mathf.Max(
-                VividParticleMainModule.MinimumStartSize,
-                size * rendererModule.sizeScale * 0.5f);
+            EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+#endif
         }
 
         private static Vector3 SampleInsideUnitSphere(System.Random random)

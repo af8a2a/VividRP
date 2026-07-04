@@ -172,25 +172,25 @@ Shader "VividRP/Particles/Unlit"
             ENDHLSL
         }
 
-        Pass
-        {
-            Name "SRPDefaultUnlit"
-            Tags { "LightMode" = "SRPDefaultUnlit" }
-
-            Blend [_SrcBlend] [_DstBlend], [_AlphaSrcBlend] [_AlphaDstBlend]
-            ZWrite [_ZWrite]
-            ZTest LEqual
-            Cull [_CullMode]
-
-            HLSLPROGRAM
-                #pragma target 4.5
-                #pragma multi_compile_instancing
-                #pragma multi_compile _ DOTS_INSTANCING_ON
-                #pragma shader_feature_local_fragment _ALPHATEST_ON
-                #pragma vertex Vert
-                #pragma fragment Frag
-            ENDHLSL
-        }
+//        Pass
+//        {
+//            Name "SRPDefaultUnlit"
+//            Tags { "LightMode" = "SRPDefaultUnlit" }
+//
+//            Blend [_SrcBlend] [_DstBlend], [_AlphaSrcBlend] [_AlphaDstBlend]
+//            ZWrite [_ZWrite]
+//            ZTest LEqual
+//            Cull [_CullMode]
+//
+//            HLSLPROGRAM
+//                #pragma target 4.5
+//                #pragma multi_compile_instancing
+//                #pragma multi_compile _ DOTS_INSTANCING_ON
+//                #pragma shader_feature_local_fragment _ALPHATEST_ON
+//                #pragma vertex Vert
+//                #pragma fragment Frag
+//            ENDHLSL
+//        }
     }
 
     CustomEditor "VividRP.Editor.ParticleUnlitShaderGUI"

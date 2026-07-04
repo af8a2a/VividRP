@@ -240,6 +240,122 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_PlayerLoopSchedulesPendingJob_AndBeginCameraCompleteAppliesIntegration()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.5f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var scheduledStats), Is.True);
+            Assert.That(scheduledStats.PendingJobCount, Is.EqualTo(1));
+            Assert.That(scheduledStats.ScheduledJobCount, Is.EqualTo(1));
+            Assert.That(scheduledStats.CompletedJobCount, Is.EqualTo(0));
+            Assert.That(scheduledStats.LastScheduledFrame, Is.GreaterThanOrEqualTo(0));
+
+            VividParticleSystemManager.CompleteAndUploadForTests();
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var completedStats), Is.True);
+            Assert.That(completedStats.PendingJobCount, Is.EqualTo(0));
+            Assert.That(completedStats.CompletedJobCount, Is.EqualTo(1));
+            Assert.That(completedStats.LastCompletedFrame, Is.GreaterThanOrEqualTo(0));
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.y, Is.EqualTo(-2.4525f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Manager_PublicParticleCountDrainsPendingJob_BeforeReturning()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var scheduledStats), Is.True);
+            Assert.That(scheduledStats.PendingJobCount, Is.EqualTo(1));
+
+            Assert.That(system.particleCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var completedStats), Is.True);
+            Assert.That(completedStats.PendingJobCount, Is.EqualTo(0));
+            Assert.That(completedStats.CompletedJobCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Manager_PlayerLoopDrainsLeftoverJob_BeforeSchedulingNextFrame()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var firstStats), Is.True);
+            Assert.That(firstStats.PendingJobCount, Is.EqualTo(1));
+            Assert.That(firstStats.ScheduledJobCount, Is.EqualTo(1));
+            Assert.That(firstStats.CompletedJobCount, Is.EqualTo(0));
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var secondStats), Is.True);
+            Assert.That(secondStats.PendingJobCount, Is.EqualTo(1));
+            Assert.That(secondStats.ScheduledJobCount, Is.EqualTo(2));
+            Assert.That(secondStats.CompletedJobCount, Is.EqualTo(1));
+
+            VividParticleSystemManager.CompleteAndUploadForTests();
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var completedStats), Is.True);
+            Assert.That(completedStats.PendingJobCount, Is.EqualTo(0));
+            Assert.That(completedStats.CompletedJobCount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void StopEmittingAndClear_DrainsPendingJob_AndClearsParticles()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var scheduledStats), Is.True);
+            Assert.That(scheduledStats.PendingJobCount, Is.EqualTo(1));
+
+            system.Stop(withChildren: false, VividParticleSystemStopBehavior.StopEmittingAndClear);
+
+            Assert.That(system.particleCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var completedStats), Is.True);
+            Assert.That(completedStats.PendingJobCount, Is.EqualTo(0));
+            Assert.That(completedStats.CompletedJobCount, Is.EqualTo(1));
+        }
+
+        [Test]
         public void Simulate_IntegratesWithBurstJob_AndAppliesGravity()
         {
             VividParticleSystem system = CreateSystem();
@@ -583,6 +699,18 @@ namespace VividRP.Editor.Tests
 
             VividParticleSystem system = gameObject.AddComponent<VividParticleSystem>();
             system.rendererModule.enabled = false;
+            system.main.useAutoRandomSeed = false;
+            return system;
+        }
+
+        private VividParticleSystem CreateActiveSystem()
+        {
+            var gameObject = new GameObject("Vivid Particle System Test");
+            m_ToDestroy.Add(gameObject);
+
+            VividParticleSystem system = gameObject.AddComponent<VividParticleSystem>();
+            system.rendererModule.enabled = false;
+            system.Stop(withChildren: false, VividParticleSystemStopBehavior.StopEmittingAndClear);
             system.main.useAutoRandomSeed = false;
             return system;
         }

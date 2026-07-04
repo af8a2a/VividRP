@@ -106,11 +106,12 @@ namespace VividRP.Runtime.Particle
             return true;
         }
 
-        public void Integrate(float deltaTime, Vector3 gravity)
+        public bool ScheduleIntegrate(float deltaTime, Vector3 gravity, out JobHandle handle)
         {
+            handle = default;
             int count = activeCount;
             if (!isCreated || count <= 0 || deltaTime <= 0.0f)
-                return;
+                return false;
 
             m_ActiveCountOutput[0] = count;
             var job = new VividParticleIntegrateJob
@@ -127,7 +128,15 @@ namespace VividRP.Runtime.Particle
                 ActiveCountOutput = m_ActiveCountOutput,
             };
 
-            job.Schedule().Complete();
+            handle = job.Schedule();
+            return true;
+        }
+
+        public void ApplyScheduledIntegrateResult()
+        {
+            if (!m_ActiveCountOutput.IsCreated)
+                return;
+
             m_ActiveCount = math.clamp(m_ActiveCountOutput[0], 0, m_MaxParticles);
         }
 

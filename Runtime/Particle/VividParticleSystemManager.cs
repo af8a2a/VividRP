@@ -26,6 +26,7 @@ namespace VividRP.Runtime.Particle
         internal const int SizeOfFloat4 = sizeof(float) * 4;
         internal const int ZeroBlockByteSize = SizeOfPackedMatrix * 2;
 
+        private const int InstanceDataBufferCount = 3;
         private const float GravityAcceleration = 9.81f;
         private const float MinimumSimulationStep = 0.000001f;
         private const float MaximumEditorSimulationStep = 0.1f;
@@ -342,8 +343,8 @@ namespace VividRP.Runtime.Particle
 
         internal static void ClearForTests()
         {
-            foreach (ParticleSystemState state in s_States.Values)
-                state.Dispose();
+            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+                pair.Value.Dispose();
 
             s_States.Clear();
             s_LastPlayerLoopFrame = -1;
@@ -455,11 +456,11 @@ namespace VividRP.Runtime.Particle
         private static void ScheduleAutomaticUpdates(float? deltaTimeOverride)
         {
             bool scheduledAnyJob = false;
-            foreach (ParticleSystemState state in s_States.Values)
-                state.CompletePending();
+            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+                pair.Value.CompletePending();
 
-            foreach (ParticleSystemState state in s_States.Values)
-                scheduledAnyJob |= state.ScheduleAutomatic(deltaTimeOverride, requireActive: true);
+            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+                scheduledAnyJob |= pair.Value.ScheduleAutomatic(deltaTimeOverride, requireActive: true);
 
             if (scheduledAnyJob)
                 JobHandle.ScheduleBatchedJobs();
@@ -473,13 +474,13 @@ namespace VividRP.Runtime.Particle
             if (oncePerFrame && s_LastCompleteAndUploadFrame == Time.frameCount)
                 return;
 
-            foreach (ParticleSystemState state in s_States.Values)
-                state.CompletePending();
+            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+                pair.Value.CompletePending();
 
             using (s_BRGUploadMarker.Auto())
             {
-                foreach (ParticleSystemState state in s_States.Values)
-                    state.UpdateRendering(forceUpload);
+                foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+                    pair.Value.UpdateRendering(forceUpload);
             }
 
             s_LastCompleteAndUploadFrame = Time.frameCount;
@@ -555,9 +556,9 @@ namespace VividRP.Runtime.Particle
             if (Application.isPlaying)
                 return;
 
-            foreach (ParticleSystemState state in s_States.Values)
+            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
             {
-                if (!state.requiresAutomaticUpdate)
+                if (!pair.Value.requiresAutomaticUpdate)
                     continue;
 
                 EditorApplication.QueuePlayerLoopUpdate();
@@ -611,17 +612,21 @@ namespace VividRP.Runtime.Particle
             private static readonly int s_AlphaSrcBlendId = Shader.PropertyToID("_AlphaSrcBlend");
             private static readonly int s_AlphaDstBlendId = Shader.PropertyToID("_AlphaDstBlend");
             private static readonly int s_ZWriteId = Shader.PropertyToID("_ZWrite");
+            private static readonly int s_ParticleRenderModeId = Shader.PropertyToID("_VividParticleRenderMode");
             private static readonly int s_ObjectToWorldId = Shader.PropertyToID("unity_ObjectToWorld");
             private static readonly int s_WorldToObjectId = Shader.PropertyToID("unity_WorldToObject");
 
             private readonly VividParticleSystem m_System;
             private readonly VividParticleEcsStorage m_Storage = new();
+            private readonly GraphicsBuffer[] m_InstanceDataBuffers = new GraphicsBuffer[InstanceDataBufferCount];
+            private readonly InstanceUploadDirtyRanges[] m_InstanceDirtyRanges = CreateInstanceDirtyRanges();
             private BatchRendererGroup m_BRG;
             private GraphicsBuffer m_InstanceData;
             private Mesh m_QuadMesh;
             private Material m_OwnedMaterial;
             private Material m_RegisteredMaterial;
             private Material m_SourceMaterial;
+            private Mesh m_SourceMesh;
             private BatchID m_BatchID;
             private BatchMeshID m_MeshID;
             private BatchMaterialID m_MaterialID;
@@ -635,14 +640,27 @@ namespace VividRP.Runtime.Particle
             private int m_Capacity;
             private int m_LastUploadedCount;
             private int m_LastUploadedFrame = -1;
+            private int m_LastUploadOperationCount;
+            private int m_LastUploadByteCount;
+            private int m_LastUploadBufferIndex = -1;
+            private int m_InstanceDataBufferIndex = -1;
             private int m_RenderQueueOffset;
+            private VividParticleRenderMode m_RenderMode = VividParticleRenderMode.Billboard;
             private int m_PendingFrame = -1;
+            private Matrix4x4 m_LastUploadedLocalToWorldMatrix;
+            private Color m_LastUploadedRendererColor;
+            private float m_LastUploadedSizeScale;
+            private float m_LastUploadedStretchLengthScale;
+            private float m_LastUploadedStretchSpeedScale;
+            private VividParticleRenderMode m_LastUploadedRenderMode;
             private bool m_BatchCreated;
+            private bool m_OwnedMesh;
             private bool m_ResourcesDirty = true;
             private bool m_MissingShaderWarningLogged;
             private bool m_HasPendingJob;
             private bool m_HasPendingSimulation;
             private bool m_PendingAllowEmission;
+            private bool m_HasUploadedRenderStateSnapshot;
 
             public ParticleSystemState(VividParticleSystem system)
             {
@@ -676,7 +694,11 @@ namespace VividRP.Runtime.Particle
                 ScheduledJobCount,
                 CompletedJobCount,
                 LastScheduledFrame,
-                LastCompletedFrame);
+                LastCompletedFrame,
+                InstanceDataBufferCount,
+                m_LastUploadBufferIndex,
+                m_LastUploadOperationCount,
+                m_LastUploadByteCount);
 
             private bool IsInitialized => m_BRG != null
                 && m_InstanceData != null
@@ -713,6 +735,7 @@ namespace VividRP.Runtime.Particle
             public void MarkResourcesDirty()
             {
                 m_ResourcesDirty = true;
+                MarkAllInstanceDataDirty();
             }
 
             public void NotifySettingsChanged()
@@ -721,8 +744,13 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 VividParticleSystemFrameSnapshot snapshot = m_System.CaptureFrameSnapshot(0.0f);
+                int oldCapacity = storageCapacity;
                 EnsureStorageCapacity(snapshot.MaxParticles);
                 EnsureBurstState(snapshot.Bursts);
+                if (oldCapacity != storageCapacity)
+                    MarkResourcesDirty();
+                else
+                    MarkActiveInstanceDataDirty();
             }
 
             public void ResetEditorUpdateTime()
@@ -756,10 +784,12 @@ namespace VividRP.Runtime.Particle
 
                 if (m_HasPendingJob)
                 {
+                    int previousActiveCount = activeCount;
                     m_PendingJob.Complete();
                     m_PendingJob = default;
                     m_HasPendingJob = false;
                     m_Storage.ApplyScheduledIntegrateResult();
+                    MarkInstanceRangeDirty(0, previousActiveCount);
                     CompletedJobCount++;
                 }
 
@@ -781,6 +811,7 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 EnsureStorageCapacity(snapshot.MaxParticles);
+                int previousActiveCount = activeCount;
                 if (m_Storage.ScheduleIntegrate(
                     snapshot.DeltaTime,
                     Vector3.down * (GravityAcceleration * snapshot.GravityModifier),
@@ -792,6 +823,7 @@ namespace VividRP.Runtime.Particle
                     CompletedJobCount++;
                     LastCompletedFrame = Time.frameCount;
                     m_Storage.ApplyScheduledIntegrateResult();
+                    MarkInstanceRangeDirty(0, previousActiveCount);
                 }
 
                 AdvanceEmission(snapshot, allowEmission);
@@ -808,8 +840,11 @@ namespace VividRP.Runtime.Particle
 
                 int available = Mathf.Max(0, snapshot.MaxParticles - activeCount);
                 int spawnCount = Mathf.Min(count, available);
+                int firstSpawnIndex = activeCount;
                 for (int index = 0; index < spawnCount; index++)
                     SpawnParticle(snapshot);
+
+                MarkInstanceRangeDirty(firstSpawnIndex, activeCount - firstSpawnIndex);
             }
 
             public void ResetSimulation(VividParticleSystemFrameSnapshot snapshot, bool clearParticles)
@@ -818,7 +853,10 @@ namespace VividRP.Runtime.Particle
                 m_EmissionAccumulator = 0.0f;
                 ResetBurstState(snapshot.Bursts);
                 if (clearParticles)
+                {
                     m_Storage.Clear();
+                    MarkInstanceRangeDirty(0, m_LastUploadedCount);
+                }
                 ResetRandom(snapshot);
             }
 
@@ -827,7 +865,7 @@ namespace VividRP.Runtime.Particle
                 if (m_System == null)
                     return;
 
-                if (!m_System.rendererModule.enabled)
+                if (!ParticleSystemState.CanRender(m_System.rendererModule))
                 {
                     m_LastUploadedCount = 0;
                     return;
@@ -854,9 +892,11 @@ namespace VividRP.Runtime.Particle
                 }
 
                 Vector3 position = GetParticleWorldPosition(m_Storage.GetPosition(particleIndex));
-                float size = Mathf.Max(
-                    VividParticleMainModule.MinimumStartSize,
-                    m_Storage.GetSize(particleIndex) * m_System.rendererModule.sizeScale);
+                float size = GetParticleRenderSize(particleIndex);
+                VividParticleRenderMode renderMode = m_System.rendererModule.renderMode;
+
+                if (renderMode == VividParticleRenderMode.Stretch)
+                    return GetStretchParticleMatrix(particleIndex, position, size);
 
                 return Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * size);
             }
@@ -890,13 +930,13 @@ namespace VividRP.Runtime.Particle
                     return new Bounds(m_System.transform.position, Vector3.zero);
 
                 Vector3 firstPosition = GetParticleWorldPosition(m_Storage.GetPosition(0));
-                float firstExtent = GetParticleWorldExtent(m_Storage.GetSize(0));
+                float firstExtent = GetParticleWorldExtent(0);
                 var bounds = new Bounds(firstPosition, Vector3.one * (firstExtent * 2.0f));
 
                 for (int index = 1; index < particleCount; index++)
                 {
                     Vector3 position = GetParticleWorldPosition(m_Storage.GetPosition(index));
-                    float extent = GetParticleWorldExtent(m_Storage.GetSize(index));
+                    float extent = GetParticleWorldExtent(index);
                     bounds.Encapsulate(position + Vector3.one * extent);
                     bounds.Encapsulate(position - Vector3.one * extent);
                 }
@@ -1100,19 +1140,73 @@ namespace VividRP.Runtime.Particle
                     : position;
             }
 
-            private float GetParticleWorldExtent(float size)
+            private float GetParticleWorldExtent(int particleIndex)
+            {
+                float renderSize = GetParticleRenderSize(particleIndex);
+                if (m_System != null
+                    && m_System.rendererModule.renderMode == VividParticleRenderMode.Mesh
+                    && m_System.rendererModule.mesh != null)
+                {
+                    return Mathf.Max(
+                        VividParticleMainModule.MinimumStartSize,
+                        m_System.rendererModule.mesh.bounds.extents.magnitude * renderSize);
+                }
+
+                if (m_System != null && m_System.rendererModule.renderMode == VividParticleRenderMode.Stretch)
+                {
+                    Vector3 velocity = m_Storage.IsValidIndex(particleIndex)
+                        ? m_Storage.GetVelocity(particleIndex)
+                        : Vector3.zero;
+                    float stretchLength = renderSize * m_System.rendererModule.stretchLengthScale
+                        + velocity.magnitude * m_System.rendererModule.stretchSpeedScale;
+                    return Mathf.Max(renderSize, stretchLength) * 0.5f;
+                }
+
+                return renderSize * 0.5f;
+            }
+
+            private float GetParticleRenderSize(int particleIndex)
             {
                 return Mathf.Max(
                     VividParticleMainModule.MinimumStartSize,
-                    size * (m_System != null ? m_System.rendererModule.sizeScale : 1.0f) * 0.5f);
+                    m_Storage.GetSize(particleIndex) * (m_System != null ? m_System.rendererModule.sizeScale : 1.0f));
+            }
+
+            private Matrix4x4 GetStretchParticleMatrix(int particleIndex, Vector3 position, float size)
+            {
+                Vector3 velocity = m_Storage.GetVelocity(particleIndex);
+                Vector3 up = velocity.sqrMagnitude > 0.000001f
+                    ? velocity.normalized
+                    : Vector3.up;
+                Vector3 right = Vector3.Cross(Vector3.forward, up);
+                if (right.sqrMagnitude <= 0.000001f)
+                    right = Vector3.Cross(Vector3.right, up);
+
+                right.Normalize();
+                Vector3 forward = Vector3.Cross(right, up).normalized;
+                float length = Mathf.Max(
+                    VividParticleMainModule.MinimumStartSize,
+                    size * m_System.rendererModule.stretchLengthScale
+                    + velocity.magnitude * m_System.rendererModule.stretchSpeedScale);
+
+                var matrix = Matrix4x4.identity;
+                matrix.SetColumn(0, new Vector4(right.x * size, right.y * size, right.z * size, 0.0f));
+                matrix.SetColumn(1, new Vector4(up.x * length, up.y * length, up.z * length, 0.0f));
+                matrix.SetColumn(2, new Vector4(forward.x * size, forward.y * size, forward.z * size, 0.0f));
+                matrix.SetColumn(3, new Vector4(position.x, position.y, position.z, 1.0f));
+                return matrix;
             }
 
             private bool EnsureResources()
             {
                 int capacity = Mathf.Max(1, m_System.maxParticles);
+                VividParticleRenderMode renderMode = m_System.rendererModule.renderMode;
+                Mesh renderMesh = ParticleSystemState.ResolveRenderMesh(m_System.rendererModule);
                 Material sourceMaterial = m_System.rendererModule.material;
                 int renderQueueOffset = m_System.rendererModule.renderQueueOffset;
                 bool materialChanged = m_SourceMaterial != sourceMaterial
+                    || m_SourceMesh != renderMesh
+                    || m_RenderMode != renderMode
                     || m_RenderQueueOffset != renderQueueOffset
                     || m_RegisteredMaterial == null;
 
@@ -1149,7 +1243,7 @@ namespace VividRP.Runtime.Particle
                     ownsMaterial = true;
                     usingDefaultMaterial = true;
                 }
-                else if (renderQueueOffset != 0)
+                else if (ParticleSystemState.ShouldOwnMaterialInstance(sourceMaterial, renderQueueOffset))
                 {
                     material = new Material(sourceMaterial)
                     {
@@ -1165,15 +1259,28 @@ namespace VividRP.Runtime.Particle
                         ConfigureDefaultParticleMaterial(material);
 
                     ApplyRenderQueueOffset(material, sourceMaterial, renderQueueOffset);
+                    ParticleSystemState.ConfigureParticleRenderMode(material, renderMode);
                     m_OwnedMaterial = material;
+                }
+                else
+                {
+                    ParticleSystemState.ConfigureParticleRenderMode(material, renderMode);
                 }
 
                 m_MissingShaderWarningLogged = false;
                 m_SourceMaterial = sourceMaterial;
+                m_SourceMesh = renderMesh;
                 m_RenderQueueOffset = renderQueueOffset;
+                m_RenderMode = renderMode;
                 m_RegisteredMaterial = material;
-                m_QuadMesh = CreateQuadMesh();
-                m_InstanceData = CreateInstanceBuffer(capacity);
+                m_QuadMesh = renderMesh != null ? renderMesh : CreateQuadMesh();
+                m_OwnedMesh = renderMesh == null;
+                for (int index = 0; index < InstanceDataBufferCount; index++)
+                    m_InstanceDataBuffers[index] = CreateInstanceBuffer(capacity);
+
+                m_InstanceDataBufferIndex = 0;
+                m_LastUploadBufferIndex = -1;
+                m_InstanceData = m_InstanceDataBuffers[m_InstanceDataBufferIndex];
 
                 m_BRG = new BatchRendererGroup(new BatchRendererGroupCreateInfo
                 {
@@ -1214,6 +1321,8 @@ namespace VividRP.Runtime.Particle
                 LastVisible = false;
                 LastViewType = default;
                 LastDrawCommandCount = 0;
+                m_HasUploadedRenderStateSnapshot = false;
+                MarkAllInstanceDataDirty();
                 return true;
             }
 
@@ -1232,6 +1341,37 @@ namespace VividRP.Runtime.Particle
                 SetFloat(material, s_AlphaDstBlendId, (float)BlendMode.OneMinusSrcAlpha);
                 SetFloat(material, s_ZWriteId, 0.0f);
                 material.SetOverrideTag("RenderType", "Transparent");
+            }
+
+            private static void ConfigureParticleRenderMode(Material material, VividParticleRenderMode renderMode)
+            {
+                SetFloat(material, s_ParticleRenderModeId, (float)renderMode);
+            }
+
+            private static bool ShouldOwnMaterialInstance(Material sourceMaterial, int renderQueueOffset)
+            {
+                return sourceMaterial != null
+                    && (renderQueueOffset != 0 || sourceMaterial.HasProperty(s_ParticleRenderModeId));
+            }
+
+            private static Mesh ResolveRenderMesh(VividParticleRendererModule rendererModule)
+            {
+                return rendererModule != null && rendererModule.renderMode == VividParticleRenderMode.Mesh
+                    ? rendererModule.mesh
+                    : null;
+            }
+
+            private static bool CanRender(VividParticleRendererModule rendererModule)
+            {
+                if (rendererModule == null || !rendererModule.enabled)
+                    return false;
+
+                return rendererModule.renderMode switch
+                {
+                    VividParticleRenderMode.None => false,
+                    VividParticleRenderMode.Mesh => rendererModule.mesh != null,
+                    _ => true,
+                };
             }
 
             private static void ApplyRenderQueueOffset(
@@ -1270,7 +1410,13 @@ namespace VividRP.Runtime.Particle
                 m_BRG?.Dispose();
                 m_BRG = null;
 
-                m_InstanceData?.Dispose();
+                for (int index = 0; index < m_InstanceDataBuffers.Length; index++)
+                {
+                    m_InstanceDataBuffers[index]?.Dispose();
+                    m_InstanceDataBuffers[index] = null;
+                    m_InstanceDirtyRanges[index].Clear();
+                }
+
                 m_InstanceData = null;
 
                 if (m_OwnedMaterial != null)
@@ -1279,59 +1425,256 @@ namespace VividRP.Runtime.Particle
                     m_OwnedMaterial = null;
                 }
 
-                if (m_QuadMesh != null)
+                if (m_OwnedMesh && m_QuadMesh != null)
                 {
                     CoreUtils.Destroy(m_QuadMesh);
                     m_QuadMesh = null;
                 }
+                else
+                {
+                    m_QuadMesh = null;
+                }
 
                 m_RegisteredMaterial = null;
+                m_SourceMesh = null;
                 m_LastUploadedCount = 0;
                 m_LastUploadedFrame = -1;
+                m_LastUploadOperationCount = 0;
+                m_LastUploadByteCount = 0;
+                m_LastUploadBufferIndex = -1;
+                m_InstanceDataBufferIndex = -1;
+                m_HasUploadedRenderStateSnapshot = false;
+                m_OwnedMesh = false;
             }
 
             private unsafe void UploadInstanceData()
             {
-                if (m_InstanceData == null || m_System == null)
+                if (m_System == null)
                     return;
 
                 int count = Mathf.Min(activeCount, m_Capacity);
                 m_LastUploadedCount = count;
+                m_LastUploadOperationCount = 0;
+                m_LastUploadByteCount = 0;
+
+                MarkRenderStateDirtyIfNeeded(count);
+
+                if (m_InstanceDataBufferIndex >= 0
+                    && m_InstanceDirtyRanges[m_InstanceDataBufferIndex].EstimateUploadByteCount(count) <= 0)
+                {
+                    return;
+                }
+
+                int uploadBufferIndex = SelectUploadBufferIndex(count);
+                if (uploadBufferIndex < 0)
+                    return;
+
+                GraphicsBuffer uploadBuffer = m_InstanceDataBuffers[uploadBufferIndex];
+                if (uploadBuffer == null)
+                    return;
+
+                if (uploadBufferIndex != m_InstanceDataBufferIndex)
+                {
+                    m_InstanceDataBufferIndex = uploadBufferIndex;
+                    m_InstanceData = uploadBuffer;
+                    if (m_BatchCreated)
+                        m_BRG.SetBatchBuffer(m_BatchID, uploadBuffer.bufferHandle);
+                }
+
+                InstanceUploadDirtyRanges dirtyRanges = m_InstanceDirtyRanges[uploadBufferIndex];
+                dirtyRanges.Compact();
+                for (int operationIndex = 0; operationIndex < dirtyRanges.Count; operationIndex++)
+                {
+                    InstanceUploadOperation operation = dirtyRanges[operationIndex];
+                    int byteOffset = GetUploadOperationByteOffset(operation);
+                    int byteCount = GetUploadOperationByteCount(operation, count);
+                    if (byteCount <= 0)
+                        continue;
+
+                    int elementOffset = byteOffset / sizeof(int);
+                    int elementCount = BufferCountForBytes(byteCount);
+                    NativeArray<int> mappedData = default;
+                    try
+                    {
+                        mappedData = uploadBuffer.LockBufferForWrite<int>(elementOffset, elementCount);
+                        WriteUploadOperation((byte*)mappedData.GetUnsafePtr(), operation, count);
+                    }
+                    finally
+                    {
+                        if (mappedData.IsCreated)
+                            uploadBuffer.UnlockBufferAfterWrite<int>(elementCount);
+                    }
+
+                    m_LastUploadOperationCount++;
+                    m_LastUploadByteCount += byteCount;
+                }
+
+                dirtyRanges.Clear();
+                m_LastUploadBufferIndex = uploadBufferIndex;
+            }
+
+            private static InstanceUploadDirtyRanges[] CreateInstanceDirtyRanges()
+            {
+                var ranges = new InstanceUploadDirtyRanges[InstanceDataBufferCount];
+                for (int index = 0; index < ranges.Length; index++)
+                    ranges[index] = new InstanceUploadDirtyRanges();
+
+                return ranges;
+            }
+
+            private void MarkAllInstanceDataDirty()
+            {
+                for (int index = 0; index < m_InstanceDirtyRanges.Length; index++)
+                    MarkAllInstanceDataDirty(m_InstanceDirtyRanges[index]);
+            }
+
+            private void MarkActiveInstanceDataDirty()
+            {
+                MarkInstanceRangeDirty(0, activeCount);
+            }
+
+            private void MarkInstanceRangeDirty(int startIndex, int count)
+            {
                 if (count <= 0)
                     return;
 
-                int elementCount = BufferCountForBytes(InstanceDataByteSize(m_Capacity));
-                NativeArray<int> mappedData = default;
-                try
-                {
-                    mappedData = m_InstanceData.LockBufferForWrite<int>(0, elementCount);
-                    byte* baseAddress = (byte*)mappedData.GetUnsafePtr();
-                    UnsafeUtility.MemClear(baseAddress, ZeroBlockByteSize);
+                startIndex = Mathf.Max(0, startIndex);
+                count = Mathf.Min(count, Mathf.Max(0, m_Capacity - startIndex));
+                if (count <= 0)
+                    return;
 
-                    for (int index = 0; index < count; index++)
+                for (int index = 0; index < m_InstanceDirtyRanges.Length; index++)
+                    m_InstanceDirtyRanges[index].AddInstanceRange(startIndex, count);
+            }
+
+            private void MarkAllInstanceDataDirty(InstanceUploadDirtyRanges ranges)
+            {
+                ranges.Clear();
+                ranges.AddZeroBlock();
+                ranges.AddInstanceRange(0, m_Capacity);
+            }
+
+            private void MarkRenderStateDirtyIfNeeded(int count)
+            {
+                if (m_System == null)
+                    return;
+
+                Matrix4x4 localToWorld = m_System.transform.localToWorldMatrix;
+                Color rendererColor = m_System.rendererModule.color;
+                float sizeScale = m_System.rendererModule.sizeScale;
+                float stretchLengthScale = m_System.rendererModule.stretchLengthScale;
+                float stretchSpeedScale = m_System.rendererModule.stretchSpeedScale;
+                VividParticleRenderMode renderMode = m_System.rendererModule.renderMode;
+                if (m_HasUploadedRenderStateSnapshot
+                    && m_LastUploadedLocalToWorldMatrix == localToWorld
+                    && m_LastUploadedRendererColor == rendererColor
+                    && Mathf.Approximately(m_LastUploadedSizeScale, sizeScale)
+                    && Mathf.Approximately(m_LastUploadedStretchLengthScale, stretchLengthScale)
+                    && Mathf.Approximately(m_LastUploadedStretchSpeedScale, stretchSpeedScale)
+                    && m_LastUploadedRenderMode == renderMode)
+                {
+                    return;
+                }
+
+                if (count > 0)
+                    MarkInstanceRangeDirty(0, count);
+
+                m_LastUploadedLocalToWorldMatrix = localToWorld;
+                m_LastUploadedRendererColor = rendererColor;
+                m_LastUploadedSizeScale = sizeScale;
+                m_LastUploadedStretchLengthScale = stretchLengthScale;
+                m_LastUploadedStretchSpeedScale = stretchSpeedScale;
+                m_LastUploadedRenderMode = renderMode;
+                m_HasUploadedRenderStateSnapshot = true;
+            }
+
+            private int SelectUploadBufferIndex(int activeCount)
+            {
+                int bestIndex = -1;
+                int bestByteCount = int.MaxValue;
+                int startIndex = m_InstanceDataBufferIndex < 0 ? 0 : (m_InstanceDataBufferIndex + 1) % InstanceDataBufferCount;
+
+                for (int offset = 0; offset < m_InstanceDirtyRanges.Length; offset++)
+                {
+                    int index = (startIndex + offset) % m_InstanceDirtyRanges.Length;
+                    int byteCount = m_InstanceDirtyRanges[index].EstimateUploadByteCount(activeCount);
+                    if (byteCount <= 0)
+                        continue;
+
+                    if (byteCount < bestByteCount)
                     {
-                        Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
-                        WriteArrayElement(
-                            baseAddress,
-                            ObjectToWorldByteAddress(m_Capacity),
-                            index,
-                            new PackedMatrix(objectToWorld));
-                        WriteArrayElement(
-                            baseAddress,
-                            WorldToObjectByteAddress(m_Capacity),
-                            index,
-                            new PackedMatrix(objectToWorld.inverse));
-                        WriteArrayElement(
-                            baseAddress,
-                            BaseColorByteAddress(m_Capacity),
-                            index,
-                            (Vector4)GetParticleRenderColor(index));
+                        bestByteCount = byteCount;
+                        bestIndex = index;
                     }
                 }
-                finally
+
+                return bestIndex;
+            }
+
+            private int GetUploadOperationByteOffset(InstanceUploadOperation operation)
+            {
+                return operation.Segment switch
                 {
-                    if (mappedData.IsCreated)
-                        m_InstanceData.UnlockBufferAfterWrite<int>(elementCount);
+                    InstanceUploadSegment.ZeroBlock => 0,
+                    InstanceUploadSegment.ObjectToWorld => ObjectToWorldByteAddress(m_Capacity)
+                        + operation.StartIndex * SizeOfPackedMatrix,
+                    InstanceUploadSegment.WorldToObject => WorldToObjectByteAddress(m_Capacity)
+                        + operation.StartIndex * SizeOfPackedMatrix,
+                    InstanceUploadSegment.BaseColor => BaseColorByteAddress(m_Capacity)
+                        + operation.StartIndex * SizeOfFloat4,
+                    _ => 0,
+                };
+            }
+
+            private int GetUploadOperationByteCount(InstanceUploadOperation operation, int activeCount)
+            {
+                if (operation.Segment == InstanceUploadSegment.ZeroBlock)
+                    return ZeroBlockByteSize;
+
+                int count = Mathf.Clamp(activeCount - operation.StartIndex, 0, operation.Count);
+                return operation.Segment == InstanceUploadSegment.BaseColor
+                    ? count * SizeOfFloat4
+                    : count * SizeOfPackedMatrix;
+            }
+
+            private unsafe void WriteUploadOperation(byte* baseAddress, InstanceUploadOperation operation, int activeCount)
+            {
+                if (operation.Segment == InstanceUploadSegment.ZeroBlock)
+                {
+                    UnsafeUtility.MemClear(baseAddress, ZeroBlockByteSize);
+                    return;
+                }
+
+                int endIndex = Mathf.Min(activeCount, operation.StartIndex + operation.Count);
+                if (endIndex <= operation.StartIndex)
+                    return;
+
+                switch (operation.Segment)
+                {
+                    case InstanceUploadSegment.ObjectToWorld:
+                        for (int index = operation.StartIndex; index < endIndex; index++)
+                        {
+                            Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
+                            WriteArrayElement(baseAddress, 0, index - operation.StartIndex, new PackedMatrix(objectToWorld));
+                        }
+                        break;
+                    case InstanceUploadSegment.WorldToObject:
+                        for (int index = operation.StartIndex; index < endIndex; index++)
+                        {
+                            Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
+                            WriteArrayElement(baseAddress, 0, index - operation.StartIndex, new PackedMatrix(objectToWorld.inverse));
+                        }
+                        break;
+                    case InstanceUploadSegment.BaseColor:
+                        for (int index = operation.StartIndex; index < endIndex; index++)
+                        {
+                            WriteArrayElement(
+                                baseAddress,
+                                0,
+                                index - operation.StartIndex,
+                                (Vector4)GetParticleRenderColor(index));
+                        }
+                        break;
                 }
             }
 
@@ -1346,7 +1689,7 @@ namespace VividRP.Runtime.Particle
 
                 bool visible = m_System != null
                     && m_System.isActiveAndEnabled
-                    && m_System.rendererModule.enabled
+                    && ParticleSystemState.CanRender(m_System.rendererModule)
                     && activeCount > 0
                     && IsVisibleInCullingContext(GetWorldBounds(), cullingContext);
                 LastVisible = visible;
@@ -1616,6 +1959,181 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        private enum InstanceUploadSegment
+        {
+            ZeroBlock,
+            ObjectToWorld,
+            WorldToObject,
+            BaseColor,
+        }
+
+        private readonly struct InstanceUploadOperation
+        {
+            public InstanceUploadOperation(InstanceUploadSegment segment, int startIndex, int count)
+            {
+                Segment = segment;
+                StartIndex = startIndex;
+                Count = count;
+            }
+
+            public InstanceUploadSegment Segment { get; }
+
+            public int StartIndex { get; }
+
+            public int Count { get; }
+
+            public int EndIndex => StartIndex + Count;
+        }
+
+        private sealed class InstanceUploadDirtyRanges
+        {
+            private bool m_ZeroBlockDirty;
+            private bool m_ObjectToWorldDirty;
+            private bool m_WorldToObjectDirty;
+            private bool m_BaseColorDirty;
+            private int m_ObjectToWorldStart;
+            private int m_ObjectToWorldEnd;
+            private int m_WorldToObjectStart;
+            private int m_WorldToObjectEnd;
+            private int m_BaseColorStart;
+            private int m_BaseColorEnd;
+
+            public int Count
+            {
+                get
+                {
+                    int count = m_ZeroBlockDirty ? 1 : 0;
+                    count += m_ObjectToWorldDirty ? 1 : 0;
+                    count += m_WorldToObjectDirty ? 1 : 0;
+                    count += m_BaseColorDirty ? 1 : 0;
+                    return count;
+                }
+            }
+
+            public InstanceUploadOperation this[int index]
+            {
+                get
+                {
+                    if (m_ZeroBlockDirty)
+                    {
+                        if (index == 0)
+                            return new InstanceUploadOperation(InstanceUploadSegment.ZeroBlock, 0, 1);
+
+                        index--;
+                    }
+
+                    if (m_ObjectToWorldDirty)
+                    {
+                        if (index == 0)
+                            return CreateOperation(InstanceUploadSegment.ObjectToWorld, m_ObjectToWorldStart, m_ObjectToWorldEnd);
+
+                        index--;
+                    }
+
+                    if (m_WorldToObjectDirty)
+                    {
+                        if (index == 0)
+                            return CreateOperation(InstanceUploadSegment.WorldToObject, m_WorldToObjectStart, m_WorldToObjectEnd);
+
+                        index--;
+                    }
+
+                    if (m_BaseColorDirty)
+                    {
+                        if (index == 0)
+                            return CreateOperation(InstanceUploadSegment.BaseColor, m_BaseColorStart, m_BaseColorEnd);
+                    }
+
+                    throw new ArgumentOutOfRangeException(nameof(index));
+                }
+            }
+
+            public void AddZeroBlock()
+            {
+                m_ZeroBlockDirty = true;
+            }
+
+            public void AddInstanceRange(int startIndex, int count)
+            {
+                if (count <= 0)
+                    return;
+
+                startIndex = Mathf.Max(0, startIndex);
+                AddRange(ref m_ObjectToWorldDirty, ref m_ObjectToWorldStart, ref m_ObjectToWorldEnd, startIndex, count);
+                AddRange(ref m_WorldToObjectDirty, ref m_WorldToObjectStart, ref m_WorldToObjectEnd, startIndex, count);
+                AddRange(ref m_BaseColorDirty, ref m_BaseColorStart, ref m_BaseColorEnd, startIndex, count);
+            }
+
+            public int EstimateUploadByteCount(int activeCount)
+            {
+                int byteCount = m_ZeroBlockDirty ? ZeroBlockByteSize : 0;
+                byteCount += EstimateRangeByteCount(m_ObjectToWorldDirty, m_ObjectToWorldStart, m_ObjectToWorldEnd, activeCount, SizeOfPackedMatrix);
+                byteCount += EstimateRangeByteCount(m_WorldToObjectDirty, m_WorldToObjectStart, m_WorldToObjectEnd, activeCount, SizeOfPackedMatrix);
+                byteCount += EstimateRangeByteCount(m_BaseColorDirty, m_BaseColorStart, m_BaseColorEnd, activeCount, SizeOfFloat4);
+                return byteCount;
+            }
+
+            public void Compact()
+            {
+            }
+
+            public void Clear()
+            {
+                m_ZeroBlockDirty = false;
+                m_ObjectToWorldDirty = false;
+                m_WorldToObjectDirty = false;
+                m_BaseColorDirty = false;
+                m_ObjectToWorldStart = 0;
+                m_ObjectToWorldEnd = 0;
+                m_WorldToObjectStart = 0;
+                m_WorldToObjectEnd = 0;
+                m_BaseColorStart = 0;
+                m_BaseColorEnd = 0;
+            }
+
+            private static void AddRange(
+                ref bool dirty,
+                ref int start,
+                ref int end,
+                int startIndex,
+                int count)
+            {
+                int endIndex = startIndex + count;
+                if (!dirty)
+                {
+                    dirty = true;
+                    start = startIndex;
+                    end = endIndex;
+                    return;
+                }
+
+                start = Mathf.Min(start, startIndex);
+                end = Mathf.Max(end, endIndex);
+            }
+
+            private static int EstimateRangeByteCount(
+                bool dirty,
+                int start,
+                int end,
+                int activeCount,
+                int elementByteSize)
+            {
+                if (!dirty)
+                    return 0;
+
+                int count = Mathf.Clamp(activeCount - start, 0, end - start);
+                return count * elementByteSize;
+            }
+
+            private static InstanceUploadOperation CreateOperation(
+                InstanceUploadSegment segment,
+                int start,
+                int end)
+            {
+                return new InstanceUploadOperation(segment, start, end - start);
+            }
+        }
+
         private sealed class VividParticleSystemManagerPlayerLoopMarker
         {
         }
@@ -1635,6 +2153,10 @@ namespace VividRP.Runtime.Particle
             public readonly int CompletedJobCount;
             public readonly int LastScheduledFrame;
             public readonly int LastCompletedFrame;
+            public readonly int InstanceDataBufferCount;
+            public readonly int LastUploadBufferIndex;
+            public readonly int LastUploadOperationCount;
+            public readonly int LastUploadByteCount;
 
             public VividParticleSystemManagerStats(
                 bool isInitialized,
@@ -1649,7 +2171,11 @@ namespace VividRP.Runtime.Particle
                 int scheduledJobCount,
                 int completedJobCount,
                 int lastScheduledFrame,
-                int lastCompletedFrame)
+                int lastCompletedFrame,
+                int instanceDataBufferCount,
+                int lastUploadBufferIndex,
+                int lastUploadOperationCount,
+                int lastUploadByteCount)
             {
                 IsInitialized = isInitialized;
                 Capacity = capacity;
@@ -1664,6 +2190,10 @@ namespace VividRP.Runtime.Particle
                 CompletedJobCount = completedJobCount;
                 LastScheduledFrame = lastScheduledFrame;
                 LastCompletedFrame = lastCompletedFrame;
+                InstanceDataBufferCount = instanceDataBufferCount;
+                LastUploadBufferIndex = lastUploadBufferIndex;
+                LastUploadOperationCount = lastUploadOperationCount;
+                LastUploadByteCount = lastUploadByteCount;
             }
         }
 

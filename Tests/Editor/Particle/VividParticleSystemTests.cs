@@ -63,9 +63,13 @@ namespace VividRP.Editor.Tests
             Assert.That(shape.angle, Is.EqualTo(25.0f));
 
             Assert.That(renderer.enabled, Is.True);
+            Assert.That(renderer.renderMode, Is.EqualTo(VividParticleRenderMode.Billboard));
             Assert.That(renderer.material, Is.Null);
+            Assert.That(renderer.mesh, Is.Null);
             Assert.That(renderer.color, Is.EqualTo(Color.white));
             Assert.That(renderer.sizeScale, Is.EqualTo(1.0f));
+            Assert.That(renderer.stretchLengthScale, Is.EqualTo(2.0f));
+            Assert.That(renderer.stretchSpeedScale, Is.EqualTo(0.0f));
             Assert.That(renderer.renderQueueOffset, Is.EqualTo(0));
         }
 
@@ -89,6 +93,8 @@ namespace VividRP.Editor.Tests
 
             VividParticleRendererModule renderer = VividParticleRendererModule.CreateDefault();
             renderer.sizeScale = -4.0f;
+            renderer.stretchLengthScale = -1.0f;
+            renderer.stretchSpeedScale = -2.0f;
 
             Assert.That(main.duration, Is.EqualTo(VividParticleMainModule.MinimumDuration));
             Assert.That(main.startLifetime, Is.EqualTo(VividParticleMainModule.MinimumStartLifetime));
@@ -100,6 +106,8 @@ namespace VividRP.Editor.Tests
             Assert.That(shape.boxSize, Is.EqualTo(new Vector3(0.0f, 2.0f, 0.0f)));
             Assert.That(shape.angle, Is.EqualTo(89.0f));
             Assert.That(renderer.sizeScale, Is.EqualTo(VividParticleRendererModule.MinimumSizeScale));
+            Assert.That(renderer.stretchLengthScale, Is.EqualTo(VividParticleRendererModule.MinimumStretchLengthScale));
+            Assert.That(renderer.stretchSpeedScale, Is.EqualTo(VividParticleRendererModule.MinimumStretchSpeedScale));
         }
 
         [Test]
@@ -112,9 +120,11 @@ namespace VividRP.Editor.Tests
             asset.emission.rateOverTime = 3.0f;
             asset.emission.bursts = new[] { new VividParticleBurst(0.25f, 2) };
             asset.shape.shapeType = VividParticleShapeType.Sphere;
+            asset.rendererModule.renderMode = VividParticleRenderMode.Stretch;
             asset.rendererModule.color = Color.cyan;
+            asset.rendererModule.stretchSpeedScale = 0.5f;
 
-            VividParticleSystem system = CreateSystem();
+            VividParticleSystem system = CreateActiveSystem();
             system.asset = asset;
 
             Assert.That(system.main.startLifetime, Is.EqualTo(2.5f));
@@ -122,21 +132,27 @@ namespace VividRP.Editor.Tests
             Assert.That(system.emission.rateOverTime, Is.EqualTo(3.0f));
             Assert.That(system.emission.bursts[0].count, Is.EqualTo(2));
             Assert.That(system.shape.shapeType, Is.EqualTo(VividParticleShapeType.Sphere));
+            Assert.That(system.rendererModule.renderMode, Is.EqualTo(VividParticleRenderMode.Stretch));
             Assert.That(system.rendererModule.color, Is.EqualTo(Color.cyan));
+            Assert.That(system.rendererModule.stretchSpeedScale, Is.EqualTo(0.5f));
 
             asset.main.startLifetime = 9.0f;
             asset.emission.bursts[0] = new VividParticleBurst(0.25f, 9);
+            asset.rendererModule.renderMode = VividParticleRenderMode.Billboard;
             asset.rendererModule.color = Color.red;
+            asset.rendererModule.stretchSpeedScale = 3.0f;
 
             Assert.That(system.main.startLifetime, Is.EqualTo(2.5f));
             Assert.That(system.emission.bursts[0].count, Is.EqualTo(2));
+            Assert.That(system.rendererModule.renderMode, Is.EqualTo(VividParticleRenderMode.Stretch));
             Assert.That(system.rendererModule.color, Is.EqualTo(Color.cyan));
+            Assert.That(system.rendererModule.stretchSpeedScale, Is.EqualTo(0.5f));
         }
 
         [Test]
         public void Emit_ClampsToMaxParticles_WhenCapacityIsExceeded()
         {
-            VividParticleSystem system = CreateSystem();
+            VividParticleSystem system = CreateActiveSystem();
             system.main.maxParticles = 3;
             system.emission.enabled = false;
 
@@ -148,7 +164,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Storage_UsesFixedPageCapacity_AndClampsActiveCountWhenMaxParticlesShrinks()
         {
-            VividParticleSystem system = CreateSystem();
+            VividParticleSystem system = CreateActiveSystem();
             system.main.maxParticles = 3;
             system.main.startLifetime = 10.0f;
             system.emission.enabled = false;
@@ -186,7 +202,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void PlayPauseStop_UpdateExpectedStateAndClearParticles()
         {
-            VividParticleSystem system = CreateSystem();
+            VividParticleSystem system = CreateActiveSystem();
             system.main.maxParticles = 8;
             system.emission.enabled = false;
 
@@ -661,6 +677,145 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_DeltaUpload_UsesTripleBuffers_AndSkipsCleanUploads()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.enabled = true;
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(2);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var initialStats), Is.True);
+            Assert.That(initialStats.InstanceDataBufferCount, Is.EqualTo(3));
+            Assert.That(initialStats.LastUploadedCount, Is.EqualTo(2));
+            Assert.That(initialStats.LastUploadOperationCount, Is.GreaterThan(0));
+            Assert.That(initialStats.LastUploadByteCount, Is.GreaterThan(0));
+            int initialUploadByteCount = initialStats.LastUploadByteCount;
+
+            VividParticleSystemManager.UpdateRendering(system);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var cleanStats), Is.True);
+            Assert.That(cleanStats.LastUploadedCount, Is.EqualTo(2));
+            Assert.That(cleanStats.LastUploadOperationCount, Is.EqualTo(0));
+            Assert.That(cleanStats.LastUploadByteCount, Is.EqualTo(0));
+
+            system.rendererModule.color = Color.red;
+            VividParticleSystemManager.UpdateRendering(system);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var colorStats), Is.True);
+            Assert.That(colorStats.LastUploadedCount, Is.EqualTo(2));
+            Assert.That(colorStats.LastUploadOperationCount, Is.EqualTo(3));
+            Assert.That(colorStats.LastUploadByteCount, Is.LessThan(initialUploadByteCount));
+
+            system.Emit(1);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var appendStats), Is.True);
+            Assert.That(appendStats.LastUploadedCount, Is.EqualTo(3));
+            Assert.That(appendStats.LastUploadOperationCount, Is.EqualTo(3));
+            Assert.That(appendStats.LastUploadByteCount, Is.LessThan(initialUploadByteCount));
+        }
+
+        [Test]
+        public void Renderer_NoneMode_SimulatesButDoesNotInitializeRendering()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.rendererModule.enabled = true;
+            system.rendererModule.renderMode = VividParticleRenderMode.None;
+            system.main.maxParticles = 4;
+            system.emission.enabled = false;
+
+            system.Emit(2);
+            VividParticleSystemManager.UpdateRendering(system);
+
+            Assert.That(system.particleCount, Is.EqualTo(2));
+            Assert.That(system.shouldRender, Is.False);
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var stats), Is.True);
+            Assert.That(stats.IsInitialized, Is.False);
+            Assert.That(stats.LastUploadedCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Renderer_MeshMode_RequiresMesh_AndInitializesWithCustomMesh()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.rendererModule.enabled = true;
+            system.rendererModule.renderMode = VividParticleRenderMode.Mesh;
+            system.main.maxParticles = 4;
+            system.emission.enabled = false;
+
+            system.Emit(1);
+            VividParticleSystemManager.UpdateRendering(system);
+
+            Assert.That(system.shouldRender, Is.False);
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var missingMeshStats), Is.True);
+            Assert.That(missingMeshStats.IsInitialized, Is.False);
+
+            Mesh mesh = CreateTriangleMesh();
+            m_ToDestroy.Add(mesh);
+            system.rendererModule.mesh = mesh;
+            VividParticleSystemManager.UpdateRendering(system);
+
+            Assert.That(system.shouldRender, Is.True);
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var meshStats), Is.True);
+            Assert.That(meshStats.IsInitialized, Is.True);
+            Assert.That(meshStats.LastUploadedCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Renderer_StretchMode_AlignsMatrixToParticleVelocity()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.renderMode = VividParticleRenderMode.Stretch;
+            system.rendererModule.stretchLengthScale = 2.0f;
+            system.rendererModule.stretchSpeedScale = 0.5f;
+            system.main.startSpeed = 2.0f;
+            system.main.startSize = 1.0f;
+            system.main.maxParticles = 4;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+
+            Matrix4x4 matrix = system.GetParticleObjectToWorldMatrix(0);
+            Vector3 stretchedAxis = matrix.GetColumn(1);
+            Vector3 thinAxis = matrix.GetColumn(0);
+
+            Assert.That(Vector3.Dot(stretchedAxis.normalized, Vector3.forward), Is.GreaterThan(0.999f));
+            Assert.That(stretchedAxis.magnitude, Is.EqualTo(3.0f).Within(0.0001f));
+            Assert.That(thinAxis.magnitude, Is.EqualTo(1.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Renderer_BillboardVariants_InitializeWithQuadRendering()
+        {
+            VividParticleRenderMode[] modes =
+            {
+                VividParticleRenderMode.Billboard,
+                VividParticleRenderMode.HorizontalBillboard,
+                VividParticleRenderMode.VerticalBillboard,
+            };
+
+            for (int index = 0; index < modes.Length; index++)
+            {
+                VividParticleSystem system = CreateActiveSystem();
+                system.rendererModule.enabled = true;
+                system.rendererModule.renderMode = modes[index];
+                system.main.maxParticles = 4;
+                system.emission.enabled = false;
+
+                system.Emit(1);
+
+                Assert.That(system.shouldRender, Is.True);
+                Assert.That(VividParticleSystemManager.TryGetStats(system, out var stats), Is.True);
+                Assert.That(stats.IsInitialized, Is.True);
+                Assert.That(stats.LastUploadedCount, Is.EqualTo(1));
+            }
+        }
+
+        [Test]
         public void Manager_UpdateRendering_WithNoParticlesKeepsDrawCountEmpty()
         {
             VividParticleSystem system = CreateSystem();
@@ -719,6 +874,30 @@ namespace VividRP.Editor.Tests
             system.Stop(withChildren: false, VividParticleSystemStopBehavior.StopEmittingAndClear);
             system.main.useAutoRandomSeed = false;
             return system;
+        }
+
+        private static Mesh CreateTriangleMesh()
+        {
+            var mesh = new Mesh
+            {
+                name = "Vivid Particle Test Triangle",
+                hideFlags = HideFlags.HideAndDontSave,
+            };
+            mesh.SetVertices(new[]
+            {
+                new Vector3(-0.5f, -0.5f, 0.0f),
+                new Vector3(0.0f, 0.5f, 0.0f),
+                new Vector3(0.5f, -0.5f, 0.0f),
+            });
+            mesh.SetUVs(0, new[]
+            {
+                new Vector2(0.0f, 0.0f),
+                new Vector2(0.5f, 1.0f),
+                new Vector2(1.0f, 0.0f),
+            });
+            mesh.SetTriangles(new[] { 0, 1, 2 }, 0);
+            mesh.RecalculateBounds();
+            return mesh;
         }
 
         private static Plane[] CreateUnitCubePlanes()

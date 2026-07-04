@@ -99,7 +99,11 @@ namespace VividRP.Runtime.Particle
 
         internal Bounds worldBounds => VividParticleSystemManager.GetWorldBounds(this);
 
-        internal bool shouldRender => isActiveAndEnabled && rendererModule.enabled && aliveParticleCount > 0;
+        internal bool shouldRender => isActiveAndEnabled
+            && rendererModule.enabled
+            && rendererModule.renderMode != VividParticleRenderMode.None
+            && (rendererModule.renderMode != VividParticleRenderMode.Mesh || rendererModule.mesh != null)
+            && aliveParticleCount > 0;
 
         internal bool requiresAutomaticUpdate => !m_IsPaused
             && (m_IsPlaying || (m_StopEmitting && aliveParticleCount > 0));
@@ -189,9 +193,13 @@ namespace VividRP.Runtime.Particle
                 shape.boxSize,
                 shape.angle,
                 rendererModule.enabled,
+                rendererModule.renderMode,
                 rendererModule.material,
+                rendererModule.mesh,
                 rendererModule.color,
                 rendererModule.sizeScale,
+                rendererModule.stretchLengthScale,
+                rendererModule.stretchSpeedScale,
                 rendererModule.renderQueueOffset,
                 gameObject.layer,
                 transform.position,

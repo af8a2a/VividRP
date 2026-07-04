@@ -30,6 +30,7 @@ Shader "VividRP/Particles/Unlit"
         [HideInInspector] _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
         [HideInInspector] _BaseMap("Base Map", 2D) = "white" {}
         [HideInInspector] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
+        [HideInInspector] _VividParticleRenderMode("Vivid Particle Render Mode", Float) = 0.0
     }
 
     SubShader
@@ -68,6 +69,7 @@ Shader "VividRP/Particles/Unlit"
                 float _AlphaCutoff;
                 float _AlphaRemapMin;
                 float _AlphaRemapMax;
+                float _VividParticleRenderMode;
             CBUFFER_END
 
             TEXTURE2D(_UnlitColorMap);
@@ -126,15 +128,48 @@ Shader "VividRP/Particles/Unlit"
 
                 float4x4 objectToWorld = GetObjectToWorldMatrix();
                 float3 centerRWS = float3(objectToWorld._m03, objectToWorld._m13, objectToWorld._m23);
-                float sizeX = length(float3(objectToWorld._m00, objectToWorld._m10, objectToWorld._m20));
-                float sizeY = length(float3(objectToWorld._m01, objectToWorld._m11, objectToWorld._m21));
+                float3 objectRight = float3(objectToWorld._m00, objectToWorld._m10, objectToWorld._m20);
+                float3 objectUp = float3(objectToWorld._m01, objectToWorld._m11, objectToWorld._m21);
+                float3 objectForward = float3(objectToWorld._m02, objectToWorld._m12, objectToWorld._m22);
+                float sizeX = max(length(objectRight), 0.0001);
+                float sizeY = max(length(objectUp), 0.0001);
 
                 float4x4 viewToWorld = GetViewToWorldMatrix();
                 float3 viewRight = normalize(float3(viewToWorld._m00, viewToWorld._m10, viewToWorld._m20));
                 float3 viewUp = normalize(float3(viewToWorld._m01, viewToWorld._m11, viewToWorld._m21));
-                float3 positionRWS = centerRWS
-                    + viewRight * (input.positionOS.x * sizeX)
-                    + viewUp * (input.positionOS.y * sizeY);
+                float3 positionRWS;
+                if (_VividParticleRenderMode < 0.5)
+                {
+                    positionRWS = centerRWS
+                        + viewRight * (input.positionOS.x * sizeX)
+                        + viewUp * (input.positionOS.y * sizeY);
+                }
+                else if (_VividParticleRenderMode < 1.5 || _VividParticleRenderMode >= 3.5)
+                {
+                    positionRWS = centerRWS
+                        + objectRight * input.positionOS.x
+                        + objectUp * input.positionOS.y
+                        + objectForward * input.positionOS.z;
+                }
+                else if (_VividParticleRenderMode < 2.5)
+                {
+                    positionRWS = centerRWS
+                        + float3(1.0, 0.0, 0.0) * (input.positionOS.x * sizeX)
+                        + float3(0.0, 0.0, 1.0) * (input.positionOS.y * sizeY);
+                }
+                else
+                {
+                    float3 cameraPositionRWS = float3(viewToWorld._m03, viewToWorld._m13, viewToWorld._m23);
+                    float3 toCamera = cameraPositionRWS - centerRWS;
+                    toCamera.y = 0.0;
+                    float toCameraLength = length(toCamera);
+                    float3 verticalNormal = toCameraLength > 0.0001 ? toCamera / toCameraLength : -float3(viewToWorld._m02, 0.0, viewToWorld._m22);
+                    float3 verticalRight = cross(float3(0.0, 1.0, 0.0), verticalNormal);
+                    verticalRight = length(verticalRight) > 0.0001 ? normalize(verticalRight) : viewRight;
+                    positionRWS = centerRWS
+                        + verticalRight * (input.positionOS.x * sizeX)
+                        + float3(0.0, 1.0, 0.0) * (input.positionOS.y * sizeY);
+                }
 
                 output.positionCS = TransformWorldToHClip(positionRWS);
                 output.uv = TransformParticleUnlitUV(input.uv);

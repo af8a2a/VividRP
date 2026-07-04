@@ -30,9 +30,13 @@ namespace VividRP.Runtime.Particle
         public readonly Vector3 ShapeBoxSize;
         public readonly float ShapeAngle;
         public readonly bool RendererEnabled;
+        public readonly VividParticleRenderMode RenderMode;
         public readonly Material RendererMaterial;
+        public readonly Mesh RendererMesh;
         public readonly Color RendererColor;
         public readonly float RendererSizeScale;
+        public readonly float StretchLengthScale;
+        public readonly float StretchSpeedScale;
         public readonly int RenderQueueOffset;
         public readonly int Layer;
         public readonly Vector3 TransformPosition;
@@ -66,9 +70,13 @@ namespace VividRP.Runtime.Particle
             Vector3 shapeBoxSize,
             float shapeAngle,
             bool rendererEnabled,
+            VividParticleRenderMode renderMode,
             Material rendererMaterial,
+            Mesh rendererMesh,
             Color rendererColor,
             float rendererSizeScale,
+            float stretchLengthScale,
+            float stretchSpeedScale,
             int renderQueueOffset,
             int layer,
             Vector3 transformPosition,
@@ -104,9 +112,13 @@ namespace VividRP.Runtime.Particle
                 Mathf.Max(0.0f, shapeBoxSize.z));
             ShapeAngle = Mathf.Clamp(shapeAngle, 0.0f, 89.0f);
             RendererEnabled = rendererEnabled;
+            RenderMode = renderMode;
             RendererMaterial = rendererMaterial;
+            RendererMesh = rendererMesh;
             RendererColor = rendererColor;
             RendererSizeScale = Mathf.Max(VividParticleRendererModule.MinimumSizeScale, rendererSizeScale);
+            StretchLengthScale = Mathf.Max(VividParticleRendererModule.MinimumStretchLengthScale, stretchLengthScale);
+            StretchSpeedScale = Mathf.Max(VividParticleRendererModule.MinimumStretchSpeedScale, stretchSpeedScale);
             RenderQueueOffset = renderQueueOffset;
             Layer = layer;
             TransformPosition = transformPosition;

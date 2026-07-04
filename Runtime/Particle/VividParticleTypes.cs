@@ -23,6 +23,16 @@ namespace VividRP.Runtime.Particle
         StopEmittingAndClear,
     }
 
+    public enum VividParticleRenderMode
+    {
+        Billboard,
+        Stretch,
+        HorizontalBillboard,
+        VerticalBillboard,
+        Mesh,
+        None,
+    }
+
     [Serializable]
     public struct VividParticleBurst
     {
@@ -374,18 +384,32 @@ namespace VividRP.Runtime.Particle
     public sealed class VividParticleRendererModule
     {
         internal const float MinimumSizeScale = 0.001f;
+        internal const float MinimumStretchLengthScale = 0.0f;
+        internal const float MinimumStretchSpeedScale = 0.0f;
 
         [SerializeField]
         private bool m_Enabled = true;
 
         [SerializeField]
+        private VividParticleRenderMode m_RenderMode = VividParticleRenderMode.Billboard;
+
+        [SerializeField]
         private Material m_Material;
+
+        [SerializeField]
+        private Mesh m_Mesh;
 
         [SerializeField]
         private Color m_Color = Color.white;
 
         [SerializeField]
         private float m_SizeScale = 1.0f;
+
+        [SerializeField]
+        private float m_StretchLengthScale = 2.0f;
+
+        [SerializeField]
+        private float m_StretchSpeedScale;
 
         [SerializeField]
         private int m_RenderQueueOffset;
@@ -396,10 +420,22 @@ namespace VividRP.Runtime.Particle
             set => m_Enabled = value;
         }
 
+        public VividParticleRenderMode renderMode
+        {
+            get => m_RenderMode;
+            set => m_RenderMode = value;
+        }
+
         public Material material
         {
             get => m_Material;
             set => m_Material = value;
+        }
+
+        public Mesh mesh
+        {
+            get => m_Mesh;
+            set => m_Mesh = value;
         }
 
         public Color color
@@ -412,6 +448,18 @@ namespace VividRP.Runtime.Particle
         {
             get => m_SizeScale;
             set => m_SizeScale = Mathf.Max(MinimumSizeScale, value);
+        }
+
+        public float stretchLengthScale
+        {
+            get => m_StretchLengthScale;
+            set => m_StretchLengthScale = Mathf.Max(MinimumStretchLengthScale, value);
+        }
+
+        public float stretchSpeedScale
+        {
+            get => m_StretchSpeedScale;
+            set => m_StretchSpeedScale = Mathf.Max(MinimumStretchSpeedScale, value);
         }
 
         public int renderQueueOffset
@@ -438,9 +486,13 @@ namespace VividRP.Runtime.Particle
                 return;
 
             m_Enabled = source.m_Enabled;
+            m_RenderMode = source.m_RenderMode;
             m_Material = source.m_Material;
+            m_Mesh = source.m_Mesh;
             m_Color = source.m_Color;
             m_SizeScale = source.m_SizeScale;
+            m_StretchLengthScale = source.m_StretchLengthScale;
+            m_StretchSpeedScale = source.m_StretchSpeedScale;
             m_RenderQueueOffset = source.m_RenderQueueOffset;
             Validate();
         }
@@ -448,6 +500,8 @@ namespace VividRP.Runtime.Particle
         internal void Validate()
         {
             m_SizeScale = Mathf.Max(MinimumSizeScale, m_SizeScale);
+            m_StretchLengthScale = Mathf.Max(MinimumStretchLengthScale, m_StretchLengthScale);
+            m_StretchSpeedScale = Mathf.Max(MinimumStretchSpeedScale, m_StretchSpeedScale);
         }
     }
 }

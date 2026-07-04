@@ -1,0 +1,649 @@
+using System;
+using UnityEngine;
+
+namespace VividRP.Runtime.Particle
+{
+    [ExecuteAlways]
+    [DisallowMultipleComponent]
+    [AddComponentMenu("Rendering/Vivid Particle System")]
+    public sealed class VividParticleSystem : MonoBehaviour
+    {
+        internal const float FixedSimulationStep = 1.0f / 60.0f;
+        private const float GravityAcceleration = 9.81f;
+        private const float MinimumSimulationStep = 0.000001f;
+
+        [SerializeField]
+        private VividParticleSystemAsset m_Asset;
+
+        [SerializeField]
+        private VividParticleMainModule m_Main = VividParticleMainModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleEmissionModule m_Emission = VividParticleEmissionModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleShapeModule m_Shape = VividParticleShapeModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleRendererModule m_Renderer = VividParticleRendererModule.CreateDefault();
+
+        private VividParticleRuntimeParticle[] m_Particles = Array.Empty<VividParticleRuntimeParticle>();
+        private bool[] m_BurstTriggered = Array.Empty<bool>();
+        private System.Random m_Random;
+        private float m_Time;
+        private float m_EmissionAccumulator;
+        private int m_ParticleCount;
+        private bool m_IsPlaying;
+        private bool m_IsPaused;
+        private bool m_StopEmitting;
+
+        public VividParticleSystemAsset asset
+        {
+            get => m_Asset;
+            set
+            {
+                if (m_Asset == value)
+                    return;
+
+                m_Asset = value;
+                CopySettingsFromAsset();
+                VividParticleSystemManager.MarkRendererDirty(this);
+            }
+        }
+
+        public VividParticleMainModule main => m_Main ??= VividParticleMainModule.CreateDefault();
+
+        public VividParticleEmissionModule emission => m_Emission ??= VividParticleEmissionModule.CreateDefault();
+
+        public VividParticleShapeModule shape => m_Shape ??= VividParticleShapeModule.CreateDefault();
+
+        public VividParticleRendererModule rendererModule => m_Renderer ??= VividParticleRendererModule.CreateDefault();
+
+        public int particleCount => m_ParticleCount;
+
+        public bool isPlaying => m_IsPlaying;
+
+        public bool isPaused => m_IsPaused;
+
+        public float time => m_Time;
+
+        public void Play(bool withChildren = true)
+        {
+            ApplyToHierarchy(withChildren, system => system.PlaySelf());
+        }
+
+        public void Stop(
+            bool withChildren = true,
+            VividParticleSystemStopBehavior stopBehavior = VividParticleSystemStopBehavior.StopEmitting)
+        {
+            ApplyToHierarchy(withChildren, system => system.StopSelf(stopBehavior));
+        }
+
+        public void Pause(bool withChildren = true)
+        {
+            ApplyToHierarchy(withChildren, system => system.PauseSelf());
+        }
+
+        public void Simulate(
+            float t,
+            bool withChildren = true,
+            bool restart = true,
+            bool fixedTimeStep = true)
+        {
+            ApplyToHierarchy(withChildren, system => system.SimulateSelf(t, restart, fixedTimeStep));
+        }
+
+        public void Emit(int count)
+        {
+            EmitInternal(count);
+            VividParticleSystemManager.UpdateRendering(this);
+        }
+
+        internal int aliveParticleCount => m_ParticleCount;
+
+        internal VividParticleRuntimeParticle[] particles => m_Particles;
+
+        internal Bounds worldBounds => CalculateWorldBounds();
+
+        internal bool shouldRender => isActiveAndEnabled && rendererModule.enabled && m_ParticleCount > 0;
+
+        internal int maxParticles => main.maxParticles;
+
+        internal Matrix4x4 GetParticleObjectToWorldMatrix(int particleIndex)
+        {
+            if (particleIndex < 0 || particleIndex >= m_ParticleCount)
+                return Matrix4x4.identity;
+
+            VividParticleRuntimeParticle particle = m_Particles[particleIndex];
+            Vector3 position = GetParticleWorldPosition(particle);
+            float size = Mathf.Max(
+                VividParticleMainModule.MinimumStartSize,
+                particle.size * rendererModule.sizeScale);
+
+            return Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * size);
+        }
+
+        internal Color GetParticleRenderColor(int particleIndex)
+        {
+            if (particleIndex < 0 || particleIndex >= m_ParticleCount)
+                return Color.clear;
+
+            VividParticleRuntimeParticle particle = m_Particles[particleIndex];
+            float lifetimeRatio = particle.startLifetime > 0.0f
+                ? Mathf.Clamp01(particle.remainingLifetime / particle.startLifetime)
+                : 0.0f;
+            Color color = particle.color * rendererModule.color;
+            color.a *= lifetimeRatio;
+            return color;
+        }
+
+        internal void UpdateAutomatic(float deltaTime)
+        {
+            if (m_IsPaused)
+                return;
+
+            bool ageOnly = m_StopEmitting && m_ParticleCount > 0;
+            if (!m_IsPlaying && !ageOnly)
+                return;
+
+            SimulateDelta(deltaTime, allowEmission: m_IsPlaying && !m_StopEmitting);
+        }
+
+        internal void EmitInternal(int count)
+        {
+            if (count <= 0)
+                return;
+
+            EnsureModules();
+            EnsureRuntimeStorage();
+            EnsureRandom();
+
+            int available = Mathf.Max(0, main.maxParticles - m_ParticleCount);
+            int spawnCount = Mathf.Min(count, available);
+            for (int index = 0; index < spawnCount; index++)
+                SpawnParticle();
+        }
+
+        internal void SimulateDelta(float deltaTime, bool allowEmission)
+        {
+            if (deltaTime <= 0.0f)
+                return;
+
+            EnsureModules();
+            EnsureRuntimeStorage();
+            AgeParticles(deltaTime);
+            AdvanceEmission(deltaTime, allowEmission);
+
+            if (m_StopEmitting && m_ParticleCount == 0)
+                m_StopEmitting = false;
+        }
+
+        internal static void SampleShape(
+            VividParticleShapeModule shape,
+            System.Random random,
+            out Vector3 localPosition,
+            out Vector3 localDirection)
+        {
+            random ??= new System.Random(1);
+            if (shape == null || !shape.enabled)
+            {
+                localPosition = Vector3.zero;
+                localDirection = Vector3.forward;
+                return;
+            }
+
+            switch (shape.shapeType)
+            {
+                case VividParticleShapeType.Sphere:
+                    localPosition = SampleInsideUnitSphere(random) * shape.radius;
+                    localDirection = localPosition.sqrMagnitude > 0.000001f
+                        ? localPosition.normalized
+                        : SampleUnitVector(random);
+                    break;
+                case VividParticleShapeType.Box:
+                    localPosition = new Vector3(
+                        RandomRange(random, -shape.boxSize.x * 0.5f, shape.boxSize.x * 0.5f),
+                        RandomRange(random, -shape.boxSize.y * 0.5f, shape.boxSize.y * 0.5f),
+                        RandomRange(random, -shape.boxSize.z * 0.5f, shape.boxSize.z * 0.5f));
+                    localDirection = Vector3.forward;
+                    break;
+                case VividParticleShapeType.Cone:
+                    float diskRadius = Mathf.Max(0.0f, shape.radius);
+                    Vector2 disk = SampleInsideUnitCircle(random) * diskRadius;
+                    localPosition = new Vector3(disk.x, disk.y, 0.0f);
+                    localDirection = SampleConeDirection(random, shape.angle);
+                    break;
+                default:
+                    localPosition = Vector3.zero;
+                    localDirection = Vector3.forward;
+                    break;
+            }
+        }
+
+        private void Reset()
+        {
+            CopySettingsFromAsset();
+        }
+
+        private void OnEnable()
+        {
+            EnsureModules();
+            ValidateModules();
+            EnsureRuntimeStorage();
+            VividParticleSystemManager.Register(this);
+
+            if (Application.isPlaying && main.playOnAwake)
+                Play(withChildren: false);
+        }
+
+        private void Update()
+        {
+            VividParticleSystemManager.UpdateSystem(this);
+        }
+
+        private void OnDisable()
+        {
+            VividParticleSystemManager.Unregister(this);
+        }
+
+        private void OnDestroy()
+        {
+            VividParticleSystemManager.Unregister(this);
+        }
+
+        private void OnValidate()
+        {
+            EnsureModules();
+            ValidateModules();
+            EnsureRuntimeStorage();
+            VividParticleSystemManager.MarkRendererDirty(this);
+        }
+
+        private void CopySettingsFromAsset()
+        {
+            EnsureModules();
+            m_Asset?.CopyModulesTo(m_Main, m_Emission, m_Shape, m_Renderer);
+            ValidateModules();
+            EnsureRuntimeStorage();
+            ResetBurstState();
+        }
+
+        private void PlaySelf()
+        {
+            EnsureModules();
+            ValidateModules();
+            EnsureRuntimeStorage();
+            EnsureRandom();
+
+            if (!main.loop && m_Time >= main.duration && m_ParticleCount == 0)
+                ResetSimulation(clearParticles: true);
+
+            m_IsPlaying = true;
+            m_IsPaused = false;
+            m_StopEmitting = false;
+        }
+
+        private void StopSelf(VividParticleSystemStopBehavior stopBehavior)
+        {
+            m_IsPlaying = false;
+            m_IsPaused = false;
+
+            if (stopBehavior == VividParticleSystemStopBehavior.StopEmittingAndClear)
+            {
+                m_StopEmitting = false;
+                ResetSimulation(clearParticles: true);
+                VividParticleSystemManager.UpdateRendering(this);
+                return;
+            }
+
+            m_StopEmitting = m_ParticleCount > 0;
+        }
+
+        private void PauseSelf()
+        {
+            m_IsPaused = true;
+            m_IsPlaying = false;
+        }
+
+        private void SimulateSelf(float t, bool restart, bool fixedTimeStep)
+        {
+            if (restart)
+                ResetSimulation(clearParticles: true);
+
+            if (t <= 0.0f)
+            {
+                VividParticleSystemManager.UpdateRendering(this);
+                return;
+            }
+
+            float remaining = t;
+            if (fixedTimeStep)
+            {
+                while (remaining > MinimumSimulationStep)
+                {
+                    float step = Mathf.Min(FixedSimulationStep, remaining);
+                    SimulateDelta(step, allowEmission: true);
+                    remaining -= step;
+                }
+            }
+            else
+            {
+                SimulateDelta(remaining, allowEmission: true);
+            }
+
+            VividParticleSystemManager.UpdateRendering(this);
+        }
+
+        private void ApplyToHierarchy(bool withChildren, Action<VividParticleSystem> action)
+        {
+            if (!withChildren)
+            {
+                action(this);
+                return;
+            }
+
+            var systems = GetComponentsInChildren<VividParticleSystem>(true);
+            for (int index = 0; index < systems.Length; index++)
+            {
+                if (systems[index] != null)
+                    action(systems[index]);
+            }
+        }
+
+        private void ResetSimulation(bool clearParticles)
+        {
+            m_Time = 0.0f;
+            m_EmissionAccumulator = 0.0f;
+            ResetBurstState();
+            if (clearParticles)
+                m_ParticleCount = 0;
+            ResetRandom();
+        }
+
+        private void EnsureModules()
+        {
+            m_Main ??= VividParticleMainModule.CreateDefault();
+            m_Emission ??= VividParticleEmissionModule.CreateDefault();
+            m_Shape ??= VividParticleShapeModule.CreateDefault();
+            m_Renderer ??= VividParticleRendererModule.CreateDefault();
+        }
+
+        private void ValidateModules()
+        {
+            main.Validate();
+            emission.Validate();
+            shape.Validate();
+            rendererModule.Validate();
+        }
+
+        private void EnsureRuntimeStorage()
+        {
+            int capacity = Mathf.Max(VividParticleMainModule.MinimumMaxParticles, main.maxParticles);
+            if (m_Particles == null || m_Particles.Length != capacity)
+            {
+                var resized = new VividParticleRuntimeParticle[capacity];
+                if (m_Particles != null && m_ParticleCount > 0)
+                {
+                    int copyCount = Mathf.Min(m_ParticleCount, resized.Length);
+                    Array.Copy(m_Particles, resized, copyCount);
+                    m_ParticleCount = copyCount;
+                }
+                m_Particles = resized;
+            }
+
+            if (m_ParticleCount > capacity)
+                m_ParticleCount = capacity;
+
+            EnsureBurstState();
+        }
+
+        private void EnsureBurstState()
+        {
+            VividParticleBurst[] bursts = emission.bursts;
+            int burstCount = bursts?.Length ?? 0;
+            if (m_BurstTriggered == null || m_BurstTriggered.Length != burstCount)
+                m_BurstTriggered = new bool[burstCount];
+        }
+
+        private void ResetBurstState()
+        {
+            EnsureBurstState();
+            Array.Clear(m_BurstTriggered, 0, m_BurstTriggered.Length);
+        }
+
+        private void EnsureRandom()
+        {
+            m_Random ??= CreateRandom();
+        }
+
+        private void ResetRandom()
+        {
+            m_Random = CreateRandom();
+        }
+
+        private System.Random CreateRandom()
+        {
+            uint seed = main.useAutoRandomSeed
+                ? unchecked((uint)Environment.TickCount ^ (uint)GetEntityId().GetHashCode())
+                : main.randomSeed;
+            return new System.Random(unchecked((int)seed));
+        }
+
+        private void AgeParticles(float deltaTime)
+        {
+            Vector3 gravity = Vector3.down * (GravityAcceleration * main.gravityModifier);
+            for (int index = m_ParticleCount - 1; index >= 0; index--)
+            {
+                VividParticleRuntimeParticle particle = m_Particles[index];
+                particle.remainingLifetime -= deltaTime;
+                if (particle.remainingLifetime <= 0.0f)
+                {
+                    RemoveParticleAt(index);
+                    continue;
+                }
+
+                particle.velocity += gravity * deltaTime;
+                particle.position += particle.velocity * deltaTime;
+                m_Particles[index] = particle;
+            }
+        }
+
+        private void AdvanceEmission(float deltaTime, bool allowEmission)
+        {
+            float remaining = deltaTime;
+            float duration = main.duration;
+
+            while (remaining > MinimumSimulationStep)
+            {
+                float segmentEnd = main.loop
+                    ? Mathf.Min(duration, m_Time + remaining)
+                    : Mathf.Min(duration, m_Time + remaining);
+                float segmentDelta = Mathf.Max(0.0f, segmentEnd - m_Time);
+
+                if (allowEmission && emission.enabled && segmentDelta > 0.0f)
+                    EmitForTimeRange(m_Time, segmentEnd, segmentDelta);
+
+                remaining -= segmentDelta;
+                m_Time = segmentEnd;
+
+                if (m_Time < duration)
+                    break;
+
+                if (!main.loop)
+                {
+                    m_Time = duration;
+                    break;
+                }
+
+                m_Time = 0.0f;
+                ResetBurstState();
+
+                if (segmentDelta <= 0.0f)
+                    break;
+            }
+        }
+
+        private void EmitForTimeRange(float startTime, float endTime, float deltaTime)
+        {
+            m_EmissionAccumulator += emission.rateOverTime * deltaTime;
+            int continuousCount = Mathf.FloorToInt(m_EmissionAccumulator);
+            if (continuousCount > 0)
+            {
+                m_EmissionAccumulator -= continuousCount;
+                EmitInternal(continuousCount);
+            }
+
+            VividParticleBurst[] bursts = emission.bursts;
+            if (bursts == null || bursts.Length == 0)
+                return;
+
+            EnsureBurstState();
+            for (int index = 0; index < bursts.Length; index++)
+            {
+                if (m_BurstTriggered[index])
+                    continue;
+
+                VividParticleBurst burst = bursts[index];
+                if (burst.time < startTime || burst.time > endTime)
+                    continue;
+
+                m_BurstTriggered[index] = true;
+                EmitInternal(burst.count);
+            }
+        }
+
+        private void SpawnParticle()
+        {
+            SampleShape(shape, m_Random, out Vector3 localPosition, out Vector3 localDirection);
+            localDirection = localDirection.sqrMagnitude > 0.000001f
+                ? localDirection.normalized
+                : Vector3.forward;
+
+            Vector3 position = localPosition;
+            Vector3 velocity = localDirection * main.startSpeed;
+            if (main.simulationSpace == VividParticleSystemSimulationSpace.World)
+            {
+                position = transform.TransformPoint(localPosition);
+                velocity = transform.TransformDirection(localDirection).normalized * main.startSpeed;
+            }
+
+            m_Particles[m_ParticleCount++] = new VividParticleRuntimeParticle
+            {
+                position = position,
+                velocity = velocity,
+                startLifetime = main.startLifetime,
+                remainingLifetime = main.startLifetime,
+                size = main.startSize,
+                color = main.startColor,
+            };
+        }
+
+        private void RemoveParticleAt(int index)
+        {
+            int lastIndex = m_ParticleCount - 1;
+            if (index != lastIndex)
+                m_Particles[index] = m_Particles[lastIndex];
+
+            m_ParticleCount = lastIndex;
+        }
+
+        private Bounds CalculateWorldBounds()
+        {
+            if (m_ParticleCount <= 0)
+                return new Bounds(transform.position, Vector3.zero);
+
+            VividParticleRuntimeParticle first = m_Particles[0];
+            Vector3 firstPosition = GetParticleWorldPosition(first);
+            float firstExtent = GetParticleWorldExtent(first);
+            var bounds = new Bounds(firstPosition, Vector3.one * (firstExtent * 2.0f));
+
+            for (int index = 1; index < m_ParticleCount; index++)
+            {
+                VividParticleRuntimeParticle particle = m_Particles[index];
+                Vector3 position = GetParticleWorldPosition(particle);
+                float extent = GetParticleWorldExtent(particle);
+                bounds.Encapsulate(position + Vector3.one * extent);
+                bounds.Encapsulate(position - Vector3.one * extent);
+            }
+
+            return bounds;
+        }
+
+        private Vector3 GetParticleWorldPosition(VividParticleRuntimeParticle particle)
+        {
+            return main.simulationSpace == VividParticleSystemSimulationSpace.Local
+                ? transform.TransformPoint(particle.position)
+                : particle.position;
+        }
+
+        private float GetParticleWorldExtent(VividParticleRuntimeParticle particle)
+        {
+            return Mathf.Max(
+                VividParticleMainModule.MinimumStartSize,
+                particle.size * rendererModule.sizeScale * 0.5f);
+        }
+
+        private static Vector3 SampleInsideUnitSphere(System.Random random)
+        {
+            Vector3 value;
+            do
+            {
+                value = new Vector3(
+                    RandomRange(random, -1.0f, 1.0f),
+                    RandomRange(random, -1.0f, 1.0f),
+                    RandomRange(random, -1.0f, 1.0f));
+            }
+            while (value.sqrMagnitude > 1.0f);
+
+            return value;
+        }
+
+        private static Vector2 SampleInsideUnitCircle(System.Random random)
+        {
+            Vector2 value;
+            do
+            {
+                value = new Vector2(
+                    RandomRange(random, -1.0f, 1.0f),
+                    RandomRange(random, -1.0f, 1.0f));
+            }
+            while (value.sqrMagnitude > 1.0f);
+
+            return value;
+        }
+
+        private static Vector3 SampleUnitVector(System.Random random)
+        {
+            Vector3 value = SampleInsideUnitSphere(random);
+            return value.sqrMagnitude > 0.000001f ? value.normalized : Vector3.forward;
+        }
+
+        private static Vector3 SampleConeDirection(System.Random random, float angle)
+        {
+            float clampedAngle = Mathf.Clamp(angle, 0.0f, 89.0f) * Mathf.Deg2Rad;
+            float cosMin = Mathf.Cos(clampedAngle);
+            float cosTheta = RandomRange(random, cosMin, 1.0f);
+            float sinTheta = Mathf.Sqrt(Mathf.Max(0.0f, 1.0f - cosTheta * cosTheta));
+            float phi = RandomRange(random, 0.0f, Mathf.PI * 2.0f);
+            return new Vector3(
+                Mathf.Cos(phi) * sinTheta,
+                Mathf.Sin(phi) * sinTheta,
+                cosTheta).normalized;
+        }
+
+        private static float RandomRange(System.Random random, float minInclusive, float maxInclusive)
+        {
+            return minInclusive + (float)random.NextDouble() * (maxInclusive - minInclusive);
+        }
+    }
+
+    internal struct VividParticleRuntimeParticle
+    {
+        public Vector3 position;
+        public Vector3 velocity;
+        public float startLifetime;
+        public float remainingLifetime;
+        public float size;
+        public Color color;
+    }
+}

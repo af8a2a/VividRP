@@ -1,4 +1,5 @@
 using UnityEngine;
+using Unity.Collections;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -135,6 +136,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!allCascadesValid)
                 return;
 
+            CullShadowCastersForCascades();
             m_IsActive = true;
 
             // Configure atlas texture size
@@ -146,10 +148,8 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 var settings = new ShadowDrawingSettings(
                     m_CullingResults,
-                    m_MainLightVisibleIndex,
-                    BatchCullingProjectionType.Orthographic);
+                    m_MainLightVisibleIndex);
                 settings.splitIndex = i;
-                settings.splitData = m_SplitData[i];
                 settings.useRenderingLayerMaskTest = false;
                 settings.objectsFilter = ShadowObjectsFilter.AllObjects;
                 m_ShadowDrawSettings[i] = settings;
@@ -186,6 +186,50 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             shadowData.ComputeAtlasLayout();
+        }
+
+        private void CullShadowCastersForCascades()
+        {
+            if (m_MainLightVisibleIndex < 0
+                || m_MainLightVisibleIndex >= m_CullingResults.visibleLights.Length
+                || m_CascadeCount <= 0)
+            {
+                return;
+            }
+
+            var perLightInfos = new NativeArray<LightShadowCasterCullingInfo>(
+                m_CullingResults.visibleLights.Length,
+                Allocator.Temp,
+                NativeArrayOptions.ClearMemory);
+            var splitBuffer = new NativeArray<ShadowSplitData>(
+                m_CascadeCount,
+                Allocator.Temp,
+                NativeArrayOptions.UninitializedMemory);
+
+            try
+            {
+                for (int i = 0; i < m_CascadeCount; i++)
+                    splitBuffer[i] = m_SplitData[i];
+
+                perLightInfos[m_MainLightVisibleIndex] = new LightShadowCasterCullingInfo
+                {
+                    splitRange = new RangeInt(0, m_CascadeCount),
+                    projectionType = BatchCullingProjectionType.Orthographic,
+                };
+
+                m_RenderContext.CullShadowCasters(
+                    m_CullingResults,
+                    new ShadowCastersCullingInfos
+                    {
+                        perLightInfos = perLightInfos,
+                        splitBuffer = splitBuffer,
+                    });
+            }
+            finally
+            {
+                splitBuffer.Dispose();
+                perLightInfos.Dispose();
+            }
         }
 
         public override void Record(UnsafePassContext context)

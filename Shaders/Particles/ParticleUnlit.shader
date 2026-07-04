@@ -31,6 +31,9 @@ Shader "VividRP/Particles/Unlit"
         [HideInInspector] _BaseMap("Base Map", 2D) = "white" {}
         [HideInInspector] _BaseColor("Base Color", Color) = (1, 1, 1, 1)
         [HideInInspector] _VividParticleRenderMode("Vivid Particle Render Mode", Float) = 0.0
+        [HideInInspector] _VividParticlePositionSize("Vivid Particle Position Size", Vector) = (0, 0, 0, 1)
+        [HideInInspector] _VividParticleRotation("Vivid Particle Rotation", Vector) = (0, 0, 0, 1)
+        [HideInInspector] _VividParticleVelocityStretch("Vivid Particle Velocity Stretch", Vector) = (0, 1, 0, 1)
     }
 
     SubShader
@@ -43,21 +46,6 @@ Shader "VividRP/Particles/Unlit"
         }
 
         HLSLINCLUDE
-            #ifdef DOTS_INSTANCING_ON
-                cbuffer UnityDOTSInstancing_BuiltinPropertyMetadata
-                {
-                    uint unity_DOTSInstancingF48_Metadataunity_ObjectToWorld;
-                    uint unity_DOTSInstancingF48_Metadataunity_WorldToObject;
-                    uint unity_DOTSInstancingF48_Metadataunity_MatrixPreviousM;
-                    uint unity_DOTSInstancingF48_Metadataunity_MatrixPreviousMI;
-                }
-
-                #define unity_WorldTransformParams LoadDOTSInstancedData_WorldTransformParams()
-                #define unity_RenderingLayer LoadDOTSInstancedData_RenderingLayer()
-                #define UNITY_SETUP_DOTS_SH_COEFFS
-                #define UNITY_SETUP_DOTS_RENDER_BOUNDS
-            #endif
-
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
@@ -66,6 +54,9 @@ Shader "VividRP/Particles/Unlit"
                 float4 _UnlitColor;
                 float4 _UnlitColorMap_ST;
                 float4 _BaseColor;
+                float4 _VividParticlePositionSize;
+                float4 _VividParticleRotation;
+                float4 _VividParticleVelocityStretch;
                 float _AlphaCutoff;
                 float _AlphaRemapMin;
                 float _AlphaRemapMax;
@@ -77,12 +68,21 @@ Shader "VividRP/Particles/Unlit"
 
             #ifdef UNITY_DOTS_INSTANCING_ENABLED
                 UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
+                    UNITY_DOTS_INSTANCED_PROP(float4, _VividParticlePositionSize)
                     UNITY_DOTS_INSTANCED_PROP(float4, _BaseColor)
+                    UNITY_DOTS_INSTANCED_PROP(float4, _VividParticleRotation)
+                    UNITY_DOTS_INSTANCED_PROP(float4, _VividParticleVelocityStretch)
                 UNITY_DOTS_INSTANCING_END(MaterialPropertyMetadata)
 
+                #define VIVID_PARTICLE_POSITION_SIZE UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _VividParticlePositionSize, float4(0.0, 0.0, 0.0, 1.0))
                 #define VIVID_PARTICLE_INSTANCE_COLOR UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _BaseColor, float4(1.0, 1.0, 1.0, 1.0))
+                #define VIVID_PARTICLE_ROTATION UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _VividParticleRotation, float4(0.0, 0.0, 0.0, 1.0))
+                #define VIVID_PARTICLE_VELOCITY_STRETCH UNITY_ACCESS_DOTS_INSTANCED_PROP_WITH_CUSTOM_DEFAULT(float4, _VividParticleVelocityStretch, float4(0.0, 1.0, 0.0, 1.0))
             #else
+                #define VIVID_PARTICLE_POSITION_SIZE _VividParticlePositionSize
                 #define VIVID_PARTICLE_INSTANCE_COLOR _BaseColor
+                #define VIVID_PARTICLE_ROTATION _VividParticleRotation
+                #define VIVID_PARTICLE_VELOCITY_STRETCH _VividParticleVelocityStretch
             #endif
 
             struct Attributes
@@ -119,6 +119,23 @@ Shader "VividRP/Particles/Unlit"
             #endif
             }
 
+            float3 RotateParticleVector(float3 value, float4 rotation)
+            {
+                float rotationLengthSq = dot(rotation, rotation);
+                if (rotationLengthSq <= 0.000001)
+                    return value;
+
+                rotation *= rsqrt(rotationLengthSq);
+                float3 t = 2.0 * cross(rotation.xyz, value);
+                return value + rotation.w * t + cross(rotation.xyz, t);
+            }
+
+            float3 SafeNormalizeParticleVector(float3 value, float3 fallback)
+            {
+                float lengthSq = dot(value, value);
+                return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
+            }
+
             Varyings Vert(Attributes input)
             {
                 Varyings output = (Varyings)0;
@@ -126,38 +143,41 @@ Shader "VividRP/Particles/Unlit"
                 UNITY_TRANSFER_INSTANCE_ID(input, output);
                 UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-                float4x4 objectToWorld = GetObjectToWorldMatrix();
-                float3 centerRWS = float3(objectToWorld._m03, objectToWorld._m13, objectToWorld._m23);
-                float3 objectRight = float3(objectToWorld._m00, objectToWorld._m10, objectToWorld._m20);
-                float3 objectUp = float3(objectToWorld._m01, objectToWorld._m11, objectToWorld._m21);
-                float3 objectForward = float3(objectToWorld._m02, objectToWorld._m12, objectToWorld._m22);
-                float sizeX = max(length(objectRight), 0.0001);
-                float sizeY = max(length(objectUp), 0.0001);
-
+                float4 positionSize = VIVID_PARTICLE_POSITION_SIZE;
+                float4 rotation = VIVID_PARTICLE_ROTATION;
+                float4 velocityStretch = VIVID_PARTICLE_VELOCITY_STRETCH;
+                float3 centerRWS = positionSize.xyz;
+                float size = max(positionSize.w, 0.0001);
                 float4x4 viewToWorld = GetViewToWorldMatrix();
                 float3 viewRight = normalize(float3(viewToWorld._m00, viewToWorld._m10, viewToWorld._m20));
                 float3 viewUp = normalize(float3(viewToWorld._m01, viewToWorld._m11, viewToWorld._m21));
+                float3 viewForward = -normalize(float3(viewToWorld._m02, viewToWorld._m12, viewToWorld._m22));
+                float3 meshLocal = input.positionOS * size;
                 float3 positionRWS;
+
                 if (_VividParticleRenderMode < 0.5)
                 {
                     positionRWS = centerRWS
-                        + viewRight * (input.positionOS.x * sizeX)
-                        + viewUp * (input.positionOS.y * sizeY);
+                        + viewRight * meshLocal.x
+                        + viewUp * meshLocal.y;
                 }
-                else if (_VividParticleRenderMode < 1.5 || _VividParticleRenderMode >= 3.5)
+                else if (_VividParticleRenderMode < 1.5)
                 {
+                    float3 stretchUp = SafeNormalizeParticleVector(velocityStretch.xyz, viewUp);
+                    float3 stretchRight = cross(viewForward, stretchUp);
+                    stretchRight = SafeNormalizeParticleVector(stretchRight, viewRight);
+                    float stretchLength = max(velocityStretch.w, size);
                     positionRWS = centerRWS
-                        + objectRight * input.positionOS.x
-                        + objectUp * input.positionOS.y
-                        + objectForward * input.positionOS.z;
+                        + stretchRight * meshLocal.x
+                        + stretchUp * (input.positionOS.y * stretchLength);
                 }
                 else if (_VividParticleRenderMode < 2.5)
                 {
                     positionRWS = centerRWS
-                        + float3(1.0, 0.0, 0.0) * (input.positionOS.x * sizeX)
-                        + float3(0.0, 0.0, 1.0) * (input.positionOS.y * sizeY);
+                        + float3(1.0, 0.0, 0.0) * meshLocal.x
+                        + float3(0.0, 0.0, 1.0) * meshLocal.y;
                 }
-                else
+                else if (_VividParticleRenderMode < 3.5)
                 {
                     float3 cameraPositionRWS = float3(viewToWorld._m03, viewToWorld._m13, viewToWorld._m23);
                     float3 toCamera = cameraPositionRWS - centerRWS;
@@ -167,8 +187,12 @@ Shader "VividRP/Particles/Unlit"
                     float3 verticalRight = cross(float3(0.0, 1.0, 0.0), verticalNormal);
                     verticalRight = length(verticalRight) > 0.0001 ? normalize(verticalRight) : viewRight;
                     positionRWS = centerRWS
-                        + verticalRight * (input.positionOS.x * sizeX)
-                        + float3(0.0, 1.0, 0.0) * (input.positionOS.y * sizeY);
+                        + verticalRight * meshLocal.x
+                        + float3(0.0, 1.0, 0.0) * meshLocal.y;
+                }
+                else
+                {
+                    positionRWS = centerRWS + RotateParticleVector(meshLocal, rotation);
                 }
 
                 output.positionCS = TransformWorldToHClip(positionRWS);
@@ -207,25 +231,25 @@ Shader "VividRP/Particles/Unlit"
             ENDHLSL
         }
 
-//        Pass
-//        {
-//            Name "SRPDefaultUnlit"
-//            Tags { "LightMode" = "SRPDefaultUnlit" }
-//
-//            Blend [_SrcBlend] [_DstBlend], [_AlphaSrcBlend] [_AlphaDstBlend]
-//            ZWrite [_ZWrite]
-//            ZTest LEqual
-//            Cull [_CullMode]
-//
-//            HLSLPROGRAM
-//                #pragma target 4.5
-//                #pragma multi_compile_instancing
-//                #pragma multi_compile _ DOTS_INSTANCING_ON
-//                #pragma shader_feature_local_fragment _ALPHATEST_ON
-//                #pragma vertex Vert
-//                #pragma fragment Frag
-//            ENDHLSL
-//        }
+        Pass
+        {
+            Name "SRPDefaultUnlit"
+            Tags { "LightMode" = "SRPDefaultUnlit" }
+
+            Blend [_SrcBlend] [_DstBlend], [_AlphaSrcBlend] [_AlphaDstBlend]
+            ZWrite [_ZWrite]
+            ZTest LEqual
+            Cull [_CullMode]
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma multi_compile_instancing
+                #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma vertex Vert
+                #pragma fragment Frag
+            ENDHLSL
+        }
     }
 
     CustomEditor "VividRP.Editor.ParticleUnlitShaderGUI"

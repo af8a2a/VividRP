@@ -24,10 +24,9 @@ namespace VividRP.Runtime.Particle
         public const string DefaultShaderName = "VividRP/Particles/Unlit";
 
         internal const uint PerInstanceMetadataMask = 0x80000000u;
-        internal const int SizeOfMatrix = sizeof(float) * 4 * 4;
-        internal const int SizeOfPackedMatrix = sizeof(float) * 4 * 3;
         internal const int SizeOfFloat4 = sizeof(float) * 4;
-        internal const int ZeroBlockByteSize = SizeOfPackedMatrix * 2;
+        internal const int SizeOfParticleGpuData = SizeOfFloat4 * 4;
+        internal const int ZeroBlockByteSize = SizeOfFloat4;
 
         private const int InstanceDataBufferCount = 3;
         private const float GravityAcceleration = 9.81f;
@@ -382,24 +381,29 @@ namespace VividRP.Runtime.Particle
             };
         }
 
-        internal static int ObjectToWorldByteAddress(int capacity)
+        internal static int PositionSizeByteAddress(int capacity)
         {
             return ZeroBlockByteSize;
         }
 
-        internal static int WorldToObjectByteAddress(int capacity)
-        {
-            return ObjectToWorldByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfPackedMatrix;
-        }
-
         internal static int BaseColorByteAddress(int capacity)
         {
-            return WorldToObjectByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfPackedMatrix;
+            return PositionSizeByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
+        }
+
+        internal static int RotationByteAddress(int capacity)
+        {
+            return BaseColorByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
+        }
+
+        internal static int VelocityStretchByteAddress(int capacity)
+        {
+            return RotationByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
         }
 
         internal static int InstanceDataByteSize(int capacity)
         {
-            return BaseColorByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
+            return VelocityStretchByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
         }
 
         internal static uint ResolveBufferWindowSize()
@@ -660,8 +664,6 @@ namespace VividRP.Runtime.Particle
             private static readonly int s_AlphaDstBlendId = Shader.PropertyToID("_AlphaDstBlend");
             private static readonly int s_ZWriteId = Shader.PropertyToID("_ZWrite");
             private static readonly int s_ParticleRenderModeId = Shader.PropertyToID("_VividParticleRenderMode");
-            private static readonly int s_ObjectToWorldId = Shader.PropertyToID("unity_ObjectToWorld");
-            private static readonly int s_WorldToObjectId = Shader.PropertyToID("unity_WorldToObject");
 
             private readonly VividParticleSystem m_System;
             private readonly VividParticleEcsStorage m_Storage = new();
@@ -1761,11 +1763,13 @@ namespace VividRP.Runtime.Particle
                 return operation.Segment switch
                 {
                     InstanceUploadSegment.ZeroBlock => 0,
-                    InstanceUploadSegment.ObjectToWorld => ObjectToWorldByteAddress(m_Capacity)
-                        + operation.StartIndex * SizeOfPackedMatrix,
-                    InstanceUploadSegment.WorldToObject => WorldToObjectByteAddress(m_Capacity)
-                        + operation.StartIndex * SizeOfPackedMatrix,
+                    InstanceUploadSegment.PositionSize => PositionSizeByteAddress(m_Capacity)
+                        + operation.StartIndex * SizeOfFloat4,
                     InstanceUploadSegment.BaseColor => BaseColorByteAddress(m_Capacity)
+                        + operation.StartIndex * SizeOfFloat4,
+                    InstanceUploadSegment.Rotation => RotationByteAddress(m_Capacity)
+                        + operation.StartIndex * SizeOfFloat4,
+                    InstanceUploadSegment.VelocityStretch => VelocityStretchByteAddress(m_Capacity)
                         + operation.StartIndex * SizeOfFloat4,
                     _ => 0,
                 };
@@ -1777,9 +1781,7 @@ namespace VividRP.Runtime.Particle
                     return ZeroBlockByteSize;
 
                 int count = Mathf.Clamp(activeCount - operation.StartIndex, 0, operation.Count);
-                return operation.Segment == InstanceUploadSegment.BaseColor
-                    ? count * SizeOfFloat4
-                    : count * SizeOfPackedMatrix;
+                return count * SizeOfFloat4;
             }
 
             private unsafe void WriteUploadOperation(byte* baseAddress, InstanceUploadOperation operation, int activeCount)
@@ -1796,18 +1798,18 @@ namespace VividRP.Runtime.Particle
 
                 switch (operation.Segment)
                 {
-                    case InstanceUploadSegment.ObjectToWorld:
+                    case InstanceUploadSegment.PositionSize:
                         for (int index = operation.StartIndex; index < endIndex; index++)
                         {
                             Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
-                            WriteArrayElement(baseAddress, 0, index - operation.StartIndex, new PackedMatrix(objectToWorld));
-                        }
-                        break;
-                    case InstanceUploadSegment.WorldToObject:
-                        for (int index = operation.StartIndex; index < endIndex; index++)
-                        {
-                            Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
-                            WriteArrayElement(baseAddress, 0, index - operation.StartIndex, new PackedMatrix(objectToWorld.inverse));
+                            Vector3 position = objectToWorld.GetColumn(3);
+                            Vector3 axis = objectToWorld.GetColumn(0);
+                            float size = Mathf.Max(VividParticleMainModule.MinimumStartSize, axis.magnitude);
+                            WriteArrayElement(
+                                baseAddress,
+                                0,
+                                index - operation.StartIndex,
+                                new Vector4(position.x, position.y, position.z, size));
                         }
                         break;
                     case InstanceUploadSegment.BaseColor:
@@ -1818,6 +1820,31 @@ namespace VividRP.Runtime.Particle
                                 0,
                                 index - operation.StartIndex,
                                 (Vector4)GetParticleRenderColor(index));
+                        }
+                        break;
+                    case InstanceUploadSegment.Rotation:
+                        for (int index = operation.StartIndex; index < endIndex; index++)
+                        {
+                            WriteArrayElement(
+                                baseAddress,
+                                0,
+                                index - operation.StartIndex,
+                                new Vector4(0.0f, 0.0f, 0.0f, 1.0f));
+                        }
+                        break;
+                    case InstanceUploadSegment.VelocityStretch:
+                        for (int index = operation.StartIndex; index < endIndex; index++)
+                        {
+                            Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
+                            Vector3 velocity = m_Storage.IsValidIndex(index) ? m_Storage.GetVelocity(index) : Vector3.zero;
+                            float length = m_System != null && m_System.rendererModule.renderMode == VividParticleRenderMode.Stretch
+                                ? objectToWorld.GetColumn(1).magnitude
+                                : objectToWorld.GetColumn(0).magnitude;
+                            WriteArrayElement(
+                                baseAddress,
+                                0,
+                                index - operation.StartIndex,
+                                new Vector4(velocity.x, velocity.y, velocity.z, length));
                         }
                         break;
                 }
@@ -2107,9 +2134,10 @@ namespace VividRP.Runtime.Particle
         private enum InstanceUploadSegment
         {
             ZeroBlock,
-            ObjectToWorld,
-            WorldToObject,
+            PositionSize,
             BaseColor,
+            Rotation,
+            VelocityStretch,
         }
 
         private readonly struct InstanceUploadOperation
@@ -2133,24 +2161,28 @@ namespace VividRP.Runtime.Particle
         private sealed class InstanceUploadDirtyRanges
         {
             private bool m_ZeroBlockDirty;
-            private bool m_ObjectToWorldDirty;
-            private bool m_WorldToObjectDirty;
+            private bool m_PositionSizeDirty;
             private bool m_BaseColorDirty;
-            private int m_ObjectToWorldStart;
-            private int m_ObjectToWorldEnd;
-            private int m_WorldToObjectStart;
-            private int m_WorldToObjectEnd;
+            private bool m_RotationDirty;
+            private bool m_VelocityStretchDirty;
+            private int m_PositionSizeStart;
+            private int m_PositionSizeEnd;
             private int m_BaseColorStart;
             private int m_BaseColorEnd;
+            private int m_RotationStart;
+            private int m_RotationEnd;
+            private int m_VelocityStretchStart;
+            private int m_VelocityStretchEnd;
 
             public int Count
             {
                 get
                 {
                     int count = m_ZeroBlockDirty ? 1 : 0;
-                    count += m_ObjectToWorldDirty ? 1 : 0;
-                    count += m_WorldToObjectDirty ? 1 : 0;
+                    count += m_PositionSizeDirty ? 1 : 0;
                     count += m_BaseColorDirty ? 1 : 0;
+                    count += m_RotationDirty ? 1 : 0;
+                    count += m_VelocityStretchDirty ? 1 : 0;
                     return count;
                 }
             }
@@ -2167,18 +2199,10 @@ namespace VividRP.Runtime.Particle
                         index--;
                     }
 
-                    if (m_ObjectToWorldDirty)
+                    if (m_PositionSizeDirty)
                     {
                         if (index == 0)
-                            return CreateOperation(InstanceUploadSegment.ObjectToWorld, m_ObjectToWorldStart, m_ObjectToWorldEnd);
-
-                        index--;
-                    }
-
-                    if (m_WorldToObjectDirty)
-                    {
-                        if (index == 0)
-                            return CreateOperation(InstanceUploadSegment.WorldToObject, m_WorldToObjectStart, m_WorldToObjectEnd);
+                            return CreateOperation(InstanceUploadSegment.PositionSize, m_PositionSizeStart, m_PositionSizeEnd);
 
                         index--;
                     }
@@ -2187,6 +2211,25 @@ namespace VividRP.Runtime.Particle
                     {
                         if (index == 0)
                             return CreateOperation(InstanceUploadSegment.BaseColor, m_BaseColorStart, m_BaseColorEnd);
+
+                        index--;
+                    }
+
+                    if (m_RotationDirty)
+                    {
+                        if (index == 0)
+                            return CreateOperation(InstanceUploadSegment.Rotation, m_RotationStart, m_RotationEnd);
+
+                        index--;
+                    }
+
+                    if (m_VelocityStretchDirty)
+                    {
+                        if (index == 0)
+                            return CreateOperation(
+                                InstanceUploadSegment.VelocityStretch,
+                                m_VelocityStretchStart,
+                                m_VelocityStretchEnd);
                     }
 
                     throw new ArgumentOutOfRangeException(nameof(index));
@@ -2204,17 +2247,29 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 startIndex = Mathf.Max(0, startIndex);
-                AddRange(ref m_ObjectToWorldDirty, ref m_ObjectToWorldStart, ref m_ObjectToWorldEnd, startIndex, count);
-                AddRange(ref m_WorldToObjectDirty, ref m_WorldToObjectStart, ref m_WorldToObjectEnd, startIndex, count);
+                AddRange(ref m_PositionSizeDirty, ref m_PositionSizeStart, ref m_PositionSizeEnd, startIndex, count);
                 AddRange(ref m_BaseColorDirty, ref m_BaseColorStart, ref m_BaseColorEnd, startIndex, count);
+                AddRange(ref m_RotationDirty, ref m_RotationStart, ref m_RotationEnd, startIndex, count);
+                AddRange(
+                    ref m_VelocityStretchDirty,
+                    ref m_VelocityStretchStart,
+                    ref m_VelocityStretchEnd,
+                    startIndex,
+                    count);
             }
 
             public int EstimateUploadByteCount(int activeCount)
             {
                 int byteCount = m_ZeroBlockDirty ? ZeroBlockByteSize : 0;
-                byteCount += EstimateRangeByteCount(m_ObjectToWorldDirty, m_ObjectToWorldStart, m_ObjectToWorldEnd, activeCount, SizeOfPackedMatrix);
-                byteCount += EstimateRangeByteCount(m_WorldToObjectDirty, m_WorldToObjectStart, m_WorldToObjectEnd, activeCount, SizeOfPackedMatrix);
+                byteCount += EstimateRangeByteCount(m_PositionSizeDirty, m_PositionSizeStart, m_PositionSizeEnd, activeCount, SizeOfFloat4);
                 byteCount += EstimateRangeByteCount(m_BaseColorDirty, m_BaseColorStart, m_BaseColorEnd, activeCount, SizeOfFloat4);
+                byteCount += EstimateRangeByteCount(m_RotationDirty, m_RotationStart, m_RotationEnd, activeCount, SizeOfFloat4);
+                byteCount += EstimateRangeByteCount(
+                    m_VelocityStretchDirty,
+                    m_VelocityStretchStart,
+                    m_VelocityStretchEnd,
+                    activeCount,
+                    SizeOfFloat4);
                 return byteCount;
             }
 
@@ -2226,9 +2281,16 @@ namespace VividRP.Runtime.Particle
                 bool hasRange = false;
                 int start = int.MaxValue;
                 int end = 0;
-                AddSegmentRange(m_ObjectToWorldDirty, m_ObjectToWorldStart, m_ObjectToWorldEnd, ref hasRange, ref start, ref end);
-                AddSegmentRange(m_WorldToObjectDirty, m_WorldToObjectStart, m_WorldToObjectEnd, ref hasRange, ref start, ref end);
+                AddSegmentRange(m_PositionSizeDirty, m_PositionSizeStart, m_PositionSizeEnd, ref hasRange, ref start, ref end);
                 AddSegmentRange(m_BaseColorDirty, m_BaseColorStart, m_BaseColorEnd, ref hasRange, ref start, ref end);
+                AddSegmentRange(m_RotationDirty, m_RotationStart, m_RotationEnd, ref hasRange, ref start, ref end);
+                AddSegmentRange(
+                    m_VelocityStretchDirty,
+                    m_VelocityStretchStart,
+                    m_VelocityStretchEnd,
+                    ref hasRange,
+                    ref start,
+                    ref end);
                 if (!hasRange)
                     return false;
 
@@ -2245,15 +2307,18 @@ namespace VividRP.Runtime.Particle
             public void Clear()
             {
                 m_ZeroBlockDirty = false;
-                m_ObjectToWorldDirty = false;
-                m_WorldToObjectDirty = false;
+                m_PositionSizeDirty = false;
                 m_BaseColorDirty = false;
-                m_ObjectToWorldStart = 0;
-                m_ObjectToWorldEnd = 0;
-                m_WorldToObjectStart = 0;
-                m_WorldToObjectEnd = 0;
+                m_RotationDirty = false;
+                m_VelocityStretchDirty = false;
+                m_PositionSizeStart = 0;
+                m_PositionSizeEnd = 0;
                 m_BaseColorStart = 0;
                 m_BaseColorEnd = 0;
+                m_RotationStart = 0;
+                m_RotationEnd = 0;
+                m_VelocityStretchStart = 0;
+                m_VelocityStretchEnd = 0;
             }
 
             private static void AddRange(
@@ -2483,9 +2548,10 @@ namespace VividRP.Runtime.Particle
             private static readonly int s_CopyOperationsId = Shader.PropertyToID("_VividParticleUploadOperations");
             private static readonly int s_CopyOperationCountId = Shader.PropertyToID("_VividParticleUploadOperationCount");
             private static readonly int s_CopyOperationBaseId = Shader.PropertyToID("_VividParticleUploadOperationBase");
-            private static readonly int s_ObjectToWorldId = Shader.PropertyToID("unity_ObjectToWorld");
-            private static readonly int s_WorldToObjectId = Shader.PropertyToID("unity_WorldToObject");
+            private static readonly int s_PositionSizeId = Shader.PropertyToID("_VividParticlePositionSize");
             private static readonly int s_BaseColorId = Shader.PropertyToID("_BaseColor");
+            private static readonly int s_RotationId = Shader.PropertyToID("_VividParticleRotation");
+            private static readonly int s_VelocityStretchId = Shader.PropertyToID("_VividParticleVelocityStretch");
 
             private readonly Dictionary<ParticleSystemState, ParticleRenderRecord> m_Records = new();
             private readonly Dictionary<ParticleDrawKey, ParticleDrawBatch> m_BatchLookup = new();
@@ -2712,18 +2778,21 @@ namespace VividRP.Runtime.Particle
                     batch.MeshId = m_BRG.RegisterMesh(batch.Mesh);
                     batch.MaterialId = m_BRG.RegisterMaterial(batch.Material);
 
-                    var metadata = new NativeArray<MetadataValue>(3, Allocator.Temp);
+                    var metadata = new NativeArray<MetadataValue>(4, Allocator.Temp);
                     try
                     {
                         metadata[0] = CreatePerInstanceMetadata(
-                            s_ObjectToWorldId,
-                            batch.DataOffset + ObjectToWorldByteAddress(batch.Capacity));
+                            s_PositionSizeId,
+                            batch.DataOffset + PositionSizeByteAddress(batch.Capacity));
                         metadata[1] = CreatePerInstanceMetadata(
-                            s_WorldToObjectId,
-                            batch.DataOffset + WorldToObjectByteAddress(batch.Capacity));
-                        metadata[2] = CreatePerInstanceMetadata(
                             s_BaseColorId,
                             batch.DataOffset + BaseColorByteAddress(batch.Capacity));
+                        metadata[2] = CreatePerInstanceMetadata(
+                            s_RotationId,
+                            batch.DataOffset + RotationByteAddress(batch.Capacity));
+                        metadata[3] = CreatePerInstanceMetadata(
+                            s_VelocityStretchId,
+                            batch.DataOffset + VelocityStretchByteAddress(batch.Capacity));
 
                         batch.BatchId = m_BRG.AddBatch(
                             metadata,
@@ -2865,23 +2934,26 @@ namespace VividRP.Runtime.Particle
                 int count)
             {
                 int batchStartIndex = record.BatchBaseIndex + startIndex;
-                int matrixByteCount = count * SizeOfPackedMatrix;
-                int colorByteCount = count * SizeOfFloat4;
-                int objectToWorldOffset = batch.DataOffset
-                    + ObjectToWorldByteAddress(batch.Capacity)
-                    + batchStartIndex * SizeOfPackedMatrix;
-                int worldToObjectOffset = batch.DataOffset
-                    + WorldToObjectByteAddress(batch.Capacity)
-                    + batchStartIndex * SizeOfPackedMatrix;
+                int columnByteCount = count * SizeOfFloat4;
+                int positionSizeOffset = batch.DataOffset
+                    + PositionSizeByteAddress(batch.Capacity)
+                    + batchStartIndex * SizeOfFloat4;
                 int baseColorOffset = batch.DataOffset
                     + BaseColorByteAddress(batch.Capacity)
                     + batchStartIndex * SizeOfFloat4;
+                int rotationOffset = batch.DataOffset
+                    + RotationByteAddress(batch.Capacity)
+                    + batchStartIndex * SizeOfFloat4;
+                int velocityStretchOffset = batch.DataOffset
+                    + VelocityStretchByteAddress(batch.Capacity)
+                    + batchStartIndex * SizeOfFloat4;
 
-                m_GPUBuffer.AddCopyOperation(objectToWorldOffset, objectToWorldOffset, matrixByteCount);
-                m_GPUBuffer.AddCopyOperation(worldToObjectOffset, worldToObjectOffset, matrixByteCount);
-                m_GPUBuffer.AddCopyOperation(baseColorOffset, baseColorOffset, colorByteCount);
-                record.LastUploadOperationCount += 3;
-                record.LastUploadByteCount += matrixByteCount * 2 + colorByteCount;
+                m_GPUBuffer.AddCopyOperation(positionSizeOffset, positionSizeOffset, columnByteCount);
+                m_GPUBuffer.AddCopyOperation(baseColorOffset, baseColorOffset, columnByteCount);
+                m_GPUBuffer.AddCopyOperation(rotationOffset, rotationOffset, columnByteCount);
+                m_GPUBuffer.AddCopyOperation(velocityStretchOffset, velocityStretchOffset, columnByteCount);
+                record.LastUploadOperationCount += 4;
+                record.LastUploadByteCount += columnByteCount * 4;
             }
 
             private void PublishCleanStats()
@@ -3305,60 +3377,69 @@ namespace VividRP.Runtime.Particle
             public void Execute()
             {
                 int endIndex = math.min(ActiveCount, StartIndex + Count);
-                int objectToWorldOffset = BatchDataOffset + ObjectToWorldByteAddress(BatchCapacity);
-                int worldToObjectOffset = BatchDataOffset + WorldToObjectByteAddress(BatchCapacity);
+                int positionSizeOffset = BatchDataOffset + PositionSizeByteAddress(BatchCapacity);
                 int baseColorOffset = BatchDataOffset + BaseColorByteAddress(BatchCapacity);
+                int rotationOffset = BatchDataOffset + RotationByteAddress(BatchCapacity);
+                int velocityStretchOffset = BatchDataOffset + VelocityStretchByteAddress(BatchCapacity);
 
                 for (int particleIndex = StartIndex; particleIndex < endIndex; particleIndex++)
                 {
                     int batchIndex = BatchBaseIndex + particleIndex;
-                    float4x4 objectToWorld = BuildObjectToWorld(particleIndex);
-                    WritePackedMatrix(BufferBase + objectToWorldOffset, batchIndex, objectToWorld);
-                    WritePackedMatrix(BufferBase + worldToObjectOffset, batchIndex, math.inverse(objectToWorld));
+                    float3 position = GetWorldPosition(Positions[particleIndex]);
+                    float size = GetRenderSize(particleIndex);
+                    float3 velocity = GetWorldVelocity(Velocities[particleIndex]);
+                    float stretchLength = GetStretchLength(size, velocity);
+                    UnsafeUtility.WriteArrayElement(
+                        BufferBase + positionSizeOffset,
+                        batchIndex,
+                        new float4(position, size));
                     UnsafeUtility.WriteArrayElement(
                         BufferBase + baseColorOffset,
                         batchIndex,
                         GetRenderColor(particleIndex));
+                    UnsafeUtility.WriteArrayElement(
+                        BufferBase + rotationOffset,
+                        batchIndex,
+                        new float4(0.0f, 0.0f, 0.0f, 1.0f));
+                    UnsafeUtility.WriteArrayElement(
+                        BufferBase + velocityStretchOffset,
+                        batchIndex,
+                        new float4(velocity, stretchLength));
                 }
             }
 
-            private float4x4 BuildObjectToWorld(int particleIndex)
+            private float3 GetWorldPosition(float3 position)
             {
-                float3 position = Positions[particleIndex];
-                if (SimulationSpace == (int)VividParticleSystemSimulationSpace.Local)
-                    position = math.transform(LocalToWorld, position);
-
-                float size = math.max(VividParticleMainModule.MinimumStartSize, Sizes[particleIndex] * SizeScale);
-                if (RenderMode == (int)VividParticleRenderMode.Stretch)
-                    return BuildStretchObjectToWorld(particleIndex, position, size);
-
-                return new float4x4(
-                    new float4(size, 0.0f, 0.0f, 0.0f),
-                    new float4(0.0f, size, 0.0f, 0.0f),
-                    new float4(0.0f, 0.0f, size, 0.0f),
-                    new float4(position, 1.0f));
+                return SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                    ? math.transform(LocalToWorld, position)
+                    : position;
             }
 
-            private float4x4 BuildStretchObjectToWorld(int particleIndex, float3 position, float size)
+            private float3 GetWorldVelocity(float3 velocity)
             {
-                float3 velocity = Velocities[particleIndex];
-                float velocityLength = math.length(velocity);
-                float3 up = velocityLength > 0.000001f ? velocity / velocityLength : new float3(0.0f, 1.0f, 0.0f);
-                float3 right = math.cross(new float3(0.0f, 0.0f, 1.0f), up);
-                if (math.lengthsq(right) <= 0.000001f)
-                    right = math.cross(new float3(1.0f, 0.0f, 0.0f), up);
+                if (SimulationSpace != (int)VividParticleSystemSimulationSpace.Local)
+                    return velocity;
 
-                right = math.normalize(right);
-                float3 forward = math.normalize(math.cross(right, up));
-                float length = math.max(
+                var rotationScale = new float3x3(
+                    LocalToWorld.c0.xyz,
+                    LocalToWorld.c1.xyz,
+                    LocalToWorld.c2.xyz);
+                return math.mul(rotationScale, velocity);
+            }
+
+            private float GetRenderSize(int particleIndex)
+            {
+                return math.max(VividParticleMainModule.MinimumStartSize, Sizes[particleIndex] * SizeScale);
+            }
+
+            private float GetStretchLength(float size, float3 velocity)
+            {
+                if (RenderMode != (int)VividParticleRenderMode.Stretch)
+                    return size;
+
+                return math.max(
                     VividParticleMainModule.MinimumStartSize,
-                    size * StretchLengthScale + velocityLength * StretchSpeedScale);
-
-                return new float4x4(
-                    new float4(right * size, 0.0f),
-                    new float4(up * length, 0.0f),
-                    new float4(forward * size, 0.0f),
-                    new float4(position, 1.0f));
+                    size * StretchLengthScale + math.length(velocity) * StretchSpeedScale);
             }
 
             private float4 GetRenderColor(int particleIndex)
@@ -3372,10 +3453,6 @@ namespace VividRP.Runtime.Particle
                 return color;
             }
 
-            private static void WritePackedMatrix(byte* baseAddress, int index, float4x4 matrix)
-            {
-                UnsafeUtility.WriteArrayElement(baseAddress, index, new PackedMatrix(matrix));
-            }
         }
 
         private sealed class VividParticleSystemManagerPlayerLoopMarker
@@ -3467,54 +3544,6 @@ namespace VividRP.Runtime.Particle
             }
         }
 
-        [StructLayout(LayoutKind.Sequential)]
-        internal struct PackedMatrix
-        {
-            public float c0x;
-            public float c0y;
-            public float c0z;
-            public float c1x;
-            public float c1y;
-            public float c1z;
-            public float c2x;
-            public float c2y;
-            public float c2z;
-            public float c3x;
-            public float c3y;
-            public float c3z;
-
-            public PackedMatrix(Matrix4x4 matrix)
-            {
-                c0x = matrix.m00;
-                c0y = matrix.m10;
-                c0z = matrix.m20;
-                c1x = matrix.m01;
-                c1y = matrix.m11;
-                c1z = matrix.m21;
-                c2x = matrix.m02;
-                c2y = matrix.m12;
-                c2z = matrix.m22;
-                c3x = matrix.m03;
-                c3y = matrix.m13;
-                c3z = matrix.m23;
-            }
-
-            public PackedMatrix(float4x4 matrix)
-            {
-                c0x = matrix.c0.x;
-                c0y = matrix.c0.y;
-                c0z = matrix.c0.z;
-                c1x = matrix.c1.x;
-                c1y = matrix.c1.y;
-                c1z = matrix.c1.z;
-                c2x = matrix.c2.x;
-                c2y = matrix.c2.y;
-                c2z = matrix.c2.z;
-                c3x = matrix.c3.x;
-                c3y = matrix.c3.y;
-                c3z = matrix.c3.z;
-            }
-        }
     }
 
 }

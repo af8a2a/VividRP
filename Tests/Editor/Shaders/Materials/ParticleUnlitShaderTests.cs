@@ -51,6 +51,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ParticleUnlitShader_DeclaresCompactParticleGpuProperties()
+        {
+            Material material = CreateMaterial();
+
+            try
+            {
+                Assert.That(material.HasProperty("_VividParticlePositionSize"), Is.True);
+                Assert.That(material.HasProperty("_BaseColor"), Is.True);
+                Assert.That(material.HasProperty("_VividParticleRotation"), Is.True);
+                Assert.That(material.HasProperty("_VividParticleVelocityStretch"), Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void SetupMaterial_SyncsTransparentStateAndLegacyAliases_WhenInputsAssigned()
         {
             Material material = CreateMaterial();

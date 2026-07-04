@@ -55,9 +55,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Constants_AlignToPage_UsesFixedPageEntryCount()
+        {
+            Assert.That(VividParticleEcsConstants.PageEntryCount, Is.EqualTo(256));
+            Assert.That(VividParticleEcsConstants.AlignToPage(0), Is.EqualTo(256));
+            Assert.That(VividParticleEcsConstants.AlignToPage(1), Is.EqualTo(256));
+            Assert.That(VividParticleEcsConstants.AlignToPage(256), Is.EqualTo(256));
+            Assert.That(VividParticleEcsConstants.AlignToPage(257), Is.EqualTo(512));
+        }
+
+        [Test]
         public void Storage_AddWritesAndReadsAcrossPages()
         {
             using var storage = new VividParticleEcsStorage();
+            storage.systemId = new VividParticleSystemId(17);
             storage.EnsureCapacity(300);
 
             for (int index = 0; index < 260; index++)

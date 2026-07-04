@@ -110,7 +110,11 @@ namespace VividRP.Runtime.Particle
 
         internal int particleStorageCapacity => VividParticleSystemManager.GetParticleStorageCapacity(this);
 
+        internal int particleStoragePageCount => VividParticleSystemManager.GetParticleStoragePageCount(this);
+
         internal int particleStorageActiveCount => VividParticleSystemManager.GetParticleCount(this);
+
+        internal bool usesEcsParticleStorage => VividParticleSystemManager.UsesEcsStorage(this);
 
         internal bool stopEmitting => m_StopEmitting;
 

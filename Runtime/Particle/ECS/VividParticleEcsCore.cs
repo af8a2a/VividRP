@@ -6,7 +6,13 @@ namespace VividRP.Runtime.Particle.ECS
 {
     internal static class VividParticleEcsConstants
     {
-        public const int PageEntryCount = VividParticleStorage.PageSize;
+        public const int PageEntryCount = 256;
+
+        public static int AlignToPage(int value)
+        {
+            int clampedValue = Math.Max(1, value);
+            return Math.Max(PageEntryCount, ((clampedValue + PageEntryCount - 1) / PageEntryCount) * PageEntryCount);
+        }
     }
 
     internal readonly struct VividParticleTypeIndex : IEquatable<VividParticleTypeIndex>

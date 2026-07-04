@@ -156,7 +156,9 @@ namespace VividRP.Editor.Tests
 
             system.Emit(10);
 
+            Assert.That(system.usesEcsParticleStorage, Is.True);
             Assert.That(system.particleStoragePageSize, Is.EqualTo(256));
+            Assert.That(system.particleStoragePageCount, Is.EqualTo(1));
             Assert.That(system.particleStorageCapacity, Is.EqualTo(256));
             Assert.That(system.particleStorageActiveCount, Is.EqualTo(3));
             Assert.That(system.particleCount, Is.EqualTo(3));
@@ -165,6 +167,7 @@ namespace VividRP.Editor.Tests
             system.Emit(10);
 
             Assert.That(system.particleStorageCapacity, Is.EqualTo(512));
+            Assert.That(system.particleStoragePageCount, Is.EqualTo(2));
             Assert.That(system.particleCount, Is.EqualTo(13));
 
             system.main.maxParticles = 2;
@@ -175,6 +178,7 @@ namespace VividRP.Editor.Tests
             system.Simulate(0.01f, withChildren: false, restart: false, fixedTimeStep: false);
 
             Assert.That(system.particleStorageCapacity, Is.EqualTo(256));
+            Assert.That(system.particleStoragePageCount, Is.EqualTo(1));
             Assert.That(system.particleStorageActiveCount, Is.EqualTo(2));
             Assert.That(system.particleCount, Is.EqualTo(2));
         }
@@ -594,11 +598,13 @@ namespace VividRP.Editor.Tests
             system.Emit(2);
             Assert.That(system.particleCount, Is.EqualTo(2));
             Assert.That(system.particleStorageCapacity, Is.EqualTo(256));
+            Assert.That(system.usesEcsParticleStorage, Is.True);
 
             gameObject.SetActive(false);
 
             Assert.That(system.particleCount, Is.EqualTo(0));
             Assert.That(system.particleStorageCapacity, Is.EqualTo(0));
+            Assert.That(system.particleStoragePageCount, Is.EqualTo(0));
             Assert.That(system.isPlaying, Is.False);
             Assert.That(system.isPaused, Is.False);
         }

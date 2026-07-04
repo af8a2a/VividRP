@@ -258,7 +258,7 @@ namespace VividRP.Runtime.Particle.ECS
         public void EnsureCapacity(int maxParticles)
         {
             int requestedMaxParticles = math.max(1, maxParticles);
-            int requestedCapacity = VividParticleStorage.AlignToPage(requestedMaxParticles);
+            int requestedCapacity = VividParticleEcsConstants.AlignToPage(requestedMaxParticles);
             int requestedPageCount = requestedCapacity / VividParticleEcsConstants.PageEntryCount;
             if (pageCount == requestedPageCount)
             {

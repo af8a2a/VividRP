@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.LowLevel;
 using UnityEngine.PlayerLoop;
 using UnityEngine.Rendering;
+using VividRP.Runtime.Particle.ECS;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -178,7 +179,7 @@ namespace VividRP.Runtime.Particle
 
         internal static int GetParticleStoragePageSize(VividParticleSystem system)
         {
-            return VividParticleStorage.PageSize;
+            return VividParticleEcsConstants.PageEntryCount;
         }
 
         internal static int GetParticleStorageCapacity(VividParticleSystem system)
@@ -186,6 +187,18 @@ namespace VividRP.Runtime.Particle
             return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
                 ? state.storageCapacity
                 : 0;
+        }
+
+        internal static int GetParticleStoragePageCount(VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
+                ? state.storagePageCount
+                : 0;
+        }
+
+        internal static bool UsesEcsStorage(VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state) && state.usesEcsStorage;
         }
 
         internal static Matrix4x4 GetParticleObjectToWorldMatrix(VividParticleSystem system, int particleIndex)
@@ -602,7 +615,7 @@ namespace VividRP.Runtime.Particle
             private static readonly int s_WorldToObjectId = Shader.PropertyToID("unity_WorldToObject");
 
             private readonly VividParticleSystem m_System;
-            private readonly VividParticleStorage m_Storage = new();
+            private readonly VividParticleEcsStorage m_Storage = new();
             private BatchRendererGroup m_BRG;
             private GraphicsBuffer m_InstanceData;
             private Mesh m_QuadMesh;
@@ -634,12 +647,17 @@ namespace VividRP.Runtime.Particle
             public ParticleSystemState(VividParticleSystem system)
             {
                 m_System = system;
+                m_Storage.systemId = ResolveSystemId(system);
                 ResetEditorUpdateTime();
             }
 
             public int activeCount => Mathf.Min(m_Storage.activeCount, m_System != null ? m_System.main.maxParticles : 0);
 
             public int storageCapacity => m_Storage.capacity;
+
+            public int storagePageCount => m_Storage.pageCount;
+
+            public bool usesEcsStorage => true;
 
             public float time => m_Time;
 
@@ -945,6 +963,13 @@ namespace VividRP.Runtime.Particle
             private void EnsureStorageCapacity(int maxParticles)
             {
                 m_Storage.EnsureCapacity(maxParticles);
+            }
+
+            private static VividParticleSystemId ResolveSystemId(VividParticleSystem system)
+            {
+                return system != null
+                    ? new VividParticleSystemId(system.GetEntityId().GetHashCode() & int.MaxValue)
+                    : VividParticleSystemId.Invalid;
             }
 
             private void EnsureRandom(VividParticleSystemFrameSnapshot snapshot)

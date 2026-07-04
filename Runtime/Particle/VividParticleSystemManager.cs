@@ -102,7 +102,7 @@ namespace VividRP.Runtime.Particle
                 state.CompletePending();
             }
 
-            state.UpdateRendering(forceUpload: true);
+            UploadRenderingState(state, forceUpload: true);
             RequestEditorRenderUpdateIfNeeded(system);
         }
 
@@ -117,7 +117,7 @@ namespace VividRP.Runtime.Particle
                 state.CompletePending();
             }
 
-            state.UpdateRendering(forceUpload: true);
+            UploadRenderingState(state, forceUpload: true);
         }
 
         public static void MarkRendererDirty(VividParticleSystem system)
@@ -239,7 +239,7 @@ namespace VividRP.Runtime.Particle
                 state.Emit(count, system.CaptureFrameSnapshot(0.0f));
             }
 
-            state.UpdateRendering(forceUpload: true);
+            UploadRenderingState(state, forceUpload: true);
         }
 
         internal static void Simulate(
@@ -278,7 +278,7 @@ namespace VividRP.Runtime.Particle
                 }
             }
 
-            state.UpdateRendering(forceUpload: true);
+            UploadRenderingState(state, forceUpload: true);
         }
 
         internal static void SimulateDeltaImmediate(
@@ -296,7 +296,7 @@ namespace VividRP.Runtime.Particle
                 state.SimulateDeltaImmediate(system.CaptureFrameSnapshot(deltaTime), allowEmission);
             }
 
-            state.UpdateRendering(forceUpload: true);
+            UploadRenderingState(state, forceUpload: true);
         }
 
         internal static void ResetSimulation(VividParticleSystem system, bool clearParticles)
@@ -463,10 +463,24 @@ namespace VividRP.Runtime.Particle
             foreach (ParticleSystemState state in s_States.Values)
                 state.CompletePending();
 
-            foreach (ParticleSystemState state in s_States.Values)
-                state.UpdateRendering(forceUpload);
+            using (s_BRGUploadMarker.Auto())
+            {
+                foreach (ParticleSystemState state in s_States.Values)
+                    state.UpdateRendering(forceUpload);
+            }
 
             s_LastCompleteAndUploadFrame = Time.frameCount;
+        }
+
+        private static void UploadRenderingState(ParticleSystemState state, bool forceUpload)
+        {
+            if (state == null)
+                return;
+
+            using (s_BRGUploadMarker.Auto())
+            {
+                state.UpdateRendering(forceUpload);
+            }
         }
 
         private static void InsertIntoPlayerLoop()
@@ -589,12 +603,6 @@ namespace VividRP.Runtime.Particle
 
             private readonly VividParticleSystem m_System;
             private readonly VividParticleStorage m_Storage = new();
-            private readonly PackedMatrix[] m_ZeroBlockData =
-            {
-                new PackedMatrix(Matrix4x4.zero),
-                new PackedMatrix(Matrix4x4.zero),
-            };
-
             private BatchRendererGroup m_BRG;
             private GraphicsBuffer m_InstanceData;
             private Mesh m_QuadMesh;
@@ -604,9 +612,6 @@ namespace VividRP.Runtime.Particle
             private BatchID m_BatchID;
             private BatchMeshID m_MeshID;
             private BatchMaterialID m_MaterialID;
-            private PackedMatrix[] m_ObjectToWorldData = Array.Empty<PackedMatrix>();
-            private PackedMatrix[] m_WorldToObjectData = Array.Empty<PackedMatrix>();
-            private Vector4[] m_BaseColorData = Array.Empty<Vector4>();
             private System.Random m_Random;
             private bool[] m_BurstTriggered = Array.Empty<bool>();
             private JobHandle m_PendingJob;
@@ -816,11 +821,8 @@ namespace VividRP.Runtime.Particle
                 if (!EnsureResources())
                     return;
 
-                using (s_BRGUploadMarker.Auto())
-                {
-                    UploadInstanceData();
-                    m_LastUploadedFrame = Time.frameCount;
-                }
+                UploadInstanceData();
+                m_LastUploadedFrame = Time.frameCount;
             }
 
             public Matrix4x4 GetParticleObjectToWorldMatrix(int particleIndex)
@@ -1094,7 +1096,6 @@ namespace VividRP.Runtime.Particle
 
                 ReleaseResources();
                 m_Capacity = capacity;
-                EnsureUploadArrays(capacity);
 
                 Shader shader = null;
                 Material material = sourceMaterial;
@@ -1148,7 +1149,6 @@ namespace VividRP.Runtime.Particle
                 m_RegisteredMaterial = material;
                 m_QuadMesh = CreateQuadMesh();
                 m_InstanceData = CreateInstanceBuffer(capacity);
-                m_InstanceData.SetData(m_ZeroBlockData, 0, 0, m_ZeroBlockData.Length);
 
                 m_BRG = new BatchRendererGroup(new BatchRendererGroupCreateInfo
                 {
@@ -1268,17 +1268,7 @@ namespace VividRP.Runtime.Particle
                 m_LastUploadedFrame = -1;
             }
 
-            private void EnsureUploadArrays(int capacity)
-            {
-                if (m_ObjectToWorldData.Length != capacity)
-                    m_ObjectToWorldData = new PackedMatrix[capacity];
-                if (m_WorldToObjectData.Length != capacity)
-                    m_WorldToObjectData = new PackedMatrix[capacity];
-                if (m_BaseColorData.Length != capacity)
-                    m_BaseColorData = new Vector4[capacity];
-            }
-
-            private void UploadInstanceData()
+            private unsafe void UploadInstanceData()
             {
                 if (m_InstanceData == null || m_System == null)
                     return;
@@ -1288,30 +1278,39 @@ namespace VividRP.Runtime.Particle
                 if (count <= 0)
                     return;
 
-                for (int index = 0; index < count; index++)
+                int elementCount = BufferCountForBytes(InstanceDataByteSize(m_Capacity));
+                NativeArray<int> mappedData = default;
+                try
                 {
-                    Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
-                    m_ObjectToWorldData[index] = new PackedMatrix(objectToWorld);
-                    m_WorldToObjectData[index] = new PackedMatrix(objectToWorld.inverse);
-                    m_BaseColorData[index] = (Vector4)GetParticleRenderColor(index);
-                }
+                    mappedData = m_InstanceData.LockBufferForWrite<int>(0, elementCount);
+                    byte* baseAddress = (byte*)mappedData.GetUnsafePtr();
+                    UnsafeUtility.MemClear(baseAddress, ZeroBlockByteSize);
 
-                m_InstanceData.SetData(m_ZeroBlockData, 0, 0, m_ZeroBlockData.Length);
-                m_InstanceData.SetData(
-                    m_ObjectToWorldData,
-                    0,
-                    ObjectToWorldByteAddress(m_Capacity) / SizeOfPackedMatrix,
-                    count);
-                m_InstanceData.SetData(
-                    m_WorldToObjectData,
-                    0,
-                    WorldToObjectByteAddress(m_Capacity) / SizeOfPackedMatrix,
-                    count);
-                m_InstanceData.SetData(
-                    m_BaseColorData,
-                    0,
-                    BaseColorByteAddress(m_Capacity) / SizeOfFloat4,
-                    count);
+                    for (int index = 0; index < count; index++)
+                    {
+                        Matrix4x4 objectToWorld = GetParticleObjectToWorldMatrix(index);
+                        WriteArrayElement(
+                            baseAddress,
+                            ObjectToWorldByteAddress(m_Capacity),
+                            index,
+                            new PackedMatrix(objectToWorld));
+                        WriteArrayElement(
+                            baseAddress,
+                            WorldToObjectByteAddress(m_Capacity),
+                            index,
+                            new PackedMatrix(objectToWorld.inverse));
+                        WriteArrayElement(
+                            baseAddress,
+                            BaseColorByteAddress(m_Capacity),
+                            index,
+                            (Vector4)GetParticleRenderColor(index));
+                    }
+                }
+                finally
+                {
+                    if (mappedData.IsCreated)
+                        m_InstanceData.UnlockBufferAfterWrite<int>(elementCount);
+                }
             }
 
             private unsafe JobHandle OnPerformCulling(
@@ -1460,6 +1459,7 @@ namespace VividRP.Runtime.Particle
             {
                 return new GraphicsBuffer(
                     ResolveBufferTarget(),
+                    GraphicsBuffer.UsageFlags.LockBufferForWrite,
                     BufferCountForBytes(InstanceDataByteSize(capacity)),
                     sizeof(int));
             }
@@ -1486,6 +1486,16 @@ namespace VividRP.Runtime.Particle
             private static int BufferCountForBytes(int byteCount)
             {
                 return (byteCount + sizeof(int) - 1) / sizeof(int);
+            }
+
+            private static unsafe void WriteArrayElement<T>(
+                byte* baseAddress,
+                int byteOffset,
+                int index,
+                T value)
+                where T : struct
+            {
+                UnsafeUtility.WriteArrayElement(baseAddress + byteOffset, index, value);
             }
 
             private static void SampleShape(

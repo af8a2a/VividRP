@@ -629,38 +629,53 @@ namespace VividRP.Editor.Tests
         public void Manager_MetadataOffsets_AreAlignedAndTaggedAsPerInstance()
         {
             int capacity = 17;
-            int positionSize = VividParticleSystemManager.PositionSizeByteAddress(capacity);
-            int baseColor = VividParticleSystemManager.BaseColorByteAddress(capacity);
-            int rotation = VividParticleSystemManager.RotationByteAddress(capacity);
-            int velocityStretch = VividParticleSystemManager.VelocityStretchByteAddress(capacity);
-            int sharedRotation = VividParticleSystemManager.SharedRotationByteAddress(capacity);
-            int sharedVelocityStretch = VividParticleSystemManager.SharedVelocityStretchByteAddress(capacity);
-            MetadataValue metadata = VividParticleSystemManager.CreatePerInstanceMetadata(123, baseColor);
-            MetadataValue sharedMetadata = VividParticleSystemManager.CreateSharedMetadata(456, sharedRotation);
+            VividParticleSystemManager.VividParticleGpuDataLayout billboardLayout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(VividParticleRenderMode.Billboard);
+            VividParticleSystemManager.VividParticleGpuBufferDataInfo[] billboardInfos =
+                billboardLayout.CreateBufferInfos(capacity, sharpCapacity: 1, spanCapacity: 1);
+            VividParticleSystemManager.VividParticleGpuDataLayout stretchLayout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(VividParticleRenderMode.Stretch);
+            VividParticleSystemManager.VividParticleGpuBufferDataInfo[] stretchInfos =
+                stretchLayout.CreateBufferInfos(capacity, sharpCapacity: 1, spanCapacity: 1);
+            MetadataValue metadata = VividParticleSystemManager.CreatePerInstanceMetadata(123, billboardInfos[0].ByteOffset);
+            MetadataValue sharedMetadata = VividParticleSystemManager.CreateSharedMetadata(456, billboardInfos[2].ByteOffset);
 
-            Assert.That(positionSize % 16, Is.EqualTo(0));
-            Assert.That(baseColor % 16, Is.EqualTo(0));
-            Assert.That(rotation % 16, Is.EqualTo(0));
-            Assert.That(velocityStretch % 16, Is.EqualTo(0));
-            Assert.That(sharedRotation % 16, Is.EqualTo(0));
-            Assert.That(sharedVelocityStretch % 16, Is.EqualTo(0));
-            Assert.That(baseColor, Is.EqualTo(positionSize + capacity * VividParticleSystemManager.SizeOfFloat4));
-            Assert.That(rotation, Is.EqualTo(baseColor + capacity * VividParticleSystemManager.SizeOfFloat4));
-            Assert.That(velocityStretch, Is.EqualTo(rotation + capacity * VividParticleSystemManager.SizeOfFloat4));
-            Assert.That(sharedRotation, Is.EqualTo(velocityStretch + capacity * VividParticleSystemManager.SizeOfFloat4));
-            Assert.That(sharedVelocityStretch, Is.EqualTo(sharedRotation + VividParticleSystemManager.SizeOfFloat4));
+            Assert.That(billboardLayout.Count, Is.EqualTo(4));
+            Assert.That(billboardLayout.DataPerSharpBits, Is.EqualTo(0u));
+            Assert.That(billboardInfos[0].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.PositionSize));
+            Assert.That(billboardInfos[0].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(billboardInfos[1].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.BaseColor));
+            Assert.That(billboardInfos[1].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(billboardInfos[2].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.Rotation));
+            Assert.That(billboardInfos[2].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.Shared));
+            Assert.That(billboardInfos[3].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.VelocityStretch));
+            Assert.That(billboardInfos[3].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.Shared));
+
+            Assert.That(billboardInfos[0].ByteOffset, Is.EqualTo(VividParticleSystemManager.ZeroBlockByteSize));
+            Assert.That(billboardInfos[1].ByteOffset, Is.EqualTo(billboardInfos[0].ByteOffset + capacity * VividParticleSystemManager.SizeOfFloat4));
+            Assert.That(billboardInfos[2].ByteOffset, Is.EqualTo(billboardInfos[1].ByteOffset + capacity * VividParticleSystemManager.SizeOfFloat4));
+            Assert.That(billboardInfos[3].ByteOffset, Is.EqualTo(billboardInfos[2].ByteOffset + VividParticleSystemManager.SizeOfFloat4));
             Assert.That(
-                VividParticleSystemManager.InstanceDataByteSize(capacity),
-                Is.EqualTo(sharedVelocityStretch + VividParticleSystemManager.SizeOfFloat4));
-            Assert.That(
-                VividParticleSystemManager.InstanceDataByteSize(capacity),
+                billboardLayout.CalculateByteSize(capacity, sharpCapacity: 1, spanCapacity: 1),
                 Is.EqualTo(VividParticleSystemManager.ZeroBlockByteSize
-                    + capacity * VividParticleSystemManager.SizeOfParticleGpuData
-                    + VividParticleSystemManager.SizeOfSharedGpuData));
+                    + capacity * VividParticleSystemManager.SizeOfFloat4 * 2
+                    + VividParticleSystemManager.SizeOfFloat4 * 2));
+            Assert.That(stretchInfos[3].DataInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(
+                stretchLayout.CalculateByteSize(capacity, sharpCapacity: 1, spanCapacity: 1),
+                Is.EqualTo(VividParticleSystemManager.ZeroBlockByteSize
+                    + capacity * VividParticleSystemManager.SizeOfFloat4 * 3
+                    + VividParticleSystemManager.SizeOfFloat4));
+            for (int index = 0; index < billboardInfos.Length; index++)
+                Assert.That(billboardInfos[index].ByteOffset % 16, Is.EqualTo(0));
+
+            for (int index = 0; index < stretchInfos.Length; index++)
+                Assert.That(stretchInfos[index].ByteOffset % 16, Is.EqualTo(0));
+
             Assert.That((metadata.Value & VividParticleSystemManager.PerInstanceMetadataMask) != 0u, Is.True);
-            Assert.That(metadata.Value & ~VividParticleSystemManager.PerInstanceMetadataMask, Is.EqualTo((uint)baseColor));
+            Assert.That(metadata.Value & ~VividParticleSystemManager.PerInstanceMetadataMask, Is.EqualTo((uint)billboardInfos[0].ByteOffset));
             Assert.That((sharedMetadata.Value & VividParticleSystemManager.PerInstanceMetadataMask) == 0u, Is.True);
-            Assert.That(sharedMetadata.Value, Is.EqualTo((uint)sharedRotation));
+            Assert.That(sharedMetadata.Value, Is.EqualTo((uint)billboardInfos[2].ByteOffset));
             Assert.That(VividParticleSystemManager.UsesPerInstanceRotationData(VividParticleRenderMode.Mesh), Is.False);
             Assert.That(VividParticleSystemManager.UsesPerInstanceVelocityStretchData(VividParticleRenderMode.Billboard), Is.False);
             Assert.That(VividParticleSystemManager.UsesPerInstanceVelocityStretchData(VividParticleRenderMode.Stretch), Is.True);

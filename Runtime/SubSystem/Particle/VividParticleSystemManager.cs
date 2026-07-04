@@ -476,6 +476,11 @@ namespace VividRP.Runtime.Particle
             return (byteCount + sizeof(int) - 1) / sizeof(int);
         }
 
+        private static int AlignTo16(int value)
+        {
+            return (value + 15) & ~15;
+        }
+
         private static GraphicsBuffer.Target ResolveBufferTarget()
         {
             GraphicsBuffer.Target target = GraphicsBuffer.Target.Raw;
@@ -2252,13 +2257,234 @@ namespace VividRP.Runtime.Particle
             }
         }
 
-        private enum InstanceUploadSegment
+        internal enum InstanceUploadSegment
         {
             ZeroBlock,
             PositionSize,
             BaseColor,
             Rotation,
             VelocityStretch,
+        }
+
+        internal enum VividParticleGpuDataId
+        {
+            PositionSize,
+            BaseColor,
+            Rotation,
+            VelocityStretch,
+        }
+
+        internal enum VividParticleGpuDataFrequency
+        {
+            Shared,
+            Span,
+            PerInstance,
+            PerSharp,
+        }
+
+        internal readonly struct VividParticleGpuDataInfo : IEquatable<VividParticleGpuDataInfo>
+        {
+            public VividParticleGpuDataInfo(
+                VividParticleGpuDataId dataId,
+                VividParticleGpuDataFrequency frequency,
+                int elementSize,
+                InstanceUploadSegment uploadSegment)
+            {
+                DataId = dataId;
+                Frequency = frequency;
+                ElementSize = Mathf.Max(1, elementSize);
+                UploadSegment = uploadSegment;
+            }
+
+            public VividParticleGpuDataId DataId { get; }
+
+            public VividParticleGpuDataFrequency Frequency { get; }
+
+            public int ElementSize { get; }
+
+            public InstanceUploadSegment UploadSegment { get; }
+
+            public bool IsPerInstance => Frequency == VividParticleGpuDataFrequency.PerInstance;
+
+            public bool HasUploadSegment => UploadSegment != InstanceUploadSegment.ZeroBlock;
+
+            public bool Equals(VividParticleGpuDataInfo other)
+            {
+                return DataId == other.DataId
+                    && Frequency == other.Frequency
+                    && ElementSize == other.ElementSize
+                    && UploadSegment == other.UploadSegment;
+            }
+
+            public override bool Equals(object obj)
+            {
+                return obj is VividParticleGpuDataInfo other && Equals(other);
+            }
+
+            public override int GetHashCode()
+            {
+                unchecked
+                {
+                    int hash = (int)DataId;
+                    hash = (hash * 397) ^ (int)Frequency;
+                    hash = (hash * 397) ^ ElementSize;
+                    hash = (hash * 397) ^ (int)UploadSegment;
+                    return hash;
+                }
+            }
+        }
+
+        internal readonly struct VividParticleGpuBufferDataInfo
+        {
+            public VividParticleGpuBufferDataInfo(
+                VividParticleGpuDataInfo dataInfo,
+                int byteOffset,
+                int elementCapacity)
+            {
+                DataInfo = dataInfo;
+                ByteOffset = byteOffset;
+                ElementCapacity = Mathf.Max(1, elementCapacity);
+            }
+
+            public VividParticleGpuDataInfo DataInfo { get; }
+
+            public int ByteOffset { get; }
+
+            public int ElementCapacity { get; }
+
+            public int ByteSize => AlignTo16(ElementCapacity * DataInfo.ElementSize);
+        }
+
+        internal readonly struct VividParticleGpuDataLayout
+        {
+            private static readonly VividParticleGpuDataInfo[] s_DefaultDataInfos =
+            {
+                new(VividParticleGpuDataId.PositionSize, VividParticleGpuDataFrequency.PerInstance, SizeOfFloat4, InstanceUploadSegment.PositionSize),
+                new(VividParticleGpuDataId.BaseColor, VividParticleGpuDataFrequency.PerInstance, SizeOfFloat4, InstanceUploadSegment.BaseColor),
+                new(VividParticleGpuDataId.Rotation, VividParticleGpuDataFrequency.Shared, SizeOfFloat4, InstanceUploadSegment.Rotation),
+                new(VividParticleGpuDataId.VelocityStretch, VividParticleGpuDataFrequency.Shared, SizeOfFloat4, InstanceUploadSegment.VelocityStretch),
+            };
+
+            private static readonly VividParticleGpuDataInfo[] s_StretchDataInfos =
+            {
+                new(VividParticleGpuDataId.PositionSize, VividParticleGpuDataFrequency.PerInstance, SizeOfFloat4, InstanceUploadSegment.PositionSize),
+                new(VividParticleGpuDataId.BaseColor, VividParticleGpuDataFrequency.PerInstance, SizeOfFloat4, InstanceUploadSegment.BaseColor),
+                new(VividParticleGpuDataId.Rotation, VividParticleGpuDataFrequency.Shared, SizeOfFloat4, InstanceUploadSegment.Rotation),
+                new(VividParticleGpuDataId.VelocityStretch, VividParticleGpuDataFrequency.PerInstance, SizeOfFloat4, InstanceUploadSegment.VelocityStretch),
+            };
+
+            private readonly VividParticleGpuDataInfo[] m_DataInfos;
+
+            private VividParticleGpuDataLayout(VividParticleGpuDataInfo[] dataInfos)
+            {
+                m_DataInfos = dataInfos;
+                DataPerSharpBits = ComputeDataPerSharpBits(dataInfos);
+                Hash = ComputeHash(dataInfos, DataPerSharpBits);
+            }
+
+            public int Count => m_DataInfos?.Length ?? 0;
+
+            public uint DataPerSharpBits { get; }
+
+            public int Hash { get; }
+
+            public VividParticleGpuDataInfo this[int index] => m_DataInfos[index];
+
+            public static VividParticleGpuDataLayout Create(VividParticleRenderMode renderMode)
+            {
+                return new VividParticleGpuDataLayout(
+                    UsesPerInstanceVelocityStretchData(renderMode)
+                        ? s_StretchDataInfos
+                        : s_DefaultDataInfos);
+            }
+
+            public int CalculateByteSize(int instanceCapacity, int sharpCapacity, int spanCapacity)
+            {
+                int cursor = ZeroBlockByteSize;
+                for (int index = 0; index < Count; index++)
+                {
+                    VividParticleGpuDataInfo dataInfo = m_DataInfos[index];
+                    int elementCapacity = GetElementCapacity(dataInfo.Frequency, instanceCapacity, sharpCapacity, spanCapacity);
+                    cursor = AlignTo16(cursor);
+                    cursor += AlignTo16(elementCapacity * dataInfo.ElementSize);
+                }
+
+                return cursor;
+            }
+
+            public VividParticleGpuBufferDataInfo[] CreateBufferInfos(
+                int instanceCapacity,
+                int sharpCapacity,
+                int spanCapacity)
+            {
+                var bufferInfos = new VividParticleGpuBufferDataInfo[Count];
+                int cursor = ZeroBlockByteSize;
+                for (int index = 0; index < Count; index++)
+                {
+                    VividParticleGpuDataInfo dataInfo = m_DataInfos[index];
+                    int elementCapacity = GetElementCapacity(dataInfo.Frequency, instanceCapacity, sharpCapacity, spanCapacity);
+                    cursor = AlignTo16(cursor);
+                    bufferInfos[index] = new VividParticleGpuBufferDataInfo(dataInfo, cursor, elementCapacity);
+                    cursor += AlignTo16(elementCapacity * dataInfo.ElementSize);
+                }
+
+                return bufferInfos;
+            }
+
+            public bool TryGetDataInfo(
+                VividParticleGpuDataId dataId,
+                out VividParticleGpuDataInfo dataInfo)
+            {
+                for (int index = 0; index < Count; index++)
+                {
+                    dataInfo = m_DataInfos[index];
+                    if (dataInfo.DataId == dataId)
+                        return true;
+                }
+
+                dataInfo = default;
+                return false;
+            }
+
+            private static int GetElementCapacity(
+                VividParticleGpuDataFrequency frequency,
+                int instanceCapacity,
+                int sharpCapacity,
+                int spanCapacity)
+            {
+                return frequency switch
+                {
+                    VividParticleGpuDataFrequency.PerInstance => Mathf.Max(1, instanceCapacity),
+                    VividParticleGpuDataFrequency.PerSharp => Mathf.Max(1, sharpCapacity),
+                    VividParticleGpuDataFrequency.Span => Mathf.Max(1, spanCapacity),
+                    _ => 1,
+                };
+            }
+
+            private static uint ComputeDataPerSharpBits(VividParticleGpuDataInfo[] dataInfos)
+            {
+                uint bits = 0u;
+                for (int index = 0; index < dataInfos.Length; index++)
+                {
+                    if (dataInfos[index].Frequency == VividParticleGpuDataFrequency.PerSharp)
+                        bits |= 1u << (int)dataInfos[index].DataId;
+                }
+
+                return bits;
+            }
+
+            private static int ComputeHash(VividParticleGpuDataInfo[] dataInfos, uint dataPerSharpBits)
+            {
+                unchecked
+                {
+                    int hash = dataInfos.Length;
+                    for (int index = 0; index < dataInfos.Length; index++)
+                        hash = (hash * 397) ^ dataInfos[index].GetHashCode();
+
+                    hash = (hash * 397) ^ (int)dataPerSharpBits;
+                    return hash;
+                }
+            }
         }
 
         private readonly struct InstanceUploadOperation
@@ -2536,13 +2762,18 @@ namespace VividRP.Runtime.Particle
             public readonly int MeshId;
             public readonly int RenderMode;
             public readonly int Layer;
+            public readonly int GpuDataLayoutHash;
+            public readonly uint DataPerSharpBits;
 
             public ParticleDrawKey(ParticleRenderEntry entry)
             {
+                VividParticleGpuDataLayout layout = VividParticleGpuDataLayout.Create(entry.RenderMode);
                 MaterialId = entry.Material != null ? entry.Material.GetEntityId().GetHashCode() : 0;
                 MeshId = entry.Mesh != null ? entry.Mesh.GetEntityId().GetHashCode() : 0;
                 RenderMode = (int)entry.RenderMode;
                 Layer = Mathf.Clamp(entry.Layer, 0, 31);
+                GpuDataLayoutHash = layout.Hash;
+                DataPerSharpBits = layout.DataPerSharpBits;
             }
 
             public bool Equals(ParticleDrawKey other)
@@ -2550,7 +2781,9 @@ namespace VividRP.Runtime.Particle
                 return MaterialId == other.MaterialId
                     && MeshId == other.MeshId
                     && RenderMode == other.RenderMode
-                    && Layer == other.Layer;
+                    && Layer == other.Layer
+                    && GpuDataLayoutHash == other.GpuDataLayoutHash
+                    && DataPerSharpBits == other.DataPerSharpBits;
             }
 
             public override bool Equals(object obj)
@@ -2566,6 +2799,8 @@ namespace VividRP.Runtime.Particle
                     hash = (hash * 397) ^ MeshId;
                     hash = (hash * 397) ^ RenderMode;
                     hash = (hash * 397) ^ Layer;
+                    hash = (hash * 397) ^ GpuDataLayoutHash;
+                    hash = (hash * 397) ^ (int)DataPerSharpBits;
                     return hash;
                 }
             }
@@ -2609,9 +2844,28 @@ namespace VividRP.Runtime.Particle
             public BatchMeshID MeshId;
             public BatchMaterialID MaterialId;
             public bool UsesPageBillboard;
+            public VividParticleGpuDataLayout GpuLayout;
+            public VividParticleGpuBufferDataInfo[] GpuBufferInfos = Array.Empty<VividParticleGpuBufferDataInfo>();
             public int Capacity;
+            public int SharpCapacity;
+            public int SpanCapacity;
             public int DataOffset;
             public bool ZeroBlockDirty;
+
+            public bool TryGetBufferInfo(
+                VividParticleGpuDataId dataId,
+                out VividParticleGpuBufferDataInfo bufferInfo)
+            {
+                for (int index = 0; index < GpuBufferInfos.Length; index++)
+                {
+                    bufferInfo = GpuBufferInfos[index];
+                    if (bufferInfo.DataInfo.DataId == dataId)
+                        return true;
+                }
+
+                bufferInfo = default;
+                return false;
+            }
         }
 
         private struct ParticleUploadWork
@@ -2657,6 +2911,7 @@ namespace VividRP.Runtime.Particle
         {
             public ParticleRenderUploadSource Source;
             public InstanceUploadSegment Segment;
+            public int ColumnByteOffset;
         }
 
         private struct ParticleCullingRecord
@@ -2923,6 +3178,7 @@ namespace VividRP.Runtime.Particle
                                 Material = record.Material,
                                 Mesh = record.Mesh,
                                 UsesPageBillboard = UsesPageBillboardRenderMode(record.RenderMode),
+                                GpuLayout = VividParticleGpuDataLayout.Create(record.RenderMode),
                                 BatchId = BatchID.Null,
                                 ZeroBlockDirty = true,
                             };
@@ -2946,8 +3202,19 @@ namespace VividRP.Runtime.Particle
                         }
 
                         batch.Capacity = Mathf.Max(1, batch.Capacity);
+                        batch.SharpCapacity = Mathf.Max(1, batch.Records.Count);
+                        batch.SpanCapacity = Mathf.Max(
+                            1,
+                            GetVisibleInstanceCount((VividParticleRenderMode)batch.Key.RenderMode, batch.Capacity));
                         batch.DataOffset = AlignTo16(m_TotalBufferByteSize);
-                        m_TotalBufferByteSize = batch.DataOffset + InstanceDataByteSize(batch.Capacity);
+                        batch.GpuBufferInfos = batch.GpuLayout.CreateBufferInfos(
+                            batch.Capacity,
+                            batch.SharpCapacity,
+                            batch.SpanCapacity);
+                        m_TotalBufferByteSize = batch.DataOffset + batch.GpuLayout.CalculateByteSize(
+                            batch.Capacity,
+                            batch.SharpCapacity,
+                            batch.SpanCapacity);
                     }
 
                     bool bufferChanged = m_GPUBuffer.EnsureCapacity(Mathf.Max(ZeroBlockByteSize, m_TotalBufferByteSize));
@@ -2982,31 +3249,20 @@ namespace VividRP.Runtime.Particle
                     ParticleDrawBatch batch = m_DrawBatches[index];
                     batch.MeshId = m_BRG.RegisterMesh(batch.Mesh);
                     batch.MaterialId = m_BRG.RegisterMaterial(batch.Material);
-                    VividParticleRenderMode renderMode = (VividParticleRenderMode)batch.Key.RenderMode;
 
-                    var metadata = new NativeArray<MetadataValue>(4, Allocator.Temp);
+                    var metadata = new NativeArray<MetadataValue>(
+                        batch.GpuBufferInfos.Length,
+                        Allocator.Temp,
+                        NativeArrayOptions.UninitializedMemory);
                     try
                     {
-                        metadata[0] = CreatePerInstanceMetadata(
-                            s_PositionSizeId,
-                            batch.DataOffset + PositionSizeByteAddress(batch.Capacity));
-                        metadata[1] = CreatePerInstanceMetadata(
-                            s_BaseColorId,
-                            batch.DataOffset + BaseColorByteAddress(batch.Capacity));
-                        metadata[2] = UsesPerInstanceRotationData(renderMode)
-                            ? CreatePerInstanceMetadata(
-                                s_RotationId,
-                                batch.DataOffset + RotationByteAddress(batch.Capacity))
-                            : CreateSharedMetadata(
-                                s_RotationId,
-                                batch.DataOffset + SharedRotationByteAddress(batch.Capacity));
-                        metadata[3] = UsesPerInstanceVelocityStretchData(renderMode)
-                            ? CreatePerInstanceMetadata(
-                                s_VelocityStretchId,
-                                batch.DataOffset + VelocityStretchByteAddress(batch.Capacity))
-                            : CreateSharedMetadata(
-                                s_VelocityStretchId,
-                                batch.DataOffset + SharedVelocityStretchByteAddress(batch.Capacity));
+                        for (int metadataIndex = 0; metadataIndex < batch.GpuBufferInfos.Length; metadataIndex++)
+                        {
+                            VividParticleGpuBufferDataInfo bufferInfo = batch.GpuBufferInfos[metadataIndex];
+                            metadata[metadataIndex] = CreateMetadataValue(
+                                bufferInfo.DataInfo,
+                                batch.DataOffset + bufferInfo.ByteOffset);
+                        }
 
                         batch.BatchId = m_BRG.AddBatch(
                             metadata,
@@ -3022,6 +3278,28 @@ namespace VividRP.Runtime.Particle
                     for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
                         batch.Records[recordIndex].State.ResetRendererCullingStats();
                 }
+            }
+
+            private static MetadataValue CreateMetadataValue(
+                VividParticleGpuDataInfo dataInfo,
+                int byteAddress)
+            {
+                int shaderPropertyId = GetGpuDataShaderPropertyId(dataInfo.DataId);
+                return dataInfo.IsPerInstance
+                    ? CreatePerInstanceMetadata(shaderPropertyId, byteAddress)
+                    : CreateSharedMetadata(shaderPropertyId, byteAddress);
+            }
+
+            private static int GetGpuDataShaderPropertyId(VividParticleGpuDataId dataId)
+            {
+                return dataId switch
+                {
+                    VividParticleGpuDataId.PositionSize => s_PositionSizeId,
+                    VividParticleGpuDataId.BaseColor => s_BaseColorId,
+                    VividParticleGpuDataId.Rotation => s_RotationId,
+                    VividParticleGpuDataId.VelocityStretch => s_VelocityStretchId,
+                    _ => 0,
+                };
             }
 
             private void Upload()
@@ -3091,7 +3369,7 @@ namespace VividRP.Runtime.Particle
                                 bufferBase,
                                 out ParticleRenderUploadSource source))
                             {
-                                AddUploadColumnWorks(source, work.StartIndex, count);
+                                AddUploadColumnWorks(batch, source, work.StartIndex, count);
                             }
 
                             AddInstanceCopyOperations(record, batch, work.StartIndex, count);
@@ -3132,6 +3410,7 @@ namespace VividRP.Runtime.Particle
             }
 
             private void AddUploadColumnWorks(
+                ParticleDrawBatch batch,
                 ParticleRenderUploadSource source,
                 int startIndex,
                 int count)
@@ -3140,19 +3419,20 @@ namespace VividRP.Runtime.Particle
                 for (int pageStart = startIndex; pageStart < endIndex; pageStart += BillboardPageSize)
                 {
                     int pageCount = Mathf.Min(BillboardPageSize, endIndex - pageStart);
-                    AddUploadColumnWork(source, InstanceUploadSegment.PositionSize, pageStart, pageCount);
-                    AddUploadColumnWork(source, InstanceUploadSegment.BaseColor, pageStart, pageCount);
-                    if (UsesPerInstanceRotationData((VividParticleRenderMode)source.RenderMode))
-                        AddUploadColumnWork(source, InstanceUploadSegment.Rotation, pageStart, pageCount);
+                    for (int dataIndex = 0; dataIndex < batch.GpuBufferInfos.Length; dataIndex++)
+                    {
+                        VividParticleGpuBufferDataInfo bufferInfo = batch.GpuBufferInfos[dataIndex];
+                        if (!bufferInfo.DataInfo.IsPerInstance || !bufferInfo.DataInfo.HasUploadSegment)
+                            continue;
 
-                    if (UsesPerInstanceVelocityStretchData((VividParticleRenderMode)source.RenderMode))
-                        AddUploadColumnWork(source, InstanceUploadSegment.VelocityStretch, pageStart, pageCount);
+                        AddUploadColumnWork(source, bufferInfo, pageStart, pageCount);
+                    }
                 }
             }
 
             private void AddUploadColumnWork(
                 ParticleRenderUploadSource source,
-                InstanceUploadSegment segment,
+                VividParticleGpuBufferDataInfo bufferInfo,
                 int startIndex,
                 int count)
             {
@@ -3161,7 +3441,8 @@ namespace VividRP.Runtime.Particle
                 m_UploadColumnWorks.Add(new ParticleRenderUploadColumnWork
                 {
                     Source = source,
-                    Segment = segment,
+                    Segment = bufferInfo.DataInfo.UploadSegment,
+                    ColumnByteOffset = bufferInfo.ByteOffset,
                 });
             }
 
@@ -3176,39 +3457,48 @@ namespace VividRP.Runtime.Particle
                     UnsafeUtility.MemClear(bufferBase + batch.DataOffset, ZeroBlockByteSize);
                     m_GPUBuffer.AddCopyOperation(batch.DataOffset, batch.DataOffset, ZeroBlockByteSize);
 
-                    int sharedRotationOffset = batch.DataOffset + SharedRotationByteAddress(batch.Capacity);
-                    UnsafeUtility.WriteArrayElement(
-                        bufferBase + sharedRotationOffset,
-                        0,
-                        new float4(0.0f, 0.0f, 0.0f, 1.0f));
-                    m_GPUBuffer.AddCopyOperation(sharedRotationOffset, sharedRotationOffset, SizeOfFloat4);
-
-                    VividParticleRenderMode renderMode = (VividParticleRenderMode)batch.Key.RenderMode;
-                    bool usesSharedVelocityStretch = !UsesPerInstanceVelocityStretchData(renderMode);
-                    int sharedVelocityStretchOffset = batch.DataOffset + SharedVelocityStretchByteAddress(batch.Capacity);
-                    if (usesSharedVelocityStretch)
-                    {
-                        UnsafeUtility.WriteArrayElement(
-                            bufferBase + sharedVelocityStretchOffset,
-                            0,
-                            new float4(0.0f, 1.0f, 0.0f, 1.0f));
-                        m_GPUBuffer.AddCopyOperation(
-                            sharedVelocityStretchOffset,
-                            sharedVelocityStretchOffset,
-                            SizeOfFloat4);
-                    }
-
                     batch.ZeroBlockDirty = false;
+
+                    int sharedOperationCount = 1;
+                    int sharedByteCount = ZeroBlockByteSize;
+                    for (int dataIndex = 0; dataIndex < batch.GpuBufferInfos.Length; dataIndex++)
+                    {
+                        VividParticleGpuBufferDataInfo bufferInfo = batch.GpuBufferInfos[dataIndex];
+                        if (bufferInfo.DataInfo.Frequency != VividParticleGpuDataFrequency.Shared)
+                            continue;
+
+                        if (!TryGetSharedGpuDataValue(bufferInfo.DataInfo, out float4 value))
+                            continue;
+
+                        int byteOffset = batch.DataOffset + bufferInfo.ByteOffset;
+                        UnsafeUtility.WriteArrayElement(bufferBase + byteOffset, 0, value);
+                        m_GPUBuffer.AddCopyOperation(byteOffset, byteOffset, bufferInfo.DataInfo.ElementSize);
+                        sharedOperationCount++;
+                        sharedByteCount += bufferInfo.DataInfo.ElementSize;
+                    }
 
                     if (batch.Records.Count > 0)
                     {
                         ParticleRenderRecord owner = batch.Records[0];
-                        owner.LastUploadOperationCount += usesSharedVelocityStretch ? 3 : 2;
-                        owner.LastUploadByteCount += ZeroBlockByteSize
-                            + SizeOfFloat4
-                            + (usesSharedVelocityStretch ? SizeOfFloat4 : 0);
+                        owner.LastUploadOperationCount += sharedOperationCount;
+                        owner.LastUploadByteCount += sharedByteCount;
                     }
                 }
+            }
+
+            private static bool TryGetSharedGpuDataValue(
+                VividParticleGpuDataInfo dataInfo,
+                out float4 value)
+            {
+                value = dataInfo.UploadSegment switch
+                {
+                    InstanceUploadSegment.Rotation => new float4(0.0f, 0.0f, 0.0f, 1.0f),
+                    InstanceUploadSegment.VelocityStretch => new float4(0.0f, 1.0f, 0.0f, 1.0f),
+                    _ => default,
+                };
+
+                return dataInfo.UploadSegment is InstanceUploadSegment.Rotation
+                    or InstanceUploadSegment.VelocityStretch;
             }
 
             private void AddInstanceCopyOperations(
@@ -3218,36 +3508,17 @@ namespace VividRP.Runtime.Particle
                 int count)
             {
                 int batchStartIndex = record.BatchBaseIndex + startIndex;
-                int columnByteCount = count * SizeOfFloat4;
-                int positionSizeOffset = batch.DataOffset
-                    + PositionSizeByteAddress(batch.Capacity)
-                    + batchStartIndex * SizeOfFloat4;
-                int baseColorOffset = batch.DataOffset
-                    + BaseColorByteAddress(batch.Capacity)
-                    + batchStartIndex * SizeOfFloat4;
-                VividParticleRenderMode renderMode = (VividParticleRenderMode)record.RenderMode;
-
-                m_GPUBuffer.AddCopyOperation(positionSizeOffset, positionSizeOffset, columnByteCount);
-                m_GPUBuffer.AddCopyOperation(baseColorOffset, baseColorOffset, columnByteCount);
-                record.LastUploadOperationCount += 2;
-                record.LastUploadByteCount += columnByteCount * 2;
-
-                if (UsesPerInstanceRotationData(renderMode))
+                for (int dataIndex = 0; dataIndex < batch.GpuBufferInfos.Length; dataIndex++)
                 {
-                    int rotationOffset = batch.DataOffset
-                        + RotationByteAddress(batch.Capacity)
-                        + batchStartIndex * SizeOfFloat4;
-                    m_GPUBuffer.AddCopyOperation(rotationOffset, rotationOffset, columnByteCount);
-                    record.LastUploadOperationCount++;
-                    record.LastUploadByteCount += columnByteCount;
-                }
+                    VividParticleGpuBufferDataInfo bufferInfo = batch.GpuBufferInfos[dataIndex];
+                    if (!bufferInfo.DataInfo.IsPerInstance || !bufferInfo.DataInfo.HasUploadSegment)
+                        continue;
 
-                if (UsesPerInstanceVelocityStretchData(renderMode))
-                {
-                    int velocityStretchOffset = batch.DataOffset
-                        + VelocityStretchByteAddress(batch.Capacity)
-                        + batchStartIndex * SizeOfFloat4;
-                    m_GPUBuffer.AddCopyOperation(velocityStretchOffset, velocityStretchOffset, columnByteCount);
+                    int columnByteCount = count * bufferInfo.DataInfo.ElementSize;
+                    int byteOffset = batch.DataOffset
+                        + bufferInfo.ByteOffset
+                        + batchStartIndex * bufferInfo.DataInfo.ElementSize;
+                    m_GPUBuffer.AddCopyOperation(byteOffset, byteOffset, columnByteCount);
                     record.LastUploadOperationCount++;
                     record.LastUploadByteCount += columnByteCount;
                 }
@@ -3918,27 +4189,14 @@ namespace VividRP.Runtime.Particle
                 if (endIndex <= source.StartIndex)
                     return;
 
-                int columnOffset = GetColumnOffset(source.BatchCapacity, work.Segment);
                 for (int particleIndex = source.StartIndex; particleIndex < endIndex; particleIndex++)
                 {
                     int batchIndex = source.BatchBaseIndex + particleIndex;
                     UnsafeUtility.WriteArrayElement(
-                        source.BufferBase + source.BatchDataOffset + columnOffset,
+                        source.BufferBase + source.BatchDataOffset + work.ColumnByteOffset,
                         batchIndex,
                         GetValue(source, work.Segment, particleIndex));
                 }
-            }
-
-            private static int GetColumnOffset(int batchCapacity, InstanceUploadSegment segment)
-            {
-                return segment switch
-                {
-                    InstanceUploadSegment.PositionSize => PositionSizeByteAddress(batchCapacity),
-                    InstanceUploadSegment.BaseColor => BaseColorByteAddress(batchCapacity),
-                    InstanceUploadSegment.Rotation => RotationByteAddress(batchCapacity),
-                    InstanceUploadSegment.VelocityStretch => VelocityStretchByteAddress(batchCapacity),
-                    _ => 0,
-                };
             }
 
             private static float4 GetValue(

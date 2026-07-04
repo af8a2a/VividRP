@@ -45,6 +45,8 @@ namespace VividRP.Runtime.Particle
         private static readonly ProfilerMarker s_ManualDrainMarker = new("VividRP.Particle.Manager.ManualDrain");
         private static readonly ProfilerMarker s_BRGUploadMarker = new("VividRP.Particle.Manager.BRGUpload");
 
+        private static readonly VividEcsManagerJobRegistry<ParticleSimulationJobContext> s_SimulationJobRegistry =
+            CreateSimulationJobRegistry();
         private static readonly Dictionary<VividParticleSystem, ParticleSystemState> s_States = new();
         private static readonly VividParticleRendererManager s_RendererManager = new();
         private static bool s_Initialized;
@@ -52,6 +54,10 @@ namespace VividRP.Runtime.Particle
         private static int s_LastCompleteAndUploadFrame = -1;
 
         public static int registeredSystemCount => s_States.Count;
+
+        internal static int registeredSimulationJobCount => s_SimulationJobRegistry.count;
+
+        internal static int registeredRenderJobCount => VividParticleRenderJobPipeline.registeredJobCount;
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
@@ -550,6 +556,31 @@ namespace VividRP.Runtime.Particle
             return s_States[system];
         }
 
+        private static VividEcsManagerJobRegistry<ParticleSimulationJobContext> CreateSimulationJobRegistry()
+        {
+            var registry = new VividEcsManagerJobRegistry<ParticleSimulationJobContext>();
+            registry.Register(
+                "VividParticle.Simulation.Integrate",
+                0,
+                ScheduleParticleIntegrateJob,
+                CanScheduleParticleIntegrateJob);
+            return registry;
+        }
+
+        private static bool CanScheduleParticleIntegrateJob(ParticleSimulationJobContext context)
+        {
+            return context.State != null && context.State.CanScheduleIntegrateJob(context.Snapshot);
+        }
+
+        private static JobHandle ScheduleParticleIntegrateJob(
+            ParticleSimulationJobContext context,
+            JobHandle dependency)
+        {
+            return context.State != null
+                ? context.State.ScheduleIntegrateJob(context.Snapshot, dependency)
+                : dependency;
+        }
+
         private static void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
         {
             if (s_States.Count == 0)
@@ -736,6 +767,20 @@ namespace VividRP.Runtime.Particle
                 new float4(value.m01, value.m11, value.m21, value.m31),
                 new float4(value.m02, value.m12, value.m22, value.m32),
                 new float4(value.m03, value.m13, value.m23, value.m33));
+        }
+
+        private readonly struct ParticleSimulationJobContext
+        {
+            public ParticleSimulationJobContext(
+                ParticleSystemState state,
+                VividParticleSystemFrameSnapshot snapshot)
+            {
+                State = state;
+                Snapshot = snapshot;
+            }
+
+            public readonly ParticleSystemState State;
+            public readonly VividParticleSystemFrameSnapshot Snapshot;
         }
 
         private sealed class ParticleSystemState : IDisposable
@@ -952,14 +997,11 @@ namespace VividRP.Runtime.Particle
 
                 EnsureStorageCapacity(snapshot.MaxParticles);
                 int previousActiveCount = activeCount;
-                if (m_Storage.ScheduleIntegrate(
-                    snapshot.DeltaTime,
-                    Vector3.down * (GravityAcceleration * snapshot.GravityModifier),
-                    out JobHandle handle))
+                if (ScheduleIntegrateViaRegistry(snapshot))
                 {
-                    ScheduledJobCount++;
-                    LastScheduledFrame = Time.frameCount;
-                    handle.Complete();
+                    m_PendingJob.Complete();
+                    m_PendingJob = default;
+                    m_HasPendingJob = false;
                     CompletedJobCount++;
                     LastCompletedFrame = Time.frameCount;
                     m_Storage.ApplyScheduledIntegrateResult();
@@ -1189,18 +1231,47 @@ namespace VividRP.Runtime.Particle
                 m_HasPendingSimulation = true;
                 m_PendingFrame = Time.frameCount;
 
+                return ScheduleIntegrateViaRegistry(snapshot);
+            }
+
+            internal bool CanScheduleIntegrateJob(VividParticleSystemFrameSnapshot snapshot)
+            {
+                return m_Storage.isCreated && activeCount > 0 && snapshot.DeltaTime > 0.0f;
+            }
+
+            internal JobHandle ScheduleIntegrateJob(
+                VividParticleSystemFrameSnapshot snapshot,
+                JobHandle dependency)
+            {
                 if (!m_Storage.ScheduleIntegrate(
                     snapshot.DeltaTime,
                     Vector3.down * (GravityAcceleration * snapshot.GravityModifier),
-                    out m_PendingJob))
+                    dependency,
+                    out JobHandle handle))
                 {
-                    LastScheduledFrame = Time.frameCount;
-                    return false;
+                    return dependency;
                 }
 
                 m_HasPendingJob = true;
                 ScheduledJobCount++;
                 LastScheduledFrame = Time.frameCount;
+                return handle;
+            }
+
+            private bool ScheduleIntegrateViaRegistry(VividParticleSystemFrameSnapshot snapshot)
+            {
+                m_PendingJob = default;
+                m_HasPendingJob = false;
+
+                JobHandle scheduledHandle = s_SimulationJobRegistry.ScheduleEnabled(
+                    new ParticleSimulationJobContext(this, snapshot));
+                if (!m_HasPendingJob)
+                {
+                    LastScheduledFrame = Time.frameCount;
+                    return false;
+                }
+
+                m_PendingJob = scheduledHandle;
                 return true;
             }
 
@@ -4552,43 +4623,97 @@ namespace VividRP.Runtime.Particle
 
         private static class VividParticleRenderJobPipeline
         {
+            private static readonly VividEcsManagerJobRegistry<ParticleRenderJobContext> s_RenderJobRegistry =
+                CreateRenderJobRegistry();
+
+            public static int registeredJobCount => s_RenderJobRegistry.count;
+
             public static JobHandle Schedule(
                 NativeArray<ParticleRenderUploadColumnWork> columnWorks,
                 NativeArray<ParticleRenderSharedDataWork> sharedDataWorks)
             {
-                JobHandle transformHandle = default;
-                JobHandle colorHandle = default;
-                JobHandle velocityStretchHandle = default;
-                JobHandle sharedDataHandle = default;
-
-                if (columnWorks.IsCreated && columnWorks.Length > 0)
-                {
-                    transformHandle = new VividParticleTransformRenderJob
-                    {
-                        Works = columnWorks,
-                    }.Schedule(columnWorks.Length, 32);
-                    colorHandle = new VividParticleColorRenderJob
-                    {
-                        Works = columnWorks,
-                    }.Schedule(columnWorks.Length, 32);
-                    velocityStretchHandle = new VividParticleVelocityStretchRenderJob
-                    {
-                        Works = columnWorks,
-                    }.Schedule(columnWorks.Length, 32);
-                }
-
-                if (sharedDataWorks.IsCreated && sharedDataWorks.Length > 0)
-                {
-                    sharedDataHandle = new VividParticleSharedDataRenderJob
-                    {
-                        Works = sharedDataWorks,
-                    }.Schedule(sharedDataWorks.Length, 32);
-                }
-
-                return JobHandle.CombineDependencies(
-                    JobHandle.CombineDependencies(transformHandle, colorHandle),
-                    JobHandle.CombineDependencies(velocityStretchHandle, sharedDataHandle));
+                return s_RenderJobRegistry.ScheduleEnabled(new ParticleRenderJobContext(columnWorks, sharedDataWorks));
             }
+
+            private static VividEcsManagerJobRegistry<ParticleRenderJobContext> CreateRenderJobRegistry()
+            {
+                var registry = new VividEcsManagerJobRegistry<ParticleRenderJobContext>();
+                registry.Register(
+                    "VividParticle.Render.Transform",
+                    0,
+                    ScheduleTransformJob,
+                    context => context.HasColumnWorks);
+                registry.Register(
+                    "VividParticle.Render.Color",
+                    10,
+                    ScheduleColorJob,
+                    context => context.HasColumnWorks);
+                registry.Register(
+                    "VividParticle.Render.VelocityStretch",
+                    20,
+                    ScheduleVelocityStretchJob,
+                    context => context.HasColumnWorks);
+                registry.Register(
+                    "VividParticle.Render.SharedData",
+                    30,
+                    ScheduleSharedDataJob,
+                    context => context.HasSharedDataWorks);
+                return registry;
+            }
+
+            private static JobHandle ScheduleTransformJob(ParticleRenderJobContext context, JobHandle dependency)
+            {
+                JobHandle handle = new VividParticleTransformRenderJob
+                {
+                    Works = context.ColumnWorks,
+                }.Schedule(context.ColumnWorks.Length, 32);
+                return JobHandle.CombineDependencies(dependency, handle);
+            }
+
+            private static JobHandle ScheduleColorJob(ParticleRenderJobContext context, JobHandle dependency)
+            {
+                JobHandle handle = new VividParticleColorRenderJob
+                {
+                    Works = context.ColumnWorks,
+                }.Schedule(context.ColumnWorks.Length, 32);
+                return JobHandle.CombineDependencies(dependency, handle);
+            }
+
+            private static JobHandle ScheduleVelocityStretchJob(ParticleRenderJobContext context, JobHandle dependency)
+            {
+                JobHandle handle = new VividParticleVelocityStretchRenderJob
+                {
+                    Works = context.ColumnWorks,
+                }.Schedule(context.ColumnWorks.Length, 32);
+                return JobHandle.CombineDependencies(dependency, handle);
+            }
+
+            private static JobHandle ScheduleSharedDataJob(ParticleRenderJobContext context, JobHandle dependency)
+            {
+                JobHandle handle = new VividParticleSharedDataRenderJob
+                {
+                    Works = context.SharedDataWorks,
+                }.Schedule(context.SharedDataWorks.Length, 32);
+                return JobHandle.CombineDependencies(dependency, handle);
+            }
+        }
+
+        private readonly struct ParticleRenderJobContext
+        {
+            public ParticleRenderJobContext(
+                NativeArray<ParticleRenderUploadColumnWork> columnWorks,
+                NativeArray<ParticleRenderSharedDataWork> sharedDataWorks)
+            {
+                ColumnWorks = columnWorks;
+                SharedDataWorks = sharedDataWorks;
+            }
+
+            public readonly NativeArray<ParticleRenderUploadColumnWork> ColumnWorks;
+            public readonly NativeArray<ParticleRenderSharedDataWork> SharedDataWorks;
+
+            public bool HasColumnWorks => ColumnWorks.IsCreated && ColumnWorks.Length > 0;
+
+            public bool HasSharedDataWorks => SharedDataWorks.IsCreated && SharedDataWorks.Length > 0;
         }
 
         [BurstCompile]

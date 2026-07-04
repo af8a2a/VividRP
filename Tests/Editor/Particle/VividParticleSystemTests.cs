@@ -293,6 +293,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_RegistersParticleSimulationAndRenderJobs_InEcsRegistry()
+        {
+            Assert.That(VividParticleSystemManager.registeredSimulationJobCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.registeredRenderJobCount, Is.EqualTo(4));
+
+            VividParticleSystem system = CreateActiveSystem();
+            system.rendererModule.enabled = true;
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var scheduledStats), Is.True);
+            Assert.That(scheduledStats.PendingJobCount, Is.EqualTo(1));
+            Assert.That(scheduledStats.ScheduledJobCount, Is.EqualTo(1));
+
+            VividParticleSystemManager.CompleteAndUploadForTests();
+
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+            Assert.That(rendererStats.LastUploadColumnWorkCount, Is.GreaterThan(0));
+            Assert.That(rendererStats.LastSharedDataWorkCount, Is.GreaterThan(0));
+        }
+
+        [Test]
         public void Manager_PublicParticleCountDrainsPendingJob_BeforeReturning()
         {
             VividParticleSystem system = CreateActiveSystem();

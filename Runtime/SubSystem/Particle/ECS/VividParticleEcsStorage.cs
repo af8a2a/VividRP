@@ -83,6 +83,15 @@ namespace VividRP.Runtime.Particle.ECS
 
         public bool ScheduleIntegrate(float deltaTime, Vector3 gravity, out JobHandle handle)
         {
+            return ScheduleIntegrate(deltaTime, gravity, default, out handle);
+        }
+
+        public bool ScheduleIntegrate(
+            float deltaTime,
+            Vector3 gravity,
+            JobHandle dependency,
+            out JobHandle handle)
+        {
             handle = default;
             int count = activeCount;
             if (!isCreated || count <= 0 || deltaTime <= 0.0f)
@@ -104,7 +113,7 @@ namespace VividRP.Runtime.Particle.ECS
                 ActiveCountOutput = m_ActiveCountOutput,
             };
 
-            handle = job.Schedule();
+            handle = job.Schedule(dependency);
             return true;
         }
 

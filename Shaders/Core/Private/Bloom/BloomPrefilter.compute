@@ -5,6 +5,8 @@
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 
 #pragma kernel KMain
+#pragma use_dxc
+#pragma require Native16Bit
 
 #pragma multi_compile LOW_QUALITY HIGH_QUALITY
 
@@ -19,15 +21,20 @@ CBUFFER_START(cb0)
     float4 _BloomThreshold;  // x: threshold, yzw: quadratic curve
 CBUFFER_END
 
-float3 BilinearSample(float2 uv, float2 offset, out float weight)
+half BloomLuminanceHalf(half3 color)
 {
-    float3 c = SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, uv + offset * _InputTexelSize.zw, 0.0).xyz;
-    c = QuadraticThreshold(c, _BloomThreshold.x, _BloomThreshold.yzw);
-    weight = 1.0 / (Luminance(c) + 1.0);
+    return dot(color, half3(0.2126729, 0.7151522, 0.0721750));
+}
+
+half3 BilinearSample(float2 uv, half2 offset, out half weight)
+{
+    half3 c = half3(SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, uv + float2(offset) * _InputTexelSize.zw, 0.0).xyz);
+    c = QuadraticThresholdHalf(c, half(_BloomThreshold.x), half3(_BloomThreshold.yzw));
+    weight = half(1.0) / (BloomLuminanceHalf(c) + half(1.0));
     return c;
 }
 
-float3 PartialAverage(float3 c0, float3 c1, float3 c2, float3 c3, float w0, float w1, float w2, float w3)
+half3 PartialAverage(half3 c0, half3 c1, half3 c2, half3 c3, half w0, half w1, half w2, half w3)
 {
     return (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3) / (w0 + w1 + w2 + w3);
 }
@@ -41,46 +48,46 @@ void KMain(uint3 dispatchThreadId : SV_DispatchThreadID)
 
 #if LOW_QUALITY
     // Rotated grid - "High Quality Antialiasing" [Lorach07]
-    const float2 kTaps[] = {
-        float2( 0.0,  0.0),
-        float2( 0.9, -0.4),
-        float2(-0.9,  0.4),
-        float2( 0.4,  0.9),
-        float2(-0.4, -0.9)
+    const half2 kTaps[] = {
+        half2( 0.0,  0.0),
+        half2( 0.9, -0.4),
+        half2(-0.9,  0.4),
+        half2( 0.4,  0.9),
+        half2(-0.4, -0.9)
     };
 
-    float w0, w1, w2, w3, w4;
-    float3 c0 = BilinearSample(uv, kTaps[0], w0);
-    float3 c1 = BilinearSample(uv, kTaps[1], w1);
-    float3 c2 = BilinearSample(uv, kTaps[2], w2);
-    float3 c3 = BilinearSample(uv, kTaps[3], w3);
-    float3 c4 = BilinearSample(uv, kTaps[4], w4);
+    half w0, w1, w2, w3, w4;
+    half3 c0 = BilinearSample(uv, kTaps[0], w0);
+    half3 c1 = BilinearSample(uv, kTaps[1], w1);
+    half3 c2 = BilinearSample(uv, kTaps[2], w2);
+    half3 c3 = BilinearSample(uv, kTaps[3], w3);
+    half3 c4 = BilinearSample(uv, kTaps[4], w4);
 
-    float wSum = w0 + w1 + w2 + w3 + w4;
-    float3 output = (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3 + c4 * w4) / wSum;
+    half wSum = w0 + w1 + w2 + w3 + w4;
+    half3 output = (c0 * w0 + c1 * w1 + c2 * w2 + c3 * w3 + c4 * w4) / wSum;
 #else
     // 13-tap "Post-Processing in CoD Advanced Warfare" [Jimenez14]
-    float wA, wB, wC, wD, wE, wF, wG, wH, wI, wJ, wK, wL, wM;
-    float3 A = BilinearSample(uv, float2(-1.0, -1.0), wA);
-    float3 B = BilinearSample(uv, float2( 0.0, -1.0), wB);
-    float3 C = BilinearSample(uv, float2( 1.0, -1.0), wC);
-    float3 D = BilinearSample(uv, float2(-0.5, -0.5), wD);
-    float3 E = BilinearSample(uv, float2( 0.5, -0.5), wE);
-    float3 F = BilinearSample(uv, float2(-1.0,  0.0), wF);
-    float3 G = BilinearSample(uv, float2( 0.0,  0.0), wG);
-    float3 H = BilinearSample(uv, float2( 1.0,  0.0), wH);
-    float3 I = BilinearSample(uv, float2(-0.5,  0.5), wI);
-    float3 J = BilinearSample(uv, float2( 0.5,  0.5), wJ);
-    float3 K = BilinearSample(uv, float2(-1.0,  1.0), wK);
-    float3 L = BilinearSample(uv, float2( 0.0,  1.0), wL);
-    float3 M = BilinearSample(uv, float2( 1.0,  1.0), wM);
+    half wA, wB, wC, wD, wE, wF, wG, wH, wI, wJ, wK, wL, wM;
+    half3 A = BilinearSample(uv, half2(-1.0, -1.0), wA);
+    half3 B = BilinearSample(uv, half2( 0.0, -1.0), wB);
+    half3 C = BilinearSample(uv, half2( 1.0, -1.0), wC);
+    half3 D = BilinearSample(uv, half2(-0.5, -0.5), wD);
+    half3 E = BilinearSample(uv, half2( 0.5, -0.5), wE);
+    half3 F = BilinearSample(uv, half2(-1.0,  0.0), wF);
+    half3 G = BilinearSample(uv, half2( 0.0,  0.0), wG);
+    half3 H = BilinearSample(uv, half2( 1.0,  0.0), wH);
+    half3 I = BilinearSample(uv, half2(-0.5,  0.5), wI);
+    half3 J = BilinearSample(uv, half2( 0.5,  0.5), wJ);
+    half3 K = BilinearSample(uv, half2(-1.0,  1.0), wK);
+    half3 L = BilinearSample(uv, half2( 0.0,  1.0), wL);
+    half3 M = BilinearSample(uv, half2( 1.0,  1.0), wM);
 
-    float3 output = 0;
-    output += PartialAverage(D, E, I, J, wD, wE, wI, wJ) * 0.5;
-    output += PartialAverage(A, B, F, G, wA, wB, wF, wG) * 0.125;
-    output += PartialAverage(B, C, G, H, wB, wC, wG, wH) * 0.125;
-    output += PartialAverage(F, G, K, L, wF, wG, wK, wL) * 0.125;
-    output += PartialAverage(G, H, L, M, wG, wH, wL, wM) * 0.125;
+    half3 output = half3(0.0, 0.0, 0.0);
+    output += PartialAverage(D, E, I, J, wD, wE, wI, wJ) * half(0.5);
+    output += PartialAverage(A, B, F, G, wA, wB, wF, wG) * half(0.125);
+    output += PartialAverage(B, C, G, H, wB, wC, wG, wH) * half(0.125);
+    output += PartialAverage(F, G, K, L, wF, wG, wK, wL) * half(0.125);
+    output += PartialAverage(G, H, L, M, wG, wH, wL, wM) * half(0.125);
 #endif
 
     output *= all(dispatchThreadId.xy <= uint2(_TexelSize.xy));

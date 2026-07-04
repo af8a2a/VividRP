@@ -23,46 +23,49 @@ groupshared uint gs_cacheR[128];
 groupshared uint gs_cacheG[128];
 groupshared uint gs_cacheB[128];
 
-float3 BlurPixels(float3 a, float3 b, float3 c, float3 d, float3 e, float3 f, float3 g, float3 h, float3 i)
+float16_t3 BlurPixels(float16_t3 a, float16_t3 b, float16_t3 c, float16_t3 d, float16_t3 e, float16_t3 f, float16_t3 g, float16_t3 h, float16_t3 i)
 {
-    return 0.27343750 * (e    )
-         + 0.21875000 * (d + f)
-         + 0.10937500 * (c + g)
-         + 0.03125000 * (b + h)
-         + 0.00390625 * (a + i);
+    return float16_t(0.27343750) * (e    )
+         + float16_t(0.21875000) * (d + f)
+         + float16_t(0.10937500) * (c + g)
+         + float16_t(0.03125000) * (b + h)
+         + float16_t(0.00390625) * (a + i);
 }
 
-void Store2Pixels(uint index, float3 pixel1, float3 pixel2)
+void Store2Pixels(uint index, float16_t3 pixel1, float16_t3 pixel2)
 {
-    gs_cacheR[index] = f32tof16(pixel1.r) | f32tof16(pixel2.r) << 16;
-    gs_cacheG[index] = f32tof16(pixel1.g) | f32tof16(pixel2.g) << 16;
-    gs_cacheB[index] = f32tof16(pixel1.b) | f32tof16(pixel2.b) << 16;
+    gs_cacheR[index] = f32tof16(float(pixel1.r)) | f32tof16(float(pixel2.r)) << 16;
+    gs_cacheG[index] = f32tof16(float(pixel1.g)) | f32tof16(float(pixel2.g)) << 16;
+    gs_cacheB[index] = f32tof16(float(pixel1.b)) | f32tof16(float(pixel2.b)) << 16;
 }
 
-void Load2Pixels(uint index, out float3 pixel1, out float3 pixel2)
+void Load2Pixels(uint index, out float16_t3 pixel1, out float16_t3 pixel2)
 {
     uint rr = gs_cacheR[index];
     uint gg = gs_cacheG[index];
     uint bb = gs_cacheB[index];
-    pixel1 = float3(f16tof32(rr      ), f16tof32(gg      ), f16tof32(bb      ));
-    pixel2 = float3(f16tof32(rr >> 16), f16tof32(gg >> 16), f16tof32(bb >> 16));
+    pixel1 = float16_t3(f16tof32(rr      ), f16tof32(gg      ), f16tof32(bb      ));
+    pixel2 = float16_t3(f16tof32(rr >> 16), f16tof32(gg >> 16), f16tof32(bb >> 16));
 }
 
-void Store1Pixel(uint index, float3 pixel)
+void Store1Pixel(uint index, float16_t3 pixel)
 {
-    gs_cacheR[index] = asuint(pixel.r);
-    gs_cacheG[index] = asuint(pixel.g);
-    gs_cacheB[index] = asuint(pixel.b);
+    gs_cacheR[index] = f32tof16(float(pixel.r));
+    gs_cacheG[index] = f32tof16(float(pixel.g));
+    gs_cacheB[index] = f32tof16(float(pixel.b));
 }
 
-void Load1Pixel(uint index, out float3 pixel)
+void Load1Pixel(uint index, out float16_t3 pixel)
 {
-    pixel = asfloat(uint3(gs_cacheR[index], gs_cacheG[index], gs_cacheB[index]));
+    pixel = float16_t3(
+        f16tof32(gs_cacheR[index]),
+        f16tof32(gs_cacheG[index]),
+        f16tof32(gs_cacheB[index]));
 }
 
 void BlurHorizontally(uint outIndex, uint leftMostIndex)
 {
-    float3 s0, s1, s2, s3, s4, s5, s6, s7, s8, s9;
+    float16_t3 s0, s1, s2, s3, s4, s5, s6, s7, s8, s9;
     Load2Pixels(leftMostIndex + 0, s0, s1);
     Load2Pixels(leftMostIndex + 1, s2, s3);
     Load2Pixels(leftMostIndex + 2, s4, s5);
@@ -75,7 +78,7 @@ void BlurHorizontally(uint outIndex, uint leftMostIndex)
 
 void BlurVertically(uint2 pixelCoord, uint topMostIndex)
 {
-    float3 s0, s1, s2, s3, s4, s5, s6, s7, s8;
+    float16_t3 s0, s1, s2, s3, s4, s5, s6, s7, s8;
     Load1Pixel(topMostIndex     , s0);
     Load1Pixel(topMostIndex +  8, s1);
     Load1Pixel(topMostIndex + 16, s2);
@@ -86,7 +89,7 @@ void BlurVertically(uint2 pixelCoord, uint topMostIndex)
     Load1Pixel(topMostIndex + 56, s7);
     Load1Pixel(topMostIndex + 64, s8);
 
-    float3 blurred = BlurPixels(s0, s1, s2, s3, s4, s5, s6, s7, s8);
+    float16_t3 blurred = BlurPixels(s0, s1, s2, s3, s4, s5, s6, s7, s8);
 
     blurred *= all(pixelCoord < uint2(_TexelSize.xy));
     _OutputTexture[pixelCoord] = float4(blurred, 1.0);
@@ -101,17 +104,17 @@ void MAIN(uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThreadID, ui
 
 #if DOWNSAMPLE
     float2 offset = float2(threadUL);
-    float3 p00 = SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset                    + 0.5) * _TexelSize.zw, 0.0).xyz;
-    float3 p10 = SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset + float2(1.0, 0.0) + 0.5) * _TexelSize.zw, 0.0).xyz;
-    float3 p01 = SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset + float2(0.0, 1.0) + 0.5) * _TexelSize.zw, 0.0).xyz;
-    float3 p11 = SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset + float2(1.0, 1.0) + 0.5) * _TexelSize.zw, 0.0).xyz;
+    float16_t3 p00 = float16_t3(SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset                    + 0.5) * _TexelSize.zw, 0.0).xyz);
+    float16_t3 p10 = float16_t3(SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset + float2(1.0, 0.0) + 0.5) * _TexelSize.zw, 0.0).xyz);
+    float16_t3 p01 = float16_t3(SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset + float2(0.0, 1.0) + 0.5) * _TexelSize.zw, 0.0).xyz);
+    float16_t3 p11 = float16_t3(SAMPLE_TEXTURE2D_LOD(_InputTexture, sampler_LinearClamp, (offset + float2(1.0, 1.0) + 0.5) * _TexelSize.zw, 0.0).xyz);
 #else
     uint2 uthreadUL = uint2(max(0, threadUL));
     uint2 size = uint2(_InputTexelSize.xy) - 1u;
-    float3 p00 = _InputTexture[min(uthreadUL + uint2(0u, 0u), size)].xyz;
-    float3 p10 = _InputTexture[min(uthreadUL + uint2(1u, 0u), size)].xyz;
-    float3 p11 = _InputTexture[min(uthreadUL + uint2(1u, 1u), size)].xyz;
-    float3 p01 = _InputTexture[min(uthreadUL + uint2(0u, 1u), size)].xyz;
+    float16_t3 p00 = float16_t3(_InputTexture[min(uthreadUL + uint2(0u, 0u), size)].xyz);
+    float16_t3 p10 = float16_t3(_InputTexture[min(uthreadUL + uint2(1u, 0u), size)].xyz);
+    float16_t3 p11 = float16_t3(_InputTexture[min(uthreadUL + uint2(1u, 1u), size)].xyz);
+    float16_t3 p01 = float16_t3(_InputTexture[min(uthreadUL + uint2(0u, 1u), size)].xyz);
 #endif
 
     uint destIdx = groupThreadId.x + (groupThreadId.y << 4u);
@@ -131,6 +134,12 @@ void MAIN(uint2 groupId : SV_GroupID, uint2 groupThreadId : SV_GroupThreadID, ui
 #define A_GPU 1
 #define A_HLSL 1
 #define FFX_WAVE 1
+#define FFX_HALF
+
+#if defined(FFX_HALF)
+#define A_HALF 1
+#endif
+
 #include "Packages/com.unity.render-pipelines.core/Runtime/PostProcessing/Shaders/ffx/ffx_a.hlsl"
 
 #if !defined(UNITY_COMPILER_DXC)
@@ -173,6 +182,8 @@ groupshared AF1 spdIntermediateR[16][16];
 groupshared AF1 spdIntermediateG[16][16];
 groupshared AF1 spdIntermediateB[16][16];
 groupshared AF1 spdIntermediateA[16][16];
+groupshared AH2 spdIntermediateRG[16][16];
+groupshared AH2 spdIntermediateBA[16][16];
 
 uint2 ClampSpdCoord(ASU2 coord, float2 size)
 {
@@ -276,12 +287,47 @@ AF4 SpdReduce4(AF4 v0, AF4 v1, AF4 v2, AF4 v3)
     return (v0 + v1 + v2 + v3) * 0.25;
 }
 
+AH4 SpdLoadSourceImageH(ASU2 tex)
+{
+    return AH4(_SpdMip0[ClampSpdCoord(tex, _SpdSourceSize.xy)]);
+}
+
+AH4 SpdLoadH(ASU2 tex)
+{
+    return AH4(_SpdMip6[ClampSpdCoord(tex, _SpdMip6Size.xy)]);
+}
+
+void SpdStoreH(ASU2 pix, AH4 outValue, AU1 mip)
+{
+    SpdStoreMip(pix, AF4(outValue), mip);
+}
+
+AH4 SpdLoadIntermediateH(AU1 x, AU1 y)
+{
+    return AH4(
+        spdIntermediateRG[x][y].x,
+        spdIntermediateRG[x][y].y,
+        spdIntermediateBA[x][y].x,
+        spdIntermediateBA[x][y].y);
+}
+
+void SpdStoreIntermediateH(AU1 x, AU1 y, AH4 value)
+{
+    spdIntermediateRG[x][y] = value.xy;
+    spdIntermediateBA[x][y] = value.zw;
+}
+
+AH4 SpdReduce4H(AH4 v0, AH4 v1, AH4 v2, AH4 v3)
+{
+    return (v0 + v1 + v2 + v3) * AH1(0.25);
+}
+
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/FidelityFX/ffx_spd.hlsl"
 
 [numthreads(256, 1, 1)]
 void KSpdDownsample(uint3 workGroupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
 {
-    SpdDownsample(
+    SpdDownsampleH(
         AU2(workGroupId.xy),
         AU1(localThreadIndex),
         AU1(mips),

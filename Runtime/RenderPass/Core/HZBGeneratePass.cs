@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class HZBGeneratePass : UnsafePass, IAllowGlobalStateModificationPass
+    public sealed class HZBGeneratePass : ComputePass, IAsyncComputeSupportedPass
     {
         private const int MaxTextureMipCount = 13;
         private const int CopyKernelThreadGroupSize = 8;
@@ -124,20 +124,16 @@ namespace VividRP.Runtime.RenderPass.Core
             ZeroAtomicCounterBuffer();
         }
 
-        public override void Record(UnsafePassContext context)
+        public override void Record(ComputePassContext context)
         {
             if (!CanExecute())
                 return;
 
-            var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+            var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                RTHandle hzbHandle = m_HzbTexture.innerHandle;
-                if (hzbHandle == null)
-                    return;
-
                 cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, InputDepthId, m_DepthTexture.innerHandle);
-                cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, s_MipTextureIds[0], hzbHandle, 0);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_CopyKernel, s_MipTextureIds[0], m_HzbTexture, 0);
                 cmd.DispatchCompute(
                     m_ComputeShader,
                     m_CopyKernel,
@@ -156,7 +152,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         GlobalAtomicBufferId,
                         m_GlobalAtomicImportedBuffer);
 
-                    BindMipTextureViews(cmd, m_ComputeShader, m_DownsampleKernel, hzbHandle, m_MipCount);
+                    BindMipTextureViews(cmd, m_ComputeShader, m_DownsampleKernel, m_HzbTexture, m_MipCount);
                     cmd.DispatchCompute(
                         m_ComputeShader,
                         m_DownsampleKernel,
@@ -165,9 +161,9 @@ namespace VividRP.Runtime.RenderPass.Core
                         1);
                 }
 
-                cmd.SetGlobalTexture(HzbGlobalTextureId, m_HzbTexture.innerHandle);
             }
         }
+
 
         public override void Dispose()
         {
@@ -290,10 +286,10 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private static void BindMipTextureViews(
-            CommandBuffer cmd,
+            ComputeCommandBuffer cmd,
             ComputeShader computeShader,
             int kernelIndex,
-            RTHandle hzbHandle,
+            RenderGraphTexture hzbHandle,
             int mipCount)
         {
             if (cmd == null || computeShader == null || hzbHandle == null)

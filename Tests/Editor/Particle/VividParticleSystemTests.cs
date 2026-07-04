@@ -955,6 +955,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Renderer_DrawOutputDefaults_ProvideSortingAndLayerFiltering()
+        {
+            Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(4), Is.EqualTo(12));
+            Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(-1), Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 5), Is.True);
+            Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 4), Is.False);
+
+            BatchDrawCommandFlags flags = VividParticleSystemManager.ResolveParticleDrawCommandFlags(
+                hasSortingPosition: true,
+                hasMotion: false);
+            Assert.That((flags & BatchDrawCommandFlags.HasSortingPosition) != 0, Is.True);
+            Assert.That((flags & BatchDrawCommandFlags.HasMotion) == 0, Is.True);
+
+            flags = VividParticleSystemManager.ResolveParticleDrawCommandFlags(
+                hasSortingPosition: true,
+                hasMotion: true);
+            Assert.That((flags & BatchDrawCommandFlags.HasMotion) != 0, Is.True);
+        }
+
+        [Test]
         public void Manager_UpdateRendering_WithNoParticlesKeepsDrawCountEmpty()
         {
             VividParticleSystem system = CreateSystem();

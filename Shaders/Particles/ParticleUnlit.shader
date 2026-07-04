@@ -129,10 +129,13 @@ Shader "VividRP/Particles/Unlit"
 
                 float4 VividLoadParticleFloat4(uint metadata, uint particleIndex, float4 defaultValue)
                 {
-                    if (!IsDOTSInstancedProperty(metadata))
+                    if (metadata == 0u)
                         return defaultValue;
 
-                    uint address = (metadata & kAddressMask) + particleIndex * 16u;
+                    uint address = metadata & kAddressMask;
+                    if (IsDOTSInstancedProperty(metadata))
+                        address += particleIndex * 16u;
+
                     return asfloat(DOTSInstanceData_Load4(address));
                 }
 

@@ -26,6 +26,7 @@ namespace VividRP.Runtime.Particle
         internal const uint PerInstanceMetadataMask = 0x80000000u;
         internal const int SizeOfFloat4 = sizeof(float) * 4;
         internal const int SizeOfParticleGpuData = SizeOfFloat4 * 4;
+        internal const int SizeOfSharedGpuData = SizeOfFloat4 * 2;
         internal const int ZeroBlockByteSize = SizeOfFloat4;
         internal const int BillboardPageSize = VividEcsConstants.PageEntryCount;
 
@@ -386,6 +387,15 @@ namespace VividRP.Runtime.Particle
             };
         }
 
+        internal static MetadataValue CreateSharedMetadata(int nameId, int byteAddress)
+        {
+            return new MetadataValue
+            {
+                NameID = nameId,
+                Value = (uint)byteAddress,
+            };
+        }
+
         internal static int PositionSizeByteAddress(int capacity)
         {
             return ZeroBlockByteSize;
@@ -406,9 +416,19 @@ namespace VividRP.Runtime.Particle
             return RotationByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
         }
 
-        internal static int InstanceDataByteSize(int capacity)
+        internal static int SharedRotationByteAddress(int capacity)
         {
             return VelocityStretchByteAddress(capacity) + Mathf.Max(1, capacity) * SizeOfFloat4;
+        }
+
+        internal static int SharedVelocityStretchByteAddress(int capacity)
+        {
+            return SharedRotationByteAddress(capacity) + SizeOfFloat4;
+        }
+
+        internal static int InstanceDataByteSize(int capacity)
+        {
+            return SharedVelocityStretchByteAddress(capacity) + SizeOfFloat4;
         }
 
         internal static bool UsesPageBillboardRenderMode(VividParticleRenderMode renderMode)
@@ -425,6 +445,16 @@ namespace VividRP.Runtime.Particle
             return UsesPageBillboardRenderMode(renderMode)
                 ? (particleCount + BillboardPageSize - 1) / BillboardPageSize
                 : particleCount;
+        }
+
+        internal static bool UsesPerInstanceRotationData(VividParticleRenderMode renderMode)
+        {
+            return false;
+        }
+
+        internal static bool UsesPerInstanceVelocityStretchData(VividParticleRenderMode renderMode)
+        {
+            return renderMode == VividParticleRenderMode.Stretch;
         }
 
         internal static int EncodeBillboardPageVisibleInstance(int baseParticleIndex, int pageParticleCount)
@@ -2952,6 +2982,7 @@ namespace VividRP.Runtime.Particle
                     ParticleDrawBatch batch = m_DrawBatches[index];
                     batch.MeshId = m_BRG.RegisterMesh(batch.Mesh);
                     batch.MaterialId = m_BRG.RegisterMaterial(batch.Material);
+                    VividParticleRenderMode renderMode = (VividParticleRenderMode)batch.Key.RenderMode;
 
                     var metadata = new NativeArray<MetadataValue>(4, Allocator.Temp);
                     try
@@ -2962,12 +2993,20 @@ namespace VividRP.Runtime.Particle
                         metadata[1] = CreatePerInstanceMetadata(
                             s_BaseColorId,
                             batch.DataOffset + BaseColorByteAddress(batch.Capacity));
-                        metadata[2] = CreatePerInstanceMetadata(
-                            s_RotationId,
-                            batch.DataOffset + RotationByteAddress(batch.Capacity));
-                        metadata[3] = CreatePerInstanceMetadata(
-                            s_VelocityStretchId,
-                            batch.DataOffset + VelocityStretchByteAddress(batch.Capacity));
+                        metadata[2] = UsesPerInstanceRotationData(renderMode)
+                            ? CreatePerInstanceMetadata(
+                                s_RotationId,
+                                batch.DataOffset + RotationByteAddress(batch.Capacity))
+                            : CreateSharedMetadata(
+                                s_RotationId,
+                                batch.DataOffset + SharedRotationByteAddress(batch.Capacity));
+                        metadata[3] = UsesPerInstanceVelocityStretchData(renderMode)
+                            ? CreatePerInstanceMetadata(
+                                s_VelocityStretchId,
+                                batch.DataOffset + VelocityStretchByteAddress(batch.Capacity))
+                            : CreateSharedMetadata(
+                                s_VelocityStretchId,
+                                batch.DataOffset + SharedVelocityStretchByteAddress(batch.Capacity));
 
                         batch.BatchId = m_BRG.AddBatch(
                             metadata,
@@ -3034,7 +3073,7 @@ namespace VividRP.Runtime.Particle
                     NativeArray<ParticleRenderUploadColumnWork> uploadColumnWorks = default;
                     try
                     {
-                        WriteDirtyZeroBlocks(bufferBase);
+                        WriteDirtySharedBlocks(bufferBase);
 
                         for (int workIndex = 0; workIndex < m_UploadWorks.Count; workIndex++)
                         {
@@ -3103,8 +3142,11 @@ namespace VividRP.Runtime.Particle
                     int pageCount = Mathf.Min(BillboardPageSize, endIndex - pageStart);
                     AddUploadColumnWork(source, InstanceUploadSegment.PositionSize, pageStart, pageCount);
                     AddUploadColumnWork(source, InstanceUploadSegment.BaseColor, pageStart, pageCount);
-                    AddUploadColumnWork(source, InstanceUploadSegment.Rotation, pageStart, pageCount);
-                    AddUploadColumnWork(source, InstanceUploadSegment.VelocityStretch, pageStart, pageCount);
+                    if (UsesPerInstanceRotationData((VividParticleRenderMode)source.RenderMode))
+                        AddUploadColumnWork(source, InstanceUploadSegment.Rotation, pageStart, pageCount);
+
+                    if (UsesPerInstanceVelocityStretchData((VividParticleRenderMode)source.RenderMode))
+                        AddUploadColumnWork(source, InstanceUploadSegment.VelocityStretch, pageStart, pageCount);
                 }
             }
 
@@ -3123,7 +3165,7 @@ namespace VividRP.Runtime.Particle
                 });
             }
 
-            private void WriteDirtyZeroBlocks(byte* bufferBase)
+            private void WriteDirtySharedBlocks(byte* bufferBase)
             {
                 for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
                 {
@@ -3133,13 +3175,38 @@ namespace VividRP.Runtime.Particle
 
                     UnsafeUtility.MemClear(bufferBase + batch.DataOffset, ZeroBlockByteSize);
                     m_GPUBuffer.AddCopyOperation(batch.DataOffset, batch.DataOffset, ZeroBlockByteSize);
+
+                    int sharedRotationOffset = batch.DataOffset + SharedRotationByteAddress(batch.Capacity);
+                    UnsafeUtility.WriteArrayElement(
+                        bufferBase + sharedRotationOffset,
+                        0,
+                        new float4(0.0f, 0.0f, 0.0f, 1.0f));
+                    m_GPUBuffer.AddCopyOperation(sharedRotationOffset, sharedRotationOffset, SizeOfFloat4);
+
+                    VividParticleRenderMode renderMode = (VividParticleRenderMode)batch.Key.RenderMode;
+                    bool usesSharedVelocityStretch = !UsesPerInstanceVelocityStretchData(renderMode);
+                    int sharedVelocityStretchOffset = batch.DataOffset + SharedVelocityStretchByteAddress(batch.Capacity);
+                    if (usesSharedVelocityStretch)
+                    {
+                        UnsafeUtility.WriteArrayElement(
+                            bufferBase + sharedVelocityStretchOffset,
+                            0,
+                            new float4(0.0f, 1.0f, 0.0f, 1.0f));
+                        m_GPUBuffer.AddCopyOperation(
+                            sharedVelocityStretchOffset,
+                            sharedVelocityStretchOffset,
+                            SizeOfFloat4);
+                    }
+
                     batch.ZeroBlockDirty = false;
 
                     if (batch.Records.Count > 0)
                     {
                         ParticleRenderRecord owner = batch.Records[0];
-                        owner.LastUploadOperationCount++;
-                        owner.LastUploadByteCount += ZeroBlockByteSize;
+                        owner.LastUploadOperationCount += usesSharedVelocityStretch ? 3 : 2;
+                        owner.LastUploadByteCount += ZeroBlockByteSize
+                            + SizeOfFloat4
+                            + (usesSharedVelocityStretch ? SizeOfFloat4 : 0);
                     }
                 }
             }
@@ -3158,19 +3225,32 @@ namespace VividRP.Runtime.Particle
                 int baseColorOffset = batch.DataOffset
                     + BaseColorByteAddress(batch.Capacity)
                     + batchStartIndex * SizeOfFloat4;
-                int rotationOffset = batch.DataOffset
-                    + RotationByteAddress(batch.Capacity)
-                    + batchStartIndex * SizeOfFloat4;
-                int velocityStretchOffset = batch.DataOffset
-                    + VelocityStretchByteAddress(batch.Capacity)
-                    + batchStartIndex * SizeOfFloat4;
+                VividParticleRenderMode renderMode = (VividParticleRenderMode)record.RenderMode;
 
                 m_GPUBuffer.AddCopyOperation(positionSizeOffset, positionSizeOffset, columnByteCount);
                 m_GPUBuffer.AddCopyOperation(baseColorOffset, baseColorOffset, columnByteCount);
-                m_GPUBuffer.AddCopyOperation(rotationOffset, rotationOffset, columnByteCount);
-                m_GPUBuffer.AddCopyOperation(velocityStretchOffset, velocityStretchOffset, columnByteCount);
-                record.LastUploadOperationCount += 4;
-                record.LastUploadByteCount += columnByteCount * 4;
+                record.LastUploadOperationCount += 2;
+                record.LastUploadByteCount += columnByteCount * 2;
+
+                if (UsesPerInstanceRotationData(renderMode))
+                {
+                    int rotationOffset = batch.DataOffset
+                        + RotationByteAddress(batch.Capacity)
+                        + batchStartIndex * SizeOfFloat4;
+                    m_GPUBuffer.AddCopyOperation(rotationOffset, rotationOffset, columnByteCount);
+                    record.LastUploadOperationCount++;
+                    record.LastUploadByteCount += columnByteCount;
+                }
+
+                if (UsesPerInstanceVelocityStretchData(renderMode))
+                {
+                    int velocityStretchOffset = batch.DataOffset
+                        + VelocityStretchByteAddress(batch.Capacity)
+                        + batchStartIndex * SizeOfFloat4;
+                    m_GPUBuffer.AddCopyOperation(velocityStretchOffset, velocityStretchOffset, columnByteCount);
+                    record.LastUploadOperationCount++;
+                    record.LastUploadByteCount += columnByteCount;
+                }
             }
 
             private void PublishCleanStats()

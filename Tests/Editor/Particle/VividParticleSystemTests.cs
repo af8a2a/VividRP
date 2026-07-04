@@ -146,6 +146,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_UsesFixedPageCapacity_AndClampsActiveCountWhenMaxParticlesShrinks()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.main.maxParticles = 3;
+            system.main.startLifetime = 10.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(10);
+
+            Assert.That(system.particleStoragePageSize, Is.EqualTo(256));
+            Assert.That(system.particleStorageCapacity, Is.EqualTo(256));
+            Assert.That(system.particleStorageActiveCount, Is.EqualTo(3));
+            Assert.That(system.particleCount, Is.EqualTo(3));
+
+            system.main.maxParticles = 300;
+            system.Emit(10);
+
+            Assert.That(system.particleStorageCapacity, Is.EqualTo(512));
+            Assert.That(system.particleCount, Is.EqualTo(13));
+
+            system.main.maxParticles = 2;
+            Assert.That(system.particleStorageActiveCount, Is.EqualTo(2));
+            Assert.That(system.particleCount, Is.EqualTo(2));
+            Assert.That(system.GetParticleRenderColor(2), Is.EqualTo(Color.clear));
+
+            system.Simulate(0.01f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Assert.That(system.particleStorageCapacity, Is.EqualTo(256));
+            Assert.That(system.particleStorageActiveCount, Is.EqualTo(2));
+            Assert.That(system.particleCount, Is.EqualTo(2));
+        }
+
+        [Test]
         public void PlayPauseStop_UpdateExpectedStateAndClearParticles()
         {
             VividParticleSystem system = CreateSystem();
@@ -203,6 +237,49 @@ namespace VividRP.Editor.Tests
 
             Assert.That(system.particleCount, Is.EqualTo(5));
             Assert.That(system.time, Is.EqualTo(0.25f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Simulate_IntegratesWithBurstJob_AndAppliesGravity()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.x, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(position.y, Is.EqualTo(-2.4525f).Within(0.0001f));
+            Assert.That(position.z, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Simulate_CompactsExpiredParticles_WithSwapBackStorage()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.main.maxParticles = 4;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 0.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.main.startLifetime = 0.05f;
+            system.Emit(1);
+            system.main.startLifetime = 1.0f;
+            system.Emit(2);
+
+            system.Simulate(0.1f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Assert.That(system.particleCount, Is.EqualTo(2));
+            Assert.That(system.particleStorageActiveCount, Is.EqualTo(2));
+            Assert.That(system.GetParticleRenderColor(0).a, Is.GreaterThan(0.0f));
+            Assert.That(system.GetParticleRenderColor(1).a, Is.GreaterThan(0.0f));
         }
 
         [Test]
@@ -384,6 +461,30 @@ namespace VividRP.Editor.Tests
 
             Assert.That(VividParticleSystemManager.registeredSystemCount, Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.Contains(system), Is.False);
+        }
+
+        [Test]
+        public void Disable_ReleasesNativeStorage_AndClearsRuntimeState()
+        {
+            var gameObject = new GameObject("Vivid Particle System Test");
+            m_ToDestroy.Add(gameObject);
+
+            VividParticleSystem system = gameObject.AddComponent<VividParticleSystem>();
+            system.Stop(withChildren: false, VividParticleSystemStopBehavior.StopEmittingAndClear);
+            system.rendererModule.enabled = false;
+            system.main.maxParticles = 3;
+            system.emission.enabled = false;
+
+            system.Emit(2);
+            Assert.That(system.particleCount, Is.EqualTo(2));
+            Assert.That(system.particleStorageCapacity, Is.EqualTo(256));
+
+            gameObject.SetActive(false);
+
+            Assert.That(system.particleCount, Is.EqualTo(0));
+            Assert.That(system.particleStorageCapacity, Is.EqualTo(0));
+            Assert.That(system.isPlaying, Is.False);
+            Assert.That(system.isPaused, Is.False);
         }
 
         [Test]

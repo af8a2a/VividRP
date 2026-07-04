@@ -33,12 +33,11 @@ namespace VividRP.Runtime.Particle
         [SerializeField]
         private VividParticleRendererModule m_Renderer = VividParticleRendererModule.CreateDefault();
 
-        private VividParticleRuntimeParticle[] m_Particles = Array.Empty<VividParticleRuntimeParticle>();
+        private VividParticleStorage m_Particles = new();
         private bool[] m_BurstTriggered = Array.Empty<bool>();
         private System.Random m_Random;
         private float m_Time;
         private float m_EmissionAccumulator;
-        private int m_ParticleCount;
         private bool m_IsPlaying;
         private bool m_IsPaused;
         private bool m_StopEmitting;
@@ -111,8 +110,6 @@ namespace VividRP.Runtime.Particle
 
         internal int aliveParticleCount => validParticleCount;
 
-        internal VividParticleRuntimeParticle[] particles => m_Particles;
-
         internal Bounds worldBounds => CalculateWorldBounds();
 
         internal bool shouldRender => isActiveAndEnabled && rendererModule.enabled && validParticleCount > 0;
@@ -122,23 +119,28 @@ namespace VividRP.Runtime.Particle
 
         internal int maxParticles => main.maxParticles;
 
-        private int validParticleCount => Mathf.Clamp(m_ParticleCount, 0, m_Particles?.Length ?? 0);
+        internal int particleStoragePageSize => VividParticleStorage.PageSize;
+
+        internal int particleStorageCapacity => m_Particles?.capacity ?? 0;
+
+        internal int particleStorageActiveCount => validParticleCount;
+
+        private int validParticleCount => Mathf.Min(m_Particles?.activeCount ?? 0, main.maxParticles);
 
         internal Matrix4x4 GetParticleObjectToWorldMatrix(int particleIndex)
         {
             if (particleIndex < 0
-                || particleIndex >= m_ParticleCount
+                || particleIndex >= validParticleCount
                 || m_Particles == null
-                || particleIndex >= m_Particles.Length)
+                || !m_Particles.IsValidIndex(particleIndex))
             {
                 return Matrix4x4.identity;
             }
 
-            VividParticleRuntimeParticle particle = m_Particles[particleIndex];
-            Vector3 position = GetParticleWorldPosition(particle);
+            Vector3 position = GetParticleWorldPosition(m_Particles.GetPosition(particleIndex));
             float size = Mathf.Max(
                 VividParticleMainModule.MinimumStartSize,
-                particle.size * rendererModule.sizeScale);
+                m_Particles.GetSize(particleIndex) * rendererModule.sizeScale);
 
             return Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * size);
         }
@@ -146,18 +148,18 @@ namespace VividRP.Runtime.Particle
         internal Color GetParticleRenderColor(int particleIndex)
         {
             if (particleIndex < 0
-                || particleIndex >= m_ParticleCount
+                || particleIndex >= validParticleCount
                 || m_Particles == null
-                || particleIndex >= m_Particles.Length)
+                || !m_Particles.IsValidIndex(particleIndex))
             {
                 return Color.clear;
             }
 
-            VividParticleRuntimeParticle particle = m_Particles[particleIndex];
-            float lifetimeRatio = particle.startLifetime > 0.0f
-                ? Mathf.Clamp01(particle.remainingLifetime / particle.startLifetime)
+            float startLifetime = m_Particles.GetStartLifetime(particleIndex);
+            float lifetimeRatio = startLifetime > 0.0f
+                ? Mathf.Clamp01(m_Particles.GetRemainingLifetime(particleIndex) / startLifetime)
                 : 0.0f;
-            Color color = particle.color * rendererModule.color;
+            Color color = m_Particles.GetColor(particleIndex) * rendererModule.color;
             color.a *= lifetimeRatio;
             return color;
         }
@@ -167,7 +169,7 @@ namespace VividRP.Runtime.Particle
             if (m_IsPaused)
                 return;
 
-            bool ageOnly = m_StopEmitting && m_ParticleCount > 0;
+            bool ageOnly = m_StopEmitting && particleCount > 0;
             if (!m_IsPlaying && !ageOnly)
                 return;
 
@@ -183,7 +185,7 @@ namespace VividRP.Runtime.Particle
             EnsureRuntimeStorage();
             EnsureRandom();
 
-            int available = Mathf.Max(0, main.maxParticles - m_ParticleCount);
+            int available = Mathf.Max(0, main.maxParticles - particleCount);
             int spawnCount = Mathf.Min(count, available);
             for (int index = 0; index < spawnCount; index++)
                 SpawnParticle();
@@ -196,10 +198,10 @@ namespace VividRP.Runtime.Particle
 
             EnsureModules();
             EnsureRuntimeStorage();
-            AgeParticles(deltaTime);
+            IntegrateParticles(deltaTime);
             AdvanceEmission(deltaTime, allowEmission);
 
-            if (m_StopEmitting && m_ParticleCount == 0)
+            if (m_StopEmitting && particleCount == 0)
                 m_StopEmitting = false;
         }
 
@@ -282,6 +284,7 @@ namespace VividRP.Runtime.Particle
             UnregisterEditorUpdate();
 #endif
             VividParticleSystemManager.Unregister(this);
+            ReleaseRuntimeStorage();
         }
 
         private void OnDestroy()
@@ -290,13 +293,17 @@ namespace VividRP.Runtime.Particle
             UnregisterEditorUpdate();
 #endif
             VividParticleSystemManager.Unregister(this);
+            ReleaseRuntimeStorage();
         }
 
         private void OnValidate()
         {
             EnsureModules();
             ValidateModules();
-            EnsureRuntimeStorage();
+            if (m_Particles != null && m_Particles.isCreated)
+                EnsureRuntimeStorage();
+            else
+                EnsureBurstState();
             VividParticleSystemManager.MarkRendererDirty(this);
         }
 
@@ -382,7 +389,7 @@ namespace VividRP.Runtime.Particle
             EnsureRuntimeStorage();
             EnsureRandom();
 
-            if (!main.loop && m_Time >= main.duration && m_ParticleCount == 0)
+            if (!main.loop && m_Time >= main.duration && particleCount == 0)
                 ResetSimulation(clearParticles: true);
 
             m_IsPlaying = true;
@@ -406,7 +413,7 @@ namespace VividRP.Runtime.Particle
                 return;
             }
 
-            m_StopEmitting = m_ParticleCount > 0;
+            m_StopEmitting = particleCount > 0;
             ResetEditorUpdateTime();
             RequestEditorRenderUpdate();
         }
@@ -473,7 +480,7 @@ namespace VividRP.Runtime.Particle
             m_EmissionAccumulator = 0.0f;
             ResetBurstState();
             if (clearParticles)
-                m_ParticleCount = 0;
+                m_Particles?.Clear();
             ResetRandom();
         }
 
@@ -495,24 +502,21 @@ namespace VividRP.Runtime.Particle
 
         private void EnsureRuntimeStorage()
         {
-            int capacity = Mathf.Max(VividParticleMainModule.MinimumMaxParticles, main.maxParticles);
-            if (m_Particles == null || m_Particles.Length != capacity)
-            {
-                var resized = new VividParticleRuntimeParticle[capacity];
-                int sourceLength = m_Particles?.Length ?? 0;
-                int copyCount = Mathf.Min(m_ParticleCount, sourceLength, resized.Length);
-                if (copyCount > 0)
-                {
-                    Array.Copy(m_Particles, resized, copyCount);
-                }
-
-                m_ParticleCount = copyCount;
-                m_Particles = resized;
-            }
-
-            m_ParticleCount = Mathf.Clamp(m_ParticleCount, 0, m_Particles.Length);
-
+            m_Particles ??= new VividParticleStorage();
+            m_Particles.EnsureCapacity(main.maxParticles);
             EnsureBurstState();
+        }
+
+        private void ReleaseRuntimeStorage()
+        {
+            m_Particles?.Dispose();
+            m_Time = 0.0f;
+            m_EmissionAccumulator = 0.0f;
+            m_IsPlaying = false;
+            m_IsPaused = false;
+            m_StopEmitting = false;
+            m_Random = null;
+            ResetBurstState();
         }
 
         private void EnsureBurstState()
@@ -547,23 +551,10 @@ namespace VividRP.Runtime.Particle
             return new System.Random(unchecked((int)seed));
         }
 
-        private void AgeParticles(float deltaTime)
+        private void IntegrateParticles(float deltaTime)
         {
             Vector3 gravity = Vector3.down * (GravityAcceleration * main.gravityModifier);
-            for (int index = m_ParticleCount - 1; index >= 0; index--)
-            {
-                VividParticleRuntimeParticle particle = m_Particles[index];
-                particle.remainingLifetime -= deltaTime;
-                if (particle.remainingLifetime <= 0.0f)
-                {
-                    RemoveParticleAt(index);
-                    continue;
-                }
-
-                particle.velocity += gravity * deltaTime;
-                particle.position += particle.velocity * deltaTime;
-                m_Particles[index] = particle;
-            }
+            m_Particles.Integrate(deltaTime, gravity);
         }
 
         private void AdvanceEmission(float deltaTime, bool allowEmission)
@@ -645,42 +636,29 @@ namespace VividRP.Runtime.Particle
                 velocity = transform.TransformDirection(localDirection).normalized * main.startSpeed;
             }
 
-            m_Particles[m_ParticleCount++] = new VividParticleRuntimeParticle
-            {
-                position = position,
-                velocity = velocity,
-                startLifetime = main.startLifetime,
-                remainingLifetime = main.startLifetime,
-                size = main.startSize,
-                color = main.startColor,
-            };
-        }
-
-        private void RemoveParticleAt(int index)
-        {
-            int lastIndex = m_ParticleCount - 1;
-            if (index != lastIndex)
-                m_Particles[index] = m_Particles[lastIndex];
-
-            m_ParticleCount = lastIndex;
+            m_Particles.Add(
+                position,
+                velocity,
+                main.startLifetime,
+                main.startLifetime,
+                main.startSize,
+                main.startColor);
         }
 
         private Bounds CalculateWorldBounds()
         {
             int particleCount = validParticleCount;
-            if (particleCount <= 0)
+            if (particleCount <= 0 || m_Particles == null || !m_Particles.isCreated || !m_Particles.IsValidIndex(0))
                 return new Bounds(transform.position, Vector3.zero);
 
-            VividParticleRuntimeParticle first = m_Particles[0];
-            Vector3 firstPosition = GetParticleWorldPosition(first);
-            float firstExtent = GetParticleWorldExtent(first);
+            Vector3 firstPosition = GetParticleWorldPosition(m_Particles.GetPosition(0));
+            float firstExtent = GetParticleWorldExtent(m_Particles.GetSize(0));
             var bounds = new Bounds(firstPosition, Vector3.one * (firstExtent * 2.0f));
 
             for (int index = 1; index < particleCount; index++)
             {
-                VividParticleRuntimeParticle particle = m_Particles[index];
-                Vector3 position = GetParticleWorldPosition(particle);
-                float extent = GetParticleWorldExtent(particle);
+                Vector3 position = GetParticleWorldPosition(m_Particles.GetPosition(index));
+                float extent = GetParticleWorldExtent(m_Particles.GetSize(index));
                 bounds.Encapsulate(position + Vector3.one * extent);
                 bounds.Encapsulate(position - Vector3.one * extent);
             }
@@ -688,18 +666,18 @@ namespace VividRP.Runtime.Particle
             return bounds;
         }
 
-        private Vector3 GetParticleWorldPosition(VividParticleRuntimeParticle particle)
+        private Vector3 GetParticleWorldPosition(Vector3 position)
         {
             return main.simulationSpace == VividParticleSystemSimulationSpace.Local
-                ? transform.TransformPoint(particle.position)
-                : particle.position;
+                ? transform.TransformPoint(position)
+                : position;
         }
 
-        private float GetParticleWorldExtent(VividParticleRuntimeParticle particle)
+        private float GetParticleWorldExtent(float size)
         {
             return Mathf.Max(
                 VividParticleMainModule.MinimumStartSize,
-                particle.size * rendererModule.sizeScale * 0.5f);
+                size * rendererModule.sizeScale * 0.5f);
         }
 
         private static Vector3 SampleInsideUnitSphere(System.Random random)
@@ -754,15 +732,5 @@ namespace VividRP.Runtime.Particle
         {
             return minInclusive + (float)random.NextDouble() * (maxInclusive - minInclusive);
         }
-    }
-
-    internal struct VividParticleRuntimeParticle
-    {
-        public Vector3 position;
-        public Vector3 velocity;
-        public float startLifetime;
-        public float remainingLifetime;
-        public float size;
-        public Color color;
     }
 }

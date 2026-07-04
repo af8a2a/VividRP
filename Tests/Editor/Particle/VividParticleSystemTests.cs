@@ -1071,6 +1071,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(4), Is.EqualTo(12));
             Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(-1), Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.RequiresSortingPositionsByDefault(), Is.False);
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 5), Is.True);
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 4), Is.False);
             Assert.That(VividParticleSystemManager.IsPickingOrSelectionView(BatchCullingViewType.Picking), Is.True);
@@ -1088,6 +1089,11 @@ namespace VividRP.Editor.Tests
                 hasMotion: false);
             Assert.That((flags & BatchDrawCommandFlags.HasSortingPosition) != 0, Is.True);
             Assert.That((flags & BatchDrawCommandFlags.HasMotion) == 0, Is.True);
+
+            flags = VividParticleSystemManager.ResolveParticleDrawCommandFlags(
+                hasSortingPosition: false,
+                hasMotion: false);
+            Assert.That((flags & BatchDrawCommandFlags.HasSortingPosition) == 0, Is.True);
 
             flags = VividParticleSystemManager.ResolveParticleDrawCommandFlags(
                 hasSortingPosition: true,

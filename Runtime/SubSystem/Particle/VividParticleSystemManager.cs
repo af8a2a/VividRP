@@ -115,6 +115,7 @@ namespace VividRP.Runtime.Particle
             ParticleSystemState state = GetOrCreateState(system);
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
                 state.ScheduleAutomatic(deltaTime, requireActive: false);
                 state.CompletePending();
@@ -151,6 +152,7 @@ namespace VividRP.Runtime.Particle
 
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
             }
 
@@ -164,6 +166,7 @@ namespace VividRP.Runtime.Particle
 
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
             }
         }
@@ -265,6 +268,7 @@ namespace VividRP.Runtime.Particle
             ParticleSystemState state = GetOrCreateState(system);
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
                 state.Emit(count, system.CaptureFrameSnapshot(0.0f));
             }
@@ -284,6 +288,7 @@ namespace VividRP.Runtime.Particle
             ParticleSystemState state = GetOrCreateState(system);
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
 
                 if (restart)
@@ -322,6 +327,7 @@ namespace VividRP.Runtime.Particle
             ParticleSystemState state = GetOrCreateState(system);
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
                 state.SimulateDeltaImmediate(system.CaptureFrameSnapshot(deltaTime), allowEmission);
             }
@@ -336,6 +342,7 @@ namespace VividRP.Runtime.Particle
 
             using (s_ManualDrainMarker.Auto())
             {
+                s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
                 state.ResetSimulation(system.CaptureFrameSnapshot(0.0f), clearParticles);
             }
@@ -355,6 +362,7 @@ namespace VividRP.Runtime.Particle
         internal static void CompleteAndUploadForTests()
         {
             CompleteAndUploadAll(forceUpload: true, oncePerFrame: false);
+            s_RendererManager.CompletePendingUpload();
         }
 
         internal static void ClearForTests()
@@ -376,6 +384,7 @@ namespace VividRP.Runtime.Particle
             if (system == null || !s_States.TryGetValue(system, out ParticleSystemState state))
                 return false;
 
+            s_RendererManager.CompletePendingUpload();
             s_RendererManager.DrainCullingResults();
             stats = state.stats;
             return true;
@@ -383,8 +392,14 @@ namespace VividRP.Runtime.Particle
 
         internal static VividParticleRendererManagerStats GetRendererStatsForTests()
         {
+            s_RendererManager.CompletePendingUpload();
             s_RendererManager.DrainCullingResults();
             return s_RendererManager.stats;
+        }
+
+        internal static bool HasPendingRendererUploadForTests()
+        {
+            return s_RendererManager.hasPendingUpload;
         }
 
         internal static MetadataValue CreatePerInstanceMetadata(int nameId, int byteAddress)
@@ -614,6 +629,7 @@ namespace VividRP.Runtime.Particle
         private static void ScheduleAutomaticUpdates(float? deltaTimeOverride)
         {
             bool scheduledAnyJob = false;
+            s_RendererManager.CompletePendingUpload();
             foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
                 pair.Value.CompletePending();
 
@@ -3004,6 +3020,7 @@ namespace VividRP.Runtime.Particle
             public int SpanCapacity;
             public int DataOffset;
             public bool ZeroBlockDirty;
+            public bool ZeroBlockUploadPending;
 
             public bool TryGetBufferInfo(
                 VividParticleGpuDataId dataId,
@@ -3179,6 +3196,7 @@ namespace VividRP.Runtime.Particle
 
             private static readonly ProfilerMarker s_RebuildBatchesMarker = new("VividRP.Particle.Renderer.RebuildBatches");
             private static readonly ProfilerMarker s_UploadMarker = new("VividRP.Particle.Renderer.Upload");
+            private static readonly ProfilerMarker s_CompleteUploadMarker = new("VividRP.Particle.Renderer.CompleteUpload");
             private static readonly int s_CopySrcBufferId = Shader.PropertyToID("_VividParticleUploadSrc");
             private static readonly int s_CopyDstBufferId = Shader.PropertyToID("_VividParticleUploadDst");
             private static readonly int s_CopyOperationsId = Shader.PropertyToID("_VividParticleUploadOperations");
@@ -3205,13 +3223,19 @@ namespace VividRP.Runtime.Particle
             private readonly Dictionary<ParticleMaterialVariantKey, Material> m_DefaultMaterials = new();
             private readonly VividParticleGPUBuffer m_GPUBuffer = new();
             private NativeArray<ParticleCullingResult> m_PendingCullingResults;
+            private NativeArray<ParticleRenderUploadColumnWork> m_PendingUploadColumnWorks;
+            private NativeArray<ParticleRenderSharedDataWork> m_PendingSharedDataWorks;
             private JobHandle m_PendingCullingHandle;
+            private JobHandle m_PendingUploadHandle;
             private BatchRendererGroup m_BRG;
             private BatchCullingViewType m_PendingCullingViewType;
             private bool m_HasPendingCullingResults;
+            private bool m_HasPendingUpload;
             private bool m_LayoutDirty = true;
             private bool m_ForceFullUpload;
             private int m_TotalBufferByteSize;
+
+            public bool hasPendingUpload => m_HasPendingUpload;
 
             public VividParticleRendererManagerStats stats => new(
                 m_Records.Count,
@@ -3247,6 +3271,7 @@ namespace VividRP.Runtime.Particle
 
             public void UpdateAll(IEnumerable<ParticleSystemState> states, bool forceUpload)
             {
+                CompletePendingUpload();
                 m_SeenStates.Clear();
                 foreach (ParticleSystemState state in states)
                 {
@@ -3275,18 +3300,21 @@ namespace VividRP.Runtime.Particle
                 if (state == null)
                     return;
 
+                CompletePendingUpload();
                 UpdateRecord(state, forceUpload);
                 Commit();
             }
 
             public void Unregister(ParticleSystemState state)
             {
+                CompletePendingUpload();
                 RemoveRecord(state);
                 Commit();
             }
 
             public void Dispose()
             {
+                CompletePendingUpload();
                 DrainCullingResults();
                 m_BRG?.Dispose();
                 m_BRG = null;
@@ -3298,9 +3326,11 @@ namespace VividRP.Runtime.Particle
                 m_SeenStates.Clear();
                 m_UploadWorks.Clear();
                 m_UploadColumnWorks.Clear();
+                m_SharedDataWorks.Clear();
                 m_CullingRecords.Clear();
                 m_DrawCommandInputs.Clear();
                 m_CullingResultRecords.Clear();
+                DisposePendingUploadArrays();
                 foreach (Material material in m_DefaultMaterials.Values)
                     CoreUtils.Destroy(material);
 
@@ -3347,10 +3377,12 @@ namespace VividRP.Runtime.Particle
 
             private void Commit()
             {
+                CompletePendingUpload();
+
                 if (m_LayoutDirty)
                     RebuildBatches();
 
-                Upload();
+                ScheduleUpload();
             }
 
             private void RebuildBatches()
@@ -3501,7 +3533,7 @@ namespace VividRP.Runtime.Particle
                 };
             }
 
-            private void Upload()
+            private void ScheduleUpload()
             {
                 using (s_UploadMarker.Auto())
                 {
@@ -3548,12 +3580,9 @@ namespace VividRP.Runtime.Particle
                         return;
                     }
 
-                    NativeArray<ParticleRenderUploadColumnWork> uploadColumnWorks = default;
-                    NativeArray<ParticleRenderSharedDataWork> sharedDataWorks = default;
                     try
                     {
                         AddBatchSharedDataWorks(bufferBase);
-                        AddBatchSharedCopyOperations();
 
                         for (int workIndex = 0; workIndex < m_UploadWorks.Count; workIndex++)
                         {
@@ -3575,54 +3604,115 @@ namespace VividRP.Runtime.Particle
                             }
 
                             AddRecordSharedDataWorks(bufferBase, batch, record, work.StartIndex, count);
-                            AddGpuDataCopyOperations(record, batch, work.StartIndex, count);
                         }
 
+                        DisposePendingUploadArrays();
                         if (m_UploadColumnWorks.Count > 0 || m_SharedDataWorks.Count > 0)
                         {
                             if (m_UploadColumnWorks.Count > 0)
                             {
-                                uploadColumnWorks = new NativeArray<ParticleRenderUploadColumnWork>(
+                                m_PendingUploadColumnWorks = new NativeArray<ParticleRenderUploadColumnWork>(
                                     m_UploadColumnWorks.Count,
-                                    Allocator.TempJob,
+                                    Allocator.Persistent,
                                     NativeArrayOptions.UninitializedMemory);
                                 for (int workIndex = 0; workIndex < m_UploadColumnWorks.Count; workIndex++)
-                                    uploadColumnWorks[workIndex] = m_UploadColumnWorks[workIndex];
+                                    m_PendingUploadColumnWorks[workIndex] = m_UploadColumnWorks[workIndex];
                             }
 
                             if (m_SharedDataWorks.Count > 0)
                             {
-                                sharedDataWorks = new NativeArray<ParticleRenderSharedDataWork>(
+                                m_PendingSharedDataWorks = new NativeArray<ParticleRenderSharedDataWork>(
                                     m_SharedDataWorks.Count,
-                                    Allocator.TempJob,
+                                    Allocator.Persistent,
                                     NativeArrayOptions.UninitializedMemory);
                                 for (int workIndex = 0; workIndex < m_SharedDataWorks.Count; workIndex++)
-                                    sharedDataWorks[workIndex] = m_SharedDataWorks[workIndex];
+                                    m_PendingSharedDataWorks[workIndex] = m_SharedDataWorks[workIndex];
                             }
 
-                            JobHandle uploadHandle = VividParticleRenderJobPipeline.Schedule(
-                                uploadColumnWorks,
-                                sharedDataWorks);
+                            m_PendingUploadHandle = VividParticleRenderJobPipeline.Schedule(
+                                m_PendingUploadColumnWorks,
+                                m_PendingSharedDataWorks);
                             JobHandle.ScheduleBatchedJobs();
-                            uploadHandle.Complete();
                         }
+
+                        m_HasPendingUpload = true;
                     }
-                    finally
+                    catch
                     {
-                        if (uploadColumnWorks.IsCreated)
-                            uploadColumnWorks.Dispose();
-
-                        if (sharedDataWorks.IsCreated)
-                            sharedDataWorks.Dispose();
-
+                        m_PendingUploadHandle.Complete();
+                        DisposePendingUploadArrays();
+                        m_PendingUploadHandle = default;
+                        m_HasPendingUpload = false;
                         m_GPUBuffer.EndWrite();
+                        m_ForceFullUpload = true;
+                        throw;
                     }
+                }
+            }
+
+            public void CompletePendingUpload()
+            {
+                if (!m_HasPendingUpload)
+                    return;
+
+                using (s_CompleteUploadMarker.Auto())
+                {
+                    m_PendingUploadHandle.Complete();
+                    m_PendingUploadHandle = default;
+                    DisposePendingUploadArrays();
+
+                    AddPendingUploadCopyOperations();
+                    m_GPUBuffer.EndWrite();
 
                     for (int workIndex = 0; workIndex < m_UploadWorks.Count; workIndex++)
                         m_UploadWorks[workIndex].Record.State.ClearUploadDirty();
 
                     PublishCleanStats();
                     m_ForceFullUpload = false;
+                    m_HasPendingUpload = false;
+                }
+            }
+
+            private void DisposePendingUploadArrays()
+            {
+                if (m_PendingUploadColumnWorks.IsCreated)
+                    m_PendingUploadColumnWorks.Dispose();
+
+                if (m_PendingSharedDataWorks.IsCreated)
+                    m_PendingSharedDataWorks.Dispose();
+
+                m_PendingUploadColumnWorks = default;
+                m_PendingSharedDataWorks = default;
+            }
+
+            private void AddPendingUploadCopyOperations()
+            {
+                AddPendingZeroBlockCopyOperations();
+                AddBatchSharedCopyOperations();
+
+                for (int workIndex = 0; workIndex < m_UploadWorks.Count; workIndex++)
+                {
+                    ParticleUploadWork work = m_UploadWorks[workIndex];
+                    ParticleRenderRecord record = work.Record;
+                    if (record == null || record.Batch == null)
+                        continue;
+
+                    int count = Mathf.Clamp(work.Count, 0, Mathf.Max(0, record.ActiveCount - work.StartIndex));
+                    if (count > 0)
+                        AddGpuDataCopyOperations(record, record.Batch, work.StartIndex, count);
+                }
+            }
+
+            private void AddPendingZeroBlockCopyOperations()
+            {
+                for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
+                {
+                    ParticleDrawBatch batch = m_DrawBatches[batchIndex];
+                    if (!batch.ZeroBlockUploadPending)
+                        continue;
+
+                    m_GPUBuffer.AddCopyOperation(batch.DataOffset, batch.DataOffset, ZeroBlockByteSize);
+                    batch.ZeroBlockUploadPending = false;
                 }
             }
 
@@ -3671,8 +3761,8 @@ namespace VividRP.Runtime.Particle
                     if (batch.ZeroBlockDirty)
                     {
                         UnsafeUtility.MemClear(bufferBase + batch.DataOffset, ZeroBlockByteSize);
-                        m_GPUBuffer.AddCopyOperation(batch.DataOffset, batch.DataOffset, ZeroBlockByteSize);
                         batch.ZeroBlockDirty = false;
+                        batch.ZeroBlockUploadPending = true;
                         if (batch.Records.Count > 0)
                         {
                             ParticleRenderRecord owner = batch.Records[0];
@@ -3957,6 +4047,7 @@ namespace VividRP.Runtime.Particle
                 BatchCullingOutput cullingOutput,
                 IntPtr userContext)
             {
+                CompletePendingUpload();
                 DrainCullingResults();
                 m_CullingRecords.Clear();
                 m_DrawCommandInputs.Clear();

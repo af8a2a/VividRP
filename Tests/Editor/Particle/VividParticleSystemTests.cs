@@ -807,6 +807,7 @@ namespace VividRP.Editor.Tests
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStatsForTests();
             Assert.That(rendererStats.LastUploadColumnWorkCount, Is.EqualTo(8));
+            Assert.That(rendererStats.LastSharedDataWorkCount, Is.GreaterThan(0));
             Assert.That(
                 rendererStats.LastCopyOperationCount,
                 Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataLayout.Create(VividParticleRenderMode.Billboard).Count + 1));
@@ -828,6 +829,7 @@ namespace VividRP.Editor.Tests
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStatsForTests();
             Assert.That(rendererStats.LastUploadColumnWorkCount, Is.EqualTo(12));
+            Assert.That(rendererStats.LastSharedDataWorkCount, Is.GreaterThan(0));
             Assert.That(
                 rendererStats.LastCopyOperationCount,
                 Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataLayout.Create(VividParticleRenderMode.Stretch).Count + 1));

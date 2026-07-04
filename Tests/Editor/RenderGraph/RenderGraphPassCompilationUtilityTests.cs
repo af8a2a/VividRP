@@ -398,7 +398,7 @@ namespace VividRP.Editor.Tests
                 RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
                 RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
                 graph.Connect(
-                    drawObjectNode.GetOutputPortByName("m_ColorTarget"),
+                    drawObjectNode.GetOutputPortByName("m_ColorTarget_Out"),
                     finalBlitNode.GetInputPortByName("source"));
 
                 var result = RenderGraphCompiler.Compile(graph);

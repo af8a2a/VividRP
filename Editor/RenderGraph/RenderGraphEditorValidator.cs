@@ -188,7 +188,11 @@ namespace VividRP.Editor.RenderGraph
                 return false;
 
             var inputPortName = passNode.GetInputPortName(field, attr);
-            var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+            var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                field.Name,
+                attr.Access,
+                attr.BindingMode,
+                attr.AllowWriteOnlyInput);
             var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
                 ? null
                 : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort;
@@ -215,11 +219,18 @@ namespace VividRP.Editor.RenderGraph
             foreach (var field in RenderGraphPassReflectionUtility.EnumerateRenderGraphResourceFields(passType))
             {
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                if (!RenderPassPortUtility.CanRead(attr.Access) || !RenderPassPortUtility.CanWrite(attr.Access))
+                var hasPairedResourcePorts =
+                    (RenderPassPortUtility.CanRead(attr.Access) && RenderPassPortUtility.CanWrite(attr.Access))
+                    || (attr.AllowWriteOnlyInput && RenderPassPortUtility.CanWrite(attr.Access));
+                if (!hasPairedResourcePorts)
                     continue;
 
                 var inputPortName = passNode.GetInputPortName(field, attr);
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                    field.Name,
+                    attr.Access,
+                    attr.BindingMode,
+                    attr.AllowWriteOnlyInput);
                 var inputNode = string.IsNullOrEmpty(inputPortName)
                     ? null
                     : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort?.GetNode();
@@ -232,7 +243,7 @@ namespace VividRP.Editor.RenderGraph
                 if (inputResourceNode != null && outputResourceNode != null && inputResourceNode != outputResourceNode)
                 {
                     reporter.LogError(
-                        $"Read/write field '{field.Name}' must connect to the same resource node on both input and output ports.",
+                        $"Field '{field.Name}' must connect to the same resource node on both input and output ports.",
                         passNode);
                     summary.ErrorCount++;
                 }
@@ -243,7 +254,7 @@ namespace VividRP.Editor.RenderGraph
                     && !ReferenceEquals(passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort, passNode.GetOutputPortByName(outputPortName)?.FirstConnectedPort))
                 {
                     reporter.LogError(
-                        $"Read/write field '{field.Name}' must connect to the same resource output on composite resource nodes.",
+                        $"Field '{field.Name}' must connect to the same resource output on composite resource nodes.",
                         passNode);
                     summary.ErrorCount++;
                 }
@@ -275,11 +286,15 @@ namespace VividRP.Editor.RenderGraph
             FieldInfo field,
             RenderGraphResource attr)
         {
-            var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access);
+            var inputPortName = RenderPassPortUtility.GetInputPortName(field.Name, attr.Access, attr.AllowWriteOnlyInput);
             if (!string.IsNullOrEmpty(inputPortName))
                 yield return inputPortName;
 
-            var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access);
+            var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                field.Name,
+                attr.Access,
+                RenderGraphResourceBindingMode.External,
+                attr.AllowWriteOnlyInput);
             if (!string.IsNullOrEmpty(outputPortName))
                 yield return outputPortName;
 
@@ -317,7 +332,11 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 var inputPortName = passNode.GetInputPortName(field, attr);
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                    field.Name,
+                    attr.Access,
+                    attr.BindingMode,
+                    attr.AllowWriteOnlyInput);
                 var inputConnectedPort = string.IsNullOrEmpty(inputPortName)
                     ? null
                     : passNode.GetInputPortByName(inputPortName)?.FirstConnectedPort;

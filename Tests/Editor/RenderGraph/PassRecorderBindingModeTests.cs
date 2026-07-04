@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
@@ -7,6 +8,7 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -265,11 +267,58 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void Compile_PreservesWriteOnlyColorAttachmentAccess_WhenLegacyInputBindingExists()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.TextureDescriptors.Add(RenderGraphTextureDesc.CreateColorTarget(
+                1,
+                1,
+                GraphicsFormat.R8G8B8A8_UNorm));
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<DrawObjectPass>(),
+                ResourceBindings =
+                {
+                    new RenderGraphPassResourceBinding
+                    {
+                        FieldName = "m_ColorTarget",
+                        ResourceKind = RenderGraphResourceKind.Texture,
+                        ResourceIndex = 0,
+                        SourceKind = RenderGraphPassBindingSourceKind.Resource,
+                        ConnectionKind = RenderGraphPassBindingConnectionKind.Input,
+                    }
+                }
+            });
+
+            try
+            {
+                Compile(graphAsset);
+
+                var pass = GetCompiledPasses().Single();
+                var resources = GetCurrentPassResources(pass);
+                var colorEntry = resources.Textures.Single(entry => entry.Name == "Color");
+
+                Assert.That(colorEntry.Access, Is.EqualTo(AccessFlags.Write));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(graphAsset);
+            }
+        }
+
         private static void Compile(RenderGraphData graphAsset)
         {
             var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);
             Assert.That(method, Is.Not.Null);
             method.Invoke(null, new object[] { graphAsset });
+        }
+
+        private static PassResource GetCurrentPassResources(IRenderPass pass)
+        {
+            var method = typeof(PassRecorder).GetMethod("GetCurrentPassResources", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+            return (PassResource)method.Invoke(null, new object[] { pass, null });
         }
 
         private static IList<IRenderPass> GetCompiledPasses()

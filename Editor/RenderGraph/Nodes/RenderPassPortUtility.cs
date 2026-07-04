@@ -23,7 +23,12 @@ namespace VividRP.Editor.RenderGraph
 
         internal static string GetInputPortName(string fieldName, AccessFlags access)
         {
-            if (!CanRead(access))
+            return GetInputPortName(fieldName, access, allowWriteOnlyInput: false);
+        }
+
+        internal static string GetInputPortName(string fieldName, AccessFlags access, bool allowWriteOnlyInput)
+        {
+            if (!CanRead(access) && !(allowWriteOnlyInput && CanWrite(access)))
                 return null;
 
             return CanWrite(access)
@@ -43,12 +48,30 @@ namespace VividRP.Editor.RenderGraph
             return GetInputPortName(fieldName, access);
         }
 
+        internal static string GetInputPortName(
+            string fieldName,
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode,
+            bool overrideEnabled,
+            bool allowWriteOnlyInput)
+        {
+            if (!ShouldDefineInputPort(access, bindingMode, overrideEnabled, allowWriteOnlyInput))
+                return null;
+
+            return GetInputPortName(fieldName, access, allowWriteOnlyInput);
+        }
+
         internal static string GetOutputPortName(string fieldName, AccessFlags access)
+        {
+            return GetOutputPortName(fieldName, access, hasInputPort: CanRead(access));
+        }
+
+        internal static string GetOutputPortName(string fieldName, AccessFlags access, bool hasInputPort)
         {
             if (!CanWrite(access))
                 return null;
 
-            return CanRead(access) ? $"{fieldName}{OutputPortSuffix}" : fieldName;
+            return hasInputPort ? $"{fieldName}{OutputPortSuffix}" : fieldName;
         }
 
         internal static string GetOutputPortName(
@@ -60,6 +83,18 @@ namespace VividRP.Editor.RenderGraph
                 return null;
 
             return GetOutputPortName(fieldName, access);
+        }
+
+        internal static string GetOutputPortName(
+            string fieldName,
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode,
+            bool allowWriteOnlyInput)
+        {
+            if (!ShouldDefineOutputPort(access, bindingMode))
+                return null;
+
+            return GetOutputPortName(fieldName, access, CanRead(access) || (allowWriteOnlyInput && CanWrite(access)));
         }
 
         internal static AccessFlags GetInputPortDisplayAccess(AccessFlags access)
@@ -94,7 +129,16 @@ namespace VividRP.Editor.RenderGraph
             RenderGraphResourceBindingMode bindingMode,
             bool overrideEnabled)
         {
-            if (!CanRead(access))
+            return ShouldDefineInputPort(access, bindingMode, overrideEnabled, allowWriteOnlyInput: false);
+        }
+
+        internal static bool ShouldDefineInputPort(
+            AccessFlags access,
+            RenderGraphResourceBindingMode bindingMode,
+            bool overrideEnabled,
+            bool allowWriteOnlyInput)
+        {
+            if (!CanRead(access) && !(allowWriteOnlyInput && CanWrite(access)))
                 return false;
 
             return bindingMode != RenderGraphResourceBindingMode.PassOwnedOverrideable

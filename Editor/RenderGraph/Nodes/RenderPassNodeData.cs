@@ -80,7 +80,11 @@ namespace VividRP.Editor.RenderGraph
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
                 var inputPortName = GetInputPortName(field, attr);
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                    field.Name,
+                    attr.Access,
+                    attr.BindingMode,
+                    attr.AllowWriteOnlyInput);
 
                 if (field.FieldType == typeof(RenderGraphTexture))
                 {
@@ -328,7 +332,8 @@ namespace VividRP.Editor.RenderGraph
                 field.Name,
                 attr.Access,
                 attr.BindingMode,
-                GetPassOwnedResourceOverrideEnabled(field, attr));
+                GetPassOwnedResourceOverrideEnabled(field, attr),
+                attr.AllowWriteOnlyInput);
         }
 
         private static bool TryResolvePassScript(Type passType, out MonoScript script)
@@ -403,9 +408,13 @@ namespace VividRP.Editor.RenderGraph
                 if (!RenderPassPortUtility.SupportsExternalOverride(attr))
                     continue;
 
-                // Write-only resources never have input ports, so override is meaningless.
-                if (RenderPassPortUtility.CanWrite(attr.Access) && !RenderPassPortUtility.CanRead(attr.Access))
+                // Write-only resources without input ports cannot be externally overridden here.
+                if (RenderPassPortUtility.CanWrite(attr.Access)
+                    && !RenderPassPortUtility.CanRead(attr.Access)
+                    && !attr.AllowWriteOnlyInput)
+                {
                     continue;
+                }
 
                 context.AddOption<bool>(RenderPassPortUtility.GetOverrideOptionName(field.Name))
                     .WithDisplayName(RenderPassPortUtility.BuildOverrideOptionDisplayName(field, attr))

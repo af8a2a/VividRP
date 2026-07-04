@@ -7757,7 +7757,7 @@ MonoBehaviour:
           m_UniqueId: m_ColorTarget_In
           m_PortDirection: 1
           m_PortOrientation: 0
-          m_Title: Color (R, A0)
+          m_Title: Color (W, A0)
     - rid: 8515051663678505579
       type: {class: VariableDeclarationModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:

@@ -19,11 +19,13 @@ namespace VividRP.Editor.Tests
         {
             var node = new AutoRegisteredSkyInjectionPassNode();
 
-            Assert.That(node.GetInputPortByName("m_DepthTexture"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_ColorTarget_In"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_ColorTarget_Out"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_DepthTexture_In"), Is.Not.Null);
+            Assert.That(node.GetOutputPortByName("m_DepthTexture_Out"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_CSMShadowAtlas"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_DirectionalShadowTexture"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_SkyViewLUT"), Is.Not.Null);
-            Assert.That(node.GetOutputPortByName("m_ColorTarget"), Is.Not.Null);
         }
 
         [Test]

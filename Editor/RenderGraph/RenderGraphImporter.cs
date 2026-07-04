@@ -183,7 +183,11 @@ namespace VividRP.Editor.RenderGraph
 
                     var attr = field.GetCustomAttribute<RenderGraphResource>();
                     var inputPortName = passNode.GetInputPortName(field, attr);
-                    var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                    var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                        field.Name,
+                        attr.Access,
+                        attr.BindingMode,
+                        attr.AllowWriteOnlyInput);
                     var inputPort = string.IsNullOrEmpty(inputPortName) ? null : passNode.GetInputPortByName(inputPortName);
                     var outputPort = string.IsNullOrEmpty(outputPortName) ? null : passNode.GetOutputPortByName(outputPortName);
                     var inputConnectedPort = RenderGraphSubSystemCompilationUtility.ResolveInputConnection(flattenedGraph, passNode, inputPort?.FirstConnectedPort);
@@ -669,7 +673,11 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 var attr = field.GetCustomAttribute<RenderGraphResource>();
-                var outputPortName = RenderPassPortUtility.GetOutputPortName(field.Name, attr.Access, attr.BindingMode);
+                var outputPortName = RenderPassPortUtility.GetOutputPortName(
+                    field.Name,
+                    attr.Access,
+                    attr.BindingMode,
+                    attr.AllowWriteOnlyInput);
                 if (string.IsNullOrEmpty(outputPortName))
                     continue;
 

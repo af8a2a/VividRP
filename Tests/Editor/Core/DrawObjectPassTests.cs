@@ -29,8 +29,10 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures, Has.Length.EqualTo(2));
             Assert.That(resources.RenderLists[0].Name, Is.EqualTo("RenderList"));
             Assert.That(resources.RenderLists[0].Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(colorEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(colorEntry.AttachmentIndex, Is.EqualTo(0));
             Assert.That(colorEntry.IsDepthAttachment, Is.False);
+            Assert.That(depthEntry.Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(depthEntry.AttachmentIndex, Is.EqualTo(-1));
             Assert.That(depthEntry.IsDepthAttachment, Is.True);
         }

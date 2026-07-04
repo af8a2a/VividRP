@@ -1246,7 +1246,9 @@ namespace VividRP.Runtime
                 if (RenderGraphPassReflectionUtility.IsDeclaredTransientResourceField(field))
                     continue;
 
-                var effectiveAccess = RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
+                var effectiveAccess = ShouldPreserveWriteOnlyColorAttachmentAccess(passType, binding, attr)
+                    ? attr.Access
+                    : RenderGraphPassBindingUtility.ResolveEffectiveAccess(binding, attr.Access);
                 if (effectiveAccess == attr.Access)
                     continue;
 
@@ -1255,6 +1257,23 @@ namespace VividRP.Runtime
             }
 
             return accessOverrides;
+        }
+
+        private static bool ShouldPreserveWriteOnlyColorAttachmentAccess(
+            Type passType,
+            RenderGraphPassResourceBinding binding,
+            RenderGraphResource attr)
+        {
+            return passType != null
+                   && typeof(RasterPass).IsAssignableFrom(passType)
+                   && binding != null
+                   && RenderGraphPassBindingUtility.UsesInputConnection(binding.ConnectionKind)
+                   && attr != null
+                   && attr.AllowWriteOnlyInput
+                   && attr.AttachmentIndex >= 0
+                   && !attr.IsDepthAttachment
+                   && (attr.Access & AccessFlags.Write) != 0
+                   && (attr.Access & AccessFlags.Read) == 0;
         }
 
         private static object ResolvePassFieldValue(

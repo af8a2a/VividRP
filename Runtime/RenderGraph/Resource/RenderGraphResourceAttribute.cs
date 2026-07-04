@@ -25,6 +25,11 @@ namespace VividRP.Runtime
         /// For raster passes: marks this texture as the depth attachment.
         /// </summary>
         public bool IsDepthAttachment;
+
+        /// <summary>
+        /// Allows a write-only resource to expose an input port for attachment target binding.
+        /// </summary>
+        public bool AllowWriteOnlyInput;
     }
 
     [AttributeUsage(AttributeTargets.Field)]

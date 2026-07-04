@@ -34,6 +34,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GetPortNames_UseDirectionalSuffixes_WhenWriteOnlyInputIsAllowed()
+        {
+            Assert.That(
+                RenderPassPortUtility.GetInputPortName("Color", AccessFlags.Write, allowWriteOnlyInput: true),
+                Is.EqualTo("Color_In"));
+            Assert.That(
+                RenderPassPortUtility.GetOutputPortName("Color", AccessFlags.Write, hasInputPort: true),
+                Is.EqualTo("Color_Out"));
+        }
+
+        [Test]
         public void GetPortNames_UseDirectionalSuffixes_WhenReadWrite()
         {
             Assert.That(

@@ -11,7 +11,7 @@ namespace VividRP.Runtime.Particle
 {
     public static class VividParticleSystemManager
     {
-        public const string DefaultShaderName = "Hidden/VividRP/Particles/BillboardUnlit";
+        public const string DefaultShaderName = "VividRP/Particles/Unlit";
 
         internal const uint PerInstanceMetadataMask = 0x80000000u;
         internal const int SizeOfMatrix = sizeof(float) * 4 * 4;
@@ -176,6 +176,17 @@ namespace VividRP.Runtime.Particle
         private sealed class ParticleRenderState : IDisposable
         {
             private static readonly int s_BaseColorId = Shader.PropertyToID("_BaseColor");
+            private static readonly int s_UnlitColorId = Shader.PropertyToID("_UnlitColor");
+            private static readonly int s_SurfaceTypeId = Shader.PropertyToID("_SurfaceType");
+            private static readonly int s_BlendModeId = Shader.PropertyToID("_BlendMode");
+            private static readonly int s_CullModeId = Shader.PropertyToID("_CullMode");
+            private static readonly int s_TransparentZWriteId = Shader.PropertyToID("_TransparentZWrite");
+            private static readonly int s_QueueOffsetId = Shader.PropertyToID("_QueueOffset");
+            private static readonly int s_SrcBlendId = Shader.PropertyToID("_SrcBlend");
+            private static readonly int s_DstBlendId = Shader.PropertyToID("_DstBlend");
+            private static readonly int s_AlphaSrcBlendId = Shader.PropertyToID("_AlphaSrcBlend");
+            private static readonly int s_AlphaDstBlendId = Shader.PropertyToID("_AlphaDstBlend");
+            private static readonly int s_ZWriteId = Shader.PropertyToID("_ZWrite");
             private static readonly int s_ObjectToWorldId = Shader.PropertyToID("unity_ObjectToWorld");
             private static readonly int s_WorldToObjectId = Shader.PropertyToID("unity_WorldToObject");
 
@@ -280,6 +291,7 @@ namespace VividRP.Runtime.Particle
                 Shader shader = null;
                 Material material = sourceMaterial;
                 bool ownsMaterial = false;
+                bool usingDefaultMaterial = false;
                 if (material == null)
                 {
                     shader = Shader.Find(DefaultShaderName);
@@ -301,6 +313,7 @@ namespace VividRP.Runtime.Particle
                         hideFlags = HideFlags.HideAndDontSave,
                     };
                     ownsMaterial = true;
+                    usingDefaultMaterial = true;
                 }
                 else if (renderQueueOffset != 0)
                 {
@@ -314,9 +327,10 @@ namespace VividRP.Runtime.Particle
 
                 if (ownsMaterial)
                 {
-                    material.SetColor(s_BaseColorId, Color.white);
-                    if (material.shader != null && material.shader.renderQueue >= 0)
-                        material.renderQueue = material.shader.renderQueue + renderQueueOffset;
+                    if (usingDefaultMaterial)
+                        ConfigureDefaultParticleMaterial(material);
+
+                    ApplyRenderQueueOffset(material, sourceMaterial, renderQueueOffset);
                     m_OwnedMaterial = material;
                 }
 
@@ -371,6 +385,53 @@ namespace VividRP.Runtime.Particle
                 LastViewType = default;
                 LastDrawCommandCount = 0;
                 return true;
+            }
+
+            private static void ConfigureDefaultParticleMaterial(Material material)
+            {
+                SetColor(material, s_UnlitColorId, Color.white);
+                SetColor(material, s_BaseColorId, Color.white);
+                SetFloat(material, s_SurfaceTypeId, 1.0f);
+                SetFloat(material, s_BlendModeId, 0.0f);
+                SetFloat(material, s_CullModeId, (float)CullMode.Off);
+                SetFloat(material, s_TransparentZWriteId, 0.0f);
+                SetFloat(material, s_QueueOffsetId, 0.0f);
+                SetFloat(material, s_SrcBlendId, (float)BlendMode.SrcAlpha);
+                SetFloat(material, s_DstBlendId, (float)BlendMode.OneMinusSrcAlpha);
+                SetFloat(material, s_AlphaSrcBlendId, (float)BlendMode.One);
+                SetFloat(material, s_AlphaDstBlendId, (float)BlendMode.OneMinusSrcAlpha);
+                SetFloat(material, s_ZWriteId, 0.0f);
+                material.SetOverrideTag("RenderType", "Transparent");
+            }
+
+            private static void ApplyRenderQueueOffset(
+                Material material,
+                Material sourceMaterial,
+                int renderQueueOffset)
+            {
+                int baseQueue = sourceMaterial != null && sourceMaterial.renderQueue >= 0
+                    ? sourceMaterial.renderQueue
+                    : ResolveShaderRenderQueue(material?.shader);
+                material.renderQueue = baseQueue + renderQueueOffset;
+            }
+
+            private static int ResolveShaderRenderQueue(Shader shader)
+            {
+                return shader != null && shader.renderQueue >= 0
+                    ? shader.renderQueue
+                    : (int)RenderQueue.Transparent;
+            }
+
+            private static void SetColor(Material material, int propertyId, Color value)
+            {
+                if (material != null && material.HasProperty(propertyId))
+                    material.SetColor(propertyId, value);
+            }
+
+            private static void SetFloat(Material material, int propertyId, float value)
+            {
+                if (material != null && material.HasProperty(propertyId))
+                    material.SetFloat(propertyId, value);
             }
 
             private void ReleaseResources()

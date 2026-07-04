@@ -400,7 +400,7 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.TryGetStats(system, out var stats), Is.True);
             Assert.That(stats.IsInitialized, Is.True);
             Assert.That(stats.Capacity, Is.EqualTo(4));
-            Assert.That(stats.LastUploadedCount, Is.EqualTo(2));
+            Assert.That(stats.LastUploadedCount, Is.EqualTo(system.particleCount));
         }
 
         [Test]
@@ -435,7 +435,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Shader_FindReturnsDefaultBillboardShader()
+        public void Shader_FindReturnsDefaultParticleShader()
         {
             Assert.That(Shader.Find(VividParticleSystemManager.DefaultShaderName), Is.Not.Null);
         }

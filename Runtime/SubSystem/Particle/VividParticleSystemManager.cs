@@ -3716,7 +3716,8 @@ namespace VividRP.Runtime.Particle
                 m_PendingCullingViewType = default;
                 m_HasPendingCullingResults = false;
             }
-
+            
+            [BurstCompile]
             private unsafe JobHandle OnPerformCulling(
                 BatchRendererGroup rendererGroup,
                 BatchCullingContext cullingContext,

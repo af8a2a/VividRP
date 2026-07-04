@@ -12,6 +12,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int ThreadGroupSizeX = 8;
         private const int ThreadGroupSizeY = 8;
         private const int BuildIndirectThreadGroupSizeX = 64;
+        internal const int Wave32SubGroupSize = 32;
+        internal const int Wave64SubGroupSize = 64;
 
         private static readonly int GBuffer0Id = Shader.PropertyToID("_GBuffer0");
         private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
@@ -50,7 +52,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_ClassificationCompute;
         private int m_ClearMaterialFeatureArgsKernel = -1;
         private int m_ClassifyMaterialFeaturesKernel = -1;
+        private int m_ClassifyMaterialFeaturesWave32Kernel = -1;
+        private int m_ClassifyMaterialFeaturesWave64Kernel = -1;
+        private int m_SelectedClassifyMaterialFeaturesKernel = -1;
         private int m_BuildMaterialFeatureIndirectArgsKernel = -1;
+        private int m_BuildMaterialFeatureIndirectArgsWave32Kernel = -1;
+        private int m_BuildMaterialFeatureIndirectArgsWave64Kernel = -1;
+        private int m_SelectedBuildMaterialFeatureIndirectArgsKernel = -1;
         private int m_ClassificationWidth = 1;
         private int m_ClassificationHeight = 1;
         private int m_DispatchGroupCountX = 1;
@@ -78,9 +86,14 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_ClassificationCompute == null)
                 return;
 
-            m_ClearMaterialFeatureArgsKernel = m_ClassificationCompute.FindKernel("ClearMaterialFeatureArgs");
-            m_ClassifyMaterialFeaturesKernel = m_ClassificationCompute.FindKernel("ClassifyMaterialFeatures");
-            m_BuildMaterialFeatureIndirectArgsKernel = m_ClassificationCompute.FindKernel("BuildMaterialFeatureIndirectArgs");
+            m_ClearMaterialFeatureArgsKernel = TryFindKernel(m_ClassificationCompute, "ClearMaterialFeatureArgs");
+            m_ClassifyMaterialFeaturesKernel = TryFindKernel(m_ClassificationCompute, "ClassifyMaterialFeatures");
+            m_ClassifyMaterialFeaturesWave32Kernel = TryFindKernel(m_ClassificationCompute, "ClassifyMaterialFeaturesWave32");
+            m_ClassifyMaterialFeaturesWave64Kernel = TryFindKernel(m_ClassificationCompute, "ClassifyMaterialFeaturesWave64");
+            m_BuildMaterialFeatureIndirectArgsKernel = TryFindKernel(m_ClassificationCompute, "BuildMaterialFeatureIndirectArgs");
+            m_BuildMaterialFeatureIndirectArgsWave32Kernel = TryFindKernel(m_ClassificationCompute, "BuildMaterialFeatureIndirectArgsWave32");
+            m_BuildMaterialFeatureIndirectArgsWave64Kernel = TryFindKernel(m_ClassificationCompute, "BuildMaterialFeatureIndirectArgsWave64");
+            SelectMaterialClassificationKernels(SystemInfo.computeSubGroupSize);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -116,8 +129,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             if (m_ClassificationCompute == null
                 || m_ClearMaterialFeatureArgsKernel < 0
-                || m_ClassifyMaterialFeaturesKernel < 0
-                || m_BuildMaterialFeatureIndirectArgsKernel < 0)
+                || m_SelectedClassifyMaterialFeaturesKernel < 0
+                || m_SelectedBuildMaterialFeatureIndirectArgsKernel < 0)
             {
                 return;
             }
@@ -133,16 +146,16 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.DispatchCompute(m_ClassificationCompute, m_ClearMaterialFeatureArgsKernel, 1, 1, 1);
 
             BindCommonParams(cmd);
-            cmd.SetComputeTextureParam(m_ClassificationCompute, m_ClassifyMaterialFeaturesKernel, GBuffer0Id, m_GBuffer0.innerHandle);
-            cmd.SetComputeTextureParam(m_ClassificationCompute, m_ClassifyMaterialFeaturesKernel, DepthTextureId, m_DepthTexture.innerHandle);
+            cmd.SetComputeTextureParam(m_ClassificationCompute, m_SelectedClassifyMaterialFeaturesKernel, GBuffer0Id, m_GBuffer0.innerHandle);
+            cmd.SetComputeTextureParam(m_ClassificationCompute, m_SelectedClassifyMaterialFeaturesKernel, DepthTextureId, m_DepthTexture.innerHandle);
             cmd.SetComputeBufferParam(
                 m_ClassificationCompute,
-                m_ClassifyMaterialFeaturesKernel,
+                m_SelectedClassifyMaterialFeaturesKernel,
                 MaterialTileFeatureFlagsId,
                 m_MaterialTileFeatureFlags.innerHandle);
             cmd.DispatchCompute(
                 m_ClassificationCompute,
-                m_ClassifyMaterialFeaturesKernel,
+                m_SelectedClassifyMaterialFeaturesKernel,
                 m_DispatchGroupCountX,
                 m_DispatchGroupCountY,
                 1);
@@ -150,22 +163,22 @@ namespace VividRP.Runtime.RenderPass.Core
             BindCommonParams(cmd);
             cmd.SetComputeBufferParam(
                 m_ClassificationCompute,
-                m_BuildMaterialFeatureIndirectArgsKernel,
+                m_SelectedBuildMaterialFeatureIndirectArgsKernel,
                 MaterialTileFeatureFlagsId,
                 m_MaterialTileFeatureFlags.innerHandle);
             cmd.SetComputeBufferParam(
                 m_ClassificationCompute,
-                m_BuildMaterialFeatureIndirectArgsKernel,
+                m_SelectedBuildMaterialFeatureIndirectArgsKernel,
                 MaterialFeatureTileListId,
                 m_MaterialFeatureTileList.innerHandle);
             cmd.SetComputeBufferParam(
                 m_ClassificationCompute,
-                m_BuildMaterialFeatureIndirectArgsKernel,
+                m_SelectedBuildMaterialFeatureIndirectArgsKernel,
                 MaterialFeatureIndirectArgsId,
                 m_MaterialFeatureIndirectArgs.innerHandle);
             cmd.DispatchCompute(
                 m_ClassificationCompute,
-                m_BuildMaterialFeatureIndirectArgsKernel,
+                m_SelectedBuildMaterialFeatureIndirectArgsKernel,
                 m_BuildIndirectDispatchGroupCountX,
                 1,
                 1);
@@ -177,7 +190,53 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ClassificationCompute = null;
             m_ClearMaterialFeatureArgsKernel = -1;
             m_ClassifyMaterialFeaturesKernel = -1;
+            m_ClassifyMaterialFeaturesWave32Kernel = -1;
+            m_ClassifyMaterialFeaturesWave64Kernel = -1;
+            m_SelectedClassifyMaterialFeaturesKernel = -1;
             m_BuildMaterialFeatureIndirectArgsKernel = -1;
+            m_BuildMaterialFeatureIndirectArgsWave32Kernel = -1;
+            m_BuildMaterialFeatureIndirectArgsWave64Kernel = -1;
+            m_SelectedBuildMaterialFeatureIndirectArgsKernel = -1;
+        }
+
+        internal static int ResolveMaterialClassificationWaveSize(int computeSubGroupSize)
+        {
+            if (computeSubGroupSize == Wave64SubGroupSize)
+                return Wave64SubGroupSize;
+
+            if (computeSubGroupSize == Wave32SubGroupSize)
+                return Wave32SubGroupSize;
+
+            return 0;
+        }
+
+        private static int TryFindKernel(ComputeShader shader, string kernelName)
+        {
+            return shader != null && shader.HasKernel(kernelName) ? shader.FindKernel(kernelName) : -1;
+        }
+
+        private void SelectMaterialClassificationKernels(int computeSubGroupSize)
+        {
+            m_SelectedClassifyMaterialFeaturesKernel = m_ClassifyMaterialFeaturesKernel;
+            m_SelectedBuildMaterialFeatureIndirectArgsKernel = m_BuildMaterialFeatureIndirectArgsKernel;
+
+            var waveSize = ResolveMaterialClassificationWaveSize(computeSubGroupSize);
+            if (waveSize == Wave64SubGroupSize
+                && m_ClassifyMaterialFeaturesWave64Kernel >= 0
+                && m_BuildMaterialFeatureIndirectArgsWave64Kernel >= 0)
+            {
+                m_SelectedClassifyMaterialFeaturesKernel = m_ClassifyMaterialFeaturesWave64Kernel;
+                m_SelectedBuildMaterialFeatureIndirectArgsKernel = m_BuildMaterialFeatureIndirectArgsWave64Kernel;
+                return;
+            }
+
+            if (waveSize == Wave32SubGroupSize
+                && m_ClassifyMaterialFeaturesWave32Kernel >= 0
+                && m_BuildMaterialFeatureIndirectArgsWave32Kernel >= 0)
+            {
+                m_SelectedClassifyMaterialFeaturesKernel = m_ClassifyMaterialFeaturesWave32Kernel;
+                m_SelectedBuildMaterialFeatureIndirectArgsKernel = m_BuildMaterialFeatureIndirectArgsWave32Kernel;
+            }
         }
 
         private void BindCommonParams(ComputeCommandBuffer cmd)

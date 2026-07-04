@@ -1,9 +1,16 @@
 #pragma kernel ClearMaterialFeatureArgs
 #pragma kernel ClassifyMaterialFeatures
+#pragma kernel ClassifyMaterialFeaturesWave32 VIVID_MATERIAL_WAVE_32
+#pragma kernel ClassifyMaterialFeaturesWave64 VIVID_MATERIAL_WAVE_64
 #pragma kernel BuildMaterialFeatureIndirectArgs
+#pragma kernel BuildMaterialFeatureIndirectArgsWave32 VIVID_MATERIAL_WAVE_32
+#pragma kernel BuildMaterialFeatureIndirectArgsWave64 VIVID_MATERIAL_WAVE_64
+#pragma use_dxc
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_WAVE_32 UNITY_DEVICE_SUPPORTS_WAVE_64
 
 #define CLASSIFY_TILE_SIZE 8
 #define BUILD_INDIRECT_THREADS 64
+#define VIVID_MATERIAL_CLASSIFY_THREAD_COUNT (CLASSIFY_TILE_SIZE * CLASSIFY_TILE_SIZE)
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl"
 
@@ -11,6 +18,22 @@
 #define VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL 6
 #define VIVID_INDIRECT_ARGS_ELEMENT_COUNT 4
 #define VIVID_INVALID_MATERIAL_FEATURE_VARIANT VIVID_MATERIAL_FEATURE_VARIANT_COUNT
+
+#if defined(VIVID_MATERIAL_WAVE_64) && defined(UNITY_DEVICE_SUPPORTS_WAVE_64) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 64
+#define VIVID_MATERIAL_WAVE_SIZE 64
+#define VIVID_MATERIAL_USE_WAVE_INTRINSICS 1
+#elif defined(VIVID_MATERIAL_WAVE_32) && defined(UNITY_DEVICE_SUPPORTS_WAVE_32) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 32
+#define VIVID_MATERIAL_WAVE_SIZE 32
+#define VIVID_MATERIAL_USE_WAVE_INTRINSICS 1
+#else
+#define VIVID_MATERIAL_WAVE_SIZE 0
+#define VIVID_MATERIAL_USE_WAVE_INTRINSICS 0
+#endif
+
+#if VIVID_MATERIAL_USE_WAVE_INTRINSICS
+#define VIVID_MATERIAL_WAVES_PER_CLASSIFY_GROUP ((VIVID_MATERIAL_CLASSIFY_THREAD_COUNT + VIVID_MATERIAL_WAVE_SIZE - 1) / VIVID_MATERIAL_WAVE_SIZE)
+#define VIVID_MATERIAL_WAVES_PER_BUILD_GROUP ((BUILD_INDIRECT_THREADS + VIVID_MATERIAL_WAVE_SIZE - 1) / VIVID_MATERIAL_WAVE_SIZE)
+#endif
 
 Texture2D<float4> _GBuffer0;
 Texture2D<float> _DepthTexture;
@@ -24,10 +47,16 @@ uint _ClassificationHeight;
 uint _MaterialTileCount;
 uint _MaterialTileCountX;
 
+#if VIVID_MATERIAL_USE_WAVE_INTRINSICS
+groupshared uint gs_TileWaveMasks[VIVID_MATERIAL_WAVES_PER_CLASSIFY_GROUP];
+groupshared uint gs_WaveVariantCounts[VIVID_MATERIAL_FEATURE_VARIANT_COUNT * VIVID_MATERIAL_WAVES_PER_BUILD_GROUP];
+groupshared uint gs_GlobalVariantOffsets[VIVID_MATERIAL_FEATURE_VARIANT_COUNT];
+#else
 groupshared uint gs_LocalVariantCounts[VIVID_MATERIAL_FEATURE_VARIANT_COUNT];
 groupshared uint gs_GlobalVariantOffsets[VIVID_MATERIAL_FEATURE_VARIANT_COUNT];
 groupshared uint gs_LocalTileOffsets[BUILD_INDIRECT_THREADS];
 groupshared uint gs_LocalTileVariants[BUILD_INDIRECT_THREADS];
+#endif
 
 uint GetMaterialFeatureVariantFlags(uint variant)
 {
@@ -96,6 +125,182 @@ bool TryDecodeValidMaterialFeatures(float encodedMaterialFeatureId, out uint mat
     return true;
 }
 
+#if VIVID_MATERIAL_USE_WAVE_INTRINSICS
+uint GetWaveVariantCountIndex(uint variant, uint waveIndex)
+{
+    return variant * VIVID_MATERIAL_WAVES_PER_BUILD_GROUP + waveIndex;
+}
+
+void WriteMaterialFeatureTile(uint tileIndex, uint variant, uint globalTileOffset)
+{
+    uint tileY = tileIndex / _MaterialTileCountX;
+    uint tileX = tileIndex - tileY * _MaterialTileCountX;
+    uint packedTileCoord = TileClassifaction::PackTileCoord(uint2(tileX, tileY));
+    _MaterialFeatureTileList[variant * _MaterialTileCount + globalTileOffset] = packedTileCoord;
+}
+
+uint GetWaveVariantLocalTileOffset(uint variant, bool isLiveTile)
+{
+    uint localTileOffset = 0u;
+
+    [unroll]
+    for (uint currentVariant = 0u; currentVariant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; currentVariant++)
+    {
+        bool belongsToVariant = isLiveTile && variant == currentVariant;
+        uint variantLocalTileOffset = WavePrefixCountBits(belongsToVariant);
+
+        if (variant == currentVariant)
+            localTileOffset = variantLocalTileOffset;
+    }
+
+    return localTileOffset;
+}
+
+uint GetWaveVariantTileCount(uint variant, bool isLiveTile, uint targetVariant)
+{
+    uint tileCount = 0u;
+
+    [unroll]
+    for (uint currentVariant = 0u; currentVariant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; currentVariant++)
+    {
+        uint currentVariantTileCount = WaveActiveCountBits(isLiveTile && variant == currentVariant);
+
+        if (targetVariant == currentVariant)
+            tileCount = currentVariantTileCount;
+    }
+
+    return tileCount;
+}
+
+void StoreWaveVariantCounts(uint variant, bool isLiveTile, uint waveIndex)
+{
+    bool isFirstLane = WaveIsFirstLane();
+
+    [unroll]
+    for (uint currentVariant = 0u; currentVariant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT; currentVariant++)
+    {
+        uint waveTileCount = WaveActiveCountBits(isLiveTile && variant == currentVariant);
+
+        if (isFirstLane)
+            gs_WaveVariantCounts[GetWaveVariantCountIndex(currentVariant, waveIndex)] = waveTileCount;
+    }
+}
+
+uint SumWaveVariantCounts(uint variant, uint waveCount)
+{
+    uint localTileCount = 0u;
+
+    [loop]
+    for (uint waveIndex = 0u; waveIndex < waveCount; waveIndex++)
+        localTileCount += gs_WaveVariantCounts[GetWaveVariantCountIndex(variant, waveIndex)];
+
+    return localTileCount;
+}
+
+uint SumPreviousWaveVariantCounts(uint variant, uint waveIndex)
+{
+    uint previousWaveTileCount = 0u;
+
+    [loop]
+    for (uint previousWaveIndex = 0u; previousWaveIndex < waveIndex; previousWaveIndex++)
+        previousWaveTileCount += gs_WaveVariantCounts[GetWaveVariantCountIndex(variant, previousWaveIndex)];
+
+    return previousWaveTileCount;
+}
+
+void WriteMaterialFeatureTileFlagsWithWaveOps(uint materialFeatures, uint3 groupId, uint groupIndex)
+{
+    uint tileIndex = groupId.y * _MaterialTileCountX + groupId.x;
+    uint waveTileMask = WaveActiveBitOr(materialFeatures);
+
+#if VIVID_MATERIAL_WAVE_SIZE >= VIVID_MATERIAL_CLASSIFY_THREAD_COUNT
+    if (WaveIsFirstLane())
+        _MaterialTileFeatureFlags[tileIndex] = waveTileMask;
+#else
+    uint waveIndex = groupIndex / VIVID_MATERIAL_WAVE_SIZE;
+
+    if (WaveIsFirstLane())
+        gs_TileWaveMasks[waveIndex] = waveTileMask;
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex == 0u)
+    {
+        uint tileMask = 0u;
+
+        [unroll]
+        for (uint currentWaveIndex = 0u; currentWaveIndex < VIVID_MATERIAL_WAVES_PER_CLASSIFY_GROUP; currentWaveIndex++)
+            tileMask |= gs_TileWaveMasks[currentWaveIndex];
+
+        _MaterialTileFeatureFlags[tileIndex] = tileMask;
+    }
+#endif
+}
+
+void BuildMaterialFeatureIndirectArgsWithWaveOps(uint tileIndex, uint variant, uint groupIndex)
+{
+    bool isLiveTile = tileIndex < _MaterialTileCount && variant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT;
+    uint localTileOffset = GetWaveVariantLocalTileOffset(variant, isLiveTile);
+
+#if VIVID_MATERIAL_WAVE_SIZE >= BUILD_INDIRECT_THREADS
+    uint variantGlobalOffset = 0u;
+    uint variantLane = WaveGetLaneIndex();
+    uint localTileCount = GetWaveVariantTileCount(variant, isLiveTile, variantLane);
+
+    if (variantLane < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    {
+        if (localTileCount > 0u)
+        {
+            uint argsOffset = variantLane * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;
+            InterlockedAdd(_MaterialFeatureIndirectArgs[argsOffset], localTileCount, variantGlobalOffset);
+        }
+    }
+
+    uint globalVariantOffset = WaveReadLaneAt(variantGlobalOffset, variant);
+
+    if (isLiveTile)
+    {
+        uint globalTileOffset = globalVariantOffset + localTileOffset;
+        WriteMaterialFeatureTile(tileIndex, variant, globalTileOffset);
+    }
+#else
+    uint waveIndex = groupIndex / VIVID_MATERIAL_WAVE_SIZE;
+    StoreWaveVariantCounts(variant, isLiveTile, waveIndex);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (groupIndex < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+    {
+        uint localTileCount = SumWaveVariantCounts(groupIndex, VIVID_MATERIAL_WAVES_PER_BUILD_GROUP);
+        uint globalTileOffset = 0u;
+
+        if (localTileCount > 0u)
+        {
+            uint argsOffset = groupIndex * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;
+            InterlockedAdd(_MaterialFeatureIndirectArgs[argsOffset], localTileCount, globalTileOffset);
+        }
+
+        gs_GlobalVariantOffsets[groupIndex] = globalTileOffset;
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    if (!isLiveTile)
+        return;
+
+    uint previousWaveTileCount = SumPreviousWaveVariantCounts(variant, waveIndex);
+    uint globalTileOffset = gs_GlobalVariantOffsets[variant] + previousWaveTileCount + localTileOffset;
+    WriteMaterialFeatureTile(tileIndex, variant, globalTileOffset);
+#endif
+}
+#else
+void WriteMaterialFeatureTile(uint tileIndex, uint variant, uint globalTileOffset)
+{
+    uint tileY = tileIndex / _MaterialTileCountX;
+    uint tileX = tileIndex - tileY * _MaterialTileCountX;
+    uint packedTileCoord = TileClassifaction::PackTileCoord(uint2(tileX, tileY));
+    _MaterialFeatureTileList[variant * _MaterialTileCount + globalTileOffset] = packedTileCoord;
+}
+
 void InitializeMaterialFeatureTileListBuild(uint groupIndex)
 {
     if (groupIndex < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
@@ -108,70 +313,40 @@ void InitializeMaterialFeatureTileListBuild(uint groupIndex)
     gs_LocalTileVariants[groupIndex] = VIVID_INVALID_MATERIAL_FEATURE_VARIANT;
     GroupMemoryBarrierWithGroupSync();
 }
+#endif
 
-[numthreads(VIVID_MATERIAL_FEATURE_VARIANT_COUNT, 1, 1)]
-void ClearMaterialFeatureArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+void WriteMaterialFeatureTileFlags(uint materialFeatures, uint3 groupId, uint groupIndex)
 {
-    uint variant = dispatchThreadId.x;
-    uint argsOffset = variant * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;
-
-    _MaterialFeatureIndirectArgs[argsOffset + 0u] = 0u;
-    _MaterialFeatureIndirectArgs[argsOffset + 1u] = 1u;
-    _MaterialFeatureIndirectArgs[argsOffset + 2u] = 1u;
-    _MaterialFeatureIndirectArgs[argsOffset + 3u] = 0u;
-}
-
-[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
-void ClassifyMaterialFeatures(
-    uint3 dispatchThreadId : SV_DispatchThreadID,
-    uint3 groupId : SV_GroupID,
-    uint groupIndex : SV_GroupIndex)
-{
+#if VIVID_MATERIAL_USE_WAVE_INTRINSICS
+    WriteMaterialFeatureTileFlagsWithWaveOps(materialFeatures, groupId, groupIndex);
+#else
     TileClassifaction::InitializeTileClassification(groupIndex);
-
-    uint materialFeatures = 0u;
-
-    if (dispatchThreadId.x < _ClassificationWidth && dispatchThreadId.y < _ClassificationHeight)
-    {
-        uint2 pixelCoord = dispatchThreadId.xy;
-        float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
-
-        if (deviceDepth != UNITY_RAW_FAR_CLIP_VALUE)
-        {
-            float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
-            TryDecodeValidMaterialFeatures(gbuffer0.a, materialFeatures);
-        }
-    }
-
     TileClassifaction::SubmitPixelClassification(materialFeatures);
 
-    if (groupIndex != 0u)
-        return;
-
-    uint tileIndex = groupId.y * _MaterialTileCountX + groupId.x;
-    _MaterialTileFeatureFlags[tileIndex] = gs_TileMask;
+    if (groupIndex == 0u)
+    {
+        uint tileIndex = groupId.y * _MaterialTileCountX + groupId.x;
+        _MaterialTileFeatureFlags[tileIndex] = gs_TileMask;
+    }
+#endif
 }
 
-[numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
-void BuildMaterialFeatureIndirectArgs(
-    uint3 dispatchThreadId : SV_DispatchThreadID,
-    uint groupIndex : SV_GroupIndex)
+void BuildMaterialFeatureIndirectArgsInternal(uint tileIndex, uint groupIndex)
 {
-    InitializeMaterialFeatureTileListBuild(groupIndex);
-
-    uint tileIndex = dispatchThreadId.x;
     uint variant = VIVID_INVALID_MATERIAL_FEATURE_VARIANT;
-    uint localTileOffset = 0u;
 
     if (tileIndex < _MaterialTileCount)
-    {
         variant = SelectMaterialFeatureVariant(_MaterialTileFeatureFlags[tileIndex]);
 
-        if (variant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
-        {
-            InterlockedAdd(gs_LocalVariantCounts[variant], 1u, localTileOffset);
-        }
-    }
+#if VIVID_MATERIAL_USE_WAVE_INTRINSICS
+    BuildMaterialFeatureIndirectArgsWithWaveOps(tileIndex, variant, groupIndex);
+#else
+    InitializeMaterialFeatureTileListBuild(groupIndex);
+
+    uint localTileOffset = 0u;
+
+    if (variant < VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
+        InterlockedAdd(gs_LocalVariantCounts[variant], 1u, localTileOffset);
 
     gs_LocalTileOffsets[groupIndex] = localTileOffset;
     gs_LocalTileVariants[groupIndex] = variant;
@@ -194,9 +369,100 @@ void BuildMaterialFeatureIndirectArgs(
     if (tileIndex >= _MaterialTileCount || variant >= VIVID_MATERIAL_FEATURE_VARIANT_COUNT)
         return;
 
-    uint tileY = tileIndex / _MaterialTileCountX;
-    uint tileX = tileIndex - tileY * _MaterialTileCountX;
-    uint packedTileCoord = TileClassifaction::PackTileCoord(uint2(tileX, tileY));
     uint globalTileOffset = gs_GlobalVariantOffsets[variant] + gs_LocalTileOffsets[groupIndex];
-    _MaterialFeatureTileList[variant * _MaterialTileCount + globalTileOffset] = packedTileCoord;
+    WriteMaterialFeatureTile(tileIndex, variant, globalTileOffset);
+#endif
+}
+
+[numthreads(VIVID_MATERIAL_FEATURE_VARIANT_COUNT, 1, 1)]
+void ClearMaterialFeatureArgs(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint variant = dispatchThreadId.x;
+    uint argsOffset = variant * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;
+
+    _MaterialFeatureIndirectArgs[argsOffset + 0u] = 0u;
+    _MaterialFeatureIndirectArgs[argsOffset + 1u] = 1u;
+    _MaterialFeatureIndirectArgs[argsOffset + 2u] = 1u;
+    _MaterialFeatureIndirectArgs[argsOffset + 3u] = 0u;
+}
+
+void ClassifyMaterialFeaturesInternal(
+    uint3 dispatchThreadId,
+    uint3 groupId,
+    uint groupIndex)
+{
+    uint materialFeatures = 0u;
+
+    if (dispatchThreadId.x < _ClassificationWidth && dispatchThreadId.y < _ClassificationHeight)
+    {
+        uint2 pixelCoord = dispatchThreadId.xy;
+        float deviceDepth = _DepthTexture.Load(int3(pixelCoord, 0));
+
+        if (deviceDepth != UNITY_RAW_FAR_CLIP_VALUE)
+        {
+            float4 gbuffer0 = _GBuffer0.Load(int3(pixelCoord, 0));
+            TryDecodeValidMaterialFeatures(gbuffer0.a, materialFeatures);
+        }
+    }
+
+    WriteMaterialFeatureTileFlags(materialFeatures, groupId, groupIndex);
+}
+
+void BuildMaterialFeatureIndirectArgsInternalEntry(
+    uint3 dispatchThreadId,
+    uint groupIndex)
+{
+    uint tileIndex = dispatchThreadId.x;
+    BuildMaterialFeatureIndirectArgsInternal(tileIndex, groupIndex);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void ClassifyMaterialFeatures(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    ClassifyMaterialFeaturesInternal(dispatchThreadId, groupId, groupIndex);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void ClassifyMaterialFeaturesWave32(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    ClassifyMaterialFeaturesInternal(dispatchThreadId, groupId, groupIndex);
+}
+
+[numthreads(CLASSIFY_TILE_SIZE, CLASSIFY_TILE_SIZE, 1)]
+void ClassifyMaterialFeaturesWave64(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint3 groupId : SV_GroupID,
+    uint groupIndex : SV_GroupIndex)
+{
+    ClassifyMaterialFeaturesInternal(dispatchThreadId, groupId, groupIndex);
+}
+
+[numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
+void BuildMaterialFeatureIndirectArgs(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex)
+{
+    BuildMaterialFeatureIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
+}
+
+[numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
+void BuildMaterialFeatureIndirectArgsWave32(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex)
+{
+    BuildMaterialFeatureIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
+}
+
+[numthreads(BUILD_INDIRECT_THREADS, 1, 1)]
+void BuildMaterialFeatureIndirectArgsWave64(
+    uint3 dispatchThreadId : SV_DispatchThreadID,
+    uint groupIndex : SV_GroupIndex)
+{
+    BuildMaterialFeatureIndirectArgsInternalEntry(dispatchThreadId, groupIndex);
 }

@@ -11,9 +11,18 @@ namespace VividRP.Editor.Tests
         {
             var source = File.ReadAllText(GetComputeShaderSourcePath());
 
-            Assert.That(source, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/TileClassification.hlsl\""));
+            Assert.That(source, Does.Contain("#pragma use_dxc"));
+            Assert.That(source, Does.Contain("#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_WAVE_32 UNITY_DEVICE_SUPPORTS_WAVE_64"));
+            Assert.That(source, Does.Contain("#pragma kernel ClassifyMaterialFeaturesWave32 VIVID_MATERIAL_WAVE_32"));
+            Assert.That(source, Does.Contain("#pragma kernel ClassifyMaterialFeaturesWave64 VIVID_MATERIAL_WAVE_64"));
+            Assert.That(source, Does.Contain("#pragma kernel BuildMaterialFeatureIndirectArgsWave32 VIVID_MATERIAL_WAVE_32"));
+            Assert.That(source, Does.Contain("#pragma kernel BuildMaterialFeatureIndirectArgsWave64 VIVID_MATERIAL_WAVE_64"));
+            Assert.That(source, Does.Contain("#include \"Packages/com.vivid.render-pipelines/Shaders/Core/Public/TileClassification.hlsl\""));
             Assert.That(source, Does.Contain("#define CLASSIFY_TILE_SIZE 8"));
             Assert.That(source, Does.Contain("#define BUILD_INDIRECT_THREADS"));
+            Assert.That(source, Does.Contain("defined(UNITY_DEVICE_SUPPORTS_WAVE_64) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 64"));
+            Assert.That(source, Does.Contain("defined(UNITY_DEVICE_SUPPORTS_WAVE_32) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 32"));
+            Assert.That(source, Does.Contain("#define VIVID_MATERIAL_USE_WAVE_INTRINSICS 1"));
             Assert.That(source, Does.Contain("#define VIVID_MATERIAL_FEATURE_VARIANT_COUNT 7"));
             Assert.That(source, Does.Contain("#define VIVID_MATERIAL_FEATURE_VARIANT_CATCH_ALL 6"));
             Assert.That(source, Does.Contain("RWStructuredBuffer<uint> _MaterialTileFeatureFlags;"));
@@ -34,6 +43,13 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("groupshared uint gs_GlobalVariantOffsets"));
             Assert.That(source, Does.Contain("groupshared uint gs_LocalTileOffsets"));
             Assert.That(source, Does.Contain("groupshared uint gs_LocalTileVariants"));
+            Assert.That(source, Does.Contain("WriteMaterialFeatureTileFlagsWithWaveOps"));
+            Assert.That(source, Does.Contain("WaveActiveBitOr(materialFeatures)"));
+            Assert.That(source, Does.Contain("WavePrefixCountBits(belongsToVariant)"));
+            Assert.That(source, Does.Contain("WaveActiveCountBits(isLiveTile && variant == currentVariant)"));
+            Assert.That(source, Does.Contain("WaveReadLaneAt(variantGlobalOffset, variant)"));
+            Assert.That(source, Does.Contain("VIVID_MATERIAL_WAVE_SIZE >= VIVID_MATERIAL_CLASSIFY_THREAD_COUNT"));
+            Assert.That(source, Does.Contain("VIVID_MATERIAL_WAVE_SIZE >= BUILD_INDIRECT_THREADS"));
             Assert.That(source, Does.Contain("InitializeMaterialFeatureTileListBuild(groupIndex);"));
             Assert.That(source, Does.Contain("InterlockedAdd(gs_LocalVariantCounts[variant], 1u, localTileOffset);"));
             Assert.That(source, Does.Contain("uint argsOffset = groupIndex * VIVID_INDIRECT_ARGS_ELEMENT_COUNT;"));
@@ -54,6 +70,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("StructuredBuffer<PunctualLightCullData> _PunctualLightCullData;"));
             Assert.That(source, Does.Not.Contain("BuildClusteredLightList"));
             Assert.That(source, Does.Not.Contain("SpotConeIntersectsCluster"));
+            Assert.That(source, Does.Not.Contain("#pragma require Native16Bit"));
+            Assert.That(source, Does.Not.Contain("WaveGetLaneCount()"));
         }
 
         [Test]

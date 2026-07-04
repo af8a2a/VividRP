@@ -69,6 +69,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveMaterialClassificationWaveSize_SelectsSupportedWavePath_FromComputeSubGroupSize()
+        {
+            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(64), Is.EqualTo(64));
+            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(32), Is.EqualTo(32));
+            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(16), Is.Zero);
+            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(0), Is.Zero);
+        }
+
+        [Test]
+        public void SelectMaterialClassificationKernels_UsesWaveKernels_WhenComputeSubGroupSizeMatches()
+        {
+            var pass = new ClassificationPass();
+            SetFieldValue(pass, "m_ClassifyMaterialFeaturesKernel", 10);
+            SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsKernel", 20);
+            SetFieldValue(pass, "m_ClassifyMaterialFeaturesWave32Kernel", 32);
+            SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsWave32Kernel", 33);
+            SetFieldValue(pass, "m_ClassifyMaterialFeaturesWave64Kernel", 64);
+            SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsWave64Kernel", 65);
+
+            InvokeSelectMaterialClassificationKernels(pass, 64);
+
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyMaterialFeaturesKernel"), Is.EqualTo(64));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildMaterialFeatureIndirectArgsKernel"), Is.EqualTo(65));
+
+            InvokeSelectMaterialClassificationKernels(pass, 32);
+
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyMaterialFeaturesKernel"), Is.EqualTo(32));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildMaterialFeatureIndirectArgsKernel"), Is.EqualTo(33));
+
+            InvokeSelectMaterialClassificationKernels(pass, 16);
+
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedClassifyMaterialFeaturesKernel"), Is.EqualTo(10));
+            Assert.That(GetFieldValue<int>(pass, "m_SelectedBuildMaterialFeatureIndirectArgsKernel"), Is.EqualTo(20));
+        }
+
+        [Test]
         public void Prepare_ComputesBuildIndirectDispatchGroups_WhenTileCountExceedsSingleWave()
         {
             var pass = new ClassificationPass();
@@ -136,6 +172,29 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer, Is.Not.Null);
             Assert.That(importedGraphicsBuffer.count, Is.GreaterThanOrEqualTo(expectedCount));
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(expectedStride));
+        }
+
+        private static T GetFieldValue<T>(ClassificationPass pass, string fieldName)
+        {
+            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            return (T)field.GetValue(pass);
+        }
+
+        private static void SetFieldValue<T>(ClassificationPass pass, string fieldName, T value)
+        {
+            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(field, Is.Not.Null, fieldName);
+            field.SetValue(pass, value);
+        }
+
+        private static void InvokeSelectMaterialClassificationKernels(ClassificationPass pass, int computeSubGroupSize)
+        {
+            var method = typeof(ClassificationPass).GetMethod(
+                "SelectMaterialClassificationKernels",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(method, Is.Not.Null);
+            method.Invoke(pass, new object[] { computeSubGroupSize });
         }
     }
 }

@@ -1,0 +1,217 @@
+using NUnit.Framework;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
+using UnityEngine;
+using VividRP.Runtime.Particle;
+using VividRP.Runtime.Particle.ECS;
+
+namespace VividRP.Editor.Tests
+{
+    public sealed class VividParticleEcsTests
+    {
+        [Test]
+        public void TypeManager_RegistersParticleTypes_WithStableSoaOffsets()
+        {
+            VividParticleTypeIndex commonIndex = VividParticleTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividParticleTypeIndex systemIdIndex = VividParticleTypeManager.GetTypeIndex<VividParticleSystemId>();
+            VividParticleTypeInfo commonType = VividParticleTypeManager.GetTypeInfo(commonIndex);
+
+            Assert.That(commonIndex.IsValid, Is.True);
+            Assert.That(systemIdIndex.IsValid, Is.True);
+            Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
+            Assert.That(VividParticleTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
+            Assert.That(commonType.IsSoa, Is.True);
+            Assert.That(commonType.FieldCount, Is.EqualTo(VividParticleCommon.FieldCountValue));
+            Assert.That(commonType.SizeInPage, Is.EqualTo(VividParticleCommon.TypeSizeInBytes));
+            Assert.That(commonType.GetFieldInfo(VividParticleCommon.PositionFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.PositionOffsetInPage));
+            Assert.That(commonType.GetFieldInfo(VividParticleCommon.PositionFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float3SizeInBytes));
+            Assert.That(commonType.GetFieldInfo(VividParticleCommon.VelocityFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.VelocityOffsetInPage));
+            Assert.That(commonType.GetFieldInfo(VividParticleCommon.StartColorFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float4SizeInBytes));
+            Assert.That(commonType.GetFieldInfo(VividParticleCommon.SizeFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.SizeOffsetInPage));
+        }
+
+        [Test]
+        public void Storage_UsesPageCapacity_AndClampsActiveCountWhenShrunk()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.systemId = new VividParticleSystemId(17);
+            storage.EnsureCapacity(300);
+
+            Assert.That(VividParticleEcsConstants.PageEntryCount, Is.EqualTo(VividParticleStorage.PageSize));
+            Assert.That(storage.capacity, Is.EqualTo(512));
+            Assert.That(storage.pageCount, Is.EqualTo(2));
+
+            for (int index = 0; index < 300; index++)
+                Assert.That(AddParticle(storage, index), Is.True);
+
+            Assert.That(storage.activeCount, Is.EqualTo(300));
+
+            storage.EnsureCapacity(3);
+
+            Assert.That(storage.capacity, Is.EqualTo(256));
+            Assert.That(storage.pageCount, Is.EqualTo(1));
+            Assert.That(storage.activeCount, Is.EqualTo(3));
+        }
+
+        [Test]
+        public void Storage_AddWritesAndReadsAcrossPages()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(300);
+
+            for (int index = 0; index < 260; index++)
+                Assert.That(AddParticle(storage, index), Is.True);
+
+            Assert.That(storage.activeCount, Is.EqualTo(260));
+            Assert.That(storage.capacity, Is.EqualTo(512));
+            AssertVector3(new Vector3(0.0f, 1.0f, 2.0f), storage.GetPosition(0));
+            AssertVector3(new Vector3(259.0f, 260.0f, 261.0f), storage.GetPosition(259));
+            AssertVector3(new Vector3(259.5f, 260.5f, 261.5f), storage.GetVelocity(259));
+            Assert.That(storage.GetStartLifetime(259), Is.EqualTo(10.0f));
+            Assert.That(storage.GetRemainingLifetime(259), Is.EqualTo(10.0f));
+            Assert.That(storage.GetSize(259), Is.EqualTo(260.0f));
+            AssertColor(new Color(0.25f, 0.5f, 0.75f, 1.0f), storage.GetColor(259));
+
+            using VividParticlePageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
+            Assert.That(pageGroup.pageCount, Is.EqualTo(2));
+            Assert.That(pageGroup[0].EntryCount, Is.EqualTo(256));
+            Assert.That(pageGroup[1].EntryCount, Is.EqualTo(4));
+            Assert.That(pageGroup[1].StartIndex, Is.EqualTo(256));
+            Assert.That(pageGroup[1].SystemId, Is.EqualTo(new VividParticleSystemId(17)));
+        }
+
+        [Test]
+        public void PageJob_SchedulesForEachLivePage()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(300);
+            for (int index = 0; index < 300; index++)
+                Assert.That(AddParticle(storage, index), Is.True);
+
+            using VividParticlePageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
+            var counts = new NativeArray<int>(pageGroup.pageCount, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            try
+            {
+                var job = new CapturePageCountsJob
+                {
+                    Counts = counts,
+                };
+
+                JobHandle handle = job.Schedule(pageGroup.pages);
+                handle.Complete();
+
+                Assert.That(counts[0], Is.EqualTo(256));
+                Assert.That(counts[1], Is.EqualTo(44));
+            }
+            finally
+            {
+                counts.Dispose();
+            }
+        }
+
+        [Test]
+        public void Storage_ScheduleIntegrate_MatchesExistingStorage()
+        {
+            using var legacyStorage = new VividParticleStorage();
+            using var ecsStorage = new VividParticleEcsStorage();
+            legacyStorage.EnsureCapacity(8);
+            ecsStorage.EnsureCapacity(8);
+
+            for (int index = 0; index < 3; index++)
+            {
+                Vector3 position = new(index, index + 2.0f, index + 4.0f);
+                Vector3 velocity = new(index + 0.25f, index + 0.5f, index + 0.75f);
+                Color color = new(0.1f * index, 0.2f, 0.3f, 1.0f);
+                Assert.That(legacyStorage.Add(position, velocity, 5.0f, 5.0f, index + 1.0f, color), Is.True);
+                Assert.That(ecsStorage.Add(position, velocity, 5.0f, 5.0f, index + 1.0f, color), Is.True);
+            }
+
+            Vector3 gravity = new(0.0f, -9.81f, 0.0f);
+            Assert.That(legacyStorage.ScheduleIntegrate(0.125f, gravity, out JobHandle legacyHandle), Is.True);
+            Assert.That(ecsStorage.ScheduleIntegrate(0.125f, gravity, out JobHandle ecsHandle), Is.True);
+
+            legacyHandle.Complete();
+            ecsHandle.Complete();
+            legacyStorage.ApplyScheduledIntegrateResult();
+            ecsStorage.ApplyScheduledIntegrateResult();
+
+            Assert.That(ecsStorage.activeCount, Is.EqualTo(legacyStorage.activeCount));
+            for (int index = 0; index < legacyStorage.activeCount; index++)
+            {
+                AssertVector3(legacyStorage.GetPosition(index), ecsStorage.GetPosition(index));
+                AssertVector3(legacyStorage.GetVelocity(index), ecsStorage.GetVelocity(index));
+                Assert.That(ecsStorage.GetStartLifetime(index), Is.EqualTo(legacyStorage.GetStartLifetime(index)));
+                Assert.That(ecsStorage.GetRemainingLifetime(index), Is.EqualTo(legacyStorage.GetRemainingLifetime(index)));
+                Assert.That(ecsStorage.GetSize(index), Is.EqualTo(legacyStorage.GetSize(index)));
+                AssertColor(legacyStorage.GetColor(index), ecsStorage.GetColor(index));
+            }
+        }
+
+        [Test]
+        public void Storage_ScheduleIntegrate_CompactsExpiredParticlesWithSwapBack()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(3);
+            Assert.That(storage.Add(Vector3.zero, Vector3.zero, 0.05f, 0.05f, 1.0f, Color.red), Is.True);
+            Assert.That(storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 2.0f, Color.green), Is.True);
+            Assert.That(storage.Add(Vector3.right, Vector3.zero, 6.0f, 6.0f, 3.0f, Color.blue), Is.True);
+
+            Assert.That(storage.ScheduleIntegrate(0.1f, Vector3.zero, out JobHandle handle), Is.True);
+            handle.Complete();
+            storage.ApplyScheduledIntegrateResult();
+
+            Assert.That(storage.activeCount, Is.EqualTo(2));
+            AssertColor(Color.blue, storage.GetColor(0));
+            AssertColor(Color.green, storage.GetColor(1));
+            Assert.That(storage.GetRemainingLifetime(0), Is.EqualTo(5.9f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Storage_DisposeCanRepeat_WithoutThrowing()
+        {
+            var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(1);
+
+            Assert.DoesNotThrow(() => storage.Dispose());
+            Assert.DoesNotThrow(() => storage.Dispose());
+        }
+
+        private static bool AddParticle(VividParticleEcsStorage storage, int index)
+        {
+            return storage.Add(
+                new Vector3(index, index + 1.0f, index + 2.0f),
+                new Vector3(index + 0.5f, index + 1.5f, index + 2.5f),
+                10.0f,
+                10.0f,
+                index + 1.0f,
+                new Color(0.25f, 0.5f, 0.75f, 1.0f));
+        }
+
+        private static void AssertVector3(Vector3 expected, Vector3 actual)
+        {
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(0.0001f));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(0.0001f));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(0.0001f));
+        }
+
+        private static void AssertColor(Color expected, Color actual)
+        {
+            Assert.That(actual.r, Is.EqualTo(expected.r).Within(0.0001f));
+            Assert.That(actual.g, Is.EqualTo(expected.g).Within(0.0001f));
+            Assert.That(actual.b, Is.EqualTo(expected.b).Within(0.0001f));
+            Assert.That(actual.a, Is.EqualTo(expected.a).Within(0.0001f));
+        }
+
+        [BurstCompile]
+        private struct CapturePageCountsJob : IVividParticlePageJob
+        {
+            public NativeArray<int> Counts;
+
+            public void Execute(VividParticlePageInfo page)
+            {
+                Counts[page.PageIndex] = page.EntryCount;
+            }
+        }
+    }
+}

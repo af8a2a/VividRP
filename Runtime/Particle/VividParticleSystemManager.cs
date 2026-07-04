@@ -1159,9 +1159,6 @@ namespace VividRP.Runtime.Particle
                 m_BRG.SetEnabledViewTypes(new[]
                 {
                     BatchCullingViewType.Camera,
-                    BatchCullingViewType.Picking,
-                    BatchCullingViewType.SelectionOutline,
-                    BatchCullingViewType.Filtering,
                 });
 #endif
                 m_MeshID = m_BRG.RegisterMesh(m_QuadMesh);

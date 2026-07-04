@@ -346,13 +346,24 @@ namespace VividRP.Runtime.ECS
         private readonly Dictionary<VividEcsTypeIndex, object> m_SharedComponents = new();
         private readonly List<VividEcsTypeIndex> m_Types = new();
         private readonly List<int> m_EntityIds = new();
+        private readonly VividEcsTileAllocator m_TileAllocator;
         private NativeArray<int> m_PageEntryCounts;
+        private VividEcsTileRange m_TileRange = VividEcsTileRange.Invalid;
         private int m_MaxEntries;
         private int m_ActiveCount;
 
         public VividEcsArchetypeLine(int archetypeLineId, params VividEcsTypeIndex[] componentTypes)
+            : this(archetypeLineId, null, componentTypes)
+        {
+        }
+
+        public VividEcsArchetypeLine(
+            int archetypeLineId,
+            VividEcsTileAllocator tileAllocator,
+            params VividEcsTypeIndex[] componentTypes)
         {
             ArchetypeLineId = archetypeLineId;
+            m_TileAllocator = tileAllocator;
             AddComponentTypes(componentTypes);
         }
 
@@ -363,6 +374,8 @@ namespace VividRP.Runtime.ECS
         public int pageCount => m_PageEntryCounts.IsCreated ? m_PageEntryCounts.Length : 0;
 
         public int capacity => pageCount * VividEcsConstants.PageEntryCount;
+
+        public VividEcsTileRange tileRange => m_TileRange;
 
         public int maxEntries => m_MaxEntries;
 
@@ -384,6 +397,11 @@ namespace VividRP.Runtime.ECS
                 return;
             }
 
+            VividEcsTileRange oldRange = m_TileRange;
+            VividEcsTileRange newRange = m_TileAllocator != null
+                ? m_TileAllocator.AllocateTiles(requestedPageCount)
+                : new VividEcsTileRange(0, requestedPageCount);
+
             foreach (IVividEcsColumn column in m_Columns.Values)
                 column.EnsureCapacity(requestedCapacity);
 
@@ -394,6 +412,10 @@ namespace VividRP.Runtime.ECS
 
             DisposePageEntryCounts();
             m_PageEntryCounts = newPageEntryCounts;
+            m_TileRange = newRange;
+            if (m_TileAllocator != null)
+                m_TileAllocator.Free(oldRange);
+
             m_MaxEntries = requestedMaxEntries;
             SetActiveCount(math.min(activeCount, m_MaxEntries));
         }
@@ -652,6 +674,10 @@ namespace VividRP.Runtime.ECS
             m_Types.Clear();
             m_EntityIds.Clear();
             DisposePageEntryCounts();
+            if (m_TileAllocator != null)
+                m_TileAllocator.Free(m_TileRange);
+
+            m_TileRange = VividEcsTileRange.Invalid;
             m_MaxEntries = 0;
             m_ActiveCount = 0;
         }

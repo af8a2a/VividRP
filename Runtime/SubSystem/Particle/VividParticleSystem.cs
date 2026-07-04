@@ -159,13 +159,18 @@ namespace VividRP.Runtime.Particle
 
         internal VividParticleSystemFrameSnapshot CaptureFrameSnapshot(float deltaTime)
         {
+            VividParticleBurst[] burstBuffer = Array.Empty<VividParticleBurst>();
+            return CaptureFrameSnapshot(deltaTime, ref burstBuffer);
+        }
+
+        internal VividParticleSystemFrameSnapshot CaptureFrameSnapshot(
+            float deltaTime,
+            ref VividParticleBurst[] burstBuffer)
+        {
             EnsureModules();
             ValidateModules();
 
-            VividParticleBurst[] sourceBursts = emission.bursts;
-            VividParticleBurst[] bursts = sourceBursts != null && sourceBursts.Length > 0
-                ? (VividParticleBurst[])sourceBursts.Clone()
-                : Array.Empty<VividParticleBurst>();
+            VividParticleBurst[] bursts = CopyBurstsToSnapshotBuffer(emission.bursts, ref burstBuffer);
 
             return new VividParticleSystemFrameSnapshot(
                 deltaTime,
@@ -206,6 +211,21 @@ namespace VividRP.Runtime.Particle
                 transform.localToWorldMatrix,
                 transform.rotation,
                 GetEntityId().GetHashCode());
+        }
+
+        private static VividParticleBurst[] CopyBurstsToSnapshotBuffer(
+            VividParticleBurst[] sourceBursts,
+            ref VividParticleBurst[] burstBuffer)
+        {
+            int burstCount = sourceBursts?.Length ?? 0;
+            if (burstCount <= 0)
+                return Array.Empty<VividParticleBurst>();
+
+            if (burstBuffer == null || burstBuffer.Length != burstCount)
+                burstBuffer = new VividParticleBurst[burstCount];
+
+            Array.Copy(sourceBursts, burstBuffer, burstCount);
+            return burstBuffer;
         }
 
         internal static void SampleShape(

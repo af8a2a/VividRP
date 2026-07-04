@@ -165,6 +165,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void World_AllocatesArchetypeLineTiles_FromSharedAllocator()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            using var world = new VividEcsWorld();
+
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(300, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(1, dataIndex);
+
+            Assert.That(first.tileRange.StartTile, Is.EqualTo(0));
+            Assert.That(first.tileRange.TileCount, Is.EqualTo(2));
+            Assert.That(second.tileRange.StartTile, Is.EqualTo(2));
+            Assert.That(world.tileAllocator.liveTileCount, Is.EqualTo(3));
+
+            first.EnsureCapacity(1);
+
+            Assert.That(first.tileRange.TileCount, Is.EqualTo(1));
+            Assert.That(world.tileAllocator.liveTileCount, Is.EqualTo(2));
+            Assert.That(world.tileAllocator.freeRangeCount, Is.GreaterThanOrEqualTo(1));
+        }
+
+        [Test]
         public void World_QueryAndLineGroups_FilterBySharedComponent()
         {
             VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
@@ -313,6 +334,52 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void ManagerJobRegistry_UsesModuleFlagsToEnableJobs()
+        {
+            var values = new NativeArray<int>(3, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            try
+            {
+                var registry = new VividEcsManagerJobRegistry<ModuleRegistryContext>();
+                registry.RegisterModule(
+                    "a",
+                    0,
+                    ModuleRegistryContext.ModuleA,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 0,
+                        Value = 10,
+                    }.Schedule(dependency));
+                registry.RegisterModule(
+                    "b",
+                    1,
+                    ModuleRegistryContext.ModuleB,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 1,
+                        Value = 20,
+                    }.Schedule(dependency));
+
+                var context = new ModuleRegistryContext
+                {
+                    Values = values,
+                    EnabledModuleFlags = ModuleRegistryContext.ModuleB,
+                };
+                JobHandle handle = registry.ScheduleEnabled(context);
+                handle.Complete();
+
+                Assert.That(registry.EnabledCount(context), Is.EqualTo(1));
+                Assert.That(values[0], Is.EqualTo(0));
+                Assert.That(values[1], Is.EqualTo(20));
+            }
+            finally
+            {
+                values.Dispose();
+            }
+        }
+
         private readonly struct TestData : IVividEcsComponentData
         {
             public TestData(float value)
@@ -395,6 +462,15 @@ namespace VividRP.Editor.Tests
         {
             public NativeArray<int> Values;
             public bool DisabledJobsEnabled;
+        }
+
+        private struct ModuleRegistryContext : IVividEcsManagerJobModuleFlags
+        {
+            public const uint ModuleA = 1u << 0;
+            public const uint ModuleB = 1u << 1;
+
+            public NativeArray<int> Values;
+            public uint EnabledModuleFlags { get; set; }
         }
 
         private struct WriteRegistryValueJob : IJob

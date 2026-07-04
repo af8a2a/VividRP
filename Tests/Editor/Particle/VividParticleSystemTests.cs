@@ -1132,6 +1132,32 @@ namespace VividRP.Editor.Tests
             Assert.That(Shader.Find(VividParticleSystemManager.DefaultShaderName), Is.Not.Null);
         }
 
+        [Test]
+        public void CaptureFrameSnapshot_ReusesBurstBuffer_WhenBurstCountUnchanged()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.emission.bursts = new[]
+            {
+                new VividParticleBurst(0.1f, 1),
+                new VividParticleBurst(0.2f, 2),
+            };
+
+            VividParticleBurst[] buffer = null;
+            VividParticleSystemFrameSnapshot firstSnapshot = system.CaptureFrameSnapshot(0.0f, ref buffer);
+            VividParticleBurst[] firstBuffer = buffer;
+
+            Assert.That(firstSnapshot.Bursts, Is.SameAs(firstBuffer));
+            Assert.That(firstBuffer, Is.Not.Null);
+
+            system.emission.bursts[0] = new VividParticleBurst(0.3f, 3);
+            VividParticleSystemFrameSnapshot secondSnapshot = system.CaptureFrameSnapshot(0.0f, ref buffer);
+
+            Assert.That(buffer, Is.SameAs(firstBuffer));
+            Assert.That(secondSnapshot.Bursts, Is.SameAs(firstBuffer));
+            Assert.That(secondSnapshot.Bursts[0].time, Is.EqualTo(0.3f));
+            Assert.That(secondSnapshot.Bursts[0].count, Is.EqualTo(3));
+        }
+
         private VividParticleSystem CreateSystem()
         {
             var gameObject = new GameObject("Vivid Particle System Test");

@@ -14,6 +14,7 @@ namespace VividRP.Runtime.Particle.ECS
 
             VividEcsTypeManager.RegisterSoa<VividParticleCommon>();
             VividEcsTypeManager.RegisterShared<VividParticleSystemId>();
+            VividEcsTypeManager.RegisterShared<VividParticleRendererSharedKey>();
             s_Registered = true;
         }
     }
@@ -44,6 +45,88 @@ namespace VividRP.Runtime.Particle.ECS
         public override int GetHashCode()
         {
             return Value;
+        }
+    }
+
+    internal readonly struct VividParticleRendererSharedKey : IVividEcsSharedComponentData, IEquatable<VividParticleRendererSharedKey>
+    {
+        public static readonly VividParticleRendererSharedKey Invalid = new(
+            0,
+            0,
+            -1,
+            -1,
+            0,
+            0u,
+            0,
+            false);
+
+        public VividParticleRendererSharedKey(
+            int materialId,
+            int meshId,
+            int renderMode,
+            int layer,
+            int gpuDataLayoutHash,
+            uint dataPerSharpBits,
+            int shadowCastingMode,
+            bool receiveShadows)
+        {
+            MaterialId = materialId;
+            MeshId = meshId;
+            RenderMode = renderMode;
+            Layer = layer;
+            GpuDataLayoutHash = gpuDataLayoutHash;
+            DataPerSharpBits = dataPerSharpBits;
+            ShadowCastingMode = shadowCastingMode;
+            ReceiveShadows = receiveShadows;
+        }
+
+        public int MaterialId { get; }
+
+        public int MeshId { get; }
+
+        public int RenderMode { get; }
+
+        public int Layer { get; }
+
+        public int GpuDataLayoutHash { get; }
+
+        public uint DataPerSharpBits { get; }
+
+        public int ShadowCastingMode { get; }
+
+        public bool ReceiveShadows { get; }
+
+        public bool Equals(VividParticleRendererSharedKey other)
+        {
+            return MaterialId == other.MaterialId
+                && MeshId == other.MeshId
+                && RenderMode == other.RenderMode
+                && Layer == other.Layer
+                && GpuDataLayoutHash == other.GpuDataLayoutHash
+                && DataPerSharpBits == other.DataPerSharpBits
+                && ShadowCastingMode == other.ShadowCastingMode
+                && ReceiveShadows == other.ReceiveShadows;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividParticleRendererSharedKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                int hash = MaterialId;
+                hash = (hash * 397) ^ MeshId;
+                hash = (hash * 397) ^ RenderMode;
+                hash = (hash * 397) ^ Layer;
+                hash = (hash * 397) ^ GpuDataLayoutHash;
+                hash = (hash * 397) ^ (int)DataPerSharpBits;
+                hash = (hash * 397) ^ ShadowCastingMode;
+                hash = (hash * 397) ^ ReceiveShadows.GetHashCode();
+                return hash;
+            }
         }
     }
 

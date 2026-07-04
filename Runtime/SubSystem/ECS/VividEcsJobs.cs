@@ -15,6 +15,11 @@ namespace VividRP.Runtime.ECS
         TContext context,
         JobHandle dependency);
 
+    internal interface IVividEcsManagerJobModuleFlags
+    {
+        uint EnabledModuleFlags { get; }
+    }
+
     internal enum VividEcsPageDispatchMode
     {
         Dynamic = 0,
@@ -202,15 +207,26 @@ namespace VividRP.Runtime.ECS
             string name,
             int order,
             VividEcsManagerJobScheduleDelegate<TContext> schedule,
-            VividEcsManagerJobEnabledDelegate<TContext> enabled = null)
+            VividEcsManagerJobEnabledDelegate<TContext> enabled = null,
+            uint requiredModuleFlags = 0u)
         {
             if (schedule == null)
                 throw new ArgumentNullException(nameof(schedule));
 
             int id = ++m_NextId;
-            m_Entries.Add(new Entry(id, name ?? string.Empty, order, enabled, schedule));
+            m_Entries.Add(new Entry(id, name ?? string.Empty, order, requiredModuleFlags, enabled, schedule));
             m_Sorted = false;
             return id;
+        }
+
+        public int RegisterModule(
+            string name,
+            int order,
+            uint requiredModuleFlags,
+            VividEcsManagerJobScheduleDelegate<TContext> schedule,
+            VividEcsManagerJobEnabledDelegate<TContext> enabled = null)
+        {
+            return Register(name, order, schedule, enabled, requiredModuleFlags);
         }
 
         public bool Unregister(int id)
@@ -229,10 +245,15 @@ namespace VividRP.Runtime.ECS
 
         public int EnabledCount(TContext context)
         {
+            return EnabledCount(context, ResolveModuleFlags(context));
+        }
+
+        public int EnabledCount(TContext context, uint enabledModuleFlags)
+        {
             int count = 0;
             for (int index = 0; index < m_Entries.Count; index++)
             {
-                if (m_Entries[index].IsEnabled(context))
+                if (m_Entries[index].IsEnabled(context, enabledModuleFlags))
                     count++;
             }
 
@@ -241,12 +262,20 @@ namespace VividRP.Runtime.ECS
 
         public JobHandle ScheduleEnabled(TContext context, JobHandle dependency = default)
         {
+            return ScheduleEnabled(context, ResolveModuleFlags(context), dependency);
+        }
+
+        public JobHandle ScheduleEnabled(
+            TContext context,
+            uint enabledModuleFlags,
+            JobHandle dependency = default)
+        {
             SortIfNeeded();
             JobHandle handle = dependency;
             for (int index = 0; index < m_Entries.Count; index++)
             {
                 Entry entry = m_Entries[index];
-                if (entry.IsEnabled(context))
+                if (entry.IsEnabled(context, enabledModuleFlags))
                     handle = entry.Schedule(context, handle);
             }
 
@@ -273,18 +302,27 @@ namespace VividRP.Runtime.ECS
             m_Sorted = true;
         }
 
+        private static uint ResolveModuleFlags(TContext context)
+        {
+            return context is IVividEcsManagerJobModuleFlags moduleFlags
+                ? moduleFlags.EnabledModuleFlags
+                : 0u;
+        }
+
         private readonly struct Entry
         {
             public Entry(
                 int id,
                 string name,
                 int order,
+                uint requiredModuleFlags,
                 VividEcsManagerJobEnabledDelegate<TContext> enabled,
                 VividEcsManagerJobScheduleDelegate<TContext> schedule)
             {
                 Id = id;
                 Name = name;
                 Order = order;
+                RequiredModuleFlags = requiredModuleFlags;
                 Enabled = enabled;
                 ScheduleDelegate = schedule;
             }
@@ -292,11 +330,18 @@ namespace VividRP.Runtime.ECS
             public readonly int Id;
             public readonly string Name;
             public readonly int Order;
+            public readonly uint RequiredModuleFlags;
             private readonly VividEcsManagerJobEnabledDelegate<TContext> Enabled;
             private readonly VividEcsManagerJobScheduleDelegate<TContext> ScheduleDelegate;
 
-            public bool IsEnabled(TContext context)
+            public bool IsEnabled(TContext context, uint enabledModuleFlags)
             {
+                if (RequiredModuleFlags != 0u)
+                {
+                    if ((enabledModuleFlags & RequiredModuleFlags) != RequiredModuleFlags)
+                        return false;
+                }
+
                 return Enabled == null || Enabled(context);
             }
 

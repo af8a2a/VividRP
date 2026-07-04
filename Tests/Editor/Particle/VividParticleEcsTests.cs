@@ -17,12 +17,15 @@ namespace VividRP.Editor.Tests
             VividParticleEcsBootstrap.RegisterTypes();
             VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
             VividEcsTypeIndex systemIdIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
+            VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
             VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
 
             Assert.That(commonIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.IsValid, Is.True);
+            Assert.That(rendererKeyIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
             Assert.That(systemIdIndex.IsSharedComponentType, Is.True);
+            Assert.That(rendererKeyIndex.IsSharedComponentType, Is.True);
             Assert.That(VividEcsTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
             Assert.That(commonType.IsSoa, Is.True);
             Assert.That(commonType.SoaFieldCount, Is.EqualTo(VividParticleCommon.FieldCountValue));
@@ -44,6 +47,9 @@ namespace VividRP.Editor.Tests
             Assert.That(VividEcsConstants.PageEntryCount, Is.EqualTo(VividParticleStorage.PageSize));
             Assert.That(storage.capacity, Is.EqualTo(512));
             Assert.That(storage.pageCount, Is.EqualTo(2));
+            Assert.That(storage.tileStart, Is.EqualTo(0));
+            Assert.That(storage.tileCount, Is.EqualTo(2));
+            Assert.That(storage.allocatorLiveTileCount, Is.EqualTo(2));
 
             for (int index = 0; index < 300; index++)
                 Assert.That(AddParticle(storage, index), Is.True);
@@ -55,6 +61,9 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.capacity, Is.EqualTo(256));
             Assert.That(storage.pageCount, Is.EqualTo(1));
             Assert.That(storage.activeCount, Is.EqualTo(3));
+            Assert.That(storage.tileCount, Is.EqualTo(1));
+            Assert.That(storage.allocatorLiveTileCount, Is.EqualTo(1));
+            Assert.That(storage.allocatorHighWatermarkTileCount, Is.GreaterThanOrEqualTo(2));
         }
 
         [Test]
@@ -93,6 +102,34 @@ namespace VividRP.Editor.Tests
             Assert.That(pageGroup[1].EntryCount, Is.EqualTo(4));
             Assert.That(pageGroup[1].StartIndex, Is.EqualTo(256));
             Assert.That(storage.systemId, Is.EqualTo(new VividParticleSystemId(17)));
+        }
+
+        [Test]
+        public void Storage_QueryLineGroups_UseSharedRendererKey()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.systemId = new VividParticleSystemId(17);
+            var rendererKey = new VividParticleRendererSharedKey(
+                materialId: 1,
+                meshId: 2,
+                renderMode: (int)VividParticleRenderMode.Billboard,
+                layer: 3,
+                gpuDataLayoutHash: 4,
+                dataPerSharpBits: 5u,
+                shadowCastingMode: 0,
+                receiveShadows: false);
+            storage.rendererSharedKey = rendererKey;
+            storage.EnsureCapacity(4);
+            Assert.That(AddParticle(storage, 0), Is.True);
+
+            using VividEcsPageGroup pageGroup = storage.CreateSimulationPageGroup(Allocator.TempJob);
+            var groups = storage.CreateLineGroups();
+
+            Assert.That(pageGroup.pageCount, Is.EqualTo(1));
+            Assert.That(storage.queryLineGroupCount, Is.EqualTo(1));
+            Assert.That(groups, Has.Count.EqualTo(1));
+            Assert.That(groups[0].activeCount, Is.EqualTo(1));
+            Assert.That(storage.rendererSharedKey, Is.EqualTo(rendererKey));
         }
 
         [Test]

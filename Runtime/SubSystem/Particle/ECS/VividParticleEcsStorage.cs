@@ -9,16 +9,29 @@ namespace VividRP.Runtime.Particle.ECS
 {
     internal sealed class VividParticleEcsStorage : IDisposable
     {
+        private readonly VividEcsWorld m_World;
         private readonly VividEcsArchetypeLine m_Line;
         private readonly VividEcsTypeIndex m_CommonTypeIndex;
+        private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
+        private readonly VividEcsTypeIndex m_RendererSharedKeyTypeIndex;
         private NativeArray<int> m_ActiveCountOutput;
+        private NativeArray<byte> m_KeepMask;
+        private NativeArray<VividEcsPageInfo> m_SimulationPages;
 
         public VividParticleEcsStorage()
         {
             VividParticleEcsBootstrap.RegisterTypes();
             m_CommonTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
-            m_Line = new VividEcsArchetypeLine(0, m_CommonTypeIndex, VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>());
+            m_SystemIdTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
+            m_RendererSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
+            m_World = new VividEcsWorld();
+            m_Line = m_World.CreateArchetypeLine(
+                0,
+                m_CommonTypeIndex,
+                m_SystemIdTypeIndex,
+                m_RendererSharedKeyTypeIndex);
             m_Line.SetSharedComponent(VividParticleSystemId.Invalid);
+            m_Line.SetSharedComponent(VividParticleRendererSharedKey.Invalid);
         }
 
         public bool isCreated => m_Line.isCreated;
@@ -31,9 +44,29 @@ namespace VividRP.Runtime.Particle.ECS
 
         public int pageCount => m_Line.pageCount;
 
+        public int tileStart => m_Line.tileRange.StartTile;
+
+        public int tileCount => m_Line.tileRange.TileCount;
+
+        public int allocatorLiveTileCount => m_World.tileAllocator.liveTileCount;
+
+        public int allocatorHighWatermarkTileCount => m_World.tileAllocator.highWatermarkTileCount;
+
+        public int allocatorFreeRangeCount => m_World.tileAllocator.freeRangeCount;
+
+        public int queryLineGroupCount => CreateLineGroups().Count;
+
         public VividParticleSystemId systemId
         {
             get => m_Line.TryGetSharedComponent(out VividParticleSystemId value) ? value : VividParticleSystemId.Invalid;
+            set => m_Line.SetSharedComponent(value);
+        }
+
+        public VividParticleRendererSharedKey rendererSharedKey
+        {
+            get => m_Line.TryGetSharedComponent(out VividParticleRendererSharedKey value)
+                ? value
+                : VividParticleRendererSharedKey.Invalid;
             set => m_Line.SetSharedComponent(value);
         }
 
@@ -42,6 +75,8 @@ namespace VividRP.Runtime.Particle.ECS
             m_Line.EnsureCapacity(maxParticles);
             if (!m_ActiveCountOutput.IsCreated)
                 m_ActiveCountOutput = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+            EnsureKeepMaskCapacity(capacity);
         }
 
         public void Clear()
@@ -53,11 +88,19 @@ namespace VividRP.Runtime.Particle.ECS
 
         public void Dispose()
         {
-            m_Line.Dispose();
+            m_World.Dispose();
             if (m_ActiveCountOutput.IsCreated)
                 m_ActiveCountOutput.Dispose();
 
+            if (m_KeepMask.IsCreated)
+                m_KeepMask.Dispose();
+
+            if (m_SimulationPages.IsCreated)
+                m_SimulationPages.Dispose();
+
             m_ActiveCountOutput = default;
+            m_KeepMask = default;
+            m_SimulationPages = default;
         }
 
         public bool Add(
@@ -98,22 +141,32 @@ namespace VividRP.Runtime.Particle.ECS
                 return false;
 
             m_ActiveCountOutput[0] = count;
+            int livePageCount = (count + VividEcsConstants.PageEntryCount - 1) / VividEcsConstants.PageEntryCount;
+            if (livePageCount <= 0)
+                return false;
+
+            EnsureSimulationPageCapacity(livePageCount);
+            for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
+                m_SimulationPages[pageIndex] = m_Line.GetPageInfo(pageIndex);
+
             VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
-            var job = new VividParticleEcsIntegrateJob
+            var job = new VividParticleEcsIntegratePageJob
             {
                 DeltaTime = deltaTime,
                 Gravity = ToFloat3(gravity),
-                ActiveCount = count,
                 Positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex),
                 Velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex),
                 StartLifetimes = common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex),
                 RemainingLifetimes = common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex),
-                Colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex),
-                Sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex),
-                ActiveCountOutput = m_ActiveCountOutput,
+                KeepMask = m_KeepMask,
             };
 
-            handle = job.Schedule(dependency);
+            NativeArray<VividEcsPageInfo> pages = m_SimulationPages.GetSubArray(0, livePageCount);
+            handle = job.ScheduleParallel(
+                pages,
+                dependency,
+                innerloopBatchCount: 1,
+                dispatchMode: VividEcsPageDispatchMode.Average);
             return true;
         }
 
@@ -122,7 +175,16 @@ namespace VividRP.Runtime.Particle.ECS
             if (!m_ActiveCountOutput.IsCreated)
                 return;
 
-            m_Line.SetActiveCount(m_ActiveCountOutput[0]);
+            int originalActiveCount = math.min(activeCount, m_KeepMask.IsCreated ? m_KeepMask.Length : activeCount);
+            for (int index = originalActiveCount - 1; index >= 0; index--)
+            {
+                if (m_KeepMask[index] != 0)
+                    continue;
+
+                m_Line.RemoveAtSwapBack(index, out _, out _);
+            }
+
+            m_ActiveCountOutput[0] = activeCount;
         }
 
         public bool IsValidIndex(int index)
@@ -170,6 +232,18 @@ namespace VividRP.Runtime.Particle.ECS
             return m_Line.CreatePageGroup(allocator);
         }
 
+        public VividEcsPageGroup CreateSimulationPageGroup(Allocator allocator)
+        {
+            VividEcsQuery query = m_World.CreateQuery().WithAll(m_CommonTypeIndex);
+            return m_World.CreatePageGroup(query, allocator);
+        }
+
+        public System.Collections.Generic.List<VividEcsArchetypeLineGroup> CreateLineGroups()
+        {
+            VividEcsQuery query = m_World.CreateQuery().WithAll(m_CommonTypeIndex);
+            return m_World.CreateArchetypeLineGroups(query);
+        }
+
         public bool TryGetCommonArrays(
             out NativeArray<float3> positions,
             out NativeArray<float3> velocities,
@@ -200,6 +274,33 @@ namespace VividRP.Runtime.Particle.ECS
 
         private VividEcsSoaColumn<VividParticleCommon> commonColumn =>
             m_Line.GetColumn<VividEcsSoaColumn<VividParticleCommon>>(m_CommonTypeIndex);
+
+        private void EnsureKeepMaskCapacity(int requestedCapacity)
+        {
+            requestedCapacity = math.max(1, requestedCapacity);
+            if (m_KeepMask.IsCreated && m_KeepMask.Length >= requestedCapacity)
+                return;
+
+            if (m_KeepMask.IsCreated)
+                m_KeepMask.Dispose();
+
+            m_KeepMask = new NativeArray<byte>(requestedCapacity, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+        }
+
+        private void EnsureSimulationPageCapacity(int requestedPageCount)
+        {
+            requestedPageCount = math.max(1, requestedPageCount);
+            if (m_SimulationPages.IsCreated && m_SimulationPages.Length >= requestedPageCount)
+                return;
+
+            if (m_SimulationPages.IsCreated)
+                m_SimulationPages.Dispose();
+
+            m_SimulationPages = new NativeArray<VividEcsPageInfo>(
+                requestedPageCount,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+        }
 
         private static float3 ToFloat3(Vector3 value)
         {

@@ -151,18 +151,23 @@ namespace VividRP.Runtime.ECS
     internal sealed class VividEcsWorld : IDisposable
     {
         private readonly List<VividEcsArchetypeLine> m_Lines = new();
-        private readonly Dictionary<int, EntityRecord> m_Entities = new();
+        private readonly VividEcsSparseTable<EntityRecord> m_Entities = new();
+        private readonly VividEcsTileAllocator m_TileAllocator = new();
         private int m_NextLineId;
         private int m_NextEntityId;
 
         public int archetypeLineCount => m_Lines.Count;
 
-        public int entityCount => m_Entities.Count;
+        public int entityCount => m_Entities.count;
+
+        public VividEcsTileAllocator tileAllocator => m_TileAllocator;
 
         public VividEcsArchetypeLine CreateArchetypeLine(int maxEntries, params VividEcsTypeIndex[] componentTypes)
         {
-            var line = new VividEcsArchetypeLine(m_NextLineId++, componentTypes);
-            line.EnsureCapacity(maxEntries);
+            var line = new VividEcsArchetypeLine(m_NextLineId++, m_TileAllocator, componentTypes);
+            if (maxEntries > 0)
+                line.EnsureCapacity(maxEntries);
+
             m_Lines.Add(line);
             return line;
         }
@@ -177,7 +182,7 @@ namespace VividRP.Runtime.ECS
                 throw new InvalidOperationException("Archetype line is full.");
 
             var entity = new VividEcsEntity(entityId, 1);
-            m_Entities.Add(entityId, new EntityRecord(entity.Version, line, index));
+            m_Entities.Set(entityId, new EntityRecord(entity.Version, line, index));
             return entity;
         }
 
@@ -191,7 +196,7 @@ namespace VividRP.Runtime.ECS
                 && m_Entities.TryGetValue(movedEntityId, out EntityRecord movedRecord))
             {
                 movedRecord.Index = record.Index;
-                m_Entities[movedEntityId] = movedRecord;
+                m_Entities.Set(movedEntityId, movedRecord);
             }
 
             m_Entities.Remove(entity.Id);
@@ -273,6 +278,7 @@ namespace VividRP.Runtime.ECS
 
             m_Lines.Clear();
             m_Entities.Clear();
+            m_TileAllocator.Clear();
             m_NextLineId = 0;
             m_NextEntityId = 0;
         }

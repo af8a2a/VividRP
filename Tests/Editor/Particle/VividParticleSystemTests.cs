@@ -71,6 +71,8 @@ namespace VividRP.Editor.Tests
             Assert.That(renderer.stretchLengthScale, Is.EqualTo(2.0f));
             Assert.That(renderer.stretchSpeedScale, Is.EqualTo(0.0f));
             Assert.That(renderer.renderQueueOffset, Is.EqualTo(0));
+            Assert.That(renderer.shadowCastingMode, Is.EqualTo(ShadowCastingMode.Off));
+            Assert.That(renderer.receiveShadows, Is.False);
         }
 
         [Test]
@@ -1014,6 +1016,15 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(-1), Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 5), Is.True);
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 4), Is.False);
+            Assert.That(VividParticleSystemManager.IsPickingOrSelectionView(BatchCullingViewType.Picking), Is.True);
+            Assert.That(VividParticleSystemManager.IsPickingOrSelectionView(BatchCullingViewType.SelectionOutline), Is.True);
+            Assert.That(VividParticleSystemManager.IsPickingOrSelectionView(BatchCullingViewType.Camera), Is.False);
+            Assert.That(
+                VividParticleSystemManager.ShouldRenderBatchForView(ShadowCastingMode.Off, BatchCullingViewType.Light),
+                Is.False);
+            Assert.That(
+                VividParticleSystemManager.ShouldRenderBatchForView(ShadowCastingMode.On, BatchCullingViewType.Light),
+                Is.True);
 
             BatchDrawCommandFlags flags = VividParticleSystemManager.ResolveParticleDrawCommandFlags(
                 hasSortingPosition: true,

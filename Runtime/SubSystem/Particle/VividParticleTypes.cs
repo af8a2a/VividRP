@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.Particle
 {
@@ -414,6 +415,12 @@ namespace VividRP.Runtime.Particle
         [SerializeField]
         private int m_RenderQueueOffset;
 
+        [SerializeField]
+        private ShadowCastingMode m_ShadowCastingMode = ShadowCastingMode.Off;
+
+        [SerializeField]
+        private bool m_ReceiveShadows;
+
         public bool enabled
         {
             get => m_Enabled;
@@ -468,6 +475,18 @@ namespace VividRP.Runtime.Particle
             set => m_RenderQueueOffset = value;
         }
 
+        public ShadowCastingMode shadowCastingMode
+        {
+            get => m_ShadowCastingMode;
+            set => m_ShadowCastingMode = value;
+        }
+
+        public bool receiveShadows
+        {
+            get => m_ReceiveShadows;
+            set => m_ReceiveShadows = value;
+        }
+
         internal static VividParticleRendererModule CreateDefault()
         {
             return new VividParticleRendererModule();
@@ -494,6 +513,8 @@ namespace VividRP.Runtime.Particle
             m_StretchLengthScale = source.m_StretchLengthScale;
             m_StretchSpeedScale = source.m_StretchSpeedScale;
             m_RenderQueueOffset = source.m_RenderQueueOffset;
+            m_ShadowCastingMode = source.m_ShadowCastingMode;
+            m_ReceiveShadows = source.m_ReceiveShadows;
             Validate();
         }
 

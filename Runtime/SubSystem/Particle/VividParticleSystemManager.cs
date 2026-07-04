@@ -494,6 +494,18 @@ namespace VividRP.Runtime.Particle
             return flags;
         }
 
+        internal static bool IsPickingOrSelectionView(BatchCullingViewType viewType)
+        {
+            return viewType is BatchCullingViewType.Picking or BatchCullingViewType.SelectionOutline;
+        }
+
+        internal static bool ShouldRenderBatchForView(
+            ShadowCastingMode shadowCastingMode,
+            BatchCullingViewType viewType)
+        {
+            return viewType != BatchCullingViewType.Light || shadowCastingMode != ShadowCastingMode.Off;
+        }
+
         internal static bool UsesPerInstanceRotationData(VividParticleRenderMode renderMode)
         {
             return false;
@@ -1115,7 +1127,11 @@ namespace VividRP.Runtime.Particle
                     m_System.rendererModule.color,
                     m_System.rendererModule.sizeScale,
                     m_System.rendererModule.stretchLengthScale,
-                    m_System.rendererModule.stretchSpeedScale);
+                    m_System.rendererModule.stretchSpeedScale,
+                    m_System.rendererModule.shadowCastingMode,
+                    m_System.rendererModule.receiveShadows,
+                    m_System.gameObject.GetEntityId(),
+                    IsSelectedForEditorOutline(m_System));
                 return true;
             }
 
@@ -1191,6 +1207,28 @@ namespace VividRP.Runtime.Particle
                 return bounds;
             }
 
+            private Bounds GetParticleRangeWorldBounds(int startIndex, int count)
+            {
+                if (m_System == null || count <= 0 || activeCount <= 0)
+                    return new Bounds(m_System != null ? m_System.transform.position : Vector3.zero, Vector3.zero);
+
+                int clampedStart = Mathf.Clamp(startIndex, 0, activeCount - 1);
+                int clampedEnd = Mathf.Clamp(startIndex + count, clampedStart + 1, activeCount);
+                Vector3 firstPosition = GetParticleWorldPosition(m_Storage.GetPosition(clampedStart));
+                float firstExtent = GetParticleWorldExtent(clampedStart);
+                var bounds = new Bounds(firstPosition, Vector3.one * (firstExtent * 2.0f));
+
+                for (int index = clampedStart + 1; index < clampedEnd; index++)
+                {
+                    Vector3 position = GetParticleWorldPosition(m_Storage.GetPosition(index));
+                    float extent = GetParticleWorldExtent(index);
+                    bounds.Encapsulate(position + Vector3.one * extent);
+                    bounds.Encapsulate(position - Vector3.one * extent);
+                }
+
+                return bounds;
+            }
+
             internal bool IsVisibleInCullingContext(BatchCullingContext cullingContext)
             {
                 return m_System != null
@@ -1200,25 +1238,58 @@ namespace VividRP.Runtime.Particle
                     && IsVisibleInCullingContext(GetWorldBounds(), cullingContext);
             }
 
-            internal bool TryCreateCullingRecord(
+            internal int AppendCullingRecords(
                 int batchBaseIndex,
                 int spanBaseIndex,
                 bool usesPageBillboard,
-                out ParticleCullingRecord record)
+                List<ParticleCullingRecord> records)
             {
-                record = default;
                 if (m_System == null
                     || !m_System.isActiveAndEnabled
                     || !ParticleSystemState.CanRender(m_System.rendererModule)
-                    || activeCount <= 0)
+                    || activeCount <= 0
+                    || records == null)
                 {
-                    return false;
+                    return 0;
                 }
 
-                Bounds bounds = GetWorldBounds();
+                if (!usesPageBillboard)
+                {
+                    Bounds bounds = GetWorldBounds();
+                    AddCullingRecord(records, bounds, batchBaseIndex, spanBaseIndex, activeCount, usesPageBillboard: false);
+                    return 1;
+                }
+
+                int addedCount = 0;
+                int particleCount = activeCount;
+                for (int pageStart = 0; pageStart < particleCount; pageStart += BillboardPageSize)
+                {
+                    int pageCount = Mathf.Min(BillboardPageSize, particleCount - pageStart);
+                    Bounds pageBounds = GetParticleRangeWorldBounds(pageStart, pageCount);
+                    AddCullingRecord(
+                        records,
+                        pageBounds,
+                        batchBaseIndex + pageStart,
+                        spanBaseIndex + addedCount,
+                        pageCount,
+                        usesPageBillboard: true);
+                    addedCount++;
+                }
+
+                return addedCount;
+            }
+
+            private static void AddCullingRecord(
+                List<ParticleCullingRecord> records,
+                Bounds bounds,
+                int batchBaseIndex,
+                int spanBaseIndex,
+                int activeCount,
+                bool usesPageBillboard)
+            {
                 Vector3 center = bounds.center;
                 Vector3 extents = bounds.extents;
-                record = new ParticleCullingRecord
+                records.Add(new ParticleCullingRecord
                 {
                     BoundsCenter = new float3(center.x, center.y, center.z),
                     BoundsExtents = new float3(extents.x, extents.y, extents.z),
@@ -1226,8 +1297,7 @@ namespace VividRP.Runtime.Particle
                     SpanBaseIndex = spanBaseIndex,
                     ActiveCount = activeCount,
                     UsesPageBillboard = usesPageBillboard ? 1 : 0,
-                };
-                return true;
+                });
             }
 
             private bool RequiresAutomaticUpdate(VividParticleSystemFrameSnapshot snapshot, bool requireActive)
@@ -1325,6 +1395,17 @@ namespace VividRP.Runtime.Particle
                 return system != null
                     ? new VividParticleSystemId(system.GetEntityId().GetHashCode() & int.MaxValue)
                     : VividParticleSystemId.Invalid;
+            }
+
+            private static bool IsSelectedForEditorOutline(VividParticleSystem system)
+            {
+#if UNITY_EDITOR
+                return system != null
+                    && system.gameObject != null
+                    && (Selection.Contains(system.gameObject) || Selection.Contains(system));
+#else
+                return false;
+#endif
             }
 
             private void EnsureRandom(VividParticleSystemFrameSnapshot snapshot)
@@ -2882,6 +2963,10 @@ namespace VividRP.Runtime.Particle
             public readonly float SizeScale;
             public readonly float StretchLengthScale;
             public readonly float StretchSpeedScale;
+            public readonly ShadowCastingMode ShadowCastingMode;
+            public readonly bool ReceiveShadows;
+            public readonly EntityId PickingEntityId;
+            public readonly bool IsEditorSelected;
 
             public ParticleRenderEntry(
                 ParticleSystemState state,
@@ -2895,7 +2980,11 @@ namespace VividRP.Runtime.Particle
                 Color rendererColor,
                 float sizeScale,
                 float stretchLengthScale,
-                float stretchSpeedScale)
+                float stretchSpeedScale,
+                ShadowCastingMode shadowCastingMode,
+                bool receiveShadows,
+                EntityId pickingEntityId,
+                bool isEditorSelected)
             {
                 State = state;
                 Material = material;
@@ -2909,6 +2998,10 @@ namespace VividRP.Runtime.Particle
                 SizeScale = sizeScale;
                 StretchLengthScale = stretchLengthScale;
                 StretchSpeedScale = stretchSpeedScale;
+                ShadowCastingMode = shadowCastingMode;
+                ReceiveShadows = receiveShadows;
+                PickingEntityId = pickingEntityId;
+                IsEditorSelected = isEditorSelected;
             }
         }
 
@@ -2920,6 +3013,8 @@ namespace VividRP.Runtime.Particle
             public readonly int Layer;
             public readonly int GpuDataLayoutHash;
             public readonly uint DataPerSharpBits;
+            public readonly ShadowCastingMode ShadowCastingMode;
+            public readonly bool ReceiveShadows;
 
             public ParticleDrawKey(ParticleRenderEntry entry)
             {
@@ -2930,6 +3025,8 @@ namespace VividRP.Runtime.Particle
                 Layer = Mathf.Clamp(entry.Layer, 0, 31);
                 GpuDataLayoutHash = layout.Hash;
                 DataPerSharpBits = layout.DataPerSharpBits;
+                ShadowCastingMode = entry.ShadowCastingMode;
+                ReceiveShadows = entry.ReceiveShadows;
             }
 
             public bool Equals(ParticleDrawKey other)
@@ -2939,7 +3036,9 @@ namespace VividRP.Runtime.Particle
                     && RenderMode == other.RenderMode
                     && Layer == other.Layer
                     && GpuDataLayoutHash == other.GpuDataLayoutHash
-                    && DataPerSharpBits == other.DataPerSharpBits;
+                    && DataPerSharpBits == other.DataPerSharpBits
+                    && ShadowCastingMode == other.ShadowCastingMode
+                    && ReceiveShadows == other.ReceiveShadows;
             }
 
             public override bool Equals(object obj)
@@ -2957,6 +3056,8 @@ namespace VividRP.Runtime.Particle
                     hash = (hash * 397) ^ Layer;
                     hash = (hash * 397) ^ GpuDataLayoutHash;
                     hash = (hash * 397) ^ (int)DataPerSharpBits;
+                    hash = (hash * 397) ^ (int)ShadowCastingMode;
+                    hash = (hash * 397) ^ ReceiveShadows.GetHashCode();
                     return hash;
                 }
             }
@@ -2982,6 +3083,13 @@ namespace VividRP.Runtime.Particle
             public float SizeScale;
             public float StretchLengthScale;
             public float StretchSpeedScale;
+            public ShadowCastingMode ShadowCastingMode;
+            public bool ReceiveShadows;
+            public EntityId PickingEntityId;
+            public bool IsEditorSelected;
+            public bool HasPendingCullingResult;
+            public bool PendingCullingVisible;
+            public int PendingCullingVisibleInstanceCount;
             public int LastUploadOperationCount;
             public int LastUploadByteCount;
 
@@ -2999,6 +3107,10 @@ namespace VividRP.Runtime.Particle
                 SizeScale = entry.SizeScale;
                 StretchLengthScale = entry.StretchLengthScale;
                 StretchSpeedScale = entry.StretchSpeedScale;
+                ShadowCastingMode = entry.ShadowCastingMode;
+                ReceiveShadows = entry.ReceiveShadows;
+                PickingEntityId = entry.PickingEntityId;
+                IsEditorSelected = entry.IsEditorSelected;
                 Key = new ParticleDrawKey(entry);
             }
         }
@@ -3012,6 +3124,8 @@ namespace VividRP.Runtime.Particle
             public BatchID BatchId;
             public BatchMeshID MeshId;
             public BatchMaterialID MaterialId;
+            public ShadowCastingMode ShadowCastingMode;
+            public bool ReceiveShadows;
             public bool UsesPageBillboard;
             public VividParticleGpuDataLayout GpuLayout;
             public VividParticleGpuBufferDataInfo[] GpuBufferInfos = Array.Empty<VividParticleGpuBufferDataInfo>();
@@ -3144,9 +3258,11 @@ namespace VividRP.Runtime.Particle
             public MotionVectorGenerationMode MotionMode;
             public int ReceiveShadows;
             public int StaticShadowCaster;
+            public int AllDepthSorted;
             public BatchID BatchId;
             public BatchMeshID MeshId;
             public BatchMaterialID MaterialId;
+            public EntityId PickingEntityId;
         }
 
         private readonly struct ParticleMaterialVariantKey : IEquatable<ParticleMaterialVariantKey>
@@ -3220,6 +3336,7 @@ namespace VividRP.Runtime.Particle
             private readonly List<ParticleCullingRecord> m_CullingRecords = new();
             private readonly List<ParticleDrawCommandInput> m_DrawCommandInputs = new();
             private readonly List<ParticleRenderRecord> m_CullingResultRecords = new();
+            private readonly List<ParticleRenderRecord> m_CullingUniqueResultRecords = new();
             private readonly Dictionary<ParticleMaterialVariantKey, Material> m_DefaultMaterials = new();
             private readonly VividParticleGPUBuffer m_GPUBuffer = new();
             private NativeArray<ParticleCullingResult> m_PendingCullingResults;
@@ -3330,6 +3447,7 @@ namespace VividRP.Runtime.Particle
                 m_CullingRecords.Clear();
                 m_DrawCommandInputs.Clear();
                 m_CullingResultRecords.Clear();
+                m_CullingUniqueResultRecords.Clear();
                 DisposePendingUploadArrays();
                 foreach (Material material in m_DefaultMaterials.Values)
                     CoreUtils.Destroy(material);
@@ -3403,6 +3521,8 @@ namespace VividRP.Runtime.Particle
                                 Key = record.Key,
                                 Material = record.Material,
                                 Mesh = record.Mesh,
+                                ShadowCastingMode = record.ShadowCastingMode,
+                                ReceiveShadows = record.ReceiveShadows,
                                 UsesPageBillboard = UsesPageBillboardRenderMode(record.RenderMode),
                                 GpuLayout = VividParticleGpuDataLayout.Create(record.RenderMode),
                                 BatchId = BatchID.Null,
@@ -3470,6 +3590,9 @@ namespace VividRP.Runtime.Particle
                 m_BRG.SetEnabledViewTypes(new[]
                 {
                     BatchCullingViewType.Camera,
+                    BatchCullingViewType.Light,
+                    BatchCullingViewType.Picking,
+                    BatchCullingViewType.SelectionOutline,
                 });
 #endif
 
@@ -4022,12 +4145,36 @@ namespace VividRP.Runtime.Particle
                     for (int index = 0; index < count; index++)
                     {
                         ParticleRenderRecord record = m_CullingResultRecords[index];
+                        if (record == null)
+                            continue;
+
+                        if (!record.HasPendingCullingResult)
+                        {
+                            record.HasPendingCullingResult = true;
+                            record.PendingCullingVisible = false;
+                            record.PendingCullingVisibleInstanceCount = 0;
+                            m_CullingUniqueResultRecords.Add(record);
+                        }
+
                         ParticleCullingResult result = m_PendingCullingResults[index];
+                        if (result.Visible != 0)
+                        {
+                            record.PendingCullingVisible = true;
+                            record.PendingCullingVisibleInstanceCount += result.VisibleInstanceCount;
+                        }
+                    }
+
+                    for (int index = 0; index < m_CullingUniqueResultRecords.Count; index++)
+                    {
+                        ParticleRenderRecord record = m_CullingUniqueResultRecords[index];
                         record.State?.RecordCulling(
                             m_PendingCullingViewType,
-                            result.Visible != 0,
-                            result.Visible != 0 ? 1 : 0,
-                            result.VisibleInstanceCount);
+                            record.PendingCullingVisible,
+                            record.PendingCullingVisible ? 1 : 0,
+                            record.PendingCullingVisibleInstanceCount);
+                        record.HasPendingCullingResult = false;
+                        record.PendingCullingVisible = false;
+                        record.PendingCullingVisibleInstanceCount = 0;
                     }
 
                     m_PendingCullingResults.Dispose();
@@ -4035,6 +4182,7 @@ namespace VividRP.Runtime.Particle
                 }
 
                 m_CullingResultRecords.Clear();
+                m_CullingUniqueResultRecords.Clear();
                 m_PendingCullingHandle = default;
                 m_PendingCullingViewType = default;
                 m_HasPendingCullingResults = false;
@@ -4052,11 +4200,16 @@ namespace VividRP.Runtime.Particle
                 m_CullingRecords.Clear();
                 m_DrawCommandInputs.Clear();
                 m_CullingResultRecords.Clear();
+                m_CullingUniqueResultRecords.Clear();
                 int visibleInstanceCount = 0;
+                bool isPerRecordPickingView = IsPickingOrSelectionView(cullingContext.viewType);
 
                 for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
                 {
                     ParticleDrawBatch batch = m_DrawBatches[batchIndex];
+                    if (!ShouldRenderBatchForView(batch.ShadowCastingMode, cullingContext.viewType))
+                        continue;
+
                     int layer = Mathf.Clamp(batch.Key.Layer, 0, 31);
                     if (!IsLayerVisibleInCullingMask(cullingContext.cullingLayerMask, layer))
                         continue;
@@ -4066,44 +4219,51 @@ namespace VividRP.Runtime.Particle
                     for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
                     {
                         ParticleRenderRecord record = batch.Records[recordIndex];
-                        if (record.State == null
-                            || !record.State.TryCreateCullingRecord(
-                                record.BatchBaseIndex,
-                                record.SpanBaseIndex,
-                                batch.UsesPageBillboard,
-                                out ParticleCullingRecord cullingRecord))
-                        {
+                        if (!ShouldRenderRecordForView(record, cullingContext.viewType))
                             continue;
-                        }
 
-                        m_CullingRecords.Add(cullingRecord);
-                        m_CullingResultRecords.Add(record);
-                        batchMaxVisibleCount += GetVisibleInstanceCount(record.RenderMode, record.ActiveCount);
+                        int recordStart = m_CullingRecords.Count;
+                        int cullingRecordCount = record.State.AppendCullingRecords(
+                            record.BatchBaseIndex,
+                            record.SpanBaseIndex,
+                            batch.UsesPageBillboard,
+                            m_CullingRecords);
+                        if (cullingRecordCount <= 0)
+                            continue;
+
+                        for (int cullingRecordIndex = 0; cullingRecordIndex < cullingRecordCount; cullingRecordIndex++)
+                            m_CullingResultRecords.Add(record);
+
+                        int recordVisibleCount = GetVisibleInstanceCount(record.RenderMode, record.ActiveCount);
+                        batchMaxVisibleCount += recordVisibleCount;
+
+                        if (isPerRecordPickingView)
+                        {
+                            m_DrawCommandInputs.Add(CreateDrawCommandInput(
+                                batch,
+                                recordStart,
+                                cullingRecordCount,
+                                layer,
+                                cullingContext,
+                                record.PickingEntityId));
+                            visibleInstanceCount += recordVisibleCount;
+                        }
                     }
 
                     if (batchMaxVisibleCount <= 0)
                         continue;
 
-                    m_DrawCommandInputs.Add(new ParticleDrawCommandInput
+                    if (!isPerRecordPickingView)
                     {
-                        RecordStart = batchVisibleRecordStart,
-                        RecordCount = m_CullingRecords.Count - batchVisibleRecordStart,
-                        Layer = layer,
-                        SubmeshIndex = 0,
-                        ActiveMeshLod = 0,
-                        RendererPriority = batch.Material != null ? batch.Material.renderQueue : 0,
-                        RenderingLayerMask = uint.MaxValue,
-                        SceneCullingMask = cullingContext.sceneCullingMask,
-                        DrawFlags = ResolveParticleDrawCommandFlags(hasSortingPosition: true, hasMotion: false),
-                        ShadowCastingMode = ShadowCastingMode.Off,
-                        MotionMode = MotionVectorGenerationMode.ForceNoMotion,
-                        ReceiveShadows = 0,
-                        StaticShadowCaster = 0,
-                        BatchId = batch.BatchId,
-                        MeshId = batch.MeshId,
-                        MaterialId = batch.MaterialId,
-                    });
-                    visibleInstanceCount += batchMaxVisibleCount;
+                        m_DrawCommandInputs.Add(CreateDrawCommandInput(
+                            batch,
+                            batchVisibleRecordStart,
+                            m_CullingRecords.Count - batchVisibleRecordStart,
+                            layer,
+                            cullingContext,
+                            EntityId.None));
+                        visibleInstanceCount += batchMaxVisibleCount;
+                    }
                 }
 
                 int drawCommandCount = m_DrawCommandInputs.Count;
@@ -4196,6 +4356,47 @@ namespace VividRP.Runtime.Particle
                 m_PendingCullingViewType = cullingContext.viewType;
                 m_HasPendingCullingResults = true;
                 return combinedHandle;
+            }
+
+            private static bool ShouldRenderRecordForView(
+                ParticleRenderRecord record,
+                BatchCullingViewType viewType)
+            {
+                if (record == null || record.State == null)
+                    return false;
+
+                return viewType != BatchCullingViewType.SelectionOutline || record.IsEditorSelected;
+            }
+
+            private static ParticleDrawCommandInput CreateDrawCommandInput(
+                ParticleDrawBatch batch,
+                int recordStart,
+                int recordCount,
+                int layer,
+                BatchCullingContext cullingContext,
+                EntityId pickingEntityId)
+            {
+                return new ParticleDrawCommandInput
+                {
+                    RecordStart = recordStart,
+                    RecordCount = Mathf.Max(0, recordCount),
+                    Layer = layer,
+                    SubmeshIndex = 0,
+                    ActiveMeshLod = 0,
+                    RendererPriority = batch.Material != null ? batch.Material.renderQueue : 0,
+                    RenderingLayerMask = uint.MaxValue,
+                    SceneCullingMask = cullingContext.sceneCullingMask,
+                    DrawFlags = ResolveParticleDrawCommandFlags(hasSortingPosition: true, hasMotion: false),
+                    ShadowCastingMode = batch.ShadowCastingMode,
+                    MotionMode = MotionVectorGenerationMode.ForceNoMotion,
+                    ReceiveShadows = batch.ReceiveShadows ? 1 : 0,
+                    StaticShadowCaster = 0,
+                    AllDepthSorted = 1,
+                    BatchId = batch.BatchId,
+                    MeshId = batch.MeshId,
+                    MaterialId = batch.MaterialId,
+                    PickingEntityId = pickingEntityId,
+                };
             }
 
             private static NativeArray<float4> CreateCullingPlaneArray(BatchCullingContext cullingContext)
@@ -4565,7 +4766,7 @@ namespace VividRP.Runtime.Particle
                         flags = command.DrawFlags,
                         sortingPosition = commandVisibleOffset * 3,
                     };
-                    DrawCommandPickingEntityIds[outputCommandIndex] = default;
+                    DrawCommandPickingEntityIds[outputCommandIndex] = command.PickingEntityId;
 
                     DrawRanges[outputCommandIndex] = new BatchDrawRange
                     {
@@ -4581,7 +4782,7 @@ namespace VividRP.Runtime.Particle
                             receiveShadows = command.ReceiveShadows != 0,
                             motionMode = command.MotionMode,
                             staticShadowCaster = command.StaticShadowCaster != 0,
-                            allDepthSorted = false,
+                            allDepthSorted = command.AllDepthSorted != 0,
                             sceneCullingMask = command.SceneCullingMask,
                         },
                     };

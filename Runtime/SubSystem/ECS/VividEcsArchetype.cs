@@ -388,6 +388,9 @@ namespace VividRP.Runtime.ECS
         public void EnsureCapacity(int maxEntries)
         {
             int requestedMaxEntries = math.max(1, maxEntries);
+            if (m_EntityIds.Capacity < requestedMaxEntries)
+                m_EntityIds.Capacity = requestedMaxEntries;
+
             int requestedCapacity = VividEcsConstants.AlignToPage(requestedMaxEntries);
             int requestedPageCount = requestedCapacity / VividEcsConstants.PageEntryCount;
             if (pageCount == requestedPageCount)
@@ -562,6 +565,29 @@ namespace VividRP.Runtime.ECS
 
             SetPageEntryCountForIndex(index);
             return true;
+        }
+
+        public int AppendRange(int requestedCount, out int startIndex, int entityId = -1)
+        {
+            startIndex = -1;
+            if (!isCreated || requestedCount <= 0)
+                return 0;
+
+            int count = math.min(requestedCount, m_MaxEntries - activeCount);
+            if (count <= 0)
+                return 0;
+
+            startIndex = m_ActiveCount;
+            int endIndex = startIndex + count;
+            while (m_EntityIds.Count < endIndex)
+                m_EntityIds.Add(entityId);
+
+            for (int index = startIndex; index < endIndex; index++)
+                m_EntityIds[index] = entityId;
+
+            m_ActiveCount = endIndex;
+            RebuildPageEntryCounts();
+            return count;
         }
 
         public bool RemoveAtSwapBack(int index, out int movedEntityId, out int movedFromIndex)

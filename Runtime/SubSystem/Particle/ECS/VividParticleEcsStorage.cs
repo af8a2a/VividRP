@@ -18,6 +18,7 @@ namespace VividRP.Runtime.Particle.ECS
         private NativeArray<int> m_ActiveCountOutput;
         private NativeArray<byte> m_KeepMask;
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
+        private NativeArray<VividParticleEcsCompactWork> m_StandaloneCompactWorks;
         private VividParticleRendererSharedKey m_RendererSharedKey = VividParticleRendererSharedKey.Invalid;
         private int m_PendingIntegrateActiveCount;
 
@@ -99,9 +100,13 @@ namespace VividRP.Runtime.Particle.ECS
             if (m_SimulationPages.IsCreated)
                 m_SimulationPages.Dispose();
 
+            if (m_StandaloneCompactWorks.IsCreated)
+                m_StandaloneCompactWorks.Dispose();
+
             m_ActiveCountOutput = default;
             m_KeepMask = default;
             m_SimulationPages = default;
+            m_StandaloneCompactWorks = default;
             m_PendingIntegrateActiveCount = 0;
         }
 
@@ -126,6 +131,63 @@ namespace VividRP.Runtime.Particle.ECS
             if (m_KeepMask.IsCreated && index < m_KeepMask.Length)
                 m_KeepMask[index] = 1;
 
+            return true;
+        }
+
+        public unsafe bool ReserveInitializeParticles(
+            int requestedCount,
+            VividParticleSystemFrameSnapshot snapshot,
+            uint randomSeed,
+            NativeList<VividParticleEcsInitializeParticlesWork> works,
+            out int firstIndex,
+            out int reservedCount)
+        {
+            firstIndex = activeCount;
+            reservedCount = 0;
+            if (!isCreated || requestedCount <= 0 || !works.IsCreated)
+                return false;
+
+            reservedCount = m_Line.AppendRange(requestedCount, out firstIndex);
+            if (reservedCount <= 0)
+                return false;
+
+            EnsureKeepMaskCapacity(capacity);
+            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
+            NativeArray<float3> positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
+            NativeArray<float3> velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
+            NativeArray<float> startLifetimes =
+                common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex);
+            NativeArray<float> remainingLifetimes =
+                common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
+            NativeArray<float4> colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
+            NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+
+            works.Add(new VividParticleEcsInitializeParticlesWork
+            {
+                StartIndex = firstIndex,
+                Count = reservedCount,
+                Capacity = positions.Length,
+                ShapeEnabled = snapshot.ShapeEnabled ? 1 : 0,
+                ShapeType = (int)snapshot.ShapeType,
+                SimulationSpace = (int)snapshot.SimulationSpace,
+                RandomSeed = randomSeed == 0u ? 1u : randomSeed,
+                StartLifetime = snapshot.StartLifetime,
+                StartSpeed = snapshot.StartSpeed,
+                StartSize = snapshot.StartSize,
+                ShapeRadius = snapshot.ShapeRadius,
+                ShapeAngleRadians = math.radians(snapshot.ShapeAngle),
+                ShapeBoxSize = ToFloat3(snapshot.ShapeBoxSize),
+                StartColor = ToFloat4(snapshot.StartColor),
+                LocalToWorldMatrix = ToFloat4x4(snapshot.LocalToWorldMatrix),
+                WorldRotation = ToQuaternion(snapshot.WorldRotation),
+                Positions = (float3*)positions.GetUnsafePtr(),
+                Velocities = (float3*)velocities.GetUnsafePtr(),
+                StartLifetimes = (float*)startLifetimes.GetUnsafePtr(),
+                RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
+                Colors = (float4*)colors.GetUnsafePtr(),
+                Sizes = (float*)sizes.GetUnsafePtr(),
+                KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
+            });
             return true;
         }
 
@@ -168,18 +230,32 @@ namespace VividRP.Runtime.Particle.ECS
                 KeepMask = m_KeepMask,
             };
 
-            handle = job.Schedule(livePageCount, innerloopBatchCount: 1, dependency);
+            JobHandle integrateHandle = job.Schedule(livePageCount, innerloopBatchCount: 1, dependency);
+            EnsureStandaloneCompactWorkCapacity();
+            m_StandaloneCompactWorks[0] = CreateCompactWork(count);
+            var compactJob = new VividParticleEcsCompactWorksJob
+            {
+                Works = m_StandaloneCompactWorks,
+            };
+            handle = compactJob.Schedule(1, innerloopBatchCount: 1, integrateHandle);
             return true;
         }
 
         public unsafe bool AddIntegratePageWorks(
             float deltaTime,
             Vector3 gravity,
-            NativeList<VividParticleEcsIntegratePageWork> works)
+            NativeList<VividParticleEcsIntegratePageWork> pageWorks,
+            NativeList<VividParticleEcsCompactWork> compactWorks)
         {
             int count = activeCount;
-            if (!isCreated || count <= 0 || deltaTime <= 0.0f || !works.IsCreated)
+            if (!isCreated
+                || count <= 0
+                || deltaTime <= 0.0f
+                || !pageWorks.IsCreated
+                || !compactWorks.IsCreated)
+            {
                 return false;
+            }
 
             if (!m_ActiveCountOutput.IsCreated)
                 m_ActiveCountOutput = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
@@ -201,7 +277,7 @@ namespace VividRP.Runtime.Particle.ECS
             float3 gravityValue = ToFloat3(gravity);
             for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
             {
-                works.Add(new VividParticleEcsIntegratePageWork
+                pageWorks.Add(new VividParticleEcsIntegratePageWork
                 {
                     Page = m_Line.GetPageInfo(pageIndex),
                     DeltaTime = deltaTime,
@@ -214,6 +290,7 @@ namespace VividRP.Runtime.Particle.ECS
                 });
             }
 
+            compactWorks.Add(CreateCompactWork(count));
             return true;
         }
 
@@ -222,18 +299,7 @@ namespace VividRP.Runtime.Particle.ECS
             if (!m_ActiveCountOutput.IsCreated)
                 return;
 
-            int originalActiveCount = math.min(
-                m_PendingIntegrateActiveCount > 0 ? m_PendingIntegrateActiveCount : activeCount,
-                m_KeepMask.IsCreated ? m_KeepMask.Length : activeCount);
-            for (int index = originalActiveCount - 1; index >= 0; index--)
-            {
-                if (m_KeepMask[index] != 0)
-                    continue;
-
-                m_Line.RemoveAtSwapBack(index, out _, out _);
-            }
-
-            m_ActiveCountOutput[0] = activeCount;
+            m_Line.SetActiveCount(m_ActiveCountOutput[0]);
             m_PendingIntegrateActiveCount = 0;
         }
 
@@ -353,6 +419,43 @@ namespace VividRP.Runtime.Particle.ECS
                 NativeArrayOptions.UninitializedMemory);
         }
 
+        private void EnsureStandaloneCompactWorkCapacity()
+        {
+            if (m_StandaloneCompactWorks.IsCreated)
+                return;
+
+            m_StandaloneCompactWorks = new NativeArray<VividParticleEcsCompactWork>(
+                1,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+        }
+
+        private unsafe VividParticleEcsCompactWork CreateCompactWork(int count)
+        {
+            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
+            NativeArray<float3> positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
+            NativeArray<float3> velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
+            NativeArray<float> startLifetimes =
+                common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex);
+            NativeArray<float> remainingLifetimes =
+                common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
+            NativeArray<float4> colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
+            NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+            return new VividParticleEcsCompactWork
+            {
+                ActiveCount = count,
+                Capacity = positions.Length,
+                Positions = (float3*)positions.GetUnsafePtr(),
+                Velocities = (float3*)velocities.GetUnsafePtr(),
+                StartLifetimes = (float*)startLifetimes.GetUnsafePtr(),
+                RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
+                Colors = (float4*)colors.GetUnsafePtr(),
+                Sizes = (float*)sizes.GetUnsafePtr(),
+                KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
+                ActiveCountOutput = (int*)m_ActiveCountOutput.GetUnsafePtr(),
+            };
+        }
+
         private void SyncRendererSharedKeyForQueries()
         {
             m_Line.SetSharedComponent(m_RendererSharedKey);
@@ -371,6 +474,20 @@ namespace VividRP.Runtime.Particle.ECS
         private static float4 ToFloat4(Color value)
         {
             return new float4(value.r, value.g, value.b, value.a);
+        }
+
+        private static float4x4 ToFloat4x4(Matrix4x4 value)
+        {
+            return new float4x4(
+                new float4(value.m00, value.m10, value.m20, value.m30),
+                new float4(value.m01, value.m11, value.m21, value.m31),
+                new float4(value.m02, value.m12, value.m22, value.m32),
+                new float4(value.m03, value.m13, value.m23, value.m33));
+        }
+
+        private static quaternion ToQuaternion(Quaternion value)
+        {
+            return new quaternion(value.x, value.y, value.z, value.w);
         }
 
         private static Color ToColor(float4 value)

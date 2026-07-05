@@ -219,6 +219,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_ReserveInitializeParticles_WritesPointParticlesInBurst()
+        {
+            using var storage = new VividParticleEcsStorage();
+            using var works = new NativeList<VividParticleEcsInitializeParticlesWork>(1, Allocator.TempJob);
+            storage.EnsureCapacity(4);
+            VividParticleSystemFrameSnapshot snapshot = CreatePointSnapshot();
+
+            Assert.That(storage.ReserveInitializeParticles(3, snapshot, 123u, works, out int firstIndex, out int count), Is.True);
+            Assert.That(firstIndex, Is.EqualTo(0));
+            Assert.That(count, Is.EqualTo(3));
+            Assert.That(storage.activeCount, Is.EqualTo(3));
+
+            var job = new VividParticleEcsInitializeParticlesJob
+            {
+                Works = works.AsArray(),
+            };
+            job.Schedule(works.Length, innerloopBatchCount: 1).Complete();
+
+            for (int index = 0; index < 3; index++)
+            {
+                AssertVector3(Vector3.zero, storage.GetPosition(index));
+                AssertVector3(new Vector3(0.0f, 0.0f, 2.5f), storage.GetVelocity(index));
+                Assert.That(storage.GetStartLifetime(index), Is.EqualTo(3.0f));
+                Assert.That(storage.GetRemainingLifetime(index), Is.EqualTo(3.0f));
+                Assert.That(storage.GetSize(index), Is.EqualTo(0.75f));
+                AssertColor(new Color(0.2f, 0.4f, 0.6f, 0.8f), storage.GetColor(index));
+            }
+        }
+
+        [Test]
         public void Storage_DisposeCanRepeat_WithoutThrowing()
         {
             var storage = new VividParticleEcsStorage();
@@ -237,6 +267,49 @@ namespace VividRP.Editor.Tests
                 10.0f,
                 index + 1.0f,
                 new Color(0.25f, 0.5f, 0.75f, 1.0f));
+        }
+
+        private static VividParticleSystemFrameSnapshot CreatePointSnapshot()
+        {
+            return new VividParticleSystemFrameSnapshot(
+                0.0f,
+                true,
+                true,
+                false,
+                false,
+                5.0f,
+                true,
+                3.0f,
+                2.5f,
+                0.75f,
+                new Color(0.2f, 0.4f, 0.6f, 0.8f),
+                0.0f,
+                VividParticleSystemSimulationSpace.Local,
+                4,
+                1u,
+                false,
+                true,
+                0.0f,
+                null,
+                true,
+                VividParticleShapeType.Point,
+                1.0f,
+                Vector3.one,
+                25.0f,
+                true,
+                VividParticleRenderMode.Billboard,
+                null,
+                null,
+                Color.white,
+                1.0f,
+                2.0f,
+                0.0f,
+                0,
+                0,
+                Vector3.zero,
+                Matrix4x4.identity,
+                Quaternion.identity,
+                1);
         }
 
         private static void AssertVector3(Vector3 expected, Vector3 actual)

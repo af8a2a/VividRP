@@ -487,6 +487,11 @@ namespace VividRP.Runtime.Particle
             return false;
         }
 
+        internal static bool RequiresSortingPositions(VividParticleSortMode sortMode)
+        {
+            return sortMode != VividParticleSortMode.None;
+        }
+
         internal static BatchDrawCommandFlags ResolveParticleDrawCommandFlags(
             bool hasSortingPosition,
             bool hasMotion)
@@ -1188,7 +1193,8 @@ namespace VividRP.Runtime.Particle
                     m_System.rendererModule.shadowCastingMode,
                     m_System.rendererModule.receiveShadows,
                     m_System.gameObject.GetEntityId(),
-                    IsSelectedForEditorOutline(m_System));
+                    IsSelectedForEditorOutline(m_System),
+                    m_System.rendererModule.sortMode);
                 return true;
             }
 
@@ -3380,6 +3386,7 @@ namespace VividRP.Runtime.Particle
             public readonly bool ReceiveShadows;
             public readonly EntityId PickingEntityId;
             public readonly bool IsEditorSelected;
+            public readonly VividParticleSortMode SortMode;
 
             public ParticleRenderEntry(
                 ParticleSystemState state,
@@ -3399,7 +3406,8 @@ namespace VividRP.Runtime.Particle
                 ShadowCastingMode shadowCastingMode,
                 bool receiveShadows,
                 EntityId pickingEntityId,
-                bool isEditorSelected)
+                bool isEditorSelected,
+                VividParticleSortMode sortMode)
             {
                 State = state;
                 Material = material;
@@ -3419,6 +3427,7 @@ namespace VividRP.Runtime.Particle
                 ReceiveShadows = receiveShadows;
                 PickingEntityId = pickingEntityId;
                 IsEditorSelected = isEditorSelected;
+                SortMode = sortMode;
             }
         }
 
@@ -3508,6 +3517,8 @@ namespace VividRP.Runtime.Particle
             public bool ReceiveShadows;
             public EntityId PickingEntityId;
             public bool IsEditorSelected;
+            public VividParticleSortMode SortMode;
+            public bool RequiresSortingPositions;
             public int LastUploadOperationCount;
             public int LastUploadByteCount;
 
@@ -3531,6 +3542,8 @@ namespace VividRP.Runtime.Particle
                 ReceiveShadows = entry.ReceiveShadows;
                 PickingEntityId = entry.PickingEntityId;
                 IsEditorSelected = entry.IsEditorSelected;
+                SortMode = entry.SortMode;
+                RequiresSortingPositions = VividParticleSystemManager.RequiresSortingPositions(SortMode);
                 Key = new ParticleDrawKey(entry);
             }
         }
@@ -3657,8 +3670,16 @@ namespace VividRP.Runtime.Particle
 
         private struct ParticleCullingSplit
         {
-            public int PlaneOffset;
-            public int PlaneCount;
+            public int PacketOffset;
+            public int PacketCount;
+        }
+
+        private struct ParticleCullingPlanePacket4
+        {
+            public float4 NormalX;
+            public float4 NormalY;
+            public float4 NormalZ;
+            public float4 Distance;
         }
 
         private struct ParticleDrawCommandInput
@@ -4010,7 +4031,8 @@ namespace VividRP.Runtime.Particle
                             m_NativePickingVisibleInstanceCapacity,
                             recordMaxVisibleCount,
                             layer,
-                            record.PickingEntityId);
+                            record.PickingEntityId,
+                            record.RequiresSortingPositions);
                         m_NativePickingDrawCommandInputs.Add(pickingCommand);
                         m_NativePickingVisibleInstanceCapacity += recordMaxVisibleCount;
                         batchMaxVisibleCount += recordMaxVisibleCount;
@@ -4027,7 +4049,8 @@ namespace VividRP.Runtime.Particle
                         batchVisibleOffset,
                         batchMaxVisibleCount,
                         layer,
-                        EntityId.None);
+                        EntityId.None,
+                        batch.RequiresSortingPositions);
                     m_NativeDrawCommandInputs.Add(command);
                     m_NativeVisibleInstanceCapacity += batchMaxVisibleCount;
                 }
@@ -4056,7 +4079,7 @@ namespace VividRP.Runtime.Particle
                                 ShadowCastingMode = record.ShadowCastingMode,
                                 ReceiveShadows = record.ReceiveShadows,
                                 UsesPageBillboard = UsesPageBillboardRenderMode(record.RenderMode),
-                                RequiresSortingPositions = RequiresSortingPositionsByDefault(),
+                                RequiresSortingPositions = false,
                                 GpuLayout = record.GpuLayout,
                                 BatchId = BatchID.Null,
                                 ZeroBlockDirty = true,
@@ -4073,6 +4096,7 @@ namespace VividRP.Runtime.Particle
                         ParticleDrawBatch batch = m_DrawBatches[batchIndex];
                         batch.Capacity = 0;
                         batch.SpanCapacity = 0;
+                        batch.RequiresSortingPositions = false;
                         for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
                         {
                             ParticleRenderRecord record = batch.Records[recordIndex];
@@ -4081,6 +4105,7 @@ namespace VividRP.Runtime.Particle
                             record.SharpIndex = recordIndex;
                             record.SpanBaseIndex = batch.SpanCapacity;
                             record.SpanCapacity = GetVisibleInstanceCount(record.RenderMode, record.Capacity);
+                            batch.RequiresSortingPositions |= record.RequiresSortingPositions;
                             batch.Capacity += Mathf.Max(1, record.Capacity);
                             batch.SpanCapacity += Mathf.Max(1, record.SpanCapacity);
                         }
@@ -4859,10 +4884,12 @@ namespace VividRP.Runtime.Particle
                         sizeof(int) * visibleInstanceCount,
                         UnsafeUtility.AlignOf<long>(),
                         Allocator.TempJob),
-                    drawCommandPickingEntityIds = (EntityId*)UnsafeUtility.Malloc(
-                        UnsafeUtility.SizeOf<EntityId>() * drawCommandCount,
-                        UnsafeUtility.AlignOf<long>(),
-                        Allocator.TempJob),
+                    drawCommandPickingEntityIds = isPerRecordPickingView
+                        ? (EntityId*)UnsafeUtility.Malloc(
+                            UnsafeUtility.SizeOf<EntityId>() * drawCommandCount,
+                            UnsafeUtility.AlignOf<long>(),
+                            Allocator.TempJob)
+                        : null,
                     instanceSortingPositions = hasSortingPositions
                         ? (float*)UnsafeUtility.Malloc(
                             sizeof(float) * GetSortingPositionFloatCount(visibleInstanceCount),
@@ -4876,22 +4903,19 @@ namespace VividRP.Runtime.Particle
 
                 cullingOutput.drawCommands[0] = draws;
 
-                NativeArray<float4> cullingPlanes = CreateCullingPlaneArray(cullingContext);
-                NativeArray<ParticleCullingSplit> cullingSplits = CreateCullingSplitArray(
+                NativeArray<ParticleCullingSplit> cullingSplits = CreatePackedCullingData(
                     cullingContext,
-                    cullingPlanes.Length);
+                    out NativeArray<ParticleCullingPlanePacket4> cullingPlanePackets);
 
                 var job = new ParticleDrawCommandOutputJob
                 {
                     Commands = commands,
                     CullingRecords = cullingRecords,
-                    CullingPlanes = cullingPlanes,
+                    CullingPlanePackets = cullingPlanePackets,
                     CullingSplits = cullingSplits,
                     CullingLayerMask = cullingContext.cullingLayerMask,
                     SceneCullingMask = cullingContext.sceneCullingMask,
                     ViewType = (int)cullingContext.viewType,
-                    ReceiverPlaneOffset = cullingContext.receiverPlaneOffset,
-                    ReceiverPlaneCount = cullingContext.receiverPlaneCount,
                     DrawCommands = draws.drawCommands,
                     DrawRanges = draws.drawRanges,
                     VisibleInstances = draws.visibleInstances,
@@ -4899,7 +4923,7 @@ namespace VividRP.Runtime.Particle
                     DrawCommandPickingEntityIds = draws.drawCommandPickingEntityIds,
                 };
                 JobHandle outputHandle = job.Schedule(drawCommandCount, 4);
-                JobHandle disposePlanesHandle = cullingPlanes.Dispose(outputHandle);
+                JobHandle disposePlanesHandle = cullingPlanePackets.Dispose(outputHandle);
                 JobHandle disposeSplitsHandle = cullingSplits.Dispose(outputHandle);
                 JobHandle combinedHandle = JobHandle.CombineDependencies(disposePlanesHandle, disposeSplitsHandle);
                 m_PendingCullingOutputHandle = m_HasPendingCullingOutput
@@ -4916,7 +4940,8 @@ namespace VividRP.Runtime.Particle
                 int visibleOffset,
                 int maxVisibleCount,
                 int layer,
-                EntityId pickingEntityId)
+                EntityId pickingEntityId,
+                bool requiresSortingPositions)
             {
                 return new ParticleDrawCommandInput
                 {
@@ -4930,8 +4955,8 @@ namespace VividRP.Runtime.Particle
                     RendererPriority = batch.Material != null ? batch.Material.renderQueue : 0,
                     RenderingLayerMask = uint.MaxValue,
                     SceneCullingMask = 0,
-                    DrawFlags = ResolveParticleDrawCommandFlags(batch.RequiresSortingPositions, hasMotion: false),
-                    HasSortingPositions = batch.RequiresSortingPositions ? 1 : 0,
+                    DrawFlags = ResolveParticleDrawCommandFlags(requiresSortingPositions, hasMotion: false),
+                    HasSortingPositions = requiresSortingPositions ? 1 : 0,
                     ShadowCastingMode = batch.ShadowCastingMode,
                     MotionMode = MotionVectorGenerationMode.ForceNoMotion,
                     ReceiveShadows = batch.ReceiveShadows ? 1 : 0,
@@ -4958,59 +4983,183 @@ namespace VividRP.Runtime.Particle
                 return false;
             }
 
-            private static NativeArray<float4> CreateCullingPlaneArray(BatchCullingContext cullingContext)
+            private static NativeArray<ParticleCullingSplit> CreatePackedCullingData(
+                BatchCullingContext cullingContext,
+                out NativeArray<ParticleCullingPlanePacket4> planePackets)
             {
                 NativeArray<Plane> sourcePlanes = cullingContext.cullingPlanes;
-                int planeCount = sourcePlanes.IsCreated ? sourcePlanes.Length : 0;
-                var planes = new NativeArray<float4>(
-                    planeCount,
-                    Allocator.TempJob,
-                    NativeArrayOptions.UninitializedMemory);
-                for (int index = 0; index < planeCount; index++)
-                {
-                    Plane plane = sourcePlanes[index];
-                    Vector3 normal = plane.normal;
-                    planes[index] = new float4(normal.x, normal.y, normal.z, plane.distance);
-                }
-
-                return planes;
-            }
-
-            private static NativeArray<ParticleCullingSplit> CreateCullingSplitArray(
-                BatchCullingContext cullingContext,
-                int planeCount)
-            {
+                int sourcePlaneCount = sourcePlanes.IsCreated ? sourcePlanes.Length : 0;
                 var sourceSplits = cullingContext.cullingSplits;
                 int splitCount = sourceSplits.IsCreated ? sourceSplits.Length : 0;
-                if (splitCount <= 0 && planeCount > 0)
+                using var receiverPlanes = new NativeList<float4>(Allocator.Temp);
+                AddBackfacingReceiverPlanes(cullingContext, sourcePlanes, receiverPlanes);
+
+                if (splitCount <= 0 && (sourcePlaneCount > 0 || receiverPlanes.Length > 0))
+                    splitCount = 1;
+
+                if (splitCount <= 0)
                 {
-                    var singleSplit = new NativeArray<ParticleCullingSplit>(
-                        1,
+                    planePackets = new NativeArray<ParticleCullingPlanePacket4>(
+                        0,
                         Allocator.TempJob,
                         NativeArrayOptions.UninitializedMemory);
-                    singleSplit[0] = new ParticleCullingSplit
-                    {
-                        PlaneOffset = 0,
-                        PlaneCount = planeCount,
-                    };
-                    return singleSplit;
+                    return new NativeArray<ParticleCullingSplit>(
+                        0,
+                        Allocator.TempJob,
+                        NativeArrayOptions.UninitializedMemory);
                 }
 
-                var splits = new NativeArray<ParticleCullingSplit>(
+                var splitPlaneCounts = new NativeArray<int>(
                     splitCount,
-                    Allocator.TempJob,
+                    Allocator.Temp,
                     NativeArrayOptions.UninitializedMemory);
-                for (int index = 0; index < splitCount; index++)
+                try
                 {
-                    var split = sourceSplits[index];
-                    splits[index] = new ParticleCullingSplit
+                    int packetCount = 0;
+                    for (int splitIndex = 0; splitIndex < splitCount; splitIndex++)
                     {
-                        PlaneOffset = split.cullingPlaneOffset,
-                        PlaneCount = split.cullingPlaneCount,
-                    };
+                        int basePlaneCount = sourceSplits.IsCreated && splitIndex < sourceSplits.Length
+                            ? sourceSplits[splitIndex].cullingPlaneCount
+                            : sourcePlaneCount;
+                        int totalPlaneCount = basePlaneCount + receiverPlanes.Length;
+                        splitPlaneCounts[splitIndex] = totalPlaneCount;
+                        packetCount += (totalPlaneCount + 3) / 4;
+                    }
+
+                    var splits = new NativeArray<ParticleCullingSplit>(
+                        splitCount,
+                        Allocator.TempJob,
+                        NativeArrayOptions.UninitializedMemory);
+                    planePackets = new NativeArray<ParticleCullingPlanePacket4>(
+                        packetCount,
+                        Allocator.TempJob,
+                        NativeArrayOptions.UninitializedMemory);
+
+                    int packetOffset = 0;
+                    for (int splitIndex = 0; splitIndex < splitCount; splitIndex++)
+                    {
+                        int basePlaneOffset = sourceSplits.IsCreated && splitIndex < sourceSplits.Length
+                            ? sourceSplits[splitIndex].cullingPlaneOffset
+                            : 0;
+                        int basePlaneCount = sourceSplits.IsCreated && splitIndex < sourceSplits.Length
+                            ? sourceSplits[splitIndex].cullingPlaneCount
+                            : sourcePlaneCount;
+                        int splitPacketCount = (splitPlaneCounts[splitIndex] + 3) / 4;
+                        splits[splitIndex] = new ParticleCullingSplit
+                        {
+                            PacketOffset = packetOffset,
+                            PacketCount = splitPacketCount,
+                        };
+
+                        for (int packetIndex = 0; packetIndex < splitPacketCount; packetIndex++)
+                        {
+                            planePackets[packetOffset + packetIndex] = CreatePlanePacket4(
+                                sourcePlanes,
+                                basePlaneOffset,
+                                basePlaneCount,
+                                receiverPlanes,
+                                packetIndex * 4);
+                        }
+
+                        packetOffset += splitPacketCount;
+                    }
+
+                    return splits;
+                }
+                finally
+                {
+                    splitPlaneCounts.Dispose();
+                }
+            }
+
+            private static void AddBackfacingReceiverPlanes(
+                BatchCullingContext cullingContext,
+                NativeArray<Plane> sourcePlanes,
+                NativeList<float4> receiverPlanes)
+            {
+                if (cullingContext.viewType != BatchCullingViewType.Light
+                    || cullingContext.receiverPlaneCount <= 0
+                    || !sourcePlanes.IsCreated)
+                {
+                    return;
                 }
 
-                return splits;
+                bool isOrthographic = cullingContext.projectionType == BatchCullingProjectionType.Orthographic;
+                Vector4 lightForwardColumn = cullingContext.localToWorldMatrix.GetColumn(2);
+                float3 lightDirection = new(lightForwardColumn.x, lightForwardColumn.y, lightForwardColumn.z);
+                Vector4 lightPositionColumn = cullingContext.localToWorldMatrix.GetColumn(3);
+                float3 lightPosition = new(lightPositionColumn.x, lightPositionColumn.y, lightPositionColumn.z);
+                int receiverEnd = math.min(
+                    sourcePlanes.Length,
+                    cullingContext.receiverPlaneOffset + cullingContext.receiverPlaneCount);
+                for (int planeIndex = math.max(0, cullingContext.receiverPlaneOffset); planeIndex < receiverEnd; planeIndex++)
+                {
+                    float4 plane = PlaneToFloat4(sourcePlanes[planeIndex]);
+                    float3 normal = plane.xyz;
+                    const float epsilon = 1e-12f;
+                    bool isBackfacing = isOrthographic
+                        ? math.dot(normal, lightDirection) < -epsilon
+                        : math.dot(normal, lightPosition) + plane.w > 0.0f;
+                    if (isBackfacing)
+                        receiverPlanes.Add(plane);
+                }
+            }
+
+            private static ParticleCullingPlanePacket4 CreatePlanePacket4(
+                NativeArray<Plane> sourcePlanes,
+                int basePlaneOffset,
+                int basePlaneCount,
+                NativeList<float4> receiverPlanes,
+                int firstPlaneIndex)
+            {
+                float4 normalX = default;
+                float4 normalY = default;
+                float4 normalZ = default;
+                float4 distance = default;
+                for (int lane = 0; lane < 4; lane++)
+                {
+                    float4 plane = GetCombinedPlane(
+                        sourcePlanes,
+                        basePlaneOffset,
+                        basePlaneCount,
+                        receiverPlanes,
+                        firstPlaneIndex + lane);
+                    normalX[lane] = plane.x;
+                    normalY[lane] = plane.y;
+                    normalZ[lane] = plane.z;
+                    distance[lane] = plane.w;
+                }
+
+                return new ParticleCullingPlanePacket4
+                {
+                    NormalX = normalX,
+                    NormalY = normalY,
+                    NormalZ = normalZ,
+                    Distance = distance,
+                };
+            }
+
+            private static float4 GetCombinedPlane(
+                NativeArray<Plane> sourcePlanes,
+                int basePlaneOffset,
+                int basePlaneCount,
+                NativeList<float4> receiverPlanes,
+                int planeIndex)
+            {
+                if (planeIndex < basePlaneCount)
+                    return PlaneToFloat4(sourcePlanes[basePlaneOffset + planeIndex]);
+
+                int receiverIndex = planeIndex - basePlaneCount;
+                if (receiverIndex < receiverPlanes.Length)
+                    return receiverPlanes[receiverIndex];
+
+                return new float4(0.0f, 0.0f, 0.0f, 1.0e20f);
+            }
+
+            private static float4 PlaneToFloat4(Plane plane)
+            {
+                Vector3 normal = plane.normal;
+                return new float4(normal.x, normal.y, normal.z, plane.distance);
             }
 
             private static int AlignTo16(int value)
@@ -5278,16 +5427,13 @@ namespace VividRP.Runtime.Particle
             [ReadOnly]
             public NativeArray<ParticleCullingRecord> CullingRecords;
             [ReadOnly]
-            public NativeArray<float4> CullingPlanes;
+            public NativeArray<ParticleCullingPlanePacket4> CullingPlanePackets;
             [ReadOnly]
             public NativeArray<ParticleCullingSplit> CullingSplits;
 
             public uint CullingLayerMask;
             public ulong SceneCullingMask;
             public int ViewType;
-            public int ReceiverPlaneOffset;
-            public int ReceiverPlaneCount;
-
             [NativeDisableUnsafePtrRestriction]
             public BatchDrawCommand* DrawCommands;
             [NativeDisableUnsafePtrRestriction]
@@ -5317,7 +5463,8 @@ namespace VividRP.Runtime.Particle
                     flags = command.DrawFlags,
                     sortingPosition = command.HasSortingPositions != 0 ? command.VisibleOffset * 3 : 0,
                 };
-                DrawCommandPickingEntityIds[commandIndex] = command.PickingEntityId;
+                if (DrawCommandPickingEntityIds != null)
+                    DrawCommandPickingEntityIds[commandIndex] = command.PickingEntityId;
 
                 DrawRanges[commandIndex] = new BatchDrawRange
                 {
@@ -5415,45 +5562,45 @@ namespace VividRP.Runtime.Particle
                 if (record.ActiveCount <= 0)
                     return false;
 
-                if (CullingPlanes.Length == 0 || CullingSplits.Length == 0)
-                    return IntersectsReceiverPlanes(record);
+                if (CullingPlanePackets.Length == 0 || CullingSplits.Length == 0)
+                    return true;
 
                 for (int splitIndex = 0; splitIndex < CullingSplits.Length; splitIndex++)
                 {
                     ParticleCullingSplit split = CullingSplits[splitIndex];
-                    if (split.PlaneCount <= 0)
-                        return IntersectsReceiverPlanes(record);
-
-                    if (IntersectsPlaneRange(record, split.PlaneOffset, split.PlaneCount)
-                        && IntersectsReceiverPlanes(record))
-                    {
+                    if (split.PacketCount <= 0)
                         return true;
-                    }
+
+                    if (IntersectsPlanePackets(record, split.PacketOffset, split.PacketCount))
+                        return true;
                 }
 
                 return false;
             }
 
-            private bool IntersectsReceiverPlanes(ParticleCullingRecord record)
+            private bool IntersectsPlanePackets(ParticleCullingRecord record, int packetOffset, int packetCount)
             {
-                if (ReceiverPlaneCount <= 0)
-                    return true;
-
-                return IntersectsPlaneRange(record, ReceiverPlaneOffset, ReceiverPlaneCount);
-            }
-
-            private bool IntersectsPlaneRange(ParticleCullingRecord record, int planeOffset, int planeCount)
-            {
-                int planeEnd = math.min(CullingPlanes.Length, planeOffset + planeCount);
-                for (int planeIndex = math.max(0, planeOffset); planeIndex < planeEnd; planeIndex++)
+                int packetEnd = math.min(CullingPlanePackets.Length, packetOffset + packetCount);
+                for (int packetIndex = math.max(0, packetOffset); packetIndex < packetEnd; packetIndex++)
                 {
-                    float4 plane = CullingPlanes[planeIndex];
-                    float3 normal = plane.xyz;
-                    float3 positiveVertex = record.BoundsCenter + math.select(
-                        -record.BoundsExtents,
-                        record.BoundsExtents,
-                        normal >= 0.0f);
-                    if (math.dot(normal, positiveVertex) + plane.w < 0.0f)
+                    ParticleCullingPlanePacket4 packet = CullingPlanePackets[packetIndex];
+                    float4 positiveX = math.select(
+                        new float4(record.BoundsCenter.x - record.BoundsExtents.x),
+                        new float4(record.BoundsCenter.x + record.BoundsExtents.x),
+                        packet.NormalX >= 0.0f);
+                    float4 positiveY = math.select(
+                        new float4(record.BoundsCenter.y - record.BoundsExtents.y),
+                        new float4(record.BoundsCenter.y + record.BoundsExtents.y),
+                        packet.NormalY >= 0.0f);
+                    float4 positiveZ = math.select(
+                        new float4(record.BoundsCenter.z - record.BoundsExtents.z),
+                        new float4(record.BoundsCenter.z + record.BoundsExtents.z),
+                        packet.NormalZ >= 0.0f);
+                    float4 distances = packet.NormalX * positiveX
+                        + packet.NormalY * positiveY
+                        + packet.NormalZ * positiveZ
+                        + packet.Distance;
+                    if (math.any(distances < 0.0f))
                         return false;
                 }
 

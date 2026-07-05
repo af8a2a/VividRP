@@ -81,6 +81,7 @@ namespace VividRP.Editor.Tests
             Assert.That(renderer.customData1Enabled, Is.False);
             Assert.That(renderer.customData2Enabled, Is.False);
             Assert.That(renderer.meshIndexDataEnabled, Is.False);
+            Assert.That(renderer.sortMode, Is.EqualTo(VividParticleSortMode.None));
         }
 
         [Test]
@@ -135,6 +136,7 @@ namespace VividRP.Editor.Tests
             asset.rendererModule.stretchSpeedScale = 0.5f;
             asset.rendererModule.colorDataMode = VividParticleGpuDataMode.Shared;
             asset.rendererModule.customData1Enabled = true;
+            asset.rendererModule.sortMode = VividParticleSortMode.ByDistance;
 
             VividParticleSystem system = CreateActiveSystem();
             system.asset = asset;
@@ -149,6 +151,7 @@ namespace VividRP.Editor.Tests
             Assert.That(system.rendererModule.stretchSpeedScale, Is.EqualTo(0.5f));
             Assert.That(system.rendererModule.colorDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
             Assert.That(system.rendererModule.customData1Enabled, Is.True);
+            Assert.That(system.rendererModule.sortMode, Is.EqualTo(VividParticleSortMode.ByDistance));
 
             asset.main.startLifetime = 9.0f;
             asset.emission.bursts[0] = new VividParticleBurst(0.25f, 9);
@@ -157,6 +160,7 @@ namespace VividRP.Editor.Tests
             asset.rendererModule.stretchSpeedScale = 3.0f;
             asset.rendererModule.colorDataMode = VividParticleGpuDataMode.PerParticle;
             asset.rendererModule.customData1Enabled = false;
+            asset.rendererModule.sortMode = VividParticleSortMode.None;
 
             Assert.That(system.main.startLifetime, Is.EqualTo(2.5f));
             Assert.That(system.emission.bursts[0].count, Is.EqualTo(2));
@@ -165,6 +169,7 @@ namespace VividRP.Editor.Tests
             Assert.That(system.rendererModule.stretchSpeedScale, Is.EqualTo(0.5f));
             Assert.That(system.rendererModule.colorDataMode, Is.EqualTo(VividParticleGpuDataMode.Shared));
             Assert.That(system.rendererModule.customData1Enabled, Is.True);
+            Assert.That(system.rendererModule.sortMode, Is.EqualTo(VividParticleSortMode.ByDistance));
         }
 
         [Test]
@@ -1072,6 +1077,8 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(4), Is.EqualTo(12));
             Assert.That(VividParticleSystemManager.GetSortingPositionFloatCount(-1), Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.RequiresSortingPositionsByDefault(), Is.False);
+            Assert.That(VividParticleSystemManager.RequiresSortingPositions(VividParticleSortMode.None), Is.False);
+            Assert.That(VividParticleSystemManager.RequiresSortingPositions(VividParticleSortMode.ByDistance), Is.True);
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 5), Is.True);
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 4), Is.False);
             Assert.That(VividParticleSystemManager.IsPickingOrSelectionView(BatchCullingViewType.Picking), Is.True);

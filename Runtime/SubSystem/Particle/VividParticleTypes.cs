@@ -40,6 +40,12 @@ namespace VividRP.Runtime.Particle
         PerParticle,
     }
 
+    public enum VividParticleSortMode
+    {
+        None,
+        ByDistance,
+    }
+
     [Serializable]
     public struct VividParticleBurst
     {
@@ -451,6 +457,9 @@ namespace VividRP.Runtime.Particle
         [SerializeField]
         private bool m_MeshIndexDataEnabled;
 
+        [SerializeField]
+        private VividParticleSortMode m_SortMode;
+
         public bool enabled
         {
             get => m_Enabled;
@@ -565,6 +574,12 @@ namespace VividRP.Runtime.Particle
             set => m_MeshIndexDataEnabled = value;
         }
 
+        public VividParticleSortMode sortMode
+        {
+            get => m_SortMode;
+            set => m_SortMode = value;
+        }
+
         internal static VividParticleRendererModule CreateDefault()
         {
             return new VividParticleRendererModule();
@@ -601,6 +616,7 @@ namespace VividRP.Runtime.Particle
             m_CustomData1Enabled = source.m_CustomData1Enabled;
             m_CustomData2Enabled = source.m_CustomData2Enabled;
             m_MeshIndexDataEnabled = source.m_MeshIndexDataEnabled;
+            m_SortMode = source.m_SortMode;
             Validate();
         }
 

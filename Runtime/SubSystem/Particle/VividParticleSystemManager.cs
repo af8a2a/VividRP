@@ -984,6 +984,7 @@ namespace VividRP.Runtime.Particle
                 s_RendererManager.UpdateAll(s_States, forceUpload);
             }
 
+            s_RendererManager.Commit();
             s_LastRendererUpdateFrame = Time.frameCount;
             s_LastCompleteAndUploadFrame = -1;
             RequestEditorRenderUpdateForActiveSystems();
@@ -4612,17 +4613,18 @@ namespace VividRP.Runtime.Particle
 
             private static readonly ProfilerMarker s_UpdateRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.UpdateRecords");
             private static readonly ProfilerMarker s_RemoveRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.RemoveRecords");
-            private static readonly ProfilerMarker s_CommitMarker = new("VividRP.Particle.Manager.BRGUpload.Commit");
+            private static readonly ProfilerMarker s_CommitMarker = new("VividRP.Particle.Manager.Commit");
             private static readonly ProfilerMarker s_BoundsCollectMarker = new("VividRP.Particle.Manager.Bounds.Collect");
             private static readonly ProfilerMarker s_BoundsScheduleMarker = new("VividRP.Particle.Manager.Bounds.Schedule");
             private static readonly ProfilerMarker s_BoundsCompleteMarker = new("VividRP.Particle.Manager.Bounds.Complete");
             private static readonly ProfilerMarker s_RefreshFastCullingFlagsMarker = new("VividRP.Particle.Manager.BRGUpload.RefreshFastCullingFlags");
             private static readonly ProfilerMarker s_RebuildCullingLayoutMarker = new("VividRP.Particle.Manager.BRGUpload.RebuildCullingLayout");
-            private static readonly ProfilerMarker s_UploadCollectDirtyMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.CollectDirty");
-            private static readonly ProfilerMarker s_UploadLockBufferMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.LockBuffer");
-            private static readonly ProfilerMarker s_UploadBuildWorksMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.BuildWorks");
-            private static readonly ProfilerMarker s_UploadCopyWorkArraysMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.CopyWorkArrays");
-            private static readonly ProfilerMarker s_UploadScheduleJobsMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.ScheduleJobs");
+            private static readonly ProfilerMarker s_ManagerJobGraphScheduleMarker = new("VividRP.Particle.Manager.JobGraph.Schedule");
+            private static readonly ProfilerMarker s_UploadCollectDirtyMarker = new("VividRP.Particle.Manager.JobGraph.Upload.CollectDirty");
+            private static readonly ProfilerMarker s_UploadLockBufferMarker = new("VividRP.Particle.Manager.JobGraph.Upload.LockBuffer");
+            private static readonly ProfilerMarker s_UploadBuildWorksMarker = new("VividRP.Particle.Manager.JobGraph.Upload.BuildWorks");
+            private static readonly ProfilerMarker s_UploadCopyWorkArraysMarker = new("VividRP.Particle.Manager.JobGraph.Upload.CopyWorkArrays");
+            private static readonly ProfilerMarker s_UploadScheduleJobsMarker = new("VividRP.Particle.Manager.JobGraph.Upload.ScheduleJobs");
             private static readonly ProfilerMarker s_RebuildBatchesMarker = new("VividRP.Particle.Renderer.RebuildBatches");
             private static readonly ProfilerMarker s_UploadMarker = new("VividRP.Particle.Renderer.Upload");
             private static readonly ProfilerMarker s_CompleteUploadMarker = new("VividRP.Particle.Renderer.CompleteUpload");
@@ -4746,7 +4748,6 @@ namespace VividRP.Runtime.Particle
                         RemoveRecord(m_RemoveRecords[index].State);
                 }
 
-                Commit();
             }
 
             public void Update(ParticleSystemState state, bool forceUpload)
@@ -4845,19 +4846,27 @@ namespace VividRP.Runtime.Particle
                 m_LayoutDirty = true;
             }
 
-            private void Commit()
+            public void Commit()
             {
                 using (s_CommitMarker.Auto())
                 {
                     if (m_LayoutDirty)
                         RebuildBatches();
 
-                    if (!m_HasPendingBounds)
-                        ScheduleBoundsUpdatesFromRecords();
+                    ScheduleManagerJobGraph();
                     RefreshFastCullingFlags();
                     CompletePendingBoundsUpdates();
                     RebuildNativeCullingLayout();
-                    ScheduleUpload();
+                }
+            }
+
+            private void ScheduleManagerJobGraph()
+            {
+                using (s_ManagerJobGraphScheduleMarker.Auto())
+                {
+                    ScheduleRenderUploadGraph();
+                    if (!m_HasPendingBounds)
+                        ScheduleBoundsUpdatesFromRecords();
                 }
             }
 
@@ -5264,7 +5273,7 @@ namespace VividRP.Runtime.Particle
                 };
             }
 
-            private void ScheduleUpload()
+            private void ScheduleRenderUploadGraph()
             {
                 using (s_UploadMarker.Auto())
                 {

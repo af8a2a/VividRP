@@ -598,7 +598,24 @@ namespace VividRP.Runtime.Particle
             InsertIntoPlayerLoop();
             RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
             RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
+#if UNITY_EDITOR
+            Selection.selectionChanged -= OnEditorSelectionChanged;
+            Selection.selectionChanged += OnEditorSelectionChanged;
+#endif
         }
+
+#if UNITY_EDITOR
+        private static void OnEditorSelectionChanged()
+        {
+            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+                pair.Value.RefreshEditorSelectionState();
+
+            s_LastRendererUpdateFrame = -1;
+            s_LastCompleteAndUploadFrame = -1;
+            EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+        }
+#endif
 
         private static ParticleSystemState GetOrCreateState(VividParticleSystem system)
         {
@@ -1052,15 +1069,24 @@ namespace VividRP.Runtime.Particle
             private VividParticleRendererSharedKey m_LastRendererSharedKey;
             private Bounds m_CachedWorldBounds;
             private Bounds[] m_CachedPageWorldBounds = Array.Empty<Bounds>();
+            private NativeArray<ParticleBoundsData> m_BoundsPageResults;
+            private NativeArray<ParticleBoundsData> m_BoundsWorldResult;
+            private JobHandle m_PendingBoundsJob;
             private int m_CachedPageWorldBoundsCount;
             private int m_CachedBoundsParticleCount = -1;
+            private int m_PendingBoundsParticleCount;
+            private int m_PendingBoundsPageCount;
+            private bool m_PendingBoundsUsesPageBillboard;
             private bool m_BatchCreated;
             private bool m_OwnedMesh;
             private bool m_ResourcesDirty = true;
             private bool m_MissingShaderWarningLogged;
             private bool m_HasPendingJob;
+            private bool m_HasPendingBoundsJob;
             private bool m_HasPendingSimulation;
             private bool m_PendingAllowEmission;
+            private bool m_BoundsDirty = true;
+            private bool m_IsEditorSelected;
             private bool m_HasUploadedRenderStateSnapshot;
             private bool m_HasCachedGpuLayout;
             private bool m_HasRendererSharedKey;
@@ -1071,6 +1097,7 @@ namespace VividRP.Runtime.Particle
             {
                 m_System = system;
                 m_Storage.systemId = ResolveSystemId(system);
+                RefreshEditorSelectionState();
                 ResetEditorUpdateTime();
             }
 
@@ -1131,8 +1158,10 @@ namespace VividRP.Runtime.Particle
             public void Dispose()
             {
                 CompletePending();
+                CompletePendingBoundsJob();
                 s_RendererManager.Unregister(this);
                 ReleaseResources();
+                DisposeBoundsArrays();
                 m_Storage.Dispose();
                 m_Random = null;
                 m_BurstTriggered = Array.Empty<bool>();
@@ -1144,6 +1173,7 @@ namespace VividRP.Runtime.Particle
             public void MarkResourcesDirty()
             {
                 m_ResourcesDirty = true;
+                MarkBoundsDirty();
                 MarkAllInstanceDataDirty();
             }
 
@@ -1168,6 +1198,15 @@ namespace VividRP.Runtime.Particle
 #if UNITY_EDITOR
                 if (!Application.isPlaying)
                     m_LastEditorUpdateTime = EditorApplication.timeSinceStartup;
+#endif
+            }
+
+            internal void RefreshEditorSelectionState()
+            {
+#if UNITY_EDITOR
+                m_IsEditorSelected = IsSelectedForEditorOutline(m_System);
+#else
+                m_IsEditorSelected = false;
 #endif
             }
 
@@ -1207,6 +1246,7 @@ namespace VividRP.Runtime.Particle
                     m_HasPendingJob = false;
                     m_Storage.ApplyScheduledIntegrateResult();
                     MarkInstanceRangeDirty(0, previousActiveCount);
+                    MarkBoundsDirty();
                     CompletedJobCount++;
                 }
 
@@ -1268,8 +1308,10 @@ namespace VividRP.Runtime.Particle
                 ResetBurstState(snapshot.Bursts);
                 if (clearParticles)
                 {
+                    CompletePendingBoundsJob();
                     m_Storage.Clear();
                     MarkInstanceRangeDirty(0, m_LastUploadedCount);
+                    MarkBoundsDirty();
                 }
                 ResetRandom(snapshot);
             }
@@ -1319,7 +1361,6 @@ namespace VividRP.Runtime.Particle
                 int count = Mathf.Min(activeCount, m_Capacity);
                 m_LastUploadedCount = count;
                 MarkRenderStateDirtyIfNeeded(count);
-                UpdateCachedRenderBounds(count);
                 VividParticleGpuDataLayoutDescriptor gpuLayoutDescriptor =
                     VividParticleGpuDataLayoutDescriptor.Create(m_System.rendererModule);
                 VividParticleGpuDataLayout gpuLayout = GetGpuDataLayout(gpuLayoutDescriptor);
@@ -1351,7 +1392,7 @@ namespace VividRP.Runtime.Particle
                     m_System.rendererModule.shadowCastingMode,
                     m_System.rendererModule.receiveShadows,
                     m_System.gameObject.GetEntityId(),
-                    IsSelectedForEditorOutline(m_System),
+                    m_IsEditorSelected,
                     m_System.rendererModule.sortMode);
                 return true;
             }
@@ -1429,91 +1470,183 @@ namespace VividRP.Runtime.Particle
 
             public Bounds GetWorldBounds()
             {
-                UpdateCachedRenderBounds(Mathf.Min(activeCount, Mathf.Max(m_Capacity, activeCount)));
+                EnsureCachedCullingBounds();
                 return m_CachedWorldBounds;
             }
 
-            private Bounds CalculateParticleRangeWorldBounds(int startIndex, int count)
+            private void ScheduleCachedRenderBounds()
             {
-                if (m_System == null || count <= 0 || activeCount <= 0)
-                    return new Bounds(m_System != null ? m_System.transform.position : Vector3.zero, Vector3.zero);
+                CompletePendingBoundsJob();
 
-                int clampedStart = Mathf.Clamp(startIndex, 0, activeCount - 1);
-                int clampedEnd = Mathf.Clamp(startIndex + count, clampedStart + 1, activeCount);
-                Vector3 firstPosition = GetParticleWorldPosition(m_Storage.GetPosition(clampedStart));
-                float firstExtent = GetParticleWorldExtent(clampedStart);
-                var bounds = new Bounds(firstPosition, Vector3.one * (firstExtent * 2.0f));
-
-                for (int index = clampedStart + 1; index < clampedEnd; index++)
-                {
-                    Vector3 position = GetParticleWorldPosition(m_Storage.GetPosition(index));
-                    float extent = GetParticleWorldExtent(index);
-                    bounds.Encapsulate(position + Vector3.one * extent);
-                    bounds.Encapsulate(position - Vector3.one * extent);
-                }
-
-                return bounds;
-            }
-
-            private void UpdateCachedRenderBounds(int count)
-            {
                 if (m_System == null)
                 {
-                    m_CachedWorldBounds = new Bounds(Vector3.zero, Vector3.zero);
-                    m_CachedPageWorldBoundsCount = 0;
-                    m_CachedBoundsParticleCount = 0;
-                    m_HasCachedWorldBounds = true;
+                    SetEmptyCachedRenderBounds(Vector3.zero, 0);
                     return;
                 }
 
-                count = Mathf.Clamp(count, 0, activeCount);
+                int count = Mathf.Clamp(Mathf.Min(activeCount, Mathf.Max(m_Capacity, activeCount)), 0, activeCount);
                 if (count <= 0 || !m_Storage.isCreated || !m_Storage.IsValidIndex(0))
                 {
-                    m_CachedWorldBounds = new Bounds(m_System.transform.position, Vector3.zero);
-                    m_CachedPageWorldBoundsCount = 0;
-                    m_CachedBoundsParticleCount = count;
-                    m_HasCachedWorldBounds = true;
+                    SetEmptyCachedRenderBounds(m_System.transform.position, count);
+                    return;
+                }
+
+                if (!m_Storage.TryGetCommonArrays(
+                    out NativeArray<float3> positions,
+                    out NativeArray<float3> velocities,
+                    out _,
+                    out _,
+                    out _,
+                    out NativeArray<float> sizes))
+                {
+                    SetEmptyCachedRenderBounds(m_System.transform.position, count);
                     return;
                 }
 
                 VividParticleRenderMode renderMode = m_System.rendererModule.renderMode;
-                if (!UsesPageBillboardRenderMode(renderMode))
+                bool usesPageBillboard = UsesPageBillboardRenderMode(renderMode);
+                int pageCount = Mathf.Max(1, GetVisibleInstanceCount(renderMode, count));
+                EnsureNativeBoundsCapacity(pageCount);
+
+                float meshExtent = 0.0f;
+                if (renderMode == VividParticleRenderMode.Mesh && m_System.rendererModule.mesh != null)
+                    meshExtent = m_System.rendererModule.mesh.bounds.extents.magnitude;
+
+                var pageJob = new ParticleBoundsPageJob
                 {
-                    m_CachedWorldBounds = CalculateParticleRangeWorldBounds(0, count);
-                    m_CachedPageWorldBoundsCount = 0;
-                    m_CachedBoundsParticleCount = count;
-                    m_HasCachedWorldBounds = true;
+                    Positions = positions,
+                    Velocities = velocities,
+                    Sizes = sizes,
+                    PageBounds = m_BoundsPageResults,
+                    LocalToWorld = ToFloat4x4(m_System.transform.localToWorldMatrix),
+                    SimulationSpace = (int)m_System.main.simulationSpace,
+                    RenderMode = (int)renderMode,
+                    ActiveCount = count,
+                    SizeScale = m_System.rendererModule.sizeScale,
+                    StretchLengthScale = m_System.rendererModule.stretchLengthScale,
+                    StretchSpeedScale = m_System.rendererModule.stretchSpeedScale,
+                    MeshExtent = meshExtent,
+                };
+
+                JobHandle pageHandle = pageJob.Schedule(pageCount, 1);
+                var worldJob = new ParticleBoundsReduceJob
+                {
+                    PageBounds = m_BoundsPageResults,
+                    PageCount = pageCount,
+                    WorldBounds = m_BoundsWorldResult,
+                };
+
+                m_PendingBoundsJob = worldJob.Schedule(pageHandle);
+                m_HasPendingBoundsJob = true;
+                m_PendingBoundsParticleCount = count;
+                m_PendingBoundsPageCount = pageCount;
+                m_PendingBoundsUsesPageBillboard = usesPageBillboard;
+                m_BoundsDirty = false;
+            }
+
+            internal void ScheduleBoundsUpdateIfDirty()
+            {
+                int count = Mathf.Min(activeCount, Mathf.Max(m_Capacity, activeCount));
+                if (!m_BoundsDirty && m_HasCachedWorldBounds && m_CachedBoundsParticleCount == count)
                     return;
-                }
 
-                int pageCount = GetVisibleInstanceCount(renderMode, count);
-                EnsureCachedPageBoundsCapacity(pageCount);
-                Bounds systemBounds = default;
-                bool hasSystemBounds = false;
-                for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+                ScheduleCachedRenderBounds();
+            }
+
+            private void CompletePendingBoundsJob()
+            {
+                if (!m_HasPendingBoundsJob)
+                    return;
+
+                m_PendingBoundsJob.Complete();
+                m_PendingBoundsJob = default;
+                m_HasPendingBoundsJob = false;
+
+                ParticleBoundsData worldBounds = m_BoundsWorldResult.IsCreated && m_BoundsWorldResult.Length > 0
+                    ? m_BoundsWorldResult[0]
+                    : default;
+                m_CachedWorldBounds = ToBounds(worldBounds, m_System != null ? m_System.transform.position : Vector3.zero);
+
+                if (m_PendingBoundsUsesPageBillboard)
                 {
-                    int pageStart = pageIndex * BillboardPageSize;
-                    int pageParticleCount = Mathf.Min(BillboardPageSize, count - pageStart);
-                    Bounds pageBounds = CalculateParticleRangeWorldBounds(pageStart, pageParticleCount);
-                    m_CachedPageWorldBounds[pageIndex] = pageBounds;
-                    if (!hasSystemBounds)
-                    {
-                        systemBounds = pageBounds;
-                        hasSystemBounds = true;
-                    }
-                    else
-                    {
-                        systemBounds.Encapsulate(pageBounds.min);
-                        systemBounds.Encapsulate(pageBounds.max);
-                    }
+                    EnsureCachedPageBoundsCapacity(m_PendingBoundsPageCount);
+                    for (int pageIndex = 0; pageIndex < m_PendingBoundsPageCount; pageIndex++)
+                        m_CachedPageWorldBounds[pageIndex] = ToBounds(m_BoundsPageResults[pageIndex], m_CachedWorldBounds.center);
+                    m_CachedPageWorldBoundsCount = m_PendingBoundsPageCount;
+                }
+                else
+                {
+                    m_CachedPageWorldBoundsCount = 0;
                 }
 
-                m_CachedWorldBounds = hasSystemBounds
-                    ? systemBounds
-                    : new Bounds(m_System.transform.position, Vector3.zero);
-                m_CachedPageWorldBoundsCount = pageCount;
+                m_CachedBoundsParticleCount = m_PendingBoundsParticleCount;
+                m_HasCachedWorldBounds = true;
+                m_PendingBoundsParticleCount = 0;
+                m_PendingBoundsPageCount = 0;
+                m_PendingBoundsUsesPageBillboard = false;
+            }
+
+            private void EnsureNativeBoundsCapacity(int pageCount)
+            {
+                pageCount = Mathf.Max(1, pageCount);
+                if (!m_BoundsWorldResult.IsCreated)
+                {
+                    m_BoundsWorldResult = new NativeArray<ParticleBoundsData>(
+                        1,
+                        Allocator.Persistent,
+                        NativeArrayOptions.UninitializedMemory);
+                }
+
+                if (m_BoundsPageResults.IsCreated && m_BoundsPageResults.Length >= pageCount)
+                    return;
+
+                if (m_BoundsPageResults.IsCreated)
+                    m_BoundsPageResults.Dispose();
+
+                m_BoundsPageResults = new NativeArray<ParticleBoundsData>(
+                    pageCount,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+            }
+
+            private void DisposeBoundsArrays()
+            {
+                CompletePendingBoundsJob();
+                if (m_BoundsPageResults.IsCreated)
+                    m_BoundsPageResults.Dispose();
+
+                if (m_BoundsWorldResult.IsCreated)
+                    m_BoundsWorldResult.Dispose();
+
+                m_BoundsPageResults = default;
+                m_BoundsWorldResult = default;
+            }
+
+            private void SetEmptyCachedRenderBounds(Vector3 center, int count)
+            {
+                m_CachedWorldBounds = new Bounds(center, Vector3.zero);
+                m_CachedPageWorldBoundsCount = 0;
                 m_CachedBoundsParticleCount = count;
                 m_HasCachedWorldBounds = true;
+                m_BoundsDirty = false;
+            }
+
+            private void MarkBoundsDirty()
+            {
+                m_BoundsDirty = true;
+            }
+
+            private static Bounds ToBounds(ParticleBoundsData bounds, Vector3 fallbackCenter)
+            {
+                if (bounds.IsValid == 0)
+                    return new Bounds(fallbackCenter, Vector3.zero);
+
+                var center = new Vector3(bounds.Center.x, bounds.Center.y, bounds.Center.z);
+                var size = new Vector3(
+                    Mathf.Max(0.0f, bounds.Extents.x) * 2.0f,
+                    Mathf.Max(0.0f, bounds.Extents.y) * 2.0f,
+                    Mathf.Max(0.0f, bounds.Extents.z) * 2.0f);
+                return new Bounds(center, size);
             }
 
             private void EnsureCachedPageBoundsCapacity(int pageCount)
@@ -1527,10 +1660,12 @@ namespace VividRP.Runtime.Particle
 
             private void ResetCachedRenderBounds()
             {
+                CompletePendingBoundsJob();
                 m_CachedWorldBounds = new Bounds(m_System != null ? m_System.transform.position : Vector3.zero, Vector3.zero);
                 m_CachedPageWorldBoundsCount = 0;
                 m_CachedBoundsParticleCount = -1;
                 m_HasCachedWorldBounds = false;
+                m_BoundsDirty = true;
             }
 
             internal bool IsVisibleInCullingContext(BatchCullingContext cullingContext)
@@ -1599,8 +1734,14 @@ namespace VividRP.Runtime.Particle
             private void EnsureCachedCullingBounds()
             {
                 int count = Mathf.Min(activeCount, Mathf.Max(m_Capacity, activeCount));
-                if (!m_HasCachedWorldBounds || m_CachedBoundsParticleCount != count)
-                    UpdateCachedRenderBounds(count);
+                if (m_HasPendingBoundsJob)
+                    CompletePendingBoundsJob();
+
+                if (m_BoundsDirty || !m_HasCachedWorldBounds || m_CachedBoundsParticleCount != count)
+                {
+                    ScheduleCachedRenderBounds();
+                    CompletePendingBoundsJob();
+                }
             }
 
             private static void AddCullingRecord(
@@ -1715,7 +1856,9 @@ namespace VividRP.Runtime.Particle
 
             private void EnsureStorageCapacity(int maxParticles)
             {
+                CompletePendingBoundsJob();
                 m_Storage.EnsureCapacity(maxParticles);
+                MarkBoundsDirty();
             }
 
             private static VividParticleSystemId ResolveSystemId(VividParticleSystem system)
@@ -1862,31 +2005,6 @@ namespace VividRP.Runtime.Particle
                 return m_System != null && m_System.main.simulationSpace == VividParticleSystemSimulationSpace.Local
                     ? m_System.transform.TransformPoint(position)
                     : position;
-            }
-
-            private float GetParticleWorldExtent(int particleIndex)
-            {
-                float renderSize = GetParticleRenderSize(particleIndex);
-                if (m_System != null
-                    && m_System.rendererModule.renderMode == VividParticleRenderMode.Mesh
-                    && m_System.rendererModule.mesh != null)
-                {
-                    return Mathf.Max(
-                        VividParticleMainModule.MinimumStartSize,
-                        m_System.rendererModule.mesh.bounds.extents.magnitude * renderSize);
-                }
-
-                if (m_System != null && m_System.rendererModule.renderMode == VividParticleRenderMode.Stretch)
-                {
-                    Vector3 velocity = m_Storage.IsValidIndex(particleIndex)
-                        ? m_Storage.GetVelocity(particleIndex)
-                        : Vector3.zero;
-                    float stretchLength = renderSize * m_System.rendererModule.stretchLengthScale
-                        + velocity.magnitude * m_System.rendererModule.stretchSpeedScale;
-                    return Mathf.Max(renderSize, stretchLength) * 0.5f;
-                }
-
-                return renderSize * 0.5f;
             }
 
             private float GetParticleRenderSize(int particleIndex)
@@ -2215,6 +2333,7 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 m_InstanceDirtyRanges[0].AddInstanceRange(startIndex, count);
+                MarkBoundsDirty();
             }
 
             private void MarkAllInstanceDataDirty(InstanceUploadDirtyRanges ranges)
@@ -2222,6 +2341,7 @@ namespace VividRP.Runtime.Particle
                 ranges.Clear();
                 ranges.AddZeroBlock();
                 ranges.AddInstanceRange(0, m_Capacity);
+                MarkBoundsDirty();
             }
 
             private void MarkRenderStateDirtyIfNeeded(int count)
@@ -3826,6 +3946,13 @@ namespace VividRP.Runtime.Particle
             public int IsEditorSelected;
         }
 
+        private struct ParticleBoundsData
+        {
+            public float3 Center;
+            public float3 Extents;
+            public int IsValid;
+        }
+
         private struct ParticleCullingSplit
         {
             public int PacketOffset;
@@ -3913,6 +4040,7 @@ namespace VividRP.Runtime.Particle
             private static readonly ProfilerMarker s_UpdateRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.UpdateRecords");
             private static readonly ProfilerMarker s_RemoveRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.RemoveRecords");
             private static readonly ProfilerMarker s_CommitMarker = new("VividRP.Particle.Manager.BRGUpload.Commit");
+            private static readonly ProfilerMarker s_ScheduleBoundsMarker = new("VividRP.Particle.Manager.BRGUpload.ScheduleBounds");
             private static readonly ProfilerMarker s_RefreshFastCullingFlagsMarker = new("VividRP.Particle.Manager.BRGUpload.RefreshFastCullingFlags");
             private static readonly ProfilerMarker s_RebuildCullingLayoutMarker = new("VividRP.Particle.Manager.BRGUpload.RebuildCullingLayout");
             private static readonly ProfilerMarker s_UploadCollectDirtyMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.CollectDirty");
@@ -4132,9 +4260,19 @@ namespace VividRP.Runtime.Particle
                     if (m_LayoutDirty)
                         RebuildBatches();
 
+                    ScheduleBoundsUpdates();
                     RefreshFastCullingFlags();
                     RebuildNativeCullingLayout();
                     ScheduleUpload();
+                }
+            }
+
+            private void ScheduleBoundsUpdates()
+            {
+                using (s_ScheduleBoundsMarker.Auto())
+                {
+                    foreach (ParticleRenderRecord record in m_Records.Values)
+                        record.State.ScheduleBoundsUpdateIfDirty();
                 }
             }
 
@@ -5616,6 +5754,135 @@ namespace VividRP.Runtime.Particle
             private static int AlignTo4(int value)
             {
                 return (value + 3) & ~3;
+            }
+        }
+
+        [BurstCompile(DisableSafetyChecks = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct ParticleBoundsPageJob : IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<float3> Positions;
+            [ReadOnly]
+            public NativeArray<float3> Velocities;
+            [ReadOnly]
+            public NativeArray<float> Sizes;
+
+            public NativeArray<ParticleBoundsData> PageBounds;
+            public float4x4 LocalToWorld;
+            public int SimulationSpace;
+            public int RenderMode;
+            public int ActiveCount;
+            public float SizeScale;
+            public float StretchLengthScale;
+            public float StretchSpeedScale;
+            public float MeshExtent;
+
+            public void Execute(int pageIndex)
+            {
+                int start = pageIndex * BillboardPageSize;
+                int end = math.min(start + BillboardPageSize, ActiveCount);
+                if (start >= end)
+                {
+                    PageBounds[pageIndex] = default;
+                    return;
+                }
+
+                float3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+                float3 max = new(float.MinValue, float.MinValue, float.MinValue);
+                for (int index = start; index < end; index++)
+                {
+                    float3 position = TransformPosition(Positions[index]);
+                    float extent = GetParticleWorldExtent(index);
+                    float3 extent3 = new(extent, extent, extent);
+                    min = math.min(min, position - extent3);
+                    max = math.max(max, position + extent3);
+                }
+
+                PageBounds[pageIndex] = CreateBounds(min, max);
+            }
+
+            private float3 TransformPosition(float3 position)
+            {
+                return SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                    ? math.transform(LocalToWorld, position)
+                    : position;
+            }
+
+            private float GetParticleWorldExtent(int particleIndex)
+            {
+                float renderSize = math.max(
+                    VividParticleMainModule.MinimumStartSize,
+                    Sizes[particleIndex] * SizeScale);
+
+                if (RenderMode == (int)VividParticleRenderMode.Mesh && MeshExtent > 0.0f)
+                    return math.max(VividParticleMainModule.MinimumStartSize, MeshExtent * renderSize);
+
+                if (RenderMode == (int)VividParticleRenderMode.Stretch)
+                {
+                    float length = math.max(
+                        VividParticleMainModule.MinimumStartSize,
+                        renderSize * StretchLengthScale
+                        + math.length(Velocities[particleIndex]) * StretchSpeedScale);
+                    return math.max(renderSize, length) * 0.5f;
+                }
+
+                return renderSize * 0.5f;
+            }
+
+            private static ParticleBoundsData CreateBounds(float3 min, float3 max)
+            {
+                float3 center = (min + max) * 0.5f;
+                float3 extents = math.max((max - min) * 0.5f, float3.zero);
+                return new ParticleBoundsData
+                {
+                    Center = center,
+                    Extents = extents,
+                    IsValid = 1,
+                };
+            }
+        }
+
+        [BurstCompile(DisableSafetyChecks = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct ParticleBoundsReduceJob : IJob
+        {
+            [ReadOnly]
+            public NativeArray<ParticleBoundsData> PageBounds;
+
+            public NativeArray<ParticleBoundsData> WorldBounds;
+            public int PageCount;
+
+            public void Execute()
+            {
+                float3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
+                float3 max = new(float.MinValue, float.MinValue, float.MinValue);
+                bool hasBounds = false;
+                int count = math.min(PageCount, PageBounds.Length);
+                for (int index = 0; index < count; index++)
+                {
+                    ParticleBoundsData bounds = PageBounds[index];
+                    if (bounds.IsValid == 0)
+                        continue;
+
+                    min = math.min(min, bounds.Center - bounds.Extents);
+                    max = math.max(max, bounds.Center + bounds.Extents);
+                    hasBounds = true;
+                }
+
+                WorldBounds[0] = hasBounds
+                    ? CreateBounds(min, max)
+                    : default;
+            }
+
+            private static ParticleBoundsData CreateBounds(float3 min, float3 max)
+            {
+                float3 center = (min + max) * 0.5f;
+                float3 extents = math.max((max - min) * 0.5f, float3.zero);
+                return new ParticleBoundsData
+                {
+                    Center = center,
+                    Extents = extents,
+                    IsValid = 1,
+                };
             }
         }
 

@@ -151,10 +151,13 @@ namespace VividRP.Runtime.Particle
             VividParticleSystemManager.SimulateDeltaImmediate(this, deltaTime, allowEmission);
         }
 
-        internal void CompleteStopEmittingIfEmpty()
+        internal bool CompleteStopEmittingIfEmpty(int aliveCount)
         {
-            if (m_StopEmitting && aliveParticleCount == 0)
-                m_StopEmitting = false;
+            if (!m_StopEmitting || aliveCount > 0)
+                return false;
+
+            m_StopEmitting = false;
+            return true;
         }
 
         internal VividParticleSystemFrameSnapshot CaptureFrameSnapshot(float deltaTime)
@@ -326,6 +329,7 @@ namespace VividRP.Runtime.Particle
             m_IsPlaying = true;
             m_IsPaused = false;
             m_StopEmitting = false;
+            VividParticleSystemManager.NotifySimulationStateChanged(this);
             VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }
@@ -339,6 +343,7 @@ namespace VividRP.Runtime.Particle
             if (stopBehavior == VividParticleSystemStopBehavior.StopEmittingAndClear)
             {
                 m_StopEmitting = false;
+                VividParticleSystemManager.NotifySimulationStateChanged(this);
                 VividParticleSystemManager.ResetSimulation(this, clearParticles: true);
                 VividParticleSystemManager.UpdateRendering(this);
                 RequestEditorRenderUpdate();
@@ -346,6 +351,7 @@ namespace VividRP.Runtime.Particle
             }
 
             m_StopEmitting = particleCount > 0;
+            VividParticleSystemManager.NotifySimulationStateChanged(this);
             VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }
@@ -355,6 +361,7 @@ namespace VividRP.Runtime.Particle
             VividParticleSystemManager.Drain(this);
             m_IsPaused = true;
             m_IsPlaying = false;
+            VividParticleSystemManager.NotifySimulationStateChanged(this);
             VividParticleSystemManager.ResetEditorUpdateTime(this);
             RequestEditorRenderUpdate();
         }

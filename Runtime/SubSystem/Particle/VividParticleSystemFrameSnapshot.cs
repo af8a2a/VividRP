@@ -126,5 +126,57 @@ namespace VividRP.Runtime.Particle
             WorldRotation = worldRotation;
             EntityHash = entityHash;
         }
+
+        public VividParticleSystemFrameSnapshot WithFrameState(
+            float deltaTime,
+            bool isActiveAndEnabled,
+            bool isPlaying,
+            bool isPaused,
+            bool stopEmitting,
+            int layer,
+            Vector3 transformPosition,
+            Matrix4x4 localToWorldMatrix,
+            Quaternion worldRotation)
+        {
+            return new VividParticleSystemFrameSnapshot(
+                deltaTime,
+                isActiveAndEnabled,
+                isPlaying,
+                isPaused,
+                stopEmitting,
+                Duration,
+                Loop,
+                StartLifetime,
+                StartSpeed,
+                StartSize,
+                StartColor,
+                GravityModifier,
+                SimulationSpace,
+                MaxParticles,
+                RandomSeed,
+                UseAutoRandomSeed,
+                EmissionEnabled,
+                RateOverTime,
+                Bursts,
+                ShapeEnabled,
+                ShapeType,
+                ShapeRadius,
+                ShapeBoxSize,
+                ShapeAngle,
+                RendererEnabled,
+                RenderMode,
+                RendererMaterial,
+                RendererMesh,
+                RendererColor,
+                RendererSizeScale,
+                StretchLengthScale,
+                StretchSpeedScale,
+                RenderQueueOffset,
+                layer,
+                transformPosition,
+                localToWorldMatrix,
+                worldRotation,
+                EntityHash);
+        }
     }
 }

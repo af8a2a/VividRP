@@ -41,6 +41,10 @@ namespace VividRP.Runtime.Particle
         private const float MaximumEditorSimulationStep = 0.1f;
 
         private static readonly ProfilerMarker s_PlayerLoopKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick");
+        private static readonly ProfilerMarker s_KickCompleteSimulationMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.CompleteSimulation");
+        private static readonly ProfilerMarker s_KickCollectActiveMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.CollectActive");
+        private static readonly ProfilerMarker s_KickPrepareSnapshotsMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.PrepareSnapshots");
+        private static readonly ProfilerMarker s_KickScheduleSimulationJobsMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.ScheduleSimulationJobs");
         private static readonly ProfilerMarker s_RendererUpdateMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.RendererUpdate");
         private static readonly ProfilerMarker s_BeginCameraCompleteMarker = new("VividRP.RenderPipeline.BeginCameraRendering/VividParticleSystemManager.Complete");
         private static readonly ProfilerMarker s_ManualDrainMarker = new("VividRP.Particle.Manager.ManualDrain");
@@ -50,6 +54,10 @@ namespace VividRP.Runtime.Particle
         private static readonly VividEcsManagerJobRegistry<ParticleSimulationJobContext> s_SimulationJobRegistry =
             CreateSimulationJobRegistry();
         private static readonly Dictionary<VividParticleSystem, ParticleSystemState> s_States = new();
+        private static readonly List<ParticleSystemState> s_ActiveSimulationStates = new();
+        private static readonly Dictionary<ParticleSystemState, int> s_ActiveSimulationIndices = new();
+        private static readonly List<ParticleSystemState> s_PreparedSimulationStates = new();
+        private static readonly List<VividParticleSystemFrameSnapshot> s_PreparedSimulationSnapshots = new();
         private static readonly VividParticleRendererManager s_RendererManager = new();
         private static bool s_Initialized;
         private static int s_LastPlayerLoopFrame = -1;
@@ -84,7 +92,11 @@ namespace VividRP.Runtime.Particle
 
             Initialize();
             if (!s_States.ContainsKey(system))
-                s_States.Add(system, new ParticleSystemState(system));
+            {
+                ParticleSystemState state = new(system);
+                s_States.Add(system, state);
+                RefreshActiveSimulationState(state);
+            }
         }
 
         public static void Unregister(VividParticleSystem system)
@@ -92,6 +104,7 @@ namespace VividRP.Runtime.Particle
             if (system == null || !s_States.TryGetValue(system, out ParticleSystemState state))
                 return;
 
+            RemoveActiveSimulationState(state);
             state.Dispose();
             s_States.Remove(system);
         }
@@ -146,6 +159,12 @@ namespace VividRP.Runtime.Particle
         {
             if (system != null && s_States.TryGetValue(system, out ParticleSystemState state))
                 state.MarkResourcesDirty();
+        }
+
+        internal static void NotifySimulationStateChanged(VividParticleSystem system)
+        {
+            if (system != null && s_States.TryGetValue(system, out ParticleSystemState state))
+                RefreshActiveSimulationState(state);
         }
 
         internal static void NotifySettingsChanged(VividParticleSystem system)
@@ -348,6 +367,7 @@ namespace VividRP.Runtime.Particle
                 s_RendererManager.CompletePendingUpload();
                 state.CompletePending();
                 state.ResetSimulation(state.CaptureFrameSnapshot(0.0f), clearParticles);
+                RefreshActiveSimulationState(state);
             }
         }
 
@@ -383,6 +403,10 @@ namespace VividRP.Runtime.Particle
                 pair.Value.Dispose();
 
             s_States.Clear();
+            s_ActiveSimulationStates.Clear();
+            s_ActiveSimulationIndices.Clear();
+            s_PreparedSimulationStates.Clear();
+            s_PreparedSimulationSnapshots.Clear();
             s_RendererManager.Dispose();
             s_LastPlayerLoopFrame = -1;
             s_LastRendererUpdateFrame = -1;
@@ -689,13 +713,43 @@ namespace VividRP.Runtime.Particle
 
         private static void ScheduleAutomaticUpdates(float? deltaTimeOverride)
         {
-            bool scheduledAnyJob = false;
             s_RendererManager.CompletePendingUpload();
-            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
-                pair.Value.CompletePending();
+            CompletePendingSimulations();
 
-            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
-                scheduledAnyJob |= pair.Value.ScheduleAutomatic(deltaTimeOverride, requireActive: true);
+            using (s_KickCollectActiveMarker.Auto())
+            {
+                PruneActiveSimulationStates();
+            }
+
+            s_PreparedSimulationStates.Clear();
+            s_PreparedSimulationSnapshots.Clear();
+            using (s_KickPrepareSnapshotsMarker.Auto())
+            {
+                for (int index = 0; index < s_ActiveSimulationStates.Count; index++)
+                {
+                    ParticleSystemState state = s_ActiveSimulationStates[index];
+                    if (state == null)
+                        continue;
+
+                    if (!state.TryPrepareAutomaticSnapshot(
+                        deltaTimeOverride,
+                        requireActive: true,
+                        out VividParticleSystemFrameSnapshot snapshot))
+                    {
+                        continue;
+                    }
+
+                    s_PreparedSimulationStates.Add(state);
+                    s_PreparedSimulationSnapshots.Add(snapshot);
+                }
+            }
+
+            bool scheduledAnyJob = false;
+            using (s_KickScheduleSimulationJobsMarker.Auto())
+            {
+                for (int index = 0; index < s_PreparedSimulationStates.Count; index++)
+                    scheduledAnyJob |= s_PreparedSimulationStates[index].ScheduleAutomatic(s_PreparedSimulationSnapshots[index]);
+            }
 
             if (scheduledAnyJob)
             {
@@ -706,6 +760,85 @@ namespace VividRP.Runtime.Particle
 
             s_LastPlayerLoopFrame = Time.frameCount;
             RequestEditorRenderUpdateForActiveSystems();
+        }
+
+        private static void CompletePendingSimulations()
+        {
+            if (s_ActiveSimulationStates.Count == 0)
+                return;
+
+            using (s_KickCompleteSimulationMarker.Auto())
+            {
+                JobHandle combinedHandle = default;
+                bool hasJob = false;
+                for (int index = 0; index < s_ActiveSimulationStates.Count; index++)
+                {
+                    ParticleSystemState state = s_ActiveSimulationStates[index];
+                    if (state == null || !state.hasPendingSimulationJob)
+                        continue;
+
+                    combinedHandle = hasJob
+                        ? JobHandle.CombineDependencies(combinedHandle, state.pendingSimulationJob)
+                        : state.pendingSimulationJob;
+                    hasJob = true;
+                }
+
+                if (hasJob)
+                    combinedHandle.Complete();
+
+                for (int index = s_ActiveSimulationStates.Count - 1; index >= 0; index--)
+                {
+                    ParticleSystemState state = s_ActiveSimulationStates[index];
+                    if (state == null)
+                        continue;
+
+                    state.ApplyPendingSimulationResult();
+                    RefreshActiveSimulationState(state);
+                }
+            }
+        }
+
+        private static void RefreshActiveSimulationState(ParticleSystemState state)
+        {
+            if (state == null)
+                return;
+
+            if (state.shouldBeInActiveSimulationList)
+            {
+                AddActiveSimulationState(state);
+                return;
+            }
+
+            RemoveActiveSimulationState(state);
+        }
+
+        private static void AddActiveSimulationState(ParticleSystemState state)
+        {
+            if (state == null || s_ActiveSimulationIndices.ContainsKey(state))
+                return;
+
+            s_ActiveSimulationIndices.Add(state, s_ActiveSimulationStates.Count);
+            s_ActiveSimulationStates.Add(state);
+        }
+
+        private static void RemoveActiveSimulationState(ParticleSystemState state)
+        {
+            if (state == null || !s_ActiveSimulationIndices.TryGetValue(state, out int index))
+                return;
+
+            int lastIndex = s_ActiveSimulationStates.Count - 1;
+            ParticleSystemState lastState = s_ActiveSimulationStates[lastIndex];
+            s_ActiveSimulationStates[index] = lastState;
+            s_ActiveSimulationStates.RemoveAt(lastIndex);
+            s_ActiveSimulationIndices.Remove(state);
+            if (index != lastIndex && lastState != null)
+                s_ActiveSimulationIndices[lastState] = index;
+        }
+
+        private static void PruneActiveSimulationStates()
+        {
+            for (int index = s_ActiveSimulationStates.Count - 1; index >= 0; index--)
+                RefreshActiveSimulationState(s_ActiveSimulationStates[index]);
         }
 
         private static void CompleteAndUploadAll(bool forceUpload, bool oncePerFrame)
@@ -720,8 +853,7 @@ namespace VividRP.Runtime.Particle
                 return;
 
             s_RendererManager.CompletePendingUpload();
-            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
-                pair.Value.CompletePending();
+            CompletePendingSimulations();
 
             using (s_BRGUploadUpdateAllMarker.Auto())
             {
@@ -913,8 +1045,13 @@ namespace VividRP.Runtime.Particle
         private static void RequestEditorRenderUpdateIfNeeded(VividParticleSystem system)
         {
 #if UNITY_EDITOR
-            if (Application.isPlaying || system == null || !system.requiresAutomaticUpdate)
+            if (Application.isPlaying
+                || system == null
+                || !s_States.TryGetValue(system, out ParticleSystemState state)
+                || !state.shouldBeInActiveSimulationList)
+            {
                 return;
+            }
 
             EditorApplication.QueuePlayerLoopUpdate();
             UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
@@ -927,9 +1064,10 @@ namespace VividRP.Runtime.Particle
             if (Application.isPlaying)
                 return;
 
-            foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
+            for (int index = 0; index < s_ActiveSimulationStates.Count; index++)
             {
-                if (!pair.Value.requiresAutomaticUpdate)
+                ParticleSystemState state = s_ActiveSimulationStates[index];
+                if (state == null || !state.shouldBeInActiveSimulationList)
                     continue;
 
                 EditorApplication.QueuePlayerLoopUpdate();
@@ -1044,6 +1182,7 @@ namespace VividRP.Runtime.Particle
             private VividParticleBurst[] m_BurstSnapshotBuffer = Array.Empty<VividParticleBurst>();
             private JobHandle m_PendingJob;
             private VividParticleSystemFrameSnapshot m_PendingSnapshot;
+            private VividParticleSystemFrameSnapshot m_CachedAutomaticSnapshot;
             private double m_LastEditorUpdateTime;
             private float m_Time;
             private float m_EmissionAccumulator;
@@ -1081,6 +1220,8 @@ namespace VividRP.Runtime.Particle
             private bool m_BoundsDirty = true;
             private bool m_IsEditorSelected;
             private bool m_HasUploadedRenderStateSnapshot;
+            private bool m_HasCachedAutomaticSnapshot;
+            private bool m_AutomaticSnapshotDirty = true;
             private bool m_HasCachedGpuLayout;
             private bool m_HasRendererSharedKey;
             private bool m_HasCachedWorldBounds;
@@ -1105,6 +1246,17 @@ namespace VividRP.Runtime.Particle
             public float time => m_Time;
 
             public bool requiresAutomaticUpdate => m_System != null && m_System.requiresAutomaticUpdate;
+
+            internal bool shouldBeInActiveSimulationList => m_System != null
+                && m_System.isActiveAndEnabled
+                && !m_System.isPaused
+                && (m_System.isPlaying || (m_System.stopEmitting && activeCount > 0));
+
+            internal bool hasPendingSimulation => m_HasPendingSimulation || m_HasPendingJob;
+
+            internal bool hasPendingSimulationJob => m_HasPendingJob;
+
+            internal JobHandle pendingSimulationJob => m_PendingJob;
 
             public VividParticleSystemManagerStats stats => new(
                 IsInitialized,
@@ -1165,6 +1317,7 @@ namespace VividRP.Runtime.Particle
             public void MarkResourcesDirty()
             {
                 m_ResourcesDirty = true;
+                InvalidateAutomaticSnapshot();
                 MarkBoundsDirty();
                 MarkAllInstanceDataDirty();
             }
@@ -1175,6 +1328,7 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 CompletePending();
+                InvalidateAutomaticSnapshot();
                 VividParticleSystemFrameSnapshot snapshot = CaptureFrameSnapshot(0.0f);
                 int oldCapacity = storageCapacity;
                 EnsureStorageCapacity(snapshot.MaxParticles);
@@ -1204,14 +1358,45 @@ namespace VividRP.Runtime.Particle
 
             public bool ScheduleAutomatic(float? deltaTimeOverride, bool requireActive)
             {
+                return TryPrepareAutomaticSnapshot(
+                        deltaTimeOverride,
+                        requireActive,
+                        out VividParticleSystemFrameSnapshot snapshot)
+                    && ScheduleAutomatic(snapshot, requireActive);
+            }
+
+            public bool TryPrepareAutomaticSnapshot(
+                float? deltaTimeOverride,
+                bool requireActive,
+                out VividParticleSystemFrameSnapshot snapshot)
+            {
                 if (m_System == null)
+                {
+                    snapshot = default;
                     return false;
+                }
 
                 float deltaTime = ResolveDeltaTime(deltaTimeOverride);
                 if (deltaTime <= 0.0f)
+                {
+                    snapshot = default;
+                    return false;
+                }
+
+                snapshot = CaptureAutomaticFrameSnapshot(deltaTime);
+                if (!RequiresAutomaticUpdate(snapshot, requireActive))
                     return false;
 
-                VividParticleSystemFrameSnapshot snapshot = CaptureFrameSnapshot(deltaTime);
+                return true;
+            }
+
+            public bool ScheduleAutomatic(VividParticleSystemFrameSnapshot snapshot)
+            {
+                return ScheduleAutomatic(snapshot, requireActive: true);
+            }
+
+            public bool ScheduleAutomatic(VividParticleSystemFrameSnapshot snapshot, bool requireActive)
+            {
                 if (!RequiresAutomaticUpdate(snapshot, requireActive))
                     return false;
 
@@ -1225,6 +1410,94 @@ namespace VividRP.Runtime.Particle
                     : default;
             }
 
+            private VividParticleSystemFrameSnapshot CaptureAutomaticFrameSnapshot(float deltaTime)
+            {
+                if (m_System == null)
+                    return default;
+
+                if (NeedsAutomaticSnapshotRebuild())
+                {
+                    m_CachedAutomaticSnapshot = CaptureFrameSnapshot(0.0f);
+                    m_HasCachedAutomaticSnapshot = true;
+                    m_AutomaticSnapshotDirty = false;
+                }
+
+                return m_CachedAutomaticSnapshot.WithFrameState(
+                    deltaTime,
+                    m_System.isActiveAndEnabled,
+                    m_System.isPlaying,
+                    m_System.isPaused,
+                    m_System.stopEmitting,
+                    m_System.gameObject.layer,
+                    m_System.transform.position,
+                    m_System.transform.localToWorldMatrix,
+                    m_System.transform.rotation);
+            }
+
+            private bool NeedsAutomaticSnapshotRebuild()
+            {
+                if (m_System == null || m_AutomaticSnapshotDirty || !m_HasCachedAutomaticSnapshot)
+                    return true;
+
+                VividParticleMainModule main = m_System.main;
+                VividParticleEmissionModule emission = m_System.emission;
+                VividParticleShapeModule shape = m_System.shape;
+                VividParticleRendererModule rendererModule = m_System.rendererModule;
+
+                return !Mathf.Approximately(m_CachedAutomaticSnapshot.Duration, main.duration)
+                    || m_CachedAutomaticSnapshot.Loop != main.loop
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StartLifetime, main.startLifetime)
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StartSpeed, main.startSpeed)
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StartSize, main.startSize)
+                    || m_CachedAutomaticSnapshot.StartColor != main.startColor
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.GravityModifier, main.gravityModifier)
+                    || m_CachedAutomaticSnapshot.SimulationSpace != main.simulationSpace
+                    || m_CachedAutomaticSnapshot.MaxParticles != main.maxParticles
+                    || m_CachedAutomaticSnapshot.RandomSeed != main.randomSeed
+                    || m_CachedAutomaticSnapshot.UseAutoRandomSeed != main.useAutoRandomSeed
+                    || m_CachedAutomaticSnapshot.EmissionEnabled != emission.enabled
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.RateOverTime, emission.rateOverTime)
+                    || !BurstsMatch(emission.bursts, m_CachedAutomaticSnapshot.Bursts)
+                    || m_CachedAutomaticSnapshot.ShapeEnabled != shape.enabled
+                    || m_CachedAutomaticSnapshot.ShapeType != shape.shapeType
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.ShapeRadius, shape.radius)
+                    || m_CachedAutomaticSnapshot.ShapeBoxSize != shape.boxSize
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.ShapeAngle, shape.angle)
+                    || m_CachedAutomaticSnapshot.RendererEnabled != rendererModule.enabled
+                    || m_CachedAutomaticSnapshot.RenderMode != rendererModule.renderMode
+                    || m_CachedAutomaticSnapshot.RendererMaterial != rendererModule.material
+                    || m_CachedAutomaticSnapshot.RendererMesh != rendererModule.mesh
+                    || m_CachedAutomaticSnapshot.RendererColor != rendererModule.color
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.RendererSizeScale, rendererModule.sizeScale)
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StretchLengthScale, rendererModule.stretchLengthScale)
+                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StretchSpeedScale, rendererModule.stretchSpeedScale)
+                    || m_CachedAutomaticSnapshot.RenderQueueOffset != rendererModule.renderQueueOffset;
+            }
+
+            private static bool BurstsMatch(VividParticleBurst[] source, VividParticleBurst[] cached)
+            {
+                int sourceCount = source?.Length ?? 0;
+                int cachedCount = cached?.Length ?? 0;
+                if (sourceCount != cachedCount)
+                    return false;
+
+                for (int index = 0; index < sourceCount; index++)
+                {
+                    if (!Mathf.Approximately(source[index].time, cached[index].time)
+                        || source[index].count != cached[index].count)
+                    {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
+
+            private void InvalidateAutomaticSnapshot()
+            {
+                m_AutomaticSnapshotDirty = true;
+            }
+
             public void CompletePending()
             {
                 if (!m_HasPendingSimulation && !m_HasPendingJob)
@@ -1232,8 +1505,20 @@ namespace VividRP.Runtime.Particle
 
                 if (m_HasPendingJob)
                 {
-                    int previousActiveCount = activeCount;
                     m_PendingJob.Complete();
+                }
+
+                ApplyPendingSimulationResult();
+            }
+
+            public void ApplyPendingSimulationResult()
+            {
+                if (!m_HasPendingSimulation && !m_HasPendingJob)
+                    return;
+
+                if (m_HasPendingJob)
+                {
+                    int previousActiveCount = activeCount;
                     m_PendingJob = default;
                     m_HasPendingJob = false;
                     m_Storage.ApplyScheduledIntegrateResult();
@@ -1248,7 +1533,8 @@ namespace VividRP.Runtime.Particle
                     m_HasPendingSimulation = false;
                     m_PendingAllowEmission = false;
                     m_PendingFrame = -1;
-                    m_System?.CompleteStopEmittingIfEmpty();
+                    if (m_System != null && m_System.CompleteStopEmittingIfEmpty(activeCount))
+                        VividParticleSystemManager.RefreshActiveSimulationState(this);
                 }
 
                 LastCompletedFrame = Time.frameCount;
@@ -1273,7 +1559,8 @@ namespace VividRP.Runtime.Particle
                 }
 
                 AdvanceEmission(snapshot, allowEmission);
-                m_System?.CompleteStopEmittingIfEmpty();
+                if (m_System != null && m_System.CompleteStopEmittingIfEmpty(activeCount))
+                    VividParticleSystemManager.RefreshActiveSimulationState(this);
             }
 
             public void Emit(int count, VividParticleSystemFrameSnapshot snapshot)

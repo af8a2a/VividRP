@@ -882,6 +882,7 @@ namespace VividRP.Editor.Tests
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStatsForTests();
             Assert.That(rendererStats.RenderRecordCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LineGroupCount, Is.EqualTo(1));
             Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastLockCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastCopyOperationCount, Is.GreaterThan(0));

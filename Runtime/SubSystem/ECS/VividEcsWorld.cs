@@ -172,6 +172,27 @@ namespace VividRP.Runtime.ECS
             return line;
         }
 
+        public bool DestroyArchetypeLine(VividEcsArchetypeLine line)
+        {
+            if (line == null)
+                return false;
+
+            int index = m_Lines.IndexOf(line);
+            if (index < 0)
+                return false;
+
+            for (int denseIndex = m_Entities.count - 1; denseIndex >= 0; denseIndex--)
+            {
+                EntityRecord record = m_Entities.GetValueAtDenseIndex(denseIndex);
+                if (record.Line == line)
+                    m_Entities.Remove(m_Entities.GetKeyAtDenseIndex(denseIndex));
+            }
+
+            m_Lines.RemoveAt(index);
+            line.Dispose();
+            return true;
+        }
+
         public VividEcsEntity CreateEntity(VividEcsArchetypeLine line)
         {
             if (line == null)
@@ -248,13 +269,37 @@ namespace VividRP.Runtime.ECS
 
         public List<VividEcsArchetypeLineGroup> CreateArchetypeLineGroups(VividEcsQuery query)
         {
+            return CreateArchetypeLineGroups(query, Array.Empty<VividEcsTypeIndex>());
+        }
+
+        public List<VividEcsArchetypeLineGroup> CreateArchetypeLineGroups(
+            VividEcsQuery query,
+            params VividEcsTypeIndex[] sharedComponentTypes)
+        {
+            var result = new List<VividEcsArchetypeLineGroup>();
+            CreateArchetypeLineGroups(query, result, sharedComponentTypes);
+            return result;
+        }
+
+        public void CreateArchetypeLineGroups(
+            VividEcsQuery query,
+            List<VividEcsArchetypeLineGroup> result,
+            params VividEcsTypeIndex[] sharedComponentTypes)
+        {
             if (query == null)
                 throw new ArgumentNullException(nameof(query));
 
+            if (result == null)
+                throw new ArgumentNullException(nameof(result));
+
+            result.Clear();
             var groups = new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
             foreach (VividEcsArchetypeLine line in query.MatchLines())
             {
-                VividEcsSharedComponentKey key = line.GetSharedComponentKey();
+                VividEcsSharedComponentKey key =
+                    sharedComponentTypes != null && sharedComponentTypes.Length > 0
+                        ? line.GetSharedComponentKey(sharedComponentTypes)
+                        : line.GetSharedComponentKey();
                 if (!groups.TryGetValue(key, out List<VividEcsArchetypeLine> lines))
                 {
                     lines = new List<VividEcsArchetypeLine>();
@@ -264,11 +309,8 @@ namespace VividRP.Runtime.ECS
                 lines.Add(line);
             }
 
-            var result = new List<VividEcsArchetypeLineGroup>(groups.Count);
             foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
                 result.Add(new VividEcsArchetypeLineGroup(pair.Key, pair.Value));
-
-            return result;
         }
 
         public void Dispose()

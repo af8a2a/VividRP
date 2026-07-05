@@ -54,6 +54,7 @@ namespace VividRP.Runtime.Particle
 
         private static readonly VividEcsManagerJobRegistry<ParticleSimulationJobContext> s_SimulationJobRegistry =
             CreateSimulationJobRegistry();
+        private static readonly VividEcsWorld s_ParticleEcsWorld = new();
         private static readonly Dictionary<VividParticleSystem, ParticleSystemState> s_States = new();
         private static readonly List<ParticleSystemState> s_ActiveSimulationStates = new();
         private static readonly Dictionary<ParticleSystemState, int> s_ActiveSimulationIndices = new();
@@ -431,6 +432,7 @@ namespace VividRP.Runtime.Particle
             s_HasPendingSimulationBatch = false;
             s_ApplyingPendingSimulations = false;
             s_RendererManager.Dispose();
+            s_ParticleEcsWorld.Dispose();
             s_LastPlayerLoopFrame = -1;
             s_LastRendererUpdateFrame = -1;
             s_LastCompleteAndUploadFrame = -1;
@@ -1289,7 +1291,7 @@ namespace VividRP.Runtime.Particle
             private static readonly int s_ParticleRenderModeId = Shader.PropertyToID("_VividParticleRenderMode");
 
             private readonly VividParticleSystem m_System;
-            private readonly VividParticleEcsStorage m_Storage = new();
+            private readonly VividParticleEcsStorage m_Storage;
             private readonly GraphicsBuffer[] m_InstanceDataBuffers = new GraphicsBuffer[InstanceDataBufferCount];
             private readonly InstanceUploadDirtyRanges[] m_InstanceDirtyRanges = CreateInstanceDirtyRanges();
             private BatchRendererGroup m_BRG;
@@ -1356,6 +1358,7 @@ namespace VividRP.Runtime.Particle
             public ParticleSystemState(VividParticleSystem system)
             {
                 m_System = system;
+                m_Storage = new VividParticleEcsStorage(s_ParticleEcsWorld);
                 m_Storage.systemId = ResolveSystemId(system);
                 RefreshEditorSelectionState();
                 ResetEditorUpdateTime();
@@ -1808,6 +1811,7 @@ namespace VividRP.Runtime.Particle
                 UpdateRendererSharedKey(rendererSharedKey);
                 entry = new ParticleRenderEntry(
                     this,
+                    m_Storage.archetypeLineId,
                     m_RegisteredMaterial,
                     m_QuadMesh,
                     m_RenderMode,
@@ -4193,6 +4197,7 @@ namespace VividRP.Runtime.Particle
         private readonly struct ParticleRenderEntry
         {
             public readonly ParticleSystemState State;
+            public readonly int EcsLineId;
             public readonly Material Material;
             public readonly Mesh Mesh;
             public readonly VividParticleRenderMode RenderMode;
@@ -4214,6 +4219,7 @@ namespace VividRP.Runtime.Particle
 
             public ParticleRenderEntry(
                 ParticleSystemState state,
+                int ecsLineId,
                 Material material,
                 Mesh mesh,
                 VividParticleRenderMode renderMode,
@@ -4234,6 +4240,7 @@ namespace VividRP.Runtime.Particle
                 VividParticleSortMode sortMode)
             {
                 State = state;
+                EcsLineId = ecsLineId;
                 Material = material;
                 Mesh = mesh;
                 RenderMode = renderMode;
@@ -4319,6 +4326,7 @@ namespace VividRP.Runtime.Particle
         private sealed class ParticleRenderRecord
         {
             public ParticleSystemState State;
+            public int EcsLineId = -1;
             public Material Material;
             public Mesh Mesh;
             public VividParticleRenderMode RenderMode;
@@ -4355,6 +4363,7 @@ namespace VividRP.Runtime.Particle
             public void Update(ParticleRenderEntry entry)
             {
                 State = entry.State;
+                EcsLineId = entry.EcsLineId;
                 Material = entry.Material;
                 Mesh = entry.Mesh;
                 RenderMode = entry.RenderMode;
@@ -4708,8 +4717,10 @@ namespace VividRP.Runtime.Particle
             private static readonly int s_MeshIndexId = Shader.PropertyToID("_VividParticleMeshIndex");
 
             private readonly Dictionary<ParticleSystemState, ParticleRenderRecord> m_Records = new();
+            private readonly Dictionary<int, ParticleRenderRecord> m_RecordByEcsLineId = new();
             private readonly Dictionary<VividParticleRendererSharedKey, ParticleRendererLineGroup> m_LineGroupLookup = new();
             private readonly List<ParticleRendererLineGroup> m_LineGroups = new();
+            private readonly List<VividEcsArchetypeLineGroup> m_EcsRendererLineGroups = new();
             private readonly List<ParticleDrawBatch> m_DrawBatches = new();
             private readonly List<ParticleRenderRecord> m_RecordSlots = new();
             private readonly List<int> m_RecordSlotVersions = new();
@@ -4863,8 +4874,10 @@ namespace VividRP.Runtime.Particle
                 m_BRG = null;
                 m_GPUBuffer.Dispose();
                 m_Records.Clear();
+                m_RecordByEcsLineId.Clear();
                 m_LineGroupLookup.Clear();
                 m_LineGroups.Clear();
+                m_EcsRendererLineGroups.Clear();
                 m_DrawBatches.Clear();
                 m_RecordSlots.Clear();
                 m_RecordSlotVersions.Clear();
@@ -4904,15 +4917,18 @@ namespace VividRP.Runtime.Particle
                     record.Update(entry);
                     AllocateRecordSlot(record);
                     m_Records.Add(state, record);
-                    AssignRecordLineGroup(record);
+                    RegisterRecordEcsLine(record, oldLineId: -1);
                     QueueUploadDirty(record);
                     m_LayoutDirty = true;
                     return;
                 }
 
-                bool layoutChanged = !record.Key.Equals(key) || record.Capacity != entry.Capacity;
+                int oldLineId = record.EcsLineId;
+                bool layoutChanged = !record.Key.Equals(key)
+                    || record.Capacity != entry.Capacity
+                    || oldLineId != entry.EcsLineId;
                 record.Update(entry);
-                layoutChanged |= AssignRecordLineGroup(record);
+                RegisterRecordEcsLine(record, oldLineId);
                 if (layoutChanged)
                     m_LayoutDirty = true;
 
@@ -5001,41 +5017,143 @@ namespace VividRP.Runtime.Particle
                 record.State.SetRendererUploadStats(false, 0, 0, 0, m_GPUBuffer.bufferIndex);
                 record.State.ResetRendererCullingStats();
                 m_Records.Remove(state);
+                UnregisterRecordEcsLine(record);
                 RemoveRecordFromLineGroup(record);
                 ReleaseRecordSlot(record);
                 m_LayoutDirty = true;
             }
 
-            private bool AssignRecordLineGroup(ParticleRenderRecord record)
+            private void RegisterRecordEcsLine(ParticleRenderRecord record, int oldLineId)
             {
                 if (record == null)
-                    return false;
+                    return;
 
-                VividParticleRendererSharedKey sharedKey = record.RendererSharedKey;
-                if (record.LineGroup != null && record.LineGroup.SharedKey.Equals(sharedKey))
+                if (oldLineId >= 0
+                    && oldLineId != record.EcsLineId
+                    && m_RecordByEcsLineId.TryGetValue(oldLineId, out ParticleRenderRecord oldRecord)
+                    && oldRecord == record)
                 {
-                    record.LineGroup.DrawKey = record.Key;
-                    return false;
+                    m_RecordByEcsLineId.Remove(oldLineId);
                 }
 
-                RemoveRecordFromLineGroup(record);
-                if (!m_LineGroupLookup.TryGetValue(sharedKey, out ParticleRendererLineGroup group))
+                if (record.EcsLineId >= 0)
+                    m_RecordByEcsLineId[record.EcsLineId] = record;
+            }
+
+            private void UnregisterRecordEcsLine(ParticleRenderRecord record)
+            {
+                if (record == null || record.EcsLineId < 0)
+                    return;
+
+                if (m_RecordByEcsLineId.TryGetValue(record.EcsLineId, out ParticleRenderRecord mappedRecord)
+                    && mappedRecord == record)
                 {
-                    group = new ParticleRendererLineGroup
+                    m_RecordByEcsLineId.Remove(record.EcsLineId);
+                }
+            }
+
+            private void RebuildRendererLineGroupsFromEcsQuery()
+            {
+                ClearRendererLineGroups();
+                m_EcsRendererLineGroups.Clear();
+
+                VividParticleEcsBootstrap.RegisterTypes();
+                VividEcsTypeIndex commonTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+                VividEcsTypeIndex rendererSharedKeyTypeIndex =
+                    VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
+                if (!commonTypeIndex.IsValid || !rendererSharedKeyTypeIndex.IsValid)
+                    return;
+
+                VividEcsQuery query = s_ParticleEcsWorld.CreateQuery().WithAll(commonTypeIndex);
+                s_ParticleEcsWorld.CreateArchetypeLineGroups(
+                    query,
+                    m_EcsRendererLineGroups,
+                    rendererSharedKeyTypeIndex);
+
+                for (int groupIndex = 0; groupIndex < m_EcsRendererLineGroups.Count; groupIndex++)
+                {
+                    VividEcsArchetypeLineGroup ecsGroup = m_EcsRendererLineGroups[groupIndex];
+                    IReadOnlyList<VividEcsArchetypeLine> lines = ecsGroup.lines;
+                    ParticleRendererLineGroup rendererGroup = null;
+                    for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
                     {
-                        SharedKey = sharedKey,
-                        DrawKey = record.Key,
-                        GroupIndex = m_LineGroups.Count,
-                    };
-                    m_LineGroupLookup.Add(sharedKey, group);
-                    m_LineGroups.Add(group);
+                        VividEcsArchetypeLine line = lines[lineIndex];
+                        if (line == null
+                            || !m_RecordByEcsLineId.TryGetValue(line.ArchetypeLineId, out ParticleRenderRecord record)
+                            || record == null)
+                        {
+                            continue;
+                        }
+
+                        if (rendererGroup == null)
+                        {
+                            VividParticleRendererSharedKey sharedKey =
+                                line.TryGetSharedComponent(out VividParticleRendererSharedKey lineSharedKey)
+                                    ? lineSharedKey
+                                    : record.RendererSharedKey;
+                            rendererGroup = GetOrCreateRendererLineGroup(sharedKey, record.Key);
+                        }
+
+                        AddRecordToRendererLineGroup(rendererGroup, record);
+                    }
+                }
+            }
+
+            private ParticleRendererLineGroup GetOrCreateRendererLineGroup(
+                VividParticleRendererSharedKey sharedKey,
+                ParticleDrawKey drawKey)
+            {
+                if (m_LineGroupLookup.TryGetValue(sharedKey, out ParticleRendererLineGroup group))
+                {
+                    group.DrawKey = drawKey;
+                    return group;
                 }
 
+                group = new ParticleRendererLineGroup
+                {
+                    SharedKey = sharedKey,
+                    DrawKey = drawKey,
+                    GroupIndex = m_LineGroups.Count,
+                };
+                m_LineGroupLookup.Add(sharedKey, group);
+                m_LineGroups.Add(group);
+                return group;
+            }
+
+            private static void AddRecordToRendererLineGroup(
+                ParticleRendererLineGroup group,
+                ParticleRenderRecord record)
+            {
                 record.LineGroup = group;
                 record.LineGroupIndex = group.Records.Count;
                 group.DrawKey = record.Key;
                 group.Records.Add(record);
-                return true;
+            }
+
+            private void ClearRendererLineGroups()
+            {
+                for (int groupIndex = 0; groupIndex < m_LineGroups.Count; groupIndex++)
+                {
+                    ParticleRendererLineGroup group = m_LineGroups[groupIndex];
+                    if (group == null)
+                        continue;
+
+                    for (int recordIndex = 0; recordIndex < group.Records.Count; recordIndex++)
+                    {
+                        ParticleRenderRecord record = group.Records[recordIndex];
+                        if (record == null)
+                            continue;
+
+                        record.LineGroup = null;
+                        record.LineGroupIndex = -1;
+                    }
+
+                    group.Records.Clear();
+                    group.GroupIndex = -1;
+                }
+
+                m_LineGroupLookup.Clear();
+                m_LineGroups.Clear();
             }
 
             private void RemoveRecordFromLineGroup(ParticleRenderRecord record)
@@ -5424,6 +5542,7 @@ namespace VividRP.Runtime.Particle
                 using (s_RebuildBatchesMarker.Auto())
                 {
                     DrainCullingResults();
+                    RebuildRendererLineGroupsFromEcsQuery();
                     m_DrawBatches.Clear();
                     m_TotalBufferByteSize = 0;
 

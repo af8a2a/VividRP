@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -130,6 +131,60 @@ namespace VividRP.Editor.Tests
             Assert.That(groups, Has.Count.EqualTo(1));
             Assert.That(groups[0].activeCount, Is.EqualTo(1));
             Assert.That(storage.rendererSharedKey, Is.EqualTo(rendererKey));
+        }
+
+        [Test]
+        public void GlobalStorage_QueryLineGroups_GroupDifferentSystemsByRendererKey()
+        {
+            VividParticleEcsBootstrap.RegisterTypes();
+            VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
+            using var world = new VividEcsWorld();
+            var first = new VividParticleEcsStorage(world);
+            var second = new VividParticleEcsStorage(world);
+            try
+            {
+                var rendererKey = new VividParticleRendererSharedKey(
+                    materialId: 1,
+                    meshId: 2,
+                    renderMode: (int)VividParticleRenderMode.Billboard,
+                    layer: 3,
+                    gpuDataLayoutHash: 4,
+                    dataPerSharpBits: 5u,
+                    shadowCastingMode: 0,
+                    receiveShadows: false);
+                first.systemId = new VividParticleSystemId(17);
+                second.systemId = new VividParticleSystemId(23);
+                first.rendererSharedKey = rendererKey;
+                second.rendererSharedKey = rendererKey;
+                first.EnsureCapacity(4);
+                second.EnsureCapacity(4);
+
+                Assert.That(AddParticle(first, 0), Is.True);
+                Assert.That(AddParticle(second, 1), Is.True);
+
+                VividEcsQuery query = world.CreateQuery().WithAll(commonIndex);
+                List<VividEcsArchetypeLineGroup> groups =
+                    world.CreateArchetypeLineGroups(query, rendererKeyIndex);
+
+                Assert.That(world.archetypeLineCount, Is.EqualTo(2));
+                Assert.That(groups, Has.Count.EqualTo(1));
+                Assert.That(groups[0].lineCount, Is.EqualTo(2));
+                Assert.That(groups[0].activeCount, Is.EqualTo(2));
+
+                first.Dispose();
+                groups = world.CreateArchetypeLineGroups(query, rendererKeyIndex);
+
+                Assert.That(world.archetypeLineCount, Is.EqualTo(1));
+                Assert.That(groups, Has.Count.EqualTo(1));
+                Assert.That(groups[0].lineCount, Is.EqualTo(1));
+                Assert.That(groups[0].activeCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                first.Dispose();
+                second.Dispose();
+            }
         }
 
         [Test]

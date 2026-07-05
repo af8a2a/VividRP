@@ -213,6 +213,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void World_LineGroups_CanGroupBySelectedSharedComponentTypes()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            VividEcsTypeManager.RegisterShared<TestSharedB>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine third = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            first.SetSharedComponent(new TestSharedB(10));
+            second.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestSharedB(20));
+            third.SetSharedComponent(new TestShared(2));
+            third.SetSharedComponent(new TestSharedB(10));
+
+            world.CreateEntity(first);
+            world.CreateEntity(second);
+            world.CreateEntity(third);
+
+            VividEcsQuery allData = world.CreateQuery().WithAll(dataIndex);
+            List<VividEcsArchetypeLineGroup> fullGroups = world.CreateArchetypeLineGroups(allData);
+            List<VividEcsArchetypeLineGroup> selectedGroups =
+                world.CreateArchetypeLineGroups(allData, sharedIndex);
+
+            Assert.That(fullGroups, Has.Count.EqualTo(3));
+            Assert.That(selectedGroups, Has.Count.EqualTo(2));
+            Assert.That(ContainsGroupWithActiveCount(selectedGroups, 2), Is.True);
+            Assert.That(ContainsGroupWithActiveCount(selectedGroups, 1), Is.True);
+        }
+
+        [Test]
         public void PageJob_ScheduleParallel_VisitsEachLivePage()
         {
             VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
@@ -400,6 +432,16 @@ namespace VividRP.Editor.Tests
             public readonly int Value;
         }
 
+        private readonly struct TestSharedB : IVividEcsSharedComponentData
+        {
+            public TestSharedB(int value)
+            {
+                Value = value;
+            }
+
+            public readonly int Value;
+        }
+
         private readonly struct TestTag : IVividEcsTagComponentData
         {
         }
@@ -483,6 +525,19 @@ namespace VividRP.Editor.Tests
             {
                 Values[Index] = Value;
             }
+        }
+
+        private static bool ContainsGroupWithActiveCount(
+            List<VividEcsArchetypeLineGroup> groups,
+            int activeCount)
+        {
+            for (int index = 0; index < groups.Count; index++)
+            {
+                if (groups[index].activeCount == activeCount)
+                    return true;
+            }
+
+            return false;
         }
     }
 }

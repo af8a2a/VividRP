@@ -15,6 +15,7 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_CommonTypeIndex;
         private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
         private readonly VividEcsTypeIndex m_RendererSharedKeyTypeIndex;
+        private readonly bool m_OwnsWorld;
         private NativeArray<int> m_ActiveCountOutput;
         private NativeArray<byte> m_KeepMask;
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
@@ -23,12 +24,26 @@ namespace VividRP.Runtime.Particle.ECS
         private int m_PendingIntegrateActiveCount;
 
         public VividParticleEcsStorage()
+            : this(new VividEcsWorld(), ownsWorld: true)
         {
+        }
+
+        public VividParticleEcsStorage(VividEcsWorld world)
+            : this(world, ownsWorld: false)
+        {
+        }
+
+        private VividParticleEcsStorage(VividEcsWorld world, bool ownsWorld)
+        {
+            if (world == null)
+                throw new ArgumentNullException(nameof(world));
+
             VividParticleEcsBootstrap.RegisterTypes();
             m_CommonTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
             m_SystemIdTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             m_RendererSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
-            m_World = new VividEcsWorld();
+            m_World = world;
+            m_OwnsWorld = ownsWorld;
             m_Line = m_World.CreateArchetypeLine(
                 0,
                 m_CommonTypeIndex,
@@ -47,6 +62,8 @@ namespace VividRP.Runtime.Particle.ECS
         public int activeCount => m_Line.activeCount;
 
         public int pageCount => m_Line.pageCount;
+
+        public int archetypeLineId => m_Line.ArchetypeLineId;
 
         public int tileStart => m_Line.tileRange.StartTile;
 
@@ -97,7 +114,11 @@ namespace VividRP.Runtime.Particle.ECS
 
         public void Dispose()
         {
-            m_World.Dispose();
+            if (m_OwnsWorld)
+                m_World.Dispose();
+            else
+                m_World.DestroyArchetypeLine(m_Line);
+
             if (m_ActiveCountOutput.IsCreated)
                 m_ActiveCountOutput.Dispose();
 

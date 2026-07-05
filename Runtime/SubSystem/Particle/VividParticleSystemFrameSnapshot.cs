@@ -1,8 +1,94 @@
 using System;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace VividRP.Runtime.Particle
 {
+    internal readonly struct VividParticleSimulationTimeStep
+    {
+        public readonly float DeltaTime;
+        public readonly int IsActiveAndEnabled;
+        public readonly int IsPlaying;
+        public readonly int IsPaused;
+        public readonly int StopEmitting;
+        public readonly int Layer;
+        public readonly float3 TransformPosition;
+        public readonly float4x4 LocalToWorldMatrix;
+        public readonly quaternion WorldRotation;
+
+        public VividParticleSimulationTimeStep(
+            float deltaTime,
+            bool isActiveAndEnabled,
+            bool isPlaying,
+            bool isPaused,
+            bool stopEmitting,
+            int layer,
+            Vector3 transformPosition,
+            Matrix4x4 localToWorldMatrix,
+            Quaternion worldRotation)
+        {
+            DeltaTime = math.max(0.0f, deltaTime);
+            IsActiveAndEnabled = isActiveAndEnabled ? 1 : 0;
+            IsPlaying = isPlaying ? 1 : 0;
+            IsPaused = isPaused ? 1 : 0;
+            StopEmitting = stopEmitting ? 1 : 0;
+            Layer = layer;
+            TransformPosition = new float3(transformPosition.x, transformPosition.y, transformPosition.z);
+            LocalToWorldMatrix = ToFloat4x4(localToWorldMatrix);
+            WorldRotation = new quaternion(worldRotation.x, worldRotation.y, worldRotation.z, worldRotation.w);
+        }
+
+        public bool allowEmission => IsPlaying != 0 && StopEmitting == 0;
+
+        public bool RequiresAutomaticUpdate(int activeCount, bool requireActive)
+        {
+            return (!requireActive || IsActiveAndEnabled != 0)
+                && IsPaused == 0
+                && (IsPlaying != 0 || (StopEmitting != 0 && activeCount > 0));
+        }
+
+        public Vector3 ToTransformPosition()
+        {
+            return new Vector3(TransformPosition.x, TransformPosition.y, TransformPosition.z);
+        }
+
+        public Matrix4x4 ToMatrix4x4()
+        {
+            var value = new Matrix4x4();
+            value.m00 = LocalToWorldMatrix.c0.x;
+            value.m10 = LocalToWorldMatrix.c0.y;
+            value.m20 = LocalToWorldMatrix.c0.z;
+            value.m30 = LocalToWorldMatrix.c0.w;
+            value.m01 = LocalToWorldMatrix.c1.x;
+            value.m11 = LocalToWorldMatrix.c1.y;
+            value.m21 = LocalToWorldMatrix.c1.z;
+            value.m31 = LocalToWorldMatrix.c1.w;
+            value.m02 = LocalToWorldMatrix.c2.x;
+            value.m12 = LocalToWorldMatrix.c2.y;
+            value.m22 = LocalToWorldMatrix.c2.z;
+            value.m32 = LocalToWorldMatrix.c2.w;
+            value.m03 = LocalToWorldMatrix.c3.x;
+            value.m13 = LocalToWorldMatrix.c3.y;
+            value.m23 = LocalToWorldMatrix.c3.z;
+            value.m33 = LocalToWorldMatrix.c3.w;
+            return value;
+        }
+
+        public Quaternion ToQuaternion()
+        {
+            return new Quaternion(WorldRotation.value.x, WorldRotation.value.y, WorldRotation.value.z, WorldRotation.value.w);
+        }
+
+        private static float4x4 ToFloat4x4(Matrix4x4 value)
+        {
+            return new float4x4(
+                new float4(value.m00, value.m10, value.m20, value.m30),
+                new float4(value.m01, value.m11, value.m21, value.m31),
+                new float4(value.m02, value.m12, value.m22, value.m32),
+                new float4(value.m03, value.m13, value.m23, value.m33));
+        }
+    }
+
     internal readonly struct VividParticleSystemFrameSnapshot
     {
         public readonly float DeltaTime;
@@ -176,6 +262,49 @@ namespace VividRP.Runtime.Particle
                 transformPosition,
                 localToWorldMatrix,
                 worldRotation,
+                EntityHash);
+        }
+
+        public VividParticleSystemFrameSnapshot WithFrameState(VividParticleSimulationTimeStep timeStep)
+        {
+            return new VividParticleSystemFrameSnapshot(
+                timeStep.DeltaTime,
+                timeStep.IsActiveAndEnabled != 0,
+                timeStep.IsPlaying != 0,
+                timeStep.IsPaused != 0,
+                timeStep.StopEmitting != 0,
+                Duration,
+                Loop,
+                StartLifetime,
+                StartSpeed,
+                StartSize,
+                StartColor,
+                GravityModifier,
+                SimulationSpace,
+                MaxParticles,
+                RandomSeed,
+                UseAutoRandomSeed,
+                EmissionEnabled,
+                RateOverTime,
+                Bursts,
+                ShapeEnabled,
+                ShapeType,
+                ShapeRadius,
+                ShapeBoxSize,
+                ShapeAngle,
+                RendererEnabled,
+                RenderMode,
+                RendererMaterial,
+                RendererMesh,
+                RendererColor,
+                RendererSizeScale,
+                StretchLengthScale,
+                StretchSpeedScale,
+                RenderQueueOffset,
+                timeStep.Layer,
+                timeStep.ToTransformPosition(),
+                timeStep.ToMatrix4x4(),
+                timeStep.ToQuaternion(),
                 EntityHash);
         }
     }

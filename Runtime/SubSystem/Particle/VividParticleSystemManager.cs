@@ -59,6 +59,7 @@ namespace VividRP.Runtime.Particle
         private static readonly Dictionary<ParticleSystemState, int> s_ActiveSimulationIndices = new();
         private static readonly List<ParticleSystemState> s_PreparedSimulationStates = new();
         private static readonly List<VividParticleSystemFrameSnapshot> s_PreparedSimulationSnapshots = new();
+        private static NativeList<VividParticleSimulationTimeStep> s_PreparedSimulationTimeSteps;
         private static readonly VividParticleRendererManager s_RendererManager = new();
         private static NativeList<VividParticleEcsIntegratePageWork> s_SimulationPageWorks;
         private static NativeList<VividParticleEcsCompactWork> s_SimulationCompactWorks;
@@ -414,8 +415,11 @@ namespace VividRP.Runtime.Particle
             s_ActiveSimulationIndices.Clear();
             s_PreparedSimulationStates.Clear();
             s_PreparedSimulationSnapshots.Clear();
+            if (s_PreparedSimulationTimeSteps.IsCreated)
+                s_PreparedSimulationTimeSteps.Dispose();
             if (s_SimulationPageWorks.IsCreated)
                 s_SimulationPageWorks.Dispose();
+            s_PreparedSimulationTimeSteps = default;
             if (s_SimulationCompactWorks.IsCreated)
                 s_SimulationCompactWorks.Dispose();
             if (s_EmissionInitializeWorks.IsCreated)
@@ -742,6 +746,8 @@ namespace VividRP.Runtime.Particle
 
             s_PreparedSimulationStates.Clear();
             s_PreparedSimulationSnapshots.Clear();
+            EnsurePreparedSimulationTimeStepList();
+            s_PreparedSimulationTimeSteps.Clear();
             using (s_KickPrepareSnapshotsMarker.Auto())
             {
                 for (int index = 0; index < s_ActiveSimulationStates.Count; index++)
@@ -753,13 +759,15 @@ namespace VividRP.Runtime.Particle
                     if (!state.TryPrepareAutomaticSnapshot(
                         deltaTimeOverride,
                         requireActive: true,
-                        out VividParticleSystemFrameSnapshot snapshot))
+                        out VividParticleSystemFrameSnapshot snapshot,
+                        out VividParticleSimulationTimeStep timeStep))
                     {
                         continue;
                     }
 
                     s_PreparedSimulationStates.Add(state);
                     s_PreparedSimulationSnapshots.Add(snapshot);
+                    s_PreparedSimulationTimeSteps.Add(timeStep);
                 }
             }
 
@@ -774,6 +782,7 @@ namespace VividRP.Runtime.Particle
                 {
                     scheduledAnySimulation |= s_PreparedSimulationStates[index].ScheduleAutomaticBatch(
                         s_PreparedSimulationSnapshots[index],
+                        s_PreparedSimulationTimeSteps[index],
                         s_SimulationPageWorks,
                         s_SimulationCompactWorks);
                 }
@@ -830,6 +839,12 @@ namespace VividRP.Runtime.Particle
                 s_SimulationCompactWorks = new NativeList<VividParticleEcsCompactWork>(32, Allocator.Persistent);
             if (!s_EmissionInitializeWorks.IsCreated)
                 s_EmissionInitializeWorks = new NativeList<VividParticleEcsInitializeParticlesWork>(32, Allocator.Persistent);
+        }
+
+        private static void EnsurePreparedSimulationTimeStepList()
+        {
+            if (!s_PreparedSimulationTimeSteps.IsCreated)
+                s_PreparedSimulationTimeSteps = new NativeList<VividParticleSimulationTimeStep>(64, Allocator.Persistent);
         }
 
         private static void CompletePendingSimulations()
@@ -1480,23 +1495,29 @@ namespace VividRP.Runtime.Particle
                 bool requireActive,
                 out VividParticleSystemFrameSnapshot snapshot)
             {
+                return TryPrepareAutomaticSnapshot(deltaTimeOverride, requireActive, out snapshot, out _);
+            }
+
+            public bool TryPrepareAutomaticSnapshot(
+                float? deltaTimeOverride,
+                bool requireActive,
+                out VividParticleSystemFrameSnapshot snapshot,
+                out VividParticleSimulationTimeStep timeStep)
+            {
                 if (m_System == null)
                 {
                     snapshot = default;
+                    timeStep = default;
                     return false;
                 }
 
-                float deltaTime = ResolveDeltaTime(deltaTimeOverride);
-                if (deltaTime <= 0.0f)
+                if (!TryPrepareAutomaticTimeStep(deltaTimeOverride, requireActive, out timeStep))
                 {
                     snapshot = default;
                     return false;
                 }
 
-                snapshot = CaptureAutomaticFrameSnapshot(deltaTime);
-                if (!RequiresAutomaticUpdate(snapshot, requireActive))
-                    return false;
-
+                snapshot = CaptureAutomaticFrameSnapshot(timeStep);
                 return true;
             }
 
@@ -1515,15 +1536,16 @@ namespace VividRP.Runtime.Particle
 
             public bool ScheduleAutomaticBatch(
                 VividParticleSystemFrameSnapshot snapshot,
+                VividParticleSimulationTimeStep timeStep,
                 NativeList<VividParticleEcsIntegratePageWork> pageWorks,
                 NativeList<VividParticleEcsCompactWork> compactWorks)
             {
-                if (!RequiresAutomaticUpdate(snapshot, requireActive: true))
+                if (!RequiresAutomaticUpdate(timeStep, requireActive: true))
                     return false;
 
                 return ScheduleSimulationBatch(
                     snapshot,
-                    snapshot.IsPlaying && !snapshot.StopEmitting,
+                    timeStep.allowEmission,
                     pageWorks,
                     compactWorks);
             }
@@ -1535,7 +1557,38 @@ namespace VividRP.Runtime.Particle
                     : default;
             }
 
-            private VividParticleSystemFrameSnapshot CaptureAutomaticFrameSnapshot(float deltaTime)
+            private bool TryPrepareAutomaticTimeStep(
+                float? deltaTimeOverride,
+                bool requireActive,
+                out VividParticleSimulationTimeStep timeStep)
+            {
+                timeStep = default;
+                if (m_System == null)
+                    return false;
+
+                float deltaTime = ResolveDeltaTime(deltaTimeOverride);
+                if (deltaTime <= 0.0f)
+                    return false;
+
+                timeStep = new VividParticleSimulationTimeStep(
+                    deltaTime,
+                    m_System.isActiveAndEnabled,
+                    m_System.isPlaying,
+                    m_System.isPaused,
+                    m_System.stopEmitting,
+                    m_System.gameObject.layer,
+                    m_System.transform.position,
+                    m_System.transform.localToWorldMatrix,
+                    m_System.transform.rotation);
+                return RequiresAutomaticUpdate(timeStep, requireActive);
+            }
+
+            private bool RequiresAutomaticUpdate(VividParticleSimulationTimeStep timeStep, bool requireActive)
+            {
+                return timeStep.RequiresAutomaticUpdate(activeCount, requireActive);
+            }
+
+            private VividParticleSystemFrameSnapshot CaptureAutomaticFrameSnapshot(VividParticleSimulationTimeStep timeStep)
             {
                 if (m_System == null)
                     return default;
@@ -1547,75 +1600,12 @@ namespace VividRP.Runtime.Particle
                     m_AutomaticSnapshotDirty = false;
                 }
 
-                return m_CachedAutomaticSnapshot.WithFrameState(
-                    deltaTime,
-                    m_System.isActiveAndEnabled,
-                    m_System.isPlaying,
-                    m_System.isPaused,
-                    m_System.stopEmitting,
-                    m_System.gameObject.layer,
-                    m_System.transform.position,
-                    m_System.transform.localToWorldMatrix,
-                    m_System.transform.rotation);
+                return m_CachedAutomaticSnapshot.WithFrameState(timeStep);
             }
 
             private bool NeedsAutomaticSnapshotRebuild()
             {
-                if (m_System == null || m_AutomaticSnapshotDirty || !m_HasCachedAutomaticSnapshot)
-                    return true;
-
-                VividParticleMainModule main = m_System.main;
-                VividParticleEmissionModule emission = m_System.emission;
-                VividParticleShapeModule shape = m_System.shape;
-                VividParticleRendererModule rendererModule = m_System.rendererModule;
-
-                return !Mathf.Approximately(m_CachedAutomaticSnapshot.Duration, main.duration)
-                    || m_CachedAutomaticSnapshot.Loop != main.loop
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StartLifetime, main.startLifetime)
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StartSpeed, main.startSpeed)
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StartSize, main.startSize)
-                    || m_CachedAutomaticSnapshot.StartColor != main.startColor
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.GravityModifier, main.gravityModifier)
-                    || m_CachedAutomaticSnapshot.SimulationSpace != main.simulationSpace
-                    || m_CachedAutomaticSnapshot.MaxParticles != main.maxParticles
-                    || m_CachedAutomaticSnapshot.RandomSeed != main.randomSeed
-                    || m_CachedAutomaticSnapshot.UseAutoRandomSeed != main.useAutoRandomSeed
-                    || m_CachedAutomaticSnapshot.EmissionEnabled != emission.enabled
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.RateOverTime, emission.rateOverTime)
-                    || !BurstsMatch(emission.bursts, m_CachedAutomaticSnapshot.Bursts)
-                    || m_CachedAutomaticSnapshot.ShapeEnabled != shape.enabled
-                    || m_CachedAutomaticSnapshot.ShapeType != shape.shapeType
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.ShapeRadius, shape.radius)
-                    || m_CachedAutomaticSnapshot.ShapeBoxSize != shape.boxSize
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.ShapeAngle, shape.angle)
-                    || m_CachedAutomaticSnapshot.RendererEnabled != rendererModule.enabled
-                    || m_CachedAutomaticSnapshot.RenderMode != rendererModule.renderMode
-                    || m_CachedAutomaticSnapshot.RendererMaterial != rendererModule.material
-                    || m_CachedAutomaticSnapshot.RendererMesh != rendererModule.mesh
-                    || m_CachedAutomaticSnapshot.RendererColor != rendererModule.color
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.RendererSizeScale, rendererModule.sizeScale)
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StretchLengthScale, rendererModule.stretchLengthScale)
-                    || !Mathf.Approximately(m_CachedAutomaticSnapshot.StretchSpeedScale, rendererModule.stretchSpeedScale)
-                    || m_CachedAutomaticSnapshot.RenderQueueOffset != rendererModule.renderQueueOffset;
-            }
-
-            private static bool BurstsMatch(VividParticleBurst[] source, VividParticleBurst[] cached)
-            {
-                int sourceCount = source?.Length ?? 0;
-                int cachedCount = cached?.Length ?? 0;
-                if (sourceCount != cachedCount)
-                    return false;
-
-                for (int index = 0; index < sourceCount; index++)
-                {
-                    if (!Mathf.Approximately(source[index].time, cached[index].time)
-                        || source[index].count != cached[index].count)
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
+                return m_System == null || m_AutomaticSnapshotDirty || !m_HasCachedAutomaticSnapshot;
             }
 
             private void InvalidateAutomaticSnapshot()

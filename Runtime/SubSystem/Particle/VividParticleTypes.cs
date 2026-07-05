@@ -88,6 +88,9 @@ namespace VividRP.Runtime.Particle
         internal const float MinimumStartSize = 0.001f;
         internal const int MinimumMaxParticles = 1;
 
+        [NonSerialized]
+        private Action m_OnChanged;
+
         [SerializeField]
         private float m_Duration = 5.0f;
 
@@ -127,73 +130,166 @@ namespace VividRP.Runtime.Particle
         public float duration
         {
             get => m_Duration;
-            set => m_Duration = Mathf.Max(MinimumDuration, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumDuration, value);
+                if (m_Duration == clamped)
+                    return;
+
+                m_Duration = clamped;
+                NotifyChanged();
+            }
         }
 
         public bool loop
         {
             get => m_Loop;
-            set => m_Loop = value;
+            set
+            {
+                if (m_Loop == value)
+                    return;
+
+                m_Loop = value;
+                NotifyChanged();
+            }
         }
 
         public bool playOnAwake
         {
             get => m_PlayOnAwake;
-            set => m_PlayOnAwake = value;
+            set
+            {
+                if (m_PlayOnAwake == value)
+                    return;
+
+                m_PlayOnAwake = value;
+                NotifyChanged();
+            }
         }
 
         public float startLifetime
         {
             get => m_StartLifetime;
-            set => m_StartLifetime = Mathf.Max(MinimumStartLifetime, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumStartLifetime, value);
+                if (m_StartLifetime == clamped)
+                    return;
+
+                m_StartLifetime = clamped;
+                NotifyChanged();
+            }
         }
 
         public float startSpeed
         {
             get => m_StartSpeed;
-            set => m_StartSpeed = value;
+            set
+            {
+                if (m_StartSpeed == value)
+                    return;
+
+                m_StartSpeed = value;
+                NotifyChanged();
+            }
         }
 
         public float startSize
         {
             get => m_StartSize;
-            set => m_StartSize = Mathf.Max(MinimumStartSize, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumStartSize, value);
+                if (m_StartSize == clamped)
+                    return;
+
+                m_StartSize = clamped;
+                NotifyChanged();
+            }
         }
 
         public Color startColor
         {
             get => m_StartColor;
-            set => m_StartColor = value;
+            set
+            {
+                if (m_StartColor == value)
+                    return;
+
+                m_StartColor = value;
+                NotifyChanged();
+            }
         }
 
         public float gravityModifier
         {
             get => m_GravityModifier;
-            set => m_GravityModifier = value;
+            set
+            {
+                if (m_GravityModifier == value)
+                    return;
+
+                m_GravityModifier = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleSystemSimulationSpace simulationSpace
         {
             get => m_SimulationSpace;
-            set => m_SimulationSpace = value;
+            set
+            {
+                if (m_SimulationSpace == value)
+                    return;
+
+                m_SimulationSpace = value;
+                NotifyChanged();
+            }
         }
 
         public int maxParticles
         {
             get => m_MaxParticles;
-            set => m_MaxParticles = Mathf.Max(MinimumMaxParticles, value);
+            set
+            {
+                int clamped = Mathf.Max(MinimumMaxParticles, value);
+                if (m_MaxParticles == clamped)
+                    return;
+
+                m_MaxParticles = clamped;
+                NotifyChanged();
+            }
         }
 
         public uint randomSeed
         {
             get => m_RandomSeed;
-            set => m_RandomSeed = value;
+            set
+            {
+                if (m_RandomSeed == value)
+                    return;
+
+                m_RandomSeed = value;
+                NotifyChanged();
+            }
         }
 
         public bool useAutoRandomSeed
         {
             get => m_UseAutoRandomSeed;
-            set => m_UseAutoRandomSeed = value;
+            set
+            {
+                if (m_UseAutoRandomSeed == value)
+                    return;
+
+                m_UseAutoRandomSeed = value;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
         }
 
         internal static VividParticleMainModule CreateDefault()
@@ -235,11 +331,19 @@ namespace VividRP.Runtime.Particle
             m_StartSize = Mathf.Max(MinimumStartSize, m_StartSize);
             m_MaxParticles = Mathf.Max(MinimumMaxParticles, m_MaxParticles);
         }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
     }
 
     [Serializable]
     public sealed class VividParticleEmissionModule
     {
+        [NonSerialized]
+        private Action m_OnChanged;
+
         [SerializeField]
         private bool m_Enabled = true;
 
@@ -252,19 +356,47 @@ namespace VividRP.Runtime.Particle
         public bool enabled
         {
             get => m_Enabled;
-            set => m_Enabled = value;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
         }
 
         public float rateOverTime
         {
             get => m_RateOverTime;
-            set => m_RateOverTime = Mathf.Max(0.0f, value);
+            set
+            {
+                float clamped = Mathf.Max(0.0f, value);
+                if (m_RateOverTime == clamped)
+                    return;
+
+                m_RateOverTime = clamped;
+                NotifyChanged();
+            }
         }
 
         public VividParticleBurst[] bursts
         {
             get => m_Bursts;
-            set => m_Bursts = value ?? Array.Empty<VividParticleBurst>();
+            set
+            {
+                VividParticleBurst[] next = value ?? Array.Empty<VividParticleBurst>();
+                if (ReferenceEquals(m_Bursts, next))
+                    return;
+
+                m_Bursts = next;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
         }
 
         internal static VividParticleEmissionModule CreateDefault()
@@ -299,6 +431,11 @@ namespace VividRP.Runtime.Particle
             for (int index = 0; index < m_Bursts.Length; index++)
                 m_Bursts[index].Validate();
         }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
     }
 
     [Serializable]
@@ -306,6 +443,9 @@ namespace VividRP.Runtime.Particle
     {
         internal const float MinimumRadius = 0.0f;
         internal const float MinimumBoxExtent = 0.0f;
+
+        [NonSerialized]
+        private Action m_OnChanged;
 
         [SerializeField]
         private bool m_Enabled = true;
@@ -325,31 +465,74 @@ namespace VividRP.Runtime.Particle
         public bool enabled
         {
             get => m_Enabled;
-            set => m_Enabled = value;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleShapeType shapeType
         {
             get => m_ShapeType;
-            set => m_ShapeType = value;
+            set
+            {
+                if (m_ShapeType == value)
+                    return;
+
+                m_ShapeType = value;
+                NotifyChanged();
+            }
         }
 
         public float radius
         {
             get => m_Radius;
-            set => m_Radius = Mathf.Max(MinimumRadius, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumRadius, value);
+                if (m_Radius == clamped)
+                    return;
+
+                m_Radius = clamped;
+                NotifyChanged();
+            }
         }
 
         public Vector3 boxSize
         {
             get => m_BoxSize;
-            set => m_BoxSize = Max(value, Vector3.zero);
+            set
+            {
+                Vector3 clamped = Max(value, Vector3.zero);
+                if (m_BoxSize == clamped)
+                    return;
+
+                m_BoxSize = clamped;
+                NotifyChanged();
+            }
         }
 
         public float angle
         {
             get => m_Angle;
-            set => m_Angle = Mathf.Clamp(value, 0.0f, 89.0f);
+            set
+            {
+                float clamped = Mathf.Clamp(value, 0.0f, 89.0f);
+                if (m_Angle == clamped)
+                    return;
+
+                m_Angle = clamped;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
         }
 
         internal static VividParticleShapeModule CreateDefault()
@@ -391,6 +574,11 @@ namespace VividRP.Runtime.Particle
                 Mathf.Max(value.y, minimum.y),
                 Mathf.Max(value.z, minimum.z));
         }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
     }
 
     [Serializable]
@@ -399,6 +587,9 @@ namespace VividRP.Runtime.Particle
         internal const float MinimumSizeScale = 0.001f;
         internal const float MinimumStretchLengthScale = 0.0f;
         internal const float MinimumStretchSpeedScale = 0.0f;
+
+        [NonSerialized]
+        private Action m_OnChanged;
 
         [SerializeField]
         private bool m_Enabled = true;
@@ -463,121 +654,269 @@ namespace VividRP.Runtime.Particle
         public bool enabled
         {
             get => m_Enabled;
-            set => m_Enabled = value;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleRenderMode renderMode
         {
             get => m_RenderMode;
-            set => m_RenderMode = value;
+            set
+            {
+                if (m_RenderMode == value)
+                    return;
+
+                m_RenderMode = value;
+                NotifyChanged();
+            }
         }
 
         public Material material
         {
             get => m_Material;
-            set => m_Material = value;
+            set
+            {
+                if (m_Material == value)
+                    return;
+
+                m_Material = value;
+                NotifyChanged();
+            }
         }
 
         public Mesh mesh
         {
             get => m_Mesh;
-            set => m_Mesh = value;
+            set
+            {
+                if (m_Mesh == value)
+                    return;
+
+                m_Mesh = value;
+                NotifyChanged();
+            }
         }
 
         public Color color
         {
             get => m_Color;
-            set => m_Color = value;
+            set
+            {
+                if (m_Color == value)
+                    return;
+
+                m_Color = value;
+                NotifyChanged();
+            }
         }
 
         public float sizeScale
         {
             get => m_SizeScale;
-            set => m_SizeScale = Mathf.Max(MinimumSizeScale, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumSizeScale, value);
+                if (m_SizeScale == clamped)
+                    return;
+
+                m_SizeScale = clamped;
+                NotifyChanged();
+            }
         }
 
         public float stretchLengthScale
         {
             get => m_StretchLengthScale;
-            set => m_StretchLengthScale = Mathf.Max(MinimumStretchLengthScale, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumStretchLengthScale, value);
+                if (m_StretchLengthScale == clamped)
+                    return;
+
+                m_StretchLengthScale = clamped;
+                NotifyChanged();
+            }
         }
 
         public float stretchSpeedScale
         {
             get => m_StretchSpeedScale;
-            set => m_StretchSpeedScale = Mathf.Max(MinimumStretchSpeedScale, value);
+            set
+            {
+                float clamped = Mathf.Max(MinimumStretchSpeedScale, value);
+                if (m_StretchSpeedScale == clamped)
+                    return;
+
+                m_StretchSpeedScale = clamped;
+                NotifyChanged();
+            }
         }
 
         public int renderQueueOffset
         {
             get => m_RenderQueueOffset;
-            set => m_RenderQueueOffset = value;
+            set
+            {
+                if (m_RenderQueueOffset == value)
+                    return;
+
+                m_RenderQueueOffset = value;
+                NotifyChanged();
+            }
         }
 
         public ShadowCastingMode shadowCastingMode
         {
             get => m_ShadowCastingMode;
-            set => m_ShadowCastingMode = value;
+            set
+            {
+                if (m_ShadowCastingMode == value)
+                    return;
+
+                m_ShadowCastingMode = value;
+                NotifyChanged();
+            }
         }
 
         public bool receiveShadows
         {
             get => m_ReceiveShadows;
-            set => m_ReceiveShadows = value;
+            set
+            {
+                if (m_ReceiveShadows == value)
+                    return;
+
+                m_ReceiveShadows = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleGpuDataMode colorDataMode
         {
             get => m_ColorDataMode;
-            set => m_ColorDataMode = value;
+            set
+            {
+                if (m_ColorDataMode == value)
+                    return;
+
+                m_ColorDataMode = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleGpuDataMode rotationDataMode
         {
             get => m_RotationDataMode;
-            set => m_RotationDataMode = value;
+            set
+            {
+                if (m_RotationDataMode == value)
+                    return;
+
+                m_RotationDataMode = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleGpuDataMode velocityDataMode
         {
             get => m_VelocityDataMode;
-            set => m_VelocityDataMode = value;
+            set
+            {
+                if (m_VelocityDataMode == value)
+                    return;
+
+                m_VelocityDataMode = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleGpuDataMode sizeDataMode
         {
             get => m_SizeDataMode;
-            set => m_SizeDataMode = value;
+            set
+            {
+                if (m_SizeDataMode == value)
+                    return;
+
+                m_SizeDataMode = value;
+                NotifyChanged();
+            }
         }
 
         public bool uvDataEnabled
         {
             get => m_UVDataEnabled;
-            set => m_UVDataEnabled = value;
+            set
+            {
+                if (m_UVDataEnabled == value)
+                    return;
+
+                m_UVDataEnabled = value;
+                NotifyChanged();
+            }
         }
 
         public bool customData1Enabled
         {
             get => m_CustomData1Enabled;
-            set => m_CustomData1Enabled = value;
+            set
+            {
+                if (m_CustomData1Enabled == value)
+                    return;
+
+                m_CustomData1Enabled = value;
+                NotifyChanged();
+            }
         }
 
         public bool customData2Enabled
         {
             get => m_CustomData2Enabled;
-            set => m_CustomData2Enabled = value;
+            set
+            {
+                if (m_CustomData2Enabled == value)
+                    return;
+
+                m_CustomData2Enabled = value;
+                NotifyChanged();
+            }
         }
 
         public bool meshIndexDataEnabled
         {
             get => m_MeshIndexDataEnabled;
-            set => m_MeshIndexDataEnabled = value;
+            set
+            {
+                if (m_MeshIndexDataEnabled == value)
+                    return;
+
+                m_MeshIndexDataEnabled = value;
+                NotifyChanged();
+            }
         }
 
         public VividParticleSortMode sortMode
         {
             get => m_SortMode;
-            set => m_SortMode = value;
+            set
+            {
+                if (m_SortMode == value)
+                    return;
+
+                m_SortMode = value;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
         }
 
         internal static VividParticleRendererModule CreateDefault()
@@ -625,6 +964,11 @@ namespace VividRP.Runtime.Particle
             m_SizeScale = Mathf.Max(MinimumSizeScale, m_SizeScale);
             m_StretchLengthScale = Mathf.Max(MinimumStretchLengthScale, m_StretchLengthScale);
             m_StretchSpeedScale = Mathf.Max(MinimumStretchSpeedScale, m_StretchSpeedScale);
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
         }
     }
 }

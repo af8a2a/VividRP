@@ -395,6 +395,22 @@ namespace VividRP.Runtime.Particle
             m_Emission ??= VividParticleEmissionModule.CreateDefault();
             m_Shape ??= VividParticleShapeModule.CreateDefault();
             m_Renderer ??= VividParticleRendererModule.CreateDefault();
+            BindModuleCallbacks();
+        }
+
+        private void BindModuleCallbacks()
+        {
+            m_Main.SetChangeCallback(OnModuleChanged);
+            m_Emission.SetChangeCallback(OnModuleChanged);
+            m_Shape.SetChangeCallback(OnModuleChanged);
+            m_Renderer.SetChangeCallback(OnModuleChanged);
+        }
+
+        private void OnModuleChanged()
+        {
+            VividParticleSystemManager.NotifySettingsChanged(this);
+            VividParticleSystemManager.MarkRendererDirty(this);
+            RequestEditorRenderUpdate();
         }
 
         private void ValidateModules()

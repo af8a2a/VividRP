@@ -3726,6 +3726,30 @@ namespace VividRP.Runtime.Particle
             public int ElementCapacity { get; }
 
             public int ByteSize => AlignTo16(ElementCapacity * DataInfo.ElementSize);
+
+            public VividParticleGpuDataCopyDescriptor CopyDescriptor =>
+                new(DataInfo.Frequency, ByteOffset, DataInfo.ElementSize);
+        }
+
+        internal readonly struct VividParticleGpuDataCopyDescriptor
+        {
+            public VividParticleGpuDataCopyDescriptor(
+                VividParticleGpuDataFrequency frequency,
+                int byteOffset,
+                int elementSize)
+            {
+                Frequency = frequency;
+                ByteOffset = byteOffset;
+                ElementSize = Mathf.Max(1, elementSize);
+            }
+
+            public VividParticleGpuDataFrequency Frequency { get; }
+
+            public int ByteOffset { get; }
+
+            public int ElementSize { get; }
+
+            public bool IsShared => Frequency == VividParticleGpuDataFrequency.Shared;
         }
 
         internal readonly struct VividParticleGpuDataLayout
@@ -4486,11 +4510,18 @@ namespace VividRP.Runtime.Particle
             public float4 RendererColor;
         }
 
-        private struct ParticleRenderUploadColumnWork
+        private struct ParticleRenderUploadPageWork
         {
             public ParticleRenderUploadSource Source;
-            public InstanceUploadSegment Segment;
-            public int ColumnByteOffset;
+            public int PositionSizeByteOffset;
+            public int BaseColorByteOffset;
+            public int RotationByteOffset;
+            public int VelocityStretchByteOffset;
+            public int ScaleByteOffset;
+            public int UVByteOffset;
+            public int CustomData1ByteOffset;
+            public int CustomData2ByteOffset;
+            public int MeshIndexByteOffset;
         }
 
         private unsafe struct ParticleRenderSharedDataWork
@@ -4733,7 +4764,7 @@ namespace VividRP.Runtime.Particle
             private readonly VividParticleGPUBuffer m_GPUBuffer = new();
             private NativeList<ParticleUploadRecordRef> m_DirtyUploadRecords;
             private NativeList<ParticleUploadRecordWork> m_UploadRecordWorks;
-            private NativeList<ParticleRenderUploadColumnWork> m_UploadColumnWorks;
+            private NativeList<ParticleRenderUploadPageWork> m_UploadPageWorks;
             private NativeList<ParticleRenderSharedDataWork> m_SharedDataWorks;
             private NativeList<ParticleGpuDataCopyWork> m_UploadCopyWorks;
             private NativeList<ParticleCullingRecord> m_NativeCullingRecords;
@@ -4747,7 +4778,7 @@ namespace VividRP.Runtime.Particle
             private NativeList<ParticleBoundsRecordReduceWork> m_BoundsRecordWorks;
             private NativeArray<ParticleBoundsData> m_BoundsPageResults;
             private NativeArray<ParticleBoundsRecordResult> m_BoundsRecordResults;
-            private NativeArray<ParticleRenderUploadColumnWork> m_PendingUploadColumnWorks;
+            private NativeArray<ParticleRenderUploadPageWork> m_PendingUploadPageWorks;
             private NativeArray<ParticleRenderSharedDataWork> m_PendingSharedDataWorks;
             private JobHandle m_PendingCullingOutputHandle;
             private JobHandle m_PendingUploadHandle;
@@ -4776,7 +4807,7 @@ namespace VividRP.Runtime.Particle
                 m_GPUBuffer.lastCopyOperationCount,
                 m_GPUBuffer.lastCopyByteCount,
                 m_GPUBuffer.usesComputeDelta,
-                m_UploadColumnWorks.IsCreated ? m_UploadColumnWorks.Length : 0,
+                m_UploadPageWorks.IsCreated ? m_UploadPageWorks.Length : 0,
                 m_SharedDataWorks.IsCreated ? m_SharedDataWorks.Length : 0);
 
             public Material GetOrCreateDefaultMaterial(VividParticleRenderMode renderMode, int renderQueueOffset)
@@ -5725,7 +5756,7 @@ namespace VividRP.Runtime.Particle
                     using (s_UploadCollectDirtyMarker.Auto())
                     {
                         m_UploadRecordWorks.Clear();
-                        m_UploadColumnWorks.Clear();
+                        m_UploadPageWorks.Clear();
                         m_SharedDataWorks.Clear();
                         m_UploadCopyWorks.Clear();
                         m_PendingRenderJobFlags = 0u;
@@ -5813,7 +5844,7 @@ namespace VividRP.Runtime.Particle
                                     bufferBase,
                                     out ParticleRenderUploadSource source))
                                 {
-                                    AddUploadColumnWorks(batch, source, work.StartIndex, count);
+                                    AddUploadPageWorks(batch, source, work.StartIndex, count);
                                 }
 
                                 AddRecordSharedDataWorks(bufferBase, batch, record, work.StartIndex, count);
@@ -5822,12 +5853,12 @@ namespace VividRP.Runtime.Particle
                         }
 
                         ClearPendingUploadViews();
-                        if (m_UploadColumnWorks.Length > 0 || m_SharedDataWorks.Length > 0)
+                        if (m_UploadPageWorks.Length > 0 || m_SharedDataWorks.Length > 0)
                         {
                             using (s_UploadCopyWorkArraysMarker.Auto())
                             {
-                                if (m_UploadColumnWorks.Length > 0)
-                                    m_PendingUploadColumnWorks = m_UploadColumnWorks.AsArray();
+                                if (m_UploadPageWorks.Length > 0)
+                                    m_PendingUploadPageWorks = m_UploadPageWorks.AsArray();
 
                                 if (m_SharedDataWorks.Length > 0)
                                     m_PendingSharedDataWorks = m_SharedDataWorks.AsArray();
@@ -5836,7 +5867,7 @@ namespace VividRP.Runtime.Particle
                             using (s_UploadScheduleJobsMarker.Auto())
                             {
                                 m_PendingUploadHandle = VividParticleRenderJobPipeline.Schedule(
-                                    m_PendingUploadColumnWorks,
+                                    m_PendingUploadPageWorks,
                                     m_PendingSharedDataWorks,
                                     m_PendingRenderJobFlags);
                                 JobHandle.ScheduleBatchedJobs();
@@ -5896,7 +5927,7 @@ namespace VividRP.Runtime.Particle
 
             private void ClearPendingUploadViews()
             {
-                m_PendingUploadColumnWorks = default;
+                m_PendingUploadPageWorks = default;
                 m_PendingSharedDataWorks = default;
             }
 
@@ -5931,8 +5962,8 @@ namespace VividRP.Runtime.Particle
                 if (!m_UploadRecordWorks.IsCreated)
                     m_UploadRecordWorks = new NativeList<ParticleUploadRecordWork>(64, Allocator.Persistent);
 
-                if (!m_UploadColumnWorks.IsCreated)
-                    m_UploadColumnWorks = new NativeList<ParticleRenderUploadColumnWork>(128, Allocator.Persistent);
+                if (!m_UploadPageWorks.IsCreated)
+                    m_UploadPageWorks = new NativeList<ParticleRenderUploadPageWork>(128, Allocator.Persistent);
 
                 if (!m_SharedDataWorks.IsCreated)
                     m_SharedDataWorks = new NativeList<ParticleRenderSharedDataWork>(64, Allocator.Persistent);
@@ -5951,8 +5982,8 @@ namespace VividRP.Runtime.Particle
                 if (m_UploadRecordWorks.IsCreated)
                     m_UploadRecordWorks.Dispose();
 
-                if (m_UploadColumnWorks.IsCreated)
-                    m_UploadColumnWorks.Dispose();
+                if (m_UploadPageWorks.IsCreated)
+                    m_UploadPageWorks.Dispose();
 
                 if (m_SharedDataWorks.IsCreated)
                     m_SharedDataWorks.Dispose();
@@ -5962,7 +5993,7 @@ namespace VividRP.Runtime.Particle
 
                 m_DirtyUploadRecords = default;
                 m_UploadRecordWorks = default;
-                m_UploadColumnWorks = default;
+                m_UploadPageWorks = default;
                 m_SharedDataWorks = default;
                 m_UploadCopyWorks = default;
                 m_PendingRenderJobFlags = 0u;
@@ -6104,7 +6135,7 @@ namespace VividRP.Runtime.Particle
                 }
             }
 
-            private void AddUploadColumnWorks(
+            private void AddUploadPageWorks(
                 ParticleDrawBatch batch,
                 ParticleRenderUploadSource source,
                 int startIndex,
@@ -6114,32 +6145,97 @@ namespace VividRP.Runtime.Particle
                 for (int pageStart = startIndex; pageStart < endIndex; pageStart += BillboardPageSize)
                 {
                     int pageCount = Mathf.Min(BillboardPageSize, endIndex - pageStart);
+                    ParticleRenderUploadPageWork pageWork = CreateUploadPageWork(source, pageStart, pageCount);
                     for (int dataIndex = 0; dataIndex < batch.GpuBufferInfos.Length; dataIndex++)
                     {
                         VividParticleGpuBufferDataInfo bufferInfo = batch.GpuBufferInfos[dataIndex];
                         if (!bufferInfo.DataInfo.IsPerInstance || !bufferInfo.DataInfo.HasUploadSegment)
                             continue;
 
-                        AddUploadColumnWork(source, bufferInfo, pageStart, pageCount);
+                        SetUploadPageColumnOffset(
+                            ref pageWork,
+                            bufferInfo.DataInfo.UploadSegment,
+                            bufferInfo.ByteOffset);
+                    }
+
+                    if (HasUploadPageColumns(pageWork))
+                    {
+                        m_UploadPageWorks.Add(pageWork);
+                        m_PendingRenderJobFlags |= (uint)ParticleRenderJobFlags.PageUpload;
                     }
                 }
             }
 
-            private void AddUploadColumnWork(
+            private static ParticleRenderUploadPageWork CreateUploadPageWork(
                 ParticleRenderUploadSource source,
-                VividParticleGpuBufferDataInfo bufferInfo,
                 int startIndex,
                 int count)
             {
                 source.StartIndex = startIndex;
                 source.Count = count;
-                m_UploadColumnWorks.Add(new ParticleRenderUploadColumnWork
+                return new ParticleRenderUploadPageWork
                 {
                     Source = source,
-                    Segment = bufferInfo.DataInfo.UploadSegment,
-                    ColumnByteOffset = bufferInfo.ByteOffset,
-                });
-                m_PendingRenderJobFlags |= GetRenderJobFlag(bufferInfo.DataInfo.UploadSegment);
+                    PositionSizeByteOffset = -1,
+                    BaseColorByteOffset = -1,
+                    RotationByteOffset = -1,
+                    VelocityStretchByteOffset = -1,
+                    ScaleByteOffset = -1,
+                    UVByteOffset = -1,
+                    CustomData1ByteOffset = -1,
+                    CustomData2ByteOffset = -1,
+                    MeshIndexByteOffset = -1,
+                };
+            }
+
+            private static void SetUploadPageColumnOffset(
+                ref ParticleRenderUploadPageWork work,
+                InstanceUploadSegment segment,
+                int byteOffset)
+            {
+                switch (segment)
+                {
+                    case InstanceUploadSegment.PositionSize:
+                        work.PositionSizeByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.BaseColor:
+                        work.BaseColorByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.Rotation:
+                        work.RotationByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.VelocityStretch:
+                        work.VelocityStretchByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.Scale:
+                        work.ScaleByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.UV:
+                        work.UVByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.CustomData1:
+                        work.CustomData1ByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.CustomData2:
+                        work.CustomData2ByteOffset = byteOffset;
+                        break;
+                    case InstanceUploadSegment.MeshIndex:
+                        work.MeshIndexByteOffset = byteOffset;
+                        break;
+                }
+            }
+
+            private static bool HasUploadPageColumns(ParticleRenderUploadPageWork work)
+            {
+                return work.PositionSizeByteOffset >= 0
+                    || work.BaseColorByteOffset >= 0
+                    || work.RotationByteOffset >= 0
+                    || work.VelocityStretchByteOffset >= 0
+                    || work.ScaleByteOffset >= 0
+                    || work.UVByteOffset >= 0
+                    || work.CustomData1ByteOffset >= 0
+                    || work.CustomData2ByteOffset >= 0
+                    || work.MeshIndexByteOffset >= 0;
             }
 
             private void AddBatchSharedDataWorks(byte* bufferBase)
@@ -6179,7 +6275,12 @@ namespace VividRP.Runtime.Particle
                         });
                         m_PendingRenderJobFlags |= (uint)ParticleRenderJobFlags.SharedData;
                         if (batch.Records.Count > 0)
-                            AddGpuDataCopyOperation(batch.Records[0], batch, bufferInfo, elementStart: 0, elementCount: 1);
+                            AddGpuDataCopyOperation(
+                                batch.Records[0],
+                                batch,
+                                bufferInfo.CopyDescriptor,
+                                elementStart: 0,
+                                elementCount: 1);
                     }
                 }
             }
@@ -6273,7 +6374,7 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 if (!TryGetRecordElementCopyRange(
-                    bufferInfo.DataInfo,
+                    bufferInfo.CopyDescriptor,
                     record,
                     startIndex,
                     count,
@@ -6313,23 +6414,6 @@ namespace VividRP.Runtime.Particle
                     or InstanceUploadSegment.VelocityStretch;
             }
 
-            private static uint GetRenderJobFlag(InstanceUploadSegment segment)
-            {
-                return segment switch
-                {
-                    InstanceUploadSegment.PositionSize
-                        or InstanceUploadSegment.Rotation
-                        or InstanceUploadSegment.Scale => (uint)ParticleRenderJobFlags.Transform,
-                    InstanceUploadSegment.BaseColor => (uint)ParticleRenderJobFlags.Color,
-                    InstanceUploadSegment.VelocityStretch => (uint)ParticleRenderJobFlags.VelocityStretch,
-                    InstanceUploadSegment.UV => (uint)ParticleRenderJobFlags.UV,
-                    InstanceUploadSegment.CustomData1
-                        or InstanceUploadSegment.CustomData2 => (uint)ParticleRenderJobFlags.CustomData,
-                    InstanceUploadSegment.MeshIndex => (uint)ParticleRenderJobFlags.MeshIndex,
-                    _ => 0u,
-                };
-            }
-
             private static bool TryGetPerSharpGpuDataValue(
                 ParticleRenderRecord record,
                 VividParticleGpuDataInfo dataInfo,
@@ -6349,11 +6433,12 @@ namespace VividRP.Runtime.Particle
                 for (int dataIndex = 0; dataIndex < batch.GpuBufferInfos.Length; dataIndex++)
                 {
                     VividParticleGpuBufferDataInfo bufferInfo = batch.GpuBufferInfos[dataIndex];
-                    if (bufferInfo.DataInfo.Frequency == VividParticleGpuDataFrequency.Shared)
+                    VividParticleGpuDataCopyDescriptor copyDescriptor = bufferInfo.CopyDescriptor;
+                    if (copyDescriptor.IsShared)
                         continue;
 
                     if (!TryGetRecordElementCopyRange(
-                        bufferInfo.DataInfo,
+                        copyDescriptor,
                         record,
                         startIndex,
                         count,
@@ -6363,12 +6448,12 @@ namespace VividRP.Runtime.Particle
                         continue;
                     }
 
-                    AddGpuDataCopyOperation(record, batch, bufferInfo, elementStart, elementCount);
+                    AddGpuDataCopyOperation(record, batch, copyDescriptor, elementStart, elementCount);
                 }
             }
 
             private static bool TryGetRecordElementCopyRange(
-                VividParticleGpuDataInfo dataInfo,
+                VividParticleGpuDataCopyDescriptor copyDescriptor,
                 ParticleRenderRecord record,
                 int startIndex,
                 int count,
@@ -6380,7 +6465,7 @@ namespace VividRP.Runtime.Particle
                 if (record == null || count <= 0)
                     return false;
 
-                switch (dataInfo.Frequency)
+                switch (copyDescriptor.Frequency)
                 {
                     case VividParticleGpuDataFrequency.PerInstance:
                         int clampedStart = Mathf.Clamp(startIndex, 0, Mathf.Max(0, record.ActiveCount));
@@ -6427,17 +6512,17 @@ namespace VividRP.Runtime.Particle
             private void AddGpuDataCopyOperation(
                 ParticleRenderRecord owner,
                 ParticleDrawBatch batch,
-                VividParticleGpuBufferDataInfo bufferInfo,
+                VividParticleGpuDataCopyDescriptor copyDescriptor,
                 int elementStart,
                 int elementCount)
             {
                 if (elementCount <= 0)
                     return;
 
-                int byteCount = elementCount * bufferInfo.DataInfo.ElementSize;
+                int byteCount = elementCount * copyDescriptor.ElementSize;
                 int byteOffset = batch.DataOffset
-                    + bufferInfo.ByteOffset
-                    + elementStart * bufferInfo.DataInfo.ElementSize;
+                    + copyDescriptor.ByteOffset
+                    + elementStart * copyDescriptor.ElementSize;
                 AddGpuDataCopyWork(owner, byteOffset, byteCount);
             }
 
@@ -7477,11 +7562,11 @@ namespace VividRP.Runtime.Particle
             public static int registeredJobCount => s_RenderJobRegistry.count;
 
             public static JobHandle Schedule(
-                NativeArray<ParticleRenderUploadColumnWork> columnWorks,
+                NativeArray<ParticleRenderUploadPageWork> pageWorks,
                 NativeArray<ParticleRenderSharedDataWork> sharedDataWorks,
                 uint enabledModuleFlags)
             {
-                var context = new ParticleRenderJobContext(columnWorks, sharedDataWorks, enabledModuleFlags);
+                var context = new ParticleRenderJobContext(pageWorks, sharedDataWorks, enabledModuleFlags);
                 return s_RenderJobRegistry.ScheduleEnabled(context, context.EnabledModuleFlags);
             }
 
@@ -7489,94 +7574,24 @@ namespace VividRP.Runtime.Particle
             {
                 var registry = new VividEcsManagerJobRegistry<ParticleRenderJobContext>();
                 registry.RegisterModule(
-                    "VividParticle.Render.Transform",
+                    "VividParticle.Render.PageUpload",
                     0,
-                    (uint)ParticleRenderJobFlags.Transform,
-                    ScheduleTransformJob);
-                registry.RegisterModule(
-                    "VividParticle.Render.Color",
-                    10,
-                    (uint)ParticleRenderJobFlags.Color,
-                    ScheduleColorJob);
-                registry.RegisterModule(
-                    "VividParticle.Render.VelocityStretch",
-                    20,
-                    (uint)ParticleRenderJobFlags.VelocityStretch,
-                    ScheduleVelocityStretchJob);
-                registry.RegisterModule(
-                    "VividParticle.Render.UV",
-                    25,
-                    (uint)ParticleRenderJobFlags.UV,
-                    ScheduleUVJob);
-                registry.RegisterModule(
-                    "VividParticle.Render.CustomData",
-                    26,
-                    (uint)ParticleRenderJobFlags.CustomData,
-                    ScheduleCustomDataJob);
-                registry.RegisterModule(
-                    "VividParticle.Render.MeshIndex",
-                    27,
-                    (uint)ParticleRenderJobFlags.MeshIndex,
-                    ScheduleMeshIndexJob);
+                    (uint)ParticleRenderJobFlags.PageUpload,
+                    SchedulePageUploadJob);
                 registry.RegisterModule(
                     "VividParticle.Render.SharedData",
-                    30,
+                    10,
                     (uint)ParticleRenderJobFlags.SharedData,
                     ScheduleSharedDataJob);
                 return registry;
             }
 
-            private static JobHandle ScheduleTransformJob(ParticleRenderJobContext context, JobHandle dependency)
+            private static JobHandle SchedulePageUploadJob(ParticleRenderJobContext context, JobHandle dependency)
             {
-                JobHandle handle = new VividParticleTransformRenderJob
+                JobHandle handle = new VividParticlePageUploadRenderJob
                 {
-                    Works = context.ColumnWorks,
-                }.Schedule(context.ColumnWorks.Length, 32);
-                return JobHandle.CombineDependencies(dependency, handle);
-            }
-
-            private static JobHandle ScheduleColorJob(ParticleRenderJobContext context, JobHandle dependency)
-            {
-                JobHandle handle = new VividParticleColorRenderJob
-                {
-                    Works = context.ColumnWorks,
-                }.Schedule(context.ColumnWorks.Length, 32);
-                return JobHandle.CombineDependencies(dependency, handle);
-            }
-
-            private static JobHandle ScheduleVelocityStretchJob(ParticleRenderJobContext context, JobHandle dependency)
-            {
-                JobHandle handle = new VividParticleVelocityStretchRenderJob
-                {
-                    Works = context.ColumnWorks,
-                }.Schedule(context.ColumnWorks.Length, 32);
-                return JobHandle.CombineDependencies(dependency, handle);
-            }
-
-            private static JobHandle ScheduleUVJob(ParticleRenderJobContext context, JobHandle dependency)
-            {
-                JobHandle handle = new VividParticleUVRenderJob
-                {
-                    Works = context.ColumnWorks,
-                }.Schedule(context.ColumnWorks.Length, 32);
-                return JobHandle.CombineDependencies(dependency, handle);
-            }
-
-            private static JobHandle ScheduleCustomDataJob(ParticleRenderJobContext context, JobHandle dependency)
-            {
-                JobHandle handle = new VividParticleCustomDataRenderJob
-                {
-                    Works = context.ColumnWorks,
-                }.Schedule(context.ColumnWorks.Length, 32);
-                return JobHandle.CombineDependencies(dependency, handle);
-            }
-
-            private static JobHandle ScheduleMeshIndexJob(ParticleRenderJobContext context, JobHandle dependency)
-            {
-                JobHandle handle = new VividParticleMeshIndexRenderJob
-                {
-                    Works = context.ColumnWorks,
-                }.Schedule(context.ColumnWorks.Length, 32);
+                    Works = context.PageWorks,
+                }.Schedule(context.PageWorks.Length, 32);
                 return JobHandle.CombineDependencies(dependency, handle);
             }
 
@@ -7594,31 +7609,26 @@ namespace VividRP.Runtime.Particle
         private enum ParticleRenderJobFlags : uint
         {
             None = 0u,
-            Transform = 1u << 0,
-            Color = 1u << 1,
-            VelocityStretch = 1u << 2,
-            UV = 1u << 3,
-            CustomData = 1u << 4,
-            MeshIndex = 1u << 5,
-            SharedData = 1u << 6,
+            PageUpload = 1u << 0,
+            SharedData = 1u << 1,
         }
 
         private readonly struct ParticleRenderJobContext : IVividEcsManagerJobModuleFlags
         {
             public ParticleRenderJobContext(
-                NativeArray<ParticleRenderUploadColumnWork> columnWorks,
+                NativeArray<ParticleRenderUploadPageWork> pageWorks,
                 NativeArray<ParticleRenderSharedDataWork> sharedDataWorks,
                 uint enabledModuleFlags)
             {
-                ColumnWorks = columnWorks;
+                PageWorks = pageWorks;
                 SharedDataWorks = sharedDataWorks;
                 EnabledModuleFlags = enabledModuleFlags;
             }
 
-            public readonly NativeArray<ParticleRenderUploadColumnWork> ColumnWorks;
+            public readonly NativeArray<ParticleRenderUploadPageWork> PageWorks;
             public readonly NativeArray<ParticleRenderSharedDataWork> SharedDataWorks;
 
-            public bool HasColumnWorks => ColumnWorks.IsCreated && ColumnWorks.Length > 0;
+            public bool HasPageWorks => PageWorks.IsCreated && PageWorks.Length > 0;
 
             public bool HasSharedDataWorks => SharedDataWorks.IsCreated && SharedDataWorks.Length > 0;
 
@@ -7627,130 +7637,15 @@ namespace VividRP.Runtime.Particle
         }
 
         [BurstCompile]
-        private struct VividParticleTransformRenderJob : IJobParallelFor
+        private struct VividParticlePageUploadRenderJob : IJobParallelFor
         {
             [ReadOnly]
             [NativeDisableContainerSafetyRestriction]
-            public NativeArray<ParticleRenderUploadColumnWork> Works;
+            public NativeArray<ParticleRenderUploadPageWork> Works;
 
             public void Execute(int workIndex)
             {
-                ParticleRenderUploadColumnWork work = Works[workIndex];
-                if (work.Segment == InstanceUploadSegment.PositionSize)
-                {
-                    VividParticleRenderJobUtility.WriteParticleRange(
-                        work,
-                        VividParticleRenderJobUtility.RenderColumnPositionSize);
-                }
-                else if (work.Segment == InstanceUploadSegment.Rotation)
-                {
-                    VividParticleRenderJobUtility.WriteParticleRange(
-                        work,
-                        VividParticleRenderJobUtility.RenderColumnRotation);
-                }
-                else if (work.Segment == InstanceUploadSegment.Scale)
-                {
-                    VividParticleRenderJobUtility.WriteParticleRange(
-                        work,
-                        VividParticleRenderJobUtility.RenderColumnScale);
-                }
-            }
-        }
-
-        [BurstCompile]
-        private struct VividParticleColorRenderJob : IJobParallelFor
-        {
-            [ReadOnly]
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<ParticleRenderUploadColumnWork> Works;
-
-            public void Execute(int workIndex)
-            {
-                ParticleRenderUploadColumnWork work = Works[workIndex];
-                if (work.Segment != InstanceUploadSegment.BaseColor)
-                    return;
-
-                VividParticleRenderJobUtility.WriteParticleRange(
-                    work,
-                    VividParticleRenderJobUtility.RenderColumnColor);
-            }
-        }
-
-        [BurstCompile]
-        private struct VividParticleVelocityStretchRenderJob : IJobParallelFor
-        {
-            [ReadOnly]
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<ParticleRenderUploadColumnWork> Works;
-
-            public void Execute(int workIndex)
-            {
-                ParticleRenderUploadColumnWork work = Works[workIndex];
-                if (work.Segment != InstanceUploadSegment.VelocityStretch)
-                    return;
-
-                VividParticleRenderJobUtility.WriteParticleRange(
-                    work,
-                    VividParticleRenderJobUtility.RenderColumnVelocityStretch);
-            }
-        }
-
-        [BurstCompile]
-        private struct VividParticleUVRenderJob : IJobParallelFor
-        {
-            [ReadOnly]
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<ParticleRenderUploadColumnWork> Works;
-
-            public void Execute(int workIndex)
-            {
-                ParticleRenderUploadColumnWork work = Works[workIndex];
-                if (work.Segment != InstanceUploadSegment.UV)
-                    return;
-
-                VividParticleRenderJobUtility.WriteParticleRange(
-                    work,
-                    VividParticleRenderJobUtility.RenderColumnUV);
-            }
-        }
-
-        [BurstCompile]
-        private struct VividParticleCustomDataRenderJob : IJobParallelFor
-        {
-            [ReadOnly]
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<ParticleRenderUploadColumnWork> Works;
-
-            public void Execute(int workIndex)
-            {
-                ParticleRenderUploadColumnWork work = Works[workIndex];
-                if (work.Segment is not InstanceUploadSegment.CustomData1 and not InstanceUploadSegment.CustomData2)
-                    return;
-
-                VividParticleRenderJobUtility.WriteParticleRange(
-                    work,
-                    work.Segment == InstanceUploadSegment.CustomData1
-                        ? VividParticleRenderJobUtility.RenderColumnCustomData1
-                        : VividParticleRenderJobUtility.RenderColumnCustomData2);
-            }
-        }
-
-        [BurstCompile]
-        private struct VividParticleMeshIndexRenderJob : IJobParallelFor
-        {
-            [ReadOnly]
-            [NativeDisableContainerSafetyRestriction]
-            public NativeArray<ParticleRenderUploadColumnWork> Works;
-
-            public void Execute(int workIndex)
-            {
-                ParticleRenderUploadColumnWork work = Works[workIndex];
-                if (work.Segment != InstanceUploadSegment.MeshIndex)
-                    return;
-
-                VividParticleRenderJobUtility.WriteParticleRange(
-                    work,
-                    VividParticleRenderJobUtility.RenderColumnMeshIndex);
+                VividParticleRenderJobUtility.WriteParticlePage(Works[workIndex]);
             }
         }
 
@@ -7783,7 +7678,7 @@ namespace VividRP.Runtime.Particle
             private const int SharedDataWorkKindPerSharp = 1;
             private const int SharedDataWorkKindSpan = 2;
 
-            public static void WriteParticleRange(ParticleRenderUploadColumnWork work, int renderColumn)
+            public static void WriteParticlePage(ParticleRenderUploadPageWork work)
             {
                 ParticleRenderUploadSource source = work.Source;
                 int endIndex = math.min(source.ActiveCount, source.StartIndex + source.Count);
@@ -7792,22 +7687,44 @@ namespace VividRP.Runtime.Particle
 
                 for (int particleIndex = source.StartIndex; particleIndex < endIndex; particleIndex++)
                 {
-                    WriteParticleValue(
-                        work,
-                        particleIndex,
-                        renderColumn switch
-                        {
-                            RenderColumnPositionSize => GetPositionSize(source, particleIndex),
-                            RenderColumnColor => GetRenderColor(source, particleIndex),
-                            RenderColumnRotation => new float4(0.0f, 0.0f, 0.0f, 1.0f),
-                            RenderColumnVelocityStretch => GetVelocityStretch(source, particleIndex),
-                            RenderColumnScale => GetScale(source, particleIndex),
-                            RenderColumnUV => new float4(0.0f, 0.0f, 1.0f, 1.0f),
-                            RenderColumnCustomData1 => float4.zero,
-                            RenderColumnCustomData2 => float4.zero,
-                            RenderColumnMeshIndex => float4.zero,
-                            _ => default,
-                        });
+                    if (work.PositionSizeByteOffset >= 0)
+                        WriteParticleValue(work, particleIndex, work.PositionSizeByteOffset, GetPositionSize(source, particleIndex));
+
+                    if (work.BaseColorByteOffset >= 0)
+                        WriteParticleValue(work, particleIndex, work.BaseColorByteOffset, GetRenderColor(source, particleIndex));
+
+                    if (work.RotationByteOffset >= 0)
+                        WriteParticleValue(
+                            work,
+                            particleIndex,
+                            work.RotationByteOffset,
+                            new float4(0.0f, 0.0f, 0.0f, 1.0f));
+
+                    if (work.VelocityStretchByteOffset >= 0)
+                        WriteParticleValue(
+                            work,
+                            particleIndex,
+                            work.VelocityStretchByteOffset,
+                            GetVelocityStretch(source, particleIndex));
+
+                    if (work.ScaleByteOffset >= 0)
+                        WriteParticleValue(work, particleIndex, work.ScaleByteOffset, GetScale(source, particleIndex));
+
+                    if (work.UVByteOffset >= 0)
+                        WriteParticleValue(
+                            work,
+                            particleIndex,
+                            work.UVByteOffset,
+                            new float4(0.0f, 0.0f, 1.0f, 1.0f));
+
+                    if (work.CustomData1ByteOffset >= 0)
+                        WriteParticleValue(work, particleIndex, work.CustomData1ByteOffset, float4.zero);
+
+                    if (work.CustomData2ByteOffset >= 0)
+                        WriteParticleValue(work, particleIndex, work.CustomData2ByteOffset, float4.zero);
+
+                    if (work.MeshIndexByteOffset >= 0)
+                        WriteParticleValue(work, particleIndex, work.MeshIndexByteOffset, float4.zero);
                 }
             }
 
@@ -7828,14 +7745,15 @@ namespace VividRP.Runtime.Particle
             }
 
             private static void WriteParticleValue(
-                ParticleRenderUploadColumnWork work,
+                ParticleRenderUploadPageWork work,
                 int particleIndex,
+                int columnByteOffset,
                 float4 value)
             {
                 ParticleRenderUploadSource source = work.Source;
                 int batchIndex = source.BatchBaseIndex + particleIndex;
                 UnsafeUtility.WriteArrayElement(
-                    source.BufferBase + source.BatchDataOffset + work.ColumnByteOffset,
+                    source.BufferBase + source.BatchDataOffset + columnByteOffset,
                     batchIndex,
                     value);
             }
@@ -8014,7 +7932,7 @@ namespace VividRP.Runtime.Particle
             public readonly int LastCopyOperationCount;
             public readonly int LastCopyByteCount;
             public readonly bool UsesComputeDelta;
-            public readonly int LastUploadColumnWorkCount;
+            public readonly int LastUploadPageWorkCount;
             public readonly int LastSharedDataWorkCount;
 
             public VividParticleRendererManagerStats(
@@ -8025,7 +7943,7 @@ namespace VividRP.Runtime.Particle
                 int lastCopyOperationCount,
                 int lastCopyByteCount,
                 bool usesComputeDelta,
-                int lastUploadColumnWorkCount,
+                int lastUploadPageWorkCount,
                 int lastSharedDataWorkCount)
             {
                 RenderRecordCount = renderRecordCount;
@@ -8035,7 +7953,7 @@ namespace VividRP.Runtime.Particle
                 LastCopyOperationCount = lastCopyOperationCount;
                 LastCopyByteCount = lastCopyByteCount;
                 UsesComputeDelta = usesComputeDelta;
-                LastUploadColumnWorkCount = lastUploadColumnWorkCount;
+                LastUploadPageWorkCount = lastUploadPageWorkCount;
                 LastSharedDataWorkCount = lastSharedDataWorkCount;
             }
         }

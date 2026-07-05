@@ -1,5 +1,6 @@
 using System;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
@@ -168,6 +169,51 @@ namespace VividRP.Runtime.Particle.ECS
             };
 
             handle = job.Schedule(livePageCount, innerloopBatchCount: 1, dependency);
+            return true;
+        }
+
+        public unsafe bool AddIntegratePageWorks(
+            float deltaTime,
+            Vector3 gravity,
+            NativeList<VividParticleEcsIntegratePageWork> works)
+        {
+            int count = activeCount;
+            if (!isCreated || count <= 0 || deltaTime <= 0.0f || !works.IsCreated)
+                return false;
+
+            if (!m_ActiveCountOutput.IsCreated)
+                m_ActiveCountOutput = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+            EnsureKeepMaskCapacity(capacity);
+            m_ActiveCountOutput[0] = count;
+            m_PendingIntegrateActiveCount = count;
+
+            int livePageCount = (count + VividEcsConstants.PageEntryCount - 1) / VividEcsConstants.PageEntryCount;
+            if (livePageCount <= 0)
+                return false;
+
+            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
+            NativeArray<float3> positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
+            NativeArray<float3> velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
+            NativeArray<float> remainingLifetimes =
+                common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
+
+            float3 gravityValue = ToFloat3(gravity);
+            for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
+            {
+                works.Add(new VividParticleEcsIntegratePageWork
+                {
+                    Page = m_Line.GetPageInfo(pageIndex),
+                    DeltaTime = deltaTime,
+                    Gravity = gravityValue,
+                    PositionLength = positions.Length,
+                    Positions = (float3*)positions.GetUnsafePtr(),
+                    Velocities = (float3*)velocities.GetUnsafePtr(),
+                    RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
+                    KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
+                });
+            }
+
             return true;
         }
 

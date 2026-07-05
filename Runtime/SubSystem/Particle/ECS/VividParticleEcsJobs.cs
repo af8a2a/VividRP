@@ -7,6 +7,26 @@ using VividRP.Runtime.ECS;
 
 namespace VividRP.Runtime.Particle.ECS
 {
+    internal unsafe struct VividParticleEcsIntegratePageWork
+    {
+        public VividEcsPageInfo Page;
+        public float DeltaTime;
+        public float3 Gravity;
+        public int PositionLength;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* Positions;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* Velocities;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* RemainingLifetimes;
+
+        [NativeDisableUnsafePtrRestriction]
+        public byte* KeepMask;
+    }
+
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct VividParticleEcsIntegrateJob : IJob
     {
@@ -96,6 +116,35 @@ namespace VividRP.Runtime.Particle.ECS
                 Positions[index] += velocity * DeltaTime;
                 RemainingLifetimes[index] = remainingLifetime;
                 KeepMask[index] = 1;
+            }
+        }
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal unsafe struct VividParticleEcsIntegratePageWorksJob : IJobParallelFor
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleEcsIntegratePageWork> Works;
+
+        public void Execute(int workIndex)
+        {
+            VividParticleEcsIntegratePageWork work = Works[workIndex];
+            VividEcsPageInfo page = work.Page;
+            int pageEnd = math.min(page.StartIndex + page.EntryCount, work.PositionLength);
+            for (int index = page.StartIndex; index < pageEnd; index++)
+            {
+                float remainingLifetime = work.RemainingLifetimes[index] - work.DeltaTime;
+                if (remainingLifetime <= 0.0f)
+                {
+                    work.KeepMask[index] = 0;
+                    continue;
+                }
+
+                float3 velocity = work.Velocities[index] + work.Gravity * work.DeltaTime;
+                work.Velocities[index] = velocity;
+                work.Positions[index] += velocity * work.DeltaTime;
+                work.RemainingLifetimes[index] = remainingLifetime;
+                work.KeepMask[index] = 1;
             }
         }
     }

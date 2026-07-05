@@ -59,7 +59,11 @@ namespace VividRP.Runtime.Particle
         private static readonly List<ParticleSystemState> s_PreparedSimulationStates = new();
         private static readonly List<VividParticleSystemFrameSnapshot> s_PreparedSimulationSnapshots = new();
         private static readonly VividParticleRendererManager s_RendererManager = new();
+        private static NativeList<VividParticleEcsIntegratePageWork> s_SimulationPageWorks;
+        private static JobHandle s_PendingSimulationBatchHandle;
         private static bool s_Initialized;
+        private static bool s_HasPendingSimulationBatch;
+        private static bool s_ApplyingPendingSimulations;
         private static int s_LastPlayerLoopFrame = -1;
         private static int s_LastRendererUpdateFrame = -1;
         private static int s_LastCompleteAndUploadFrame = -1;
@@ -407,6 +411,12 @@ namespace VividRP.Runtime.Particle
             s_ActiveSimulationIndices.Clear();
             s_PreparedSimulationStates.Clear();
             s_PreparedSimulationSnapshots.Clear();
+            if (s_SimulationPageWorks.IsCreated)
+                s_SimulationPageWorks.Dispose();
+            s_SimulationPageWorks = default;
+            s_PendingSimulationBatchHandle = default;
+            s_HasPendingSimulationBatch = false;
+            s_ApplyingPendingSimulations = false;
             s_RendererManager.Dispose();
             s_LastPlayerLoopFrame = -1;
             s_LastRendererUpdateFrame = -1;
@@ -745,15 +755,37 @@ namespace VividRP.Runtime.Particle
             }
 
             bool scheduledAnyJob = false;
+            bool scheduledAnySimulation = false;
             using (s_KickScheduleSimulationJobsMarker.Auto())
             {
+                EnsureSimulationPageWorkList();
+                s_SimulationPageWorks.Clear();
                 for (int index = 0; index < s_PreparedSimulationStates.Count; index++)
-                    scheduledAnyJob |= s_PreparedSimulationStates[index].ScheduleAutomatic(s_PreparedSimulationSnapshots[index]);
+                {
+                    scheduledAnySimulation |= s_PreparedSimulationStates[index].ScheduleAutomaticBatch(
+                        s_PreparedSimulationSnapshots[index],
+                        s_SimulationPageWorks);
+                }
+
+                if (s_SimulationPageWorks.Length > 0)
+                {
+                    var integrateJob = new VividParticleEcsIntegratePageWorksJob
+                    {
+                        Works = s_SimulationPageWorks.AsArray(),
+                    };
+                    s_PendingSimulationBatchHandle = integrateJob.Schedule(s_SimulationPageWorks.Length, innerloopBatchCount: 1);
+                    s_HasPendingSimulationBatch = true;
+                    scheduledAnyJob = true;
+                }
             }
 
             if (scheduledAnyJob)
             {
                 JobHandle.ScheduleBatchedJobs();
+            }
+
+            if (scheduledAnySimulation)
+            {
                 s_LastRendererUpdateFrame = -1;
                 s_LastCompleteAndUploadFrame = -1;
             }
@@ -762,15 +794,27 @@ namespace VividRP.Runtime.Particle
             RequestEditorRenderUpdateForActiveSystems();
         }
 
+        private static void EnsureSimulationPageWorkList()
+        {
+            if (!s_SimulationPageWorks.IsCreated)
+                s_SimulationPageWorks = new NativeList<VividParticleEcsIntegratePageWork>(64, Allocator.Persistent);
+        }
+
         private static void CompletePendingSimulations()
         {
-            if (s_ActiveSimulationStates.Count == 0)
+            if (s_ActiveSimulationStates.Count == 0 && !s_HasPendingSimulationBatch)
                 return;
 
             using (s_KickCompleteSimulationMarker.Auto())
             {
                 JobHandle combinedHandle = default;
                 bool hasJob = false;
+                if (s_HasPendingSimulationBatch)
+                {
+                    combinedHandle = s_PendingSimulationBatchHandle;
+                    hasJob = true;
+                }
+
                 for (int index = 0; index < s_ActiveSimulationStates.Count; index++)
                 {
                     ParticleSystemState state = s_ActiveSimulationStates[index];
@@ -786,14 +830,27 @@ namespace VividRP.Runtime.Particle
                 if (hasJob)
                     combinedHandle.Complete();
 
-                for (int index = s_ActiveSimulationStates.Count - 1; index >= 0; index--)
-                {
-                    ParticleSystemState state = s_ActiveSimulationStates[index];
-                    if (state == null)
-                        continue;
+                s_PendingSimulationBatchHandle = default;
+                s_HasPendingSimulationBatch = false;
+                if (s_SimulationPageWorks.IsCreated)
+                    s_SimulationPageWorks.Clear();
 
-                    state.ApplyPendingSimulationResult();
-                    RefreshActiveSimulationState(state);
+                s_ApplyingPendingSimulations = true;
+                try
+                {
+                    for (int index = s_ActiveSimulationStates.Count - 1; index >= 0; index--)
+                    {
+                        ParticleSystemState state = s_ActiveSimulationStates[index];
+                        if (state == null)
+                            continue;
+
+                        state.ApplyPendingSimulationResult();
+                        RefreshActiveSimulationState(state);
+                    }
+                }
+                finally
+                {
+                    s_ApplyingPendingSimulations = false;
                 }
             }
         }
@@ -1215,6 +1272,7 @@ namespace VividRP.Runtime.Particle
             private bool m_ResourcesDirty = true;
             private bool m_MissingShaderWarningLogged;
             private bool m_HasPendingJob;
+            private bool m_HasPendingStandaloneJob;
             private bool m_HasPendingSimulation;
             private bool m_PendingAllowEmission;
             private bool m_BoundsDirty = true;
@@ -1254,7 +1312,7 @@ namespace VividRP.Runtime.Particle
 
             internal bool hasPendingSimulation => m_HasPendingSimulation || m_HasPendingJob;
 
-            internal bool hasPendingSimulationJob => m_HasPendingJob;
+            internal bool hasPendingSimulationJob => m_HasPendingStandaloneJob;
 
             internal JobHandle pendingSimulationJob => m_PendingJob;
 
@@ -1403,6 +1461,16 @@ namespace VividRP.Runtime.Particle
                 return ScheduleSimulation(snapshot, snapshot.IsPlaying && !snapshot.StopEmitting);
             }
 
+            public bool ScheduleAutomaticBatch(
+                VividParticleSystemFrameSnapshot snapshot,
+                NativeList<VividParticleEcsIntegratePageWork> pageWorks)
+            {
+                if (!RequiresAutomaticUpdate(snapshot, requireActive: true))
+                    return false;
+
+                return ScheduleSimulationBatch(snapshot, snapshot.IsPlaying && !snapshot.StopEmitting, pageWorks);
+            }
+
             public VividParticleSystemFrameSnapshot CaptureFrameSnapshot(float deltaTime)
             {
                 return m_System != null
@@ -1500,10 +1568,13 @@ namespace VividRP.Runtime.Particle
 
             public void CompletePending()
             {
+                if (!s_ApplyingPendingSimulations)
+                    VividParticleSystemManager.CompletePendingSimulations();
+
                 if (!m_HasPendingSimulation && !m_HasPendingJob)
                     return;
 
-                if (m_HasPendingJob)
+                if (m_HasPendingStandaloneJob)
                 {
                     m_PendingJob.Complete();
                 }
@@ -1520,6 +1591,7 @@ namespace VividRP.Runtime.Particle
                 {
                     int previousActiveCount = activeCount;
                     m_PendingJob = default;
+                    m_HasPendingStandaloneJob = false;
                     m_HasPendingJob = false;
                     m_Storage.ApplyScheduledIntegrateResult();
                     MarkInstanceRangeDirty(0, previousActiveCount);
@@ -1552,6 +1624,7 @@ namespace VividRP.Runtime.Particle
                     m_PendingJob.Complete();
                     m_PendingJob = default;
                     m_HasPendingJob = false;
+                    m_HasPendingStandaloneJob = false;
                     CompletedJobCount++;
                     LastCompletedFrame = Time.frameCount;
                     m_Storage.ApplyScheduledIntegrateResult();
@@ -2083,6 +2156,38 @@ namespace VividRP.Runtime.Particle
                 return ScheduleIntegrateViaRegistry(snapshot);
             }
 
+            private bool ScheduleSimulationBatch(
+                VividParticleSystemFrameSnapshot snapshot,
+                bool allowEmission,
+                NativeList<VividParticleEcsIntegratePageWork> pageWorks)
+            {
+                EnsureStorageCapacity(snapshot.MaxParticles);
+
+                m_PendingSnapshot = snapshot;
+                m_PendingAllowEmission = allowEmission;
+                m_HasPendingSimulation = true;
+                m_PendingFrame = Time.frameCount;
+                m_PendingJob = default;
+                m_HasPendingStandaloneJob = false;
+                m_HasPendingJob = false;
+
+                if (m_Storage.AddIntegratePageWorks(
+                    snapshot.DeltaTime,
+                    Vector3.down * (GravityAcceleration * snapshot.GravityModifier),
+                    pageWorks))
+                {
+                    m_HasPendingJob = true;
+                    ScheduledJobCount++;
+                    LastScheduledFrame = Time.frameCount;
+                }
+                else
+                {
+                    LastScheduledFrame = Time.frameCount;
+                }
+
+                return true;
+            }
+
             internal bool CanScheduleIntegrateJob(VividParticleSystemFrameSnapshot snapshot)
             {
                 return m_Storage.isCreated && activeCount > 0 && snapshot.DeltaTime > 0.0f;
@@ -2102,6 +2207,7 @@ namespace VividRP.Runtime.Particle
                 }
 
                 m_HasPendingJob = true;
+                m_HasPendingStandaloneJob = true;
                 ScheduledJobCount++;
                 LastScheduledFrame = Time.frameCount;
                 return handle;
@@ -2111,6 +2217,7 @@ namespace VividRP.Runtime.Particle
             {
                 m_PendingJob = default;
                 m_HasPendingJob = false;
+                m_HasPendingStandaloneJob = false;
 
                 var context = new ParticleSimulationJobContext(this, snapshot);
                 JobHandle scheduledHandle = s_SimulationJobRegistry.ScheduleEnabled(
@@ -2123,6 +2230,7 @@ namespace VividRP.Runtime.Particle
                 }
 
                 m_PendingJob = scheduledHandle;
+                m_HasPendingStandaloneJob = true;
                 return true;
             }
 

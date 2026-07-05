@@ -41,6 +41,7 @@ namespace VividRP.Runtime.Particle
         private const float MaximumEditorSimulationStep = 0.1f;
 
         private static readonly ProfilerMarker s_PlayerLoopKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick");
+        private static readonly ProfilerMarker s_RendererUpdateMarker = new("VividRP.PlayerLoop.PostLateUpdate/VividParticleSystemManager.RendererUpdate");
         private static readonly ProfilerMarker s_BeginCameraCompleteMarker = new("VividRP.RenderPipeline.BeginCameraRendering/VividParticleSystemManager.Complete");
         private static readonly ProfilerMarker s_ManualDrainMarker = new("VividRP.Particle.Manager.ManualDrain");
         private static readonly ProfilerMarker s_BRGUploadMarker = new("VividRP.Particle.Manager.BRGUpload");
@@ -51,6 +52,7 @@ namespace VividRP.Runtime.Particle
         private static readonly VividParticleRendererManager s_RendererManager = new();
         private static bool s_Initialized;
         private static int s_LastPlayerLoopFrame = -1;
+        private static int s_LastRendererUpdateFrame = -1;
         private static int s_LastCompleteAndUploadFrame = -1;
 
         public static int registeredSystemCount => s_States.Count;
@@ -359,10 +361,19 @@ namespace VividRP.Runtime.Particle
             PlayerLoopKick(deltaTime);
         }
 
+        internal static void RunRendererUpdateForTests()
+        {
+            RendererUpdateKick();
+        }
+
+        internal static void CompletePendingRendererUploadForTests()
+        {
+            CompletePendingUploadForRendering(oncePerFrame: false);
+        }
+
         internal static void CompleteAndUploadForTests()
         {
             CompleteAndUploadAll(forceUpload: true, oncePerFrame: false);
-            s_RendererManager.CompletePendingUpload();
         }
 
         internal static void ClearForTests()
@@ -373,6 +384,7 @@ namespace VividRP.Runtime.Particle
             s_States.Clear();
             s_RendererManager.Dispose();
             s_LastPlayerLoopFrame = -1;
+            s_LastRendererUpdateFrame = -1;
             s_LastCompleteAndUploadFrame = -1;
         }
 
@@ -623,7 +635,10 @@ namespace VividRP.Runtime.Particle
                 if (s_LastPlayerLoopFrame != Time.frameCount)
                     ScheduleAutomaticUpdates(null);
 
-                CompleteAndUploadAll(forceUpload: false, oncePerFrame: true);
+                if (s_LastRendererUpdateFrame != Time.frameCount)
+                    ScheduleRendererUpdate(forceUpload: false, oncePerFrame: true);
+
+                CompletePendingUploadForRendering(oncePerFrame: true);
             }
         }
 
@@ -643,6 +658,17 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        private static void RendererUpdateKick()
+        {
+            if (s_States.Count == 0)
+                return;
+
+            using (s_RendererUpdateMarker.Auto())
+            {
+                ScheduleRendererUpdate(forceUpload: false, oncePerFrame: true);
+            }
+        }
+
         private static void ScheduleAutomaticUpdates(float? deltaTimeOverride)
         {
             bool scheduledAnyJob = false;
@@ -654,7 +680,11 @@ namespace VividRP.Runtime.Particle
                 scheduledAnyJob |= pair.Value.ScheduleAutomatic(deltaTimeOverride, requireActive: true);
 
             if (scheduledAnyJob)
+            {
                 JobHandle.ScheduleBatchedJobs();
+                s_LastRendererUpdateFrame = -1;
+                s_LastCompleteAndUploadFrame = -1;
+            }
 
             s_LastPlayerLoopFrame = Time.frameCount;
             RequestEditorRenderUpdateForActiveSystems();
@@ -662,21 +692,38 @@ namespace VividRP.Runtime.Particle
 
         private static void CompleteAndUploadAll(bool forceUpload, bool oncePerFrame)
         {
-            if (oncePerFrame && s_LastCompleteAndUploadFrame == Time.frameCount)
-            {
-                s_RendererManager.CompletePendingUpload();
-                s_RendererManager.DrainCullingResults();
-                return;
-            }
+            ScheduleRendererUpdate(forceUpload, oncePerFrame);
+            CompletePendingUploadForRendering(oncePerFrame);
+        }
 
+        private static void ScheduleRendererUpdate(bool forceUpload, bool oncePerFrame)
+        {
+            if (oncePerFrame && s_LastRendererUpdateFrame == Time.frameCount)
+                return;
+
+            s_RendererManager.CompletePendingUpload();
             foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
                 pair.Value.CompletePending();
 
             using (s_BRGUploadMarker.Auto())
             {
                 s_RendererManager.UpdateAll(s_States, forceUpload);
-                s_RendererManager.CompletePendingUpload();
             }
+
+            s_LastRendererUpdateFrame = Time.frameCount;
+            s_LastCompleteAndUploadFrame = -1;
+            RequestEditorRenderUpdateForActiveSystems();
+        }
+
+        private static void CompletePendingUploadForRendering(bool oncePerFrame)
+        {
+            if (oncePerFrame && s_LastCompleteAndUploadFrame == Time.frameCount)
+            {
+                s_RendererManager.DrainCullingResults();
+                return;
+            }
+
+            s_RendererManager.CompletePendingUpload();
 
             s_RendererManager.DrainCullingResults();
             s_LastCompleteAndUploadFrame = Time.frameCount;
@@ -687,10 +734,12 @@ namespace VividRP.Runtime.Particle
             if (state == null)
                 return;
 
+            s_RendererManager.CompletePendingUpload();
             using (s_BRGUploadMarker.Auto())
             {
                 s_RendererManager.Update(state, forceUpload);
             }
+            s_LastCompleteAndUploadFrame = -1;
         }
 
         private static void InsertIntoPlayerLoop()
@@ -699,10 +748,32 @@ namespace VividRP.Runtime.Particle
             if (rootLoop.subSystemList == null)
                 return;
 
+            bool changed = InsertPlayerLoopSystem(
+                ref rootLoop,
+                typeof(PreLateUpdate),
+                typeof(VividParticleSystemManagerPlayerLoopMarker),
+                PlayerLoopKick);
+
+            changed |= InsertPlayerLoopSystem(
+                ref rootLoop,
+                typeof(PostLateUpdate),
+                typeof(VividParticleSystemManagerRendererUpdateMarker),
+                RendererUpdateKick);
+
+            if (changed)
+                PlayerLoop.SetPlayerLoop(rootLoop);
+        }
+
+        private static bool InsertPlayerLoopSystem(
+            ref PlayerLoopSystem rootLoop,
+            Type parentType,
+            Type markerType,
+            PlayerLoopSystem.UpdateFunction updateFunction)
+        {
             for (int index = 0; index < rootLoop.subSystemList.Length; index++)
             {
                 PlayerLoopSystem subSystem = rootLoop.subSystemList[index];
-                if (subSystem.type != typeof(PreLateUpdate))
+                if (subSystem.type != parentType)
                     continue;
 
                 PlayerLoopSystem[] nestedSystems = subSystem.subSystemList ?? Array.Empty<PlayerLoopSystem>();
@@ -710,28 +781,30 @@ namespace VividRP.Runtime.Particle
                 bool alreadyPresent = false;
                 foreach (PlayerLoopSystem nestedSystem in nestedSystems)
                 {
-                    if (nestedSystem.type == typeof(VividParticleSystemManagerPlayerLoopMarker))
+                    if (nestedSystem.type == markerType)
                         alreadyPresent = true;
                     updatedSubSystems.Add(nestedSystem);
                 }
 
                 if (!alreadyPresent)
-                    updatedSubSystems.Add(CreatePlayerLoopSystem());
+                    updatedSubSystems.Add(CreatePlayerLoopSystem(markerType, updateFunction));
 
                 subSystem.subSystemList = updatedSubSystems.ToArray();
                 rootLoop.subSystemList[index] = subSystem;
-                break;
+                return !alreadyPresent;
             }
 
-            PlayerLoop.SetPlayerLoop(rootLoop);
+            return false;
         }
 
-        private static PlayerLoopSystem CreatePlayerLoopSystem()
+        private static PlayerLoopSystem CreatePlayerLoopSystem(
+            Type markerType,
+            PlayerLoopSystem.UpdateFunction updateFunction)
         {
             return new PlayerLoopSystem
             {
-                type = typeof(VividParticleSystemManagerPlayerLoopMarker),
-                updateDelegate = PlayerLoopKick,
+                type = markerType,
+                updateDelegate = updateFunction,
             };
         }
 
@@ -3841,7 +3914,6 @@ namespace VividRP.Runtime.Particle
                 Dictionary<VividParticleSystem, ParticleSystemState> states,
                 bool forceUpload)
             {
-                CompletePendingUpload();
                 m_SeenStates.Clear();
                 foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in states)
                 {
@@ -3871,7 +3943,6 @@ namespace VividRP.Runtime.Particle
                 if (state == null)
                     return;
 
-                CompletePendingUpload();
                 UpdateRecord(state, forceUpload);
                 Commit();
             }
@@ -3951,8 +4022,6 @@ namespace VividRP.Runtime.Particle
 
             private void Commit()
             {
-                CompletePendingUpload();
-
                 if (m_LayoutDirty)
                     RebuildBatches();
 
@@ -6151,6 +6220,10 @@ namespace VividRP.Runtime.Particle
         }
 
         private sealed class VividParticleSystemManagerPlayerLoopMarker
+        {
+        }
+
+        private sealed class VividParticleSystemManagerRendererUpdateMarker
         {
         }
 

@@ -910,6 +910,39 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_RendererUpdateSchedulesUpload_AndCompleteFinalizesIt()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.rendererModule.enabled = true;
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            VividParticleSystemManager.GetRendererStatsForTests();
+            system.Play(withChildren: false);
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.HasPendingRendererUploadForTests(), Is.False);
+
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            Assert.That(VividParticleSystemManager.HasPendingRendererUploadForTests(), Is.True);
+
+            VividParticleSystemManager.CompletePendingRendererUploadForTests();
+
+            Assert.That(VividParticleSystemManager.HasPendingRendererUploadForTests(), Is.False);
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+            Assert.That(rendererStats.LastUploadColumnWorkCount, Is.GreaterThan(0));
+            Assert.That(rendererStats.LastCopyOperationCount, Is.GreaterThan(0));
+        }
+
+        [Test]
         public void Manager_Upload_ExpandsDirtyRangeIntoPageColumnWorks()
         {
             VividParticleSystem system = CreateSystem();

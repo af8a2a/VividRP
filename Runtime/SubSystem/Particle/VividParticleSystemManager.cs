@@ -41,10 +41,11 @@ namespace VividRP.Runtime.Particle
         private const float MaximumEditorSimulationStep = 0.1f;
 
         private static readonly ProfilerMarker s_PlayerLoopKickMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick");
-        private static readonly ProfilerMarker s_RendererUpdateMarker = new("VividRP.PlayerLoop.PostLateUpdate/VividParticleSystemManager.RendererUpdate");
+        private static readonly ProfilerMarker s_RendererUpdateMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.RendererUpdate");
         private static readonly ProfilerMarker s_BeginCameraCompleteMarker = new("VividRP.RenderPipeline.BeginCameraRendering/VividParticleSystemManager.Complete");
         private static readonly ProfilerMarker s_ManualDrainMarker = new("VividRP.Particle.Manager.ManualDrain");
-        private static readonly ProfilerMarker s_BRGUploadMarker = new("VividRP.Particle.Manager.BRGUpload");
+        private static readonly ProfilerMarker s_BRGUploadUpdateAllMarker = new("VividRP.Particle.Manager.BRGUpload.UpdateAll");
+        private static readonly ProfilerMarker s_BRGUploadUpdateOneMarker = new("VividRP.Particle.Manager.BRGUpload.UpdateOne");
 
         private static readonly VividEcsManagerJobRegistry<ParticleSimulationJobContext> s_SimulationJobRegistry =
             CreateSimulationJobRegistry();
@@ -705,7 +706,7 @@ namespace VividRP.Runtime.Particle
             foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in s_States)
                 pair.Value.CompletePending();
 
-            using (s_BRGUploadMarker.Auto())
+            using (s_BRGUploadUpdateAllMarker.Auto())
             {
                 s_RendererManager.UpdateAll(s_States, forceUpload);
             }
@@ -735,7 +736,7 @@ namespace VividRP.Runtime.Particle
                 return;
 
             s_RendererManager.CompletePendingUpload();
-            using (s_BRGUploadMarker.Auto())
+            using (s_BRGUploadUpdateOneMarker.Auto())
             {
                 s_RendererManager.Update(state, forceUpload);
             }
@@ -748,17 +749,36 @@ namespace VividRP.Runtime.Particle
             if (rootLoop.subSystemList == null)
                 return;
 
-            bool changed = InsertPlayerLoopSystem(
+            bool changed = RemovePlayerLoopSystem(
                 ref rootLoop,
+                typeof(VividParticleSystemManagerPlayerLoopMarker));
+
+            changed |= RemovePlayerLoopSystem(
+                ref rootLoop,
+                typeof(VividParticleSystemManagerRendererUpdateMarker));
+
+            Type lateUpdateAnchorType = ResolvePlayerLoopNestedType(
                 typeof(PreLateUpdate),
-                typeof(VividParticleSystemManagerPlayerLoopMarker),
-                PlayerLoopKick);
+                "ScriptRunBehaviourLateUpdate");
+            Type rendererAnchorType = ResolvePlayerLoopNestedType(
+                typeof(PreLateUpdate),
+                "UpdateAllRenderers");
 
             changed |= InsertPlayerLoopSystem(
                 ref rootLoop,
-                typeof(PostLateUpdate),
+                typeof(PreLateUpdate),
+                typeof(VividParticleSystemManagerPlayerLoopMarker),
+                PlayerLoopKick,
+                insertAfterType: lateUpdateAnchorType,
+                insertBeforeType: null);
+
+            changed |= InsertPlayerLoopSystem(
+                ref rootLoop,
+                typeof(PreLateUpdate),
                 typeof(VividParticleSystemManagerRendererUpdateMarker),
-                RendererUpdateKick);
+                RendererUpdateKick,
+                insertAfterType: null,
+                insertBeforeType: rendererAnchorType);
 
             if (changed)
                 PlayerLoop.SetPlayerLoop(rootLoop);
@@ -768,7 +788,9 @@ namespace VividRP.Runtime.Particle
             ref PlayerLoopSystem rootLoop,
             Type parentType,
             Type markerType,
-            PlayerLoopSystem.UpdateFunction updateFunction)
+            PlayerLoopSystem.UpdateFunction updateFunction,
+            Type insertAfterType,
+            Type insertBeforeType)
         {
             for (int index = 0; index < rootLoop.subSystemList.Length; index++)
             {
@@ -779,14 +801,34 @@ namespace VividRP.Runtime.Particle
                 PlayerLoopSystem[] nestedSystems = subSystem.subSystemList ?? Array.Empty<PlayerLoopSystem>();
                 var updatedSubSystems = new List<PlayerLoopSystem>(nestedSystems.Length + 1);
                 bool alreadyPresent = false;
+                bool inserted = false;
                 foreach (PlayerLoopSystem nestedSystem in nestedSystems)
                 {
                     if (nestedSystem.type == markerType)
                         alreadyPresent = true;
+
+                    if (!alreadyPresent
+                        && !inserted
+                        && insertBeforeType != null
+                        && nestedSystem.type == insertBeforeType)
+                    {
+                        updatedSubSystems.Add(CreatePlayerLoopSystem(markerType, updateFunction));
+                        inserted = true;
+                    }
+
                     updatedSubSystems.Add(nestedSystem);
+
+                    if (!alreadyPresent
+                        && !inserted
+                        && insertAfterType != null
+                        && nestedSystem.type == insertAfterType)
+                    {
+                        updatedSubSystems.Add(CreatePlayerLoopSystem(markerType, updateFunction));
+                        inserted = true;
+                    }
                 }
 
-                if (!alreadyPresent)
+                if (!alreadyPresent && !inserted)
                     updatedSubSystems.Add(CreatePlayerLoopSystem(markerType, updateFunction));
 
                 subSystem.subSystemList = updatedSubSystems.ToArray();
@@ -795,6 +837,49 @@ namespace VividRP.Runtime.Particle
             }
 
             return false;
+        }
+
+        private static bool RemovePlayerLoopSystem(
+            ref PlayerLoopSystem rootLoop,
+            Type markerType)
+        {
+            bool changed = false;
+            for (int index = 0; index < rootLoop.subSystemList.Length; index++)
+            {
+                PlayerLoopSystem subSystem = rootLoop.subSystemList[index];
+                PlayerLoopSystem[] nestedSystems = subSystem.subSystemList;
+                if (nestedSystems == null || nestedSystems.Length == 0)
+                    continue;
+
+                var updatedSubSystems = new List<PlayerLoopSystem>(nestedSystems.Length);
+                for (int nestedIndex = 0; nestedIndex < nestedSystems.Length; nestedIndex++)
+                {
+                    if (nestedSystems[nestedIndex].type == markerType)
+                    {
+                        changed = true;
+                        continue;
+                    }
+
+                    updatedSubSystems.Add(nestedSystems[nestedIndex]);
+                }
+
+                if (updatedSubSystems.Count == nestedSystems.Length)
+                    continue;
+
+                subSystem.subSystemList = updatedSubSystems.ToArray();
+                rootLoop.subSystemList[index] = subSystem;
+            }
+
+            return changed;
+        }
+
+        private static Type ResolvePlayerLoopNestedType(Type parentType, string nestedTypeName)
+        {
+            Type nestedType = parentType.GetNestedType(nestedTypeName);
+            if (nestedType != null)
+                return nestedType;
+
+            return Type.GetType(parentType.FullName + "+" + nestedTypeName + ", UnityEngine.CoreModule");
         }
 
         private static PlayerLoopSystem CreatePlayerLoopSystem(
@@ -3825,6 +3910,16 @@ namespace VividRP.Runtime.Particle
             private const int SharedDataWorkKindPerSharp = 1;
             private const int SharedDataWorkKindSpan = 2;
 
+            private static readonly ProfilerMarker s_UpdateRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.UpdateRecords");
+            private static readonly ProfilerMarker s_RemoveRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.RemoveRecords");
+            private static readonly ProfilerMarker s_CommitMarker = new("VividRP.Particle.Manager.BRGUpload.Commit");
+            private static readonly ProfilerMarker s_RefreshFastCullingFlagsMarker = new("VividRP.Particle.Manager.BRGUpload.RefreshFastCullingFlags");
+            private static readonly ProfilerMarker s_RebuildCullingLayoutMarker = new("VividRP.Particle.Manager.BRGUpload.RebuildCullingLayout");
+            private static readonly ProfilerMarker s_UploadCollectDirtyMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.CollectDirty");
+            private static readonly ProfilerMarker s_UploadLockBufferMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.LockBuffer");
+            private static readonly ProfilerMarker s_UploadBuildWorksMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.BuildWorks");
+            private static readonly ProfilerMarker s_UploadCopyWorkArraysMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.CopyWorkArrays");
+            private static readonly ProfilerMarker s_UploadScheduleJobsMarker = new("VividRP.Particle.Manager.BRGUpload.Upload.ScheduleJobs");
             private static readonly ProfilerMarker s_RebuildBatchesMarker = new("VividRP.Particle.Renderer.RebuildBatches");
             private static readonly ProfilerMarker s_UploadMarker = new("VividRP.Particle.Renderer.Upload");
             private static readonly ProfilerMarker s_CompleteUploadMarker = new("VividRP.Particle.Renderer.CompleteUpload");
@@ -3915,25 +4010,31 @@ namespace VividRP.Runtime.Particle
                 bool forceUpload)
             {
                 m_SeenStates.Clear();
-                foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in states)
+                using (s_UpdateRecordsMarker.Auto())
                 {
-                    ParticleSystemState state = pair.Value;
-                    if (state == null)
-                        continue;
+                    foreach (KeyValuePair<VividParticleSystem, ParticleSystemState> pair in states)
+                    {
+                        ParticleSystemState state = pair.Value;
+                        if (state == null)
+                            continue;
 
-                    m_SeenStates.Add(state);
-                    UpdateRecord(state, forceUpload);
+                        m_SeenStates.Add(state);
+                        UpdateRecord(state, forceUpload);
+                    }
                 }
 
-                m_RemoveRecords.Clear();
-                foreach (ParticleRenderRecord record in m_Records.Values)
+                using (s_RemoveRecordsMarker.Auto())
                 {
-                    if (!m_SeenStates.Contains(record.State))
-                        m_RemoveRecords.Add(record);
-                }
+                    m_RemoveRecords.Clear();
+                    foreach (ParticleRenderRecord record in m_Records.Values)
+                    {
+                        if (!m_SeenStates.Contains(record.State))
+                            m_RemoveRecords.Add(record);
+                    }
 
-                for (int index = 0; index < m_RemoveRecords.Count; index++)
-                    RemoveRecord(m_RemoveRecords[index].State);
+                    for (int index = 0; index < m_RemoveRecords.Count; index++)
+                        RemoveRecord(m_RemoveRecords[index].State);
+                }
 
                 Commit();
             }
@@ -3943,7 +4044,11 @@ namespace VividRP.Runtime.Particle
                 if (state == null)
                     return;
 
-                UpdateRecord(state, forceUpload);
+                using (s_UpdateRecordsMarker.Auto())
+                {
+                    UpdateRecord(state, forceUpload);
+                }
+
                 Commit();
             }
 
@@ -4022,109 +4127,118 @@ namespace VividRP.Runtime.Particle
 
             private void Commit()
             {
-                if (m_LayoutDirty)
-                    RebuildBatches();
+                using (s_CommitMarker.Auto())
+                {
+                    if (m_LayoutDirty)
+                        RebuildBatches();
 
-                RefreshFastCullingFlags();
-                RebuildNativeCullingLayout();
-                ScheduleUpload();
+                    RefreshFastCullingFlags();
+                    RebuildNativeCullingLayout();
+                    ScheduleUpload();
+                }
             }
 
             private void RefreshFastCullingFlags()
             {
-                m_AnyShadowCastingBatch = false;
-                for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
+                using (s_RefreshFastCullingFlagsMarker.Auto())
                 {
-                    if (m_DrawBatches[batchIndex].ShadowCastingMode == ShadowCastingMode.Off)
-                        continue;
+                    m_AnyShadowCastingBatch = false;
+                    for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
+                    {
+                        if (m_DrawBatches[batchIndex].ShadowCastingMode == ShadowCastingMode.Off)
+                            continue;
 
-                    m_AnyShadowCastingBatch = true;
-                    break;
-                }
+                        m_AnyShadowCastingBatch = true;
+                        break;
+                    }
 
-                m_AnySelectedRecord = false;
-                foreach (ParticleRenderRecord record in m_Records.Values)
-                {
-                    if (!record.IsEditorSelected)
-                        continue;
+                    m_AnySelectedRecord = false;
+                    foreach (ParticleRenderRecord record in m_Records.Values)
+                    {
+                        if (!record.IsEditorSelected)
+                            continue;
 
-                    m_AnySelectedRecord = true;
-                    break;
+                        m_AnySelectedRecord = true;
+                        break;
+                    }
                 }
             }
 
             private void RebuildNativeCullingLayout()
             {
-                DrainCullingResults();
-                EnsureNativeCullingLayout();
-                m_NativeCullingRecords.Clear();
-                m_NativeDrawCommandInputs.Clear();
-                m_NativePickingDrawCommandInputs.Clear();
-                m_NativeVisibleInstanceCapacity = 0;
-                m_NativePickingVisibleInstanceCapacity = 0;
-                m_CullingRecords.Clear();
-
-                for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
+                using (s_RebuildCullingLayoutMarker.Auto())
                 {
-                    ParticleDrawBatch batch = m_DrawBatches[batchIndex];
-                    int layer = Mathf.Clamp(batch.Key.Layer, 0, 31);
-                    int batchRecordStart = m_NativeCullingRecords.Length;
-                    int batchMaxVisibleCount = 0;
-                    int batchVisibleOffset = m_NativeVisibleInstanceCapacity;
+                    DrainCullingResults();
+                    EnsureNativeCullingLayout();
+                    m_NativeCullingRecords.Clear();
+                    m_NativeDrawCommandInputs.Clear();
+                    m_NativePickingDrawCommandInputs.Clear();
+                    m_NativeVisibleInstanceCapacity = 0;
+                    m_NativePickingVisibleInstanceCapacity = 0;
+                    m_CullingRecords.Clear();
 
-                    for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
+                    for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
                     {
-                        ParticleRenderRecord record = batch.Records[recordIndex];
-                        int recordStart = m_NativeCullingRecords.Length;
-                        m_CullingRecords.Clear();
-                        int cullingRecordCount = record.State.AppendCullingRecords(
-                            record.BatchBaseIndex,
-                            record.SpanBaseIndex,
-                            batch.UsesPageBillboard,
-                            record.IsEditorSelected,
-                            m_CullingRecords);
-                        if (cullingRecordCount <= 0)
+                        ParticleDrawBatch batch = m_DrawBatches[batchIndex];
+                        int layer = Mathf.Clamp(batch.Key.Layer, 0, 31);
+                        int batchRecordStart = m_NativeCullingRecords.Length;
+                        int batchMaxVisibleCount = 0;
+                        int batchVisibleOffset = m_NativeVisibleInstanceCapacity;
+
+                        for (int recordIndex = 0; recordIndex < batch.Records.Count; recordIndex++)
+                        {
+                            ParticleRenderRecord record = batch.Records[recordIndex];
+                            int recordStart = m_NativeCullingRecords.Length;
+                            m_CullingRecords.Clear();
+                            int cullingRecordCount = record.State.AppendCullingRecords(
+                                record.BatchBaseIndex,
+                                record.SpanBaseIndex,
+                                batch.UsesPageBillboard,
+                                record.IsEditorSelected,
+                                m_CullingRecords);
+                            if (cullingRecordCount <= 0)
+                                continue;
+
+                            for (int cullingRecordIndex = 0; cullingRecordIndex < cullingRecordCount; cullingRecordIndex++)
+                                m_NativeCullingRecords.Add(m_CullingRecords[cullingRecordIndex]);
+
+                            int recordMaxVisibleCount = GetVisibleInstanceCount(record.RenderMode, record.ActiveCount);
+                            if (recordMaxVisibleCount <= 0)
+                                continue;
+
+                            ParticleDrawCommandInput pickingCommand = CreateDrawCommandInput(
+                                batch,
+                                recordStart,
+                                cullingRecordCount,
+                                m_NativePickingVisibleInstanceCapacity,
+                                recordMaxVisibleCount,
+                                layer,
+                                record.PickingEntityId,
+                                record.RequiresSortingPositions);
+                            m_NativePickingDrawCommandInputs.Add(pickingCommand);
+                            m_NativePickingVisibleInstanceCapacity += recordMaxVisibleCount;
+                            batchMaxVisibleCount += recordMaxVisibleCount;
+                        }
+
+                        int batchRecordCount = m_NativeCullingRecords.Length - batchRecordStart;
+                        if (batchRecordCount <= 0 || batchMaxVisibleCount <= 0)
                             continue;
 
-                        for (int cullingRecordIndex = 0; cullingRecordIndex < cullingRecordCount; cullingRecordIndex++)
-                            m_NativeCullingRecords.Add(m_CullingRecords[cullingRecordIndex]);
-
-                        int recordMaxVisibleCount = GetVisibleInstanceCount(record.RenderMode, record.ActiveCount);
-                        if (recordMaxVisibleCount <= 0)
-                            continue;
-
-                        ParticleDrawCommandInput pickingCommand = CreateDrawCommandInput(
+                        ParticleDrawCommandInput command = CreateDrawCommandInput(
                             batch,
-                            recordStart,
-                            cullingRecordCount,
-                            m_NativePickingVisibleInstanceCapacity,
-                            recordMaxVisibleCount,
+                            batchRecordStart,
+                            batchRecordCount,
+                            batchVisibleOffset,
+                            batchMaxVisibleCount,
                             layer,
-                            record.PickingEntityId,
-                            record.RequiresSortingPositions);
-                        m_NativePickingDrawCommandInputs.Add(pickingCommand);
-                        m_NativePickingVisibleInstanceCapacity += recordMaxVisibleCount;
-                        batchMaxVisibleCount += recordMaxVisibleCount;
+                            EntityId.None,
+                            batch.RequiresSortingPositions);
+                        m_NativeDrawCommandInputs.Add(command);
+                        m_NativeVisibleInstanceCapacity += batchMaxVisibleCount;
                     }
 
-                    int batchRecordCount = m_NativeCullingRecords.Length - batchRecordStart;
-                    if (batchRecordCount <= 0 || batchMaxVisibleCount <= 0)
-                        continue;
-
-                    ParticleDrawCommandInput command = CreateDrawCommandInput(
-                        batch,
-                        batchRecordStart,
-                        batchRecordCount,
-                        batchVisibleOffset,
-                        batchMaxVisibleCount,
-                        layer,
-                        EntityId.None,
-                        batch.RequiresSortingPositions);
-                    m_NativeDrawCommandInputs.Add(command);
-                    m_NativeVisibleInstanceCapacity += batchMaxVisibleCount;
+                    m_CullingRecords.Clear();
                 }
-
-                m_CullingRecords.Clear();
             }
 
             private void RebuildBatches()
@@ -4294,29 +4408,32 @@ namespace VividRP.Runtime.Particle
                 {
                     bool forceFullUpload = m_ForceFullUpload;
                     bool hasUpload = false;
-                    m_UploadWorks.Clear();
-                    m_UploadColumnWorks.Clear();
-                    m_SharedDataWorks.Clear();
-
-                    for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
+                    using (s_UploadCollectDirtyMarker.Auto())
                     {
-                        if (m_DrawBatches[batchIndex].ZeroBlockDirty)
-                            hasUpload = true;
-                    }
+                        m_UploadWorks.Clear();
+                        m_UploadColumnWorks.Clear();
+                        m_SharedDataWorks.Clear();
 
-                    foreach (ParticleRenderRecord record in m_Records.Values)
-                    {
-                        record.LastUploadOperationCount = 0;
-                        record.LastUploadByteCount = 0;
-                        if (record.State.TryGetUploadRange(forceFullUpload, out int startIndex, out int count))
+                        for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
                         {
-                            m_UploadWorks.Add(new ParticleUploadWork
+                            if (m_DrawBatches[batchIndex].ZeroBlockDirty)
+                                hasUpload = true;
+                        }
+
+                        foreach (ParticleRenderRecord record in m_Records.Values)
+                        {
+                            record.LastUploadOperationCount = 0;
+                            record.LastUploadByteCount = 0;
+                            if (record.State.TryGetUploadRange(forceFullUpload, out int startIndex, out int count))
                             {
-                                Record = record,
-                                StartIndex = startIndex,
-                                Count = count,
-                            });
-                            hasUpload = true;
+                                m_UploadWorks.Add(new ParticleUploadWork
+                                {
+                                    Record = record,
+                                    StartIndex = startIndex,
+                                    Count = count,
+                                });
+                                hasUpload = true;
+                            }
                         }
                     }
 
@@ -4328,7 +4445,12 @@ namespace VividRP.Runtime.Particle
                         return;
                     }
 
-                    byte* bufferBase = m_GPUBuffer.BeginWrite();
+                    byte* bufferBase;
+                    using (s_UploadLockBufferMarker.Auto())
+                    {
+                        bufferBase = m_GPUBuffer.BeginWrite();
+                    }
+
                     if (bufferBase == null)
                     {
                         PublishCleanStats();
@@ -4337,59 +4459,68 @@ namespace VividRP.Runtime.Particle
 
                     try
                     {
-                        AddBatchSharedDataWorks(bufferBase);
-
-                        for (int workIndex = 0; workIndex < m_UploadWorks.Count; workIndex++)
+                        using (s_UploadBuildWorksMarker.Auto())
                         {
-                            ParticleUploadWork work = m_UploadWorks[workIndex];
-                            ParticleRenderRecord record = work.Record;
-                            ParticleDrawBatch batch = record.Batch;
-                            int count = Mathf.Clamp(work.Count, 0, Mathf.Max(0, record.ActiveCount - work.StartIndex));
-                            if (count <= 0)
-                                continue;
+                            AddBatchSharedDataWorks(bufferBase);
 
-                            if (record.State.TryCreateRenderUploadSource(
-                                record.BatchBaseIndex,
-                                batch.Capacity,
-                                batch.DataOffset,
-                                bufferBase,
-                                out ParticleRenderUploadSource source))
+                            for (int workIndex = 0; workIndex < m_UploadWorks.Count; workIndex++)
                             {
-                                AddUploadColumnWorks(batch, source, work.StartIndex, count);
-                            }
+                                ParticleUploadWork work = m_UploadWorks[workIndex];
+                                ParticleRenderRecord record = work.Record;
+                                ParticleDrawBatch batch = record.Batch;
+                                int count = Mathf.Clamp(work.Count, 0, Mathf.Max(0, record.ActiveCount - work.StartIndex));
+                                if (count <= 0)
+                                    continue;
 
-                            AddRecordSharedDataWorks(bufferBase, batch, record, work.StartIndex, count);
+                                if (record.State.TryCreateRenderUploadSource(
+                                    record.BatchBaseIndex,
+                                    batch.Capacity,
+                                    batch.DataOffset,
+                                    bufferBase,
+                                    out ParticleRenderUploadSource source))
+                                {
+                                    AddUploadColumnWorks(batch, source, work.StartIndex, count);
+                                }
+
+                                AddRecordSharedDataWorks(bufferBase, batch, record, work.StartIndex, count);
+                            }
                         }
 
                         ClearPendingUploadViews();
                         if (m_UploadColumnWorks.Count > 0 || m_SharedDataWorks.Count > 0)
                         {
-                            if (m_UploadColumnWorks.Count > 0)
+                            using (s_UploadCopyWorkArraysMarker.Auto())
                             {
-                                EnsureUploadColumnWorkCapacity(m_UploadColumnWorks.Count);
-                                for (int workIndex = 0; workIndex < m_UploadColumnWorks.Count; workIndex++)
-                                    m_UploadColumnWorkBuffer[workIndex] = m_UploadColumnWorks[workIndex];
+                                if (m_UploadColumnWorks.Count > 0)
+                                {
+                                    EnsureUploadColumnWorkCapacity(m_UploadColumnWorks.Count);
+                                    for (int workIndex = 0; workIndex < m_UploadColumnWorks.Count; workIndex++)
+                                        m_UploadColumnWorkBuffer[workIndex] = m_UploadColumnWorks[workIndex];
 
-                                m_PendingUploadColumnWorks = m_UploadColumnWorkBuffer.GetSubArray(
-                                    0,
-                                    m_UploadColumnWorks.Count);
+                                    m_PendingUploadColumnWorks = m_UploadColumnWorkBuffer.GetSubArray(
+                                        0,
+                                        m_UploadColumnWorks.Count);
+                                }
+
+                                if (m_SharedDataWorks.Count > 0)
+                                {
+                                    EnsureSharedDataWorkCapacity(m_SharedDataWorks.Count);
+                                    for (int workIndex = 0; workIndex < m_SharedDataWorks.Count; workIndex++)
+                                        m_SharedDataWorkBuffer[workIndex] = m_SharedDataWorks[workIndex];
+
+                                    m_PendingSharedDataWorks = m_SharedDataWorkBuffer.GetSubArray(
+                                        0,
+                                        m_SharedDataWorks.Count);
+                                }
                             }
 
-                            if (m_SharedDataWorks.Count > 0)
+                            using (s_UploadScheduleJobsMarker.Auto())
                             {
-                                EnsureSharedDataWorkCapacity(m_SharedDataWorks.Count);
-                                for (int workIndex = 0; workIndex < m_SharedDataWorks.Count; workIndex++)
-                                    m_SharedDataWorkBuffer[workIndex] = m_SharedDataWorks[workIndex];
-
-                                m_PendingSharedDataWorks = m_SharedDataWorkBuffer.GetSubArray(
-                                    0,
-                                    m_SharedDataWorks.Count);
+                                m_PendingUploadHandle = VividParticleRenderJobPipeline.Schedule(
+                                    m_PendingUploadColumnWorks,
+                                    m_PendingSharedDataWorks);
+                                JobHandle.ScheduleBatchedJobs();
                             }
-
-                            m_PendingUploadHandle = VividParticleRenderJobPipeline.Schedule(
-                                m_PendingUploadColumnWorks,
-                                m_PendingSharedDataWorks);
-                            JobHandle.ScheduleBatchedJobs();
                         }
 
                         m_HasPendingUpload = true;

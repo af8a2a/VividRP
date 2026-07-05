@@ -1113,6 +1113,17 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.RequiresSortingPositionsByDefault(), Is.False);
             Assert.That(VividParticleSystemManager.RequiresSortingPositions(VividParticleSortMode.None), Is.False);
             Assert.That(VividParticleSystemManager.RequiresSortingPositions(VividParticleSortMode.ByDistance), Is.True);
+            Assert.That(
+                VividParticleSystemManager.ShouldWriteSortingPositionsForView(BatchCullingViewType.Camera),
+                Is.True);
+            Assert.That(
+                VividParticleSystemManager.ShouldWriteSortingPositionsForView(BatchCullingViewType.Light),
+                Is.False);
+            Assert.That(
+                VividParticleSystemManager.ShouldWriteSortingPositionsForView(BatchCullingViewType.Picking),
+                Is.False);
+            Assert.That(VividParticleSystemManager.ResolveAllDepthSortedFlag(false), Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.ResolveAllDepthSortedFlag(true), Is.EqualTo(1));
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 5), Is.True);
             Assert.That(VividParticleSystemManager.IsLayerVisibleInCullingMask(1u << 5, 4), Is.False);
             Assert.That(VividParticleSystemManager.IsPickingOrSelectionView(BatchCullingViewType.Picking), Is.True);
@@ -1124,6 +1135,15 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemManager.ShouldRenderBatchForView(ShadowCastingMode.On, BatchCullingViewType.Light),
                 Is.True);
+            Assert.That(
+                VividParticleSystemManager.ResolveSplitVisibilityMaskForView(BatchCullingViewType.Camera, 0b0011, 4),
+                Is.EqualTo(0xff));
+            Assert.That(
+                VividParticleSystemManager.ResolveSplitVisibilityMaskForView(BatchCullingViewType.Light, 0b0101, 4),
+                Is.EqualTo(0b0101));
+            Assert.That(
+                VividParticleSystemManager.ResolveSplitVisibilityMaskForView(BatchCullingViewType.Light, 0, 4),
+                Is.EqualTo(0));
 
             BatchDrawCommandFlags flags = VividParticleSystemManager.ResolveParticleDrawCommandFlags(
                 hasSortingPosition: true,

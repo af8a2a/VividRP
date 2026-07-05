@@ -156,7 +156,7 @@ Shader "VividRP/Particles/Unlit"
             #ifdef UNITY_DOTS_INSTANCING_ENABLED
                 static const uint VIVID_PARTICLE_PAGE_BASE_MASK = 0x00ffffffu;
                 static const uint VIVID_PARTICLE_PAGE_COUNT_SHIFT = 24u;
-                static const uint VIVID_PARTICLE_SHARED_DATA_STRIDE = 144u;
+                static const uint VIVID_PARTICLE_SHARED_DATA_STRIDE = 192u;
                 static const uint VIVID_PARTICLE_BASE_COLOR_BIT = 1u << 3u;
                 static const uint VIVID_PARTICLE_ROTATION_BIT = 1u << 4u;
                 static const uint VIVID_PARTICLE_VELOCITY_STRETCH_BIT = 1u << 5u;

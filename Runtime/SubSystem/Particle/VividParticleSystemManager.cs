@@ -4488,8 +4488,13 @@ namespace VividRP.Runtime.Particle
             public int SpanBaseIndex;
             public int BatchBaseIndex;
             public int ActiveCount;
+            public int Capacity;
             public int UsesPageBillboard;
             public int RenderMode;
+            public int RendererPriority;
+            public int ShadowCastingMode;
+            public int ReceiveShadows;
+            public int SortMode;
             public uint DataPerSharpBits;
             public float SizeScale;
             public float StretchLengthScale;
@@ -4599,6 +4604,20 @@ namespace VividRP.Runtime.Particle
             public EntityId PickingEntityId;
         }
 
+        private struct ParticleDrawRangeInput
+        {
+            public int DrawCommandsBegin;
+            public int DrawCommandsCount;
+            public int RendererPriority;
+            public uint RenderingLayerMask;
+            public int Layer;
+            public ShadowCastingMode ShadowCastingMode;
+            public MotionVectorGenerationMode MotionMode;
+            public int ReceiveShadows;
+            public int StaticShadowCaster;
+            public int AllDepthSorted;
+        }
+
         private readonly struct ParticleMaterialVariantKey : IEquatable<ParticleMaterialVariantKey>
         {
             public readonly int RenderMode;
@@ -4697,7 +4716,11 @@ namespace VividRP.Runtime.Particle
             private NativeList<ParticleGpuDataCopyWork> m_UploadCopyWorks;
             private NativeList<ParticleCullingRecord> m_NativeCullingRecords;
             private NativeList<ParticleDrawCommandInput> m_NativeDrawCommandInputs;
+            private NativeList<ParticleDrawRangeInput> m_NativeDrawRangeInputs;
             private NativeList<ParticleDrawCommandInput> m_NativePickingDrawCommandInputs;
+            private NativeList<ParticleDrawRangeInput> m_NativePickingDrawRangeInputs;
+            private NativeList<ParticleDrawCommandInput> m_NativeSelectionDrawCommandInputs;
+            private NativeList<ParticleDrawRangeInput> m_NativeSelectionDrawRangeInputs;
             private NativeList<ParticleBoundsPageWork> m_BoundsPageWorks;
             private NativeList<ParticleBoundsRecordReduceWork> m_BoundsRecordWorks;
             private NativeArray<ParticleBoundsData> m_BoundsPageResults;
@@ -4717,6 +4740,7 @@ namespace VividRP.Runtime.Particle
             private bool m_AnySelectedRecord;
             private int m_NativeVisibleInstanceCapacity;
             private int m_NativePickingVisibleInstanceCapacity;
+            private int m_NativeSelectionVisibleInstanceCapacity;
             private int m_TotalBufferByteSize;
             private uint m_PendingRenderJobFlags;
 
@@ -5158,9 +5182,14 @@ namespace VividRP.Runtime.Particle
                     EnsureNativeCullingLayout();
                     m_NativeCullingRecords.Clear();
                     m_NativeDrawCommandInputs.Clear();
+                    m_NativeDrawRangeInputs.Clear();
                     m_NativePickingDrawCommandInputs.Clear();
+                    m_NativePickingDrawRangeInputs.Clear();
+                    m_NativeSelectionDrawCommandInputs.Clear();
+                    m_NativeSelectionDrawRangeInputs.Clear();
                     m_NativeVisibleInstanceCapacity = 0;
                     m_NativePickingVisibleInstanceCapacity = 0;
+                    m_NativeSelectionVisibleInstanceCapacity = 0;
                     m_CullingRecords.Clear();
 
                     for (int batchIndex = 0; batchIndex < m_DrawBatches.Count; batchIndex++)
@@ -5201,8 +5230,29 @@ namespace VividRP.Runtime.Particle
                                 layer,
                                 record.PickingEntityId,
                                 record.RequiresSortingPositions);
-                            m_NativePickingDrawCommandInputs.Add(pickingCommand);
+                            AddDrawCommandWithRange(
+                                m_NativePickingDrawCommandInputs,
+                                m_NativePickingDrawRangeInputs,
+                                pickingCommand);
                             m_NativePickingVisibleInstanceCapacity += recordMaxVisibleCount;
+                            if (record.IsEditorSelected)
+                            {
+                                ParticleDrawCommandInput selectionCommand = CreateDrawCommandInput(
+                                    batch,
+                                    recordStart,
+                                    cullingRecordCount,
+                                    m_NativeSelectionVisibleInstanceCapacity,
+                                    recordMaxVisibleCount,
+                                    layer,
+                                    record.PickingEntityId,
+                                    record.RequiresSortingPositions);
+                                AddDrawCommandWithRange(
+                                    m_NativeSelectionDrawCommandInputs,
+                                    m_NativeSelectionDrawRangeInputs,
+                                    selectionCommand);
+                                m_NativeSelectionVisibleInstanceCapacity += recordMaxVisibleCount;
+                            }
+
                             batchMaxVisibleCount += recordMaxVisibleCount;
                         }
 
@@ -5219,7 +5269,10 @@ namespace VividRP.Runtime.Particle
                             layer,
                             EntityId.None,
                             batch.RequiresSortingPositions);
-                        m_NativeDrawCommandInputs.Add(command);
+                        AddDrawCommandWithRange(
+                            m_NativeDrawCommandInputs,
+                            m_NativeDrawRangeInputs,
+                            command);
                         m_NativeVisibleInstanceCapacity += batchMaxVisibleCount;
                     }
 
@@ -5709,8 +5762,20 @@ namespace VividRP.Runtime.Particle
                 if (!m_NativeDrawCommandInputs.IsCreated)
                     m_NativeDrawCommandInputs = new NativeList<ParticleDrawCommandInput>(16, Allocator.Persistent);
 
+                if (!m_NativeDrawRangeInputs.IsCreated)
+                    m_NativeDrawRangeInputs = new NativeList<ParticleDrawRangeInput>(16, Allocator.Persistent);
+
                 if (!m_NativePickingDrawCommandInputs.IsCreated)
                     m_NativePickingDrawCommandInputs = new NativeList<ParticleDrawCommandInput>(16, Allocator.Persistent);
+
+                if (!m_NativePickingDrawRangeInputs.IsCreated)
+                    m_NativePickingDrawRangeInputs = new NativeList<ParticleDrawRangeInput>(16, Allocator.Persistent);
+
+                if (!m_NativeSelectionDrawCommandInputs.IsCreated)
+                    m_NativeSelectionDrawCommandInputs = new NativeList<ParticleDrawCommandInput>(16, Allocator.Persistent);
+
+                if (!m_NativeSelectionDrawRangeInputs.IsCreated)
+                    m_NativeSelectionDrawRangeInputs = new NativeList<ParticleDrawRangeInput>(16, Allocator.Persistent);
             }
 
             private void DisposeNativeCullingLayout()
@@ -5721,14 +5786,31 @@ namespace VividRP.Runtime.Particle
                 if (m_NativeDrawCommandInputs.IsCreated)
                     m_NativeDrawCommandInputs.Dispose();
 
+                if (m_NativeDrawRangeInputs.IsCreated)
+                    m_NativeDrawRangeInputs.Dispose();
+
                 if (m_NativePickingDrawCommandInputs.IsCreated)
                     m_NativePickingDrawCommandInputs.Dispose();
 
+                if (m_NativePickingDrawRangeInputs.IsCreated)
+                    m_NativePickingDrawRangeInputs.Dispose();
+
+                if (m_NativeSelectionDrawCommandInputs.IsCreated)
+                    m_NativeSelectionDrawCommandInputs.Dispose();
+
+                if (m_NativeSelectionDrawRangeInputs.IsCreated)
+                    m_NativeSelectionDrawRangeInputs.Dispose();
+
                 m_NativeCullingRecords = default;
                 m_NativeDrawCommandInputs = default;
+                m_NativeDrawRangeInputs = default;
                 m_NativePickingDrawCommandInputs = default;
+                m_NativePickingDrawRangeInputs = default;
+                m_NativeSelectionDrawCommandInputs = default;
+                m_NativeSelectionDrawRangeInputs = default;
                 m_NativeVisibleInstanceCapacity = 0;
                 m_NativePickingVisibleInstanceCapacity = 0;
+                m_NativeSelectionVisibleInstanceCapacity = 0;
             }
 
             private void AddPendingUploadCopyOperations()
@@ -5858,8 +5940,13 @@ namespace VividRP.Runtime.Particle
                     ElementCount = 1,
                     SharpIndex = record.SharpIndex,
                     ActiveCount = record.ActiveCount,
+                    Capacity = record.Capacity,
                     UsesPageBillboard = batch.UsesPageBillboard ? 1 : 0,
                     RenderMode = (int)record.RenderMode,
+                    RendererPriority = record.Material != null ? record.Material.renderQueue : 0,
+                    ShadowCastingMode = (int)record.ShadowCastingMode,
+                    ReceiveShadows = record.ReceiveShadows ? 1 : 0,
+                    SortMode = (int)record.SortMode,
                     DataPerSharpBits = batch.GpuLayout.DataPerSharpBits,
                     SizeScale = record.SizeScale,
                     StretchLengthScale = record.StretchLengthScale,
@@ -6126,18 +6213,22 @@ namespace VividRP.Runtime.Particle
                     return default;
                 }
 
-                bool isPerRecordPickingView = IsPickingOrSelectionView(cullingContext.viewType);
-                NativeArray<ParticleDrawCommandInput> commands = isPerRecordPickingView
-                    ? (m_NativePickingDrawCommandInputs.IsCreated ? m_NativePickingDrawCommandInputs.AsArray() : default)
-                    : (m_NativeDrawCommandInputs.IsCreated ? m_NativeDrawCommandInputs.AsArray() : default);
+                SelectCullingDrawLayout(
+                    cullingContext.viewType,
+                    out NativeArray<ParticleDrawCommandInput> commands,
+                    out NativeArray<ParticleDrawRangeInput> ranges,
+                    out int visibleInstanceCount);
                 NativeArray<ParticleCullingRecord> cullingRecords = m_NativeCullingRecords.IsCreated
                     ? m_NativeCullingRecords.AsArray()
                     : default;
                 int drawCommandCount = commands.IsCreated ? commands.Length : 0;
-                int visibleInstanceCount = isPerRecordPickingView
-                    ? m_NativePickingVisibleInstanceCapacity
-                    : m_NativeVisibleInstanceCapacity;
-                if (drawCommandCount <= 0 || visibleInstanceCount <= 0 || !cullingRecords.IsCreated || cullingRecords.Length <= 0)
+                int drawRangeCount = ranges.IsCreated ? ranges.Length : 0;
+                bool isPickingView = cullingContext.viewType == BatchCullingViewType.Picking;
+                if (drawCommandCount <= 0
+                    || drawRangeCount <= 0
+                    || visibleInstanceCount <= 0
+                    || !cullingRecords.IsCreated
+                    || cullingRecords.Length <= 0)
                 {
                     WriteEmptyDrawCommands(cullingOutput);
                     return default;
@@ -6147,21 +6238,21 @@ namespace VividRP.Runtime.Particle
                 var draws = new BatchCullingOutputDrawCommands
                 {
                     drawCommandCount = drawCommandCount,
-                    drawRangeCount = drawCommandCount,
+                    drawRangeCount = drawRangeCount,
                     visibleInstanceCount = visibleInstanceCount,
                     drawCommands = (BatchDrawCommand*)UnsafeUtility.Malloc(
                         UnsafeUtility.SizeOf<BatchDrawCommand>() * drawCommandCount,
                         UnsafeUtility.AlignOf<long>(),
                         Allocator.TempJob),
                     drawRanges = (BatchDrawRange*)UnsafeUtility.Malloc(
-                        UnsafeUtility.SizeOf<BatchDrawRange>() * drawCommandCount,
+                        UnsafeUtility.SizeOf<BatchDrawRange>() * drawRangeCount,
                         UnsafeUtility.AlignOf<long>(),
                         Allocator.TempJob),
                     visibleInstances = (int*)UnsafeUtility.Malloc(
                         sizeof(int) * visibleInstanceCount,
                         UnsafeUtility.AlignOf<long>(),
                         Allocator.TempJob),
-                    drawCommandPickingEntityIds = isPerRecordPickingView
+                    drawCommandPickingEntityIds = isPickingView
                         ? (EntityId*)UnsafeUtility.Malloc(
                             UnsafeUtility.SizeOf<EntityId>() * drawCommandCount,
                             UnsafeUtility.AlignOf<long>(),
@@ -6187,6 +6278,7 @@ namespace VividRP.Runtime.Particle
                 var job = new ParticleDrawCommandOutputJob
                 {
                     Commands = commands,
+                    Ranges = ranges,
                     CullingRecords = cullingRecords,
                     CullingPlanePackets = cullingPlanePackets,
                     CullingSplits = cullingSplits,
@@ -6208,6 +6300,41 @@ namespace VividRP.Runtime.Particle
                     : combinedHandle;
                 m_HasPendingCullingOutput = true;
                 return combinedHandle;
+            }
+
+            private void SelectCullingDrawLayout(
+                BatchCullingViewType viewType,
+                out NativeArray<ParticleDrawCommandInput> commands,
+                out NativeArray<ParticleDrawRangeInput> ranges,
+                out int visibleInstanceCount)
+            {
+                if (viewType == BatchCullingViewType.Picking)
+                {
+                    commands = m_NativePickingDrawCommandInputs.IsCreated
+                        ? m_NativePickingDrawCommandInputs.AsArray()
+                        : default;
+                    ranges = m_NativePickingDrawRangeInputs.IsCreated
+                        ? m_NativePickingDrawRangeInputs.AsArray()
+                        : default;
+                    visibleInstanceCount = m_NativePickingVisibleInstanceCapacity;
+                    return;
+                }
+
+                if (viewType == BatchCullingViewType.SelectionOutline)
+                {
+                    commands = m_NativeSelectionDrawCommandInputs.IsCreated
+                        ? m_NativeSelectionDrawCommandInputs.AsArray()
+                        : default;
+                    ranges = m_NativeSelectionDrawRangeInputs.IsCreated
+                        ? m_NativeSelectionDrawRangeInputs.AsArray()
+                        : default;
+                    visibleInstanceCount = m_NativeSelectionVisibleInstanceCapacity;
+                    return;
+                }
+
+                commands = m_NativeDrawCommandInputs.IsCreated ? m_NativeDrawCommandInputs.AsArray() : default;
+                ranges = m_NativeDrawRangeInputs.IsCreated ? m_NativeDrawRangeInputs.AsArray() : default;
+                visibleInstanceCount = m_NativeVisibleInstanceCapacity;
             }
 
             private static ParticleDrawCommandInput CreateDrawCommandInput(
@@ -6244,6 +6371,65 @@ namespace VividRP.Runtime.Particle
                     MaterialId = batch.MaterialId,
                     PickingEntityId = pickingEntityId,
                 };
+            }
+
+            private static void AddDrawCommandWithRange(
+                NativeList<ParticleDrawCommandInput> commands,
+                NativeList<ParticleDrawRangeInput> ranges,
+                ParticleDrawCommandInput command)
+            {
+                int commandIndex = commands.Length;
+                commands.Add(command);
+                ParticleDrawRangeInput nextRange = CreateDrawRangeInput(command, commandIndex, drawCommandCount: 1);
+                if (ranges.Length > 0)
+                {
+                    int lastRangeIndex = ranges.Length - 1;
+                    ParticleDrawRangeInput lastRange = ranges[lastRangeIndex];
+                    if (CanMergeDrawRanges(lastRange, nextRange, commandIndex))
+                    {
+                        lastRange.DrawCommandsCount++;
+                        ranges[lastRangeIndex] = lastRange;
+                        return;
+                    }
+                }
+
+                ranges.Add(nextRange);
+            }
+
+            private static ParticleDrawRangeInput CreateDrawRangeInput(
+                ParticleDrawCommandInput command,
+                int drawCommandsBegin,
+                int drawCommandCount)
+            {
+                return new ParticleDrawRangeInput
+                {
+                    DrawCommandsBegin = drawCommandsBegin,
+                    DrawCommandsCount = drawCommandCount,
+                    RendererPriority = command.RendererPriority,
+                    RenderingLayerMask = command.RenderingLayerMask,
+                    Layer = command.Layer,
+                    ShadowCastingMode = command.ShadowCastingMode,
+                    MotionMode = command.MotionMode,
+                    ReceiveShadows = command.ReceiveShadows,
+                    StaticShadowCaster = command.StaticShadowCaster,
+                    AllDepthSorted = command.AllDepthSorted,
+                };
+            }
+
+            private static bool CanMergeDrawRanges(
+                ParticleDrawRangeInput left,
+                ParticleDrawRangeInput right,
+                int rightCommandIndex)
+            {
+                return left.DrawCommandsBegin + left.DrawCommandsCount == rightCommandIndex
+                    && left.RendererPriority == right.RendererPriority
+                    && left.RenderingLayerMask == right.RenderingLayerMask
+                    && left.Layer == right.Layer
+                    && left.ShadowCastingMode == right.ShadowCastingMode
+                    && left.MotionMode == right.MotionMode
+                    && left.ReceiveShadows == right.ReceiveShadows
+                    && left.StaticShadowCaster == right.StaticShadowCaster
+                    && left.AllDepthSorted == right.AllDepthSorted;
             }
 
             private static bool RequiresSortingPositions(NativeArray<ParticleDrawCommandInput> commands)
@@ -6818,6 +7004,8 @@ namespace VividRP.Runtime.Particle
             [ReadOnly]
             public NativeArray<ParticleDrawCommandInput> Commands;
             [ReadOnly]
+            public NativeArray<ParticleDrawRangeInput> Ranges;
+            [ReadOnly]
             public NativeArray<ParticleCullingRecord> CullingRecords;
             [ReadOnly]
             public NativeArray<ParticleCullingPlanePacket4> CullingPlanePackets;
@@ -6859,21 +7047,27 @@ namespace VividRP.Runtime.Particle
                 if (DrawCommandPickingEntityIds != null)
                     DrawCommandPickingEntityIds[commandIndex] = command.PickingEntityId;
 
-                DrawRanges[commandIndex] = new BatchDrawRange
+                if (commandIndex < Ranges.Length)
+                    DrawRanges[commandIndex] = CreateDrawRange(Ranges[commandIndex]);
+            }
+
+            private BatchDrawRange CreateDrawRange(ParticleDrawRangeInput range)
+            {
+                return new BatchDrawRange
                 {
-                    drawCommandsBegin = (uint)commandIndex,
-                    drawCommandsCount = 1,
+                    drawCommandsBegin = (uint)math.max(0, range.DrawCommandsBegin),
+                    drawCommandsCount = (uint)math.max(0, range.DrawCommandsCount),
                     drawCommandsType = BatchDrawCommandType.Direct,
                     filterSettings = new BatchFilterSettings
                     {
-                        renderingLayerMask = command.RenderingLayerMask,
-                        rendererPriority = command.RendererPriority,
-                        layer = (byte)math.clamp(command.Layer, 0, 31),
-                        shadowCastingMode = command.ShadowCastingMode,
-                        receiveShadows = command.ReceiveShadows != 0,
-                        motionMode = command.MotionMode,
-                        staticShadowCaster = command.StaticShadowCaster != 0,
-                        allDepthSorted = command.AllDepthSorted != 0,
+                        renderingLayerMask = range.RenderingLayerMask,
+                        rendererPriority = range.RendererPriority,
+                        layer = (byte)math.clamp(range.Layer, 0, 31),
+                        shadowCastingMode = range.ShadowCastingMode,
+                        receiveShadows = range.ReceiveShadows != 0,
+                        motionMode = range.MotionMode,
+                        staticShadowCaster = range.StaticShadowCaster != 0,
+                        allDepthSorted = range.AllDepthSorted != 0,
                         sceneCullingMask = SceneCullingMask,
                     },
                 };
@@ -7397,7 +7591,7 @@ namespace VividRP.Runtime.Particle
                     new float4(
                         math.max(VividParticleMainModule.MinimumStartSize, work.SizeScale),
                         VividParticleMainModule.MinimumStartSize,
-                        0.0f,
+                        work.Capacity,
                         work.ActiveCount));
                 UnsafeUtility.WriteArrayElement(
                     destination,
@@ -7407,8 +7601,22 @@ namespace VividRP.Runtime.Particle
                         work.StretchSpeedScale,
                         0.0f,
                         work.RenderMode));
-                UnsafeUtility.WriteArrayElement(destination, 7, new float4(0.0f, 0.0f, 1.0f, 1.0f));
-                UnsafeUtility.WriteArrayElement(destination, 8, new float4(work.DataPerSharpBits, 0.0f, 0.0f, work.ActiveCount));
+                UnsafeUtility.WriteArrayElement(
+                    destination,
+                    7,
+                    new float4(
+                        work.RendererPriority,
+                        work.ShadowCastingMode,
+                        work.ReceiveShadows,
+                        work.SortMode));
+                UnsafeUtility.WriteArrayElement(
+                    destination,
+                    8,
+                    new float4(
+                        work.DataPerSharpBits,
+                        work.UsesPageBillboard,
+                        work.Capacity,
+                        work.ActiveCount));
             }
 
             private static void WriteSpanSharedData(ParticleRenderSharedDataWork work)
@@ -7432,7 +7640,7 @@ namespace VividRP.Runtime.Particle
                                 (uint)math.max(0, work.SharpIndex),
                                 (uint)math.max(0, work.BatchBaseIndex + pageStart),
                                 activeMinusOne,
-                                0u));
+                                (uint)math.max(0, work.ActiveCount)));
                     }
                     else
                     {
@@ -7444,7 +7652,7 @@ namespace VividRP.Runtime.Particle
                                 (uint)math.max(0, work.SharpIndex),
                                 (uint)math.max(0, work.BatchBaseIndex + particleOffset),
                                 0u,
-                                0u));
+                                (uint)math.max(0, work.ActiveCount)));
                     }
                 }
             }

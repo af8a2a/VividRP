@@ -69,7 +69,14 @@ namespace VividRP.Runtime.Particle.ECS
         public VividParticleRendererSharedKey rendererSharedKey
         {
             get => m_RendererSharedKey;
-            set => m_RendererSharedKey = value;
+            set
+            {
+                if (m_RendererSharedKey.Equals(value))
+                    return;
+
+                m_RendererSharedKey = value;
+                m_Line.SetSharedComponent(value);
+            }
         }
 
         public void EnsureCapacity(int maxParticles)

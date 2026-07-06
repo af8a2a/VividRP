@@ -83,6 +83,15 @@ namespace VividRP.Editor
             new(VividParticleSystemManager.VividParticleGpuDataId.MeshIndex, "MeshIndex"),
         };
 
+        private static readonly RenderJobFlagFormatEntry[] s_RenderJobFlagFormatEntries =
+        {
+            new(VividParticleSystemManager.RenderJobTransformUploadFlag, "Transform"),
+            new(VividParticleSystemManager.RenderJobColorUploadFlag, "Color"),
+            new(VividParticleSystemManager.RenderJobVelocityStretchUploadFlag, "VelocityStretch"),
+            new(VividParticleSystemManager.RenderJobExtraDataUploadFlag, "ExtraData"),
+            new(VividParticleSystemManager.RenderJobSharedDataFlag, "SharedData"),
+        };
+
         internal static bool TryFindModuleRoots(
             SerializedObject serializedObject,
             out SerializedProperty main,
@@ -414,6 +423,56 @@ namespace VividRP.Editor
             return builder.ToString();
         }
 
+        internal static string FormatRenderJobModuleFlags(uint flags)
+        {
+            if (flags == 0u)
+                return "None (0x0)";
+
+            var builder = new System.Text.StringBuilder();
+            uint remainingFlags = flags;
+            for (int index = 0; index < s_RenderJobFlagFormatEntries.Length; index++)
+            {
+                RenderJobFlagFormatEntry entry = s_RenderJobFlagFormatEntries[index];
+                if ((flags & entry.Flag) == 0u)
+                    continue;
+
+                if (builder.Length > 0)
+                    builder.Append(" | ");
+
+                builder.Append(entry.Name);
+                remainingFlags &= ~entry.Flag;
+            }
+
+            if (remainingFlags != 0u)
+            {
+                if (builder.Length > 0)
+                    builder.Append(" | ");
+
+                builder.Append("Unknown(0x");
+                builder.Append(remainingFlags.ToString("X", CultureInfo.InvariantCulture));
+                builder.Append(')');
+            }
+
+            builder.Append(" (0x");
+            builder.Append(flags.ToString("X", CultureInfo.InvariantCulture));
+            builder.Append(')');
+            return builder.ToString();
+        }
+
+        internal static string FormatGpuDataInfo(VividParticleSystemManager.VividParticleGpuDataInfo dataInfo)
+        {
+            string copyMask = dataInfo.HasUploadSegment
+                ? FormatUploadColumnMask(VividParticleSystemManager.GetUploadColumnMask(dataInfo.UploadSegment))
+                : "None (0x0)";
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} / {1} / {2} B / Copy {3}",
+                dataInfo.Frequency,
+                dataInfo.UploadSegment,
+                dataInfo.ElementSize,
+                copyMask);
+        }
+
         internal static VividParticleRendererInspectorNotice GetRendererInspectorNotices(SerializedProperty renderer)
         {
             if (renderer == null)
@@ -592,6 +651,18 @@ namespace VividRP.Editor
             public readonly string Name;
         }
 
+        private readonly struct RenderJobFlagFormatEntry
+        {
+            public RenderJobFlagFormatEntry(uint flag, string name)
+            {
+                Flag = flag;
+                Name = name;
+            }
+
+            public readonly uint Flag;
+            public readonly string Name;
+        }
+
         private static bool HasMissingOrMixedValue(params SerializedProperty[] properties)
         {
             for (int index = 0; index < properties.Length; index++)
@@ -629,6 +700,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_PendingSimulationLabel = EditorGUIUtility.TrTextContent("Pending Simulation");
         private static readonly GUIContent s_RenderRecordsLabel = EditorGUIUtility.TrTextContent("Render Records");
         private static readonly GUIContent s_LineGroupsLabel = EditorGUIUtility.TrTextContent("Line Groups");
+        private static readonly GUIContent s_EcsLineGroupsLabel = EditorGUIUtility.TrTextContent("ECS Line Groups");
+        private static readonly GUIContent s_EcsLinesLabel = EditorGUIUtility.TrTextContent("ECS Lines");
         private static readonly GUIContent s_DrawBatchesLabel = EditorGUIUtility.TrTextContent("Draw Batches");
         private static readonly GUIContent s_CullingRecordsLabel = EditorGUIUtility.TrTextContent("Culling Records");
         private static readonly GUIContent s_DrawCommandsLabel = EditorGUIUtility.TrTextContent("Draw Commands");
@@ -642,7 +715,24 @@ namespace VividRP.Editor
         private static readonly GUIContent s_MeshVisibleWorksLabel = EditorGUIUtility.TrTextContent("Mesh Visible Works");
         private static readonly GUIContent s_MeshVisibleOutputsLabel = EditorGUIUtility.TrTextContent("Mesh Visible Outputs");
         private static readonly GUIContent s_LastUploadLabel = EditorGUIUtility.TrTextContent("Last Upload");
+        private static readonly GUIContent s_DirtyUploadQueueLabel = EditorGUIUtility.TrTextContent("Dirty Upload Queue");
+        private static readonly GUIContent s_InvalidDirtyUploadQueueLabel =
+            EditorGUIUtility.TrTextContent("Invalid Dirty Uploads");
+        private static readonly GUIContent s_UploadRecordWorksLabel = EditorGUIUtility.TrTextContent("Upload Record Works");
+        private static readonly GUIContent s_TransformUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Transform Page Works");
+        private static readonly GUIContent s_ColorUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Color Page Works");
+        private static readonly GUIContent s_VelocityUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Velocity Page Works");
+        private static readonly GUIContent s_ExtraUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Extra Page Works");
         private static readonly GUIContent s_LastUploadCopyWorksLabel = EditorGUIUtility.TrTextContent("Upload Copy Works");
+        private static readonly GUIContent s_MergedUploadCopyWorksLabel =
+            EditorGUIUtility.TrTextContent("Merged Copy Works");
+        private static readonly GUIContent s_RenderJobFlagsLabel = EditorGUIUtility.TrTextContent("Render Job Flags");
+        private static readonly GUIContent s_RenderPageJobModulesLabel =
+            EditorGUIUtility.TrTextContent("Render Page Job Modules");
         private static readonly GUIContent s_LastUploadColumnMaskLabel = EditorGUIUtility.TrTextContent("Upload Column Mask");
         private static readonly GUIContent s_LastUploadDataBitsLabel = EditorGUIUtility.TrTextContent("Upload Data Bits");
         private static readonly GUIContent s_LayoutHashLabel = EditorGUIUtility.TrTextContent("Layout Hash");
@@ -783,6 +873,8 @@ namespace VividRP.Editor
             {
                 EditorGUILayout.IntField(s_RenderRecordsLabel, rendererStats.RenderRecordCount);
                 EditorGUILayout.IntField(s_LineGroupsLabel, rendererStats.LineGroupCount);
+                EditorGUILayout.IntField(s_EcsLineGroupsLabel, rendererStats.EcsLineGroupCount);
+                EditorGUILayout.IntField(s_EcsLinesLabel, rendererStats.EcsLineCount);
                 EditorGUILayout.IntField(s_DrawBatchesLabel, rendererStats.DrawBatchCount);
                 EditorGUILayout.IntField(s_CullingRecordsLabel, rendererStats.CullingRecordCount);
                 EditorGUILayout.IntField(s_DrawCommandsLabel, rendererStats.DrawCommandCount);
@@ -796,7 +888,19 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_MeshVisibleWorksLabel, rendererStats.MeshVisibleCountWorkCount);
                 EditorGUILayout.IntField(s_MeshVisibleOutputsLabel, rendererStats.MeshVisibleCountOutputCount);
                 EditorGUILayout.IntField(s_LastUploadLabel, rendererStats.LastCopyByteCount);
+                EditorGUILayout.IntField(s_DirtyUploadQueueLabel, rendererStats.LastDirtyUploadQueueCount);
+                EditorGUILayout.IntField(s_InvalidDirtyUploadQueueLabel, rendererStats.LastInvalidDirtyUploadQueueCount);
+                EditorGUILayout.IntField(s_UploadRecordWorksLabel, rendererStats.LastUploadRecordWorkCount);
+                EditorGUILayout.IntField(s_TransformUploadPageWorksLabel, rendererStats.LastTransformUploadPageWorkCount);
+                EditorGUILayout.IntField(s_ColorUploadPageWorksLabel, rendererStats.LastColorUploadPageWorkCount);
+                EditorGUILayout.IntField(s_VelocityUploadPageWorksLabel, rendererStats.LastVelocityStretchUploadPageWorkCount);
+                EditorGUILayout.IntField(s_ExtraUploadPageWorksLabel, rendererStats.LastExtraDataUploadPageWorkCount);
                 EditorGUILayout.IntField(s_LastUploadCopyWorksLabel, rendererStats.LastUploadCopyWorkCount);
+                EditorGUILayout.IntField(s_MergedUploadCopyWorksLabel, rendererStats.LastMergedUploadCopyWorkCount);
+                EditorGUILayout.TextField(
+                    s_RenderJobFlagsLabel,
+                    VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(rendererStats.LastRenderJobModuleFlags));
+                EditorGUILayout.IntField(s_RenderPageJobModulesLabel, rendererStats.LastRenderPageJobModuleCount);
                 EditorGUILayout.TextField(
                     s_LastUploadColumnMaskLabel,
                     VividParticleSystemEditorUtility.FormatUploadColumnMask(rendererStats.LastUploadColumnMask));
@@ -1086,7 +1190,7 @@ namespace VividRP.Editor
                     VividParticleSystemManager.VividParticleGpuDataInfo dataInfo = layout[index];
                     EditorGUILayout.LabelField(
                         dataInfo.DataId.ToString(),
-                        $"{dataInfo.Frequency} / {dataInfo.UploadSegment} / {dataInfo.ElementSize} B");
+                        VividParticleSystemEditorUtility.FormatGpuDataInfo(dataInfo));
                 }
             }
         }

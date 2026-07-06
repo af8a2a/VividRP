@@ -412,6 +412,63 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void ManagerJobRegistry_CanScheduleEnabledJobsInParallel()
+        {
+            var values = new NativeArray<int>(4, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            try
+            {
+                var registry = new VividEcsManagerJobRegistry<ModuleRegistryContext>();
+                registry.RegisterModule(
+                    "a",
+                    10,
+                    ModuleRegistryContext.ModuleA,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 0,
+                        Value = 11,
+                    }.Schedule(dependency));
+                registry.RegisterModule(
+                    "b",
+                    0,
+                    ModuleRegistryContext.ModuleB,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 1,
+                        Value = 22,
+                    }.Schedule(dependency));
+                registry.RegisterModule(
+                    "disabled",
+                    5,
+                    ModuleRegistryContext.ModuleC,
+                    (context, dependency) => new WriteRegistryValueJob
+                    {
+                        Values = context.Values,
+                        Index = 2,
+                        Value = 33,
+                    }.Schedule(dependency));
+
+                var context = new ModuleRegistryContext
+                {
+                    Values = values,
+                    EnabledModuleFlags = ModuleRegistryContext.ModuleA | ModuleRegistryContext.ModuleB,
+                };
+                JobHandle handle = registry.ScheduleEnabledParallel(context);
+                handle.Complete();
+
+                Assert.That(registry.EnabledCount(context), Is.EqualTo(2));
+                Assert.That(values[0], Is.EqualTo(11));
+                Assert.That(values[1], Is.EqualTo(22));
+                Assert.That(values[2], Is.EqualTo(0));
+            }
+            finally
+            {
+                values.Dispose();
+            }
+        }
+
         private readonly struct TestData : IVividEcsComponentData
         {
             public TestData(float value)
@@ -510,6 +567,7 @@ namespace VividRP.Editor.Tests
         {
             public const uint ModuleA = 1u << 0;
             public const uint ModuleB = 1u << 1;
+            public const uint ModuleC = 1u << 2;
 
             public NativeArray<int> Values;
             public uint EnabledModuleFlags { get; set; }

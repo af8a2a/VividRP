@@ -282,6 +282,35 @@ namespace VividRP.Runtime.ECS
             return handle;
         }
 
+        public JobHandle ScheduleEnabledParallel(TContext context, JobHandle dependency = default)
+        {
+            return ScheduleEnabledParallel(context, ResolveModuleFlags(context), dependency);
+        }
+
+        public JobHandle ScheduleEnabledParallel(
+            TContext context,
+            uint enabledModuleFlags,
+            JobHandle dependency = default)
+        {
+            SortIfNeeded();
+            JobHandle combinedHandle = dependency;
+            bool hasScheduledJob = false;
+            for (int index = 0; index < m_Entries.Count; index++)
+            {
+                Entry entry = m_Entries[index];
+                if (!entry.IsEnabled(context, enabledModuleFlags))
+                    continue;
+
+                JobHandle handle = entry.Schedule(context, dependency);
+                combinedHandle = hasScheduledJob
+                    ? JobHandle.CombineDependencies(combinedHandle, handle)
+                    : handle;
+                hasScheduledJob = true;
+            }
+
+            return hasScheduledJob ? combinedHandle : dependency;
+        }
+
         public void Clear()
         {
             m_Entries.Clear();

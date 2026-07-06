@@ -335,14 +335,14 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.Rotation, out var rotationInfo),
                 Is.True);
-            Assert.That(rotationInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.Shared));
+            Assert.That(rotationInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp));
             Assert.That(
                 layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.VelocityStretch, out var velocityInfo),
                 Is.True);
             Assert.That(velocityInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
             Assert.That(
                 layout.PerInstanceElementByteSize,
-                Is.EqualTo(VividParticleSystemManager.SizeOfFloat4 * 4));
+                Is.EqualTo(VividParticleSystemManager.SizeOfFloat4 * 5));
             Assert.That(
                 layout.PerInstanceUploadColumnMask,
                 Is.EqualTo(VividParticleSystemManager.UploadColumnPositionSizeMask
@@ -400,6 +400,42 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemEditorUtility.FormatGpuDataBits(1u << 31),
                 Is.EqualTo("Unknown(0x80000000) (0x80000000)"));
+        }
+
+        [Test]
+        public void GpuLayoutPreview_FormatsRenderJobModuleFlagsWithNames()
+        {
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(0u),
+                Is.EqualTo("None (0x0)"));
+
+            uint flags = VividParticleSystemManager.RenderJobTransformUploadFlag
+                | VividParticleSystemManager.RenderJobVelocityStretchUploadFlag
+                | VividParticleSystemManager.RenderJobSharedDataFlag;
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(flags),
+                Is.EqualTo("Transform | VelocityStretch | SharedData (0x15)"));
+
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(1u << 31),
+                Is.EqualTo("Unknown(0x80000000) (0x80000000)"));
+        }
+
+        [Test]
+        public void GpuLayoutPreview_FormatsDataInfoWithCopyMask()
+        {
+            VividParticleSystemManager.VividParticleGpuDataLayout layout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(VividParticleRenderMode.Billboard);
+
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatGpuDataInfo(layout[0]),
+                Is.EqualTo($"PerSharp / ZeroBlock / {VividParticleSystemManager.SharedDataByteSize} B / Copy None (0x0)"));
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatGpuDataInfo(layout[2]),
+                Is.EqualTo($"PerInstance / PositionSize / {VividParticleSystemManager.SizeOfFloat4} B / Copy PositionSize (0x1)"));
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatGpuDataInfo(layout[5]),
+                Is.EqualTo($"PerSharp / Rotation / {VividParticleSystemManager.SizeOfFloat4} B / Copy Rotation (0x4)"));
         }
 
         [Test]

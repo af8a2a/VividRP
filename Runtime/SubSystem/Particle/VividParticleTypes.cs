@@ -604,6 +604,9 @@ namespace VividRP.Runtime.Particle
         private Mesh m_Mesh;
 
         [SerializeField]
+        private Mesh[] m_Meshes = Array.Empty<Mesh>();
+
+        [SerializeField]
         private Color m_Color = Color.white;
 
         [SerializeField]
@@ -616,6 +619,18 @@ namespace VividRP.Runtime.Particle
         private float m_StretchSpeedScale;
 
         [SerializeField]
+        private Vector3 m_Pivot;
+
+        [SerializeField]
+        private float m_MinParticleSize;
+
+        [SerializeField]
+        private float m_MaxParticleSize;
+
+        [SerializeField]
+        private Vector3 m_Flip;
+
+        [SerializeField]
         private int m_RenderQueueOffset;
 
         [SerializeField]
@@ -625,7 +640,10 @@ namespace VividRP.Runtime.Particle
         private bool m_ReceiveShadows;
 
         [SerializeField]
-        private VividParticleGpuDataMode m_ColorDataMode = VividParticleGpuDataMode.PerParticle;
+        private uint m_RenderingLayerMask = uint.MaxValue;
+
+        [SerializeField]
+        private VividParticleGpuDataMode m_ColorDataMode = VividParticleGpuDataMode.Shared;
 
         [SerializeField]
         private VividParticleGpuDataMode m_RotationDataMode = VividParticleGpuDataMode.Shared;
@@ -703,6 +721,22 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        public Mesh[] meshes
+        {
+            get => CopyMeshes(m_Meshes);
+            set
+            {
+                Mesh[] copy = CopyMeshes(value);
+                if (MeshArraysEqual(m_Meshes, copy))
+                    return;
+
+                m_Meshes = copy;
+                NotifyChanged();
+            }
+        }
+
+        public int meshCount => GetMeshCount();
+
         public Color color
         {
             get => m_Color;
@@ -758,6 +792,64 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        public Vector3 pivot
+        {
+            get => m_Pivot;
+            set
+            {
+                if (m_Pivot == value)
+                    return;
+
+                m_Pivot = value;
+                NotifyChanged();
+            }
+        }
+
+        public float minParticleSize
+        {
+            get => m_MinParticleSize;
+            set
+            {
+                float clamped = Mathf.Max(0.0f, value);
+                if (m_MinParticleSize == clamped)
+                    return;
+
+                m_MinParticleSize = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public float maxParticleSize
+        {
+            get => m_MaxParticleSize;
+            set
+            {
+                float clamped = Mathf.Max(0.0f, value);
+                if (m_MaxParticleSize == clamped)
+                    return;
+
+                m_MaxParticleSize = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public Vector3 flip
+        {
+            get => m_Flip;
+            set
+            {
+                Vector3 clamped = new(
+                    Mathf.Clamp01(value.x),
+                    Mathf.Clamp01(value.y),
+                    Mathf.Clamp01(value.z));
+                if (m_Flip == clamped)
+                    return;
+
+                m_Flip = clamped;
+                NotifyChanged();
+            }
+        }
+
         public int renderQueueOffset
         {
             get => m_RenderQueueOffset;
@@ -793,6 +885,19 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 m_ReceiveShadows = value;
+                NotifyChanged();
+            }
+        }
+
+        public uint renderingLayerMask
+        {
+            get => m_RenderingLayerMask;
+            set
+            {
+                if (m_RenderingLayerMask == value)
+                    return;
+
+                m_RenderingLayerMask = value;
                 NotifyChanged();
             }
         }
@@ -940,13 +1045,19 @@ namespace VividRP.Runtime.Particle
             m_RenderMode = source.m_RenderMode;
             m_Material = source.m_Material;
             m_Mesh = source.m_Mesh;
+            m_Meshes = CopyMeshes(source.m_Meshes);
             m_Color = source.m_Color;
             m_SizeScale = source.m_SizeScale;
             m_StretchLengthScale = source.m_StretchLengthScale;
             m_StretchSpeedScale = source.m_StretchSpeedScale;
+            m_Pivot = source.m_Pivot;
+            m_MinParticleSize = source.m_MinParticleSize;
+            m_MaxParticleSize = source.m_MaxParticleSize;
+            m_Flip = source.m_Flip;
             m_RenderQueueOffset = source.m_RenderQueueOffset;
             m_ShadowCastingMode = source.m_ShadowCastingMode;
             m_ReceiveShadows = source.m_ReceiveShadows;
+            m_RenderingLayerMask = source.m_RenderingLayerMask;
             m_ColorDataMode = source.m_ColorDataMode;
             m_RotationDataMode = source.m_RotationDataMode;
             m_VelocityDataMode = source.m_VelocityDataMode;
@@ -964,6 +1075,152 @@ namespace VividRP.Runtime.Particle
             m_SizeScale = Mathf.Max(MinimumSizeScale, m_SizeScale);
             m_StretchLengthScale = Mathf.Max(MinimumStretchLengthScale, m_StretchLengthScale);
             m_StretchSpeedScale = Mathf.Max(MinimumStretchSpeedScale, m_StretchSpeedScale);
+            m_MinParticleSize = Mathf.Max(0.0f, m_MinParticleSize);
+            m_MaxParticleSize = Mathf.Max(0.0f, m_MaxParticleSize);
+            m_Meshes ??= Array.Empty<Mesh>();
+            m_Flip = new Vector3(
+                Mathf.Clamp01(m_Flip.x),
+                Mathf.Clamp01(m_Flip.y),
+                Mathf.Clamp01(m_Flip.z));
+        }
+
+        internal Mesh renderMesh => ResolveRenderMesh();
+
+        internal bool hasRenderMesh => renderMesh != null;
+
+        internal int meshSetHash
+        {
+            get
+            {
+                unchecked
+                {
+                    int hash = 17;
+                    hash = (hash * 397) ^ GetMeshHash(m_Mesh);
+                    Mesh[] meshes = m_Meshes;
+                    int count = meshes?.Length ?? 0;
+                    hash = (hash * 397) ^ count;
+                    for (int index = 0; index < count; index++)
+                        hash = (hash * 397) ^ GetMeshHash(meshes[index]);
+
+                    return hash;
+                }
+            }
+        }
+
+        public int GetMeshes(Mesh[] meshes)
+        {
+            int count = 0;
+            if (m_Mesh != null)
+            {
+                if (meshes != null && count < meshes.Length)
+                    meshes[count] = m_Mesh;
+
+                count++;
+            }
+
+            Mesh[] source = m_Meshes;
+            int sourceCount = source?.Length ?? 0;
+            for (int index = 0; index < sourceCount; index++)
+            {
+                Mesh mesh = source[index];
+                if (mesh == null)
+                    continue;
+
+                if (meshes != null && count < meshes.Length)
+                    meshes[count] = mesh;
+
+                count++;
+            }
+
+            return count;
+        }
+
+        public void SetMeshes(Mesh[] meshes)
+        {
+            SetMeshes(meshes, meshes?.Length ?? 0);
+        }
+
+        public void SetMeshes(Mesh[] meshes, int size)
+        {
+            int count = Mathf.Clamp(size, 0, meshes?.Length ?? 0);
+            Mesh primary = null;
+            var extraMeshes = new Mesh[Mathf.Max(0, count - 1)];
+            for (int index = 0; index < count; index++)
+            {
+                Mesh mesh = meshes[index];
+                if (index == 0)
+                    primary = mesh;
+                else
+                    extraMeshes[index - 1] = mesh;
+            }
+
+            if (m_Mesh == primary && MeshArraysEqual(m_Meshes, extraMeshes))
+                return;
+
+            m_Mesh = primary;
+            m_Meshes = extraMeshes;
+            NotifyChanged();
+        }
+
+        private Mesh ResolveRenderMesh()
+        {
+            if (m_Mesh != null)
+                return m_Mesh;
+
+            Mesh[] meshes = m_Meshes;
+            int count = meshes?.Length ?? 0;
+            for (int index = 0; index < count; index++)
+            {
+                if (meshes[index] != null)
+                    return meshes[index];
+            }
+
+            return null;
+        }
+
+        private int GetMeshCount()
+        {
+            int count = m_Mesh != null ? 1 : 0;
+            Mesh[] meshes = m_Meshes;
+            int sourceCount = meshes?.Length ?? 0;
+            for (int index = 0; index < sourceCount; index++)
+            {
+                if (meshes[index] != null)
+                    count++;
+            }
+
+            return count;
+        }
+
+        private static Mesh[] CopyMeshes(Mesh[] source)
+        {
+            if (source == null || source.Length == 0)
+                return Array.Empty<Mesh>();
+
+            var copy = new Mesh[source.Length];
+            Array.Copy(source, copy, source.Length);
+            return copy;
+        }
+
+        private static bool MeshArraysEqual(Mesh[] left, Mesh[] right)
+        {
+            int leftCount = left?.Length ?? 0;
+            int rightCount = right?.Length ?? 0;
+            if (leftCount != rightCount)
+                return false;
+
+            for (int index = 0; index < leftCount; index++)
+            {
+                if (left[index] != right[index])
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static int GetMeshHash(Mesh mesh)
+        {
+            return mesh != null ? mesh.GetEntityId().GetHashCode() : 0;
         }
 
         private void NotifyChanged()

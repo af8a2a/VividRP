@@ -149,14 +149,19 @@ Shader "VividRP/Particles/Unlit"
                 float4 rotation;
                 float4 velocityStretch;
                 float4 scale;
+                float4 meshIndex;
+                float4 sharedSize;
+                float3 pivot;
+                float3 flip;
                 float visible;
+                uint particleIndex;
                 uint sharpIndex;
             };
 
             #ifdef UNITY_DOTS_INSTANCING_ENABLED
                 static const uint VIVID_PARTICLE_PAGE_BASE_MASK = 0x00ffffffu;
                 static const uint VIVID_PARTICLE_PAGE_COUNT_SHIFT = 24u;
-                static const uint VIVID_PARTICLE_SHARED_DATA_STRIDE = 192u;
+                static const uint VIVID_PARTICLE_SHARED_DATA_STRIDE = 224u;
                 static const uint VIVID_PARTICLE_BASE_COLOR_BIT = 1u << 3u;
                 static const uint VIVID_PARTICLE_ROTATION_BIT = 1u << 4u;
                 static const uint VIVID_PARTICLE_VELOCITY_STRETCH_BIT = 1u << 5u;
@@ -227,6 +232,7 @@ Shader "VividRP/Particles/Unlit"
                 {
                     VividParticleData data;
                     uint particleIndex = VividResolveParticleIndex(input, data.visible, data.sharpIndex);
+                    data.particleIndex = particleIndex;
                     float4 sharedVisibility = VividLoadParticleSharedFloat4(
                         VIVID_PARTICLE_SHARED_DATA_METADATA,
                         data.sharpIndex,
@@ -238,6 +244,22 @@ Shader "VividRP/Particles/Unlit"
                     data.rotation = VividLoadParticleFloat4(VIVID_PARTICLE_ROTATION_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_ROTATION_BIT, float4(0.0, 0.0, 0.0, 1.0));
                     data.velocityStretch = VividLoadParticleFloat4(VIVID_PARTICLE_VELOCITY_STRETCH_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_VELOCITY_STRETCH_BIT, float4(0.0, 1.0, 0.0, 1.0));
                     data.scale = VividLoadParticleFloat4(VIVID_PARTICLE_SCALE_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_SCALE_BIT, float4(data.positionSize.w, data.positionSize.w, data.positionSize.w, 1.0));
+                    data.meshIndex = VividLoadParticleFloat4(VIVID_PARTICLE_MESH_INDEX_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, 0u, float4(0.0, 1.0, 0.0, 0.0));
+                    data.sharedSize = VividLoadParticleSharedFloat4(
+                        VIVID_PARTICLE_SHARED_DATA_METADATA,
+                        data.sharpIndex,
+                        5u,
+                        float4(1.0, 0.0, 0.0, 1.0));
+                    data.pivot = VividLoadParticleSharedFloat4(
+                        VIVID_PARTICLE_SHARED_DATA_METADATA,
+                        data.sharpIndex,
+                        12u,
+                        float4(0.0, 0.0, 0.0, 0.0)).xyz;
+                    data.flip = VividLoadParticleSharedFloat4(
+                        VIVID_PARTICLE_SHARED_DATA_METADATA,
+                        data.sharpIndex,
+                        13u,
+                        float4(0.0, 0.0, 0.0, 0.0)).xyz;
                     data.visible *= sharedVisibility.w >= 0.0 ? 1.0 : 0.0;
                     return data;
                 }
@@ -250,7 +272,12 @@ Shader "VividRP/Particles/Unlit"
                     data.rotation = _VividParticleRotation;
                     data.velocityStretch = _VividParticleVelocityStretch;
                     data.scale = _VividParticleScale;
+                    data.meshIndex = _VividParticleMeshIndex;
+                    data.sharedSize = float4(1.0, 0.0, 0.0, 1.0);
+                    data.pivot = 0.0;
+                    data.flip = 0.0;
                     data.visible = 1.0;
+                    data.particleIndex = 0u;
                     data.sharpIndex = 0u;
                     return data;
                 }
@@ -292,6 +319,24 @@ Shader "VividRP/Particles/Unlit"
                 return lengthSq > 0.000001 ? value * rsqrt(lengthSq) : fallback;
             }
 
+            uint VividParticleHash(uint value)
+            {
+                value = ((value >> ((value >> 28u) + 4u)) ^ value) * 277803737u;
+                return (value >> 22u) ^ value;
+            }
+
+            bool ShouldFlipParticleAxis(uint particleIndex, float probability, uint salt)
+            {
+                if (probability <= 0.0)
+                    return false;
+
+                if (probability >= 1.0)
+                    return true;
+
+                uint hash = VividParticleHash((particleIndex + 1u) * 747796405u + salt);
+                return (float)hash * (1.0 / 4294967295.0) < probability;
+            }
+
             Varyings Vert(Attributes input)
             {
                 Varyings output = (Varyings)0;
@@ -314,11 +359,18 @@ Shader "VividRP/Particles/Unlit"
                 float4 velocityStretch = particle.velocityStretch;
                 float3 centerRWS = positionSize.xyz;
                 float size = max(particle.scale.x, 0.0001);
+                size = max(size, particle.sharedSize.y);
+                if (particle.sharedSize.z > 0.0)
+                    size = min(size, max(particle.sharedSize.z, particle.sharedSize.y));
                 float4x4 viewToWorld = GetViewToWorldMatrix();
                 float3 viewRight = normalize(float3(viewToWorld._m00, viewToWorld._m10, viewToWorld._m20));
                 float3 viewUp = normalize(float3(viewToWorld._m01, viewToWorld._m11, viewToWorld._m21));
                 float3 viewForward = -normalize(float3(viewToWorld._m02, viewToWorld._m12, viewToWorld._m22));
-                float3 meshLocal = input.positionOS * size;
+                float3 particleLocal = input.positionOS;
+                particleLocal.x = ShouldFlipParticleAxis(particle.particleIndex, particle.flip.x, 0x9E3779B9u) ? -particleLocal.x : particleLocal.x;
+                particleLocal.y = ShouldFlipParticleAxis(particle.particleIndex, particle.flip.y, 0xBB67AE85u) ? -particleLocal.y : particleLocal.y;
+                particleLocal.z = ShouldFlipParticleAxis(particle.particleIndex, particle.flip.z, 0x3C6EF372u) ? -particleLocal.z : particleLocal.z;
+                float3 meshLocal = (particleLocal - particle.pivot) * size;
                 float3 positionRWS;
 
                 if (_VividParticleRenderMode < 0.5)
@@ -335,7 +387,7 @@ Shader "VividRP/Particles/Unlit"
                     float stretchLength = max(velocityStretch.w, size);
                     positionRWS = centerRWS
                         + stretchRight * meshLocal.x
-                        + stretchUp * (input.positionOS.y * stretchLength);
+                        + stretchUp * ((particleLocal.y - particle.pivot.y) * stretchLength);
                 }
                 else if (_VividParticleRenderMode < 2.5)
                 {

@@ -144,7 +144,8 @@ namespace VividRP.Runtime.Particle.ECS
             float startLifetime,
             float remainingLifetime,
             float size,
-            Color color)
+            Color color,
+            int meshIndex = 0)
         {
             if (!isCreated || !m_Line.Append(out int index))
                 return false;
@@ -156,6 +157,7 @@ namespace VividRP.Runtime.Particle.ECS
             common.SetFieldValue(VividParticleCommon.RemainingLifetimeFieldIndex, index, remainingLifetime);
             common.SetFieldValue(VividParticleCommon.StartColorFieldIndex, index, ToFloat4(color));
             common.SetFieldValue(VividParticleCommon.SizeFieldIndex, index, size);
+            common.SetFieldValue(VividParticleCommon.MeshIndexFieldIndex, index, math.max(0, meshIndex));
             if (m_KeepMask.IsCreated && index < m_KeepMask.Length)
                 m_KeepMask[index] = 1;
 
@@ -189,6 +191,7 @@ namespace VividRP.Runtime.Particle.ECS
                 common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
             NativeArray<float4> colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
             NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+            NativeArray<int> meshIndices = common.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
 
             works.Add(new VividParticleEcsInitializeParticlesWork
             {
@@ -198,6 +201,7 @@ namespace VividRP.Runtime.Particle.ECS
                 ShapeEnabled = snapshot.ShapeEnabled ? 1 : 0,
                 ShapeType = (int)snapshot.ShapeType,
                 SimulationSpace = (int)snapshot.SimulationSpace,
+                MeshCount = math.max(1, snapshot.RendererMeshCount),
                 RandomSeed = randomSeed == 0u ? 1u : randomSeed,
                 StartLifetime = snapshot.StartLifetime,
                 StartSpeed = snapshot.StartSpeed,
@@ -214,6 +218,7 @@ namespace VividRP.Runtime.Particle.ECS
                 RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
                 Colors = (float4*)colors.GetUnsafePtr(),
                 Sizes = (float*)sizes.GetUnsafePtr(),
+                MeshIndices = (int*)meshIndices.GetUnsafePtr(),
                 KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
             });
             return true;
@@ -366,6 +371,11 @@ namespace VividRP.Runtime.Particle.ECS
             return commonColumn.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex)[index];
         }
 
+        public int GetMeshIndex(int index)
+        {
+            return commonColumn.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex)[index];
+        }
+
         public VividEcsPageInfo GetPageInfo(int pageIndex)
         {
             return m_Line.GetPageInfo(pageIndex);
@@ -414,6 +424,16 @@ namespace VividRP.Runtime.Particle.ECS
             remainingLifetimes = common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
             colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
             sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+            return true;
+        }
+
+        public bool TryGetMeshIndexArray(out NativeArray<int> meshIndices)
+        {
+            meshIndices = default;
+            if (!isCreated)
+                return false;
+
+            meshIndices = commonColumn.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
             return true;
         }
 
@@ -469,6 +489,7 @@ namespace VividRP.Runtime.Particle.ECS
                 common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
             NativeArray<float4> colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
             NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+            NativeArray<int> meshIndices = common.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
             return new VividParticleEcsCompactWork
             {
                 ActiveCount = count,
@@ -479,6 +500,7 @@ namespace VividRP.Runtime.Particle.ECS
                 RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
                 Colors = (float4*)colors.GetUnsafePtr(),
                 Sizes = (float*)sizes.GetUnsafePtr(),
+                MeshIndices = (int*)meshIndices.GetUnsafePtr(),
                 KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
                 ActiveCountOutput = (int*)m_ActiveCountOutput.GetUnsafePtr(),
             };

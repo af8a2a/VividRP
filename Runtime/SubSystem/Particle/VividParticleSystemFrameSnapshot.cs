@@ -119,6 +119,7 @@ namespace VividRP.Runtime.Particle
         public readonly VividParticleRenderMode RenderMode;
         public readonly Material RendererMaterial;
         public readonly Mesh RendererMesh;
+        public readonly int RendererMeshCount;
         public readonly Color RendererColor;
         public readonly float RendererSizeScale;
         public readonly float StretchLengthScale;
@@ -159,6 +160,7 @@ namespace VividRP.Runtime.Particle
             VividParticleRenderMode renderMode,
             Material rendererMaterial,
             Mesh rendererMesh,
+            int rendererMeshCount,
             Color rendererColor,
             float rendererSizeScale,
             float stretchLengthScale,
@@ -201,6 +203,7 @@ namespace VividRP.Runtime.Particle
             RenderMode = renderMode;
             RendererMaterial = rendererMaterial;
             RendererMesh = rendererMesh;
+            RendererMeshCount = Mathf.Max(0, rendererMeshCount);
             RendererColor = rendererColor;
             RendererSizeScale = Mathf.Max(VividParticleRendererModule.MinimumSizeScale, rendererSizeScale);
             StretchLengthScale = Mathf.Max(VividParticleRendererModule.MinimumStretchLengthScale, stretchLengthScale);
@@ -253,6 +256,7 @@ namespace VividRP.Runtime.Particle
                 RenderMode,
                 RendererMaterial,
                 RendererMesh,
+                RendererMeshCount,
                 RendererColor,
                 RendererSizeScale,
                 StretchLengthScale,
@@ -296,6 +300,7 @@ namespace VividRP.Runtime.Particle
                 RenderMode,
                 RendererMaterial,
                 RendererMesh,
+                RendererMeshCount,
                 RendererColor,
                 RendererSizeScale,
                 StretchLengthScale,

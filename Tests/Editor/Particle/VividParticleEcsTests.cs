@@ -36,6 +36,8 @@ namespace VividRP.Editor.Tests
             Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.VelocityFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.VelocityOffsetInPage));
             Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.StartColorFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.Float4SizeInBytes));
             Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.SizeFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.SizeOffsetInPage));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.MeshIndexFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.MeshIndexOffsetInPage));
+            Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.MeshIndexFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.IntSizeInBytes));
         }
 
         [Test]
@@ -96,6 +98,7 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.GetRemainingLifetime(259), Is.EqualTo(10.0f));
             Assert.That(storage.GetSize(259), Is.EqualTo(260.0f));
             AssertColor(new Color(0.25f, 0.5f, 0.75f, 1.0f), storage.GetColor(259));
+            Assert.That(storage.GetMeshIndex(259), Is.EqualTo(259 % 3));
 
             using VividEcsPageGroup pageGroup = storage.CreatePageGroup(Allocator.TempJob);
             Assert.That(pageGroup.pageCount, Is.EqualTo(2));
@@ -118,6 +121,8 @@ namespace VividRP.Editor.Tests
                 gpuDataLayoutHash: 4,
                 dataPerSharpBits: 5u,
                 shadowCastingMode: 0,
+                sortMode: 0,
+                renderingLayerMask: 0xffu,
                 receiveShadows: false);
             storage.rendererSharedKey = rendererKey;
             storage.EnsureCapacity(4);
@@ -152,6 +157,8 @@ namespace VividRP.Editor.Tests
                     gpuDataLayoutHash: 4,
                     dataPerSharpBits: 5u,
                     shadowCastingMode: 0,
+                    sortMode: 0,
+                    renderingLayerMask: 0xffu,
                     receiveShadows: false);
                 first.systemId = new VividParticleSystemId(17);
                 second.systemId = new VividParticleSystemId(23);
@@ -259,9 +266,9 @@ namespace VividRP.Editor.Tests
         {
             using var storage = new VividParticleEcsStorage();
             storage.EnsureCapacity(3);
-            Assert.That(storage.Add(Vector3.zero, Vector3.zero, 0.05f, 0.05f, 1.0f, Color.red), Is.True);
-            Assert.That(storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 2.0f, Color.green), Is.True);
-            Assert.That(storage.Add(Vector3.right, Vector3.zero, 6.0f, 6.0f, 3.0f, Color.blue), Is.True);
+            Assert.That(storage.Add(Vector3.zero, Vector3.zero, 0.05f, 0.05f, 1.0f, Color.red, meshIndex: 0), Is.True);
+            Assert.That(storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 2.0f, Color.green, meshIndex: 1), Is.True);
+            Assert.That(storage.Add(Vector3.right, Vector3.zero, 6.0f, 6.0f, 3.0f, Color.blue, meshIndex: 2), Is.True);
 
             Assert.That(storage.ScheduleIntegrate(0.1f, Vector3.zero, out JobHandle handle), Is.True);
             handle.Complete();
@@ -269,7 +276,9 @@ namespace VividRP.Editor.Tests
 
             Assert.That(storage.activeCount, Is.EqualTo(2));
             AssertColor(Color.blue, storage.GetColor(0));
+            Assert.That(storage.GetMeshIndex(0), Is.EqualTo(2));
             AssertColor(Color.green, storage.GetColor(1));
+            Assert.That(storage.GetMeshIndex(1), Is.EqualTo(1));
             Assert.That(storage.GetRemainingLifetime(0), Is.EqualTo(5.9f).Within(0.0001f));
         }
 
@@ -279,7 +288,7 @@ namespace VividRP.Editor.Tests
             using var storage = new VividParticleEcsStorage();
             using var works = new NativeList<VividParticleEcsInitializeParticlesWork>(1, Allocator.TempJob);
             storage.EnsureCapacity(4);
-            VividParticleSystemFrameSnapshot snapshot = CreatePointSnapshot();
+            VividParticleSystemFrameSnapshot snapshot = CreatePointSnapshot(meshCount: 3);
 
             Assert.That(storage.ReserveInitializeParticles(3, snapshot, 123u, works, out int firstIndex, out int count), Is.True);
             Assert.That(firstIndex, Is.EqualTo(0));
@@ -300,6 +309,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(storage.GetRemainingLifetime(index), Is.EqualTo(3.0f));
                 Assert.That(storage.GetSize(index), Is.EqualTo(0.75f));
                 AssertColor(new Color(0.2f, 0.4f, 0.6f, 0.8f), storage.GetColor(index));
+                Assert.That(storage.GetMeshIndex(index), Is.EqualTo(index % 3));
             }
         }
 
@@ -321,10 +331,11 @@ namespace VividRP.Editor.Tests
                 10.0f,
                 10.0f,
                 index + 1.0f,
-                new Color(0.25f, 0.5f, 0.75f, 1.0f));
+                new Color(0.25f, 0.5f, 0.75f, 1.0f),
+                index % 3);
         }
 
-        private static VividParticleSystemFrameSnapshot CreatePointSnapshot()
+        private static VividParticleSystemFrameSnapshot CreatePointSnapshot(int meshCount = 0)
         {
             return new VividParticleSystemFrameSnapshot(
                 0.0f,
@@ -355,6 +366,7 @@ namespace VividRP.Editor.Tests
                 VividParticleRenderMode.Billboard,
                 null,
                 null,
+                meshCount,
                 Color.white,
                 1.0f,
                 2.0f,

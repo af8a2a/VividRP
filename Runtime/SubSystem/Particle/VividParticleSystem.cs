@@ -102,7 +102,7 @@ namespace VividRP.Runtime.Particle
         internal bool shouldRender => isActiveAndEnabled
             && rendererModule.enabled
             && rendererModule.renderMode != VividParticleRenderMode.None
-            && (rendererModule.renderMode != VividParticleRenderMode.Mesh || rendererModule.mesh != null)
+            && (rendererModule.renderMode != VividParticleRenderMode.Mesh || rendererModule.hasRenderMesh)
             && aliveParticleCount > 0;
 
         internal bool requiresAutomaticUpdate => !m_IsPaused
@@ -203,7 +203,8 @@ namespace VividRP.Runtime.Particle
                 rendererModule.enabled,
                 rendererModule.renderMode,
                 rendererModule.material,
-                rendererModule.mesh,
+                rendererModule.renderMesh,
+                rendererModule.meshCount,
                 rendererModule.color,
                 rendererModule.sizeScale,
                 rendererModule.stretchLengthScale,
@@ -400,16 +401,22 @@ namespace VividRP.Runtime.Particle
 
         private void BindModuleCallbacks()
         {
-            m_Main.SetChangeCallback(OnModuleChanged);
-            m_Emission.SetChangeCallback(OnModuleChanged);
-            m_Shape.SetChangeCallback(OnModuleChanged);
-            m_Renderer.SetChangeCallback(OnModuleChanged);
+            m_Main.SetChangeCallback(OnSimulationModuleChanged);
+            m_Emission.SetChangeCallback(OnSimulationModuleChanged);
+            m_Shape.SetChangeCallback(OnSimulationModuleChanged);
+            m_Renderer.SetChangeCallback(OnRendererModuleChanged);
         }
 
-        private void OnModuleChanged()
+        private void OnSimulationModuleChanged()
         {
             VividParticleSystemManager.NotifySettingsChanged(this);
             VividParticleSystemManager.MarkRendererDirty(this);
+            RequestEditorRenderUpdate();
+        }
+
+        private void OnRendererModuleChanged()
+        {
+            VividParticleSystemManager.MarkRendererModuleDirty(this);
             RequestEditorRenderUpdate();
         }
 

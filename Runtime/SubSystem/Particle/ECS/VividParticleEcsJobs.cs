@@ -51,6 +51,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float* Sizes;
 
         [NativeDisableUnsafePtrRestriction]
+        public int* MeshIndices;
+
+        [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
 
         [NativeDisableUnsafePtrRestriction]
@@ -65,6 +68,7 @@ namespace VividRP.Runtime.Particle.ECS
         public int ShapeEnabled;
         public int ShapeType;
         public int SimulationSpace;
+        public int MeshCount;
         public uint RandomSeed;
         public float StartLifetime;
         public float StartSpeed;
@@ -95,6 +99,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float* Sizes;
 
         [NativeDisableUnsafePtrRestriction]
+        public int* MeshIndices;
+
+        [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
     }
 
@@ -110,6 +117,7 @@ namespace VividRP.Runtime.Particle.ECS
         public NativeArray<float> RemainingLifetimes;
         public NativeArray<float4> Colors;
         public NativeArray<float> Sizes;
+        public NativeArray<int> MeshIndices;
         public NativeArray<int> ActiveCountOutput;
 
         public void Execute()
@@ -145,6 +153,8 @@ namespace VividRP.Runtime.Particle.ECS
             RemainingLifetimes[destinationIndex] = RemainingLifetimes[sourceIndex];
             Colors[destinationIndex] = Colors[sourceIndex];
             Sizes[destinationIndex] = Sizes[sourceIndex];
+            if (MeshIndices.IsCreated)
+                MeshIndices[destinationIndex] = MeshIndices[sourceIndex];
         }
     }
 
@@ -255,6 +265,7 @@ namespace VividRP.Runtime.Particle.ECS
             work.RemainingLifetimes[destinationIndex] = work.RemainingLifetimes[sourceIndex];
             work.Colors[destinationIndex] = work.Colors[sourceIndex];
             work.Sizes[destinationIndex] = work.Sizes[sourceIndex];
+            work.MeshIndices[destinationIndex] = work.MeshIndices[sourceIndex];
             work.KeepMask[destinationIndex] = work.KeepMask[sourceIndex];
         }
     }
@@ -298,8 +309,20 @@ namespace VividRP.Runtime.Particle.ECS
                 work.RemainingLifetimes[particleIndex] = work.StartLifetime;
                 work.Colors[particleIndex] = work.StartColor;
                 work.Sizes[particleIndex] = work.StartSize;
+                work.MeshIndices[particleIndex] = ResolveMeshIndex(work, particleIndex);
                 work.KeepMask[particleIndex] = 1;
             }
+        }
+
+        private static int ResolveMeshIndex(
+            VividParticleEcsInitializeParticlesWork work,
+            int particleIndex)
+        {
+            int meshCount = math.max(1, work.MeshCount);
+            if (meshCount <= 1)
+                return 0;
+
+            return particleIndex % meshCount;
         }
 
         private static Random CreateRandom(uint seed, int particleIndex, int localIndex)

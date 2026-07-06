@@ -58,6 +58,8 @@ namespace VividRP.Runtime.Particle.ECS
             0,
             0u,
             0,
+            0,
+            uint.MaxValue,
             false);
 
         public VividParticleRendererSharedKey(
@@ -68,6 +70,8 @@ namespace VividRP.Runtime.Particle.ECS
             int gpuDataLayoutHash,
             uint dataPerSharpBits,
             int shadowCastingMode,
+            int sortMode,
+            uint renderingLayerMask,
             bool receiveShadows)
         {
             MaterialId = materialId;
@@ -77,6 +81,8 @@ namespace VividRP.Runtime.Particle.ECS
             GpuDataLayoutHash = gpuDataLayoutHash;
             DataPerSharpBits = dataPerSharpBits;
             ShadowCastingMode = shadowCastingMode;
+            SortMode = sortMode;
+            RenderingLayerMask = renderingLayerMask;
             ReceiveShadows = receiveShadows;
         }
 
@@ -94,6 +100,10 @@ namespace VividRP.Runtime.Particle.ECS
 
         public int ShadowCastingMode { get; }
 
+        public int SortMode { get; }
+
+        public uint RenderingLayerMask { get; }
+
         public bool ReceiveShadows { get; }
 
         public bool Equals(VividParticleRendererSharedKey other)
@@ -105,6 +115,8 @@ namespace VividRP.Runtime.Particle.ECS
                 && GpuDataLayoutHash == other.GpuDataLayoutHash
                 && DataPerSharpBits == other.DataPerSharpBits
                 && ShadowCastingMode == other.ShadowCastingMode
+                && SortMode == other.SortMode
+                && RenderingLayerMask == other.RenderingLayerMask
                 && ReceiveShadows == other.ReceiveShadows;
         }
 
@@ -124,6 +136,8 @@ namespace VividRP.Runtime.Particle.ECS
                 hash = (hash * 397) ^ GpuDataLayoutHash;
                 hash = (hash * 397) ^ (int)DataPerSharpBits;
                 hash = (hash * 397) ^ ShadowCastingMode;
+                hash = (hash * 397) ^ SortMode;
+                hash = (hash * 397) ^ (int)RenderingLayerMask;
                 hash = (hash * 397) ^ ReceiveShadows.GetHashCode();
                 return hash;
             }
@@ -138,8 +152,10 @@ namespace VividRP.Runtime.Particle.ECS
         public const int RemainingLifetimeFieldIndex = 3;
         public const int StartColorFieldIndex = 4;
         public const int SizeFieldIndex = 5;
-        public const int FieldCountValue = 6;
+        public const int MeshIndexFieldIndex = 6;
+        public const int FieldCountValue = 7;
         public const int FloatSizeInBytes = sizeof(float);
+        public const int IntSizeInBytes = sizeof(int);
         public const int Float3SizeInBytes = sizeof(float) * 3;
         public const int Float4SizeInBytes = sizeof(float) * 4;
         public const int PositionOffsetInPage = 0;
@@ -148,7 +164,8 @@ namespace VividRP.Runtime.Particle.ECS
         public const int RemainingLifetimeOffsetInPage = StartLifetimeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
         public const int StartColorOffsetInPage = RemainingLifetimeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
         public const int SizeOffsetInPage = StartColorOffsetInPage + Float4SizeInBytes * VividEcsConstants.PageEntryCount;
-        public const int TypeSizeInBytes = SizeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int MeshIndexOffsetInPage = SizeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int TypeSizeInBytes = MeshIndexOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
 
         public int FieldCount => FieldCountValue;
 
@@ -164,6 +181,7 @@ namespace VividRP.Runtime.Particle.ECS
                 RemainingLifetimeFieldIndex => new VividEcsSoaFieldInfo(RemainingLifetimeOffsetInPage, FloatSizeInBytes),
                 StartColorFieldIndex => new VividEcsSoaFieldInfo(StartColorOffsetInPage, Float4SizeInBytes),
                 SizeFieldIndex => new VividEcsSoaFieldInfo(SizeOffsetInPage, FloatSizeInBytes),
+                MeshIndexFieldIndex => new VividEcsSoaFieldInfo(MeshIndexOffsetInPage, IntSizeInBytes),
                 _ => throw new ArgumentOutOfRangeException(nameof(index)),
             };
         }

@@ -429,13 +429,53 @@ namespace VividRP.Editor.Tests
 
             Assert.That(
                 VividParticleSystemEditorUtility.FormatGpuDataInfo(layout[0]),
-                Is.EqualTo($"PerSharp / ZeroBlock / {VividParticleSystemManager.SharedDataByteSize} B / Copy None (0x0)"));
+                Is.EqualTo($"SharedDataBlock / PerSharp / ZeroBlock / {VividParticleSystemManager.SharedDataByteSize} B / Bit SharedData (0x1) / Copy None (0x0) / Job None (0x0)"));
             Assert.That(
                 VividParticleSystemEditorUtility.FormatGpuDataInfo(layout[2]),
-                Is.EqualTo($"PerInstance / PositionSize / {VividParticleSystemManager.SizeOfFloat4} B / Copy PositionSize (0x1)"));
+                Is.EqualTo($"PerInstanceValue / PerInstance / PositionSize / {VividParticleSystemManager.SizeOfFloat4} B / Bit PositionSize (0x4) / Copy PositionSize (0x1) / Job Transform (0x1)"));
             Assert.That(
                 VividParticleSystemEditorUtility.FormatGpuDataInfo(layout[5]),
-                Is.EqualTo($"PerSharp / Rotation / {VividParticleSystemManager.SizeOfFloat4} B / Copy Rotation (0x4)"));
+                Is.EqualTo($"PerSharpValue / PerSharp / Rotation / {VividParticleSystemManager.SizeOfFloat4} B / Bit Rotation (0x10) / Copy Rotation (0x4) / Job Transform (0x1)"));
+        }
+
+        [Test]
+        public void GpuLayoutPreview_EstimatesFootprintFromSerializedMaxParticles()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.main.maxParticles = 513;
+            system.rendererModule.renderMode = VividParticleRenderMode.Billboard;
+            system.rendererModule.colorDataMode = VividParticleGpuDataMode.PerParticle;
+            system.rendererModule.customData1Enabled = true;
+
+            using var serializedSystem = new SerializedObject(system);
+            SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
+
+            Assert.That(
+                VividParticleSystemEditorUtility.TryCreateGpuLayoutFootprint(
+                    renderer,
+                    out VividParticleGpuLayoutFootprint footprint),
+                Is.True);
+            Assert.That(footprint.InstanceCapacity, Is.EqualTo(513));
+            Assert.That(footprint.SharpCapacity, Is.EqualTo(1));
+            Assert.That(footprint.SpanCapacity, Is.EqualTo(3));
+
+            VividParticleSystemManager.VividParticleGpuDataLayout layout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(
+                    VividParticleSystemManager.VividParticleGpuDataLayoutDescriptor.Create(system.rendererModule));
+            Assert.That(
+                footprint.TotalByteSize,
+                Is.EqualTo(layout.CalculateByteSize(513, 1, 3)));
+        }
+
+        [Test]
+        public void GpuLayoutPreview_FormatsByteSize()
+        {
+            Assert.That(VividParticleSystemEditorUtility.FormatByteSize(-1), Is.EqualTo("0 B"));
+            Assert.That(VividParticleSystemEditorUtility.FormatByteSize(512), Is.EqualTo("512 B"));
+            Assert.That(VividParticleSystemEditorUtility.FormatByteSize(1536), Is.EqualTo("1.5 KiB (1536 B)"));
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatByteSize(2 * 1024 * 1024),
+                Is.EqualTo("2 MiB (2097152 B)"));
         }
 
         [Test]

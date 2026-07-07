@@ -252,17 +252,32 @@ namespace VividRP.Runtime.ECS
 
         public VividEcsPageGroup CreatePageGroup(VividEcsQuery query, Allocator allocator)
         {
-            List<VividEcsPageInfo> pageInfos = new();
-            foreach (VividEcsArchetypeLine line in query.MatchLines())
+            if (query == null)
+                throw new ArgumentNullException(nameof(query));
+
+            int pageCount = 0;
+            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
             {
-                using VividEcsPageGroup group = line.CreatePageGroup(Allocator.Temp);
-                for (int index = 0; index < group.pageCount; index++)
-                    pageInfos.Add(group[index]);
+                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
+                if (!query.MatchesLine(line))
+                    continue;
+
+                if (line != null)
+                    pageCount += GetLivePageCount(line.activeCount);
             }
 
-            var pages = new NativeArray<VividEcsPageInfo>(pageInfos.Count, allocator, NativeArrayOptions.UninitializedMemory);
-            for (int index = 0; index < pageInfos.Count; index++)
-                pages[index] = pageInfos[index];
+            var pages = new NativeArray<VividEcsPageInfo>(pageCount, allocator, NativeArrayOptions.UninitializedMemory);
+            int writeIndex = 0;
+            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            {
+                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
+                if (!query.MatchesLine(line))
+                    continue;
+
+                int linePageCount = line != null ? GetLivePageCount(line.activeCount) : 0;
+                for (int pageIndex = 0; pageIndex < linePageCount; pageIndex++)
+                    pages[writeIndex++] = line.GetPageInfo(pageIndex);
+            }
 
             return new VividEcsPageGroup(pages);
         }
@@ -286,6 +301,15 @@ namespace VividRP.Runtime.ECS
             List<VividEcsArchetypeLineGroup> result,
             params VividEcsTypeIndex[] sharedComponentTypes)
         {
+            CreateArchetypeLineGroups(query, result, scratchGroups: null, sharedComponentTypes);
+        }
+
+        public void CreateArchetypeLineGroups(
+            VividEcsQuery query,
+            List<VividEcsArchetypeLineGroup> result,
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> scratchGroups,
+            params VividEcsTypeIndex[] sharedComponentTypes)
+        {
             if (query == null)
                 throw new ArgumentNullException(nameof(query));
 
@@ -293,9 +317,37 @@ namespace VividRP.Runtime.ECS
                 throw new ArgumentNullException(nameof(result));
 
             result.Clear();
-            var groups = new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
-            foreach (VividEcsArchetypeLine line in query.MatchLines())
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups =
+                scratchGroups ?? new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
+            CreateArchetypeLineGroupMap(query, groups, sharedComponentTypes);
+
+            foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
             {
+                if (pair.Value.Count > 0)
+                    result.Add(new VividEcsArchetypeLineGroup(pair.Key, pair.Value));
+            }
+        }
+
+        public int CreateArchetypeLineGroupMap(
+            VividEcsQuery query,
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups,
+            params VividEcsTypeIndex[] sharedComponentTypes)
+        {
+            if (query == null)
+                throw new ArgumentNullException(nameof(query));
+
+            if (groups == null)
+                throw new ArgumentNullException(nameof(groups));
+
+            foreach (List<VividEcsArchetypeLine> lines in groups.Values)
+                lines.Clear();
+
+            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            {
+                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
+                if (!query.MatchesLine(line))
+                    continue;
+
                 VividEcsSharedComponentKey key =
                     sharedComponentTypes != null && sharedComponentTypes.Length > 0
                         ? line.GetSharedComponentKey(sharedComponentTypes)
@@ -309,8 +361,14 @@ namespace VividRP.Runtime.ECS
                 lines.Add(line);
             }
 
+            int groupCount = 0;
             foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
-                result.Add(new VividEcsArchetypeLineGroup(pair.Key, pair.Value));
+            {
+                if (pair.Value.Count > 0)
+                    groupCount++;
+            }
+
+            return groupCount;
         }
 
         public void Dispose()
@@ -334,6 +392,13 @@ namespace VividRP.Runtime.ECS
             }
 
             return true;
+        }
+
+        private static int GetLivePageCount(int activeCount)
+        {
+            return activeCount <= 0
+                ? 0
+                : (activeCount + VividEcsConstants.PageEntryCount - 1) / VividEcsConstants.PageEntryCount;
         }
 
         private struct EntityRecord
@@ -396,8 +461,11 @@ namespace VividRP.Runtime.ECS
         public int MatchingLineCount()
         {
             int count = 0;
-            foreach (VividEcsArchetypeLine _ in MatchLines())
-                count++;
+            for (int index = 0; index < m_Lines.Count; index++)
+            {
+                if (Matches(m_Lines[index]))
+                    count++;
+            }
 
             return count;
         }
@@ -405,10 +473,26 @@ namespace VividRP.Runtime.ECS
         public int MatchingEntriesCount()
         {
             int count = 0;
-            foreach (VividEcsArchetypeLine line in MatchLines())
-                count += line.activeCount;
+            for (int index = 0; index < m_Lines.Count; index++)
+            {
+                VividEcsArchetypeLine line = m_Lines[index];
+                if (Matches(line))
+                    count += line.activeCount;
+            }
 
             return count;
+        }
+
+        internal int candidateLineCount => m_Lines.Count;
+
+        internal VividEcsArchetypeLine GetCandidateLine(int index)
+        {
+            return m_Lines[index];
+        }
+
+        internal bool MatchesLine(VividEcsArchetypeLine line)
+        {
+            return Matches(line);
         }
 
         public IEnumerable<VividEcsArchetypeLine> MatchLines()

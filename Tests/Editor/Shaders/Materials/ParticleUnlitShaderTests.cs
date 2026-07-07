@@ -16,6 +16,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(Shader.Find(ParticleUnlitMaterialUtility.ParticleUnlitShaderName), Is.Not.Null);
             Assert.That(VividParticleSystemManager.DefaultShaderName, Is.EqualTo(ParticleUnlitMaterialUtility.ParticleUnlitShaderName));
+            Assert.That(VividParticleSystemManager.PickingShaderName, Is.EqualTo(ParticleUnlitMaterialUtility.ParticleUnlitShaderName));
         }
 
         [Test]
@@ -27,6 +28,8 @@ namespace VividRP.Editor.Tests
             {
                 AssertPassTag(material, "VividForward", "VividForward");
                 AssertPassTag(material, "SRPDefaultUnlit", "SRPDefaultUnlit");
+                AssertPassTag(material, "ScenePickingPass", "Picking");
+                AssertPassTag(material, "SceneSelectionPass", "SceneSelectionPass");
             }
             finally
             {
@@ -43,6 +46,8 @@ namespace VividRP.Editor.Tests
             {
                 AssertNoSRPBatcherIssue(material, "VividForward");
                 AssertNoSRPBatcherIssue(material, "SRPDefaultUnlit");
+                AssertNoSRPBatcherIssue(material, "ScenePickingPass");
+                AssertNoSRPBatcherIssue(material, "SceneSelectionPass");
             }
             finally
             {

@@ -162,6 +162,13 @@ namespace VividRP.Editor.Tests
 
             Assert.That(world.CreateQuery().WithAll(dataIndex).MatchingLineCount(), Is.EqualTo(0));
             Assert.That(world.CreateQuery().WithAll(tagIndex).MatchingEntriesCount(), Is.EqualTo(2));
+
+            var matchedLines = new List<VividEcsArchetypeLine>();
+            foreach (VividEcsArchetypeLine matchedLine in world.CreateQuery().WithAll(tagIndex).MatchLines())
+                matchedLines.Add(matchedLine);
+
+            Assert.That(matchedLines, Has.Count.EqualTo(1));
+            Assert.That(matchedLines[0], Is.SameAs(line));
         }
 
         [Test]
@@ -242,6 +249,109 @@ namespace VividRP.Editor.Tests
             Assert.That(selectedGroups, Has.Count.EqualTo(2));
             Assert.That(ContainsGroupWithActiveCount(selectedGroups, 2), Is.True);
             Assert.That(ContainsGroupWithActiveCount(selectedGroups, 1), Is.True);
+        }
+
+        [Test]
+        public void SharedComponentKey_SingleInlineKey_EqualsArrayKey_AndEmptyKeysMatch()
+        {
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            var inlineKey = new VividEcsSharedComponentKey(sharedIndex, new TestShared(7));
+            var arrayKey = new VividEcsSharedComponentKey(
+                new[] { sharedIndex },
+                new object[] { new TestShared(7) });
+            var emptyArrayKey = new VividEcsSharedComponentKey(
+                System.Array.Empty<VividEcsTypeIndex>(),
+                System.Array.Empty<object>());
+            VividEcsSharedComponentKey defaultEmptyKey = default;
+            var dictionary = new Dictionary<VividEcsSharedComponentKey, int>();
+
+            dictionary.Add(emptyArrayKey, 1);
+            dictionary[defaultEmptyKey] = 2;
+
+            Assert.That(inlineKey.Equals(arrayKey), Is.True);
+            Assert.That(inlineKey.GetHashCode(), Is.EqualTo(arrayKey.GetHashCode()));
+            Assert.That(defaultEmptyKey.Equals(emptyArrayKey), Is.True);
+            Assert.That(defaultEmptyKey.GetHashCode(), Is.EqualTo(emptyArrayKey.GetHashCode()));
+            Assert.That(dictionary, Has.Count.EqualTo(1));
+            Assert.That(dictionary[emptyArrayKey], Is.EqualTo(2));
+        }
+
+        [Test]
+        public void World_LineGroups_ReusesScratchCollections_AndSkipsEmptyScratchGroups()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine third = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestShared(1));
+            third.SetSharedComponent(new TestShared(2));
+
+            world.CreateEntity(first);
+            world.CreateEntity(second);
+            world.CreateEntity(third);
+
+            VividEcsQuery allData = world.CreateQuery().WithAll(dataIndex);
+            VividEcsQuery sharedOne = world.CreateQuery().WithAll(dataIndex).WithShared(new TestShared(1));
+            var groups = new List<VividEcsArchetypeLineGroup>();
+            var scratchGroups = new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
+
+            world.CreateArchetypeLineGroups(allData, groups, scratchGroups, sharedIndex);
+
+            Assert.That(groups, Has.Count.EqualTo(2));
+            Assert.That(scratchGroups, Has.Count.EqualTo(2));
+            var firstPassLists = new List<IReadOnlyList<VividEcsArchetypeLine>>();
+            for (int index = 0; index < groups.Count; index++)
+                firstPassLists.Add(groups[index].lines);
+
+            int mapGroupCount = world.CreateArchetypeLineGroupMap(sharedOne, scratchGroups, sharedIndex);
+
+            Assert.That(mapGroupCount, Is.EqualTo(1));
+            Assert.That(scratchGroups, Has.Count.EqualTo(2));
+            Assert.That(TryGetSingleNonEmptyLineList(scratchGroups, out List<VividEcsArchetypeLine> mapLines), Is.True);
+            Assert.That(mapLines, Has.Count.EqualTo(2));
+            Assert.That(ContainsLineListReference(firstPassLists, mapLines), Is.True);
+
+            world.CreateArchetypeLineGroups(sharedOne, groups, scratchGroups, sharedIndex);
+
+            Assert.That(groups, Has.Count.EqualTo(1));
+            Assert.That(groups[0].activeCount, Is.EqualTo(2));
+            Assert.That(scratchGroups, Has.Count.EqualTo(2));
+            Assert.That(ContainsLineListReference(firstPassLists, groups[0].lines), Is.True);
+        }
+
+        [Test]
+        public void World_PageGroups_FlattenMatchingLinePages()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestShared(1));
+            first.EnsureCapacity(300);
+            second.EnsureCapacity(10);
+            first.SetActiveCount(300);
+            second.SetActiveCount(10);
+
+            VividEcsQuery allData = world.CreateQuery().WithAll(dataIndex);
+            using VividEcsPageGroup worldPages = world.CreatePageGroup(allData, Allocator.TempJob);
+            List<VividEcsArchetypeLineGroup> groups = world.CreateArchetypeLineGroups(allData, sharedIndex);
+            using VividEcsPageGroup groupedPages = groups[0].CreatePageGroup(Allocator.TempJob);
+
+            Assert.That(worldPages.pageCount, Is.EqualTo(3));
+            Assert.That(worldPages[0].ArchetypeLineId, Is.EqualTo(first.ArchetypeLineId));
+            Assert.That(worldPages[0].EntryCount, Is.EqualTo(256));
+            Assert.That(worldPages[1].ArchetypeLineId, Is.EqualTo(first.ArchetypeLineId));
+            Assert.That(worldPages[1].EntryCount, Is.EqualTo(44));
+            Assert.That(worldPages[2].ArchetypeLineId, Is.EqualTo(second.ArchetypeLineId));
+            Assert.That(worldPages[2].EntryCount, Is.EqualTo(10));
+            Assert.That(groupedPages.pageCount, Is.EqualTo(worldPages.pageCount));
+            Assert.That(groupedPages[0].EntryCount, Is.EqualTo(worldPages[0].EntryCount));
+            Assert.That(groupedPages[2].EntryCount, Is.EqualTo(worldPages[2].EntryCount));
         }
 
         [Test]
@@ -596,6 +706,38 @@ namespace VividRP.Editor.Tests
             }
 
             return false;
+        }
+
+        private static bool ContainsLineListReference(
+            List<IReadOnlyList<VividEcsArchetypeLine>> lists,
+            IReadOnlyList<VividEcsArchetypeLine> target)
+        {
+            for (int index = 0; index < lists.Count; index++)
+            {
+                if (ReferenceEquals(lists[index], target))
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static bool TryGetSingleNonEmptyLineList(
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups,
+            out List<VividEcsArchetypeLine> result)
+        {
+            result = null;
+            foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
+            {
+                if (pair.Value.Count == 0)
+                    continue;
+
+                if (result != null)
+                    return false;
+
+                result = pair.Value;
+            }
+
+            return result != null;
         }
     }
 }

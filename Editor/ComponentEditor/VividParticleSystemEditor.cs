@@ -31,6 +31,29 @@ namespace VividRP.Editor
         MultiMeshSplitsDrawCommands = 1 << 7,
     }
 
+    internal readonly struct VividParticleGpuLayoutFootprint
+    {
+        public VividParticleGpuLayoutFootprint(
+            int instanceCapacity,
+            int sharpCapacity,
+            int spanCapacity,
+            int totalByteSize)
+        {
+            InstanceCapacity = instanceCapacity;
+            SharpCapacity = sharpCapacity;
+            SpanCapacity = spanCapacity;
+            TotalByteSize = totalByteSize;
+        }
+
+        public int InstanceCapacity { get; }
+
+        public int SharpCapacity { get; }
+
+        public int SpanCapacity { get; }
+
+        public int TotalByteSize { get; }
+    }
+
     internal static class VividParticleSystemMenuItems
     {
         internal const string CreateVividParticleSystemMenuPath = "GameObject/Rendering/Vivid Particle System";
@@ -351,6 +374,37 @@ namespace VividRP.Editor
             return true;
         }
 
+        internal static bool TryCreateGpuLayoutFootprint(
+            SerializedProperty renderer,
+            out VividParticleGpuLayoutFootprint footprint)
+        {
+            footprint = default;
+            if (!TryCreateGpuDataLayoutDescriptor(
+                    renderer,
+                    out VividParticleSystemManager.VividParticleGpuDataLayoutDescriptor descriptor))
+            {
+                return false;
+            }
+
+            SerializedProperty maxParticles = renderer.serializedObject?.FindProperty("m_Main.m_MaxParticles");
+            if (maxParticles == null || maxParticles.hasMultipleDifferentValues)
+                return false;
+
+            int instanceCapacity = Mathf.Max(VividParticleMainModule.MinimumMaxParticles, maxParticles.intValue);
+            int sharpCapacity = 1;
+            int spanCapacity = Mathf.Max(
+                1,
+                VividParticleSystemManager.GetVisibleInstanceCount(descriptor.RenderMode, instanceCapacity));
+            VividParticleSystemManager.VividParticleGpuDataLayout layout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(descriptor);
+            footprint = new VividParticleGpuLayoutFootprint(
+                instanceCapacity,
+                sharpCapacity,
+                spanCapacity,
+                layout.CalculateByteSize(instanceCapacity, sharpCapacity, spanCapacity));
+            return true;
+        }
+
         internal static string FormatUploadColumnMask(int columnMask)
         {
             if (columnMask == 0)
@@ -462,15 +516,45 @@ namespace VividRP.Editor
         internal static string FormatGpuDataInfo(VividParticleSystemManager.VividParticleGpuDataInfo dataInfo)
         {
             string copyMask = dataInfo.HasUploadSegment
-                ? FormatUploadColumnMask(VividParticleSystemManager.GetUploadColumnMask(dataInfo.UploadSegment))
+                ? FormatUploadColumnMask(dataInfo.UploadColumnMask)
+                : "None (0x0)";
+            string renderJobs = dataInfo.RenderJobFlagMask != 0u
+                ? FormatRenderJobModuleFlags(dataInfo.RenderJobFlagMask)
                 : "None (0x0)";
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "{0} / {1} / {2} B / Copy {3}",
+                "{0} / {1} / {2} / {3} B / Bit {4} / Copy {5} / Job {6}",
+                dataInfo.Role,
                 dataInfo.Frequency,
                 dataInfo.UploadSegment,
                 dataInfo.ElementSize,
-                copyMask);
+                FormatGpuDataBits(dataInfo.DataBit),
+                copyMask,
+                renderJobs);
+        }
+
+        internal static string FormatByteSize(int byteSize)
+        {
+            int clampedByteSize = Mathf.Max(0, byteSize);
+            if (clampedByteSize >= 1024 * 1024)
+            {
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0:0.##} MiB ({1} B)",
+                    clampedByteSize / (1024.0f * 1024.0f),
+                    clampedByteSize);
+            }
+
+            if (clampedByteSize >= 1024)
+            {
+                return string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0:0.##} KiB ({1} B)",
+                    clampedByteSize / 1024.0f,
+                    clampedByteSize);
+            }
+
+            return string.Format(CultureInfo.InvariantCulture, "{0} B", clampedByteSize);
         }
 
         internal static VividParticleRendererInspectorNotice GetRendererInspectorNotices(SerializedProperty renderer)
@@ -702,6 +786,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_LineGroupsLabel = EditorGUIUtility.TrTextContent("Line Groups");
         private static readonly GUIContent s_EcsLineGroupsLabel = EditorGUIUtility.TrTextContent("ECS Line Groups");
         private static readonly GUIContent s_EcsLinesLabel = EditorGUIUtility.TrTextContent("ECS Lines");
+        private static readonly GUIContent s_EcsMatchedLinesLabel = EditorGUIUtility.TrTextContent("ECS Matched Lines");
+        private static readonly GUIContent s_EcsSkippedLinesLabel = EditorGUIUtility.TrTextContent("ECS Skipped Lines");
         private static readonly GUIContent s_DrawBatchesLabel = EditorGUIUtility.TrTextContent("Draw Batches");
         private static readonly GUIContent s_CullingRecordsLabel = EditorGUIUtility.TrTextContent("Culling Records");
         private static readonly GUIContent s_DrawCommandsLabel = EditorGUIUtility.TrTextContent("Draw Commands");
@@ -709,16 +795,40 @@ namespace VividRP.Editor
         private static readonly GUIContent s_VisibleCapacityLabel = EditorGUIUtility.TrTextContent("Visible Capacity");
         private static readonly GUIContent s_SortingCapacityLabel = EditorGUIUtility.TrTextContent("Sorting Capacity");
         private static readonly GUIContent s_LightCommandsLabel = EditorGUIUtility.TrTextContent("Light Commands");
+        private static readonly GUIContent s_LightRangesLabel = EditorGUIUtility.TrTextContent("Light Ranges");
+        private static readonly GUIContent s_LightVisibleCapacityLabel =
+            EditorGUIUtility.TrTextContent("Light Visible Capacity");
         private static readonly GUIContent s_PickingCommandsLabel = EditorGUIUtility.TrTextContent("Picking Commands");
+        private static readonly GUIContent s_PickingRangesLabel = EditorGUIUtility.TrTextContent("Picking Ranges");
+        private static readonly GUIContent s_PickingVisibleCapacityLabel =
+            EditorGUIUtility.TrTextContent("Picking Visible Capacity");
         private static readonly GUIContent s_SelectionCommandsLabel = EditorGUIUtility.TrTextContent("Selection Commands");
+        private static readonly GUIContent s_SelectionRangesLabel = EditorGUIUtility.TrTextContent("Selection Ranges");
+        private static readonly GUIContent s_SelectionVisibleCapacityLabel =
+            EditorGUIUtility.TrTextContent("Selection Visible Capacity");
         private static readonly GUIContent s_BoundsPageWorksLabel = EditorGUIUtility.TrTextContent("Bounds Page Works");
+        private static readonly GUIContent s_CullingSingleMeshCachesLabel =
+            EditorGUIUtility.TrTextContent("Single Mesh Cache Records");
+        private static readonly GUIContent s_CullingMultiMeshCachesLabel =
+            EditorGUIUtility.TrTextContent("Multi Mesh Cache Records");
+        private static readonly GUIContent s_CullingMeshFallbacksLabel =
+            EditorGUIUtility.TrTextContent("Mesh Fallback Records");
+        private static readonly GUIContent s_CullingRecordCacheEntriesLabel =
+            EditorGUIUtility.TrTextContent("Record Cache Entries");
+        private static readonly GUIContent s_CullingBatchCacheEntriesLabel =
+            EditorGUIUtility.TrTextContent("Batch Cache Entries");
         private static readonly GUIContent s_MeshVisibleWorksLabel = EditorGUIUtility.TrTextContent("Mesh Visible Works");
         private static readonly GUIContent s_MeshVisibleOutputsLabel = EditorGUIUtility.TrTextContent("Mesh Visible Outputs");
         private static readonly GUIContent s_LastUploadLabel = EditorGUIUtility.TrTextContent("Last Upload");
         private static readonly GUIContent s_DirtyUploadQueueLabel = EditorGUIUtility.TrTextContent("Dirty Upload Queue");
         private static readonly GUIContent s_InvalidDirtyUploadQueueLabel =
             EditorGUIUtility.TrTextContent("Invalid Dirty Uploads");
+        private static readonly GUIContent s_DirtyUploadBatchQueueLabel =
+            EditorGUIUtility.TrTextContent("Dirty Batch Queue");
+        private static readonly GUIContent s_InvalidDirtyUploadBatchQueueLabel =
+            EditorGUIUtility.TrTextContent("Invalid Dirty Batches");
         private static readonly GUIContent s_UploadRecordWorksLabel = EditorGUIUtility.TrTextContent("Upload Record Works");
+        private static readonly GUIContent s_UploadBatchWorksLabel = EditorGUIUtility.TrTextContent("Upload Batch Works");
         private static readonly GUIContent s_TransformUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Transform Page Works");
         private static readonly GUIContent s_ColorUploadPageWorksLabel =
@@ -740,6 +850,26 @@ namespace VividRP.Editor
         private static readonly GUIContent s_LayoutColumnCountLabel = EditorGUIUtility.TrTextContent("Column Count");
         private static readonly GUIContent s_PerInstanceUploadBytesLabel = EditorGUIUtility.TrTextContent("Per-Particle Upload Bytes");
         private static readonly GUIContent s_PerInstanceUploadMaskLabel = EditorGUIUtility.TrTextContent("Per-Particle Upload Mask");
+        private static readonly GUIContent s_PerInstanceRenderJobsLabel = EditorGUIUtility.TrTextContent("Per-Particle Render Jobs");
+        private static readonly GUIContent s_TransformUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("Transform Upload Mask");
+        private static readonly GUIContent s_ColorUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("Color Upload Mask");
+        private static readonly GUIContent s_VelocityUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("Velocity Upload Mask");
+        private static readonly GUIContent s_ExtraUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("Extra Upload Mask");
+        private static readonly GUIContent s_UVUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("UV Upload Mask");
+        private static readonly GUIContent s_CustomDataUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("Custom Data Upload Mask");
+        private static readonly GUIContent s_MeshIndexUploadMaskLabel =
+            EditorGUIUtility.TrTextContent("Mesh Index Upload Mask");
+        private static readonly GUIContent s_InstanceCapacityLabel = EditorGUIUtility.TrTextContent("Instance Capacity");
+        private static readonly GUIContent s_SharpCapacityLabel = EditorGUIUtility.TrTextContent("Sharp Capacity");
+        private static readonly GUIContent s_SpanCapacityLabel = EditorGUIUtility.TrTextContent("Span Capacity");
+        private static readonly GUIContent s_EstimatedBufferBytesLabel =
+            EditorGUIUtility.TrTextContent("Estimated Buffer Bytes");
         private const string RendererDisabledNotice =
             "Renderer is disabled. Particles can still simulate, but this module will not produce BRG draw records.";
         private const string RenderModeNoneNotice =
@@ -875,6 +1005,8 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_LineGroupsLabel, rendererStats.LineGroupCount);
                 EditorGUILayout.IntField(s_EcsLineGroupsLabel, rendererStats.EcsLineGroupCount);
                 EditorGUILayout.IntField(s_EcsLinesLabel, rendererStats.EcsLineCount);
+                EditorGUILayout.IntField(s_EcsMatchedLinesLabel, rendererStats.EcsMatchedLineCount);
+                EditorGUILayout.IntField(s_EcsSkippedLinesLabel, rendererStats.EcsSkippedLineCount);
                 EditorGUILayout.IntField(s_DrawBatchesLabel, rendererStats.DrawBatchCount);
                 EditorGUILayout.IntField(s_CullingRecordsLabel, rendererStats.CullingRecordCount);
                 EditorGUILayout.IntField(s_DrawCommandsLabel, rendererStats.DrawCommandCount);
@@ -882,15 +1014,43 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_VisibleCapacityLabel, rendererStats.VisibleInstanceCapacity);
                 EditorGUILayout.IntField(s_SortingCapacityLabel, rendererStats.SortingPositionCapacity);
                 EditorGUILayout.IntField(s_LightCommandsLabel, rendererStats.LightDrawCommandCount);
+                EditorGUILayout.IntField(s_LightRangesLabel, rendererStats.LightDrawRangeCount);
+                EditorGUILayout.IntField(s_LightVisibleCapacityLabel, rendererStats.LightVisibleInstanceCapacity);
                 EditorGUILayout.IntField(s_PickingCommandsLabel, rendererStats.PickingDrawCommandCount);
+                EditorGUILayout.IntField(s_PickingRangesLabel, rendererStats.PickingDrawRangeCount);
+                EditorGUILayout.IntField(s_PickingVisibleCapacityLabel, rendererStats.PickingVisibleInstanceCapacity);
                 EditorGUILayout.IntField(s_SelectionCommandsLabel, rendererStats.SelectionDrawCommandCount);
+                EditorGUILayout.IntField(s_SelectionRangesLabel, rendererStats.SelectionDrawRangeCount);
+                EditorGUILayout.IntField(s_SelectionVisibleCapacityLabel, rendererStats.SelectionVisibleInstanceCapacity);
                 EditorGUILayout.IntField(s_BoundsPageWorksLabel, rendererStats.LastBoundsPageWorkCount);
+                EditorGUILayout.IntField(
+                    s_CullingSingleMeshCachesLabel,
+                    rendererStats.LastCullingSingleMeshCacheRecordCount);
+                EditorGUILayout.IntField(
+                    s_CullingMultiMeshCachesLabel,
+                    rendererStats.LastCullingMultiMeshCacheRecordCount);
+                EditorGUILayout.IntField(
+                    s_CullingMeshFallbacksLabel,
+                    rendererStats.LastCullingMeshFallbackRecordCount);
+                EditorGUILayout.IntField(
+                    s_CullingRecordCacheEntriesLabel,
+                    rendererStats.LastCullingRecordVisibleCacheEntryCount);
+                EditorGUILayout.IntField(
+                    s_CullingBatchCacheEntriesLabel,
+                    rendererStats.LastCullingBatchVisibleCacheEntryCount);
                 EditorGUILayout.IntField(s_MeshVisibleWorksLabel, rendererStats.MeshVisibleCountWorkCount);
                 EditorGUILayout.IntField(s_MeshVisibleOutputsLabel, rendererStats.MeshVisibleCountOutputCount);
-                EditorGUILayout.IntField(s_LastUploadLabel, rendererStats.LastCopyByteCount);
+                EditorGUILayout.TextField(
+                    s_LastUploadLabel,
+                    VividParticleSystemEditorUtility.FormatByteSize(rendererStats.LastCopyByteCount));
                 EditorGUILayout.IntField(s_DirtyUploadQueueLabel, rendererStats.LastDirtyUploadQueueCount);
                 EditorGUILayout.IntField(s_InvalidDirtyUploadQueueLabel, rendererStats.LastInvalidDirtyUploadQueueCount);
+                EditorGUILayout.IntField(s_DirtyUploadBatchQueueLabel, rendererStats.LastDirtyUploadBatchQueueCount);
+                EditorGUILayout.IntField(
+                    s_InvalidDirtyUploadBatchQueueLabel,
+                    rendererStats.LastInvalidDirtyUploadBatchQueueCount);
                 EditorGUILayout.IntField(s_UploadRecordWorksLabel, rendererStats.LastUploadRecordWorkCount);
+                EditorGUILayout.IntField(s_UploadBatchWorksLabel, rendererStats.LastUploadBatchWorkCount);
                 EditorGUILayout.IntField(s_TransformUploadPageWorksLabel, rendererStats.LastTransformUploadPageWorkCount);
                 EditorGUILayout.IntField(s_ColorUploadPageWorksLabel, rendererStats.LastColorUploadPageWorkCount);
                 EditorGUILayout.IntField(s_VelocityUploadPageWorksLabel, rendererStats.LastVelocityStretchUploadPageWorkCount);
@@ -1185,6 +1345,42 @@ namespace VividRP.Editor
                 EditorGUILayout.TextField(
                     s_PerInstanceUploadMaskLabel,
                     VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.PerInstanceUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_PerInstanceRenderJobsLabel,
+                    VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(layout.PerInstanceRenderJobFlagMask));
+                EditorGUILayout.TextField(
+                    s_TransformUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.TransformRenderJobUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_ColorUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.ColorRenderJobUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_VelocityUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.VelocityStretchRenderJobUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_ExtraUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.ExtraDataRenderJobUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_UVUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.UVRenderJobUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_CustomDataUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.CustomDataRenderJobUploadColumnMask));
+                EditorGUILayout.TextField(
+                    s_MeshIndexUploadMaskLabel,
+                    VividParticleSystemEditorUtility.FormatUploadColumnMask(layout.MeshIndexRenderJobUploadColumnMask));
+                if (VividParticleSystemEditorUtility.TryCreateGpuLayoutFootprint(
+                        rendererModule,
+                        out VividParticleGpuLayoutFootprint footprint))
+                {
+                    EditorGUILayout.IntField(s_InstanceCapacityLabel, footprint.InstanceCapacity);
+                    EditorGUILayout.IntField(s_SharpCapacityLabel, footprint.SharpCapacity);
+                    EditorGUILayout.IntField(s_SpanCapacityLabel, footprint.SpanCapacity);
+                    EditorGUILayout.TextField(
+                        s_EstimatedBufferBytesLabel,
+                        VividParticleSystemEditorUtility.FormatByteSize(footprint.TotalByteSize));
+                }
+
                 for (int index = 0; index < layout.Count; index++)
                 {
                     VividParticleSystemManager.VividParticleGpuDataInfo dataInfo = layout[index];

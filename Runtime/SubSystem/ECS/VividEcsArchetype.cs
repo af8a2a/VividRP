@@ -234,15 +234,63 @@ namespace VividRP.Runtime.ECS
 
     internal readonly struct VividEcsSharedComponentKey : IEquatable<VividEcsSharedComponentKey>
     {
+        private readonly VividEcsTypeIndex m_Type0;
+        private readonly object m_Value0;
         private readonly VividEcsTypeIndex[] m_Types;
         private readonly object[] m_Values;
 
+        public VividEcsSharedComponentKey(VividEcsTypeIndex type, object value)
+        {
+            if (!type.IsValid)
+            {
+                m_Type0 = default;
+                m_Value0 = null;
+                m_Types = null;
+                m_Values = null;
+                Count = 0;
+                Hash = 0;
+                return;
+            }
+
+            m_Type0 = type;
+            m_Value0 = value;
+            m_Types = null;
+            m_Values = null;
+            Count = 1;
+            Hash = ComputeHash(type, value);
+        }
+
         public VividEcsSharedComponentKey(VividEcsTypeIndex[] types, object[] values)
         {
-            m_Types = types ?? Array.Empty<VividEcsTypeIndex>();
-            m_Values = values ?? Array.Empty<object>();
-            Count = Math.Min(m_Types.Length, m_Values.Length);
-            Hash = ComputeHash(m_Types, m_Values, Count);
+            int count = Math.Min(types?.Length ?? 0, values?.Length ?? 0);
+            if (count == 0)
+            {
+                m_Type0 = default;
+                m_Value0 = null;
+                m_Types = null;
+                m_Values = null;
+                Count = 0;
+                Hash = 0;
+                return;
+            }
+
+            if (count == 1)
+            {
+                m_Type0 = types[0];
+                m_Value0 = values[0];
+                m_Types = null;
+                m_Values = null;
+                Count = 1;
+                Hash = ComputeHash(m_Type0, m_Value0);
+                return;
+            }
+
+            m_Type0 = default;
+            m_Value0 = null;
+            m_Types = types;
+            m_Values = values;
+            Count = count;
+            Hash = ComputeHash(types, values, count);
         }
 
         public int Count { get; }
@@ -251,13 +299,19 @@ namespace VividRP.Runtime.ECS
 
         public bool Equals(VividEcsSharedComponentKey other)
         {
-            if (Hash != other.Hash || Count != other.Count)
+            if (Count != other.Count)
+                return false;
+
+            if (Count == 0)
+                return true;
+
+            if (Hash != other.Hash)
                 return false;
 
             for (int index = 0; index < Count; index++)
             {
-                if (m_Types[index] != other.m_Types[index]
-                    || !Equals(m_Values[index], other.m_Values[index]))
+                if (GetTypeAt(index) != other.GetTypeAt(index)
+                    || !Equals(GetValueAt(index), other.GetValueAt(index)))
                 {
                     return false;
                 }
@@ -273,11 +327,44 @@ namespace VividRP.Runtime.ECS
 
         public override int GetHashCode()
         {
-            return Hash;
+            return Count == 0 ? 0 : Hash;
+        }
+
+        private VividEcsTypeIndex GetTypeAt(int index)
+        {
+            if (Count == 1)
+                return m_Type0;
+
+            return m_Types[index];
+        }
+
+        private object GetValueAt(int index)
+        {
+            if (Count == 1)
+                return m_Value0;
+
+            return m_Values[index];
+        }
+
+        private static int ComputeHash(VividEcsTypeIndex type, object value)
+        {
+            unchecked
+            {
+                int hash = 17;
+                hash = (hash * 397) ^ type.GetHashCode();
+                hash = (hash * 397) ^ (value?.GetHashCode() ?? 0);
+                return hash;
+            }
         }
 
         private static int ComputeHash(VividEcsTypeIndex[] types, object[] values, int count)
         {
+            if (count == 0)
+                return 0;
+
+            if (count == 1)
+                return ComputeHash(types[0], values[0]);
+
             unchecked
             {
                 int hash = 17;
@@ -324,19 +411,32 @@ namespace VividRP.Runtime.ECS
 
         public VividEcsPageGroup CreatePageGroup(Allocator allocator)
         {
-            List<VividEcsPageInfo> pageInfos = new();
+            int pageCount = 0;
             for (int lineIndex = 0; lineIndex < m_Lines.Count; lineIndex++)
             {
-                using VividEcsPageGroup group = m_Lines[lineIndex].CreatePageGroup(Allocator.Temp);
-                for (int pageIndex = 0; pageIndex < group.pageCount; pageIndex++)
-                    pageInfos.Add(group[pageIndex]);
+                VividEcsArchetypeLine line = m_Lines[lineIndex];
+                if (line != null)
+                    pageCount += GetLivePageCount(line.activeCount);
             }
 
-            var pages = new NativeArray<VividEcsPageInfo>(pageInfos.Count, allocator, NativeArrayOptions.UninitializedMemory);
-            for (int index = 0; index < pageInfos.Count; index++)
-                pages[index] = pageInfos[index];
+            var pages = new NativeArray<VividEcsPageInfo>(pageCount, allocator, NativeArrayOptions.UninitializedMemory);
+            int writeIndex = 0;
+            for (int lineIndex = 0; lineIndex < m_Lines.Count; lineIndex++)
+            {
+                VividEcsArchetypeLine line = m_Lines[lineIndex];
+                int linePageCount = line != null ? GetLivePageCount(line.activeCount) : 0;
+                for (int pageIndex = 0; pageIndex < linePageCount; pageIndex++)
+                    pages[writeIndex++] = line.GetPageInfo(pageIndex);
+            }
 
             return new VividEcsPageGroup(pages);
+        }
+
+        private static int GetLivePageCount(int activeCount)
+        {
+            return activeCount <= 0
+                ? 0
+                : (activeCount + VividEcsConstants.PageEntryCount - 1) / VividEcsConstants.PageEntryCount;
         }
     }
 
@@ -520,7 +620,13 @@ namespace VividRP.Runtime.ECS
         public VividEcsSharedComponentKey GetSharedComponentKey()
         {
             if (m_SharedComponents.Count == 0)
-                return new VividEcsSharedComponentKey(Array.Empty<VividEcsTypeIndex>(), Array.Empty<object>());
+                return default;
+
+            if (m_SharedComponents.Count == 1)
+            {
+                foreach (KeyValuePair<VividEcsTypeIndex, object> pair in m_SharedComponents)
+                    return new VividEcsSharedComponentKey(pair.Key, pair.Value);
+            }
 
             var types = new VividEcsTypeIndex[m_SharedComponents.Count];
             var values = new object[m_SharedComponents.Count];
@@ -536,6 +642,12 @@ namespace VividRP.Runtime.ECS
                 writeIndex++;
             }
 
+            if (writeIndex == 0)
+                return default;
+
+            if (writeIndex == 1)
+                return new VividEcsSharedComponentKey(types[0], values[0]);
+
             if (writeIndex == types.Length)
                 return new VividEcsSharedComponentKey(types, values);
 
@@ -548,6 +660,14 @@ namespace VividRP.Runtime.ECS
         {
             if (sharedComponentTypes == null || sharedComponentTypes.Length == 0)
                 return GetSharedComponentKey();
+
+            if (sharedComponentTypes.Length == 1)
+            {
+                VividEcsTypeIndex type = sharedComponentTypes[0];
+                return type.IsValid && m_SharedComponents.TryGetValue(type, out object value)
+                    ? new VividEcsSharedComponentKey(type, value)
+                    : default;
+            }
 
             var types = new VividEcsTypeIndex[sharedComponentTypes.Length];
             var values = new object[sharedComponentTypes.Length];
@@ -562,6 +682,12 @@ namespace VividRP.Runtime.ECS
                 values[writeIndex] = value;
                 writeIndex++;
             }
+
+            if (writeIndex == 0)
+                return default;
+
+            if (writeIndex == 1)
+                return new VividEcsSharedComponentKey(types[0], values[0]);
 
             if (writeIndex == types.Length)
                 return new VividEcsSharedComponentKey(types, values);

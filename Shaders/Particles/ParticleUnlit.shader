@@ -41,6 +41,9 @@ Shader "VividRP/Particles/Unlit"
         [HideInInspector] _VividParticleCustomData1("Vivid Particle Custom Data 1", Vector) = (0, 0, 0, 0)
         [HideInInspector] _VividParticleCustomData2("Vivid Particle Custom Data 2", Vector) = (0, 0, 0, 0)
         [HideInInspector] _VividParticleMeshIndex("Vivid Particle Mesh Index", Vector) = (0, 0, 0, 0)
+        [HideInInspector] _SelectionID("Selection ID", Color) = (0, 0, 0, 0)
+        [HideInInspector] _ObjectId("Object ID", Float) = 0.0
+        [HideInInspector] _PassValue("Pass Value", Float) = 0.0
     }
 
     SubShader
@@ -86,10 +89,13 @@ Shader "VividRP/Particles/Unlit"
                 float4 _VividParticleCustomData1;
                 float4 _VividParticleCustomData2;
                 float4 _VividParticleMeshIndex;
+                float4 _SelectionID;
                 float _AlphaCutoff;
                 float _AlphaRemapMin;
                 float _AlphaRemapMax;
                 float _VividParticleRenderMode;
+                float _ObjectId;
+                float _PassValue;
             CBUFFER_END
 
             TEXTURE2D(_UnlitColorMap);
@@ -154,6 +160,7 @@ Shader "VividRP/Particles/Unlit"
                 float3 pivot;
                 float3 flip;
                 float visible;
+                float renderMode;
                 uint particleIndex;
                 uint sharpIndex;
             };
@@ -250,6 +257,11 @@ Shader "VividRP/Particles/Unlit"
                         data.sharpIndex,
                         5u,
                         float4(1.0, 0.0, 0.0, 1.0));
+                    data.renderMode = VividLoadParticleSharedFloat4(
+                        VIVID_PARTICLE_SHARED_DATA_METADATA,
+                        data.sharpIndex,
+                        6u,
+                        float4(1.0, 1.0, 0.0, _VividParticleRenderMode)).w;
                     data.pivot = VividLoadParticleSharedFloat4(
                         VIVID_PARTICLE_SHARED_DATA_METADATA,
                         data.sharpIndex,
@@ -277,6 +289,7 @@ Shader "VividRP/Particles/Unlit"
                     data.pivot = 0.0;
                     data.flip = 0.0;
                     data.visible = 1.0;
+                    data.renderMode = _VividParticleRenderMode;
                     data.particleIndex = 0u;
                     data.sharpIndex = 0u;
                     return data;
@@ -373,13 +386,13 @@ Shader "VividRP/Particles/Unlit"
                 float3 meshLocal = (particleLocal - particle.pivot) * size;
                 float3 positionRWS;
 
-                if (_VividParticleRenderMode < 0.5)
+                if (particle.renderMode < 0.5)
                 {
                     positionRWS = centerRWS
                         + viewRight * meshLocal.x
                         + viewUp * meshLocal.y;
                 }
-                else if (_VividParticleRenderMode < 1.5)
+                else if (particle.renderMode < 1.5)
                 {
                     float3 stretchUp = SafeNormalizeParticleVector(velocityStretch.xyz, viewUp);
                     float3 stretchRight = cross(viewForward, stretchUp);
@@ -389,13 +402,13 @@ Shader "VividRP/Particles/Unlit"
                         + stretchRight * meshLocal.x
                         + stretchUp * ((particleLocal.y - particle.pivot.y) * stretchLength);
                 }
-                else if (_VividParticleRenderMode < 2.5)
+                else if (particle.renderMode < 2.5)
                 {
                     positionRWS = centerRWS
                         + float3(1.0, 0.0, 0.0) * meshLocal.x
                         + float3(0.0, 0.0, 1.0) * meshLocal.y;
                 }
-                else if (_VividParticleRenderMode < 3.5)
+                else if (particle.renderMode < 3.5)
                 {
                     float3 cameraPositionRWS = float3(viewToWorld._m03, viewToWorld._m13, viewToWorld._m23);
                     float3 toCamera = cameraPositionRWS - centerRWS;
@@ -426,6 +439,28 @@ Shader "VividRP/Particles/Unlit"
                 float4 color = SampleParticleUnlitColor(input.uv) * input.instanceColor;
                 ApplyParticleUnlitAlphaClip(color.a);
                 return float4((color.rgb), color.a);
+            }
+
+            float4 FragPicking(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                clip(input.particleVisible - 0.5);
+                float4 color = SampleParticleUnlitColor(input.uv) * input.instanceColor;
+                ApplyParticleUnlitAlphaClip(color.a);
+                return _SelectionID;
+            }
+
+            float4 FragSceneSelection(Varyings input) : SV_Target
+            {
+                UNITY_SETUP_INSTANCE_ID(input);
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+                clip(input.particleVisible - 0.5);
+                float4 color = SampleParticleUnlitColor(input.uv) * input.instanceColor;
+                ApplyParticleUnlitAlphaClip(color.a);
+                return float4(_ObjectId, _PassValue, 1.0, 1.0);
             }
         ENDHLSL
 
@@ -466,6 +501,46 @@ Shader "VividRP/Particles/Unlit"
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma vertex Vert
                 #pragma fragment Frag
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "ScenePickingPass"
+            Tags { "LightMode" = "Picking" }
+
+            ZWrite On
+            ZTest LEqual
+            Cull [_CullMode]
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma editor_sync_compilation
+                #pragma multi_compile_instancing
+                #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma vertex Vert
+                #pragma fragment FragPicking
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "SceneSelectionPass"
+            Tags { "LightMode" = "SceneSelectionPass" }
+
+            ZWrite On
+            ZTest LEqual
+            Cull [_CullMode]
+
+            HLSLPROGRAM
+                #pragma target 4.5
+                #pragma editor_sync_compilation
+                #pragma multi_compile_instancing
+                #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local_fragment _ALPHATEST_ON
+                #pragma vertex Vert
+                #pragma fragment FragSceneSelection
             ENDHLSL
         }
     }

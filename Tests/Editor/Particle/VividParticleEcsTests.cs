@@ -195,6 +195,53 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_QueryLineGroupCount_UsesRendererSharedKeyGroupingWithoutCreatingGroups()
+        {
+            using var world = new VividEcsWorld();
+            var first = new VividParticleEcsStorage(world);
+            var second = new VividParticleEcsStorage(world);
+            try
+            {
+                first.rendererSharedKey = new VividParticleRendererSharedKey(
+                    materialId: 1,
+                    meshId: 2,
+                    renderMode: (int)VividParticleRenderMode.Billboard,
+                    layer: 3,
+                    gpuDataLayoutHash: 4,
+                    dataPerSharpBits: 5u,
+                    shadowCastingMode: 0,
+                    sortMode: 0,
+                    renderingLayerMask: 0xffu,
+                    receiveShadows: false);
+                second.rendererSharedKey = new VividParticleRendererSharedKey(
+                    materialId: 6,
+                    meshId: 7,
+                    renderMode: (int)VividParticleRenderMode.Mesh,
+                    layer: 8,
+                    gpuDataLayoutHash: 9,
+                    dataPerSharpBits: 10u,
+                    shadowCastingMode: 0,
+                    sortMode: 0,
+                    renderingLayerMask: 0xffu,
+                    receiveShadows: false);
+                first.EnsureCapacity(4);
+                second.EnsureCapacity(4);
+
+                Assert.That(AddParticle(first, 0), Is.True);
+                Assert.That(AddParticle(second, 1), Is.True);
+
+                Assert.That(first.queryLineGroupCount, Is.EqualTo(2));
+                Assert.That(second.queryLineGroupCount, Is.EqualTo(2));
+                Assert.That(first.CreateLineGroups(), Has.Count.EqualTo(2));
+            }
+            finally
+            {
+                first.Dispose();
+                second.Dispose();
+            }
+        }
+
+        [Test]
         public void PageJob_SchedulesForEachLivePage()
         {
             using var storage = new VividParticleEcsStorage();

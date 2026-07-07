@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
@@ -16,6 +17,7 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
         private readonly VividEcsTypeIndex m_RendererSharedKeyTypeIndex;
         private readonly bool m_OwnsWorld;
+        private readonly Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> m_LineGroupScratch = new();
         private NativeArray<int> m_ActiveCountOutput;
         private NativeArray<byte> m_KeepMask;
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
@@ -75,7 +77,7 @@ namespace VividRP.Runtime.Particle.ECS
 
         public int allocatorFreeRangeCount => m_World.tileAllocator.freeRangeCount;
 
-        public int queryLineGroupCount => CreateLineGroups().Count;
+        public int queryLineGroupCount => CountLineGroups();
 
         public VividParticleSystemId systemId
         {
@@ -135,6 +137,7 @@ namespace VividRP.Runtime.Particle.ECS
             m_KeepMask = default;
             m_SimulationPages = default;
             m_StandaloneCompactWorks = default;
+            m_LineGroupScratch.Clear();
             m_PendingIntegrateActiveCount = 0;
         }
 
@@ -392,11 +395,21 @@ namespace VividRP.Runtime.Particle.ECS
             return m_World.CreatePageGroup(query, allocator);
         }
 
-        public System.Collections.Generic.List<VividEcsArchetypeLineGroup> CreateLineGroups()
+        public List<VividEcsArchetypeLineGroup> CreateLineGroups()
         {
             SyncRendererSharedKeyForQueries();
             VividEcsQuery query = m_World.CreateQuery().WithAll(m_CommonTypeIndex);
-            return m_World.CreateArchetypeLineGroups(query);
+            return m_World.CreateArchetypeLineGroups(query, m_RendererSharedKeyTypeIndex);
+        }
+
+        private int CountLineGroups()
+        {
+            SyncRendererSharedKeyForQueries();
+            VividEcsQuery query = m_World.CreateQuery().WithAll(m_CommonTypeIndex);
+            return m_World.CreateArchetypeLineGroupMap(
+                query,
+                m_LineGroupScratch,
+                m_RendererSharedKeyTypeIndex);
         }
 
         public bool TryGetCommonArrays(

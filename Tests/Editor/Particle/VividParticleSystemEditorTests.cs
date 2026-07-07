@@ -414,7 +414,12 @@ namespace VividRP.Editor.Tests
                 | VividParticleSystemManager.RenderJobSharedDataFlag;
             Assert.That(
                 VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(flags),
-                Is.EqualTo("Transform | VelocityStretch | SharedData (0x15)"));
+                Is.EqualTo("Transform | VelocityStretch | SharedData (0x45)"));
+
+            Assert.That(
+                VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(
+                    VividParticleSystemManager.RenderJobExtraDataUploadFlag),
+                Is.EqualTo("UV | CustomData | MeshIndex (0x38)"));
 
             Assert.That(
                 VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(1u << 31),

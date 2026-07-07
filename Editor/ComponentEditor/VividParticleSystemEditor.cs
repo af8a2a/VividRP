@@ -111,7 +111,9 @@ namespace VividRP.Editor
             new(VividParticleSystemManager.RenderJobTransformUploadFlag, "Transform"),
             new(VividParticleSystemManager.RenderJobColorUploadFlag, "Color"),
             new(VividParticleSystemManager.RenderJobVelocityStretchUploadFlag, "VelocityStretch"),
-            new(VividParticleSystemManager.RenderJobExtraDataUploadFlag, "ExtraData"),
+            new(VividParticleSystemManager.RenderJobUVUploadFlag, "UV"),
+            new(VividParticleSystemManager.RenderJobCustomDataUploadFlag, "CustomData"),
+            new(VividParticleSystemManager.RenderJobMeshIndexUploadFlag, "MeshIndex"),
             new(VividParticleSystemManager.RenderJobSharedDataFlag, "SharedData"),
         };
 
@@ -829,12 +831,20 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Invalid Dirty Batches");
         private static readonly GUIContent s_UploadRecordWorksLabel = EditorGUIUtility.TrTextContent("Upload Record Works");
         private static readonly GUIContent s_UploadBatchWorksLabel = EditorGUIUtility.TrTextContent("Upload Batch Works");
+        private static readonly GUIContent s_RecordCopyDescriptorsLabel =
+            EditorGUIUtility.TrTextContent("Record Copy Descriptors");
         private static readonly GUIContent s_TransformUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Transform Page Works");
         private static readonly GUIContent s_ColorUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Color Page Works");
         private static readonly GUIContent s_VelocityUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Velocity Page Works");
+        private static readonly GUIContent s_UVUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("UV Page Works");
+        private static readonly GUIContent s_CustomDataUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Custom Data Page Works");
+        private static readonly GUIContent s_MeshIndexUploadPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Mesh Index Page Works");
         private static readonly GUIContent s_ExtraUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Extra Page Works");
         private static readonly GUIContent s_LastUploadCopyWorksLabel = EditorGUIUtility.TrTextContent("Upload Copy Works");
@@ -1051,9 +1061,13 @@ namespace VividRP.Editor
                     rendererStats.LastInvalidDirtyUploadBatchQueueCount);
                 EditorGUILayout.IntField(s_UploadRecordWorksLabel, rendererStats.LastUploadRecordWorkCount);
                 EditorGUILayout.IntField(s_UploadBatchWorksLabel, rendererStats.LastUploadBatchWorkCount);
+                EditorGUILayout.IntField(s_RecordCopyDescriptorsLabel, rendererStats.LastRecordCopyDescriptorCount);
                 EditorGUILayout.IntField(s_TransformUploadPageWorksLabel, rendererStats.LastTransformUploadPageWorkCount);
                 EditorGUILayout.IntField(s_ColorUploadPageWorksLabel, rendererStats.LastColorUploadPageWorkCount);
                 EditorGUILayout.IntField(s_VelocityUploadPageWorksLabel, rendererStats.LastVelocityStretchUploadPageWorkCount);
+                EditorGUILayout.IntField(s_UVUploadPageWorksLabel, rendererStats.LastUVUploadPageWorkCount);
+                EditorGUILayout.IntField(s_CustomDataUploadPageWorksLabel, rendererStats.LastCustomDataUploadPageWorkCount);
+                EditorGUILayout.IntField(s_MeshIndexUploadPageWorksLabel, rendererStats.LastMeshIndexUploadPageWorkCount);
                 EditorGUILayout.IntField(s_ExtraUploadPageWorksLabel, rendererStats.LastExtraDataUploadPageWorkCount);
                 EditorGUILayout.IntField(s_LastUploadCopyWorksLabel, rendererStats.LastUploadCopyWorkCount);
                 EditorGUILayout.IntField(s_MergedUploadCopyWorksLabel, rendererStats.LastMergedUploadCopyWorkCount);

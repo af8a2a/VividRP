@@ -371,7 +371,7 @@ namespace VividRP.Editor.Tests
         public void Manager_RegistersParticleSimulationAndRenderJobs_InEcsRegistry()
         {
             Assert.That(VividParticleSystemManager.registeredSimulationJobCount, Is.EqualTo(1));
-            Assert.That(VividParticleSystemManager.registeredRenderPageJobDescriptorCount, Is.EqualTo(4));
+            Assert.That(VividParticleSystemManager.registeredRenderPageJobDescriptorCount, Is.EqualTo(6));
             Assert.That(
                 VividParticleSystemManager.registeredRenderJobCount,
                 Is.EqualTo(VividParticleSystemManager.registeredRenderPageJobDescriptorCount + 1));
@@ -456,14 +456,17 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemManager.ResolveRenderJobModuleFlagsForUploadColumnMaskForTests(
                     VividParticleSystemManager.UploadColumnMeshIndexMask),
-                Is.EqualTo((int)VividParticleSystemManager.RenderJobExtraDataUploadFlag));
+                Is.EqualTo((int)VividParticleSystemManager.RenderJobMeshIndexUploadFlag));
             Assert.That(
                 VividParticleSystemManager.ResolveRenderJobModuleFlagsForUploadColumnMaskForTests(
                     VividParticleSystemManager.UploadColumnPositionSizeMask
                     | VividParticleSystemManager.UploadColumnBaseColorMask
                     | VividParticleSystemManager.UploadColumnVelocityStretchMask
                     | VividParticleSystemManager.UploadColumnMeshIndexMask),
-                Is.EqualTo((int)VividParticleSystemManager.RenderJobAllPageUploadFlags));
+                Is.EqualTo((int)(VividParticleSystemManager.RenderJobTransformUploadFlag
+                    | VividParticleSystemManager.RenderJobColorUploadFlag
+                    | VividParticleSystemManager.RenderJobVelocityStretchUploadFlag
+                    | VividParticleSystemManager.RenderJobMeshIndexUploadFlag)));
             Assert.That(VividParticleSystemManager.CountRenderPageJobModulesForTests(0u), Is.EqualTo(0));
             Assert.That(
                 VividParticleSystemManager.CountRenderPageJobModulesForTests(
@@ -472,12 +475,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemManager.CountRenderPageJobModulesForTests(
                     VividParticleSystemManager.RenderJobAllPageUploadFlags),
-                Is.EqualTo(4));
+                Is.EqualTo(6));
             Assert.That(
                 VividParticleSystemManager.CountRenderPageJobModulesForTests(
                     VividParticleSystemManager.RenderJobAllPageUploadFlags
                     | VividParticleSystemManager.RenderJobSharedDataFlag),
-                Is.EqualTo(4));
+                Is.EqualTo(6));
         }
 
         [Test]
@@ -914,6 +917,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 billboardInfos[0].DataInfo.Role,
                 Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SharedDataBlock));
+            Assert.That(
+                billboardInfos[0].CopyDescriptor.Role,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SharedDataBlock));
+            Assert.That(
+                billboardInfos[0].CopyDescriptor.CopyRangeKind,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.PerSharpSingle));
             Assert.That(billboardInfos[0].DataInfo.UploadColumnMask, Is.EqualTo(0));
             Assert.That(billboardInfos[0].DataInfo.RenderJobFlagMask, Is.EqualTo(0u));
             Assert.That(billboardInfos[1].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.SpanSharedData));
@@ -926,6 +935,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 billboardInfos[1].DataInfo.Role,
                 Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SpanSharedDataBlock));
+            Assert.That(
+                billboardInfos[1].CopyDescriptor.Role,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SpanSharedDataBlock));
+            Assert.That(
+                billboardInfos[1].CopyDescriptor.CopyRangeKind,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.SpanRange));
             Assert.That(billboardInfos[1].DataInfo.UsesInstanceMetadata, Is.True);
             Assert.That(billboardInfos[1].DataInfo.UploadColumnMask, Is.EqualTo(0));
             Assert.That(billboardInfos[1].DataInfo.RenderJobFlagMask, Is.EqualTo(0u));
@@ -936,6 +951,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 billboardInfos[2].DataInfo.Role,
                 Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.PerInstanceValue));
+            Assert.That(
+                billboardInfos[2].CopyDescriptor.Role,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.PerInstanceValue));
+            Assert.That(
+                billboardInfos[2].CopyDescriptor.CopyRangeKind,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.PerInstanceRange));
             Assert.That(
                 billboardInfos[2].DataInfo.DataBit,
                 Is.EqualTo(VividParticleSystemManager.GetGpuDataBit(VividParticleSystemManager.VividParticleGpuDataId.PositionSize)));
@@ -948,6 +969,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 billboardInfos[3].DataInfo.Role,
                 Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.PerSharpValue));
+            Assert.That(
+                billboardInfos[3].CopyDescriptor.Role,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.PerSharpValue));
+            Assert.That(
+                billboardInfos[3].CopyDescriptor.CopyRangeKind,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.PerSharpSingle));
             Assert.That(billboardInfos[3].DataInfo.UploadColumnMask, Is.EqualTo(VividParticleSystemManager.UploadColumnBaseColorMask));
             Assert.That(billboardInfos[3].DataInfo.RenderJobFlagMask, Is.EqualTo(VividParticleSystemManager.RenderJobColorUploadFlag));
             Assert.That(billboardInfos[4].DataInfo.DataId, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataId.Scale));
@@ -1102,11 +1129,14 @@ namespace VividRP.Editor.Tests
             Assert.That(scaleInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
             Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.UV, out var uvInfo), Is.True);
             Assert.That(uvInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
-            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.CustomData1, out _), Is.True);
-            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.CustomData2, out _), Is.True);
-            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.MeshIndex, out _), Is.True);
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.CustomData1, out var customData1Info), Is.True);
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.CustomData2, out var customData2Info), Is.True);
+            Assert.That(layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.MeshIndex, out var meshIndexInfo), Is.True);
             Assert.That(uvInfo.UploadColumnMask, Is.EqualTo(VividParticleSystemManager.UploadColumnUVMask));
-            Assert.That(uvInfo.RenderJobFlagMask, Is.EqualTo(VividParticleSystemManager.RenderJobExtraDataUploadFlag));
+            Assert.That(uvInfo.RenderJobFlagMask, Is.EqualTo(VividParticleSystemManager.RenderJobUVUploadFlag));
+            Assert.That(customData1Info.RenderJobFlagMask, Is.EqualTo(VividParticleSystemManager.RenderJobCustomDataUploadFlag));
+            Assert.That(customData2Info.RenderJobFlagMask, Is.EqualTo(VividParticleSystemManager.RenderJobCustomDataUploadFlag));
+            Assert.That(meshIndexInfo.RenderJobFlagMask, Is.EqualTo(VividParticleSystemManager.RenderJobMeshIndexUploadFlag));
             Assert.That(
                 layout.DataPerSharpBits,
                 Is.EqualTo((1u << (int)VividParticleSystemManager.VividParticleGpuDataId.SharedData)
@@ -1356,7 +1386,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Manager_CopyOperations_UseDataInfoFrequencyAndDirtyMasks()
+        public void Manager_CopyOperations_UseDataInfoRoleAndDirtyMasks()
         {
             var position = new VividParticleSystemManager.VividParticleGpuDataCopyDescriptor(
                 VividParticleSystemManager.VividParticleGpuDataId.PositionSize,
@@ -1376,6 +1406,12 @@ namespace VividRP.Editor.Tests
                 byteOffset: 48,
                 elementSize: 16,
                 columnMask: 0);
+            var sharedData = new VividParticleSystemManager.VividParticleGpuDataCopyDescriptor(
+                VividParticleSystemManager.VividParticleGpuDataId.SharedData,
+                VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp,
+                byteOffset: 56,
+                elementSize: VividParticleSystemManager.SharedDataByteSize,
+                columnMask: 0);
             var perSharpScale = new VividParticleSystemManager.VividParticleGpuDataCopyDescriptor(
                 VividParticleSystemManager.VividParticleGpuDataId.Scale,
                 VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp,
@@ -1393,6 +1429,144 @@ namespace VividRP.Editor.Tests
                 perSharpScale.DataBit,
                 Is.EqualTo(VividParticleSystemManager.GetGpuDataBit(
                     VividParticleSystemManager.VividParticleGpuDataId.Scale)));
+            Assert.That(position.Role, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.PerInstanceValue));
+            Assert.That(span.Role, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SpanSharedDataBlock));
+            Assert.That(sharedData.Role, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SharedDataBlock));
+            Assert.That(perSharpScale.Role, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.PerSharpValue));
+            Assert.That(sharedRotation.Role, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataRole.SharedValue));
+            Assert.That(position.CopyRangeKind, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.PerInstanceRange));
+            Assert.That(span.CopyRangeKind, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.SpanRange));
+            Assert.That(sharedData.CopyRangeKind, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.PerSharpSingle));
+            Assert.That(perSharpScale.CopyRangeKind, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.PerSharpSingle));
+            Assert.That(sharedRotation.CopyRangeKind, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataCopyRangeKind.None));
+            Assert.That(
+                position.ShouldCopyForUploadWork(
+                    hasInstanceRange: true,
+                    hasSpanData: false,
+                    hasSharedData: false,
+                    VividParticleSystemManager.UploadColumnPositionSizeMask,
+                    sharedDataBits: 0u),
+                Is.True);
+            Assert.That(
+                color.ShouldCopyForUploadWork(
+                    hasInstanceRange: true,
+                    hasSpanData: false,
+                    hasSharedData: false,
+                    VividParticleSystemManager.UploadColumnPositionSizeMask,
+                    sharedDataBits: 0u),
+                Is.False);
+            Assert.That(
+                span.ShouldCopyForUploadWork(
+                    hasInstanceRange: false,
+                    hasSpanData: true,
+                    hasSharedData: false,
+                    columnMask: 0,
+                    sharedDataBits: 0u),
+                Is.True);
+            Assert.That(
+                sharedData.ShouldCopyForUploadWork(
+                    hasInstanceRange: false,
+                    hasSpanData: false,
+                    hasSharedData: true,
+                    columnMask: 0,
+                    sharedData.DataBit),
+                Is.True);
+            position.ResolveUploadRequestRange(
+                instanceStartIndex: 3,
+                instanceCount: 5,
+                sharedStartIndex: 7,
+                sharedCount: 11,
+                activeCount: 13,
+                out int resolvedStart,
+                out int resolvedCount);
+            Assert.That(resolvedStart, Is.EqualTo(3));
+            Assert.That(resolvedCount, Is.EqualTo(5));
+            span.ResolveUploadRequestRange(
+                instanceStartIndex: 3,
+                instanceCount: 5,
+                sharedStartIndex: 7,
+                sharedCount: 11,
+                activeCount: 13,
+                out resolvedStart,
+                out resolvedCount);
+            Assert.That(resolvedStart, Is.EqualTo(7));
+            Assert.That(resolvedCount, Is.EqualTo(11));
+            perSharpScale.ResolveUploadRequestRange(
+                instanceStartIndex: 3,
+                instanceCount: 5,
+                sharedStartIndex: 7,
+                sharedCount: 11,
+                activeCount: 13,
+                out resolvedStart,
+                out resolvedCount);
+            Assert.That(resolvedStart, Is.EqualTo(7));
+            Assert.That(resolvedCount, Is.EqualTo(13));
+            sharedRotation.ResolveUploadRequestRange(
+                instanceStartIndex: 3,
+                instanceCount: 5,
+                sharedStartIndex: 7,
+                sharedCount: 11,
+                activeCount: 13,
+                out resolvedStart,
+                out resolvedCount);
+            Assert.That(resolvedStart, Is.EqualTo(0));
+            Assert.That(resolvedCount, Is.EqualTo(0));
+            Assert.That(
+                position.TryResolveElementCopyRange(
+                    activeCount: 13,
+                    batchBaseIndex: 100,
+                    sharpIndex: 200,
+                    spanBaseIndex: 300,
+                    renderMode: VividParticleRenderMode.Mesh,
+                    startIndex: 3,
+                    count: 5,
+                    out int elementStart,
+                    out int elementCount),
+                Is.True);
+            Assert.That(elementStart, Is.EqualTo(103));
+            Assert.That(elementCount, Is.EqualTo(5));
+            Assert.That(
+                perSharpScale.TryResolveElementCopyRange(
+                    activeCount: 13,
+                    batchBaseIndex: 100,
+                    sharpIndex: 200,
+                    spanBaseIndex: 300,
+                    renderMode: VividParticleRenderMode.Mesh,
+                    startIndex: 7,
+                    count: 13,
+                    out elementStart,
+                    out elementCount),
+                Is.True);
+            Assert.That(elementStart, Is.EqualTo(200));
+            Assert.That(elementCount, Is.EqualTo(1));
+            Assert.That(
+                span.TryResolveElementCopyRange(
+                    activeCount: 32,
+                    batchBaseIndex: 100,
+                    sharpIndex: 200,
+                    spanBaseIndex: 300,
+                    renderMode: VividParticleRenderMode.Mesh,
+                    startIndex: 7,
+                    count: 11,
+                    out elementStart,
+                    out elementCount),
+                Is.True);
+            Assert.That(elementStart, Is.EqualTo(307));
+            Assert.That(elementCount, Is.EqualTo(11));
+            Assert.That(
+                span.TryResolveElementCopyRange(
+                    activeCount: VividParticleSystemManager.BillboardPageSize * 2,
+                    batchBaseIndex: 100,
+                    sharpIndex: 200,
+                    spanBaseIndex: 300,
+                    renderMode: VividParticleRenderMode.Billboard,
+                    startIndex: VividParticleSystemManager.BillboardPageSize,
+                    count: VividParticleSystemManager.BillboardPageSize,
+                    out elementStart,
+                    out elementCount),
+                Is.True);
+            Assert.That(elementStart, Is.EqualTo(301));
+            Assert.That(elementCount, Is.EqualTo(1));
             Assert.That(
                 VividParticleSystemManager.ShouldCopyGpuDataForUploadWork(
                     position,
@@ -1420,6 +1594,24 @@ namespace VividRP.Editor.Tests
                     columnMask: 0,
                     sharedDataBits: 0u),
                 Is.True);
+            Assert.That(
+                VividParticleSystemManager.ShouldCopyGpuDataForUploadWork(
+                    sharedData,
+                    hasInstanceRange: false,
+                    hasSpanData: false,
+                    hasSharedData: true,
+                    columnMask: 0,
+                    sharedData.DataBit),
+                Is.True);
+            Assert.That(
+                VividParticleSystemManager.ShouldCopyGpuDataForUploadWork(
+                    sharedData,
+                    hasInstanceRange: false,
+                    hasSpanData: false,
+                    hasSharedData: true,
+                    columnMask: 0,
+                    sharedDataBits: 0u),
+                Is.False);
             Assert.That(
                 VividParticleSystemManager.ShouldCopyGpuDataForUploadWork(
                     perSharpScale,
@@ -1577,6 +1769,7 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.EcsMatchedLineCount, Is.EqualTo(2));
             Assert.That(rendererStats.EcsSkippedLineCount, Is.EqualTo(0));
             Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastRecordCopyDescriptorCount, Is.GreaterThan(0));
             Assert.That(rendererStats.LastLockCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastCopyOperationCount, Is.GreaterThan(0));
             Assert.That(rendererStats.LastUploadBatchWorkCount, Is.EqualTo(1));
@@ -1873,6 +2066,44 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.HasPendingRendererUploadForTests(), Is.False);
             Assert.That(rendererStats.LastUploadPageWorkCount, Is.GreaterThan(0));
             Assert.That(rendererStats.LastCopyOperationCount, Is.GreaterThan(0));
+        }
+
+        [Test]
+        public void Manager_RenderUploadGraph_SplitsExtraDataPageWorksByModule()
+        {
+            VividParticleSystem system = CreateSystem();
+            Mesh mesh = CreateTriangleMesh();
+            m_ToDestroy.Add(mesh);
+
+            system.rendererModule.enabled = true;
+            system.rendererModule.renderMode = VividParticleRenderMode.Mesh;
+            system.rendererModule.mesh = mesh;
+            system.rendererModule.uvDataEnabled = true;
+            system.rendererModule.customData1Enabled = true;
+            system.rendererModule.customData2Enabled = true;
+            system.rendererModule.meshIndexDataEnabled = true;
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(2);
+
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+
+            Assert.That(rendererStats.LastRecordCopyDescriptorCount, Is.GreaterThan(0));
+            Assert.That(rendererStats.LastUVUploadPageWorkCount, Is.GreaterThan(0));
+            Assert.That(rendererStats.LastCustomDataUploadPageWorkCount, Is.GreaterThan(0));
+            Assert.That(rendererStats.LastMeshIndexUploadPageWorkCount, Is.GreaterThan(0));
+            Assert.That(
+                rendererStats.LastExtraDataUploadPageWorkCount,
+                Is.EqualTo(rendererStats.LastUVUploadPageWorkCount
+                    + rendererStats.LastCustomDataUploadPageWorkCount
+                    + rendererStats.LastMeshIndexUploadPageWorkCount));
+            Assert.That(
+                rendererStats.LastRenderJobModuleFlags & VividParticleSystemManager.RenderJobExtraDataUploadFlag,
+                Is.EqualTo(VividParticleSystemManager.RenderJobExtraDataUploadFlag));
         }
 
         [Test]

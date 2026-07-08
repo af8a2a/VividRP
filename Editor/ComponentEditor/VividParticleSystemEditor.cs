@@ -559,6 +559,29 @@ namespace VividRP.Editor
             return string.Format(CultureInfo.InvariantCulture, "{0} B", clampedByteSize);
         }
 
+        internal static string FormatPerformanceSummary(
+            VividParticleSystemManager.VividParticleSystemRuntimeStats runtimeStats,
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats)
+        {
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "Particles {0}, Storage {1}/{2} pages, PendingSim {3}, EmitInit {4} (inline {5}, job {6}), Upload {7}, CopyOps {8}/{9}, Sorts {10}, RenderJobs {11}, Draw {12}/{13}",
+                runtimeStats.ParticleCount,
+                runtimeStats.StorageCapacity,
+                runtimeStats.StoragePageCount,
+                runtimeStats.HasPendingSimulation ? 1 : 0,
+                runtimeStats.LastEmissionInitializeWorkCount,
+                runtimeStats.LastEmissionInitializeInlineWorkCount,
+                runtimeStats.LastEmissionInitializeScheduledWorkCount,
+                FormatByteSize(rendererStats.LastCopyByteCount),
+                rendererStats.LastCopyOperationCount,
+                rendererStats.LastUploadCopyWorkCount,
+                rendererStats.LastUploadCopySortCount,
+                rendererStats.LastRenderPageJobModuleCount,
+                rendererStats.DrawCommandCount,
+                rendererStats.VisibleInstanceCapacity);
+        }
+
         internal static VividParticleRendererInspectorNotice GetRendererInspectorNotices(SerializedProperty renderer)
         {
             if (renderer == null)
@@ -778,19 +801,40 @@ namespace VividRP.Editor
         private static readonly GUIContent s_BurstsLabel = EditorGUIUtility.TrTextContent("Bursts");
         private static readonly GUIContent s_BurstTimeLabel = EditorGUIUtility.TrTextContent("Time");
         private static readonly GUIContent s_BurstCountLabel = EditorGUIUtility.TrTextContent("Count");
+        private static readonly GUIContent s_PerformanceSummaryLabel =
+            EditorGUIUtility.TrTextContent("Perf Summary");
         private static readonly GUIContent s_ParticleCountLabel = EditorGUIUtility.TrTextContent("Particle Count");
         private static readonly GUIContent s_TimeLabel = EditorGUIUtility.TrTextContent("Time");
         private static readonly GUIContent s_PageSizeLabel = EditorGUIUtility.TrTextContent("Page Size");
         private static readonly GUIContent s_StorageCapacityLabel = EditorGUIUtility.TrTextContent("Storage Capacity");
         private static readonly GUIContent s_StoragePageCountLabel = EditorGUIUtility.TrTextContent("Storage Pages");
         private static readonly GUIContent s_PendingSimulationLabel = EditorGUIUtility.TrTextContent("Pending Simulation");
+        private static readonly GUIContent s_EmissionInitializeWorksLabel =
+            EditorGUIUtility.TrTextContent("Emission Init Works");
+        private static readonly GUIContent s_EmissionInitializeInlineWorksLabel =
+            EditorGUIUtility.TrTextContent("Emission Init Inline Works");
+        private static readonly GUIContent s_EmissionInitializeScheduledWorksLabel =
+            EditorGUIUtility.TrTextContent("Emission Init Scheduled Works");
         private static readonly GUIContent s_RenderRecordsLabel = EditorGUIUtility.TrTextContent("Render Records");
+        private static readonly GUIContent s_RenderRecordPoolLabel = EditorGUIUtility.TrTextContent("Render Record Pool");
+        private static readonly GUIContent s_ReusedRenderRecordsLabel = EditorGUIUtility.TrTextContent("Reused Render Records");
+        private static readonly GUIContent s_CreatedRenderRecordsLabel = EditorGUIUtility.TrTextContent("Created Render Records");
         private static readonly GUIContent s_LineGroupsLabel = EditorGUIUtility.TrTextContent("Line Groups");
+        private static readonly GUIContent s_LineGroupPoolLabel = EditorGUIUtility.TrTextContent("Line Group Pool");
+        private static readonly GUIContent s_ReusedLineGroupsLabel = EditorGUIUtility.TrTextContent("Reused Line Groups");
+        private static readonly GUIContent s_CreatedLineGroupsLabel = EditorGUIUtility.TrTextContent("Created Line Groups");
+        private static readonly GUIContent s_EcsRendererQueryCreatedLabel =
+            EditorGUIUtility.TrTextContent("ECS Renderer Query Created");
+        private static readonly GUIContent s_EcsRendererQueryReusedLabel =
+            EditorGUIUtility.TrTextContent("ECS Renderer Query Reused");
         private static readonly GUIContent s_EcsLineGroupsLabel = EditorGUIUtility.TrTextContent("ECS Line Groups");
         private static readonly GUIContent s_EcsLinesLabel = EditorGUIUtility.TrTextContent("ECS Lines");
         private static readonly GUIContent s_EcsMatchedLinesLabel = EditorGUIUtility.TrTextContent("ECS Matched Lines");
         private static readonly GUIContent s_EcsSkippedLinesLabel = EditorGUIUtility.TrTextContent("ECS Skipped Lines");
         private static readonly GUIContent s_DrawBatchesLabel = EditorGUIUtility.TrTextContent("Draw Batches");
+        private static readonly GUIContent s_DrawBatchPoolLabel = EditorGUIUtility.TrTextContent("Draw Batch Pool");
+        private static readonly GUIContent s_ReusedDrawBatchesLabel = EditorGUIUtility.TrTextContent("Reused Draw Batches");
+        private static readonly GUIContent s_CreatedDrawBatchesLabel = EditorGUIUtility.TrTextContent("Created Draw Batches");
         private static readonly GUIContent s_CullingRecordsLabel = EditorGUIUtility.TrTextContent("Culling Records");
         private static readonly GUIContent s_DrawCommandsLabel = EditorGUIUtility.TrTextContent("Draw Commands");
         private static readonly GUIContent s_DrawRangesLabel = EditorGUIUtility.TrTextContent("Draw Ranges");
@@ -819,8 +863,14 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Record Cache Entries");
         private static readonly GUIContent s_CullingBatchCacheEntriesLabel =
             EditorGUIUtility.TrTextContent("Batch Cache Entries");
+        private static readonly GUIContent s_VisibleCapacityCacheEntriesLabel =
+            EditorGUIUtility.TrTextContent("Visible Capacity Cache Entries");
         private static readonly GUIContent s_MeshVisibleWorksLabel = EditorGUIUtility.TrTextContent("Mesh Visible Works");
         private static readonly GUIContent s_MeshVisibleOutputsLabel = EditorGUIUtility.TrTextContent("Mesh Visible Outputs");
+        private static readonly GUIContent s_MeshVisibleInlineWorksLabel =
+            EditorGUIUtility.TrTextContent("Mesh Visible Inline Works");
+        private static readonly GUIContent s_MeshVisibleScheduledWorksLabel =
+            EditorGUIUtility.TrTextContent("Mesh Visible Scheduled Works");
         private static readonly GUIContent s_LastUploadLabel = EditorGUIUtility.TrTextContent("Last Upload");
         private static readonly GUIContent s_DirtyUploadQueueLabel = EditorGUIUtility.TrTextContent("Dirty Upload Queue");
         private static readonly GUIContent s_InvalidDirtyUploadQueueLabel =
@@ -831,8 +881,14 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Invalid Dirty Batches");
         private static readonly GUIContent s_UploadRecordWorksLabel = EditorGUIUtility.TrTextContent("Upload Record Works");
         private static readonly GUIContent s_UploadBatchWorksLabel = EditorGUIUtility.TrTextContent("Upload Batch Works");
+        private static readonly GUIContent s_GpuBufferInfosLabel =
+            EditorGUIUtility.TrTextContent("GPU Buffer Infos");
         private static readonly GUIContent s_RecordCopyDescriptorsLabel =
             EditorGUIUtility.TrTextContent("Record Copy Descriptors");
+        private static readonly GUIContent s_SharedValueBufferInfosLabel =
+            EditorGUIUtility.TrTextContent("Shared Value Buffer Infos");
+        private static readonly GUIContent s_PerSharpBufferInfosLabel =
+            EditorGUIUtility.TrTextContent("Per-Sharp Buffer Infos");
         private static readonly GUIContent s_TransformUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Transform Page Works");
         private static readonly GUIContent s_ColorUploadPageWorksLabel =
@@ -850,6 +906,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_LastUploadCopyWorksLabel = EditorGUIUtility.TrTextContent("Upload Copy Works");
         private static readonly GUIContent s_MergedUploadCopyWorksLabel =
             EditorGUIUtility.TrTextContent("Merged Copy Works");
+        private static readonly GUIContent s_UploadCopySortsLabel =
+            EditorGUIUtility.TrTextContent("Upload Copy Sorts");
         private static readonly GUIContent s_RenderJobFlagsLabel = EditorGUIUtility.TrTextContent("Render Job Flags");
         private static readonly GUIContent s_RenderPageJobModulesLabel =
             EditorGUIUtility.TrTextContent("Render Page Job Modules");
@@ -1005,19 +1063,42 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_StorageCapacityLabel, runtimeStats.StorageCapacity);
                 EditorGUILayout.IntField(s_StoragePageCountLabel, runtimeStats.StoragePageCount);
                 EditorGUILayout.Toggle(s_PendingSimulationLabel, runtimeStats.HasPendingSimulation);
+                EditorGUILayout.IntField(
+                    s_EmissionInitializeWorksLabel,
+                    runtimeStats.LastEmissionInitializeWorkCount);
+                EditorGUILayout.IntField(
+                    s_EmissionInitializeInlineWorksLabel,
+                    runtimeStats.LastEmissionInitializeInlineWorkCount);
+                EditorGUILayout.IntField(
+                    s_EmissionInitializeScheduledWorksLabel,
+                    runtimeStats.LastEmissionInitializeScheduledWorkCount);
             }
 
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStats();
             using (new EditorGUI.DisabledScope(true))
             {
+                EditorGUILayout.TextField(
+                    s_PerformanceSummaryLabel,
+                VividParticleSystemEditorUtility.FormatPerformanceSummary(runtimeStats, rendererStats));
                 EditorGUILayout.IntField(s_RenderRecordsLabel, rendererStats.RenderRecordCount);
+                EditorGUILayout.IntField(s_RenderRecordPoolLabel, rendererStats.RenderRecordPoolCount);
+                EditorGUILayout.IntField(s_ReusedRenderRecordsLabel, rendererStats.LastReusedRenderRecordCount);
+                EditorGUILayout.IntField(s_CreatedRenderRecordsLabel, rendererStats.LastCreatedRenderRecordCount);
                 EditorGUILayout.IntField(s_LineGroupsLabel, rendererStats.LineGroupCount);
+                EditorGUILayout.IntField(s_LineGroupPoolLabel, rendererStats.LineGroupPoolCount);
+                EditorGUILayout.IntField(s_ReusedLineGroupsLabel, rendererStats.LastReusedLineGroupCount);
+                EditorGUILayout.IntField(s_CreatedLineGroupsLabel, rendererStats.LastCreatedLineGroupCount);
+                EditorGUILayout.IntField(s_EcsRendererQueryCreatedLabel, rendererStats.LastEcsRendererQueryCreatedCount);
+                EditorGUILayout.IntField(s_EcsRendererQueryReusedLabel, rendererStats.LastEcsRendererQueryReusedCount);
                 EditorGUILayout.IntField(s_EcsLineGroupsLabel, rendererStats.EcsLineGroupCount);
                 EditorGUILayout.IntField(s_EcsLinesLabel, rendererStats.EcsLineCount);
                 EditorGUILayout.IntField(s_EcsMatchedLinesLabel, rendererStats.EcsMatchedLineCount);
                 EditorGUILayout.IntField(s_EcsSkippedLinesLabel, rendererStats.EcsSkippedLineCount);
                 EditorGUILayout.IntField(s_DrawBatchesLabel, rendererStats.DrawBatchCount);
+                EditorGUILayout.IntField(s_DrawBatchPoolLabel, rendererStats.DrawBatchPoolCount);
+                EditorGUILayout.IntField(s_ReusedDrawBatchesLabel, rendererStats.LastReusedDrawBatchCount);
+                EditorGUILayout.IntField(s_CreatedDrawBatchesLabel, rendererStats.LastCreatedDrawBatchCount);
                 EditorGUILayout.IntField(s_CullingRecordsLabel, rendererStats.CullingRecordCount);
                 EditorGUILayout.IntField(s_DrawCommandsLabel, rendererStats.DrawCommandCount);
                 EditorGUILayout.IntField(s_DrawRangesLabel, rendererStats.DrawRangeCount);
@@ -1048,8 +1129,15 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_CullingBatchCacheEntriesLabel,
                     rendererStats.LastCullingBatchVisibleCacheEntryCount);
+                EditorGUILayout.IntField(
+                    s_VisibleCapacityCacheEntriesLabel,
+                    rendererStats.LastVisibleInstanceCapacityCacheEntryCount);
                 EditorGUILayout.IntField(s_MeshVisibleWorksLabel, rendererStats.MeshVisibleCountWorkCount);
                 EditorGUILayout.IntField(s_MeshVisibleOutputsLabel, rendererStats.MeshVisibleCountOutputCount);
+                EditorGUILayout.IntField(s_MeshVisibleInlineWorksLabel, rendererStats.LastMeshVisibleCountInlineWorkCount);
+                EditorGUILayout.IntField(
+                    s_MeshVisibleScheduledWorksLabel,
+                    rendererStats.LastMeshVisibleCountScheduledWorkCount);
                 EditorGUILayout.TextField(
                     s_LastUploadLabel,
                     VividParticleSystemEditorUtility.FormatByteSize(rendererStats.LastCopyByteCount));
@@ -1061,7 +1149,10 @@ namespace VividRP.Editor
                     rendererStats.LastInvalidDirtyUploadBatchQueueCount);
                 EditorGUILayout.IntField(s_UploadRecordWorksLabel, rendererStats.LastUploadRecordWorkCount);
                 EditorGUILayout.IntField(s_UploadBatchWorksLabel, rendererStats.LastUploadBatchWorkCount);
+                EditorGUILayout.IntField(s_GpuBufferInfosLabel, rendererStats.LastGpuBufferInfoCount);
                 EditorGUILayout.IntField(s_RecordCopyDescriptorsLabel, rendererStats.LastRecordCopyDescriptorCount);
+                EditorGUILayout.IntField(s_SharedValueBufferInfosLabel, rendererStats.LastSharedValueBufferInfoCount);
+                EditorGUILayout.IntField(s_PerSharpBufferInfosLabel, rendererStats.LastPerSharpValueBufferInfoCount);
                 EditorGUILayout.IntField(s_TransformUploadPageWorksLabel, rendererStats.LastTransformUploadPageWorkCount);
                 EditorGUILayout.IntField(s_ColorUploadPageWorksLabel, rendererStats.LastColorUploadPageWorkCount);
                 EditorGUILayout.IntField(s_VelocityUploadPageWorksLabel, rendererStats.LastVelocityStretchUploadPageWorkCount);
@@ -1071,6 +1162,7 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_ExtraUploadPageWorksLabel, rendererStats.LastExtraDataUploadPageWorkCount);
                 EditorGUILayout.IntField(s_LastUploadCopyWorksLabel, rendererStats.LastUploadCopyWorkCount);
                 EditorGUILayout.IntField(s_MergedUploadCopyWorksLabel, rendererStats.LastMergedUploadCopyWorkCount);
+                EditorGUILayout.IntField(s_UploadCopySortsLabel, rendererStats.LastUploadCopySortCount);
                 EditorGUILayout.TextField(
                     s_RenderJobFlagsLabel,
                     VividParticleSystemEditorUtility.FormatRenderJobModuleFlags(rendererStats.LastRenderJobModuleFlags));

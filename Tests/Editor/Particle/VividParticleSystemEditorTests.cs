@@ -484,6 +484,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RuntimeDebugSummary_FormatsKeyPerformanceCounters()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.enabled = true;
+            system.main.maxParticles = 8;
+            system.main.startLifetime = 10.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(2);
+            Assert.That(system.particleCount, Is.EqualTo(2));
+
+            Assert.That(
+                VividParticleSystemManager.TryGetRuntimeStats(
+                    system,
+                    out VividParticleSystemManager.VividParticleSystemRuntimeStats runtimeStats),
+                Is.True);
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+
+            string summary = VividParticleSystemEditorUtility.FormatPerformanceSummary(runtimeStats, rendererStats);
+
+            Assert.That(summary, Does.Contain("Particles 2"));
+            Assert.That(summary, Does.Contain("Storage"));
+            Assert.That(summary, Does.Contain("PendingSim 0"));
+            Assert.That(summary, Does.Contain("EmitInit"));
+            Assert.That(summary, Does.Contain("Upload"));
+            Assert.That(summary, Does.Contain("CopyOps"));
+            Assert.That(summary, Does.Contain("Sorts"));
+            Assert.That(summary, Does.Contain("RenderJobs"));
+            Assert.That(summary, Does.Contain("Draw"));
+        }
+
+        [Test]
         public void RendererInspectorNotices_ReturnNone_ForDefaultBillboardRenderer()
         {
             VividParticleSystem system = CreateSystem();

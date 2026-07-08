@@ -662,12 +662,7 @@ namespace VividRP.Runtime.ECS
                 return GetSharedComponentKey();
 
             if (sharedComponentTypes.Length == 1)
-            {
-                VividEcsTypeIndex type = sharedComponentTypes[0];
-                return type.IsValid && m_SharedComponents.TryGetValue(type, out object value)
-                    ? new VividEcsSharedComponentKey(type, value)
-                    : default;
-            }
+                return GetSharedComponentKey(sharedComponentTypes[0]);
 
             var types = new VividEcsTypeIndex[sharedComponentTypes.Length];
             var values = new object[sharedComponentTypes.Length];
@@ -695,6 +690,14 @@ namespace VividRP.Runtime.ECS
             Array.Resize(ref types, writeIndex);
             Array.Resize(ref values, writeIndex);
             return new VividEcsSharedComponentKey(types, values);
+        }
+
+        public VividEcsSharedComponentKey GetSharedComponentKey(VividEcsTypeIndex sharedComponentType)
+        {
+            return sharedComponentType.IsValid
+                && m_SharedComponents.TryGetValue(sharedComponentType, out object value)
+                    ? new VividEcsSharedComponentKey(sharedComponentType, value)
+                    : default;
         }
 
         public void Clear()

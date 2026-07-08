@@ -323,6 +323,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void World_LineGroupMap_SingleSharedTypeOverload_MatchesParamsPath()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine third = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestShared(1));
+            third.SetSharedComponent(new TestShared(2));
+
+            world.CreateEntity(first);
+            world.CreateEntity(second);
+            world.CreateEntity(third);
+
+            VividEcsQuery allData = world.CreateQuery().WithAll(dataIndex);
+            var inlineGroups = new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
+            var paramsGroups = new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
+
+            int inlineGroupCount = world.CreateArchetypeLineGroupMap(allData, inlineGroups, sharedIndex);
+            int paramsGroupCount = world.CreateArchetypeLineGroupMap(allData, paramsGroups, new[] { sharedIndex });
+
+            Assert.That(first.GetSharedComponentKey(sharedIndex), Is.EqualTo(first.GetSharedComponentKey(new[] { sharedIndex })));
+            Assert.That(inlineGroupCount, Is.EqualTo(paramsGroupCount));
+            Assert.That(inlineGroups.Keys, Is.EquivalentTo(paramsGroups.Keys));
+            foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in inlineGroups)
+            {
+                Assert.That(paramsGroups.TryGetValue(pair.Key, out List<VividEcsArchetypeLine> lines), Is.True);
+                Assert.That(pair.Value, Is.EquivalentTo(lines));
+            }
+        }
+
+        [Test]
         public void World_PageGroups_FlattenMatchingLinePages()
         {
             VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();

@@ -296,12 +296,29 @@ namespace VividRP.Runtime.ECS
             return result;
         }
 
+        public List<VividEcsArchetypeLineGroup> CreateArchetypeLineGroups(
+            VividEcsQuery query,
+            VividEcsTypeIndex sharedComponentType)
+        {
+            var result = new List<VividEcsArchetypeLineGroup>();
+            CreateArchetypeLineGroups(query, result, sharedComponentType);
+            return result;
+        }
+
         public void CreateArchetypeLineGroups(
             VividEcsQuery query,
             List<VividEcsArchetypeLineGroup> result,
             params VividEcsTypeIndex[] sharedComponentTypes)
         {
             CreateArchetypeLineGroups(query, result, scratchGroups: null, sharedComponentTypes);
+        }
+
+        public void CreateArchetypeLineGroups(
+            VividEcsQuery query,
+            List<VividEcsArchetypeLineGroup> result,
+            VividEcsTypeIndex sharedComponentType)
+        {
+            CreateArchetypeLineGroups(query, result, scratchGroups: null, sharedComponentType);
         }
 
         public void CreateArchetypeLineGroups(
@@ -321,11 +338,27 @@ namespace VividRP.Runtime.ECS
                 scratchGroups ?? new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
             CreateArchetypeLineGroupMap(query, groups, sharedComponentTypes);
 
-            foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
-            {
-                if (pair.Value.Count > 0)
-                    result.Add(new VividEcsArchetypeLineGroup(pair.Key, pair.Value));
-            }
+            AddNonEmptyLineGroupsToResult(groups, result);
+        }
+
+        public void CreateArchetypeLineGroups(
+            VividEcsQuery query,
+            List<VividEcsArchetypeLineGroup> result,
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> scratchGroups,
+            VividEcsTypeIndex sharedComponentType)
+        {
+            if (query == null)
+                throw new ArgumentNullException(nameof(query));
+
+            if (result == null)
+                throw new ArgumentNullException(nameof(result));
+
+            result.Clear();
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups =
+                scratchGroups ?? new Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>>();
+            CreateArchetypeLineGroupMap(query, groups, sharedComponentType);
+
+            AddNonEmptyLineGroupsToResult(groups, result);
         }
 
         public int CreateArchetypeLineGroupMap(
@@ -339,8 +372,7 @@ namespace VividRP.Runtime.ECS
             if (groups == null)
                 throw new ArgumentNullException(nameof(groups));
 
-            foreach (List<VividEcsArchetypeLine> lines in groups.Values)
-                lines.Clear();
+            ClearLineGroupMap(groups);
 
             for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
             {
@@ -352,15 +384,73 @@ namespace VividRP.Runtime.ECS
                     sharedComponentTypes != null && sharedComponentTypes.Length > 0
                         ? line.GetSharedComponentKey(sharedComponentTypes)
                         : line.GetSharedComponentKey();
-                if (!groups.TryGetValue(key, out List<VividEcsArchetypeLine> lines))
-                {
-                    lines = new List<VividEcsArchetypeLine>();
-                    groups.Add(key, lines);
-                }
-
-                lines.Add(line);
+                AddLineToGroupMap(groups, key, line);
             }
 
+            return CountNonEmptyLineGroups(groups);
+        }
+
+        public int CreateArchetypeLineGroupMap(
+            VividEcsQuery query,
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups,
+            VividEcsTypeIndex sharedComponentType)
+        {
+            if (query == null)
+                throw new ArgumentNullException(nameof(query));
+
+            if (groups == null)
+                throw new ArgumentNullException(nameof(groups));
+
+            ClearLineGroupMap(groups);
+
+            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            {
+                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
+                if (!query.MatchesLine(line))
+                    continue;
+
+                VividEcsSharedComponentKey key = line.GetSharedComponentKey(sharedComponentType);
+                AddLineToGroupMap(groups, key, line);
+            }
+
+            return CountNonEmptyLineGroups(groups);
+        }
+
+        private static void ClearLineGroupMap(
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups)
+        {
+            foreach (List<VividEcsArchetypeLine> lines in groups.Values)
+                lines.Clear();
+        }
+
+        private static void AddLineToGroupMap(
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups,
+            VividEcsSharedComponentKey key,
+            VividEcsArchetypeLine line)
+        {
+            if (!groups.TryGetValue(key, out List<VividEcsArchetypeLine> lines))
+            {
+                lines = new List<VividEcsArchetypeLine>();
+                groups.Add(key, lines);
+            }
+
+            lines.Add(line);
+        }
+
+        private static void AddNonEmptyLineGroupsToResult(
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups,
+            List<VividEcsArchetypeLineGroup> result)
+        {
+            foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
+            {
+                if (pair.Value.Count > 0)
+                    result.Add(new VividEcsArchetypeLineGroup(pair.Key, pair.Value));
+            }
+        }
+
+        private static int CountNonEmptyLineGroups(
+            Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> groups)
+        {
             int groupCount = 0;
             foreach (KeyValuePair<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> pair in groups)
             {

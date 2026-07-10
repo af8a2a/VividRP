@@ -568,7 +568,7 @@ namespace VividRP.Editor
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Particles {0}, Storage {1}/{2} pages, PendingSim {3}, EmitInit {4} (inline {5}, job {6}), Upload {7}, CopyOps {8}/{9}, Sorts {10}, RenderJobs {11}, Draw {12}/{13}, Cull {14}/{15}->{16}/{17}",
+                "Particles {0}, Storage {1}/{2} pages, PendingSim {3}, EmitInit {4} (inline {5}, job {6}), Upload {7}, CopyOps {8}/{9}, Sorts {10}, RenderJobs {11}, Draw {12}/{13}, Cull {14}/{15}->{16}/{17}, Bounds {18}/{19}, CullingBuild {20}/{21}, MeshCount {22}/{23}, Reduce {24}/{25}, PickBuild {26}, BatchBuild {27}",
                 runtimeStats.ParticleCount,
                 runtimeStats.StorageCapacity,
                 runtimeStats.StoragePageCount,
@@ -586,7 +586,17 @@ namespace VividRP.Editor
                 rendererStats.LastCullingSourceDrawCommandCount,
                 rendererStats.LastCullingSourceVisibleInstanceCount,
                 rendererStats.LastCullingFilteredDrawCommandCount,
-                rendererStats.LastCullingFilteredVisibleInstanceCount);
+                rendererStats.LastCullingFilteredVisibleInstanceCount,
+                rendererStats.LastBoundsPageWorkCount,
+                rendererStats.CullingPageBoundsCapacity,
+                rendererStats.LastCullingRecordBuildWorkCount,
+                rendererStats.HasPendingCullingRecordBuild ? 1 : 0,
+                rendererStats.LastMeshVisibleCountInlineWorkCount,
+                rendererStats.LastMeshVisibleCountScheduledWorkCount,
+                rendererStats.LastMeshVisibleBatchReduceWorkCount,
+                rendererStats.MeshBatchVisibleCountOutputCount,
+                rendererStats.LastPickingDrawBuildWorkCount,
+                rendererStats.LastBatchDrawBuildWorkCount);
         }
 
         internal static VividParticleRendererInspectorNotice GetRendererInspectorNotices(SerializedProperty renderer)
@@ -864,11 +874,21 @@ namespace VividRP.Editor
         private static readonly GUIContent s_EcsLinesLabel = EditorGUIUtility.TrTextContent("ECS Lines");
         private static readonly GUIContent s_EcsMatchedLinesLabel = EditorGUIUtility.TrTextContent("ECS Matched Lines");
         private static readonly GUIContent s_EcsSkippedLinesLabel = EditorGUIUtility.TrTextContent("ECS Skipped Lines");
+        private static readonly GUIContent s_RendererRecordRefsLabel =
+            EditorGUIUtility.TrTextContent("Native Renderer Record Refs");
+        private static readonly GUIContent s_InvalidRendererRecordRefsLabel =
+            EditorGUIUtility.TrTextContent("Invalid Renderer Record Refs");
         private static readonly GUIContent s_DrawBatchesLabel = EditorGUIUtility.TrTextContent("Draw Batches");
         private static readonly GUIContent s_DrawBatchPoolLabel = EditorGUIUtility.TrTextContent("Draw Batch Pool");
         private static readonly GUIContent s_ReusedDrawBatchesLabel = EditorGUIUtility.TrTextContent("Reused Draw Batches");
         private static readonly GUIContent s_CreatedDrawBatchesLabel = EditorGUIUtility.TrTextContent("Created Draw Batches");
         private static readonly GUIContent s_CullingRecordsLabel = EditorGUIUtility.TrTextContent("Culling Records");
+        private static readonly GUIContent s_CullingPageBoundsCapacityLabel =
+            EditorGUIUtility.TrTextContent("Culling Page Bounds Capacity");
+        private static readonly GUIContent s_CullingRecordBuildWorksLabel =
+            EditorGUIUtility.TrTextContent("Culling Record Build Works");
+        private static readonly GUIContent s_PendingCullingRecordBuildLabel =
+            EditorGUIUtility.TrTextContent("Pending Culling Record Build");
         private static readonly GUIContent s_DrawCommandsLabel = EditorGUIUtility.TrTextContent("Draw Commands");
         private static readonly GUIContent s_DrawRangesLabel = EditorGUIUtility.TrTextContent("Draw Ranges");
         private static readonly GUIContent s_VisibleCapacityLabel = EditorGUIUtility.TrTextContent("Visible Capacity");
@@ -920,8 +940,16 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Batch Cache Entries");
         private static readonly GUIContent s_VisibleCapacityCacheEntriesLabel =
             EditorGUIUtility.TrTextContent("Visible Capacity Cache Entries");
+        private static readonly GUIContent s_PickingDrawBuildWorksLabel =
+            EditorGUIUtility.TrTextContent("Picking Draw Build Works");
+        private static readonly GUIContent s_BatchDrawBuildWorksLabel =
+            EditorGUIUtility.TrTextContent("Batch Draw Build Works");
         private static readonly GUIContent s_MeshVisibleWorksLabel = EditorGUIUtility.TrTextContent("Mesh Visible Works");
         private static readonly GUIContent s_MeshVisibleOutputsLabel = EditorGUIUtility.TrTextContent("Mesh Visible Outputs");
+        private static readonly GUIContent s_MeshBatchVisibleOutputsLabel =
+            EditorGUIUtility.TrTextContent("Mesh Batch Visible Outputs");
+        private static readonly GUIContent s_MeshBatchReduceWorksLabel =
+            EditorGUIUtility.TrTextContent("Mesh Batch Reduce Works");
         private static readonly GUIContent s_MeshVisibleInlineWorksLabel =
             EditorGUIUtility.TrTextContent("Mesh Visible Inline Works");
         private static readonly GUIContent s_MeshVisibleScheduledWorksLabel =
@@ -1006,7 +1034,7 @@ namespace VividRP.Editor
         private const string MultiMeshNotice =
             "Multiple Meshes split Mesh mode into mesh-specific BRG draw commands; invalid mesh indices render with the first mesh.";
         private const string SortingPositionsNotice =
-            "Non-default Sort Mode allocates sorting positions for camera views.";
+            "Non-default Sort Mode allocates camera-view sorting positions. Billboard modes use one bounds center per particle page; Mesh uses one position per particle.";
         private const string PerParticleGpuDataNotice =
             "Per-particle GPU data adds upload columns and increases particle buffer bandwidth.";
         private const string ShadowsOnlyNotice =
@@ -1156,11 +1184,24 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_EcsLinesLabel, rendererStats.EcsLineCount);
                 EditorGUILayout.IntField(s_EcsMatchedLinesLabel, rendererStats.EcsMatchedLineCount);
                 EditorGUILayout.IntField(s_EcsSkippedLinesLabel, rendererStats.EcsSkippedLineCount);
+                EditorGUILayout.IntField(s_RendererRecordRefsLabel, rendererStats.RendererRecordRefCount);
+                EditorGUILayout.IntField(
+                    s_InvalidRendererRecordRefsLabel,
+                    rendererStats.LastInvalidRendererRecordRefCount);
                 EditorGUILayout.IntField(s_DrawBatchesLabel, rendererStats.DrawBatchCount);
                 EditorGUILayout.IntField(s_DrawBatchPoolLabel, rendererStats.DrawBatchPoolCount);
                 EditorGUILayout.IntField(s_ReusedDrawBatchesLabel, rendererStats.LastReusedDrawBatchCount);
                 EditorGUILayout.IntField(s_CreatedDrawBatchesLabel, rendererStats.LastCreatedDrawBatchCount);
                 EditorGUILayout.IntField(s_CullingRecordsLabel, rendererStats.CullingRecordCount);
+                EditorGUILayout.IntField(
+                    s_CullingPageBoundsCapacityLabel,
+                    rendererStats.CullingPageBoundsCapacity);
+                EditorGUILayout.IntField(
+                    s_CullingRecordBuildWorksLabel,
+                    rendererStats.LastCullingRecordBuildWorkCount);
+                EditorGUILayout.Toggle(
+                    s_PendingCullingRecordBuildLabel,
+                    rendererStats.HasPendingCullingRecordBuild);
                 EditorGUILayout.IntField(s_DrawCommandsLabel, rendererStats.DrawCommandCount);
                 EditorGUILayout.IntField(s_DrawRangesLabel, rendererStats.DrawRangeCount);
                 EditorGUILayout.IntField(s_VisibleCapacityLabel, rendererStats.VisibleInstanceCapacity);
@@ -1222,8 +1263,20 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_VisibleCapacityCacheEntriesLabel,
                     rendererStats.LastVisibleInstanceCapacityCacheEntryCount);
+                EditorGUILayout.IntField(
+                    s_PickingDrawBuildWorksLabel,
+                    rendererStats.LastPickingDrawBuildWorkCount);
+                EditorGUILayout.IntField(
+                    s_BatchDrawBuildWorksLabel,
+                    rendererStats.LastBatchDrawBuildWorkCount);
                 EditorGUILayout.IntField(s_MeshVisibleWorksLabel, rendererStats.MeshVisibleCountWorkCount);
                 EditorGUILayout.IntField(s_MeshVisibleOutputsLabel, rendererStats.MeshVisibleCountOutputCount);
+                EditorGUILayout.IntField(
+                    s_MeshBatchVisibleOutputsLabel,
+                    rendererStats.MeshBatchVisibleCountOutputCount);
+                EditorGUILayout.IntField(
+                    s_MeshBatchReduceWorksLabel,
+                    rendererStats.LastMeshVisibleBatchReduceWorkCount);
                 EditorGUILayout.IntField(s_MeshVisibleInlineWorksLabel, rendererStats.LastMeshVisibleCountInlineWorkCount);
                 EditorGUILayout.IntField(
                     s_MeshVisibleScheduledWorksLabel,

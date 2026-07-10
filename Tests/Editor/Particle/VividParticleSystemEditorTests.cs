@@ -517,10 +517,18 @@ namespace VividRP.Editor.Tests
             Assert.That(summary, Does.Contain("RenderJobs"));
             Assert.That(summary, Does.Contain("Draw"));
             Assert.That(summary, Does.Contain("Cull"));
+            Assert.That(summary, Does.Contain("CullingBuild 1"));
+            Assert.That(summary, Does.Contain("MeshCount"));
+            Assert.That(summary, Does.Contain("Reduce"));
+            Assert.That(summary, Does.Contain("PickBuild"));
+            Assert.That(summary, Does.Contain("BatchBuild"));
             Assert.That(rendererStats.LastCullingSourceDrawCommandCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingFilteredDrawCommandCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingUsedFilteredLayout, Is.False);
             Assert.That(rendererStats.LastCullingUsedPickingFilter, Is.False);
+            Assert.That(rendererStats.CullingPageBoundsCapacity, Is.GreaterThan(0));
+            Assert.That(rendererStats.LastCullingRecordBuildWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.HasPendingCullingRecordBuild, Is.False);
         }
 
         [Test]

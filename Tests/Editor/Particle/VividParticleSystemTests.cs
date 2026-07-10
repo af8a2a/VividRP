@@ -2066,6 +2066,8 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.EcsLineCount, Is.EqualTo(2));
             Assert.That(rendererStats.EcsMatchedLineCount, Is.EqualTo(2));
             Assert.That(rendererStats.EcsSkippedLineCount, Is.EqualTo(0));
+            Assert.That(rendererStats.RendererRecordRefCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastInvalidRendererRecordRefCount, Is.EqualTo(0));
             Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastGpuBufferInfoCount, Is.GreaterThan(0));
             Assert.That(rendererStats.LastRecordCopyDescriptorCount, Is.GreaterThan(0));
@@ -2587,9 +2589,13 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.VisibleInstanceCapacity, Is.EqualTo(8));
             Assert.That(rendererStats.PickingDrawCommandCount, Is.EqualTo(2));
             Assert.That(rendererStats.PickingVisibleInstanceCapacity, Is.EqualTo(8));
-            Assert.That(rendererStats.LastVisibleInstanceCapacityCacheEntryCount, Is.EqualTo(4));
+            Assert.That(rendererStats.LastVisibleInstanceCapacityCacheEntryCount, Is.EqualTo(0));
             Assert.That(rendererStats.MeshVisibleCountWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.MeshVisibleCountOutputCount, Is.EqualTo(2));
+            Assert.That(rendererStats.MeshBatchVisibleCountOutputCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastMeshVisibleBatchReduceWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastPickingDrawBuildWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastMeshVisibleCountInlineWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastMeshVisibleCountScheduledWorkCount, Is.EqualTo(0));
             Assert.That(
@@ -2598,10 +2604,59 @@ namespace VividRP.Editor.Tests
 
             int[] meshVisibleCounts = VividParticleSystemManager.GetMeshVisibleCountsForTests();
             Assert.That(meshVisibleCounts, Is.EqualTo(new[] { 4, 4 }));
+            int[] meshBatchVisibleCounts = VividParticleSystemManager.GetMeshBatchVisibleCountsForTests();
+            Assert.That(meshBatchVisibleCounts, Is.EqualTo(new[] { 4, 4 }));
             Assert.That(VividParticleSystemManager.ResolveMeshIndexSlot(-1, 2), Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.ResolveMeshIndexSlot(0, 2), Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.ResolveMeshIndexSlot(1, 2), Is.EqualTo(1));
             Assert.That(VividParticleSystemManager.ResolveMeshIndexSlot(2, 2), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Renderer_MultiMeshCounts_ScheduleAsSingleManagerGraph_ForMultipleRecords()
+        {
+            VividParticleSystem first = CreateActiveSystem();
+            VividParticleSystem second = CreateActiveSystem();
+            Mesh firstMesh = CreateTriangleMesh();
+            Mesh secondMesh = CreateTriangleMesh();
+            m_ToDestroy.Add(firstMesh);
+            m_ToDestroy.Add(secondMesh);
+
+            VividParticleSystem[] systems = { first, second };
+            for (int index = 0; index < systems.Length; index++)
+            {
+                VividParticleSystem system = systems[index];
+                system.rendererModule.enabled = true;
+                system.rendererModule.renderMode = VividParticleRenderMode.Mesh;
+                system.rendererModule.SetMeshes(new[] { firstMesh, secondMesh });
+                system.rendererModule.meshIndexDataEnabled = false;
+                system.main.maxParticles = 8;
+                system.main.startLifetime = 10.0f;
+                system.emission.enabled = false;
+                system.shape.enabled = false;
+                system.Emit(8);
+            }
+
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+            Assert.That(rendererStats.RenderRecordCount, Is.EqualTo(2));
+            Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
+            Assert.That(rendererStats.DrawCommandCount, Is.EqualTo(2));
+            Assert.That(rendererStats.VisibleInstanceCapacity, Is.EqualTo(16));
+            Assert.That(rendererStats.MeshVisibleCountWorkCount, Is.EqualTo(2));
+            Assert.That(rendererStats.MeshVisibleCountOutputCount, Is.EqualTo(4));
+            Assert.That(rendererStats.MeshBatchVisibleCountOutputCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastMeshVisibleBatchReduceWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastPickingDrawBuildWorkCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastMeshVisibleCountInlineWorkCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastMeshVisibleCountScheduledWorkCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastCullingMultiMeshCacheRecordCount, Is.EqualTo(2));
+
+            int[] meshVisibleCounts = VividParticleSystemManager.GetMeshVisibleCountsForTests();
+            Assert.That(meshVisibleCounts, Is.EqualTo(new[] { 4, 4, 4, 4 }));
+            int[] meshBatchVisibleCounts = VividParticleSystemManager.GetMeshBatchVisibleCountsForTests();
+            Assert.That(meshBatchVisibleCounts, Is.EqualTo(new[] { 8, 8 }));
         }
 
         [Test]
@@ -2637,17 +2692,37 @@ namespace VividRP.Editor.Tests
                 second.emission.enabled = false;
                 first.shape.enabled = false;
                 second.shape.enabled = false;
+                first.transform.position = new Vector3(10.0f, 0.0f, 0.0f);
+                second.transform.position = new Vector3(-20.0f, 0.0f, 0.0f);
 
                 first.Emit(1);
                 second.Emit(1);
+                Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.True);
 
                 VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                     VividParticleSystemManager.GetRendererStatsForTests();
                 Assert.That(rendererStats.RenderRecordCount, Is.EqualTo(2));
                 Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
                 Assert.That(rendererStats.CullingRecordCount, Is.EqualTo(2));
+                Assert.That(rendererStats.CullingPageBoundsCapacity, Is.EqualTo(2));
+                Assert.That(rendererStats.LastCullingRecordBuildWorkCount, Is.EqualTo(2));
+                Assert.That(rendererStats.RendererRecordRefCount, Is.EqualTo(2));
+                Assert.That(rendererStats.LastInvalidRendererRecordRefCount, Is.EqualTo(0));
+                Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.False);
                 Assert.That(rendererStats.DrawCommandCount, Is.EqualTo(1));
                 Assert.That(rendererStats.VisibleInstanceCapacity, Is.EqualTo(2));
+                Vector3[] boundsCenters =
+                    VividParticleSystemManager.GetRendererCullingRecordBoundsCentersForTests();
+                bool containsFirstCenter = false;
+                bool containsSecondCenter = false;
+                for (int index = 0; index < boundsCenters.Length; index++)
+                {
+                    containsFirstCenter |= Mathf.Abs(boundsCenters[index].x - 10.0f) < 0.0001f;
+                    containsSecondCenter |= Mathf.Abs(boundsCenters[index].x + 20.0f) < 0.0001f;
+                }
+
+                Assert.That(containsFirstCenter, Is.True);
+                Assert.That(containsSecondCenter, Is.True);
                 Assert.That(VividParticleSystemManager.ResolveGameObjectSceneCullingMask(first.gameObject), Is.EqualTo(firstSceneMask));
                 Assert.That(VividParticleSystemManager.ResolveGameObjectSceneCullingMask(second.gameObject), Is.EqualTo(secondSceneMask));
                 Assert.That(
@@ -2834,9 +2909,13 @@ namespace VividRP.Editor.Tests
             system.shape.enabled = false;
 
             system.Emit(1024);
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.True);
+            VividParticleSystemManager.CompletePendingRendererUploadForTests();
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.True);
 
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStatsForTests();
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.False);
             Assert.That(rendererStats.LastUploadBatchWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastUploadPageWorkCount, Is.EqualTo(4));
             Assert.That(rendererStats.LastTransformUploadPageWorkCount, Is.EqualTo(4));
@@ -3175,6 +3254,7 @@ namespace VividRP.Editor.Tests
             system.shape.enabled = false;
 
             system.Emit(1024);
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.True);
 
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStatsForTests();
@@ -3340,11 +3420,17 @@ namespace VividRP.Editor.Tests
             system.shape.enabled = false;
 
             system.Emit(1024);
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.True);
 
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
                 VividParticleSystemManager.GetRendererStatsForTests();
             Assert.That(rendererStats.RenderRecordCount, Is.EqualTo(1));
             Assert.That(rendererStats.CullingRecordCount, Is.EqualTo(4));
+            Assert.That(rendererStats.CullingPageBoundsCapacity, Is.EqualTo(4));
+            Assert.That(rendererStats.LastCullingRecordBuildWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.RendererRecordRefCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastInvalidRendererRecordRefCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.False);
             Assert.That(rendererStats.DrawCommandCount, Is.EqualTo(1));
             Assert.That(rendererStats.DrawRangeCount, Is.EqualTo(1));
             Assert.That(rendererStats.VisibleInstanceCapacity, Is.EqualTo(1024));
@@ -3364,8 +3450,10 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.LastCullingMultiMeshCacheRecordCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingMeshFallbackRecordCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingRecordVisibleCacheEntryCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastPickingDrawBuildWorkCount, Is.EqualTo(1));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastCullingBatchVisibleCacheEntryCount, Is.EqualTo(1));
-            Assert.That(rendererStats.LastVisibleInstanceCapacityCacheEntryCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastVisibleInstanceCapacityCacheEntryCount, Is.EqualTo(1));
             Assert.That(rendererStats.MeshVisibleCountWorkCount, Is.EqualTo(0));
             Assert.That(rendererStats.MeshVisibleCountOutputCount, Is.EqualTo(0));
             Assert.That(
@@ -3419,8 +3507,10 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.LastCullingMultiMeshCacheRecordCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingMeshFallbackRecordCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingRecordVisibleCacheEntryCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastPickingDrawBuildWorkCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastCullingBatchVisibleCacheEntryCount, Is.EqualTo(1));
-            Assert.That(rendererStats.LastVisibleInstanceCapacityCacheEntryCount, Is.EqualTo(3));
+            Assert.That(rendererStats.LastVisibleInstanceCapacityCacheEntryCount, Is.EqualTo(1));
         }
 
         [Test]
@@ -3459,6 +3549,8 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(1));
             Assert.That(rendererStats.PickingDrawCommandCount, Is.EqualTo(2));
             Assert.That(rendererStats.PickingVisibleInstanceCapacity, Is.EqualTo(2));
+            Assert.That(rendererStats.LastPickingDrawBuildWorkCount, Is.EqualTo(2));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.SelectionDrawCommandCount, Is.EqualTo(1));
             Assert.That(rendererStats.SelectionDrawRangeCount, Is.EqualTo(1));
             Assert.That(rendererStats.SelectionVisibleInstanceCapacity, Is.EqualTo(1));
@@ -3533,6 +3625,7 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.LightVisibleInstanceCapacity, Is.EqualTo(1));
             Assert.That(rendererStats.PickingDrawCommandCount, Is.EqualTo(2));
             Assert.That(rendererStats.PickingVisibleInstanceCapacity, Is.EqualTo(2));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(2));
         }
 
         [Test]
@@ -3561,6 +3654,8 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.PickingVisibleInstanceCapacity, Is.EqualTo(0));
             Assert.That(rendererStats.SelectionDrawCommandCount, Is.EqualTo(0));
             Assert.That(rendererStats.SelectionVisibleInstanceCapacity, Is.EqualTo(0));
+            Assert.That(rendererStats.LastPickingDrawBuildWorkCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastBatchDrawBuildWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.LightDrawCommandCount, Is.EqualTo(1));
             Assert.That(rendererStats.LightDrawRangeCount, Is.EqualTo(1));
             Assert.That(rendererStats.LightVisibleInstanceCapacity, Is.EqualTo(1));
@@ -3817,25 +3912,16 @@ namespace VividRP.Editor.Tests
             Assert.That(worldResolved.z, Is.EqualTo(localPosition.z).Within(0.0001f));
 
             float3 pageBoundsCenter = new(100.0f, 200.0f, 300.0f);
-            float3 pageLocalResolved = VividParticleSystemManager.ResolvePageSortingPosition(
-                pageBoundsCenter,
-                localPosition,
-                localToWorld,
-                (int)VividParticleSystemSimulationSpace.Local,
-                hasFirstParticle: true);
-            Assert.That(pageLocalResolved.x, Is.EqualTo(localResolved.x).Within(0.0001f));
-            Assert.That(pageLocalResolved.y, Is.EqualTo(localResolved.y).Within(0.0001f));
-            Assert.That(pageLocalResolved.z, Is.EqualTo(localResolved.z).Within(0.0001f));
+            float3 pageLocalResolved = VividParticleSystemManager.ResolvePageSortingPosition(pageBoundsCenter);
+            Assert.That(pageLocalResolved.x, Is.EqualTo(pageBoundsCenter.x).Within(0.0001f));
+            Assert.That(pageLocalResolved.y, Is.EqualTo(pageBoundsCenter.y).Within(0.0001f));
+            Assert.That(pageLocalResolved.z, Is.EqualTo(pageBoundsCenter.z).Within(0.0001f));
 
-            float3 pageFallbackResolved = VividParticleSystemManager.ResolvePageSortingPosition(
-                pageBoundsCenter,
-                localPosition,
-                localToWorld,
-                (int)VividParticleSystemSimulationSpace.Local,
-                hasFirstParticle: false);
-            Assert.That(pageFallbackResolved.x, Is.EqualTo(pageBoundsCenter.x).Within(0.0001f));
-            Assert.That(pageFallbackResolved.y, Is.EqualTo(pageBoundsCenter.y).Within(0.0001f));
-            Assert.That(pageFallbackResolved.z, Is.EqualTo(pageBoundsCenter.z).Within(0.0001f));
+            float3 secondPageBoundsCenter = new(-10.0f, -20.0f, -30.0f);
+            float3 secondPageResolved = VividParticleSystemManager.ResolvePageSortingPosition(secondPageBoundsCenter);
+            Assert.That(secondPageResolved.x, Is.EqualTo(secondPageBoundsCenter.x).Within(0.0001f));
+            Assert.That(secondPageResolved.y, Is.EqualTo(secondPageBoundsCenter.y).Within(0.0001f));
+            Assert.That(secondPageResolved.z, Is.EqualTo(secondPageBoundsCenter.z).Within(0.0001f));
 
             float4x4 rotatedScaledLocalToWorld = float4x4.TRS(
                 float3.zero,

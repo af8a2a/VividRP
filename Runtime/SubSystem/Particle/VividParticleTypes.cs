@@ -587,6 +587,8 @@ namespace VividRP.Runtime.Particle
         internal const float MinimumSizeScale = 0.001f;
         internal const float MinimumStretchLengthScale = 0.0f;
         internal const float MinimumStretchSpeedScale = 0.0f;
+        internal const int MinimumBatchLayer = 0;
+        internal const int MaximumBatchLayer = 31;
 
         [NonSerialized]
         private Action m_OnChanged;
@@ -634,7 +636,19 @@ namespace VividRP.Runtime.Particle
         private int m_RenderQueueOffset;
 
         [SerializeField]
+        private int m_SortingPriority;
+
+        [SerializeField]
+        private int m_BatchLayer;
+
+        [SerializeField]
         private ShadowCastingMode m_ShadowCastingMode = ShadowCastingMode.Off;
+
+        [SerializeField]
+        private MotionVectorGenerationMode m_MotionVectorGenerationMode = MotionVectorGenerationMode.ForceNoMotion;
+
+        [SerializeField]
+        private bool m_StaticShadowCaster;
 
         [SerializeField]
         private bool m_ReceiveShadows;
@@ -863,6 +877,33 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        public int sortingPriority
+        {
+            get => m_SortingPriority;
+            set
+            {
+                if (m_SortingPriority == value)
+                    return;
+
+                m_SortingPriority = value;
+                NotifyChanged();
+            }
+        }
+
+        public int batchLayer
+        {
+            get => m_BatchLayer;
+            set
+            {
+                int clamped = Mathf.Clamp(value, MinimumBatchLayer, MaximumBatchLayer);
+                if (m_BatchLayer == clamped)
+                    return;
+
+                m_BatchLayer = clamped;
+                NotifyChanged();
+            }
+        }
+
         public ShadowCastingMode shadowCastingMode
         {
             get => m_ShadowCastingMode;
@@ -872,6 +913,33 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 m_ShadowCastingMode = value;
+                NotifyChanged();
+            }
+        }
+
+        public MotionVectorGenerationMode motionVectorGenerationMode
+        {
+            get => m_MotionVectorGenerationMode;
+            set
+            {
+                MotionVectorGenerationMode resolved = ValidateMotionVectorGenerationMode(value);
+                if (m_MotionVectorGenerationMode == resolved)
+                    return;
+
+                m_MotionVectorGenerationMode = resolved;
+                NotifyChanged();
+            }
+        }
+
+        public bool staticShadowCaster
+        {
+            get => m_StaticShadowCaster;
+            set
+            {
+                if (m_StaticShadowCaster == value)
+                    return;
+
+                m_StaticShadowCaster = value;
                 NotifyChanged();
             }
         }
@@ -1055,7 +1123,11 @@ namespace VividRP.Runtime.Particle
             m_MaxParticleSize = source.m_MaxParticleSize;
             m_Flip = source.m_Flip;
             m_RenderQueueOffset = source.m_RenderQueueOffset;
+            m_SortingPriority = source.m_SortingPriority;
+            m_BatchLayer = source.m_BatchLayer;
             m_ShadowCastingMode = source.m_ShadowCastingMode;
+            m_MotionVectorGenerationMode = ValidateMotionVectorGenerationMode(source.m_MotionVectorGenerationMode);
+            m_StaticShadowCaster = source.m_StaticShadowCaster;
             m_ReceiveShadows = source.m_ReceiveShadows;
             m_RenderingLayerMask = source.m_RenderingLayerMask;
             m_ColorDataMode = source.m_ColorDataMode;
@@ -1077,7 +1149,9 @@ namespace VividRP.Runtime.Particle
             m_StretchSpeedScale = Mathf.Max(MinimumStretchSpeedScale, m_StretchSpeedScale);
             m_MinParticleSize = Mathf.Max(0.0f, m_MinParticleSize);
             m_MaxParticleSize = Mathf.Max(0.0f, m_MaxParticleSize);
+            m_BatchLayer = Mathf.Clamp(m_BatchLayer, MinimumBatchLayer, MaximumBatchLayer);
             m_Meshes ??= Array.Empty<Mesh>();
+            m_MotionVectorGenerationMode = ValidateMotionVectorGenerationMode(m_MotionVectorGenerationMode);
             m_Flip = new Vector3(
                 Mathf.Clamp01(m_Flip.x),
                 Mathf.Clamp01(m_Flip.y),
@@ -1221,6 +1295,17 @@ namespace VividRP.Runtime.Particle
         private static int GetMeshHash(Mesh mesh)
         {
             return mesh != null ? mesh.GetEntityId().GetHashCode() : 0;
+        }
+
+        private static MotionVectorGenerationMode ValidateMotionVectorGenerationMode(MotionVectorGenerationMode mode)
+        {
+            return mode switch
+            {
+                MotionVectorGenerationMode.Camera => mode,
+                MotionVectorGenerationMode.Object => mode,
+                MotionVectorGenerationMode.ForceNoMotion => mode,
+                _ => MotionVectorGenerationMode.ForceNoMotion,
+            };
         }
 
         private void NotifyChanged()

@@ -29,6 +29,9 @@ namespace VividRP.Editor
         SortingAllocatesPositions = 1 << 5,
         PerParticleGpuDataIncreasesUpload = 1 << 6,
         MultiMeshSplitsDrawCommands = 1 << 7,
+        ShadowsOnlySkipsRegularViews = 1 << 8,
+        MotionVectorsAffectDrawOutput = 1 << 9,
+        StaticShadowCasterAffectsDrawOutput = 1 << 10,
     }
 
     internal readonly struct VividParticleGpuLayoutFootprint
@@ -565,7 +568,7 @@ namespace VividRP.Editor
         {
             return string.Format(
                 CultureInfo.InvariantCulture,
-                "Particles {0}, Storage {1}/{2} pages, PendingSim {3}, EmitInit {4} (inline {5}, job {6}), Upload {7}, CopyOps {8}/{9}, Sorts {10}, RenderJobs {11}, Draw {12}/{13}",
+                "Particles {0}, Storage {1}/{2} pages, PendingSim {3}, EmitInit {4} (inline {5}, job {6}), Upload {7}, CopyOps {8}/{9}, Sorts {10}, RenderJobs {11}, Draw {12}/{13}, Cull {14}/{15}->{16}/{17}",
                 runtimeStats.ParticleCount,
                 runtimeStats.StorageCapacity,
                 runtimeStats.StoragePageCount,
@@ -579,7 +582,11 @@ namespace VividRP.Editor
                 rendererStats.LastUploadCopySortCount,
                 rendererStats.LastRenderPageJobModuleCount,
                 rendererStats.DrawCommandCount,
-                rendererStats.VisibleInstanceCapacity);
+                rendererStats.VisibleInstanceCapacity,
+                rendererStats.LastCullingSourceDrawCommandCount,
+                rendererStats.LastCullingSourceVisibleInstanceCount,
+                rendererStats.LastCullingFilteredDrawCommandCount,
+                rendererStats.LastCullingFilteredVisibleInstanceCount);
         }
 
         internal static VividParticleRendererInspectorNotice GetRendererInspectorNotices(SerializedProperty renderer)
@@ -601,6 +608,10 @@ namespace VividRP.Editor
             SerializedProperty customData2Enabled = FindRelative(renderer, "m_CustomData2Enabled");
             SerializedProperty meshIndexDataEnabled = FindRelative(renderer, "m_MeshIndexDataEnabled");
             SerializedProperty sortMode = FindRelative(renderer, "m_SortMode");
+            SerializedProperty shadowCastingMode = FindRelative(renderer, "m_ShadowCastingMode");
+            SerializedProperty motionVectorGenerationMode =
+                FindRelative(renderer, "m_MotionVectorGenerationMode");
+            SerializedProperty staticShadowCaster = FindRelative(renderer, "m_StaticShadowCaster");
 
             if (enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue)
                 notices |= VividParticleRendererInspectorNotice.RendererDisabled;
@@ -651,6 +662,28 @@ namespace VividRP.Editor
                 && (VividParticleSortMode)sortMode.enumValueIndex != VividParticleSortMode.None)
             {
                 notices |= VividParticleRendererInspectorNotice.SortingAllocatesPositions;
+            }
+
+            if (shadowCastingMode != null
+                && !shadowCastingMode.hasMultipleDifferentValues
+                && (ShadowCastingMode)shadowCastingMode.enumValueIndex == ShadowCastingMode.ShadowsOnly)
+            {
+                notices |= VividParticleRendererInspectorNotice.ShadowsOnlySkipsRegularViews;
+            }
+
+            if (motionVectorGenerationMode != null
+                && !motionVectorGenerationMode.hasMultipleDifferentValues
+                && (MotionVectorGenerationMode)motionVectorGenerationMode.enumValueIndex
+                    != MotionVectorGenerationMode.ForceNoMotion)
+            {
+                notices |= VividParticleRendererInspectorNotice.MotionVectorsAffectDrawOutput;
+            }
+
+            if (staticShadowCaster != null
+                && !staticShadowCaster.hasMultipleDifferentValues
+                && staticShadowCaster.boolValue)
+            {
+                notices |= VividParticleRendererInspectorNotice.StaticShadowCasterAffectsDrawOutput;
             }
 
             return notices;
@@ -852,6 +885,28 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SelectionRangesLabel = EditorGUIUtility.TrTextContent("Selection Ranges");
         private static readonly GUIContent s_SelectionVisibleCapacityLabel =
             EditorGUIUtility.TrTextContent("Selection Visible Capacity");
+        private static readonly GUIContent s_LastCullingViewTypeLabel =
+            EditorGUIUtility.TrTextContent("Last Culling View");
+        private static readonly GUIContent s_LastCullingSourceCommandsLabel =
+            EditorGUIUtility.TrTextContent("Last Source Commands");
+        private static readonly GUIContent s_LastCullingSourceRangesLabel =
+            EditorGUIUtility.TrTextContent("Last Source Ranges");
+        private static readonly GUIContent s_LastCullingSourceVisibleLabel =
+            EditorGUIUtility.TrTextContent("Last Source Visible");
+        private static readonly GUIContent s_LastCullingSourceSortingLabel =
+            EditorGUIUtility.TrTextContent("Last Source Sorting");
+        private static readonly GUIContent s_LastCullingFilteredCommandsLabel =
+            EditorGUIUtility.TrTextContent("Last Filtered Commands");
+        private static readonly GUIContent s_LastCullingFilteredRangesLabel =
+            EditorGUIUtility.TrTextContent("Last Filtered Ranges");
+        private static readonly GUIContent s_LastCullingFilteredVisibleLabel =
+            EditorGUIUtility.TrTextContent("Last Filtered Visible");
+        private static readonly GUIContent s_LastCullingFilteredSortingLabel =
+            EditorGUIUtility.TrTextContent("Last Filtered Sorting");
+        private static readonly GUIContent s_LastCullingUsedFilteredLayoutLabel =
+            EditorGUIUtility.TrTextContent("Used Filtered Layout");
+        private static readonly GUIContent s_LastCullingUsedPickingFilterLabel =
+            EditorGUIUtility.TrTextContent("Used Picking Filter");
         private static readonly GUIContent s_BoundsPageWorksLabel = EditorGUIUtility.TrTextContent("Bounds Page Works");
         private static readonly GUIContent s_CullingSingleMeshCachesLabel =
             EditorGUIUtility.TrTextContent("Single Mesh Cache Records");
@@ -954,6 +1009,12 @@ namespace VividRP.Editor
             "Non-default Sort Mode allocates sorting positions for camera views.";
         private const string PerParticleGpuDataNotice =
             "Per-particle GPU data adds upload columns and increases particle buffer bandwidth.";
+        private const string ShadowsOnlyNotice =
+            "Shadows Only renders in light views and skips camera, picking, and selection draw output.";
+        private const string MotionVectorsNotice =
+            "Motion vectors set BRG motion flags and split draw ranges by motion mode.";
+        private const string StaticShadowCasterNotice =
+            "Static Shadow Caster changes BRG filter settings and can split draw ranges.";
 
         private SerializedProperty m_Main;
         private SerializedProperty m_Emission;
@@ -1113,6 +1174,35 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_SelectionCommandsLabel, rendererStats.SelectionDrawCommandCount);
                 EditorGUILayout.IntField(s_SelectionRangesLabel, rendererStats.SelectionDrawRangeCount);
                 EditorGUILayout.IntField(s_SelectionVisibleCapacityLabel, rendererStats.SelectionVisibleInstanceCapacity);
+                EditorGUILayout.EnumPopup(s_LastCullingViewTypeLabel, rendererStats.LastCullingViewType);
+                EditorGUILayout.IntField(
+                    s_LastCullingSourceCommandsLabel,
+                    rendererStats.LastCullingSourceDrawCommandCount);
+                EditorGUILayout.IntField(s_LastCullingSourceRangesLabel, rendererStats.LastCullingSourceDrawRangeCount);
+                EditorGUILayout.IntField(
+                    s_LastCullingSourceVisibleLabel,
+                    rendererStats.LastCullingSourceVisibleInstanceCount);
+                EditorGUILayout.IntField(
+                    s_LastCullingSourceSortingLabel,
+                    rendererStats.LastCullingSourceSortingPositionCount);
+                EditorGUILayout.IntField(
+                    s_LastCullingFilteredCommandsLabel,
+                    rendererStats.LastCullingFilteredDrawCommandCount);
+                EditorGUILayout.IntField(
+                    s_LastCullingFilteredRangesLabel,
+                    rendererStats.LastCullingFilteredDrawRangeCount);
+                EditorGUILayout.IntField(
+                    s_LastCullingFilteredVisibleLabel,
+                    rendererStats.LastCullingFilteredVisibleInstanceCount);
+                EditorGUILayout.IntField(
+                    s_LastCullingFilteredSortingLabel,
+                    rendererStats.LastCullingFilteredSortingPositionCount);
+                EditorGUILayout.Toggle(
+                    s_LastCullingUsedFilteredLayoutLabel,
+                    rendererStats.LastCullingUsedFilteredLayout);
+                EditorGUILayout.Toggle(
+                    s_LastCullingUsedPickingFilterLabel,
+                    rendererStats.LastCullingUsedPickingFilter);
                 EditorGUILayout.IntField(s_BoundsPageWorksLabel, rendererStats.LastBoundsPageWorkCount);
                 EditorGUILayout.IntField(
                     s_CullingSingleMeshCachesLabel,
@@ -1369,7 +1459,11 @@ namespace VividRP.Editor
                 }
 
                 DrawRelative(module, "m_RenderQueueOffset");
+                DrawRelative(module, "m_SortingPriority");
+                DrawRelative(module, "m_BatchLayer");
                 DrawRelative(module, "m_ShadowCastingMode");
+                DrawRelative(module, "m_MotionVectorGenerationMode");
+                DrawRelative(module, "m_StaticShadowCaster");
                 DrawRelative(module, "m_ReceiveShadows");
                 DrawRelative(module, "m_RenderingLayerMask");
                 DrawRelative(module, "m_SortMode");
@@ -1425,6 +1519,15 @@ namespace VividRP.Editor
 
             if ((notices & VividParticleRendererInspectorNotice.SortingAllocatesPositions) != 0)
                 EditorGUILayout.HelpBox(SortingPositionsNotice, MessageType.Info);
+
+            if ((notices & VividParticleRendererInspectorNotice.ShadowsOnlySkipsRegularViews) != 0)
+                EditorGUILayout.HelpBox(ShadowsOnlyNotice, MessageType.Info);
+
+            if ((notices & VividParticleRendererInspectorNotice.MotionVectorsAffectDrawOutput) != 0)
+                EditorGUILayout.HelpBox(MotionVectorsNotice, MessageType.Info);
+
+            if ((notices & VividParticleRendererInspectorNotice.StaticShadowCasterAffectsDrawOutput) != 0)
+                EditorGUILayout.HelpBox(StaticShadowCasterNotice, MessageType.Info);
         }
 
         private static void DrawGpuDataLayoutPreview(SerializedProperty rendererModule)

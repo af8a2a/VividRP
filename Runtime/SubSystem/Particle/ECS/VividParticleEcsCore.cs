@@ -1,4 +1,5 @@
 using System;
+using UnityEngine;
 using VividRP.Runtime.ECS;
 
 namespace VividRP.Runtime.Particle.ECS
@@ -60,7 +61,11 @@ namespace VividRP.Runtime.Particle.ECS
             0,
             0,
             uint.MaxValue,
-            false);
+            false,
+            false,
+            0,
+            0,
+            (int)MotionVectorGenerationMode.ForceNoMotion);
 
         public VividParticleRendererSharedKey(
             int materialId,
@@ -72,7 +77,11 @@ namespace VividRP.Runtime.Particle.ECS
             int shadowCastingMode,
             int sortMode,
             uint renderingLayerMask,
-            bool receiveShadows)
+            bool receiveShadows,
+            bool staticShadowCaster = false,
+            int sortingPriority = 0,
+            int batchLayer = 0,
+            int motionMode = (int)MotionVectorGenerationMode.ForceNoMotion)
         {
             MaterialId = materialId;
             MeshId = meshId;
@@ -84,6 +93,10 @@ namespace VividRP.Runtime.Particle.ECS
             SortMode = sortMode;
             RenderingLayerMask = renderingLayerMask;
             ReceiveShadows = receiveShadows;
+            StaticShadowCaster = staticShadowCaster;
+            SortingPriority = sortingPriority;
+            BatchLayer = batchLayer;
+            MotionMode = motionMode;
         }
 
         public int MaterialId { get; }
@@ -106,6 +119,14 @@ namespace VividRP.Runtime.Particle.ECS
 
         public bool ReceiveShadows { get; }
 
+        public bool StaticShadowCaster { get; }
+
+        public int SortingPriority { get; }
+
+        public int BatchLayer { get; }
+
+        public int MotionMode { get; }
+
         public bool Equals(VividParticleRendererSharedKey other)
         {
             return MaterialId == other.MaterialId
@@ -117,7 +138,11 @@ namespace VividRP.Runtime.Particle.ECS
                 && ShadowCastingMode == other.ShadowCastingMode
                 && SortMode == other.SortMode
                 && RenderingLayerMask == other.RenderingLayerMask
-                && ReceiveShadows == other.ReceiveShadows;
+                && ReceiveShadows == other.ReceiveShadows
+                && StaticShadowCaster == other.StaticShadowCaster
+                && SortingPriority == other.SortingPriority
+                && BatchLayer == other.BatchLayer
+                && MotionMode == other.MotionMode;
         }
 
         public override bool Equals(object obj)
@@ -139,6 +164,10 @@ namespace VividRP.Runtime.Particle.ECS
                 hash = (hash * 397) ^ SortMode;
                 hash = (hash * 397) ^ (int)RenderingLayerMask;
                 hash = (hash * 397) ^ ReceiveShadows.GetHashCode();
+                hash = (hash * 397) ^ StaticShadowCaster.GetHashCode();
+                hash = (hash * 397) ^ SortingPriority;
+                hash = (hash * 397) ^ BatchLayer;
+                hash = (hash * 397) ^ MotionMode;
                 return hash;
             }
         }

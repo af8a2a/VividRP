@@ -1,6 +1,7 @@
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime.Particle;
 
 namespace VividRP.Editor.Tests
@@ -515,6 +516,11 @@ namespace VividRP.Editor.Tests
             Assert.That(summary, Does.Contain("Sorts"));
             Assert.That(summary, Does.Contain("RenderJobs"));
             Assert.That(summary, Does.Contain("Draw"));
+            Assert.That(summary, Does.Contain("Cull"));
+            Assert.That(rendererStats.LastCullingSourceDrawCommandCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastCullingFilteredDrawCommandCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastCullingUsedFilteredLayout, Is.False);
+            Assert.That(rendererStats.LastCullingUsedPickingFilter, Is.False);
         }
 
         [Test]
@@ -652,6 +658,45 @@ namespace VividRP.Editor.Tests
                 Is.True);
             Assert.That(
                 (notices & VividParticleRendererInspectorNotice.SortingAllocatesPositions) != 0,
+                Is.True);
+        }
+
+        [Test]
+        public void RendererInspectorNotices_ReportShadowsOnlyViewHint()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.shadowCastingMode = ShadowCastingMode.ShadowsOnly;
+
+            using var serializedSystem = new SerializedObject(system);
+            SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
+
+            VividParticleRendererInspectorNotice notices =
+                VividParticleSystemEditorUtility.GetRendererInspectorNotices(renderer);
+            Assert.That(
+                (notices & VividParticleRendererInspectorNotice.ShadowsOnlySkipsRegularViews) != 0,
+                Is.True);
+            Assert.That(
+                (notices & VividParticleRendererInspectorNotice.RendererDisabled) == 0,
+                Is.True);
+        }
+
+        [Test]
+        public void RendererInspectorNotices_ReportDrawOutputFilterHints()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.motionVectorGenerationMode = MotionVectorGenerationMode.Camera;
+            system.rendererModule.staticShadowCaster = true;
+
+            using var serializedSystem = new SerializedObject(system);
+            SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
+
+            VividParticleRendererInspectorNotice notices =
+                VividParticleSystemEditorUtility.GetRendererInspectorNotices(renderer);
+            Assert.That(
+                (notices & VividParticleRendererInspectorNotice.MotionVectorsAffectDrawOutput) != 0,
+                Is.True);
+            Assert.That(
+                (notices & VividParticleRendererInspectorNotice.StaticShadowCasterAffectsDrawOutput) != 0,
                 Is.True);
         }
 

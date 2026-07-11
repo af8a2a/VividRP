@@ -24,6 +24,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* AnimatedVelocities;
 
         [NativeDisableUnsafePtrRestriction]
+        public float3* InitialEmitterVelocities;
+
+        [NativeDisableUnsafePtrRestriction]
         public float* StartLifetimes;
 
         [NativeDisableUnsafePtrRestriction]
@@ -61,10 +64,25 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* NoisePhases;
 
         [NativeDisableUnsafePtrRestriction]
+        public float* NoiseSizeMultipliers;
+
+        [NativeDisableUnsafePtrRestriction]
         public float3* NoiseStrengthLut;
 
         [NativeDisableUnsafePtrRestriction]
         public float* NoiseScrollSpeedLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* NoisePositionAmountLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* NoiseRotationAmountLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* NoiseSizeAmountLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* NoiseRemapLut;
 
         public float NoiseFrequency;
         public float NoiseOctaveMultiplier;
@@ -72,6 +90,15 @@ namespace VividRP.Runtime.Particle.ECS
         public int NoiseOctaveCount;
         public int NoiseDamping;
         public int NoiseEnabled;
+        public int NoiseQuality;
+        public int NoiseRemapEnabled;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* InheritVelocityLut;
+
+        public float3 EmitterVelocity;
+        public int InheritVelocityEnabled;
+        public int InheritVelocityMode;
 
         [NativeDisableUnsafePtrRestriction]
         public float* RemainingLifetimes;
@@ -95,6 +122,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* AnimatedVelocities;
 
         [NativeDisableUnsafePtrRestriction]
+        public float3* InitialEmitterVelocities;
+
+        [NativeDisableUnsafePtrRestriction]
         public float* StartLifetimes;
 
         [NativeDisableUnsafePtrRestriction]
@@ -114,6 +144,9 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* NoiseSizeMultipliers;
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
@@ -153,6 +186,11 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* AnimatedVelocities;
 
         [NativeDisableUnsafePtrRestriction]
+        public float3* InitialEmitterVelocities;
+
+        public float3 EmitterVelocity;
+
+        [NativeDisableUnsafePtrRestriction]
         public float* StartLifetimes;
 
         [NativeDisableUnsafePtrRestriction]
@@ -172,6 +210,9 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* NoiseSizeMultipliers;
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
@@ -503,7 +544,8 @@ namespace VividRP.Runtime.Particle.ECS
                     && work.VelocityOverLifetimeLut != null)
                 || work.LimitVelocityEnabled != 0
                 || work.RotationBySpeedEnabled != 0
-                || work.NoiseEnabled != 0)
+                || work.NoiseEnabled != 0
+                || work.InheritVelocityEnabled != 0)
             {
                 IntegrateModulePage(work, page.StartIndex, pageEnd);
                 return;
@@ -561,7 +603,20 @@ namespace VividRP.Runtime.Particle.ECS
                     animatedVelocity = math.mul(
                         work.VelocityOverLifetimeTransform,
                         SampleVelocityLut(work.VelocityOverLifetimeLut, normalizedLifetime));
-                    work.AnimatedVelocities[index] = animatedVelocity;
+                }
+
+                if (work.InheritVelocityEnabled != 0
+                    && work.InheritVelocityLut != null)
+                {
+                    float3 inheritedVelocity = work.InheritVelocityMode
+                            == (int)VividParticleInheritVelocityMode.Current
+                        ? work.EmitterVelocity
+                        : work.InitialEmitterVelocities != null
+                            ? work.InitialEmitterVelocities[index]
+                            : float3.zero;
+                    animatedVelocity += inheritedVelocity * SampleScalarLut(
+                        work.InheritVelocityLut,
+                        normalizedLifetime);
                 }
 
                 if (work.NoiseEnabled != 0
@@ -569,11 +624,41 @@ namespace VividRP.Runtime.Particle.ECS
                     && work.NoiseStrengthLut != null
                     && work.NoiseScrollSpeedLut != null)
                 {
-                    velocity += EvaluateNoiseAcceleration(
+                    float3 noiseValue = EvaluateNoiseValue(
                         work,
                         index,
-                        normalizedLifetime) * work.DeltaTime;
+                        normalizedLifetime);
+                    if (work.NoisePositionAmountLut != null)
+                    {
+                        animatedVelocity += noiseValue * SampleScalarLut(
+                            work.NoisePositionAmountLut,
+                            normalizedLifetime);
+                    }
+
+                    if (work.NoiseRotationAmountLut != null
+                        && work.AccumulatedRotations != null)
+                    {
+                        float rotationAmount = SampleScalarLut(
+                            work.NoiseRotationAmountLut,
+                            normalizedLifetime);
+                        work.AccumulatedRotations[index] += noiseValue
+                            * math.radians(rotationAmount)
+                            * (0.5f * work.DeltaTime);
+                    }
+
+                    if (work.NoiseSizeMultipliers != null)
+                    {
+                        float sizeAmount = work.NoiseSizeAmountLut != null
+                            ? SampleScalarLut(work.NoiseSizeAmountLut, normalizedLifetime)
+                            : 0.0f;
+                        work.NoiseSizeMultipliers[index] = math.max(
+                            0.0f,
+                            1.0f + noiseValue.x * sizeAmount * 0.5f);
+                    }
                 }
+
+                if (work.AnimatedVelocities != null)
+                    work.AnimatedVelocities[index] = animatedVelocity;
 
                 if (work.LimitVelocityEnabled != 0
                     && work.LimitVelocityLut != null
@@ -632,7 +717,7 @@ namespace VividRP.Runtime.Particle.ECS
             return math.lerp(lut[lower], lut[upper], sample - lower);
         }
 
-        private static float3 EvaluateNoiseAcceleration(
+        private static float3 EvaluateNoiseValue(
             VividParticleEcsIntegratePageWork work,
             int particleIndex,
             float normalizedLifetime)
@@ -644,7 +729,7 @@ namespace VividRP.Runtime.Particle.ECS
                 + new float3(1.0f, 1.371f, 1.913f) * scrollSpeed * work.DeltaTime;
             work.NoisePhases[particleIndex] = phase;
 
-            float frequency = math.max(0.0f, work.NoiseFrequency);
+            float frequency = math.max(0.000001f, work.NoiseFrequency);
             float3 samplePosition = phase + work.Positions[particleIndex] * frequency;
             float amplitude = 1.0f;
             float octaveScale = 1.0f;
@@ -655,20 +740,56 @@ namespace VividRP.Runtime.Particle.ECS
             {
                 float3 octavePosition = samplePosition * octaveScale;
                 value += new float3(
-                    noise.snoise(octavePosition + new float3(19.19f, 3.17f, 7.13f)),
-                    noise.snoise(octavePosition + new float3(5.71f, 23.23f, 11.11f)),
-                    noise.snoise(octavePosition + new float3(13.37f, 17.17f, 29.29f))) * amplitude;
+                    SampleNoise(work.NoiseQuality, octavePosition, new float3(19.19f, 3.17f, 7.13f)),
+                    SampleNoise(work.NoiseQuality, octavePosition, new float3(5.71f, 23.23f, 11.11f)),
+                    SampleNoise(work.NoiseQuality, octavePosition, new float3(13.37f, 17.17f, 29.29f))) * amplitude;
                 amplitudeSum += amplitude;
                 amplitude *= math.saturate(work.NoiseOctaveMultiplier);
                 octaveScale *= math.max(1.0f, work.NoiseOctaveScale);
             }
 
             value /= math.max(0.000001f, amplitudeSum);
+            if (work.NoiseRemapEnabled != 0 && work.NoiseRemapLut != null)
+            {
+                float3 normalizedValue = math.saturate(value * 0.5f + 0.5f);
+                value = new float3(
+                    SampleRemapLut(work.NoiseRemapLut, normalizedValue.x, 0),
+                    SampleRemapLut(work.NoiseRemapLut, normalizedValue.y, 1),
+                    SampleRemapLut(work.NoiseRemapLut, normalizedValue.z, 2));
+            }
             float3 strength = SampleVelocityLut(
                 work.NoiseStrengthLut,
                 normalizedLifetime);
-            float dampingScale = work.NoiseDamping != 0 ? frequency : 1.0f;
+            float dampingScale = work.NoiseDamping != 0 ? math.rcp(frequency) : 1.0f;
             return value * strength * dampingScale;
+        }
+
+        private static float SampleNoise(int quality, float3 position, float3 offset)
+        {
+            if (quality == (int)VividParticleNoiseQuality.Low)
+                return noise.snoise(new float2(position.x + offset.x, offset.y));
+
+            if (quality == (int)VividParticleNoiseQuality.Medium)
+            {
+                return noise.snoise(new float2(
+                    position.x + offset.x,
+                    position.y + offset.y));
+            }
+
+            return noise.snoise(position + offset);
+        }
+
+        private static float SampleRemapLut(float3* lut, float normalizedValue, int axis)
+        {
+            float sample = math.saturate(normalizedValue)
+                * (VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+            int lower = (int)math.floor(sample);
+            int upper = math.min(
+                lower + 1,
+                VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+            float lowerValue = lut[lower][axis];
+            float upperValue = lut[upper][axis];
+            return math.lerp(lowerValue, upperValue, sample - lower);
         }
 
         private static float3 ApplyLimitVelocity(
@@ -750,6 +871,8 @@ namespace VividRP.Runtime.Particle.ECS
             work.Velocities[destinationIndex] = work.Velocities[sourceIndex];
             if (work.AnimatedVelocities != null)
                 work.AnimatedVelocities[destinationIndex] = work.AnimatedVelocities[sourceIndex];
+            if (work.InitialEmitterVelocities != null)
+                work.InitialEmitterVelocities[destinationIndex] = work.InitialEmitterVelocities[sourceIndex];
             work.StartLifetimes[destinationIndex] = work.StartLifetimes[sourceIndex];
             work.RemainingLifetimes[destinationIndex] = work.RemainingLifetimes[sourceIndex];
             work.Colors[destinationIndex] = work.Colors[sourceIndex];
@@ -759,6 +882,8 @@ namespace VividRP.Runtime.Particle.ECS
                 work.AccumulatedRotations[destinationIndex] = work.AccumulatedRotations[sourceIndex];
             if (work.NoisePhases != null)
                 work.NoisePhases[destinationIndex] = work.NoisePhases[sourceIndex];
+            if (work.NoiseSizeMultipliers != null)
+                work.NoiseSizeMultipliers[destinationIndex] = work.NoiseSizeMultipliers[sourceIndex];
             work.KeepMask[destinationIndex] = work.KeepMask[sourceIndex];
         }
     }
@@ -807,6 +932,8 @@ namespace VividRP.Runtime.Particle.ECS
                 work.Velocities[particleIndex] = velocity;
                 if (work.AnimatedVelocities != null)
                     work.AnimatedVelocities[particleIndex] = float3.zero;
+                if (work.InitialEmitterVelocities != null)
+                    work.InitialEmitterVelocities[particleIndex] = work.EmitterVelocity;
                 work.StartLifetimes[particleIndex] = work.StartLifetime;
                 work.RemainingLifetimes[particleIndex] = work.StartLifetime;
                 work.Colors[particleIndex] = work.StartColor;
@@ -818,6 +945,8 @@ namespace VividRP.Runtime.Particle.ECS
                     work.NoisePhases[particleIndex] = random.NextFloat3(
                         new float3(-1024.0f),
                         new float3(1024.0f));
+                if (work.NoiseSizeMultipliers != null)
+                    work.NoiseSizeMultipliers[particleIndex] = 1.0f;
                 work.KeepMask[particleIndex] = 1;
             }
         }

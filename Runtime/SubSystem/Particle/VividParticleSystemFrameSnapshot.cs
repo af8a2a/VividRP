@@ -52,9 +52,13 @@ namespace VividRP.Runtime.Particle
         public int RotationBySpeedEnabled;
         public int NoiseEnabled;
         public int NoiseDamping;
+        public int NoiseQuality;
+        public int NoiseRemapEnabled;
         public int NoiseOctaveCount;
         public int VelocityOverLifetimeEnabled;
         public int VelocityOverLifetimeSpace;
+        public int InheritVelocityEnabled;
+        public int InheritVelocityMode;
         public int LimitVelocityOverLifetimeEnabled;
         public int LimitVelocitySeparateAxes;
         public int LimitVelocitySpace;
@@ -62,6 +66,8 @@ namespace VividRP.Runtime.Particle
         public int LimitVelocityMultiplyDragByParticleVelocity;
         public float LimitVelocityDampen;
         public int TextureSheetAnimationEnabled;
+        public int CustomData1Mode;
+        public int CustomData2Mode;
         public int TextureSheetTilesX;
         public int TextureSheetTilesY;
         public int TextureSheetAnimationType;
@@ -86,13 +92,17 @@ namespace VividRP.Runtime.Particle
         public fixed float RotationBySpeedLut[LifetimeLutResolution * 3];
         public fixed float NoiseStrengthLut[LifetimeLutResolution * 3];
         public fixed float NoiseScrollSpeedLut[LifetimeLutResolution];
+        public fixed float NoiseRemapLut[LifetimeLutResolution * 3];
         public fixed float NoisePositionAmountLut[LifetimeLutResolution];
         public fixed float NoiseRotationAmountLut[LifetimeLutResolution];
         public fixed float NoiseSizeAmountLut[LifetimeLutResolution];
         public fixed float VelocityOverLifetimeLut[LifetimeLutResolution * 3];
+        public fixed float InheritVelocityLut[LifetimeLutResolution];
         public fixed float LimitVelocityLut[LifetimeLutResolution * 3];
         public fixed float LimitVelocityDragLut[LifetimeLutResolution];
         public fixed float TextureSheetFrameOverTimeLut[LifetimeLutResolution];
+        public fixed float CustomData1Lut[LifetimeLutResolution * 4];
+        public fixed float CustomData2Lut[LifetimeLutResolution * 4];
     }
 
     internal struct VividParticleSimulationPrepareInput

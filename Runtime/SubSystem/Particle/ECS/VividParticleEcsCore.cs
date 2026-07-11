@@ -16,6 +16,7 @@ namespace VividRP.Runtime.Particle.ECS
             VividEcsTypeManager.RegisterSoa<VividParticleCommon>();
             VividEcsTypeManager.RegisterSoa<VividParticleAnimatedMotion>();
             VividEcsTypeManager.RegisterSoa<VividParticleNoiseState>();
+            VividEcsTypeManager.RegisterSoa<VividParticleInheritVelocityState>();
             VividEcsTypeManager.RegisterShared<VividParticleSystemId>();
             VividEcsTypeManager.RegisterShared<VividParticleModuleSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleSimulationKernelSharedKey>();
@@ -118,6 +119,8 @@ namespace VividRP.Runtime.Particle.ECS
         SizeBySpeed = 1u << 11,
         RotationBySpeed = 1u << 12,
         Noise = 1u << 13,
+        InheritVelocity = 1u << 14,
+        CustomData = 1u << 15,
     }
 
     internal readonly struct VividParticleModuleSharedKey : IVividEcsSharedComponentData,
@@ -165,7 +168,8 @@ namespace VividRP.Runtime.Particle.ECS
                 VividParticleModuleFlags.VelocityOverLifetime
                 | VividParticleModuleFlags.LimitVelocityOverLifetime
                 | VividParticleModuleFlags.RotationBySpeed
-                | VividParticleModuleFlags.Noise);
+                | VividParticleModuleFlags.Noise
+                | VividParticleModuleFlags.InheritVelocity);
         }
 
         public VividParticleModuleFlags EnabledFlags { get; }
@@ -202,7 +206,10 @@ namespace VividRP.Runtime.Particle.ECS
             | VividParticleModuleFlags.TextureSheetAnimation
             | VividParticleModuleFlags.ColorBySpeed
             | VividParticleModuleFlags.SizeBySpeed
-            | VividParticleModuleFlags.RotationBySpeed;
+            | VividParticleModuleFlags.RotationBySpeed
+            | VividParticleModuleFlags.Noise
+            | VividParticleModuleFlags.InheritVelocity
+            | VividParticleModuleFlags.CustomData;
 
         public static readonly VividParticleRenderKernelSharedKey Base = new(
             VividParticleModuleFlags.None);
@@ -460,6 +467,26 @@ namespace VividRP.Runtime.Particle.ECS
                     FloatSizeInBytes),
                 _ => throw new ArgumentOutOfRangeException(nameof(index)),
             };
+        }
+    }
+
+    internal struct VividParticleInheritVelocityState : IVividEcsSoaComponentData
+    {
+        public const int InitialVelocityFieldIndex = 0;
+        public const int FieldCountValue = 1;
+        public const int Float3SizeInBytes = sizeof(float) * 3;
+        public const int InitialVelocityOffsetInPage = 0;
+        public const int TypeSizeInBytes = Float3SizeInBytes * VividEcsConstants.PageEntryCount;
+
+        public int FieldCount => FieldCountValue;
+
+        public int TypeSize => TypeSizeInBytes;
+
+        public VividEcsSoaFieldInfo GetFieldInfo(int index)
+        {
+            return index == InitialVelocityFieldIndex
+                ? new VividEcsSoaFieldInfo(InitialVelocityOffsetInPage, Float3SizeInBytes)
+                : throw new ArgumentOutOfRangeException(nameof(index));
         }
     }
 }

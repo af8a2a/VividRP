@@ -59,6 +59,39 @@ namespace VividRP.Runtime.Particle
         SingleRow,
     }
 
+    public enum VividParticleNoiseQuality
+    {
+        High,
+        Medium,
+        Low,
+    }
+
+    public enum VividParticleInheritVelocityMode
+    {
+        Initial,
+        Current,
+    }
+
+    public enum VividParticleEmitterVelocityMode
+    {
+        Transform,
+        Rigidbody,
+        Custom,
+    }
+
+    public enum VividParticleCustomDataMode
+    {
+        Disabled,
+        Vector,
+        Color,
+    }
+
+    public enum VividParticleCustomDataStream
+    {
+        Custom1,
+        Custom2,
+    }
+
     [Serializable]
     public struct VividParticleBurst
     {
@@ -139,6 +172,13 @@ namespace VividRP.Runtime.Particle
 
         [SerializeField]
         private bool m_UseAutoRandomSeed = true;
+
+        [SerializeField]
+        private VividParticleEmitterVelocityMode m_EmitterVelocityMode =
+            VividParticleEmitterVelocityMode.Transform;
+
+        [SerializeField]
+        private Vector3 m_CustomEmitterVelocity;
 
         public float duration
         {
@@ -300,6 +340,39 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        public VividParticleEmitterVelocityMode emitterVelocityMode
+        {
+            get => m_EmitterVelocityMode;
+            set
+            {
+                VividParticleEmitterVelocityMode clamped = Enum.IsDefined(
+                    typeof(VividParticleEmitterVelocityMode),
+                    value)
+                        ? value
+                        : VividParticleEmitterVelocityMode.Transform;
+                if (m_EmitterVelocityMode == clamped)
+                    return;
+                m_EmitterVelocityMode = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public Vector3 customEmitterVelocity
+        {
+            get => m_CustomEmitterVelocity;
+            set
+            {
+                Vector3 sanitized = new(
+                    float.IsFinite(value.x) ? value.x : 0.0f,
+                    float.IsFinite(value.y) ? value.y : 0.0f,
+                    float.IsFinite(value.z) ? value.z : 0.0f);
+                if (m_CustomEmitterVelocity == sanitized)
+                    return;
+                m_CustomEmitterVelocity = sanitized;
+                NotifyChanged();
+            }
+        }
+
         internal void SetChangeCallback(Action onChanged)
         {
             m_OnChanged = onChanged;
@@ -334,6 +407,8 @@ namespace VividRP.Runtime.Particle
             m_MaxParticles = source.m_MaxParticles;
             m_RandomSeed = source.m_RandomSeed;
             m_UseAutoRandomSeed = source.m_UseAutoRandomSeed;
+            m_EmitterVelocityMode = source.m_EmitterVelocityMode;
+            m_CustomEmitterVelocity = source.m_CustomEmitterVelocity;
             Validate();
         }
 
@@ -343,12 +418,113 @@ namespace VividRP.Runtime.Particle
             m_StartLifetime = Mathf.Max(MinimumStartLifetime, m_StartLifetime);
             m_StartSize = Mathf.Max(MinimumStartSize, m_StartSize);
             m_MaxParticles = Mathf.Max(MinimumMaxParticles, m_MaxParticles);
+            if (!Enum.IsDefined(typeof(VividParticleEmitterVelocityMode), m_EmitterVelocityMode))
+                m_EmitterVelocityMode = VividParticleEmitterVelocityMode.Transform;
+            m_CustomEmitterVelocity = new Vector3(
+                float.IsFinite(m_CustomEmitterVelocity.x) ? m_CustomEmitterVelocity.x : 0.0f,
+                float.IsFinite(m_CustomEmitterVelocity.y) ? m_CustomEmitterVelocity.y : 0.0f,
+                float.IsFinite(m_CustomEmitterVelocity.z) ? m_CustomEmitterVelocity.z : 0.0f);
         }
 
         private void NotifyChanged()
         {
             m_OnChanged?.Invoke();
         }
+    }
+
+    [Serializable]
+    public sealed class VividParticleInheritVelocityModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private VividParticleInheritVelocityMode m_Mode = VividParticleInheritVelocityMode.Initial;
+
+        [SerializeField]
+        private AnimationCurve m_Curve = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set { if (m_Enabled != value) { m_Enabled = value; NotifyChanged(); } }
+        }
+
+        public VividParticleInheritVelocityMode mode
+        {
+            get => m_Mode;
+            set
+            {
+                VividParticleInheritVelocityMode clamped = Enum.IsDefined(
+                    typeof(VividParticleInheritVelocityMode),
+                    value)
+                        ? value
+                        : VividParticleInheritVelocityMode.Initial;
+                if (m_Mode == clamped)
+                    return;
+                m_Mode = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve curve
+        {
+            get => m_Curve ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            set
+            {
+                AnimationCurve source = value ?? AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+                m_Curve = new AnimationCurve(source.keys)
+                {
+                    preWrapMode = source.preWrapMode,
+                    postWrapMode = source.postWrapMode,
+                };
+                NotifyChanged();
+            }
+        }
+
+        internal float Evaluate(float normalizedLifetime)
+        {
+            return curve.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal void SetChangeCallback(Action onChanged) => m_OnChanged = onChanged;
+
+        internal static VividParticleInheritVelocityModule CreateDefault() => new();
+
+        internal VividParticleInheritVelocityModule Clone()
+        {
+            var clone = new VividParticleInheritVelocityModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleInheritVelocityModule source)
+        {
+            if (source == null)
+                return;
+            m_Enabled = source.m_Enabled;
+            m_Mode = source.m_Mode;
+            AnimationCurve sourceCurve = source.m_Curve
+                ?? AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            m_Curve = new AnimationCurve(sourceCurve.keys)
+            {
+                preWrapMode = sourceCurve.preWrapMode,
+                postWrapMode = sourceCurve.postWrapMode,
+            };
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Curve ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            if (!Enum.IsDefined(typeof(VividParticleInheritVelocityMode), m_Mode))
+                m_Mode = VividParticleInheritVelocityMode.Initial;
+        }
+
+        private void NotifyChanged() => m_OnChanged?.Invoke();
     }
 
     [Serializable]
@@ -1879,6 +2055,21 @@ namespace VividRP.Runtime.Particle
         private bool m_Damping = true;
 
         [SerializeField]
+        private VividParticleNoiseQuality m_Quality = VividParticleNoiseQuality.High;
+
+        [SerializeField]
+        private bool m_RemapEnabled;
+
+        [SerializeField]
+        private AnimationCurve m_RemapX = CreateDefaultRemapCurve();
+
+        [SerializeField]
+        private AnimationCurve m_RemapY = CreateDefaultRemapCurve();
+
+        [SerializeField]
+        private AnimationCurve m_RemapZ = CreateDefaultRemapCurve();
+
+        [SerializeField]
         private int m_OctaveCount = 1;
 
         [SerializeField]
@@ -1968,6 +2159,57 @@ namespace VividRP.Runtime.Particle
             set { if (m_Damping != value) { m_Damping = value; NotifyChanged(); } }
         }
 
+        public VividParticleNoiseQuality quality
+        {
+            get => m_Quality;
+            set
+            {
+                VividParticleNoiseQuality clamped = Enum.IsDefined(typeof(VividParticleNoiseQuality), value)
+                    ? value
+                    : VividParticleNoiseQuality.High;
+                if (m_Quality == clamped)
+                    return;
+                m_Quality = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public bool remapEnabled
+        {
+            get => m_RemapEnabled;
+            set { if (m_RemapEnabled != value) { m_RemapEnabled = value; NotifyChanged(); } }
+        }
+
+        public AnimationCurve remap
+        {
+            get => remapX;
+            set
+            {
+                m_RemapX = CloneCurve(value, CreateDefaultRemapCurve());
+                m_RemapY = CloneCurve(value, CreateDefaultRemapCurve());
+                m_RemapZ = CloneCurve(value, CreateDefaultRemapCurve());
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve remapX
+        {
+            get => m_RemapX ??= CreateDefaultRemapCurve();
+            set { m_RemapX = CloneCurve(value, CreateDefaultRemapCurve()); NotifyChanged(); }
+        }
+
+        public AnimationCurve remapY
+        {
+            get => m_RemapY ??= CreateDefaultRemapCurve();
+            set { m_RemapY = CloneCurve(value, CreateDefaultRemapCurve()); NotifyChanged(); }
+        }
+
+        public AnimationCurve remapZ
+        {
+            get => m_RemapZ ??= CreateDefaultRemapCurve();
+            set { m_RemapZ = CloneCurve(value, CreateDefaultRemapCurve()); NotifyChanged(); }
+        }
+
         public int octaveCount
         {
             get => m_OctaveCount;
@@ -2054,6 +2296,11 @@ namespace VividRP.Runtime.Particle
             m_StrengthZ = CloneCurve(source.m_StrengthZ, 1.0f);
             m_Frequency = source.m_Frequency;
             m_Damping = source.m_Damping;
+            m_Quality = source.m_Quality;
+            m_RemapEnabled = source.m_RemapEnabled;
+            m_RemapX = CloneCurve(source.m_RemapX, CreateDefaultRemapCurve());
+            m_RemapY = CloneCurve(source.m_RemapY, CreateDefaultRemapCurve());
+            m_RemapZ = CloneCurve(source.m_RemapZ, CreateDefaultRemapCurve());
             m_OctaveCount = source.m_OctaveCount;
             m_OctaveMultiplier = source.m_OctaveMultiplier;
             m_OctaveScale = source.m_OctaveScale;
@@ -2071,6 +2318,11 @@ namespace VividRP.Runtime.Particle
             m_StrengthY ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
             m_StrengthZ ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
             m_ScrollSpeed ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            m_RemapX ??= CreateDefaultRemapCurve();
+            m_RemapY ??= CreateDefaultRemapCurve();
+            m_RemapZ ??= CreateDefaultRemapCurve();
+            if (!Enum.IsDefined(typeof(VividParticleNoiseQuality), m_Quality))
+                m_Quality = VividParticleNoiseQuality.High;
             m_PositionAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
             m_RotationAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
             m_SizeAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
@@ -2097,6 +2349,14 @@ namespace VividRP.Runtime.Particle
         internal float EvaluateScrollSpeed(float normalizedLifetime)
         {
             return scrollSpeed.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal Vector3 EvaluateRemap(Vector3 normalizedNoise)
+        {
+            return new Vector3(
+                remapX.Evaluate(Mathf.Clamp01(normalizedNoise.x)),
+                remapY.Evaluate(Mathf.Clamp01(normalizedNoise.y)),
+                remapZ.Evaluate(Mathf.Clamp01(normalizedNoise.z)));
         }
 
         internal float EvaluatePositionAmount(float normalizedLifetime)
@@ -2143,6 +2403,338 @@ namespace VividRP.Runtime.Particle
             {
                 preWrapMode = curve.preWrapMode,
                 postWrapMode = curve.postWrapMode,
+            };
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source, AnimationCurve fallback)
+        {
+            AnimationCurve curve = source ?? fallback;
+            return new AnimationCurve(curve.keys)
+            {
+                preWrapMode = curve.preWrapMode,
+                postWrapMode = curve.postWrapMode,
+            };
+        }
+
+        private static AnimationCurve CreateDefaultRemapCurve()
+        {
+            return AnimationCurve.Linear(0.0f, -1.0f, 1.0f, 1.0f);
+        }
+
+        private void NotifyChanged() => m_OnChanged?.Invoke();
+    }
+
+    [Serializable]
+    public sealed class VividParticleCustomDataModule
+    {
+        internal const int MinimumComponentCount = 1;
+        internal const int MaximumComponentCount = 4;
+
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private VividParticleCustomDataMode m_Mode1;
+
+        [SerializeField]
+        private VividParticleCustomDataMode m_Mode2;
+
+        [SerializeField]
+        private int m_NumberOfComponents1 = MaximumComponentCount;
+
+        [SerializeField]
+        private int m_NumberOfComponents2 = MaximumComponentCount;
+
+        [SerializeField]
+        private AnimationCurve m_Vector1X = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector1Y = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector1Z = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector1W = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector2X = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector2Y = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector2Z = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Vector2W = CreateZeroCurve();
+
+        [SerializeField]
+        private Gradient m_Color1 = CreateWhiteGradient();
+
+        [SerializeField]
+        private Gradient m_Color2 = CreateWhiteGradient();
+
+        public bool enabled => m_Mode1 != VividParticleCustomDataMode.Disabled
+            || m_Mode2 != VividParticleCustomDataMode.Disabled;
+
+        public VividParticleCustomDataMode mode1
+        {
+            get => m_Mode1;
+            set => SetMode(VividParticleCustomDataStream.Custom1, value);
+        }
+
+        public VividParticleCustomDataMode mode2
+        {
+            get => m_Mode2;
+            set => SetMode(VividParticleCustomDataStream.Custom2, value);
+        }
+
+        public int numberOfComponents1
+        {
+            get => m_NumberOfComponents1;
+            set => SetVectorComponentCount(VividParticleCustomDataStream.Custom1, value);
+        }
+
+        public int numberOfComponents2
+        {
+            get => m_NumberOfComponents2;
+            set => SetVectorComponentCount(VividParticleCustomDataStream.Custom2, value);
+        }
+
+        public VividParticleCustomDataMode GetMode(VividParticleCustomDataStream stream)
+        {
+            return stream == VividParticleCustomDataStream.Custom2 ? m_Mode2 : m_Mode1;
+        }
+
+        public void SetMode(VividParticleCustomDataStream stream, VividParticleCustomDataMode mode)
+        {
+            if (!Enum.IsDefined(typeof(VividParticleCustomDataMode), mode))
+                mode = VividParticleCustomDataMode.Disabled;
+
+            ref VividParticleCustomDataMode target = ref (
+                stream == VividParticleCustomDataStream.Custom2
+                    ? ref m_Mode2
+                    : ref m_Mode1);
+            if (target == mode)
+                return;
+            target = mode;
+            NotifyChanged();
+        }
+
+        public int GetVectorComponentCount(VividParticleCustomDataStream stream)
+        {
+            return stream == VividParticleCustomDataStream.Custom2
+                ? m_NumberOfComponents2
+                : m_NumberOfComponents1;
+        }
+
+        public void SetVectorComponentCount(VividParticleCustomDataStream stream, int count)
+        {
+            count = Mathf.Clamp(count, MinimumComponentCount, MaximumComponentCount);
+            ref int target = ref (
+                stream == VividParticleCustomDataStream.Custom2
+                    ? ref m_NumberOfComponents2
+                    : ref m_NumberOfComponents1);
+            if (target == count)
+                return;
+            target = count;
+            NotifyChanged();
+        }
+
+        public AnimationCurve GetVector(VividParticleCustomDataStream stream, int component)
+        {
+            component = Mathf.Clamp(component, 0, MaximumComponentCount - 1);
+            AnimationCurve curve = GetVectorCurve(stream, component);
+            return CloneCurve(curve);
+        }
+
+        public void SetVector(
+            VividParticleCustomDataStream stream,
+            int component,
+            AnimationCurve curve)
+        {
+            component = Mathf.Clamp(component, 0, MaximumComponentCount - 1);
+            SetVectorCurve(stream, component, CloneCurve(curve));
+            NotifyChanged();
+        }
+
+        public Gradient GetColor(VividParticleCustomDataStream stream)
+        {
+            return CloneGradient(stream == VividParticleCustomDataStream.Custom2 ? m_Color2 : m_Color1);
+        }
+
+        public void SetColor(VividParticleCustomDataStream stream, Gradient color)
+        {
+            if (stream == VividParticleCustomDataStream.Custom2)
+                m_Color2 = CloneGradient(color);
+            else
+                m_Color1 = CloneGradient(color);
+            NotifyChanged();
+        }
+
+        internal Vector4 Evaluate(VividParticleCustomDataStream stream, float normalizedLifetime)
+        {
+            float t = Mathf.Clamp01(normalizedLifetime);
+            VividParticleCustomDataMode mode = GetMode(stream);
+            if (mode == VividParticleCustomDataMode.Color)
+            {
+                Color color = (stream == VividParticleCustomDataStream.Custom2 ? m_Color2 : m_Color1)
+                    .Evaluate(t);
+                return new Vector4(color.r, color.g, color.b, color.a);
+            }
+
+            if (mode != VividParticleCustomDataMode.Vector)
+                return Vector4.zero;
+
+            int componentCount = GetVectorComponentCount(stream);
+            return new Vector4(
+                componentCount > 0 ? GetVectorCurve(stream, 0).Evaluate(t) : 0.0f,
+                componentCount > 1 ? GetVectorCurve(stream, 1).Evaluate(t) : 0.0f,
+                componentCount > 2 ? GetVectorCurve(stream, 2).Evaluate(t) : 0.0f,
+                componentCount > 3 ? GetVectorCurve(stream, 3).Evaluate(t) : 0.0f);
+        }
+
+        internal void SetChangeCallback(Action onChanged) => m_OnChanged = onChanged;
+
+        internal static VividParticleCustomDataModule CreateDefault() => new();
+
+        internal void CopyFrom(VividParticleCustomDataModule source)
+        {
+            if (source == null)
+                return;
+            m_Mode1 = source.m_Mode1;
+            m_Mode2 = source.m_Mode2;
+            m_NumberOfComponents1 = source.m_NumberOfComponents1;
+            m_NumberOfComponents2 = source.m_NumberOfComponents2;
+            for (int component = 0; component < MaximumComponentCount; component++)
+            {
+                SetVectorCurve(
+                    VividParticleCustomDataStream.Custom1,
+                    component,
+                    CloneCurve(source.GetVectorCurve(VividParticleCustomDataStream.Custom1, component)));
+                SetVectorCurve(
+                    VividParticleCustomDataStream.Custom2,
+                    component,
+                    CloneCurve(source.GetVectorCurve(VividParticleCustomDataStream.Custom2, component)));
+            }
+            m_Color1 = CloneGradient(source.m_Color1);
+            m_Color2 = CloneGradient(source.m_Color2);
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            if (!Enum.IsDefined(typeof(VividParticleCustomDataMode), m_Mode1))
+                m_Mode1 = VividParticleCustomDataMode.Disabled;
+            if (!Enum.IsDefined(typeof(VividParticleCustomDataMode), m_Mode2))
+                m_Mode2 = VividParticleCustomDataMode.Disabled;
+            m_NumberOfComponents1 = Mathf.Clamp(
+                m_NumberOfComponents1,
+                MinimumComponentCount,
+                MaximumComponentCount);
+            m_NumberOfComponents2 = Mathf.Clamp(
+                m_NumberOfComponents2,
+                MinimumComponentCount,
+                MaximumComponentCount);
+            for (int component = 0; component < MaximumComponentCount; component++)
+            {
+                if (GetVectorCurve(VividParticleCustomDataStream.Custom1, component) == null)
+                    SetVectorCurve(VividParticleCustomDataStream.Custom1, component, CreateZeroCurve());
+                if (GetVectorCurve(VividParticleCustomDataStream.Custom2, component) == null)
+                    SetVectorCurve(VividParticleCustomDataStream.Custom2, component, CreateZeroCurve());
+            }
+            m_Color1 ??= CreateWhiteGradient();
+            m_Color2 ??= CreateWhiteGradient();
+        }
+
+        private AnimationCurve GetVectorCurve(VividParticleCustomDataStream stream, int component)
+        {
+            if (stream == VividParticleCustomDataStream.Custom2)
+            {
+                return component switch
+                {
+                    1 => m_Vector2Y,
+                    2 => m_Vector2Z,
+                    3 => m_Vector2W,
+                    _ => m_Vector2X,
+                };
+            }
+
+            return component switch
+            {
+                1 => m_Vector1Y,
+                2 => m_Vector1Z,
+                3 => m_Vector1W,
+                _ => m_Vector1X,
+            };
+        }
+
+        private void SetVectorCurve(
+            VividParticleCustomDataStream stream,
+            int component,
+            AnimationCurve curve)
+        {
+            if (stream == VividParticleCustomDataStream.Custom2)
+            {
+                switch (component)
+                {
+                    case 1: m_Vector2Y = curve; break;
+                    case 2: m_Vector2Z = curve; break;
+                    case 3: m_Vector2W = curve; break;
+                    default: m_Vector2X = curve; break;
+                }
+                return;
+            }
+
+            switch (component)
+            {
+                case 1: m_Vector1Y = curve; break;
+                case 2: m_Vector1Z = curve; break;
+                case 3: m_Vector1W = curve; break;
+                default: m_Vector1X = curve; break;
+            }
+        }
+
+        private static AnimationCurve CreateZeroCurve() =>
+            AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            source ??= CreateZeroCurve();
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private static Gradient CreateWhiteGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(Color.white, 0.0f),
+                    new GradientColorKey(Color.white, 1.0f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(1.0f, 0.0f),
+                    new GradientAlphaKey(1.0f, 1.0f),
+                });
+            return gradient;
+        }
+
+        private static Gradient CloneGradient(Gradient source)
+        {
+            source ??= CreateWhiteGradient();
+            return new Gradient
+            {
+                colorKeys = source.colorKeys,
+                alphaKeys = source.alphaKeys,
+                mode = source.mode,
+                colorSpace = source.colorSpace,
             };
         }
 

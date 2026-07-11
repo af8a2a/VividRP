@@ -18,6 +18,8 @@ namespace VividRP.Runtime.Particle.ECS
         [NativeDisableUnsafePtrRestriction]
         public float3* AnimatedVelocities;
         [NativeDisableUnsafePtrRestriction]
+        public float3* InitialEmitterVelocities;
+        [NativeDisableUnsafePtrRestriction]
         public float* StartLifetimes;
         [NativeDisableUnsafePtrRestriction]
         public float* RemainingLifetimes;
@@ -60,6 +62,7 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_CommonTypeIndex;
         private readonly VividEcsTypeIndex m_AnimatedMotionTypeIndex;
         private readonly VividEcsTypeIndex m_NoiseStateTypeIndex;
+        private readonly VividEcsTypeIndex m_InheritVelocityStateTypeIndex;
         private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
         private readonly VividEcsTypeIndex m_ModuleSharedKeyTypeIndex;
         private readonly VividEcsTypeIndex m_SimulationKernelSharedKeyTypeIndex;
@@ -71,6 +74,7 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsSoaColumn<VividParticleCommon> m_CommonColumn;
         private VividEcsSoaColumn<VividParticleAnimatedMotion> m_AnimatedMotionColumn;
         private VividEcsSoaColumn<VividParticleNoiseState> m_NoiseStateColumn;
+        private VividEcsSoaColumn<VividParticleInheritVelocityState> m_InheritVelocityStateColumn;
         private readonly bool m_OwnsWorld;
         private readonly Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> m_LineGroupScratch = new();
         private NativeArray<int> m_ActiveCountOutput;
@@ -88,6 +92,7 @@ namespace VividRP.Runtime.Particle.ECS
         private int m_CachedCommonColumnVersion = -1;
         private int m_CachedAnimatedMotionColumnVersion = -1;
         private int m_CachedNoiseStateColumnVersion = -1;
+        private int m_CachedInheritVelocityStateColumnVersion = -1;
         private int m_CachedKeepMaskCapacity = -1;
         private int m_CachedActiveCountOutputLength = -1;
         private int m_ColumnViewVersion;
@@ -113,6 +118,8 @@ namespace VividRP.Runtime.Particle.ECS
             m_CommonTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
             m_AnimatedMotionTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleAnimatedMotion>();
             m_NoiseStateTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleNoiseState>();
+            m_InheritVelocityStateTypeIndex =
+                VividEcsTypeManager.GetTypeIndex<VividParticleInheritVelocityState>();
             m_SystemIdTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             m_ModuleSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleModuleSharedKey>();
             m_SimulationKernelSharedKeyTypeIndex =
@@ -175,6 +182,8 @@ namespace VividRP.Runtime.Particle.ECS
 
         public bool hasNoiseStateColumn => m_NoiseStateColumn != null;
 
+        public bool hasInheritVelocityStateColumn => m_InheritVelocityStateColumn != null;
+
         public void EnsureAnimatedMotionColumn()
         {
             if (m_AnimatedMotionColumn != null)
@@ -218,6 +227,26 @@ namespace VividRP.Runtime.Particle.ECS
                 sizeMultipliers[index] = 1.0f;
             }
             m_CachedNoiseStateColumnVersion = -1;
+            m_CachedInheritVelocityStateColumnVersion = -1;
+            m_ColumnView = default;
+        }
+
+        public void EnsureInheritVelocityStateColumn(Vector3 initialVelocity)
+        {
+            if (m_InheritVelocityStateColumn != null)
+                return;
+
+            m_World.AddComponentType(m_Line, m_InheritVelocityStateTypeIndex);
+            m_InheritVelocityStateColumn =
+                m_Line.GetColumn<VividEcsSoaColumn<VividParticleInheritVelocityState>>(
+                    m_InheritVelocityStateTypeIndex);
+            NativeArray<float3> initialVelocities = m_InheritVelocityStateColumn.GetFieldArray<float3>(
+                VividParticleInheritVelocityState.InitialVelocityFieldIndex);
+            int count = math.min(activeCount, initialVelocities.Length);
+            float3 value = ToFloat3(initialVelocity);
+            for (int index = 0; index < count; index++)
+                initialVelocities[index] = value;
+            m_CachedInheritVelocityStateColumnVersion = -1;
             m_ColumnView = default;
         }
 
@@ -364,6 +393,7 @@ namespace VividRP.Runtime.Particle.ECS
             m_CachedCommonColumnVersion = -1;
             m_CachedAnimatedMotionColumnVersion = -1;
             m_CachedNoiseStateColumnVersion = -1;
+            m_CachedInheritVelocityStateColumnVersion = -1;
             m_CachedKeepMaskCapacity = -1;
             m_CachedActiveCountOutputLength = -1;
             m_PendingIntegrateActiveCount = 0;
@@ -376,7 +406,8 @@ namespace VividRP.Runtime.Particle.ECS
             float remainingLifetime,
             float size,
             Color color,
-            int meshIndex = 0)
+            int meshIndex = 0,
+            Vector3 initialEmitterVelocity = default)
         {
             if (!isCreated || !m_Line.Append(out int index))
                 return false;
@@ -408,6 +439,13 @@ namespace VividRP.Runtime.Particle.ECS
                     index,
                     1.0f);
             }
+            if (m_InheritVelocityStateColumn != null)
+            {
+                m_InheritVelocityStateColumn.SetFieldValue(
+                    VividParticleInheritVelocityState.InitialVelocityFieldIndex,
+                    index,
+                    ToFloat3(initialEmitterVelocity));
+            }
             if (m_KeepMask.IsCreated && index < m_KeepMask.Length)
                 m_KeepMask[index] = 1;
 
@@ -418,6 +456,25 @@ namespace VividRP.Runtime.Particle.ECS
             int requestedCount,
             VividParticleSystemFrameSnapshot snapshot,
             uint randomSeed,
+            NativeList<VividParticleEcsInitializeParticlesWork> works,
+            out int firstIndex,
+            out int reservedCount)
+        {
+            return ReserveInitializeParticles(
+                requestedCount,
+                snapshot,
+                randomSeed,
+                Vector3.zero,
+                works,
+                out firstIndex,
+                out reservedCount);
+        }
+
+        public unsafe bool ReserveInitializeParticles(
+            int requestedCount,
+            VividParticleSystemFrameSnapshot snapshot,
+            uint randomSeed,
+            Vector3 emitterVelocity,
             NativeList<VividParticleEcsInitializeParticlesWork> works,
             out int firstIndex,
             out int reservedCount)
@@ -434,6 +491,7 @@ namespace VividRP.Runtime.Particle.ECS
             if (!TryCreateInitializeParticlesTemplate(
                 snapshot,
                 randomSeed,
+                emitterVelocity,
                 out VividParticleEcsInitializeParticlesWork work,
                 out _))
             {
@@ -449,6 +507,7 @@ namespace VividRP.Runtime.Particle.ECS
         public unsafe bool TryCreateInitializeParticlesTemplate(
             VividParticleSystemFrameSnapshot snapshot,
             uint randomSeed,
+            Vector3 emitterVelocity,
             out VividParticleEcsInitializeParticlesWork work,
             out int* activeCountOutput)
         {
@@ -496,6 +555,8 @@ namespace VividRP.Runtime.Particle.ECS
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
                 AnimatedVelocities = columnView.AnimatedVelocities,
+                InitialEmitterVelocities = columnView.InitialEmitterVelocities,
+                EmitterVelocity = ToFloat3(emitterVelocity),
                 KeepMask = columnView.KeepMask,
             };
             return true;
@@ -521,6 +582,10 @@ namespace VividRP.Runtime.Particle.ECS
                     0,
                     float3x3.identity,
                     null,
+                    0,
+                    (int)VividParticleInheritVelocityMode.Initial,
+                    float3.zero,
+                    null,
                     null,
                     0,
                     0,
@@ -533,6 +598,12 @@ namespace VividRP.Runtime.Particle.ECS
                     new float2(0.0f, 1.0f),
                     null,
                     null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    (int)VividParticleNoiseQuality.High,
                     0,
                     0.0f,
                     0,
@@ -550,6 +621,10 @@ namespace VividRP.Runtime.Particle.ECS
             float3* velocityOverLifetimeLut,
             int velocityOverLifetimeEnabled,
             float3x3 velocityOverLifetimeTransform,
+            float* inheritVelocityLut,
+            int inheritVelocityEnabled,
+            int inheritVelocityMode,
+            float3 emitterVelocity,
             float3* limitVelocityLut,
             float* limitVelocityDragLut,
             int limitVelocityEnabled,
@@ -563,7 +638,13 @@ namespace VividRP.Runtime.Particle.ECS
             float2 rotationBySpeedRange,
             float3* noiseStrengthLut,
             float* noiseScrollSpeedLut,
+            float3* noiseRemapLut,
+            float* noisePositionAmountLut,
+            float* noiseRotationAmountLut,
+            float* noiseSizeAmountLut,
             int noiseEnabled,
+            int noiseQuality,
+            int noiseRemapEnabled,
             float noiseFrequency,
             int noiseDamping,
             int noiseOctaveCount,
@@ -605,10 +686,15 @@ namespace VividRP.Runtime.Particle.ECS
                     Positions = columnView.Positions,
                     Velocities = columnView.Velocities,
                     AnimatedVelocities = columnView.AnimatedVelocities,
+                    InitialEmitterVelocities = columnView.InitialEmitterVelocities,
                     StartLifetimes = columnView.StartLifetimes,
                     VelocityOverLifetimeLut = velocityOverLifetimeLut,
                     VelocityOverLifetimeEnabled = velocityOverLifetimeEnabled,
                     VelocityOverLifetimeTransform = velocityOverLifetimeTransform,
+                    InheritVelocityLut = inheritVelocityLut,
+                    InheritVelocityEnabled = inheritVelocityEnabled,
+                    InheritVelocityMode = inheritVelocityMode,
+                    EmitterVelocity = emitterVelocity,
                     LimitVelocityLut = limitVelocityLut,
                     LimitVelocityDragLut = limitVelocityDragLut,
                     LimitVelocityEnabled = limitVelocityEnabled,
@@ -621,12 +707,18 @@ namespace VividRP.Runtime.Particle.ECS
                     AccumulatedRotations = columnView.AccumulatedRotations,
                     NoisePhases = columnView.NoisePhases,
                     NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                    NoisePositionAmountLut = noisePositionAmountLut,
+                    NoiseRotationAmountLut = noiseRotationAmountLut,
+                    NoiseSizeAmountLut = noiseSizeAmountLut,
+                    NoiseRemapLut = noiseRemapLut,
                     RotationBySpeedLut = rotationBySpeedLut,
                     RotationBySpeedEnabled = rotationBySpeedEnabled,
                     RotationBySpeedRange = rotationBySpeedRange,
                     NoiseStrengthLut = noiseStrengthLut,
                     NoiseScrollSpeedLut = noiseScrollSpeedLut,
                     NoiseEnabled = noiseEnabled,
+                    NoiseQuality = noiseQuality,
+                    NoiseRemapEnabled = noiseRemapEnabled,
                     NoiseFrequency = noiseFrequency,
                     NoiseDamping = noiseDamping,
                     NoiseOctaveCount = noiseOctaveCount,
@@ -661,6 +753,10 @@ namespace VividRP.Runtime.Particle.ECS
             float3* velocityOverLifetimeLut,
             int velocityOverLifetimeEnabled,
             float3x3 velocityOverLifetimeTransform,
+            float* inheritVelocityLut,
+            int inheritVelocityEnabled,
+            int inheritVelocityMode,
+            float3 emitterVelocity,
             float3* limitVelocityLut,
             float* limitVelocityDragLut,
             int limitVelocityEnabled,
@@ -674,7 +770,13 @@ namespace VividRP.Runtime.Particle.ECS
             float2 rotationBySpeedRange,
             float3* noiseStrengthLut,
             float* noiseScrollSpeedLut,
+            float3* noiseRemapLut,
+            float* noisePositionAmountLut,
+            float* noiseRotationAmountLut,
+            float* noiseSizeAmountLut,
             int noiseEnabled,
+            int noiseQuality,
+            int noiseRemapEnabled,
             float noiseFrequency,
             int noiseDamping,
             int noiseOctaveCount,
@@ -720,10 +822,15 @@ namespace VividRP.Runtime.Particle.ECS
                     Positions = columnView.Positions,
                     Velocities = columnView.Velocities,
                     AnimatedVelocities = columnView.AnimatedVelocities,
+                    InitialEmitterVelocities = columnView.InitialEmitterVelocities,
                     StartLifetimes = columnView.StartLifetimes,
                     VelocityOverLifetimeLut = velocityOverLifetimeLut,
                     VelocityOverLifetimeEnabled = velocityOverLifetimeEnabled,
                     VelocityOverLifetimeTransform = velocityOverLifetimeTransform,
+                    InheritVelocityLut = inheritVelocityLut,
+                    InheritVelocityEnabled = inheritVelocityEnabled,
+                    InheritVelocityMode = inheritVelocityMode,
+                    EmitterVelocity = emitterVelocity,
                     LimitVelocityLut = limitVelocityLut,
                     LimitVelocityDragLut = limitVelocityDragLut,
                     LimitVelocityEnabled = limitVelocityEnabled,
@@ -736,12 +843,18 @@ namespace VividRP.Runtime.Particle.ECS
                     AccumulatedRotations = columnView.AccumulatedRotations,
                     NoisePhases = columnView.NoisePhases,
                     NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                    NoisePositionAmountLut = noisePositionAmountLut,
+                    NoiseRotationAmountLut = noiseRotationAmountLut,
+                    NoiseSizeAmountLut = noiseSizeAmountLut,
+                    NoiseRemapLut = noiseRemapLut,
                     RotationBySpeedLut = rotationBySpeedLut,
                     RotationBySpeedEnabled = rotationBySpeedEnabled,
                     RotationBySpeedRange = rotationBySpeedRange,
                     NoiseStrengthLut = noiseStrengthLut,
                     NoiseScrollSpeedLut = noiseScrollSpeedLut,
                     NoiseEnabled = noiseEnabled,
+                    NoiseQuality = noiseQuality,
+                    NoiseRemapEnabled = noiseRemapEnabled,
                     NoiseFrequency = noiseFrequency,
                     NoiseDamping = noiseDamping,
                     NoiseOctaveCount = noiseOctaveCount,
@@ -790,6 +903,16 @@ namespace VividRP.Runtime.Particle.ECS
                     .GetFieldArray<float3>(VividParticleAnimatedMotion.VelocityFieldIndex)[index]);
         }
 
+        public Vector3 GetInitialEmitterVelocity(int index)
+        {
+            if (m_InheritVelocityStateColumn == null)
+                return Vector3.zero;
+
+            return ToVector3(
+                m_InheritVelocityStateColumn
+                    .GetFieldArray<float3>(VividParticleInheritVelocityState.InitialVelocityFieldIndex)[index]);
+        }
+
         public float GetStartLifetime(int index)
         {
             return commonColumn.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex)[index];
@@ -819,6 +942,15 @@ namespace VividRP.Runtime.Particle.ECS
         {
             return ToVector3(commonColumn.GetFieldArray<float3>(
                 VividParticleCommon.AccumulatedRotationFieldIndex)[index]);
+        }
+
+        public float GetNoiseSizeMultiplier(int index)
+        {
+            if (m_NoiseStateColumn == null)
+                return 1.0f;
+
+            return m_NoiseStateColumn.GetFieldArray<float>(
+                VividParticleNoiseState.SizeMultiplierFieldIndex)[index];
         }
 
         public VividEcsPageInfo GetPageInfo(int pageIndex)
@@ -867,6 +999,8 @@ namespace VividRP.Runtime.Particle.ECS
                 || m_CachedCommonColumnVersion != common.version
                 || m_CachedAnimatedMotionColumnVersion != (m_AnimatedMotionColumn?.version ?? -1)
                 || m_CachedNoiseStateColumnVersion != (m_NoiseStateColumn?.version ?? -1)
+                || m_CachedInheritVelocityStateColumnVersion
+                    != (m_InheritVelocityStateColumn?.version ?? -1)
                 || m_CachedKeepMaskCapacity != keepMaskCapacity
                 || m_CachedActiveCountOutputLength != activeCountOutputLength)
             {
@@ -893,6 +1027,10 @@ namespace VividRP.Runtime.Particle.ECS
                 NativeArray<float> noiseSizeMultipliers = m_NoiseStateColumn != null
                     ? m_NoiseStateColumn.GetFieldArray<float>(VividParticleNoiseState.SizeMultiplierFieldIndex)
                     : default;
+                NativeArray<float3> initialEmitterVelocities = m_InheritVelocityStateColumn != null
+                    ? m_InheritVelocityStateColumn.GetFieldArray<float3>(
+                        VividParticleInheritVelocityState.InitialVelocityFieldIndex)
+                    : default;
 
                 m_ColumnViewVersion = m_ColumnViewVersion == int.MaxValue ? 1 : m_ColumnViewVersion + 1;
                 m_ColumnView = new VividParticleEcsColumnView
@@ -901,6 +1039,9 @@ namespace VividRP.Runtime.Particle.ECS
                     Velocities = (float3*)velocities.GetUnsafePtr(),
                     AnimatedVelocities = animatedVelocities.IsCreated
                         ? (float3*)animatedVelocities.GetUnsafePtr()
+                        : null,
+                    InitialEmitterVelocities = initialEmitterVelocities.IsCreated
+                        ? (float3*)initialEmitterVelocities.GetUnsafePtr()
                         : null,
                     StartLifetimes = (float*)startLifetimes.GetUnsafePtr(),
                     RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
@@ -923,6 +1064,8 @@ namespace VividRP.Runtime.Particle.ECS
                 m_CachedCommonColumnVersion = common.version;
                 m_CachedAnimatedMotionColumnVersion = m_AnimatedMotionColumn?.version ?? -1;
                 m_CachedNoiseStateColumnVersion = m_NoiseStateColumn?.version ?? -1;
+                m_CachedInheritVelocityStateColumnVersion =
+                    m_InheritVelocityStateColumn?.version ?? -1;
                 m_CachedKeepMaskCapacity = keepMaskCapacity;
                 m_CachedActiveCountOutputLength = activeCountOutputLength;
                 m_ColumnViewRefreshCount++;
@@ -1047,6 +1190,7 @@ namespace VividRP.Runtime.Particle.ECS
                 Positions = columnView.Positions,
                 Velocities = columnView.Velocities,
                 AnimatedVelocities = columnView.AnimatedVelocities,
+                InitialEmitterVelocities = columnView.InitialEmitterVelocities,
                 StartLifetimes = columnView.StartLifetimes,
                 RemainingLifetimes = columnView.RemainingLifetimes,
                 Colors = columnView.Colors,

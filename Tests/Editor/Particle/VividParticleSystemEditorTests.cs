@@ -124,10 +124,16 @@ namespace VividRP.Editor.Tests
                 VividParticleSystemEditorUtility.FindVelocityOverLifetimeProperty(systemObject),
                 Is.Not.Null);
             Assert.That(
+                VividParticleSystemEditorUtility.FindInheritVelocityProperty(systemObject),
+                Is.Not.Null);
+            Assert.That(
                 VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(systemObject),
                 Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindNoiseProperty(systemObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindCustomDataProperty(systemObject),
                 Is.Not.Null);
             Assert.That(systemRenderer, Is.Not.Null);
             Assert.That(VividParticleSystemEditorUtility.FindAssetProperty(systemObject), Is.Not.Null);
@@ -168,10 +174,16 @@ namespace VividRP.Editor.Tests
                 VividParticleSystemEditorUtility.FindVelocityOverLifetimeProperty(assetObject),
                 Is.Not.Null);
             Assert.That(
+                VividParticleSystemEditorUtility.FindInheritVelocityProperty(assetObject),
+                Is.Not.Null);
+            Assert.That(
                 VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(assetObject),
                 Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindNoiseProperty(assetObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindCustomDataProperty(assetObject),
                 Is.Not.Null);
             Assert.That(assetRenderer, Is.Not.Null);
         }
@@ -196,6 +208,12 @@ namespace VividRP.Editor.Tests
             m_Asset.noise.enabled = true;
             m_Asset.noise.strength = AnimationCurve.Constant(0.0f, 1.0f, 2.0f);
             m_Asset.noise.frequency = 0.75f;
+            m_Asset.noise.quality = VividParticleNoiseQuality.Medium;
+            m_Asset.noise.remapEnabled = true;
+            m_Asset.noise.remapX = AnimationCurve.Linear(0.0f, -0.25f, 1.0f, 0.25f);
+            m_Asset.noise.positionAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.5f);
+            m_Asset.noise.rotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 20.0f);
+            m_Asset.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.25f);
             m_Asset.rendererModule.color = Color.cyan;
             system.main.startLifetime = 1.0f;
             system.emission.rateOverTime = 0.0f;
@@ -221,6 +239,12 @@ namespace VividRP.Editor.Tests
             Assert.That(system.noise.enabled, Is.True);
             Assert.That(system.noise.EvaluateStrength(0.5f), Is.EqualTo(Vector3.one * 2.0f));
             Assert.That(system.noise.frequency, Is.EqualTo(0.75f));
+            Assert.That(system.noise.quality, Is.EqualTo(VividParticleNoiseQuality.Medium));
+            Assert.That(system.noise.remapEnabled, Is.True);
+            Assert.That(system.noise.EvaluateRemap(Vector3.zero).x, Is.EqualTo(-0.25f));
+            Assert.That(system.noise.EvaluatePositionAmount(0.5f), Is.EqualTo(0.5f));
+            Assert.That(system.noise.EvaluateRotationAmount(0.5f), Is.EqualTo(20.0f));
+            Assert.That(system.noise.EvaluateSizeAmount(0.5f), Is.EqualTo(0.25f));
             Assert.That(system.rendererModule.color, Is.EqualTo(Color.cyan));
         }
 
@@ -259,6 +283,11 @@ namespace VividRP.Editor.Tests
             system.forceOverLifetime.enabled = true;
             system.forceOverLifetime.force = new Vector3(3.0f, 2.0f, 1.0f);
             system.forceOverLifetime.space = VividParticleForceSpace.World;
+            system.main.emitterVelocityMode = VividParticleEmitterVelocityMode.Custom;
+            system.main.customEmitterVelocity = new Vector3(2.0f, 3.0f, 4.0f);
+            system.inheritVelocity.enabled = true;
+            system.inheritVelocity.mode = VividParticleInheritVelocityMode.Current;
+            system.inheritVelocity.curve = AnimationCurve.Constant(0.0f, 1.0f, 0.75f);
             system.limitVelocityOverLifetime.enabled = true;
             system.limitVelocityOverLifetime.limit = AnimationCurve.Constant(0.0f, 1.0f, 4.0f);
             system.limitVelocityOverLifetime.dampen = 0.25f;
@@ -283,7 +312,19 @@ namespace VividRP.Editor.Tests
             system.noise.strengthY = AnimationCurve.Constant(0.0f, 1.0f, 2.0f);
             system.noise.strengthZ = AnimationCurve.Constant(0.0f, 1.0f, 3.0f);
             system.noise.frequency = 0.5f;
+            system.noise.quality = VividParticleNoiseQuality.Low;
+            system.noise.remapEnabled = true;
+            system.noise.remapZ = AnimationCurve.Linear(0.0f, -0.5f, 1.0f, 0.5f);
             system.noise.octaveCount = 3;
+            system.noise.positionAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.75f);
+            system.noise.rotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 45.0f);
+            system.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.5f);
+            system.customData.mode1 = VividParticleCustomDataMode.Vector;
+            system.customData.numberOfComponents1 = 2;
+            system.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Constant(0.0f, 1.0f, 2.0f));
             system.rendererModule.renderMode = VividParticleRenderMode.Stretch;
             system.rendererModule.color = Color.yellow;
             system.rendererModule.stretchLengthScale = 5.0f;
@@ -303,6 +344,11 @@ namespace VividRP.Editor.Tests
             Assert.That(m_Asset.forceOverLifetime.enabled, Is.True);
             Assert.That(m_Asset.forceOverLifetime.force, Is.EqualTo(new Vector3(3.0f, 2.0f, 1.0f)));
             Assert.That(m_Asset.forceOverLifetime.space, Is.EqualTo(VividParticleForceSpace.World));
+            Assert.That(m_Asset.main.emitterVelocityMode, Is.EqualTo(VividParticleEmitterVelocityMode.Custom));
+            Assert.That(m_Asset.main.customEmitterVelocity, Is.EqualTo(new Vector3(2.0f, 3.0f, 4.0f)));
+            Assert.That(m_Asset.inheritVelocity.enabled, Is.True);
+            Assert.That(m_Asset.inheritVelocity.mode, Is.EqualTo(VividParticleInheritVelocityMode.Current));
+            Assert.That(m_Asset.inheritVelocity.Evaluate(0.5f), Is.EqualTo(0.75f));
             Assert.That(m_Asset.limitVelocityOverLifetime.enabled, Is.True);
             Assert.That(
                 m_Asset.limitVelocityOverLifetime.EvaluateLimit(0.5f),
@@ -329,7 +375,18 @@ namespace VividRP.Editor.Tests
             Assert.That(m_Asset.noise.separateAxes, Is.True);
             Assert.That(m_Asset.noise.EvaluateStrength(0.5f), Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
             Assert.That(m_Asset.noise.frequency, Is.EqualTo(0.5f));
+            Assert.That(m_Asset.noise.quality, Is.EqualTo(VividParticleNoiseQuality.Low));
+            Assert.That(m_Asset.noise.remapEnabled, Is.True);
+            Assert.That(m_Asset.noise.EvaluateRemap(Vector3.zero).z, Is.EqualTo(-0.5f));
             Assert.That(m_Asset.noise.octaveCount, Is.EqualTo(3));
+            Assert.That(m_Asset.noise.EvaluatePositionAmount(0.5f), Is.EqualTo(0.75f));
+            Assert.That(m_Asset.noise.EvaluateRotationAmount(0.5f), Is.EqualTo(45.0f));
+            Assert.That(m_Asset.noise.EvaluateSizeAmount(0.5f), Is.EqualTo(0.5f));
+            Assert.That(m_Asset.customData.mode1, Is.EqualTo(VividParticleCustomDataMode.Vector));
+            Assert.That(m_Asset.customData.numberOfComponents1, Is.EqualTo(2));
+            Assert.That(
+                m_Asset.customData.Evaluate(VividParticleCustomDataStream.Custom1, 0.5f).x,
+                Is.EqualTo(2.0f));
             Assert.That(m_Asset.rendererModule.renderMode, Is.EqualTo(VividParticleRenderMode.Stretch));
             Assert.That(m_Asset.rendererModule.color, Is.EqualTo(Color.yellow));
             Assert.That(m_Asset.rendererModule.stretchLengthScale, Is.EqualTo(5.0f));
@@ -341,6 +398,14 @@ namespace VividRP.Editor.Tests
             system.sizeBySpeed.size = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
             system.rotationBySpeed.z = AnimationCurve.Constant(0.0f, 1.0f, 180.0f);
             system.noise.strengthX = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
+            system.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
+            system.noise.remapZ = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            system.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Constant(0.0f, 1.0f, 9.0f));
+            system.main.customEmitterVelocity = Vector3.one * 9.0f;
+            system.inheritVelocity.curve = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
 
             Assert.That(m_Asset.emission.bursts[0].time, Is.EqualTo(0.25f));
             Assert.That(m_Asset.emission.bursts[0].count, Is.EqualTo(4));
@@ -354,6 +419,13 @@ namespace VividRP.Editor.Tests
                 m_Asset.rotationBySpeed.EvaluateAngularVelocity(4.0f).z,
                 Is.EqualTo(60.0f).Within(0.0001f));
             Assert.That(m_Asset.noise.EvaluateStrength(0.5f), Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
+            Assert.That(m_Asset.noise.EvaluateSizeAmount(0.5f), Is.EqualTo(0.5f));
+            Assert.That(m_Asset.noise.EvaluateRemap(Vector3.zero).z, Is.EqualTo(-0.5f));
+            Assert.That(
+                m_Asset.customData.Evaluate(VividParticleCustomDataStream.Custom1, 0.5f).x,
+                Is.EqualTo(2.0f));
+            Assert.That(m_Asset.main.customEmitterVelocity, Is.EqualTo(new Vector3(2.0f, 3.0f, 4.0f)));
+            Assert.That(m_Asset.inheritVelocity.Evaluate(0.5f), Is.EqualTo(0.75f));
         }
 
         [Test]
@@ -689,6 +761,38 @@ namespace VividRP.Editor.Tests
             Assert.That(descriptor.SizeDataMode, Is.EqualTo(VividParticleGpuDataMode.PerParticle));
             Assert.That(descriptor.RotationDataMode, Is.EqualTo(VividParticleGpuDataMode.PerParticle));
             Assert.That(descriptor.VelocityDataMode, Is.EqualTo(VividParticleGpuDataMode.PerParticle));
+        }
+
+        [Test]
+        public void GpuLayoutPreview_CustomDataModuleForcesPerParticleStream()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.customData1Enabled = false;
+            system.customData.mode1 = VividParticleCustomDataMode.Vector;
+
+            using var serializedSystem = new SerializedObject(system);
+            SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
+            Assert.That(
+                VividParticleSystemEditorUtility.TryCreateGpuDataLayoutDescriptor(
+                    renderer,
+                    out VividParticleSystemManager.VividParticleGpuDataLayoutDescriptor descriptor),
+                Is.True);
+            Assert.That(descriptor.IncludeCustomData1, Is.True);
+            Assert.That(descriptor.CustomData1Mode, Is.EqualTo(VividParticleGpuDataMode.PerParticle));
+
+            VividParticleSystemManager.VividParticleGpuDataLayout layout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(descriptor);
+            Assert.That(
+                layout.TryGetDataInfo(
+                    VividParticleSystemManager.VividParticleGpuDataId.CustomData1,
+                    out VividParticleSystemManager.VividParticleGpuDataInfo dataInfo),
+                Is.True);
+            Assert.That(
+                dataInfo.Frequency,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(
+                layout.CustomDataRenderJobUploadColumnMask,
+                Is.EqualTo(VividParticleSystemManager.UploadColumnCustomData1Mask));
         }
 
         [Test]

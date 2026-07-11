@@ -19,6 +19,8 @@ namespace VividRP.Editor.Tests
             VividParticleEcsBootstrap.RegisterTypes();
             VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
             VividEcsTypeIndex noiseStateIndex = VividEcsTypeManager.GetTypeIndex<VividParticleNoiseState>();
+            VividEcsTypeIndex inheritVelocityStateIndex =
+                VividEcsTypeManager.GetTypeIndex<VividParticleInheritVelocityState>();
             VividEcsTypeIndex systemIdIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             VividEcsTypeIndex moduleKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleModuleSharedKey>();
             VividEcsTypeIndex simulationKernelKeyIndex =
@@ -30,10 +32,15 @@ namespace VividRP.Editor.Tests
             VividEcsTypeIndex simulationActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
             VividEcsTypeIndex rendererActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
             VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
+            VividEcsTypeInfo noiseStateType = VividEcsTypeManager.GetTypeInfo(noiseStateIndex);
+            VividEcsTypeInfo inheritVelocityStateType =
+                VividEcsTypeManager.GetTypeInfo(inheritVelocityStateIndex);
 
             Assert.That(commonIndex.IsValid, Is.True);
             Assert.That(noiseStateIndex.IsValid, Is.True);
             Assert.That(noiseStateIndex.IsSoaComponentType, Is.True);
+            Assert.That(inheritVelocityStateIndex.IsValid, Is.True);
+            Assert.That(inheritVelocityStateIndex.IsSoaComponentType, Is.True);
             Assert.That(systemIdIndex.IsValid, Is.True);
             Assert.That(moduleKeyIndex.IsValid, Is.True);
             Assert.That(simulationKernelKeyIndex.IsValid, Is.True);
@@ -68,6 +75,24 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 commonType.GetSoaFieldInfo(VividParticleCommon.AccumulatedRotationFieldIndex).ElementSize,
                 Is.EqualTo(VividParticleCommon.Float3SizeInBytes));
+            Assert.That(noiseStateType.SoaFieldCount, Is.EqualTo(VividParticleNoiseState.FieldCountValue));
+            Assert.That(
+                noiseStateType.GetSoaFieldInfo(VividParticleNoiseState.PhaseFieldIndex).OffsetInPage,
+                Is.EqualTo(VividParticleNoiseState.PhaseOffsetInPage));
+            Assert.That(
+                noiseStateType.GetSoaFieldInfo(VividParticleNoiseState.SizeMultiplierFieldIndex).OffsetInPage,
+                Is.EqualTo(VividParticleNoiseState.SizeMultiplierOffsetInPage));
+            Assert.That(
+                noiseStateType.GetSoaFieldInfo(VividParticleNoiseState.SizeMultiplierFieldIndex).ElementSize,
+                Is.EqualTo(VividParticleNoiseState.FloatSizeInBytes));
+            Assert.That(
+                inheritVelocityStateType.SoaFieldCount,
+                Is.EqualTo(VividParticleInheritVelocityState.FieldCountValue));
+            Assert.That(
+                inheritVelocityStateType
+                    .GetSoaFieldInfo(VividParticleInheritVelocityState.InitialVelocityFieldIndex)
+                    .ElementSize,
+                Is.EqualTo(VividParticleInheritVelocityState.Float3SizeInBytes));
         }
 
         [Test]
@@ -163,6 +188,22 @@ namespace VividRP.Editor.Tests
             AssertVector3(velocity, storage.GetVelocity(0));
             AssertColor(color, storage.GetColor(0));
             Assert.That(storage.GetSize(0), Is.EqualTo(size));
+            Assert.That(storage.GetNoiseSizeMultiplier(0), Is.EqualTo(1.0f));
+        }
+
+        [Test]
+        public void Storage_InheritVelocityStateColumn_IsLazyAndInitializesExistingParticles()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(32);
+            Assert.That(AddParticle(storage, 3), Is.True);
+            Assert.That(storage.hasInheritVelocityStateColumn, Is.False);
+
+            var emitterVelocity = new Vector3(2.0f, 3.0f, 4.0f);
+            storage.EnsureInheritVelocityStateColumn(emitterVelocity);
+
+            Assert.That(storage.hasInheritVelocityStateColumn, Is.True);
+            AssertVector3(emitterVelocity, storage.GetInitialEmitterVelocity(0));
         }
 
         [Test]
@@ -227,6 +268,7 @@ namespace VividRP.Editor.Tests
                     | VividParticleModuleFlags.ColorBySpeed
                     | VividParticleModuleFlags.SizeBySpeed
                     | VividParticleModuleFlags.RotationBySpeed
+                    | VividParticleModuleFlags.Noise
                     | VividParticleModuleFlags.TextureSheetAnimation));
             Assert.That(storage.rendererHandle, Is.EqualTo(rendererHandle));
             Assert.That(storage.rendererActive, Is.True);
@@ -756,7 +798,18 @@ namespace VividRP.Editor.Tests
             storage.EnsureCapacity(4);
             VividParticleSystemFrameSnapshot snapshot = CreatePointSnapshot(meshCount: 3);
 
-            Assert.That(storage.ReserveInitializeParticles(3, snapshot, 123u, works, out int firstIndex, out int count), Is.True);
+            var emitterVelocity = new Vector3(2.0f, 3.0f, 4.0f);
+            storage.EnsureInheritVelocityStateColumn(Vector3.zero);
+            Assert.That(
+                storage.ReserveInitializeParticles(
+                    3,
+                    snapshot,
+                    123u,
+                    emitterVelocity,
+                    works,
+                    out int firstIndex,
+                    out int count),
+                Is.True);
             Assert.That(firstIndex, Is.EqualTo(0));
             Assert.That(count, Is.EqualTo(3));
             Assert.That(storage.activeCount, Is.EqualTo(3));
@@ -776,6 +829,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(storage.GetSize(index), Is.EqualTo(0.75f));
                 AssertColor(new Color(0.2f, 0.4f, 0.6f, 0.8f), storage.GetColor(index));
                 Assert.That(storage.GetMeshIndex(index), Is.EqualTo(index % 3));
+                AssertVector3(emitterVelocity, storage.GetInitialEmitterVelocity(index));
             }
         }
 

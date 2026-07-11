@@ -49,6 +49,8 @@ namespace VividRP.Editor.Tests
                 VividParticleForceOverLifetimeModule.CreateDefault();
             VividParticleVelocityOverLifetimeModule velocityOverLifetime =
                 VividParticleVelocityOverLifetimeModule.CreateDefault();
+            VividParticleInheritVelocityModule inheritVelocity =
+                VividParticleInheritVelocityModule.CreateDefault();
             VividParticleLimitVelocityOverLifetimeModule limitVelocityOverLifetime =
                 VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
             VividParticleColorOverLifetimeModule colorOverLifetime =
@@ -64,6 +66,7 @@ namespace VividRP.Editor.Tests
             VividParticleRotationBySpeedModule rotationBySpeed =
                 VividParticleRotationBySpeedModule.CreateDefault();
             VividParticleNoiseModule noise = VividParticleNoiseModule.CreateDefault();
+            VividParticleCustomDataModule customData = VividParticleCustomDataModule.CreateDefault();
             VividParticleTextureSheetAnimationModule textureSheetAnimation =
                 VividParticleTextureSheetAnimationModule.CreateDefault();
             VividParticleRendererModule renderer = VividParticleRendererModule.CreateDefault();
@@ -80,6 +83,8 @@ namespace VividRP.Editor.Tests
             Assert.That(main.maxParticles, Is.EqualTo(1000));
             Assert.That(main.randomSeed, Is.EqualTo(1u));
             Assert.That(main.useAutoRandomSeed, Is.True);
+            Assert.That(main.emitterVelocityMode, Is.EqualTo(VividParticleEmitterVelocityMode.Transform));
+            Assert.That(main.customEmitterVelocity, Is.EqualTo(Vector3.zero));
 
             Assert.That(emission.enabled, Is.True);
             Assert.That(emission.rateOverTime, Is.EqualTo(10.0f));
@@ -97,6 +102,9 @@ namespace VividRP.Editor.Tests
             Assert.That(velocityOverLifetime.enabled, Is.False);
             Assert.That(velocityOverLifetime.Evaluate(0.5f), Is.EqualTo(Vector3.zero));
             Assert.That(velocityOverLifetime.space, Is.EqualTo(VividParticleForceSpace.Local));
+            Assert.That(inheritVelocity.enabled, Is.False);
+            Assert.That(inheritVelocity.mode, Is.EqualTo(VividParticleInheritVelocityMode.Initial));
+            Assert.That(inheritVelocity.Evaluate(0.5f), Is.EqualTo(1.0f));
             Assert.That(limitVelocityOverLifetime.enabled, Is.False);
             Assert.That(limitVelocityOverLifetime.separateAxes, Is.False);
             Assert.That(limitVelocityOverLifetime.EvaluateLimit(0.5f), Is.EqualTo(Vector3.one));
@@ -128,10 +136,27 @@ namespace VividRP.Editor.Tests
             Assert.That(noise.EvaluateStrength(0.5f), Is.EqualTo(Vector3.one));
             Assert.That(noise.frequency, Is.EqualTo(0.5f));
             Assert.That(noise.damping, Is.True);
+            Assert.That(noise.quality, Is.EqualTo(VividParticleNoiseQuality.High));
+            Assert.That(noise.remapEnabled, Is.False);
+            Assert.That(noise.EvaluateRemap(new Vector3(0.25f, 0.5f, 0.75f)),
+                Is.EqualTo(new Vector3(-0.5f, 0.0f, 0.5f)));
             Assert.That(noise.octaveCount, Is.EqualTo(1));
             Assert.That(noise.octaveMultiplier, Is.EqualTo(0.5f));
             Assert.That(noise.octaveScale, Is.EqualTo(2.0f));
             Assert.That(noise.EvaluateScrollSpeed(0.5f), Is.EqualTo(0.0f));
+            Assert.That(noise.EvaluatePositionAmount(0.5f), Is.EqualTo(1.0f));
+            Assert.That(noise.EvaluateRotationAmount(0.5f), Is.EqualTo(0.0f));
+            Assert.That(noise.EvaluateSizeAmount(0.5f), Is.EqualTo(0.0f));
+            Assert.That(noise.hasPositionEffect, Is.True);
+            Assert.That(noise.hasRotationEffect, Is.False);
+            Assert.That(noise.hasSizeEffect, Is.False);
+            Assert.That(customData.enabled, Is.False);
+            Assert.That(customData.mode1, Is.EqualTo(VividParticleCustomDataMode.Disabled));
+            Assert.That(customData.mode2, Is.EqualTo(VividParticleCustomDataMode.Disabled));
+            Assert.That(customData.numberOfComponents1, Is.EqualTo(4));
+            Assert.That(
+                customData.Evaluate(VividParticleCustomDataStream.Custom1, 0.5f),
+                Is.EqualTo(Vector4.zero));
             Assert.That(textureSheetAnimation.enabled, Is.False);
             Assert.That(textureSheetAnimation.numTilesX, Is.EqualTo(1));
             Assert.That(textureSheetAnimation.numTilesY, Is.EqualTo(1));
@@ -173,6 +198,32 @@ namespace VividRP.Editor.Tests
             Assert.That(renderer.customData2Enabled, Is.False);
             Assert.That(renderer.meshIndexDataEnabled, Is.False);
             Assert.That(renderer.sortMode, Is.EqualTo(VividParticleSortMode.None));
+        }
+
+        [Test]
+        public void CustomDataModule_EvaluatesVectorAndColorStreamsWithoutSharingInputs()
+        {
+            VividParticleCustomDataModule customData = VividParticleCustomDataModule.CreateDefault();
+            var x = AnimationCurve.Linear(0.0f, 0.0f, 1.0f, 2.0f);
+            Gradient color = CreateGradient(Color.red, Color.blue);
+            customData.mode1 = VividParticleCustomDataMode.Vector;
+            customData.numberOfComponents1 = 99;
+            customData.SetVector(VividParticleCustomDataStream.Custom1, 0, x);
+            customData.mode2 = VividParticleCustomDataMode.Color;
+            customData.SetColor(VividParticleCustomDataStream.Custom2, color);
+
+            x.keys = new[] { new Keyframe(0.0f, 9.0f), new Keyframe(1.0f, 9.0f) };
+            color.SetKeys(
+                new[] { new GradientColorKey(Color.green, 0.0f) },
+                new[] { new GradientAlphaKey(1.0f, 0.0f) });
+
+            Assert.That(customData.numberOfComponents1, Is.EqualTo(4));
+            Assert.That(
+                customData.Evaluate(VividParticleCustomDataStream.Custom1, 0.5f).x,
+                Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(
+                customData.Evaluate(VividParticleCustomDataStream.Custom2, 0.0f),
+                Is.EqualTo(new Vector4(1.0f, 0.0f, 0.0f, 1.0f)));
         }
 
         [Test]
@@ -226,6 +277,7 @@ namespace VividRP.Editor.Tests
             noise.octaveCount = 99;
             noise.octaveMultiplier = -2.0f;
             noise.octaveScale = 0.25f;
+            noise.quality = (VividParticleNoiseQuality)99;
 
             Assert.That(main.duration, Is.EqualTo(VividParticleMainModule.MinimumDuration));
             Assert.That(main.startLifetime, Is.EqualTo(VividParticleMainModule.MinimumStartLifetime));
@@ -257,6 +309,7 @@ namespace VividRP.Editor.Tests
             Assert.That(noise.octaveCount, Is.EqualTo(VividParticleNoiseModule.MaximumOctaveCount));
             Assert.That(noise.octaveMultiplier, Is.EqualTo(0.0f));
             Assert.That(noise.octaveScale, Is.EqualTo(1.0f));
+            Assert.That(noise.quality, Is.EqualTo(VividParticleNoiseQuality.High));
             renderer.batchLayer = -1;
             Assert.That(renderer.batchLayer, Is.EqualTo(VividParticleRendererModule.MinimumBatchLayer));
         }
@@ -281,6 +334,11 @@ namespace VividRP.Editor.Tests
             asset.velocityOverLifetime.enabled = true;
             asset.velocityOverLifetime.x = AnimationCurve.Constant(0.0f, 1.0f, 3.0f);
             asset.velocityOverLifetime.space = VividParticleForceSpace.World;
+            asset.main.emitterVelocityMode = VividParticleEmitterVelocityMode.Custom;
+            asset.main.customEmitterVelocity = new Vector3(2.0f, 3.0f, 4.0f);
+            asset.inheritVelocity.enabled = true;
+            asset.inheritVelocity.mode = VividParticleInheritVelocityMode.Current;
+            asset.inheritVelocity.curve = AnimationCurve.Constant(0.0f, 1.0f, 0.75f);
             asset.limitVelocityOverLifetime.enabled = true;
             asset.limitVelocityOverLifetime.separateAxes = true;
             asset.limitVelocityOverLifetime.limitX = AnimationCurve.Constant(0.0f, 1.0f, 2.0f);
@@ -296,6 +354,23 @@ namespace VividRP.Editor.Tests
             asset.sizeOverLifetime.size = AnimationCurve.Linear(0.0f, 1.0f, 1.0f, 0.25f);
             asset.rotationOverLifetime.enabled = true;
             asset.rotationOverLifetime.angularVelocity = AnimationCurve.Constant(0.0f, 1.0f, 90.0f);
+            asset.noise.enabled = true;
+            asset.noise.quality = VividParticleNoiseQuality.Medium;
+            asset.noise.remapEnabled = true;
+            asset.noise.remapX = AnimationCurve.Linear(0.0f, -0.5f, 1.0f, 0.5f);
+            asset.noise.positionAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.75f);
+            asset.noise.rotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 30.0f);
+            asset.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.5f);
+            asset.customData.mode1 = VividParticleCustomDataMode.Vector;
+            asset.customData.numberOfComponents1 = 2;
+            asset.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Linear(0.0f, 0.0f, 1.0f, 2.0f));
+            asset.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                1,
+                AnimationCurve.Constant(0.0f, 1.0f, 3.0f));
             asset.textureSheetAnimation.enabled = true;
             asset.textureSheetAnimation.numTilesX = 4;
             asset.textureSheetAnimation.numTilesY = 2;
@@ -334,6 +409,11 @@ namespace VividRP.Editor.Tests
             Assert.That(system.velocityOverLifetime.enabled, Is.True);
             Assert.That(system.velocityOverLifetime.Evaluate(0.5f).x, Is.EqualTo(3.0f));
             Assert.That(system.velocityOverLifetime.space, Is.EqualTo(VividParticleForceSpace.World));
+            Assert.That(system.main.emitterVelocityMode, Is.EqualTo(VividParticleEmitterVelocityMode.Custom));
+            Assert.That(system.main.customEmitterVelocity, Is.EqualTo(new Vector3(2.0f, 3.0f, 4.0f)));
+            Assert.That(system.inheritVelocity.enabled, Is.True);
+            Assert.That(system.inheritVelocity.mode, Is.EqualTo(VividParticleInheritVelocityMode.Current));
+            Assert.That(system.inheritVelocity.Evaluate(0.5f), Is.EqualTo(0.75f));
             Assert.That(system.limitVelocityOverLifetime.enabled, Is.True);
             Assert.That(system.limitVelocityOverLifetime.separateAxes, Is.True);
             Assert.That(
@@ -349,6 +429,18 @@ namespace VividRP.Editor.Tests
             Assert.That(system.sizeOverLifetime.Evaluate(1.0f), Is.EqualTo(0.25f).Within(0.0001f));
             Assert.That(system.rotationOverLifetime.enabled, Is.True);
             Assert.That(system.rotationOverLifetime.EvaluateAngularVelocity(0.5f), Is.EqualTo(90.0f).Within(0.0001f));
+            Assert.That(system.noise.enabled, Is.True);
+            Assert.That(system.noise.quality, Is.EqualTo(VividParticleNoiseQuality.Medium));
+            Assert.That(system.noise.remapEnabled, Is.True);
+            Assert.That(system.noise.EvaluateRemap(Vector3.zero).x, Is.EqualTo(-0.5f));
+            Assert.That(system.noise.EvaluatePositionAmount(0.5f), Is.EqualTo(0.75f));
+            Assert.That(system.noise.EvaluateRotationAmount(0.5f), Is.EqualTo(30.0f));
+            Assert.That(system.noise.EvaluateSizeAmount(0.5f), Is.EqualTo(0.5f));
+            Assert.That(system.customData.mode1, Is.EqualTo(VividParticleCustomDataMode.Vector));
+            Assert.That(system.customData.numberOfComponents1, Is.EqualTo(2));
+            Assert.That(
+                system.customData.Evaluate(VividParticleCustomDataStream.Custom1, 0.5f),
+                Is.EqualTo(new Vector4(1.0f, 3.0f, 0.0f, 0.0f)));
             Assert.That(system.textureSheetAnimation.enabled, Is.True);
             Assert.That(system.textureSheetAnimation.numTilesX, Is.EqualTo(4));
             Assert.That(system.textureSheetAnimation.numTilesY, Is.EqualTo(2));
@@ -384,12 +476,25 @@ namespace VividRP.Editor.Tests
             asset.forceOverLifetime.enabled = false;
             asset.velocityOverLifetime.enabled = false;
             asset.velocityOverLifetime.x = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
+            asset.main.customEmitterVelocity = Vector3.one * 9.0f;
+            asset.inheritVelocity.enabled = false;
+            asset.inheritVelocity.curve = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
             asset.limitVelocityOverLifetime.enabled = false;
             asset.limitVelocityOverLifetime.limitX = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
             asset.limitVelocityOverLifetime.drag = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
             asset.colorOverLifetime.color = CreateGradient(Color.green, Color.yellow);
             asset.sizeOverLifetime.size = AnimationCurve.Constant(0.0f, 1.0f, 4.0f);
             asset.rotationOverLifetime.angularVelocity = AnimationCurve.Constant(0.0f, 1.0f, 180.0f);
+            asset.noise.positionAmount = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
+            asset.noise.quality = VividParticleNoiseQuality.Low;
+            asset.noise.remapX = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            asset.noise.rotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 90.0f);
+            asset.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 3.0f);
+            asset.customData.mode1 = VividParticleCustomDataMode.Disabled;
+            asset.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Constant(0.0f, 1.0f, 9.0f));
             asset.textureSheetAnimation.enabled = false;
             asset.textureSheetAnimation.numTilesX = 8;
             asset.textureSheetAnimation.frameOverTime = AnimationCurve.Constant(0.0f, 1.0f, 0.25f);
@@ -416,6 +521,9 @@ namespace VividRP.Editor.Tests
             Assert.That(system.forceOverLifetime.force, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
             Assert.That(system.velocityOverLifetime.enabled, Is.True);
             Assert.That(system.velocityOverLifetime.Evaluate(0.5f).x, Is.EqualTo(3.0f));
+            Assert.That(system.main.customEmitterVelocity, Is.EqualTo(new Vector3(2.0f, 3.0f, 4.0f)));
+            Assert.That(system.inheritVelocity.enabled, Is.True);
+            Assert.That(system.inheritVelocity.Evaluate(0.5f), Is.EqualTo(0.75f));
             Assert.That(system.limitVelocityOverLifetime.enabled, Is.True);
             Assert.That(
                 system.limitVelocityOverLifetime.EvaluateLimit(0.5f),
@@ -424,6 +532,15 @@ namespace VividRP.Editor.Tests
             Assert.That(system.colorOverLifetime.Evaluate(0.0f), Is.EqualTo(Color.red));
             Assert.That(system.sizeOverLifetime.Evaluate(1.0f), Is.EqualTo(0.25f).Within(0.0001f));
             Assert.That(system.rotationOverLifetime.EvaluateAngularVelocity(0.5f), Is.EqualTo(90.0f).Within(0.0001f));
+            Assert.That(system.noise.EvaluatePositionAmount(0.5f), Is.EqualTo(0.75f));
+            Assert.That(system.noise.quality, Is.EqualTo(VividParticleNoiseQuality.Medium));
+            Assert.That(system.noise.EvaluateRemap(Vector3.zero).x, Is.EqualTo(-0.5f));
+            Assert.That(system.noise.EvaluateRotationAmount(0.5f), Is.EqualTo(30.0f));
+            Assert.That(system.noise.EvaluateSizeAmount(0.5f), Is.EqualTo(0.5f));
+            Assert.That(system.customData.mode1, Is.EqualTo(VividParticleCustomDataMode.Vector));
+            Assert.That(
+                system.customData.Evaluate(VividParticleCustomDataStream.Custom1, 0.5f),
+                Is.EqualTo(new Vector4(1.0f, 3.0f, 0.0f, 0.0f)));
             Assert.That(system.textureSheetAnimation.enabled, Is.True);
             Assert.That(system.textureSheetAnimation.numTilesX, Is.EqualTo(4));
             Assert.That(system.textureSheetAnimation.EvaluateFrame(0.5f), Is.EqualTo(0.5f).Within(0.0001f));
@@ -938,14 +1055,63 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.lastVelocitySimulationPageWorkCount, Is.EqualTo(2));
             VividParticleSystemManager.CompleteAndUploadForTests();
 
-            Vector3 firstPosition = first.GetParticleObjectToWorldMatrix(0).GetColumn(3);
-            Vector3 secondPosition = second.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Matrix4x4 firstMatrix = first.GetParticleObjectToWorldMatrix(0);
+            Matrix4x4 secondMatrix = second.GetParticleObjectToWorldMatrix(0);
+            Vector3 firstPosition = firstMatrix.GetColumn(3);
+            Vector3 secondPosition = secondMatrix.GetColumn(3);
             Assert.That(firstPosition.sqrMagnitude, Is.GreaterThan(0.000001f));
             Assert.That(Vector3.Distance(firstPosition, secondPosition), Is.LessThan(0.000001f));
+            Assert.That(Mathf.Abs(firstMatrix.GetColumn(0).magnitude - 1.0f), Is.GreaterThan(0.000001f));
+            float rotationDelta = Mathf.Abs(firstMatrix.m01)
+                + Mathf.Abs(firstMatrix.m02)
+                + Mathf.Abs(firstMatrix.m10)
+                + Mathf.Abs(firstMatrix.m12)
+                + Mathf.Abs(firstMatrix.m20)
+                + Mathf.Abs(firstMatrix.m21);
+            Assert.That(rotationDelta, Is.GreaterThan(0.000001f));
             Assert.That(
                 VividParticleSystemManager.GetSimulationKernelFlagsForTests(first)
                     & VividParticleModuleFlags.Noise,
                 Is.EqualTo(VividParticleModuleFlags.Noise));
+            Assert.That(
+                VividParticleSystemManager.GetRenderKernelFlagsForTests(first)
+                    & VividParticleModuleFlags.Noise,
+                Is.EqualTo(VividParticleModuleFlags.Noise));
+        }
+
+        [Test]
+        public void Manager_Noise_QualityAndRemapChangeBurstTrajectory()
+        {
+            VividParticleSystem high = CreateActiveSystem();
+            VividParticleSystem low = CreateActiveSystem();
+            VividParticleSystem remappedToZero = CreateActiveSystem();
+            ConfigureNoiseSystem(high);
+            ConfigureNoiseSystem(low);
+            ConfigureNoiseSystem(remappedToZero);
+            DisableNoiseRenderEffects(high);
+            DisableNoiseRenderEffects(low);
+            DisableNoiseRenderEffects(remappedToZero);
+            high.noise.quality = VividParticleNoiseQuality.High;
+            low.noise.quality = VividParticleNoiseQuality.Low;
+            remappedToZero.noise.remapEnabled = true;
+            remappedToZero.noise.remap = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+            high.Emit(1);
+            low.Emit(1);
+            remappedToZero.Emit(1);
+            high.Play(withChildren: false);
+            low.Play(withChildren: false);
+            remappedToZero.Play(withChildren: false);
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+            VividParticleSystemManager.CompleteAndUploadForTests();
+
+            Vector3 highPosition = high.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Vector3 lowPosition = low.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Vector3 remappedPosition = remappedToZero.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(highPosition.sqrMagnitude, Is.GreaterThan(0.000001f));
+            Assert.That(Vector3.Distance(highPosition, lowPosition), Is.GreaterThan(0.000001f));
+            Assert.That(remappedPosition.sqrMagnitude, Is.LessThan(0.000001f));
         }
 
         [Test]
@@ -1392,6 +1558,56 @@ namespace VividRP.Editor.Tests
             Assert.That(position.x, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(position.y, Is.EqualTo(1.0f).Within(0.0001f));
             Assert.That(position.z, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Simulate_InheritVelocityInitial_UsesVelocityCapturedAtEmission()
+        {
+            VividParticleSystem system = CreateSystem();
+            ConfigureInheritVelocitySystem(system, VividParticleInheritVelocityMode.Initial);
+            system.main.customEmitterVelocity = new Vector3(2.0f, 0.0f, 0.0f);
+
+            system.Emit(1);
+            system.main.customEmitterVelocity = new Vector3(8.0f, 0.0f, 0.0f);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(VividParticleSystemManager.HasInheritVelocityStateColumnForTests(system), Is.True);
+            Assert.That(
+                VividParticleSystemManager.GetSimulationKernelFlagsForTests(system)
+                    & VividParticleModuleFlags.InheritVelocity,
+                Is.EqualTo(VividParticleModuleFlags.InheritVelocity));
+        }
+
+        [Test]
+        public void Simulate_InheritVelocityCurrent_UsesLatestEmitterVelocity()
+        {
+            VividParticleSystem system = CreateSystem();
+            ConfigureInheritVelocitySystem(system, VividParticleInheritVelocityMode.Current);
+            system.main.customEmitterVelocity = new Vector3(2.0f, 0.0f, 0.0f);
+
+            system.Emit(1);
+            system.main.customEmitterVelocity = new Vector3(8.0f, 0.0f, 0.0f);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.x, Is.EqualTo(4.0f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Simulate_InheritVelocity_IsIgnoredInLocalSimulationSpace()
+        {
+            VividParticleSystem system = CreateSystem();
+            ConfigureInheritVelocitySystem(system, VividParticleInheritVelocityMode.Current);
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.Local;
+            system.main.customEmitterVelocity = new Vector3(8.0f, 0.0f, 0.0f);
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position, Is.EqualTo(Vector3.zero));
         }
 
         [Test]
@@ -4011,6 +4227,53 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_CustomDataModule_UsesPerParticleBurstUploadColumns()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.rendererModule.enabled = true;
+            system.rendererModule.customData1Enabled = false;
+            system.rendererModule.customData2Enabled = false;
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 1.0f;
+            system.main.startSpeed = 0.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.customData.mode1 = VividParticleCustomDataMode.Vector;
+            system.customData.numberOfComponents1 = 2;
+            system.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Linear(0.0f, 0.0f, 1.0f, 2.0f));
+            system.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                1,
+                AnimationCurve.Constant(0.0f, 1.0f, 3.0f));
+
+            system.Emit(2);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
+                VividParticleSystemManager.GetRendererStatsForTests();
+            Assert.That(rendererStats.LastCustomDataUploadPageWorkCount, Is.GreaterThan(0));
+            Assert.That(
+                rendererStats.LastRenderJobModuleFlags
+                    & VividParticleSystemManager.RenderJobCustomDataUploadFlag,
+                Is.EqualTo(VividParticleSystemManager.RenderJobCustomDataUploadFlag));
+            Assert.That(
+                VividParticleSystemManager.GetRenderKernelFlagsForTests(system)
+                    & VividParticleModuleFlags.CustomData,
+                Is.EqualTo(VividParticleModuleFlags.CustomData));
+            Vector4 sampledCustomData = VividParticleSystemManager.GetCustomDataLutValueForTests(
+                system,
+                VividParticleCustomDataStream.Custom1,
+                0.5f);
+            Assert.That(sampledCustomData.x, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(sampledCustomData.y, Is.EqualTo(3.0f).Within(0.0001f));
+            Assert.That(sampledCustomData.z, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(sampledCustomData.w, Is.EqualTo(0.0f).Within(0.0001f));
+        }
+
+        [Test]
         public void Manager_RendererStats_DoesNotCompletePendingUpload_ForRuntimeSnapshot()
         {
             VividParticleSystem system = CreateActiveSystem();
@@ -5371,6 +5634,32 @@ namespace VividRP.Editor.Tests
             system.noise.octaveCount = 2;
             system.noise.octaveMultiplier = 0.5f;
             system.noise.octaveScale = 2.0f;
+            system.noise.positionAmount = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            system.noise.rotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 90.0f);
+            system.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.75f);
+        }
+
+        private static void DisableNoiseRenderEffects(VividParticleSystem system)
+        {
+            system.noise.rotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            system.noise.sizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+        }
+
+        private static void ConfigureInheritVelocitySystem(
+            VividParticleSystem system,
+            VividParticleInheritVelocityMode mode)
+        {
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 0.0f;
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.World;
+            system.main.emitterVelocityMode = VividParticleEmitterVelocityMode.Custom;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.inheritVelocity.enabled = true;
+            system.inheritVelocity.mode = mode;
+            system.inheritVelocity.curve = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
         }
 
         private VividParticleSystem CreateActiveSystem()

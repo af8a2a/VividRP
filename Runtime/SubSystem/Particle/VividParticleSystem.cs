@@ -34,6 +34,10 @@ namespace VividRP.Runtime.Particle
             VividParticleVelocityOverLifetimeModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleInheritVelocityModule m_InheritVelocity =
+            VividParticleInheritVelocityModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleLimitVelocityOverLifetimeModule m_LimitVelocityOverLifetime =
             VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
 
@@ -63,6 +67,10 @@ namespace VividRP.Runtime.Particle
 
         [SerializeField]
         private VividParticleNoiseModule m_Noise = VividParticleNoiseModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleCustomDataModule m_CustomData =
+            VividParticleCustomDataModule.CreateDefault();
 
         [SerializeField]
         private VividParticleTextureSheetAnimationModule m_TextureSheetAnimation =
@@ -102,6 +110,9 @@ namespace VividRP.Runtime.Particle
         public VividParticleVelocityOverLifetimeModule velocityOverLifetime =>
             m_VelocityOverLifetime ??= VividParticleVelocityOverLifetimeModule.CreateDefault();
 
+        public VividParticleInheritVelocityModule inheritVelocity =>
+            m_InheritVelocity ??= VividParticleInheritVelocityModule.CreateDefault();
+
         public VividParticleLimitVelocityOverLifetimeModule limitVelocityOverLifetime =>
             m_LimitVelocityOverLifetime ??= VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
 
@@ -124,6 +135,9 @@ namespace VividRP.Runtime.Particle
             m_RotationBySpeed ??= VividParticleRotationBySpeedModule.CreateDefault();
 
         public VividParticleNoiseModule noise => m_Noise ??= VividParticleNoiseModule.CreateDefault();
+
+        public VividParticleCustomDataModule customData =>
+            m_CustomData ??= VividParticleCustomDataModule.CreateDefault();
 
         public VividParticleTextureSheetAnimationModule textureSheetAnimation =>
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
@@ -397,6 +411,7 @@ namespace VividRP.Runtime.Particle
                 m_Shape,
                 m_ForceOverLifetime,
                 m_VelocityOverLifetime,
+                m_InheritVelocity,
                 m_LimitVelocityOverLifetime,
                 m_ColorOverLifetime,
                 m_ColorBySpeed,
@@ -405,6 +420,7 @@ namespace VividRP.Runtime.Particle
                 m_RotationOverLifetime,
                 m_RotationBySpeed,
                 m_Noise,
+                m_CustomData,
                 m_TextureSheetAnimation,
                 m_Renderer);
             ValidateModules();
@@ -490,6 +506,7 @@ namespace VividRP.Runtime.Particle
             m_Shape ??= VividParticleShapeModule.CreateDefault();
             m_ForceOverLifetime ??= VividParticleForceOverLifetimeModule.CreateDefault();
             m_VelocityOverLifetime ??= VividParticleVelocityOverLifetimeModule.CreateDefault();
+            m_InheritVelocity ??= VividParticleInheritVelocityModule.CreateDefault();
             m_LimitVelocityOverLifetime ??= VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
             m_ColorOverLifetime ??= VividParticleColorOverLifetimeModule.CreateDefault();
             m_ColorBySpeed ??= VividParticleColorBySpeedModule.CreateDefault();
@@ -498,6 +515,7 @@ namespace VividRP.Runtime.Particle
             m_RotationOverLifetime ??= VividParticleRotationOverLifetimeModule.CreateDefault();
             m_RotationBySpeed ??= VividParticleRotationBySpeedModule.CreateDefault();
             m_Noise ??= VividParticleNoiseModule.CreateDefault();
+            m_CustomData ??= VividParticleCustomDataModule.CreateDefault();
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
             m_Renderer ??= VividParticleRendererModule.CreateDefault();
             BindModuleCallbacks();
@@ -510,6 +528,7 @@ namespace VividRP.Runtime.Particle
             m_Shape.SetChangeCallback(OnSimulationModuleChanged);
             m_ForceOverLifetime.SetChangeCallback(OnSimulationModuleChanged);
             m_VelocityOverLifetime.SetChangeCallback(OnVelocityOverLifetimeModuleChanged);
+            m_InheritVelocity.SetChangeCallback(OnVelocityOverLifetimeModuleChanged);
             m_LimitVelocityOverLifetime.SetChangeCallback(OnSimulationModuleChanged);
             m_ColorOverLifetime.SetChangeCallback(OnColorOverLifetimeModuleChanged);
             m_ColorBySpeed.SetChangeCallback(OnColorOverLifetimeModuleChanged);
@@ -518,6 +537,7 @@ namespace VividRP.Runtime.Particle
             m_RotationOverLifetime.SetChangeCallback(OnRotationOverLifetimeModuleChanged);
             m_RotationBySpeed.SetChangeCallback(OnRotationOverLifetimeModuleChanged);
             m_Noise.SetChangeCallback(OnSimulationModuleChanged);
+            m_CustomData.SetChangeCallback(OnCustomDataModuleChanged);
             m_TextureSheetAnimation.SetChangeCallback(OnTextureSheetAnimationModuleChanged);
             m_Renderer.SetChangeCallback(OnRendererModuleChanged);
         }
@@ -580,6 +600,17 @@ namespace VividRP.Runtime.Particle
             RequestEditorRenderUpdate();
         }
 
+        private void OnCustomDataModuleChanged()
+        {
+            VividParticleSystemManager.NotifySettingsChanged(this);
+            VividParticleSystemManager.MarkRendererDirty(this);
+            VividParticleSystemManager.MarkParticleDataDirty(
+                this,
+                VividParticleSystemManager.UploadColumnCustomData1Mask
+                | VividParticleSystemManager.UploadColumnCustomData2Mask);
+            RequestEditorRenderUpdate();
+        }
+
         private void ValidateModules()
         {
             main.Validate();
@@ -587,6 +618,7 @@ namespace VividRP.Runtime.Particle
             shape.Validate();
             forceOverLifetime.Validate();
             velocityOverLifetime.Validate();
+            inheritVelocity.Validate();
             limitVelocityOverLifetime.Validate();
             colorOverLifetime.Validate();
             colorBySpeed.Validate();
@@ -595,6 +627,7 @@ namespace VividRP.Runtime.Particle
             rotationOverLifetime.Validate();
             rotationBySpeed.Validate();
             noise.Validate();
+            customData.Validate();
             textureSheetAnimation.Validate();
             rendererModule.Validate();
         }

@@ -40,6 +40,61 @@ namespace VividRP.Runtime.Particle
         public int Version;
     }
 
+    internal unsafe struct VividParticleNativeRenderModuleConfig
+    {
+        public const int LifetimeLutResolution = 32;
+
+        public int ColorOverLifetimeEnabled;
+        public int ColorBySpeedEnabled;
+        public int SizeOverLifetimeEnabled;
+        public int SizeBySpeedEnabled;
+        public int RotationOverLifetimeEnabled;
+        public int RotationBySpeedEnabled;
+        public int NoiseEnabled;
+        public int NoiseDamping;
+        public int NoiseOctaveCount;
+        public int VelocityOverLifetimeEnabled;
+        public int VelocityOverLifetimeSpace;
+        public int LimitVelocityOverLifetimeEnabled;
+        public int LimitVelocitySeparateAxes;
+        public int LimitVelocitySpace;
+        public int LimitVelocityMultiplyDragByParticleSize;
+        public int LimitVelocityMultiplyDragByParticleVelocity;
+        public float LimitVelocityDampen;
+        public int TextureSheetAnimationEnabled;
+        public int TextureSheetTilesX;
+        public int TextureSheetTilesY;
+        public int TextureSheetAnimationType;
+        public int TextureSheetRowIndex;
+        public float TextureSheetStartFrame;
+        public float TextureSheetCycleCount;
+        public float2 ColorBySpeedRange;
+        public float2 SizeBySpeedRange;
+        public float2 RotationBySpeedRange;
+        public float NoiseFrequency;
+        public float NoiseOctaveMultiplier;
+        public float NoiseOctaveScale;
+        public float NoiseSizeMaxMultiplier;
+        public float SizeOverLifetimeMaxMultiplier;
+        public float SizeBySpeedMaxMultiplier;
+        public int Version;
+        public fixed float ColorOverLifetimeLut[LifetimeLutResolution * 4];
+        public fixed float ColorBySpeedLut[LifetimeLutResolution * 4];
+        public fixed float SizeOverLifetimeLut[LifetimeLutResolution];
+        public fixed float SizeBySpeedLut[LifetimeLutResolution];
+        public fixed float RotationOverLifetimeLut[LifetimeLutResolution];
+        public fixed float RotationBySpeedLut[LifetimeLutResolution * 3];
+        public fixed float NoiseStrengthLut[LifetimeLutResolution * 3];
+        public fixed float NoiseScrollSpeedLut[LifetimeLutResolution];
+        public fixed float NoisePositionAmountLut[LifetimeLutResolution];
+        public fixed float NoiseRotationAmountLut[LifetimeLutResolution];
+        public fixed float NoiseSizeAmountLut[LifetimeLutResolution];
+        public fixed float VelocityOverLifetimeLut[LifetimeLutResolution * 3];
+        public fixed float LimitVelocityLut[LifetimeLutResolution * 3];
+        public fixed float LimitVelocityDragLut[LifetimeLutResolution];
+        public fixed float TextureSheetFrameOverTimeLut[LifetimeLutResolution];
+    }
+
     internal struct VividParticleSimulationPrepareInput
     {
         public int SystemId;

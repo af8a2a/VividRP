@@ -144,6 +144,56 @@ namespace VividRP.Editor
             return serializedObject?.FindProperty("m_ForceOverLifetime");
         }
 
+        internal static SerializedProperty FindColorOverLifetimeProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_ColorOverLifetime");
+        }
+
+        internal static SerializedProperty FindColorBySpeedProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_ColorBySpeed");
+        }
+
+        internal static SerializedProperty FindSizeOverLifetimeProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_SizeOverLifetime");
+        }
+
+        internal static SerializedProperty FindSizeBySpeedProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_SizeBySpeed");
+        }
+
+        internal static SerializedProperty FindRotationOverLifetimeProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_RotationOverLifetime");
+        }
+
+        internal static SerializedProperty FindRotationBySpeedProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_RotationBySpeed");
+        }
+
+        internal static SerializedProperty FindNoiseProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_Noise");
+        }
+
+        internal static SerializedProperty FindVelocityOverLifetimeProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_VelocityOverLifetime");
+        }
+
+        internal static SerializedProperty FindLimitVelocityOverLifetimeProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_LimitVelocityOverLifetime");
+        }
+
+        internal static SerializedProperty FindTextureSheetAnimationProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_TextureSheetAnimation");
+        }
+
         internal static bool TryFindEmissionBurstsProperty(
             SerializedObject serializedObject,
             out SerializedProperty bursts)
@@ -245,6 +295,17 @@ namespace VividRP.Editor
             asset.main.CopyFrom(system.main);
             asset.emission.CopyFrom(system.emission);
             asset.shape.CopyFrom(system.shape);
+            asset.forceOverLifetime.CopyFrom(system.forceOverLifetime);
+            asset.velocityOverLifetime.CopyFrom(system.velocityOverLifetime);
+            asset.limitVelocityOverLifetime.CopyFrom(system.limitVelocityOverLifetime);
+            asset.colorOverLifetime.CopyFrom(system.colorOverLifetime);
+            asset.colorBySpeed.CopyFrom(system.colorBySpeed);
+            asset.sizeOverLifetime.CopyFrom(system.sizeOverLifetime);
+            asset.sizeBySpeed.CopyFrom(system.sizeBySpeed);
+            asset.rotationOverLifetime.CopyFrom(system.rotationOverLifetime);
+            asset.rotationBySpeed.CopyFrom(system.rotationBySpeed);
+            asset.noise.CopyFrom(system.noise);
+            asset.textureSheetAnimation.CopyFrom(system.textureSheetAnimation);
             asset.rendererModule.CopyFrom(system.rendererModule);
             asset.Validate();
             EditorUtility.SetDirty(asset);
@@ -385,6 +446,22 @@ namespace VividRP.Editor
             SerializedProperty customData1Enabled = FindRelative(renderer, "m_CustomData1Enabled");
             SerializedProperty customData2Enabled = FindRelative(renderer, "m_CustomData2Enabled");
             SerializedProperty meshIndexDataEnabled = FindRelative(renderer, "m_MeshIndexDataEnabled");
+            SerializedProperty colorOverLifetimeEnabled = renderer.serializedObject?
+                .FindProperty("m_ColorOverLifetime.m_Enabled");
+            SerializedProperty colorBySpeedEnabled = renderer.serializedObject?
+                .FindProperty("m_ColorBySpeed.m_Enabled");
+            SerializedProperty sizeOverLifetimeEnabled = renderer.serializedObject?
+                .FindProperty("m_SizeOverLifetime.m_Enabled");
+            SerializedProperty sizeBySpeedEnabled = renderer.serializedObject?
+                .FindProperty("m_SizeBySpeed.m_Enabled");
+            SerializedProperty rotationOverLifetimeEnabled = renderer.serializedObject?
+                .FindProperty("m_RotationOverLifetime.m_Enabled");
+            SerializedProperty rotationBySpeedEnabled = renderer.serializedObject?
+                .FindProperty("m_RotationBySpeed.m_Enabled");
+            SerializedProperty velocityOverLifetimeEnabled = renderer.serializedObject?
+                .FindProperty("m_VelocityOverLifetime.m_Enabled");
+            SerializedProperty textureSheetAnimationEnabled = renderer.serializedObject?
+                .FindProperty("m_TextureSheetAnimation.m_Enabled");
             if (HasMissingOrMixedValue(
                     renderMode,
                     colorDataMode,
@@ -394,18 +471,37 @@ namespace VividRP.Editor
                     uvDataEnabled,
                     customData1Enabled,
                     customData2Enabled,
-                    meshIndexDataEnabled))
+                    meshIndexDataEnabled,
+                    colorOverLifetimeEnabled,
+                    colorBySpeedEnabled,
+                    sizeOverLifetimeEnabled,
+                    sizeBySpeedEnabled,
+                    rotationOverLifetimeEnabled,
+                    rotationBySpeedEnabled,
+                    velocityOverLifetimeEnabled,
+                    textureSheetAnimationEnabled))
             {
                 return false;
             }
 
             descriptor = new VividParticleSystemManager.VividParticleGpuDataLayoutDescriptor(
                 (VividParticleRenderMode)renderMode.enumValueIndex,
-                (VividParticleGpuDataMode)colorDataMode.enumValueIndex,
-                (VividParticleGpuDataMode)rotationDataMode.enumValueIndex,
-                (VividParticleGpuDataMode)velocityDataMode.enumValueIndex,
-                (VividParticleGpuDataMode)sizeDataMode.enumValueIndex,
-                uvDataEnabled.boolValue,
+                colorOverLifetimeEnabled.boolValue || colorBySpeedEnabled.boolValue
+                    ? VividParticleGpuDataMode.PerParticle
+                    : (VividParticleGpuDataMode)colorDataMode.enumValueIndex,
+                rotationOverLifetimeEnabled.boolValue || rotationBySpeedEnabled.boolValue
+                    ? VividParticleGpuDataMode.PerParticle
+                    : (VividParticleGpuDataMode)rotationDataMode.enumValueIndex,
+                velocityOverLifetimeEnabled.boolValue
+                    ? VividParticleGpuDataMode.PerParticle
+                    : (VividParticleGpuDataMode)velocityDataMode.enumValueIndex,
+                sizeOverLifetimeEnabled.boolValue || sizeBySpeedEnabled.boolValue
+                    ? VividParticleGpuDataMode.PerParticle
+                    : (VividParticleGpuDataMode)sizeDataMode.enumValueIndex,
+                textureSheetAnimationEnabled.boolValue
+                    ? VividParticleGpuDataMode.PerParticle
+                    : VividParticleGpuDataMode.Shared,
+                uvDataEnabled.boolValue || textureSheetAnimationEnabled.boolValue,
                 customData1Enabled.boolValue,
                 customData2Enabled.boolValue,
                 meshIndexDataEnabled.boolValue);
@@ -652,9 +748,6 @@ namespace VividRP.Editor
             SerializedProperty rotationDataMode = FindRelative(renderer, "m_RotationDataMode");
             SerializedProperty velocityDataMode = FindRelative(renderer, "m_VelocityDataMode");
             SerializedProperty sizeDataMode = FindRelative(renderer, "m_SizeDataMode");
-            SerializedProperty uvDataEnabled = FindRelative(renderer, "m_UVDataEnabled");
-            SerializedProperty customData1Enabled = FindRelative(renderer, "m_CustomData1Enabled");
-            SerializedProperty customData2Enabled = FindRelative(renderer, "m_CustomData2Enabled");
             SerializedProperty meshIndexDataEnabled = FindRelative(renderer, "m_MeshIndexDataEnabled");
             SerializedProperty sortMode = FindRelative(renderer, "m_SortMode");
             SerializedProperty shadowCastingMode = FindRelative(renderer, "m_ShadowCastingMode");
@@ -699,9 +792,7 @@ namespace VividRP.Editor
                     rotationDataMode,
                     velocityDataMode,
                     sizeDataMode,
-                    uvDataEnabled,
-                    customData1Enabled,
-                    customData2Enabled))
+                    meshIndexDataEnabled))
             {
                 notices |= VividParticleRendererInspectorNotice.PerParticleGpuDataIncreasesUpload;
             }
@@ -873,6 +964,25 @@ namespace VividRP.Editor
         private static readonly GUIContent s_ShapeLabel = EditorGUIUtility.TrTextContent("Shape");
         private static readonly GUIContent s_ForceOverLifetimeLabel =
             EditorGUIUtility.TrTextContent("Force over Lifetime");
+        private static readonly GUIContent s_ColorOverLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Color over Lifetime");
+        private static readonly GUIContent s_ColorBySpeedLabel =
+            EditorGUIUtility.TrTextContent("Color by Speed");
+        private static readonly GUIContent s_SizeOverLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Size over Lifetime");
+        private static readonly GUIContent s_SizeBySpeedLabel =
+            EditorGUIUtility.TrTextContent("Size by Speed");
+        private static readonly GUIContent s_RotationOverLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Rotation over Lifetime");
+        private static readonly GUIContent s_RotationBySpeedLabel =
+            EditorGUIUtility.TrTextContent("Rotation by Speed");
+        private static readonly GUIContent s_NoiseLabel = EditorGUIUtility.TrTextContent("Noise");
+        private static readonly GUIContent s_VelocityOverLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Velocity over Lifetime");
+        private static readonly GUIContent s_LimitVelocityOverLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Limit Velocity over Lifetime");
+        private static readonly GUIContent s_TextureSheetAnimationLabel =
+            EditorGUIUtility.TrTextContent("Texture Sheet Animation");
         private static readonly GUIContent s_RendererLabel = EditorGUIUtility.TrTextContent("Renderer");
         private static readonly GUIContent s_DebugLabel = EditorGUIUtility.TrTextContent("Debug");
         private static readonly GUIContent s_DataLayoutLabel = EditorGUIUtility.TrTextContent("GPU Data Layout");
@@ -899,10 +1009,24 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Active Simulation Query Lines");
         private static readonly GUIContent s_InvalidActiveSimulationQueryLinesLabel =
             EditorGUIUtility.TrTextContent("Invalid Simulation Query Lines");
+        private static readonly GUIContent s_SimulationModuleGroupsLabel =
+            EditorGUIUtility.TrTextContent("Simulation Module Groups");
+        private static readonly GUIContent s_SimulationModuleGroupCacheBuildsLabel =
+            EditorGUIUtility.TrTextContent("Module Group Cache Builds");
+        private static readonly GUIContent s_SimulationModuleGroupCacheHitsLabel =
+            EditorGUIUtility.TrTextContent("Module Group Cache Hits");
+        private static readonly GUIContent s_SimulationModuleGroupSourceScansLabel =
+            EditorGUIUtility.TrTextContent("Module Group Source Scans");
+        private static readonly GUIContent s_BaseSimulationPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Base Simulation Page Works");
+        private static readonly GUIContent s_VelocitySimulationPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Velocity Simulation Page Works");
         private static readonly GUIContent s_PendingSimulationSystemsLabel =
             EditorGUIUtility.TrTextContent("Pending Simulation Systems");
         private static readonly GUIContent s_NativeSimulationConfigsLabel =
             EditorGUIUtility.TrTextContent("Native Simulation Configs");
+        private static readonly GUIContent s_NativeRenderModuleConfigsLabel =
+            EditorGUIUtility.TrTextContent("Native Render Module Configs");
         private static readonly GUIContent s_NativeSimulationBurstsLabel =
             EditorGUIUtility.TrTextContent("Packed Simulation Bursts");
         private static readonly GUIContent s_SimulationPrepareInlineLabel =
@@ -1029,6 +1153,10 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Last Scratch Splits");
         private static readonly GUIContent s_LastCullingScratchPacketsLabel =
             EditorGUIUtility.TrTextContent("Last Scratch Packets");
+        private static readonly GUIContent s_CullingScratchFilteredCommandsLabel =
+            EditorGUIUtility.TrTextContent("Filter Command Capacity");
+        private static readonly GUIContent s_CullingScratchFilteredRangesLabel =
+            EditorGUIUtility.TrTextContent("Filter Range Capacity");
         private static readonly GUIContent s_BoundsPageWorksLabel = EditorGUIUtility.TrTextContent("Bounds Page Works");
         private static readonly GUIContent s_CullingSingleMeshCachesLabel =
             EditorGUIUtility.TrTextContent("Single Mesh Cache Records");
@@ -1088,6 +1216,14 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Mesh Index Page Works");
         private static readonly GUIContent s_ExtraUploadPageWorksLabel =
             EditorGUIUtility.TrTextContent("Extra Page Works");
+        private static readonly GUIContent s_RenderKernelFlagsLabel =
+            EditorGUIUtility.TrTextContent("Render Kernel Flags");
+        private static readonly GUIContent s_AnimatedTransformPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Animated Transform Page Works");
+        private static readonly GUIContent s_AnimatedColorPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Animated Color Page Works");
+        private static readonly GUIContent s_AnimatedVelocityPageWorksLabel =
+            EditorGUIUtility.TrTextContent("Animated Velocity Page Works");
         private static readonly GUIContent s_LastUploadCopyWorksLabel = EditorGUIUtility.TrTextContent("Upload Copy Works");
         private static readonly GUIContent s_MergedUploadCopyWorksLabel =
             EditorGUIUtility.TrTextContent("Merged Copy Works");
@@ -1150,11 +1286,31 @@ namespace VividRP.Editor
         private SerializedProperty m_Emission;
         private SerializedProperty m_Shape;
         private SerializedProperty m_ForceOverLifetime;
+        private SerializedProperty m_ColorOverLifetime;
+        private SerializedProperty m_ColorBySpeed;
+        private SerializedProperty m_SizeOverLifetime;
+        private SerializedProperty m_SizeBySpeed;
+        private SerializedProperty m_RotationOverLifetime;
+        private SerializedProperty m_RotationBySpeed;
+        private SerializedProperty m_Noise;
+        private SerializedProperty m_VelocityOverLifetime;
+        private SerializedProperty m_LimitVelocityOverLifetime;
+        private SerializedProperty m_TextureSheetAnimation;
         private SerializedProperty m_Renderer;
         private bool m_MainExpanded = true;
         private bool m_EmissionExpanded = true;
         private bool m_ShapeExpanded = true;
         private bool m_ForceOverLifetimeExpanded;
+        private bool m_ColorOverLifetimeExpanded;
+        private bool m_ColorBySpeedExpanded;
+        private bool m_SizeOverLifetimeExpanded;
+        private bool m_SizeBySpeedExpanded;
+        private bool m_RotationOverLifetimeExpanded;
+        private bool m_RotationBySpeedExpanded;
+        private bool m_NoiseExpanded;
+        private bool m_VelocityOverLifetimeExpanded;
+        private bool m_LimitVelocityOverLifetimeExpanded;
+        private bool m_TextureSheetAnimationExpanded;
         private bool m_RendererExpanded = true;
         private bool m_DebugExpanded = true;
         private int m_EmitCount = 1;
@@ -1172,6 +1328,25 @@ namespace VividRP.Editor
                 out m_Renderer);
             m_ForceOverLifetime =
                 VividParticleSystemEditorUtility.FindForceOverLifetimeProperty(serializedObject);
+            m_ColorOverLifetime =
+                VividParticleSystemEditorUtility.FindColorOverLifetimeProperty(serializedObject);
+            m_ColorBySpeed =
+                VividParticleSystemEditorUtility.FindColorBySpeedProperty(serializedObject);
+            m_SizeOverLifetime =
+                VividParticleSystemEditorUtility.FindSizeOverLifetimeProperty(serializedObject);
+            m_SizeBySpeed =
+                VividParticleSystemEditorUtility.FindSizeBySpeedProperty(serializedObject);
+            m_RotationOverLifetime =
+                VividParticleSystemEditorUtility.FindRotationOverLifetimeProperty(serializedObject);
+            m_RotationBySpeed =
+                VividParticleSystemEditorUtility.FindRotationBySpeedProperty(serializedObject);
+            m_Noise = VividParticleSystemEditorUtility.FindNoiseProperty(serializedObject);
+            m_VelocityOverLifetime =
+                VividParticleSystemEditorUtility.FindVelocityOverLifetimeProperty(serializedObject);
+            m_LimitVelocityOverLifetime =
+                VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(serializedObject);
+            m_TextureSheetAnimation =
+                VividParticleSystemEditorUtility.FindTextureSheetAnimationProperty(serializedObject);
         }
 
         public override void OnInspectorGUI()
@@ -1186,6 +1361,43 @@ namespace VividRP.Editor
                 s_ForceOverLifetimeLabel,
                 ref m_ForceOverLifetimeExpanded,
                 () => DrawForceOverLifetimeModule(m_ForceOverLifetime));
+            DrawModule(
+                s_VelocityOverLifetimeLabel,
+                ref m_VelocityOverLifetimeExpanded,
+                () => DrawVelocityOverLifetimeModule(m_VelocityOverLifetime));
+            DrawModule(
+                s_LimitVelocityOverLifetimeLabel,
+                ref m_LimitVelocityOverLifetimeExpanded,
+                () => DrawLimitVelocityOverLifetimeModule(m_LimitVelocityOverLifetime));
+            DrawModule(
+                s_ColorOverLifetimeLabel,
+                ref m_ColorOverLifetimeExpanded,
+                () => DrawColorOverLifetimeModule(m_ColorOverLifetime));
+            DrawModule(
+                s_ColorBySpeedLabel,
+                ref m_ColorBySpeedExpanded,
+                () => DrawColorBySpeedModule(m_ColorBySpeed));
+            DrawModule(
+                s_SizeOverLifetimeLabel,
+                ref m_SizeOverLifetimeExpanded,
+                () => DrawSizeOverLifetimeModule(m_SizeOverLifetime));
+            DrawModule(
+                s_SizeBySpeedLabel,
+                ref m_SizeBySpeedExpanded,
+                () => DrawSizeBySpeedModule(m_SizeBySpeed));
+            DrawModule(
+                s_RotationOverLifetimeLabel,
+                ref m_RotationOverLifetimeExpanded,
+                () => DrawRotationOverLifetimeModule(m_RotationOverLifetime));
+            DrawModule(
+                s_RotationBySpeedLabel,
+                ref m_RotationBySpeedExpanded,
+                () => DrawRotationBySpeedModule(m_RotationBySpeed));
+            DrawModule(s_NoiseLabel, ref m_NoiseExpanded, () => DrawNoiseModule(m_Noise));
+            DrawModule(
+                s_TextureSheetAnimationLabel,
+                ref m_TextureSheetAnimationExpanded,
+                () => DrawTextureSheetAnimationModule(m_TextureSheetAnimation));
             DrawModule(s_RendererLabel, ref m_RendererExpanded, () => DrawRendererModule(m_Renderer));
             DrawFooterInspector();
 
@@ -1291,11 +1503,32 @@ namespace VividRP.Editor
                     s_InvalidActiveSimulationQueryLinesLabel,
                     VividParticleSystemManager.lastInvalidActiveSimulationQueryLineCount);
                 EditorGUILayout.IntField(
+                    s_SimulationModuleGroupsLabel,
+                    VividParticleSystemManager.lastActiveSimulationModuleGroupCount);
+                EditorGUILayout.IntField(
+                    s_SimulationModuleGroupCacheBuildsLabel,
+                    VividParticleSystemManager.lastSimulationModuleGroupCacheBuildCount);
+                EditorGUILayout.IntField(
+                    s_SimulationModuleGroupCacheHitsLabel,
+                    VividParticleSystemManager.lastSimulationModuleGroupCacheHitCount);
+                EditorGUILayout.IntField(
+                    s_SimulationModuleGroupSourceScansLabel,
+                    VividParticleSystemManager.lastSimulationModuleGroupSourceScanCount);
+                EditorGUILayout.IntField(
+                    s_BaseSimulationPageWorksLabel,
+                    VividParticleSystemManager.lastBaseSimulationPageWorkCount);
+                EditorGUILayout.IntField(
+                    s_VelocitySimulationPageWorksLabel,
+                    VividParticleSystemManager.lastVelocitySimulationPageWorkCount);
+                EditorGUILayout.IntField(
                     s_PendingSimulationSystemsLabel,
                     VividParticleSystemManager.pendingSimulationSystemCount);
                 EditorGUILayout.IntField(
                     s_NativeSimulationConfigsLabel,
                     VividParticleSystemManager.nativeSimulationConfigCount);
+                EditorGUILayout.IntField(
+                    s_NativeRenderModuleConfigsLabel,
+                    VividParticleSystemManager.nativeRenderModuleConfigCount);
                 EditorGUILayout.IntField(
                     s_NativeSimulationBurstsLabel,
                     VividParticleSystemManager.nativeSimulationBurstCount);
@@ -1463,6 +1696,12 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_LastCullingScratchPacketsLabel,
                     rendererStats.LastCullingScratchPacketCount);
+                EditorGUILayout.IntField(
+                    s_CullingScratchFilteredCommandsLabel,
+                    rendererStats.CullingScratchFilteredCommandCapacity);
+                EditorGUILayout.IntField(
+                    s_CullingScratchFilteredRangesLabel,
+                    rendererStats.CullingScratchFilteredRangeCapacity);
                 EditorGUILayout.IntField(s_BoundsPageWorksLabel, rendererStats.LastBoundsPageWorkCount);
                 EditorGUILayout.IntField(
                     s_CullingSingleMeshCachesLabel,
@@ -1522,6 +1761,18 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(s_CustomDataUploadPageWorksLabel, rendererStats.LastCustomDataUploadPageWorkCount);
                 EditorGUILayout.IntField(s_MeshIndexUploadPageWorksLabel, rendererStats.LastMeshIndexUploadPageWorkCount);
                 EditorGUILayout.IntField(s_ExtraUploadPageWorksLabel, rendererStats.LastExtraDataUploadPageWorkCount);
+                EditorGUILayout.TextField(
+                    s_RenderKernelFlagsLabel,
+                    $"0x{VividParticleSystemManager.lastRenderKernelFlags:X8}");
+                EditorGUILayout.IntField(
+                    s_AnimatedTransformPageWorksLabel,
+                    VividParticleSystemManager.lastAnimatedTransformPageWorkCount);
+                EditorGUILayout.IntField(
+                    s_AnimatedColorPageWorksLabel,
+                    VividParticleSystemManager.lastAnimatedColorPageWorkCount);
+                EditorGUILayout.IntField(
+                    s_AnimatedVelocityPageWorksLabel,
+                    VividParticleSystemManager.lastAnimatedVelocityPageWorkCount);
                 EditorGUILayout.IntField(s_LastUploadCopyWorksLabel, rendererStats.LastUploadCopyWorkCount);
                 EditorGUILayout.IntField(s_MergedUploadCopyWorksLabel, rendererStats.LastMergedUploadCopyWorkCount);
                 EditorGUILayout.IntField(s_UploadCopySortsLabel, rendererStats.LastUploadCopySortCount);
@@ -1708,6 +1959,200 @@ namespace VividRP.Editor
             {
                 DrawRelative(module, "m_Force");
                 DrawRelative(module, "m_Space");
+            }
+        }
+
+        private static void DrawColorOverLifetimeModule(SerializedProperty module)
+        {
+            DrawEnabledModule(module, "m_Color");
+        }
+
+        private static void DrawColorBySpeedModule(SerializedProperty module)
+        {
+            DrawEnabledModule(module, "m_Color", "m_Range");
+        }
+
+        private static void DrawSizeOverLifetimeModule(SerializedProperty module)
+        {
+            DrawEnabledModule(module, "m_Size");
+        }
+
+        private static void DrawSizeBySpeedModule(SerializedProperty module)
+        {
+            DrawEnabledModule(module, "m_Size", "m_Range");
+        }
+
+        private static void DrawRotationOverLifetimeModule(SerializedProperty module)
+        {
+            DrawEnabledModule(module, "m_AngularVelocity");
+        }
+
+        private static void DrawRotationBySpeedModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                SerializedProperty separateAxes =
+                    VividParticleSystemEditorUtility.FindRelative(module, "m_SeparateAxes");
+                EditorGUILayout.PropertyField(separateAxes);
+                bool drawsSeparateAxes = separateAxes != null
+                    && !separateAxes.hasMultipleDifferentValues
+                    && separateAxes.boolValue;
+                if (drawsSeparateAxes)
+                {
+                    DrawRelative(module, "m_X");
+                    DrawRelative(module, "m_Y");
+                }
+
+                DrawRelative(module, "m_Z");
+                DrawRelative(module, "m_Range");
+            }
+        }
+
+        private static void DrawNoiseModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                SerializedProperty separateAxes =
+                    VividParticleSystemEditorUtility.FindRelative(module, "m_SeparateAxes");
+                EditorGUILayout.PropertyField(separateAxes);
+                bool drawsSeparateAxes = separateAxes != null
+                    && !separateAxes.hasMultipleDifferentValues
+                    && separateAxes.boolValue;
+                if (drawsSeparateAxes)
+                {
+                    DrawRelative(module, "m_StrengthX");
+                    DrawRelative(module, "m_StrengthY");
+                    DrawRelative(module, "m_StrengthZ");
+                }
+                else
+                {
+                    DrawRelative(module, "m_Strength");
+                }
+
+                DrawRelative(module, "m_Frequency");
+                DrawRelative(module, "m_Damping");
+                DrawRelative(module, "m_OctaveCount");
+                DrawRelative(module, "m_OctaveMultiplier");
+                DrawRelative(module, "m_OctaveScale");
+                DrawRelative(module, "m_ScrollSpeed");
+                DrawRelative(module, "m_PositionAmount");
+                DrawRelative(module, "m_RotationAmount");
+                DrawRelative(module, "m_SizeAmount");
+            }
+        }
+
+        private static void DrawVelocityOverLifetimeModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                DrawRelative(module, "m_X");
+                DrawRelative(module, "m_Y");
+                DrawRelative(module, "m_Z");
+                DrawRelative(module, "m_Space");
+            }
+        }
+
+        private static void DrawLimitVelocityOverLifetimeModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                SerializedProperty separateAxes =
+                    VividParticleSystemEditorUtility.FindRelative(module, "m_SeparateAxes");
+                EditorGUILayout.PropertyField(separateAxes);
+                bool drawsSeparateAxes = separateAxes != null
+                    && !separateAxes.hasMultipleDifferentValues
+                    && separateAxes.boolValue;
+                if (drawsSeparateAxes)
+                {
+                    DrawRelative(module, "m_LimitX");
+                    DrawRelative(module, "m_LimitY");
+                    DrawRelative(module, "m_LimitZ");
+                }
+                else
+                {
+                    DrawRelative(module, "m_Limit");
+                }
+
+                DrawRelative(module, "m_Dampen");
+                DrawRelative(module, "m_Space");
+                DrawRelative(module, "m_Drag");
+                DrawRelative(module, "m_MultiplyDragByParticleSize");
+                DrawRelative(module, "m_MultiplyDragByParticleVelocity");
+            }
+        }
+
+        private static void DrawTextureSheetAnimationModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            DrawRelative(module, "m_Enabled");
+            SerializedProperty enabled = module.FindPropertyRelative("m_Enabled");
+            using (new EditorGUI.DisabledScope(enabled != null && !enabled.boolValue))
+            {
+                DrawRelative(module, "m_NumTilesX");
+                DrawRelative(module, "m_NumTilesY");
+                DrawRelative(module, "m_Animation");
+                DrawRelative(module, "m_FrameOverTime");
+                DrawRelative(module, "m_StartFrame");
+                DrawRelative(module, "m_CycleCount");
+
+                SerializedProperty animation = module.FindPropertyRelative("m_Animation");
+                if (animation != null
+                    && !animation.hasMultipleDifferentValues
+                    && (VividParticleTextureSheetAnimationType)animation.enumValueIndex
+                        == VividParticleTextureSheetAnimationType.SingleRow)
+                {
+                    DrawRelative(module, "m_RowIndex");
+                }
+            }
+        }
+
+        private static void DrawEnabledModule(SerializedProperty module, string valuePropertyName)
+        {
+            DrawEnabledModule(module, valuePropertyName, null);
+        }
+
+        private static void DrawEnabledModule(
+            SerializedProperty module,
+            string valuePropertyName,
+            string secondaryPropertyName)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                DrawRelative(module, valuePropertyName);
+                if (!string.IsNullOrEmpty(secondaryPropertyName))
+                    DrawRelative(module, secondaryPropertyName);
             }
         }
 

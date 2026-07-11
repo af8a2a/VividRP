@@ -53,6 +53,12 @@ namespace VividRP.Runtime.Particle
         ByDistance,
     }
 
+    public enum VividParticleTextureSheetAnimationType
+    {
+        WholeSheet,
+        SingleRow,
+    }
+
     [Serializable]
     public struct VividParticleBurst
     {
@@ -678,6 +684,1675 @@ namespace VividRP.Runtime.Particle
                 m_Force.y = 0.0f;
             if (!float.IsFinite(m_Force.z))
                 m_Force.z = 0.0f;
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleVelocityOverLifetimeModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private AnimationCurve m_X = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        [SerializeField]
+        private AnimationCurve m_Y = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        [SerializeField]
+        private AnimationCurve m_Z = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        [SerializeField]
+        private VividParticleForceSpace m_Space = VividParticleForceSpace.Local;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve x
+        {
+            get => m_X ??= CreateDefaultCurve();
+            set
+            {
+                m_X = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve y
+        {
+            get => m_Y ??= CreateDefaultCurve();
+            set
+            {
+                m_Y = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve z
+        {
+            get => m_Z ??= CreateDefaultCurve();
+            set
+            {
+                m_Z = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public VividParticleForceSpace space
+        {
+            get => m_Space;
+            set
+            {
+                if (m_Space == value)
+                    return;
+
+                m_Space = value;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleVelocityOverLifetimeModule CreateDefault()
+        {
+            return new VividParticleVelocityOverLifetimeModule();
+        }
+
+        internal void CopyFrom(VividParticleVelocityOverLifetimeModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_X = CloneCurve(source.m_X);
+            m_Y = CloneCurve(source.m_Y);
+            m_Z = CloneCurve(source.m_Z);
+            m_Space = source.m_Space;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_X ??= CreateDefaultCurve();
+            m_Y ??= CreateDefaultCurve();
+            m_Z ??= CreateDefaultCurve();
+        }
+
+        internal Vector3 Evaluate(float normalizedLifetime)
+        {
+            float time = Mathf.Clamp01(normalizedLifetime);
+            return new Vector3(x.Evaluate(time), y.Evaluate(time), z.Evaluate(time));
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            if (source == null)
+                return CreateDefaultCurve();
+
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleLimitVelocityOverLifetimeModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private bool m_SeparateAxes;
+
+        [SerializeField]
+        private AnimationCurve m_Limit = CreateLimitCurve();
+
+        [SerializeField]
+        private AnimationCurve m_LimitX = CreateLimitCurve();
+
+        [SerializeField]
+        private AnimationCurve m_LimitY = CreateLimitCurve();
+
+        [SerializeField]
+        private AnimationCurve m_LimitZ = CreateLimitCurve();
+
+        [SerializeField]
+        private float m_Dampen = 1.0f;
+
+        [SerializeField]
+        private VividParticleForceSpace m_Space = VividParticleForceSpace.Local;
+
+        [SerializeField]
+        private AnimationCurve m_Drag = CreateDragCurve();
+
+        [SerializeField]
+        private bool m_MultiplyDragByParticleSize;
+
+        [SerializeField]
+        private bool m_MultiplyDragByParticleVelocity;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public bool separateAxes
+        {
+            get => m_SeparateAxes;
+            set
+            {
+                if (m_SeparateAxes == value)
+                    return;
+
+                m_SeparateAxes = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve limit
+        {
+            get => m_Limit ??= CreateLimitCurve();
+            set
+            {
+                m_Limit = CloneCurve(value, CreateLimitCurve);
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve limitX
+        {
+            get => m_LimitX ??= CreateLimitCurve();
+            set
+            {
+                m_LimitX = CloneCurve(value, CreateLimitCurve);
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve limitY
+        {
+            get => m_LimitY ??= CreateLimitCurve();
+            set
+            {
+                m_LimitY = CloneCurve(value, CreateLimitCurve);
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve limitZ
+        {
+            get => m_LimitZ ??= CreateLimitCurve();
+            set
+            {
+                m_LimitZ = CloneCurve(value, CreateLimitCurve);
+                NotifyChanged();
+            }
+        }
+
+        public float dampen
+        {
+            get => m_Dampen;
+            set
+            {
+                float clamped = Mathf.Clamp01(value);
+                if (m_Dampen == clamped)
+                    return;
+
+                m_Dampen = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public VividParticleForceSpace space
+        {
+            get => m_Space;
+            set
+            {
+                if (m_Space == value)
+                    return;
+
+                m_Space = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve drag
+        {
+            get => m_Drag ??= CreateDragCurve();
+            set
+            {
+                m_Drag = CloneCurve(value, CreateDragCurve);
+                NotifyChanged();
+            }
+        }
+
+        public bool multiplyDragByParticleSize
+        {
+            get => m_MultiplyDragByParticleSize;
+            set
+            {
+                if (m_MultiplyDragByParticleSize == value)
+                    return;
+
+                m_MultiplyDragByParticleSize = value;
+                NotifyChanged();
+            }
+        }
+
+        public bool multiplyDragByParticleVelocity
+        {
+            get => m_MultiplyDragByParticleVelocity;
+            set
+            {
+                if (m_MultiplyDragByParticleVelocity == value)
+                    return;
+
+                m_MultiplyDragByParticleVelocity = value;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleLimitVelocityOverLifetimeModule CreateDefault()
+        {
+            return new VividParticleLimitVelocityOverLifetimeModule();
+        }
+
+        internal VividParticleLimitVelocityOverLifetimeModule Clone()
+        {
+            var clone = new VividParticleLimitVelocityOverLifetimeModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleLimitVelocityOverLifetimeModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_SeparateAxes = source.m_SeparateAxes;
+            m_Limit = CloneCurve(source.m_Limit, CreateLimitCurve);
+            m_LimitX = CloneCurve(source.m_LimitX, CreateLimitCurve);
+            m_LimitY = CloneCurve(source.m_LimitY, CreateLimitCurve);
+            m_LimitZ = CloneCurve(source.m_LimitZ, CreateLimitCurve);
+            m_Dampen = source.m_Dampen;
+            m_Space = source.m_Space;
+            m_Drag = CloneCurve(source.m_Drag, CreateDragCurve);
+            m_MultiplyDragByParticleSize = source.m_MultiplyDragByParticleSize;
+            m_MultiplyDragByParticleVelocity = source.m_MultiplyDragByParticleVelocity;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Limit ??= CreateLimitCurve();
+            m_LimitX ??= CreateLimitCurve();
+            m_LimitY ??= CreateLimitCurve();
+            m_LimitZ ??= CreateLimitCurve();
+            m_Drag ??= CreateDragCurve();
+            m_Dampen = Mathf.Clamp01(m_Dampen);
+        }
+
+        internal Vector3 EvaluateLimit(float normalizedLifetime)
+        {
+            float time = Mathf.Clamp01(normalizedLifetime);
+            if (!m_SeparateAxes)
+            {
+                float scalarLimit = Mathf.Max(0.0f, limit.Evaluate(time));
+                return Vector3.one * scalarLimit;
+            }
+
+            return new Vector3(
+                Mathf.Max(0.0f, limitX.Evaluate(time)),
+                Mathf.Max(0.0f, limitY.Evaluate(time)),
+                Mathf.Max(0.0f, limitZ.Evaluate(time)));
+        }
+
+        internal float EvaluateDrag(float normalizedLifetime)
+        {
+            return Mathf.Max(0.0f, drag.Evaluate(Mathf.Clamp01(normalizedLifetime)));
+        }
+
+        private static AnimationCurve CreateLimitCurve()
+        {
+            return AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+        }
+
+        private static AnimationCurve CreateDragCurve()
+        {
+            return AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+        }
+
+        private static AnimationCurve CloneCurve(
+            AnimationCurve source,
+            Func<AnimationCurve> defaultFactory)
+        {
+            if (source == null)
+                return defaultFactory();
+
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleColorOverLifetimeModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private Gradient m_Color = CreateDefaultGradient();
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public Gradient color
+        {
+            get => m_Color ??= CreateDefaultGradient();
+            set
+            {
+                m_Color = CloneGradient(value);
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleColorOverLifetimeModule CreateDefault()
+        {
+            return new VividParticleColorOverLifetimeModule();
+        }
+
+        internal VividParticleColorOverLifetimeModule Clone()
+        {
+            var clone = new VividParticleColorOverLifetimeModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleColorOverLifetimeModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Color = CloneGradient(source.m_Color);
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Color ??= CreateDefaultGradient();
+        }
+
+        internal Color Evaluate(float normalizedLifetime)
+        {
+            return color.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        private static Gradient CreateDefaultGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(Color.white, 0.0f),
+                    new GradientColorKey(Color.white, 1.0f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(1.0f, 0.0f),
+                    new GradientAlphaKey(1.0f, 1.0f),
+                });
+            return gradient;
+        }
+
+        private static Gradient CloneGradient(Gradient source)
+        {
+            if (source == null)
+                return CreateDefaultGradient();
+
+            var clone = new Gradient
+            {
+                mode = source.mode,
+                colorSpace = source.colorSpace,
+            };
+            clone.SetKeys(source.colorKeys, source.alphaKeys);
+            return clone;
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleColorBySpeedModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private Gradient m_Color = CreateDefaultGradient();
+
+        [SerializeField]
+        private Vector2 m_Range = new(0.0f, 1.0f);
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public Gradient color
+        {
+            get => m_Color ??= CreateDefaultGradient();
+            set
+            {
+                m_Color = CloneGradient(value);
+                NotifyChanged();
+            }
+        }
+
+        public Vector2 range
+        {
+            get => m_Range;
+            set
+            {
+                Vector2 clamped = NormalizeRange(value);
+                if (m_Range == clamped)
+                    return;
+
+                m_Range = clamped;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleColorBySpeedModule CreateDefault()
+        {
+            return new VividParticleColorBySpeedModule();
+        }
+
+        internal VividParticleColorBySpeedModule Clone()
+        {
+            var clone = new VividParticleColorBySpeedModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleColorBySpeedModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Color = CloneGradient(source.m_Color);
+            m_Range = source.m_Range;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Color ??= CreateDefaultGradient();
+            m_Range = NormalizeRange(m_Range);
+        }
+
+        internal Color Evaluate(float speed)
+        {
+            float denominator = Mathf.Max(0.000001f, m_Range.y - m_Range.x);
+            float normalizedSpeed = Mathf.Clamp01((speed - m_Range.x) / denominator);
+            return color.Evaluate(normalizedSpeed);
+        }
+
+        private static Vector2 NormalizeRange(Vector2 value)
+        {
+            float minimum = float.IsFinite(value.x) ? Mathf.Max(0.0f, value.x) : 0.0f;
+            float maximum = float.IsFinite(value.y) ? Mathf.Max(0.0f, value.y) : minimum;
+            return maximum >= minimum
+                ? new Vector2(minimum, maximum)
+                : new Vector2(maximum, minimum);
+        }
+
+        private static Gradient CreateDefaultGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(Color.white, 0.0f),
+                    new GradientColorKey(Color.white, 1.0f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(1.0f, 0.0f),
+                    new GradientAlphaKey(1.0f, 1.0f),
+                });
+            return gradient;
+        }
+
+        private static Gradient CloneGradient(Gradient source)
+        {
+            if (source == null)
+                return CreateDefaultGradient();
+
+            var clone = new Gradient
+            {
+                mode = source.mode,
+                colorSpace = source.colorSpace,
+            };
+            clone.SetKeys(source.colorKeys, source.alphaKeys);
+            return clone;
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleSizeOverLifetimeModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private AnimationCurve m_Size = CreateDefaultCurve();
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve size
+        {
+            get => m_Size ??= CreateDefaultCurve();
+            set
+            {
+                m_Size = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleSizeOverLifetimeModule CreateDefault()
+        {
+            return new VividParticleSizeOverLifetimeModule();
+        }
+
+        internal VividParticleSizeOverLifetimeModule Clone()
+        {
+            var clone = new VividParticleSizeOverLifetimeModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleSizeOverLifetimeModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Size = CloneCurve(source.m_Size);
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Size ??= CreateDefaultCurve();
+        }
+
+        internal float Evaluate(float normalizedLifetime)
+        {
+            return Mathf.Max(0.0f, size.Evaluate(Mathf.Clamp01(normalizedLifetime)));
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return AnimationCurve.Linear(0.0f, 1.0f, 1.0f, 1.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            if (source == null)
+                return CreateDefaultCurve();
+
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleSizeBySpeedModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private AnimationCurve m_Size = CreateDefaultCurve();
+
+        [SerializeField]
+        private Vector2 m_Range = new(0.0f, 1.0f);
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve size
+        {
+            get => m_Size ??= CreateDefaultCurve();
+            set
+            {
+                m_Size = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public Vector2 range
+        {
+            get => m_Range;
+            set
+            {
+                Vector2 clamped = NormalizeRange(value);
+                if (m_Range == clamped)
+                    return;
+
+                m_Range = clamped;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleSizeBySpeedModule CreateDefault()
+        {
+            return new VividParticleSizeBySpeedModule();
+        }
+
+        internal VividParticleSizeBySpeedModule Clone()
+        {
+            var clone = new VividParticleSizeBySpeedModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleSizeBySpeedModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Size = CloneCurve(source.m_Size);
+            m_Range = source.m_Range;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Size ??= CreateDefaultCurve();
+            m_Range = NormalizeRange(m_Range);
+        }
+
+        internal float Evaluate(float speed)
+        {
+            float denominator = Mathf.Max(0.000001f, m_Range.y - m_Range.x);
+            float normalizedSpeed = Mathf.Clamp01((speed - m_Range.x) / denominator);
+            return Mathf.Max(0.0f, size.Evaluate(normalizedSpeed));
+        }
+
+        private static Vector2 NormalizeRange(Vector2 value)
+        {
+            float minimum = float.IsFinite(value.x) ? Mathf.Max(0.0f, value.x) : 0.0f;
+            float maximum = float.IsFinite(value.y) ? Mathf.Max(0.0f, value.y) : minimum;
+            return maximum >= minimum
+                ? new Vector2(minimum, maximum)
+                : new Vector2(maximum, minimum);
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return AnimationCurve.Linear(0.0f, 1.0f, 1.0f, 1.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            if (source == null)
+                return CreateDefaultCurve();
+
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleRotationOverLifetimeModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private AnimationCurve m_AngularVelocity = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve angularVelocity
+        {
+            get => m_AngularVelocity ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            set
+            {
+                m_AngularVelocity = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleRotationOverLifetimeModule CreateDefault()
+        {
+            return new VividParticleRotationOverLifetimeModule();
+        }
+
+        internal VividParticleRotationOverLifetimeModule Clone()
+        {
+            var clone = new VividParticleRotationOverLifetimeModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleRotationOverLifetimeModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_AngularVelocity = CloneCurve(source.m_AngularVelocity);
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_AngularVelocity ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+        }
+
+        internal float EvaluateAngularVelocity(float normalizedLifetime)
+        {
+            return angularVelocity.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal float EvaluateIntegratedRadians(float normalizedLifetime, float startLifetime)
+        {
+            const int integrationSteps = 32;
+            float end = Mathf.Clamp01(normalizedLifetime);
+            if (end <= 0.0f || startLifetime <= 0.0f)
+                return 0.0f;
+
+            float step = end / integrationSteps;
+            float previous = EvaluateAngularVelocity(0.0f) * Mathf.Deg2Rad;
+            float integral = 0.0f;
+            for (int index = 1; index <= integrationSteps; index++)
+            {
+                float current = EvaluateAngularVelocity(index * step) * Mathf.Deg2Rad;
+                integral += (previous + current) * 0.5f * step;
+                previous = current;
+            }
+
+            return integral * startLifetime;
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            if (source == null)
+                return AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleRotationBySpeedModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private bool m_SeparateAxes;
+
+        [SerializeField]
+        private AnimationCurve m_X = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Y = CreateZeroCurve();
+
+        [SerializeField]
+        private AnimationCurve m_Z = AnimationCurve.Constant(0.0f, 1.0f, 45.0f);
+
+        [SerializeField]
+        private Vector2 m_Range = new(0.0f, 1.0f);
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public bool separateAxes
+        {
+            get => m_SeparateAxes;
+            set
+            {
+                if (m_SeparateAxes == value)
+                    return;
+
+                m_SeparateAxes = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve x
+        {
+            get => m_X ??= CreateZeroCurve();
+            set
+            {
+                m_X = CloneCurve(value, CreateZeroCurve());
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve y
+        {
+            get => m_Y ??= CreateZeroCurve();
+            set
+            {
+                m_Y = CloneCurve(value, CreateZeroCurve());
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve z
+        {
+            get => m_Z ??= AnimationCurve.Constant(0.0f, 1.0f, 45.0f);
+            set
+            {
+                m_Z = CloneCurve(value, AnimationCurve.Constant(0.0f, 1.0f, 45.0f));
+                NotifyChanged();
+            }
+        }
+
+        public Vector2 range
+        {
+            get => m_Range;
+            set
+            {
+                Vector2 normalized = NormalizeRange(value);
+                if (m_Range == normalized)
+                    return;
+
+                m_Range = normalized;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleRotationBySpeedModule CreateDefault()
+        {
+            return new VividParticleRotationBySpeedModule();
+        }
+
+        internal VividParticleRotationBySpeedModule Clone()
+        {
+            var clone = new VividParticleRotationBySpeedModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleRotationBySpeedModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_SeparateAxes = source.m_SeparateAxes;
+            m_X = CloneCurve(source.m_X, CreateZeroCurve());
+            m_Y = CloneCurve(source.m_Y, CreateZeroCurve());
+            m_Z = CloneCurve(source.m_Z, AnimationCurve.Constant(0.0f, 1.0f, 45.0f));
+            m_Range = source.m_Range;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_X ??= CreateZeroCurve();
+            m_Y ??= CreateZeroCurve();
+            m_Z ??= AnimationCurve.Constant(0.0f, 1.0f, 45.0f);
+            m_Range = NormalizeRange(m_Range);
+        }
+
+        internal Vector3 EvaluateAngularVelocity(float speed)
+        {
+            float denominator = Mathf.Max(0.000001f, m_Range.y - m_Range.x);
+            float normalizedSpeed = Mathf.Clamp01((speed - m_Range.x) / denominator);
+            return m_SeparateAxes
+                ? new Vector3(
+                    x.Evaluate(normalizedSpeed),
+                    y.Evaluate(normalizedSpeed),
+                    z.Evaluate(normalizedSpeed))
+                : new Vector3(0.0f, 0.0f, z.Evaluate(normalizedSpeed));
+        }
+
+        private static Vector2 NormalizeRange(Vector2 value)
+        {
+            float minimum = float.IsFinite(value.x) ? Mathf.Max(0.0f, value.x) : 0.0f;
+            float maximum = float.IsFinite(value.y) ? Mathf.Max(0.0f, value.y) : minimum;
+            return maximum >= minimum
+                ? new Vector2(minimum, maximum)
+                : new Vector2(maximum, minimum);
+        }
+
+        private static AnimationCurve CreateZeroCurve()
+        {
+            return AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source, AnimationCurve fallback)
+        {
+            AnimationCurve curve = source ?? fallback;
+            return new AnimationCurve(curve.keys)
+            {
+                preWrapMode = curve.preWrapMode,
+                postWrapMode = curve.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleNoiseModule
+    {
+        internal const int MinimumOctaveCount = 1;
+        internal const int MaximumOctaveCount = 4;
+
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private bool m_SeparateAxes;
+
+        [SerializeField]
+        private AnimationCurve m_Strength = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+
+        [SerializeField]
+        private AnimationCurve m_StrengthX = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+
+        [SerializeField]
+        private AnimationCurve m_StrengthY = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+
+        [SerializeField]
+        private AnimationCurve m_StrengthZ = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+
+        [SerializeField]
+        private float m_Frequency = 0.5f;
+
+        [SerializeField]
+        private bool m_Damping = true;
+
+        [SerializeField]
+        private int m_OctaveCount = 1;
+
+        [SerializeField]
+        private float m_OctaveMultiplier = 0.5f;
+
+        [SerializeField]
+        private float m_OctaveScale = 2.0f;
+
+        [SerializeField]
+        private AnimationCurve m_ScrollSpeed = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        [SerializeField]
+        private AnimationCurve m_PositionAmount = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+
+        [SerializeField]
+        private AnimationCurve m_RotationAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        [SerializeField]
+        private AnimationCurve m_SizeAmount = AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public bool separateAxes
+        {
+            get => m_SeparateAxes;
+            set
+            {
+                if (m_SeparateAxes == value)
+                    return;
+
+                m_SeparateAxes = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve strength
+        {
+            get => m_Strength ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            set { m_Strength = CloneCurve(value, 1.0f); NotifyChanged(); }
+        }
+
+        public AnimationCurve strengthX
+        {
+            get => m_StrengthX ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            set { m_StrengthX = CloneCurve(value, 1.0f); NotifyChanged(); }
+        }
+
+        public AnimationCurve strengthY
+        {
+            get => m_StrengthY ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            set { m_StrengthY = CloneCurve(value, 1.0f); NotifyChanged(); }
+        }
+
+        public AnimationCurve strengthZ
+        {
+            get => m_StrengthZ ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            set { m_StrengthZ = CloneCurve(value, 1.0f); NotifyChanged(); }
+        }
+
+        public float frequency
+        {
+            get => m_Frequency;
+            set
+            {
+                float clamped = float.IsFinite(value) ? Mathf.Max(0.0f, value) : 0.0f;
+                if (m_Frequency == clamped)
+                    return;
+                m_Frequency = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public bool damping
+        {
+            get => m_Damping;
+            set { if (m_Damping != value) { m_Damping = value; NotifyChanged(); } }
+        }
+
+        public int octaveCount
+        {
+            get => m_OctaveCount;
+            set
+            {
+                int clamped = Mathf.Clamp(value, MinimumOctaveCount, MaximumOctaveCount);
+                if (m_OctaveCount == clamped)
+                    return;
+                m_OctaveCount = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public float octaveMultiplier
+        {
+            get => m_OctaveMultiplier;
+            set
+            {
+                float clamped = float.IsFinite(value) ? Mathf.Clamp01(value) : 0.0f;
+                if (m_OctaveMultiplier == clamped)
+                    return;
+                m_OctaveMultiplier = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public float octaveScale
+        {
+            get => m_OctaveScale;
+            set
+            {
+                float clamped = float.IsFinite(value) ? Mathf.Max(1.0f, value) : 1.0f;
+                if (m_OctaveScale == clamped)
+                    return;
+                m_OctaveScale = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve scrollSpeed
+        {
+            get => m_ScrollSpeed ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            set { m_ScrollSpeed = CloneCurve(value, 0.0f); NotifyChanged(); }
+        }
+
+        public AnimationCurve positionAmount
+        {
+            get => m_PositionAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            set { m_PositionAmount = CloneCurve(value, 1.0f); NotifyChanged(); }
+        }
+
+        public AnimationCurve rotationAmount
+        {
+            get => m_RotationAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            set { m_RotationAmount = CloneCurve(value, 0.0f); NotifyChanged(); }
+        }
+
+        public AnimationCurve sizeAmount
+        {
+            get => m_SizeAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            set { m_SizeAmount = CloneCurve(value, 0.0f); NotifyChanged(); }
+        }
+
+        internal void SetChangeCallback(Action onChanged) => m_OnChanged = onChanged;
+
+        internal static VividParticleNoiseModule CreateDefault() => new();
+
+        internal VividParticleNoiseModule Clone()
+        {
+            var clone = new VividParticleNoiseModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleNoiseModule source)
+        {
+            if (source == null)
+                return;
+            m_Enabled = source.m_Enabled;
+            m_SeparateAxes = source.m_SeparateAxes;
+            m_Strength = CloneCurve(source.m_Strength, 1.0f);
+            m_StrengthX = CloneCurve(source.m_StrengthX, 1.0f);
+            m_StrengthY = CloneCurve(source.m_StrengthY, 1.0f);
+            m_StrengthZ = CloneCurve(source.m_StrengthZ, 1.0f);
+            m_Frequency = source.m_Frequency;
+            m_Damping = source.m_Damping;
+            m_OctaveCount = source.m_OctaveCount;
+            m_OctaveMultiplier = source.m_OctaveMultiplier;
+            m_OctaveScale = source.m_OctaveScale;
+            m_ScrollSpeed = CloneCurve(source.m_ScrollSpeed, 0.0f);
+            m_PositionAmount = CloneCurve(source.m_PositionAmount, 1.0f);
+            m_RotationAmount = CloneCurve(source.m_RotationAmount, 0.0f);
+            m_SizeAmount = CloneCurve(source.m_SizeAmount, 0.0f);
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Strength ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            m_StrengthX ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            m_StrengthY ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            m_StrengthZ ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            m_ScrollSpeed ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            m_PositionAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            m_RotationAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            m_SizeAmount ??= AnimationCurve.Constant(0.0f, 1.0f, 0.0f);
+            m_Frequency = float.IsFinite(m_Frequency) ? Mathf.Max(0.0f, m_Frequency) : 0.0f;
+            m_OctaveCount = Mathf.Clamp(m_OctaveCount, MinimumOctaveCount, MaximumOctaveCount);
+            m_OctaveMultiplier = float.IsFinite(m_OctaveMultiplier) ? Mathf.Clamp01(m_OctaveMultiplier) : 0.0f;
+            m_OctaveScale = float.IsFinite(m_OctaveScale) ? Mathf.Max(1.0f, m_OctaveScale) : 1.0f;
+        }
+
+        internal Vector3 EvaluateStrength(float normalizedLifetime)
+        {
+            float time = Mathf.Clamp01(normalizedLifetime);
+            if (!m_SeparateAxes)
+            {
+                float value = strength.Evaluate(time);
+                return Vector3.one * value;
+            }
+            return new Vector3(
+                strengthX.Evaluate(time),
+                strengthY.Evaluate(time),
+                strengthZ.Evaluate(time));
+        }
+
+        internal float EvaluateScrollSpeed(float normalizedLifetime)
+        {
+            return scrollSpeed.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal float EvaluatePositionAmount(float normalizedLifetime)
+        {
+            return positionAmount.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal float EvaluateRotationAmount(float normalizedLifetime)
+        {
+            return rotationAmount.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal float EvaluateSizeAmount(float normalizedLifetime)
+        {
+            return sizeAmount.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        internal bool hasPositionEffect => HasNonZeroSample(positionAmount);
+
+        internal bool hasRotationEffect => HasNonZeroSample(rotationAmount);
+
+        internal bool hasSizeEffect => HasNonZeroSample(sizeAmount);
+
+        private static bool HasNonZeroSample(AnimationCurve curve)
+        {
+            if (curve == null || curve.length == 0)
+                return false;
+
+            const int sampleCount = 16;
+            for (int index = 0; index < sampleCount; index++)
+            {
+                float time = index / (float)(sampleCount - 1);
+                if (Mathf.Abs(curve.Evaluate(time)) > 0.000001f)
+                    return true;
+            }
+
+            return false;
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source, float defaultValue)
+        {
+            AnimationCurve curve = source ?? AnimationCurve.Constant(0.0f, 1.0f, defaultValue);
+            return new AnimationCurve(curve.keys)
+            {
+                preWrapMode = curve.preWrapMode,
+                postWrapMode = curve.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged() => m_OnChanged?.Invoke();
+    }
+
+    [Serializable]
+    public sealed class VividParticleTextureSheetAnimationModule
+    {
+        internal const int MinimumTileCount = 1;
+        internal const int MaximumTileCount = 64;
+        internal const float MinimumCycleCount = 0.0f;
+
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private int m_NumTilesX = 1;
+
+        [SerializeField]
+        private int m_NumTilesY = 1;
+
+        [SerializeField]
+        private VividParticleTextureSheetAnimationType m_Animation =
+            VividParticleTextureSheetAnimationType.WholeSheet;
+
+        [SerializeField]
+        private AnimationCurve m_FrameOverTime = CreateDefaultCurve();
+
+        [SerializeField]
+        private float m_StartFrame;
+
+        [SerializeField]
+        private float m_CycleCount = 1.0f;
+
+        [SerializeField]
+        private int m_RowIndex;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public int numTilesX
+        {
+            get => m_NumTilesX;
+            set
+            {
+                int clamped = Mathf.Clamp(value, MinimumTileCount, MaximumTileCount);
+                if (m_NumTilesX == clamped)
+                    return;
+
+                m_NumTilesX = clamped;
+                m_RowIndex = Mathf.Clamp(m_RowIndex, 0, Mathf.Max(0, m_NumTilesY - 1));
+                NotifyChanged();
+            }
+        }
+
+        public int numTilesY
+        {
+            get => m_NumTilesY;
+            set
+            {
+                int clamped = Mathf.Clamp(value, MinimumTileCount, MaximumTileCount);
+                if (m_NumTilesY == clamped)
+                    return;
+
+                m_NumTilesY = clamped;
+                m_RowIndex = Mathf.Clamp(m_RowIndex, 0, m_NumTilesY - 1);
+                NotifyChanged();
+            }
+        }
+
+        public VividParticleTextureSheetAnimationType animation
+        {
+            get => m_Animation;
+            set
+            {
+                if (m_Animation == value)
+                    return;
+
+                m_Animation = value;
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve frameOverTime
+        {
+            get => m_FrameOverTime ??= CreateDefaultCurve();
+            set
+            {
+                m_FrameOverTime = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public float startFrame
+        {
+            get => m_StartFrame;
+            set
+            {
+                if (m_StartFrame == value)
+                    return;
+
+                m_StartFrame = value;
+                NotifyChanged();
+            }
+        }
+
+        public float cycleCount
+        {
+            get => m_CycleCount;
+            set
+            {
+                float clamped = Mathf.Max(MinimumCycleCount, value);
+                if (m_CycleCount == clamped)
+                    return;
+
+                m_CycleCount = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public int rowIndex
+        {
+            get => m_RowIndex;
+            set
+            {
+                int clamped = Mathf.Clamp(value, 0, Mathf.Max(0, m_NumTilesY - 1));
+                if (m_RowIndex == clamped)
+                    return;
+
+                m_RowIndex = clamped;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleTextureSheetAnimationModule CreateDefault()
+        {
+            return new VividParticleTextureSheetAnimationModule();
+        }
+
+        internal VividParticleTextureSheetAnimationModule Clone()
+        {
+            var clone = new VividParticleTextureSheetAnimationModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleTextureSheetAnimationModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_NumTilesX = source.m_NumTilesX;
+            m_NumTilesY = source.m_NumTilesY;
+            m_Animation = source.m_Animation;
+            m_FrameOverTime = CloneCurve(source.m_FrameOverTime);
+            m_StartFrame = source.m_StartFrame;
+            m_CycleCount = source.m_CycleCount;
+            m_RowIndex = source.m_RowIndex;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_NumTilesX = Mathf.Clamp(m_NumTilesX, MinimumTileCount, MaximumTileCount);
+            m_NumTilesY = Mathf.Clamp(m_NumTilesY, MinimumTileCount, MaximumTileCount);
+            m_CycleCount = Mathf.Max(MinimumCycleCount, m_CycleCount);
+            m_RowIndex = Mathf.Clamp(m_RowIndex, 0, m_NumTilesY - 1);
+            m_FrameOverTime ??= CreateDefaultCurve();
+        }
+
+        internal float EvaluateFrame(float normalizedLifetime)
+        {
+            return frameOverTime.Evaluate(Mathf.Clamp01(normalizedLifetime));
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return AnimationCurve.Linear(0.0f, 0.0f, 1.0f, 1.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            if (source == null)
+                return CreateDefaultCurve();
+
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
         }
 
         private void NotifyChanged()

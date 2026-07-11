@@ -21,6 +21,59 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* Velocities;
 
         [NativeDisableUnsafePtrRestriction]
+        public float3* AnimatedVelocities;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* StartLifetimes;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* VelocityOverLifetimeLut;
+
+        public float3x3 VelocityOverLifetimeTransform;
+        public int VelocityOverLifetimeEnabled;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* LimitVelocityLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* LimitVelocityDragLut;
+
+        public float3x3 LimitVelocityTransform;
+        public int LimitVelocityEnabled;
+        public int LimitVelocitySeparateAxes;
+        public float LimitVelocityDampen;
+        public int LimitVelocityMultiplyDragByParticleSize;
+        public int LimitVelocityMultiplyDragByParticleVelocity;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* Sizes;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* AccumulatedRotations;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* RotationBySpeedLut;
+
+        public float2 RotationBySpeedRange;
+        public int RotationBySpeedEnabled;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* NoisePhases;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* NoiseStrengthLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* NoiseScrollSpeedLut;
+
+        public float NoiseFrequency;
+        public float NoiseOctaveMultiplier;
+        public float NoiseOctaveScale;
+        public int NoiseOctaveCount;
+        public int NoiseDamping;
+        public int NoiseEnabled;
+
+        [NativeDisableUnsafePtrRestriction]
         public float* RemainingLifetimes;
 
         [NativeDisableUnsafePtrRestriction]
@@ -39,6 +92,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* Velocities;
 
         [NativeDisableUnsafePtrRestriction]
+        public float3* AnimatedVelocities;
+
+        [NativeDisableUnsafePtrRestriction]
         public float* StartLifetimes;
 
         [NativeDisableUnsafePtrRestriction]
@@ -52,6 +108,12 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public int* MeshIndices;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* AccumulatedRotations;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* NoisePhases;
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
@@ -88,6 +150,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* Velocities;
 
         [NativeDisableUnsafePtrRestriction]
+        public float3* AnimatedVelocities;
+
+        [NativeDisableUnsafePtrRestriction]
         public float* StartLifetimes;
 
         [NativeDisableUnsafePtrRestriction]
@@ -101,6 +166,12 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public int* MeshIndices;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* AccumulatedRotations;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float3* NoisePhases;
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
@@ -427,7 +498,26 @@ namespace VividRP.Runtime.Particle.ECS
         {
             VividParticleEcsIntegratePageWork work = Works[workIndex];
             int pageEnd = math.min(page.StartIndex + page.EntryCount, work.PositionLength);
-            for (int index = page.StartIndex; index < pageEnd; index++)
+            if ((work.VelocityOverLifetimeEnabled != 0
+                    && work.AnimatedVelocities != null
+                    && work.VelocityOverLifetimeLut != null)
+                || work.LimitVelocityEnabled != 0
+                || work.RotationBySpeedEnabled != 0
+                || work.NoiseEnabled != 0)
+            {
+                IntegrateModulePage(work, page.StartIndex, pageEnd);
+                return;
+            }
+
+            IntegrateBasePage(work, page.StartIndex, pageEnd);
+        }
+
+        private static void IntegrateBasePage(
+            VividParticleEcsIntegratePageWork work,
+            int pageStart,
+            int pageEnd)
+        {
+            for (int index = pageStart; index < pageEnd; index++)
             {
                 float remainingLifetime = work.RemainingLifetimes[index] - work.DeltaTime;
                 if (remainingLifetime <= 0.0f)
@@ -442,6 +532,188 @@ namespace VividRP.Runtime.Particle.ECS
                 work.RemainingLifetimes[index] = remainingLifetime;
                 work.KeepMask[index] = 1;
             }
+        }
+
+        private static void IntegrateModulePage(
+            VividParticleEcsIntegratePageWork work,
+            int pageStart,
+            int pageEnd)
+        {
+            for (int index = pageStart; index < pageEnd; index++)
+            {
+                float remainingLifetime = work.RemainingLifetimes[index] - work.DeltaTime;
+                if (remainingLifetime <= 0.0f)
+                {
+                    work.KeepMask[index] = 0;
+                    continue;
+                }
+
+                float3 velocity = work.Velocities[index] + work.Gravity * work.DeltaTime;
+                float startLifetime = work.StartLifetimes[index];
+                float normalizedLifetime = startLifetime > 0.0f
+                    ? 1.0f - math.saturate(work.RemainingLifetimes[index] / startLifetime)
+                    : 0.0f;
+                float3 animatedVelocity = float3.zero;
+                if (work.VelocityOverLifetimeEnabled != 0
+                    && work.AnimatedVelocities != null
+                    && work.VelocityOverLifetimeLut != null)
+                {
+                    animatedVelocity = math.mul(
+                        work.VelocityOverLifetimeTransform,
+                        SampleVelocityLut(work.VelocityOverLifetimeLut, normalizedLifetime));
+                    work.AnimatedVelocities[index] = animatedVelocity;
+                }
+
+                if (work.NoiseEnabled != 0
+                    && work.NoisePhases != null
+                    && work.NoiseStrengthLut != null
+                    && work.NoiseScrollSpeedLut != null)
+                {
+                    velocity += EvaluateNoiseAcceleration(
+                        work,
+                        index,
+                        normalizedLifetime) * work.DeltaTime;
+                }
+
+                if (work.LimitVelocityEnabled != 0
+                    && work.LimitVelocityLut != null
+                    && work.LimitVelocityDragLut != null)
+                {
+                    velocity = ApplyLimitVelocity(
+                        work,
+                        index,
+                        normalizedLifetime,
+                        velocity,
+                        animatedVelocity);
+                }
+
+                if (work.RotationBySpeedEnabled != 0
+                    && work.RotationBySpeedLut != null
+                    && work.AccumulatedRotations != null)
+                {
+                    float3 totalVelocity = velocity + animatedVelocity;
+                    float rangeLength = math.max(
+                        0.000001f,
+                        work.RotationBySpeedRange.y - work.RotationBySpeedRange.x);
+                    float normalizedSpeed = math.saturate(
+                        (math.length(totalVelocity) - work.RotationBySpeedRange.x) / rangeLength);
+                    float3 angularVelocityDegrees =
+                        SampleVelocityLut(work.RotationBySpeedLut, normalizedSpeed);
+                    work.AccumulatedRotations[index] +=
+                        math.radians(angularVelocityDegrees) * work.DeltaTime;
+                }
+
+                work.Velocities[index] = velocity;
+                work.Positions[index] += (velocity + animatedVelocity) * work.DeltaTime;
+                work.RemainingLifetimes[index] = remainingLifetime;
+                work.KeepMask[index] = 1;
+            }
+        }
+
+        private static float3 SampleVelocityLut(float3* lut, float normalizedLifetime)
+        {
+            float sample = math.saturate(normalizedLifetime)
+                * (VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+            int lower = (int)math.floor(sample);
+            int upper = math.min(
+                lower + 1,
+                VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+            return math.lerp(lut[lower], lut[upper], sample - lower);
+        }
+
+        private static float SampleScalarLut(float* lut, float normalizedLifetime)
+        {
+            float sample = math.saturate(normalizedLifetime)
+                * (VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+            int lower = (int)math.floor(sample);
+            int upper = math.min(
+                lower + 1,
+                VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+            return math.lerp(lut[lower], lut[upper], sample - lower);
+        }
+
+        private static float3 EvaluateNoiseAcceleration(
+            VividParticleEcsIntegratePageWork work,
+            int particleIndex,
+            float normalizedLifetime)
+        {
+            float scrollSpeed = SampleScalarLut(
+                work.NoiseScrollSpeedLut,
+                normalizedLifetime);
+            float3 phase = work.NoisePhases[particleIndex]
+                + new float3(1.0f, 1.371f, 1.913f) * scrollSpeed * work.DeltaTime;
+            work.NoisePhases[particleIndex] = phase;
+
+            float frequency = math.max(0.0f, work.NoiseFrequency);
+            float3 samplePosition = phase + work.Positions[particleIndex] * frequency;
+            float amplitude = 1.0f;
+            float octaveScale = 1.0f;
+            float amplitudeSum = 0.0f;
+            float3 value = float3.zero;
+            int octaveCount = math.clamp(work.NoiseOctaveCount, 1, 4);
+            for (int octave = 0; octave < octaveCount; octave++)
+            {
+                float3 octavePosition = samplePosition * octaveScale;
+                value += new float3(
+                    noise.snoise(octavePosition + new float3(19.19f, 3.17f, 7.13f)),
+                    noise.snoise(octavePosition + new float3(5.71f, 23.23f, 11.11f)),
+                    noise.snoise(octavePosition + new float3(13.37f, 17.17f, 29.29f))) * amplitude;
+                amplitudeSum += amplitude;
+                amplitude *= math.saturate(work.NoiseOctaveMultiplier);
+                octaveScale *= math.max(1.0f, work.NoiseOctaveScale);
+            }
+
+            value /= math.max(0.000001f, amplitudeSum);
+            float3 strength = SampleVelocityLut(
+                work.NoiseStrengthLut,
+                normalizedLifetime);
+            float dampingScale = work.NoiseDamping != 0 ? frequency : 1.0f;
+            return value * strength * dampingScale;
+        }
+
+        private static float3 ApplyLimitVelocity(
+            VividParticleEcsIntegratePageWork work,
+            int particleIndex,
+            float normalizedLifetime,
+            float3 baseVelocity,
+            float3 animatedVelocity)
+        {
+            float3 totalVelocity = baseVelocity + animatedVelocity;
+            float3 moduleVelocity = math.mul(work.LimitVelocityTransform, totalVelocity);
+            float3 limit = math.max(
+                float3.zero,
+                SampleVelocityLut(work.LimitVelocityLut, normalizedLifetime));
+            float3 targetVelocity;
+            if (work.LimitVelocitySeparateAxes != 0)
+            {
+                targetVelocity = math.clamp(moduleVelocity, -limit, limit);
+            }
+            else
+            {
+                float speed = math.length(moduleVelocity);
+                float magnitudeLimit = limit.x;
+                targetVelocity = speed > magnitudeLimit && speed > 0.000001f
+                    ? moduleVelocity * (magnitudeLimit / speed)
+                    : moduleVelocity;
+            }
+
+            float dampen = math.saturate(work.LimitVelocityDampen);
+            float dampenFactor = dampen <= 0.0f
+                ? 0.0f
+                : 1.0f - math.pow(math.max(0.0f, 1.0f - dampen), work.DeltaTime * 30.0f);
+            moduleVelocity = math.lerp(moduleVelocity, targetVelocity, dampenFactor);
+
+            float drag = math.max(0.0f, SampleScalarLut(
+                work.LimitVelocityDragLut,
+                normalizedLifetime));
+            if (work.LimitVelocityMultiplyDragByParticleSize != 0 && work.Sizes != null)
+                drag *= math.max(0.0f, work.Sizes[particleIndex]);
+            if (work.LimitVelocityMultiplyDragByParticleVelocity != 0)
+                drag *= math.length(moduleVelocity);
+            moduleVelocity *= math.max(0.0f, 1.0f - drag * work.DeltaTime);
+
+            totalVelocity = math.mul(math.transpose(work.LimitVelocityTransform), moduleVelocity);
+            return totalVelocity - animatedVelocity;
         }
     }
 
@@ -476,11 +748,17 @@ namespace VividRP.Runtime.Particle.ECS
         {
             work.Positions[destinationIndex] = work.Positions[sourceIndex];
             work.Velocities[destinationIndex] = work.Velocities[sourceIndex];
+            if (work.AnimatedVelocities != null)
+                work.AnimatedVelocities[destinationIndex] = work.AnimatedVelocities[sourceIndex];
             work.StartLifetimes[destinationIndex] = work.StartLifetimes[sourceIndex];
             work.RemainingLifetimes[destinationIndex] = work.RemainingLifetimes[sourceIndex];
             work.Colors[destinationIndex] = work.Colors[sourceIndex];
             work.Sizes[destinationIndex] = work.Sizes[sourceIndex];
             work.MeshIndices[destinationIndex] = work.MeshIndices[sourceIndex];
+            if (work.AccumulatedRotations != null)
+                work.AccumulatedRotations[destinationIndex] = work.AccumulatedRotations[sourceIndex];
+            if (work.NoisePhases != null)
+                work.NoisePhases[destinationIndex] = work.NoisePhases[sourceIndex];
             work.KeepMask[destinationIndex] = work.KeepMask[sourceIndex];
         }
     }
@@ -527,11 +805,19 @@ namespace VividRP.Runtime.Particle.ECS
 
                 work.Positions[particleIndex] = position;
                 work.Velocities[particleIndex] = velocity;
+                if (work.AnimatedVelocities != null)
+                    work.AnimatedVelocities[particleIndex] = float3.zero;
                 work.StartLifetimes[particleIndex] = work.StartLifetime;
                 work.RemainingLifetimes[particleIndex] = work.StartLifetime;
                 work.Colors[particleIndex] = work.StartColor;
                 work.Sizes[particleIndex] = work.StartSize;
                 work.MeshIndices[particleIndex] = ResolveMeshIndex(work, particleIndex);
+                if (work.AccumulatedRotations != null)
+                    work.AccumulatedRotations[particleIndex] = float3.zero;
+                if (work.NoisePhases != null)
+                    work.NoisePhases[particleIndex] = random.NextFloat3(
+                        new float3(-1024.0f),
+                        new float3(1024.0f));
                 work.KeepMask[particleIndex] = 1;
             }
         }

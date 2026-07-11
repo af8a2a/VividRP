@@ -14,7 +14,12 @@ namespace VividRP.Runtime.Particle.ECS
                 return;
 
             VividEcsTypeManager.RegisterSoa<VividParticleCommon>();
+            VividEcsTypeManager.RegisterSoa<VividParticleAnimatedMotion>();
+            VividEcsTypeManager.RegisterSoa<VividParticleNoiseState>();
             VividEcsTypeManager.RegisterShared<VividParticleSystemId>();
+            VividEcsTypeManager.RegisterShared<VividParticleModuleSharedKey>();
+            VividEcsTypeManager.RegisterShared<VividParticleSimulationKernelSharedKey>();
+            VividEcsTypeManager.RegisterShared<VividParticleRenderKernelSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleRendererSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleRendererHandle>();
             VividEcsTypeManager.RegisterTag<VividParticleSimulationActive>();
@@ -93,6 +98,141 @@ namespace VividRP.Runtime.Particle.ECS
 
     internal struct VividParticleSimulationActive : IVividEcsTagComponentData
     {
+    }
+
+    [Flags]
+    internal enum VividParticleModuleFlags : uint
+    {
+        None = 0u,
+        ForceOverLifetime = 1u << 0,
+        VelocityOverLifetime = 1u << 1,
+        ColorOverLifetime = 1u << 2,
+        SizeOverLifetime = 1u << 3,
+        RotationOverLifetime = 1u << 4,
+        MeshRenderer = 1u << 5,
+        StretchRenderer = 1u << 6,
+        Sorting = 1u << 7,
+        TextureSheetAnimation = 1u << 8,
+        LimitVelocityOverLifetime = 1u << 9,
+        ColorBySpeed = 1u << 10,
+        SizeBySpeed = 1u << 11,
+        RotationBySpeed = 1u << 12,
+        Noise = 1u << 13,
+    }
+
+    internal readonly struct VividParticleModuleSharedKey : IVividEcsSharedComponentData,
+        IEquatable<VividParticleModuleSharedKey>
+    {
+        public static readonly VividParticleModuleSharedKey None = new(VividParticleModuleFlags.None);
+
+        public VividParticleModuleSharedKey(VividParticleModuleFlags enabledFlags)
+        {
+            EnabledFlags = enabledFlags;
+        }
+
+        public VividParticleModuleFlags EnabledFlags { get; }
+
+        public bool Has(VividParticleModuleFlags flags)
+        {
+            return (EnabledFlags & flags) == flags;
+        }
+
+        public bool Equals(VividParticleModuleSharedKey other)
+        {
+            return EnabledFlags == other.EnabledFlags;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividParticleModuleSharedKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return (int)EnabledFlags;
+        }
+    }
+
+    internal readonly struct VividParticleSimulationKernelSharedKey : IVividEcsSharedComponentData,
+        IEquatable<VividParticleSimulationKernelSharedKey>
+    {
+        public static readonly VividParticleSimulationKernelSharedKey Base = new(
+            VividParticleModuleFlags.None);
+
+        public VividParticleSimulationKernelSharedKey(VividParticleModuleFlags enabledFlags)
+        {
+            EnabledFlags = enabledFlags & (
+                VividParticleModuleFlags.VelocityOverLifetime
+                | VividParticleModuleFlags.LimitVelocityOverLifetime
+                | VividParticleModuleFlags.RotationBySpeed
+                | VividParticleModuleFlags.Noise);
+        }
+
+        public VividParticleModuleFlags EnabledFlags { get; }
+
+        public bool Has(VividParticleModuleFlags flags)
+        {
+            return (EnabledFlags & flags) == flags;
+        }
+
+        public bool Equals(VividParticleSimulationKernelSharedKey other)
+        {
+            return EnabledFlags == other.EnabledFlags;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividParticleSimulationKernelSharedKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return (int)EnabledFlags;
+        }
+    }
+
+    internal readonly struct VividParticleRenderKernelSharedKey : IVividEcsSharedComponentData,
+        IEquatable<VividParticleRenderKernelSharedKey>
+    {
+        private const VividParticleModuleFlags RenderKernelMask =
+            VividParticleModuleFlags.VelocityOverLifetime
+            | VividParticleModuleFlags.ColorOverLifetime
+            | VividParticleModuleFlags.SizeOverLifetime
+            | VividParticleModuleFlags.RotationOverLifetime
+            | VividParticleModuleFlags.TextureSheetAnimation
+            | VividParticleModuleFlags.ColorBySpeed
+            | VividParticleModuleFlags.SizeBySpeed
+            | VividParticleModuleFlags.RotationBySpeed;
+
+        public static readonly VividParticleRenderKernelSharedKey Base = new(
+            VividParticleModuleFlags.None);
+
+        public VividParticleRenderKernelSharedKey(VividParticleModuleFlags enabledFlags)
+        {
+            EnabledFlags = enabledFlags & RenderKernelMask;
+        }
+
+        public VividParticleModuleFlags EnabledFlags { get; }
+
+        public bool Has(VividParticleModuleFlags flags)
+        {
+            return (EnabledFlags & flags) == flags;
+        }
+
+        public bool Equals(VividParticleRenderKernelSharedKey other)
+        {
+            return EnabledFlags == other.EnabledFlags;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividParticleRenderKernelSharedKey other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return (int)EnabledFlags;
+        }
     }
 
     internal readonly struct VividParticleRendererSharedKey : IVividEcsSharedComponentData, IEquatable<VividParticleRendererSharedKey>
@@ -228,7 +368,8 @@ namespace VividRP.Runtime.Particle.ECS
         public const int StartColorFieldIndex = 4;
         public const int SizeFieldIndex = 5;
         public const int MeshIndexFieldIndex = 6;
-        public const int FieldCountValue = 7;
+        public const int AccumulatedRotationFieldIndex = 7;
+        public const int FieldCountValue = 8;
         public const int FloatSizeInBytes = sizeof(float);
         public const int IntSizeInBytes = sizeof(int);
         public const int Float3SizeInBytes = sizeof(float) * 3;
@@ -240,7 +381,10 @@ namespace VividRP.Runtime.Particle.ECS
         public const int StartColorOffsetInPage = RemainingLifetimeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
         public const int SizeOffsetInPage = StartColorOffsetInPage + Float4SizeInBytes * VividEcsConstants.PageEntryCount;
         public const int MeshIndexOffsetInPage = SizeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
-        public const int TypeSizeInBytes = MeshIndexOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int AccumulatedRotationOffsetInPage =
+            MeshIndexOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int TypeSizeInBytes =
+            AccumulatedRotationOffsetInPage + Float3SizeInBytes * VividEcsConstants.PageEntryCount;
 
         public int FieldCount => FieldCountValue;
 
@@ -257,6 +401,8 @@ namespace VividRP.Runtime.Particle.ECS
                 StartColorFieldIndex => new VividEcsSoaFieldInfo(StartColorOffsetInPage, Float4SizeInBytes),
                 SizeFieldIndex => new VividEcsSoaFieldInfo(SizeOffsetInPage, FloatSizeInBytes),
                 MeshIndexFieldIndex => new VividEcsSoaFieldInfo(MeshIndexOffsetInPage, IntSizeInBytes),
+                AccumulatedRotationFieldIndex =>
+                    new VividEcsSoaFieldInfo(AccumulatedRotationOffsetInPage, Float3SizeInBytes),
                 _ => throw new ArgumentOutOfRangeException(nameof(index)),
             };
         }
@@ -264,6 +410,56 @@ namespace VividRP.Runtime.Particle.ECS
         public static VividEcsSoaFieldInfo GetStaticFieldInfo(int index)
         {
             return default(VividParticleCommon).GetFieldInfo(index);
+        }
+    }
+
+    internal struct VividParticleAnimatedMotion : IVividEcsSoaComponentData
+    {
+        public const int VelocityFieldIndex = 0;
+        public const int FieldCountValue = 1;
+        public const int Float3SizeInBytes = sizeof(float) * 3;
+        public const int VelocityOffsetInPage = 0;
+        public const int TypeSizeInBytes = Float3SizeInBytes * VividEcsConstants.PageEntryCount;
+
+        public int FieldCount => FieldCountValue;
+
+        public int TypeSize => TypeSizeInBytes;
+
+        public VividEcsSoaFieldInfo GetFieldInfo(int index)
+        {
+            return index == VelocityFieldIndex
+                ? new VividEcsSoaFieldInfo(VelocityOffsetInPage, Float3SizeInBytes)
+                : throw new ArgumentOutOfRangeException(nameof(index));
+        }
+    }
+
+    internal struct VividParticleNoiseState : IVividEcsSoaComponentData
+    {
+        public const int PhaseFieldIndex = 0;
+        public const int SizeMultiplierFieldIndex = 1;
+        public const int FieldCountValue = 2;
+        public const int Float3SizeInBytes = sizeof(float) * 3;
+        public const int FloatSizeInBytes = sizeof(float);
+        public const int PhaseOffsetInPage = 0;
+        public const int SizeMultiplierOffsetInPage =
+            PhaseOffsetInPage + Float3SizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int TypeSizeInBytes = SizeMultiplierOffsetInPage
+            + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
+
+        public int FieldCount => FieldCountValue;
+
+        public int TypeSize => TypeSizeInBytes;
+
+        public VividEcsSoaFieldInfo GetFieldInfo(int index)
+        {
+            return index switch
+            {
+                PhaseFieldIndex => new VividEcsSoaFieldInfo(PhaseOffsetInPage, Float3SizeInBytes),
+                SizeMultiplierFieldIndex => new VividEcsSoaFieldInfo(
+                    SizeMultiplierOffsetInPage,
+                    FloatSizeInBytes),
+                _ => throw new ArgumentOutOfRangeException(nameof(index)),
+            };
         }
     }
 }

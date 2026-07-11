@@ -18,7 +18,13 @@ namespace VividRP.Editor.Tests
         {
             VividParticleEcsBootstrap.RegisterTypes();
             VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividEcsTypeIndex noiseStateIndex = VividEcsTypeManager.GetTypeIndex<VividParticleNoiseState>();
             VividEcsTypeIndex systemIdIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
+            VividEcsTypeIndex moduleKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleModuleSharedKey>();
+            VividEcsTypeIndex simulationKernelKeyIndex =
+                VividEcsTypeManager.GetTypeIndex<VividParticleSimulationKernelSharedKey>();
+            VividEcsTypeIndex renderKernelKeyIndex =
+                VividEcsTypeManager.GetTypeIndex<VividParticleRenderKernelSharedKey>();
             VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
             VividEcsTypeIndex rendererHandleIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererHandle>();
             VividEcsTypeIndex simulationActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
@@ -26,13 +32,21 @@ namespace VividRP.Editor.Tests
             VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
 
             Assert.That(commonIndex.IsValid, Is.True);
+            Assert.That(noiseStateIndex.IsValid, Is.True);
+            Assert.That(noiseStateIndex.IsSoaComponentType, Is.True);
             Assert.That(systemIdIndex.IsValid, Is.True);
+            Assert.That(moduleKeyIndex.IsValid, Is.True);
+            Assert.That(simulationKernelKeyIndex.IsValid, Is.True);
+            Assert.That(renderKernelKeyIndex.IsValid, Is.True);
             Assert.That(rendererKeyIndex.IsValid, Is.True);
             Assert.That(rendererHandleIndex.IsValid, Is.True);
             Assert.That(simulationActiveIndex.IsValid, Is.True);
             Assert.That(rendererActiveIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
             Assert.That(systemIdIndex.IsSharedComponentType, Is.True);
+            Assert.That(moduleKeyIndex.IsSharedComponentType, Is.True);
+            Assert.That(simulationKernelKeyIndex.IsSharedComponentType, Is.True);
+            Assert.That(renderKernelKeyIndex.IsSharedComponentType, Is.True);
             Assert.That(rendererKeyIndex.IsSharedComponentType, Is.True);
             Assert.That(rendererHandleIndex.IsSharedComponentType, Is.True);
             Assert.That(simulationActiveIndex.IsTagComponentType, Is.True);
@@ -48,6 +62,12 @@ namespace VividRP.Editor.Tests
             Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.SizeFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.SizeOffsetInPage));
             Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.MeshIndexFieldIndex).OffsetInPage, Is.EqualTo(VividParticleCommon.MeshIndexOffsetInPage));
             Assert.That(commonType.GetSoaFieldInfo(VividParticleCommon.MeshIndexFieldIndex).ElementSize, Is.EqualTo(VividParticleCommon.IntSizeInBytes));
+            Assert.That(
+                commonType.GetSoaFieldInfo(VividParticleCommon.AccumulatedRotationFieldIndex).OffsetInPage,
+                Is.EqualTo(VividParticleCommon.AccumulatedRotationOffsetInPage));
+            Assert.That(
+                commonType.GetSoaFieldInfo(VividParticleCommon.AccumulatedRotationFieldIndex).ElementSize,
+                Is.EqualTo(VividParticleCommon.Float3SizeInBytes));
         }
 
         [Test]
@@ -107,6 +127,7 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.GetStartLifetime(259), Is.EqualTo(10.0f));
             Assert.That(storage.GetRemainingLifetime(259), Is.EqualTo(10.0f));
             Assert.That(storage.GetSize(259), Is.EqualTo(260.0f));
+            AssertVector3(Vector3.zero, storage.GetAccumulatedRotation(259));
             AssertColor(new Color(0.25f, 0.5f, 0.75f, 1.0f), storage.GetColor(259));
             Assert.That(storage.GetMeshIndex(259), Is.EqualTo(259 % 3));
 
@@ -119,10 +140,50 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_NoiseStateColumn_IsLazyAndPreservesCommonParticleData()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(32);
+            Assert.That(AddParticle(storage, 3), Is.True);
+
+            Vector3 position = storage.GetPosition(0);
+            Vector3 velocity = storage.GetVelocity(0);
+            Color color = storage.GetColor(0);
+            float size = storage.GetSize(0);
+            int lineId = storage.archetypeLineId;
+
+            Assert.That(storage.hasNoiseStateColumn, Is.False);
+
+            storage.EnsureNoiseStateColumn();
+
+            Assert.That(storage.hasNoiseStateColumn, Is.True);
+            Assert.That(storage.archetypeLineId, Is.EqualTo(lineId));
+            Assert.That(storage.activeCount, Is.EqualTo(1));
+            AssertVector3(position, storage.GetPosition(0));
+            AssertVector3(velocity, storage.GetVelocity(0));
+            AssertColor(color, storage.GetColor(0));
+            Assert.That(storage.GetSize(0), Is.EqualTo(size));
+        }
+
+        [Test]
         public void Storage_QueryLineGroups_UseSharedRendererKey()
         {
             using var storage = new VividParticleEcsStorage();
             storage.systemId = new VividParticleSystemId(17);
+            var moduleKey = new VividParticleModuleSharedKey(
+                VividParticleModuleFlags.VelocityOverLifetime
+                | VividParticleModuleFlags.LimitVelocityOverLifetime
+                | VividParticleModuleFlags.ColorOverLifetime
+                | VividParticleModuleFlags.ColorBySpeed
+                | VividParticleModuleFlags.SizeBySpeed
+                | VividParticleModuleFlags.RotationBySpeed
+                | VividParticleModuleFlags.Noise
+                | VividParticleModuleFlags.TextureSheetAnimation);
+            storage.moduleSharedKey = moduleKey;
+            storage.simulationKernelSharedKey = new VividParticleSimulationKernelSharedKey(
+                moduleKey.EnabledFlags);
+            storage.renderKernelSharedKey = new VividParticleRenderKernelSharedKey(
+                moduleKey.EnabledFlags);
             var rendererKey = new VividParticleRendererSharedKey(
                 materialId: 1,
                 meshId: 2,
@@ -151,6 +212,22 @@ namespace VividRP.Editor.Tests
             Assert.That(groups, Has.Count.EqualTo(1));
             Assert.That(groups[0].activeCount, Is.EqualTo(1));
             Assert.That(storage.rendererSharedKey, Is.EqualTo(rendererKey));
+            Assert.That(storage.moduleSharedKey, Is.EqualTo(moduleKey));
+            Assert.That(storage.moduleSharedKey.Has(VividParticleModuleFlags.VelocityOverLifetime), Is.True);
+            Assert.That(
+                storage.simulationKernelSharedKey.EnabledFlags,
+                Is.EqualTo(VividParticleModuleFlags.VelocityOverLifetime
+                    | VividParticleModuleFlags.LimitVelocityOverLifetime
+                    | VividParticleModuleFlags.RotationBySpeed
+                    | VividParticleModuleFlags.Noise));
+            Assert.That(
+                storage.renderKernelSharedKey.EnabledFlags,
+                Is.EqualTo(VividParticleModuleFlags.VelocityOverLifetime
+                    | VividParticleModuleFlags.ColorOverLifetime
+                    | VividParticleModuleFlags.ColorBySpeed
+                    | VividParticleModuleFlags.SizeBySpeed
+                    | VividParticleModuleFlags.RotationBySpeed
+                    | VividParticleModuleFlags.TextureSheetAnimation));
             Assert.That(storage.rendererHandle, Is.EqualTo(rendererHandle));
             Assert.That(storage.rendererActive, Is.True);
             storage.rendererHandle = VividParticleRendererHandle.Invalid;
@@ -737,6 +814,26 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_AnimatedMotionColumn_IsLazyAndPreservesCommonData()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(32);
+            Assert.That(AddParticle(storage, 0), Is.True);
+            Assert.That(storage.hasAnimatedMotionColumn, Is.False);
+
+            storage.EnsureAnimatedMotionColumn();
+
+            Assert.That(storage.hasAnimatedMotionColumn, Is.True);
+            Assert.That(storage.EnsureColumnView(), Is.True);
+            AssertVector3(Vector3.zero, storage.GetAnimatedVelocity(0));
+            AssertVector3(new Vector3(0.0f, 1.0f, 2.0f), storage.GetPosition(0));
+
+            storage.EnsureCapacity(300);
+            Assert.That(storage.EnsureColumnView(), Is.True);
+            AssertVector3(new Vector3(0.0f, 1.0f, 2.0f), storage.GetPosition(0));
+        }
+
+        [Test]
         public void Storage_DisposeCanRepeat_WithoutThrowing()
         {
             var storage = new VividParticleEcsStorage();
@@ -785,6 +882,9 @@ namespace VividRP.Editor.Tests
                 1.0f,
                 Vector3.one,
                 25.0f,
+                false,
+                Vector3.zero,
+                VividParticleForceSpace.Local,
                 true,
                 VividParticleRenderMode.Billboard,
                 null,

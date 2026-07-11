@@ -103,6 +103,7 @@ namespace VividRP.Runtime.Particle
         private static readonly Stack<int> s_FreeNativeSimulationConfigSlots = new();
         private static readonly VividParticleRendererManager s_RendererManager = new();
         private static NativeList<VividParticleNativeSimulationConfig> s_NativeSimulationConfigs;
+        private static NativeList<VividParticleNativeRenderModuleConfig> s_NativeRenderModuleConfigs;
         private static NativeList<VividParticleNativeBurst> s_NativeSimulationBursts;
         private static NativeList<VividParticleSimulationPrepareInput> s_SimulationPrepareInputs;
         private static NativeList<VividParticleSimulationPrepareOutput> s_SimulationPrepareOutputs;
@@ -110,6 +111,7 @@ namespace VividRP.Runtime.Particle
         private static NativeList<VividParticleEmissionPlanOutput> s_EmissionPlanOutputs;
         private static NativeList<int> s_PendingSimulationSystemIds;
         private static NativeList<VividParticleEcsIntegratePageWork> s_SimulationPageWorks;
+        private static NativeList<VividParticleEcsIntegratePageWork> s_VelocitySimulationPageWorks;
         private static NativeList<VividParticleEcsCompactWork> s_SimulationCompactWorks;
         private static NativeList<VividParticleEcsInitializeParticlesWork> s_EmissionInitializeWorks;
         private static NativeList<VividParticleEcsInitializeParticlesWork> s_EmissionInitializePageWorks;
@@ -118,6 +120,8 @@ namespace VividRP.Runtime.Particle
         private static bool s_HasPendingSimulationBatch;
         private static bool s_ApplyingPendingSimulations;
         private static VividEcsQuery s_ActiveSimulationLineQuery;
+        private static VividEcsArchetypeLineGroupCache s_ActiveSimulationModuleLineGroupCache;
+        private static VividEcsTypeIndex s_ActiveSimulationKernelSharedKeyTypeIndex = VividEcsTypeIndex.Invalid;
         private static VividEcsQuery s_ActiveRendererLineQuery;
         private static int s_NextParticleSystemId = 1;
         private static int s_LastEmissionInitializeWorkCount;
@@ -126,6 +130,12 @@ namespace VividRP.Runtime.Particle
         private static int s_LastEmissionInitializePageWorkCount;
         private static int s_LastActiveSimulationQueryLineCount;
         private static int s_LastInvalidActiveSimulationQueryLineCount;
+        private static int s_LastActiveSimulationModuleGroupCount;
+        private static int s_LastSimulationModuleGroupCacheBuildCount;
+        private static int s_LastSimulationModuleGroupCacheHitCount;
+        private static int s_LastSimulationModuleGroupSourceScanCount;
+        private static int s_LastBaseSimulationPageWorkCount;
+        private static int s_LastVelocitySimulationPageWorkCount;
         private static int s_LastSimulationPrepareInlineCount;
         private static int s_LastSimulationPrepareScheduledCount;
         private static int s_NativeSimulationConfigUpdateCount;
@@ -182,6 +192,11 @@ namespace VividRP.Runtime.Particle
                 ? s_NativeSimulationConfigs.Length - s_FreeNativeSimulationConfigSlots.Count
                 : 0;
 
+        internal static int nativeRenderModuleConfigCount =>
+            s_NativeRenderModuleConfigs.IsCreated
+                ? s_NativeRenderModuleConfigs.Length - s_FreeNativeSimulationConfigSlots.Count
+                : 0;
+
         internal static int nativeSimulationBurstCount =>
             s_NativeSimulationBursts.IsCreated ? s_NativeSimulationBursts.Length : 0;
 
@@ -206,7 +221,34 @@ namespace VividRP.Runtime.Particle
         internal static int pendingRendererRemoveCountForTests => s_RendererManager.pendingRemoveCount;
 
         internal static int pendingSimulationPageWorkCountForTests =>
-            s_SimulationPageWorks.IsCreated ? s_SimulationPageWorks.Length : 0;
+            (s_SimulationPageWorks.IsCreated ? s_SimulationPageWorks.Length : 0)
+            + (s_VelocitySimulationPageWorks.IsCreated ? s_VelocitySimulationPageWorks.Length : 0);
+
+        internal static int lastActiveSimulationModuleGroupCount => s_LastActiveSimulationModuleGroupCount;
+
+        internal static int lastSimulationModuleGroupCacheBuildCount =>
+            s_LastSimulationModuleGroupCacheBuildCount;
+
+        internal static int lastSimulationModuleGroupCacheHitCount =>
+            s_LastSimulationModuleGroupCacheHitCount;
+
+        internal static int lastSimulationModuleGroupSourceScanCount =>
+            s_LastSimulationModuleGroupSourceScanCount;
+
+        internal static int lastBaseSimulationPageWorkCount => s_LastBaseSimulationPageWorkCount;
+
+        internal static int lastVelocitySimulationPageWorkCount => s_LastVelocitySimulationPageWorkCount;
+
+        internal static uint lastRenderKernelFlags => s_RendererManager.lastRenderKernelFlags;
+
+        internal static int lastAnimatedTransformPageWorkCount =>
+            s_RendererManager.lastAnimatedTransformPageWorkCount;
+
+        internal static int lastAnimatedColorPageWorkCount =>
+            s_RendererManager.lastAnimatedColorPageWorkCount;
+
+        internal static int lastAnimatedVelocityPageWorkCount =>
+            s_RendererManager.lastAnimatedVelocityPageWorkCount;
 
         internal static int ResolveRenderJobModuleFlagsForTests(
             bool requestPageUpload,
@@ -286,6 +328,7 @@ namespace VividRP.Runtime.Particle
             Initialize();
             if (!s_States.ContainsKey(system))
             {
+                s_RendererManager.CompletePendingUpload();
                 CompletePendingSimulations();
                 VividParticleSystemId systemId = AllocateParticleSystemId();
                 int nativeSimulationConfigSlot = AllocateNativeSimulationConfigSlot();
@@ -293,6 +336,7 @@ namespace VividRP.Runtime.Particle
                 s_States.Add(system, state);
                 s_StatesBySystemId.Add(systemId.Value, state);
                 SyncNativeSimulationConfig(state);
+                state.RefreshNativeBurstHash();
                 RebuildNativeSimulationBursts();
                 RefreshActiveSimulationState(state);
                 RefreshActiveRendererState(state);
@@ -378,6 +422,16 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        internal static void MarkParticleDataDirty(VividParticleSystem system, int columnMask)
+        {
+            if (system == null || !s_States.TryGetValue(system, out ParticleSystemState state))
+                return;
+
+            state.MarkParticleDataDirty(columnMask);
+            s_LastRendererUpdateFrame = -1;
+            s_LastCompleteAndUploadFrame = -1;
+        }
+
         internal static void NotifySimulationStateChanged(VividParticleSystem system)
         {
             if (system != null && s_States.TryGetValue(system, out ParticleSystemState state))
@@ -397,7 +451,8 @@ namespace VividRP.Runtime.Particle
 
             state.NotifySettingsChanged();
             SyncNativeSimulationConfig(state);
-            RebuildNativeSimulationBursts();
+            if (state.RefreshNativeBurstHash())
+                RebuildNativeSimulationBursts();
             RefreshActiveRendererState(state);
         }
 
@@ -639,6 +694,8 @@ namespace VividRP.Runtime.Particle
             s_FreeNativeSimulationConfigSlots.Clear();
             if (s_NativeSimulationConfigs.IsCreated)
                 s_NativeSimulationConfigs.Dispose();
+            if (s_NativeRenderModuleConfigs.IsCreated)
+                s_NativeRenderModuleConfigs.Dispose();
             if (s_NativeSimulationBursts.IsCreated)
                 s_NativeSimulationBursts.Dispose();
             if (s_SimulationPrepareInputs.IsCreated)
@@ -650,6 +707,7 @@ namespace VividRP.Runtime.Particle
             if (s_EmissionPlanOutputs.IsCreated)
                 s_EmissionPlanOutputs.Dispose();
             s_NativeSimulationConfigs = default;
+            s_NativeRenderModuleConfigs = default;
             s_NativeSimulationBursts = default;
             s_SimulationPrepareInputs = default;
             s_SimulationPrepareOutputs = default;
@@ -659,6 +717,8 @@ namespace VividRP.Runtime.Particle
                 s_PendingSimulationSystemIds.Dispose();
             if (s_SimulationPageWorks.IsCreated)
                 s_SimulationPageWorks.Dispose();
+            if (s_VelocitySimulationPageWorks.IsCreated)
+                s_VelocitySimulationPageWorks.Dispose();
             s_PendingSimulationSystemIds = default;
             if (s_SimulationCompactWorks.IsCreated)
                 s_SimulationCompactWorks.Dispose();
@@ -667,6 +727,7 @@ namespace VividRP.Runtime.Particle
             if (s_EmissionInitializePageWorks.IsCreated)
                 s_EmissionInitializePageWorks.Dispose();
             s_SimulationPageWorks = default;
+            s_VelocitySimulationPageWorks = default;
             s_SimulationCompactWorks = default;
             s_EmissionInitializeWorks = default;
             s_EmissionInitializePageWorks = default;
@@ -679,6 +740,12 @@ namespace VividRP.Runtime.Particle
             s_LastEmissionInitializePageWorkCount = 0;
             s_LastActiveSimulationQueryLineCount = 0;
             s_LastInvalidActiveSimulationQueryLineCount = 0;
+            s_LastActiveSimulationModuleGroupCount = 0;
+            s_LastSimulationModuleGroupCacheBuildCount = 0;
+            s_LastSimulationModuleGroupCacheHitCount = 0;
+            s_LastSimulationModuleGroupSourceScanCount = 0;
+            s_LastBaseSimulationPageWorkCount = 0;
+            s_LastVelocitySimulationPageWorkCount = 0;
             s_LastSimulationPrepareInlineCount = 0;
             s_LastSimulationPrepareScheduledCount = 0;
             s_NativeSimulationConfigUpdateCount = 0;
@@ -692,6 +759,8 @@ namespace VividRP.Runtime.Particle
             s_RendererManager.Dispose();
             s_ParticleEcsWorld.Dispose();
             s_ActiveSimulationLineQuery = null;
+            s_ActiveSimulationModuleLineGroupCache = null;
+            s_ActiveSimulationKernelSharedKeyTypeIndex = VividEcsTypeIndex.Invalid;
             s_ActiveRendererLineQuery = null;
             s_NextParticleSystemId = 1;
             s_LastPlayerLoopFrame = -1;
@@ -727,6 +796,36 @@ namespace VividRP.Runtime.Particle
 
             stats = state.runtimeStats;
             return true;
+        }
+
+        internal static int GetRenderIdentityRefreshCountForTests(VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
+                ? state.renderIdentityRefreshCount
+                : 0;
+        }
+
+        internal static VividParticleModuleFlags GetSimulationKernelFlagsForTests(
+            VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
+                ? state.simulationKernelSharedKey.EnabledFlags
+                : VividParticleModuleFlags.None;
+        }
+
+        internal static VividParticleModuleFlags GetRenderKernelFlagsForTests(
+            VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
+                ? state.renderKernelSharedKey.EnabledFlags
+                : VividParticleModuleFlags.None;
+        }
+
+        internal static bool HasNoiseStateColumnForTests(VividParticleSystem system)
+        {
+            return system != null
+                && s_States.TryGetValue(system, out ParticleSystemState state)
+                && state.hasNoiseStateColumn;
         }
 
         internal static VividParticleRendererManagerStats GetRendererStats()
@@ -1097,6 +1196,35 @@ namespace VividRP.Runtime.Particle
                 : math.normalizesafe(localToWorld.c2.xyz, new float3(0.0f, 0.0f, 1.0f));
             float renderSize = math.max(VividParticleMainModule.MinimumStartSize, startSize);
             return new float4(direction * startSpeed, renderSize);
+        }
+
+        internal static float4 ResolveTextureSheetAnimationUV(
+            int tilesX,
+            int tilesY,
+            VividParticleTextureSheetAnimationType animationType,
+            int rowIndex,
+            float startFrame,
+            float cycleCount,
+            float frameOverTime)
+        {
+            tilesX = math.max(1, tilesX);
+            tilesY = math.max(1, tilesY);
+            bool singleRow = animationType == VividParticleTextureSheetAnimationType.SingleRow;
+            int frameCount = singleRow ? tilesX : tilesX * tilesY;
+            float frameTime = startFrame + frameOverTime * math.max(0.0f, cycleCount);
+            float wrappedFrameTime = frameTime - math.floor(frameTime);
+            int frameIndex = math.min(frameCount - 1, (int)math.floor(wrappedFrameTime * frameCount));
+            int column = frameIndex % tilesX;
+            int row = singleRow
+                ? math.clamp(rowIndex, 0, tilesY - 1)
+                : frameIndex / tilesX;
+            float invTilesX = 1.0f / tilesX;
+            float invTilesY = 1.0f / tilesY;
+            return new float4(
+                column * invTilesX,
+                1.0f - invTilesY - row * invTilesY,
+                invTilesX,
+                invTilesY);
         }
 
         internal static int ResolveSplitVisibilityMaskForView(
@@ -1623,9 +1751,25 @@ namespace VividRP.Runtime.Particle
 
             VividEcsQuery activeSimulationQuery = GetOrCreateActiveSimulationLineQuery();
             int matchingLineCount;
+            IReadOnlyList<VividEcsArchetypeLineGroup> moduleGroups;
             using (s_KickCollectActiveMarker.Auto())
             {
-                matchingLineCount = activeSimulationQuery.PrepareMatchingLines();
+                VividEcsArchetypeLineGroupCache moduleGroupCache =
+                    GetOrCreateActiveSimulationModuleLineGroupCache(activeSimulationQuery);
+                int previousBuildCount = moduleGroupCache.cacheRebuildCount;
+                int previousHitCount = moduleGroupCache.cacheHitCount;
+                moduleGroupCache.Prepare();
+                moduleGroups = moduleGroupCache.groups;
+                matchingLineCount = 0;
+                for (int groupIndex = 0; groupIndex < moduleGroups.Count; groupIndex++)
+                    matchingLineCount += moduleGroups[groupIndex].lineCount;
+
+                s_LastActiveSimulationModuleGroupCount = moduleGroupCache.groupCount;
+                s_LastSimulationModuleGroupCacheBuildCount =
+                    moduleGroupCache.cacheRebuildCount - previousBuildCount;
+                s_LastSimulationModuleGroupCacheHitCount =
+                    moduleGroupCache.cacheHitCount - previousHitCount;
+                s_LastSimulationModuleGroupSourceScanCount = moduleGroupCache.lastSourceLineScanCount;
                 s_LastActiveSimulationQueryLineCount = matchingLineCount;
                 s_LastInvalidActiveSimulationQueryLineCount = 0;
             }
@@ -1634,21 +1778,23 @@ namespace VividRP.Runtime.Particle
             {
                 EnsureNativeSimulationData();
                 s_SimulationPrepareInputs.Clear();
-                for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
+                for (int groupIndex = 0; groupIndex < moduleGroups.Count; groupIndex++)
                 {
-                    if (!TryResolveParticleState(
-                            activeSimulationQuery.GetMatchingLine(lineIndex),
-                            out ParticleSystemState state))
+                    IReadOnlyList<VividEcsArchetypeLine> lines = moduleGroups[groupIndex].lines;
+                    for (int lineIndex = 0; lineIndex < lines.Count; lineIndex++)
                     {
-                        s_LastInvalidActiveSimulationQueryLineCount++;
-                        continue;
-                    }
+                        if (!TryResolveParticleState(lines[lineIndex], out ParticleSystemState state))
+                        {
+                            s_LastInvalidActiveSimulationQueryLineCount++;
+                            continue;
+                        }
 
-                    if (state.TryCreateAutomaticPrepareInput(
-                        deltaTimeOverride,
-                        out VividParticleSimulationPrepareInput input))
-                    {
-                        s_SimulationPrepareInputs.Add(input);
+                        if (state.TryCreateAutomaticPrepareInput(
+                            deltaTimeOverride,
+                            out VividParticleSimulationPrepareInput input))
+                        {
+                            s_SimulationPrepareInputs.Add(input);
+                        }
                     }
                 }
 
@@ -1687,6 +1833,7 @@ namespace VividRP.Runtime.Particle
                 EnsureSimulationPageWorkList();
                 s_PendingSimulationSystemIds.Clear();
                 s_SimulationPageWorks.Clear();
+                s_VelocitySimulationPageWorks.Clear();
                 s_SimulationCompactWorks.Clear();
                 s_EmissionPlanInputs.Clear();
                 s_EmissionPlanOutputs.Clear();
@@ -1696,13 +1843,17 @@ namespace VividRP.Runtime.Particle
                     VividParticleSimulationPrepareOutput output = s_SimulationPrepareOutputs[prepareIndex];
                     if (output.ShouldSchedule == 0
                         || !s_StatesBySystemId.TryGetValue(output.SystemId, out ParticleSystemState state)
-                        || !state.PrepareAutomaticSimulation(output)
-                        || !state.SchedulePreparedAutomaticBatch(
-                            s_SimulationPageWorks,
-                            s_SimulationCompactWorks))
+                        || !state.PrepareAutomaticSimulation(output))
                     {
                         continue;
                     }
+
+                    NativeList<VividParticleEcsIntegratePageWork> integrateWorks =
+                        state.simulationKernelSharedKey.EnabledFlags != VividParticleModuleFlags.None
+                            ? s_VelocitySimulationPageWorks
+                            : s_SimulationPageWorks;
+                    if (!state.SchedulePreparedAutomaticBatch(integrateWorks, s_SimulationCompactWorks))
+                        continue;
 
                     s_PendingSimulationSystemIds.Add(state.systemId.Value);
                     s_EmissionPlanInputs.Add(state.CreatePreparedEmissionPlanInput());
@@ -1711,17 +1862,43 @@ namespace VividRP.Runtime.Particle
 
                 JobHandle simulationGraphHandle = default;
                 bool hasSimulationGraphHandle = false;
+                JobHandle integrateHandle = default;
+                bool hasIntegrateHandle = false;
+                s_LastBaseSimulationPageWorkCount = s_SimulationPageWorks.Length;
+                s_LastVelocitySimulationPageWorkCount = s_VelocitySimulationPageWorks.Length;
                 if (s_SimulationPageWorks.Length > 0)
                 {
                     var integrateJob = new VividParticleEcsIntegratePageWorksJob
                     {
                         Works = s_SimulationPageWorks.AsArray(),
                     };
-                    JobHandle integrateHandle = integrateJob.ScheduleParallelEmbedded(
+                    integrateHandle = integrateJob.ScheduleParallelEmbedded(
                         s_SimulationPageWorks.AsArray(),
                         pageInfoByteOffset: 0,
                         innerloopBatchCount: 1,
                         dispatchMode: VividEcsPageDispatchMode.Average);
+                    hasIntegrateHandle = true;
+                }
+
+                if (s_VelocitySimulationPageWorks.Length > 0)
+                {
+                    var velocityIntegrateJob = new VividParticleEcsIntegratePageWorksJob
+                    {
+                        Works = s_VelocitySimulationPageWorks.AsArray(),
+                    };
+                    JobHandle velocityIntegrateHandle = velocityIntegrateJob.ScheduleParallelEmbedded(
+                        s_VelocitySimulationPageWorks.AsArray(),
+                        pageInfoByteOffset: 0,
+                        innerloopBatchCount: 1,
+                        dispatchMode: VividEcsPageDispatchMode.Average);
+                    integrateHandle = hasIntegrateHandle
+                        ? JobHandle.CombineDependencies(integrateHandle, velocityIntegrateHandle)
+                        : velocityIntegrateHandle;
+                    hasIntegrateHandle = true;
+                }
+
+                if (hasIntegrateHandle)
+                {
                     if (s_SimulationCompactWorks.Length > 0)
                     {
                         var compactJob = new VividParticleEcsCompactWorksJob
@@ -1810,6 +1987,9 @@ namespace VividRP.Runtime.Particle
                 s_PendingSimulationSystemIds = new NativeList<int>(64, Allocator.Persistent);
             if (!s_SimulationPageWorks.IsCreated)
                 s_SimulationPageWorks = new NativeList<VividParticleEcsIntegratePageWork>(64, Allocator.Persistent);
+            if (!s_VelocitySimulationPageWorks.IsCreated)
+                s_VelocitySimulationPageWorks =
+                    new NativeList<VividParticleEcsIntegratePageWork>(32, Allocator.Persistent);
             if (!s_SimulationCompactWorks.IsCreated)
                 s_SimulationCompactWorks = new NativeList<VividParticleEcsCompactWork>(32, Allocator.Persistent);
             if (!s_EmissionInitializeWorks.IsCreated)
@@ -1884,6 +2064,8 @@ namespace VividRP.Runtime.Particle
                 s_HasPendingSimulationBatch = false;
                 if (s_SimulationPageWorks.IsCreated)
                     s_SimulationPageWorks.Clear();
+                if (s_VelocitySimulationPageWorks.IsCreated)
+                    s_VelocitySimulationPageWorks.Clear();
                 if (s_SimulationCompactWorks.IsCreated)
                     s_SimulationCompactWorks.Clear();
                 EnsureSimulationPageWorkList();
@@ -1999,6 +2181,25 @@ namespace VividRP.Runtime.Particle
             return s_ActiveSimulationLineQuery;
         }
 
+        private static VividEcsArchetypeLineGroupCache GetOrCreateActiveSimulationModuleLineGroupCache(
+            VividEcsQuery query)
+        {
+            VividParticleEcsBootstrap.RegisterTypes();
+            VividEcsTypeIndex moduleSharedKeyTypeIndex =
+                VividEcsTypeManager.GetTypeIndex<VividParticleSimulationKernelSharedKey>();
+            if (s_ActiveSimulationModuleLineGroupCache == null
+                || s_ActiveSimulationKernelSharedKeyTypeIndex != moduleSharedKeyTypeIndex
+                || !s_ActiveSimulationModuleLineGroupCache.Matches(query, moduleSharedKeyTypeIndex))
+            {
+                s_ActiveSimulationModuleLineGroupCache = new VividEcsArchetypeLineGroupCache(
+                    query,
+                    moduleSharedKeyTypeIndex);
+                s_ActiveSimulationKernelSharedKeyTypeIndex = moduleSharedKeyTypeIndex;
+            }
+
+            return s_ActiveSimulationModuleLineGroupCache;
+        }
+
         private static void RemovePendingSimulationState(ParticleSystemState state)
         {
             if (state == null || !s_PendingSimulationSystemIds.IsCreated)
@@ -2019,6 +2220,8 @@ namespace VividRP.Runtime.Particle
         {
             if (!s_NativeSimulationConfigs.IsCreated)
                 s_NativeSimulationConfigs = new NativeList<VividParticleNativeSimulationConfig>(64, Allocator.Persistent);
+            if (!s_NativeRenderModuleConfigs.IsCreated)
+                s_NativeRenderModuleConfigs = new NativeList<VividParticleNativeRenderModuleConfig>(64, Allocator.Persistent);
             if (!s_NativeSimulationBursts.IsCreated)
                 s_NativeSimulationBursts = new NativeList<VividParticleNativeBurst>(64, Allocator.Persistent);
             if (!s_SimulationPrepareInputs.IsCreated)
@@ -2039,6 +2242,7 @@ namespace VividRP.Runtime.Particle
 
             int slot = s_NativeSimulationConfigs.Length;
             s_NativeSimulationConfigs.Add(default);
+            s_NativeRenderModuleConfigs.Add(default);
             return slot;
         }
 
@@ -2051,10 +2255,15 @@ namespace VividRP.Runtime.Particle
             }
 
             s_NativeSimulationConfigs[slot] = default;
+            if (s_NativeRenderModuleConfigs.IsCreated
+                && (uint)slot < (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                s_NativeRenderModuleConfigs[slot] = default;
+            }
             s_FreeNativeSimulationConfigSlots.Push(slot);
         }
 
-        private static void SyncNativeSimulationConfig(ParticleSystemState state)
+        private static unsafe void SyncNativeSimulationConfig(ParticleSystemState state)
         {
             if (state == null || state.system == null)
                 return;
@@ -2073,7 +2282,7 @@ namespace VividRP.Runtime.Particle
             Color startColor = main.startColor;
             Vector3 boxSize = shape.boxSize;
             Vector3 force = forceOverLifetime.force;
-            s_NativeSimulationConfigs[slot] = new VividParticleNativeSimulationConfig
+            var config = new VividParticleNativeSimulationConfig
             {
                 Duration = main.duration,
                 StartLifetime = main.startLifetime,
@@ -2100,7 +2309,425 @@ namespace VividRP.Runtime.Particle
                 BurstCount = previous.BurstCount,
                 Version = previous.Version + 1,
             };
+
+            s_NativeSimulationConfigs[slot] = config;
+            SyncNativeRenderModuleConfig(state, slot);
             s_NativeSimulationConfigUpdateCount++;
+        }
+
+        private static unsafe void SyncNativeRenderModuleConfig(ParticleSystemState state, int slot)
+        {
+            if (state == null
+                || state.system == null
+                || !s_NativeRenderModuleConfigs.IsCreated
+                || (uint)slot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return;
+            }
+
+            VividParticleColorOverLifetimeModule colorOverLifetime = state.system.colorOverLifetime;
+            VividParticleColorBySpeedModule colorBySpeed = state.system.colorBySpeed;
+            VividParticleSizeOverLifetimeModule sizeOverLifetime = state.system.sizeOverLifetime;
+            VividParticleSizeBySpeedModule sizeBySpeed = state.system.sizeBySpeed;
+            VividParticleRotationOverLifetimeModule rotationOverLifetime = state.system.rotationOverLifetime;
+            VividParticleRotationBySpeedModule rotationBySpeed = state.system.rotationBySpeed;
+            VividParticleNoiseModule noiseModule = state.system.noise;
+            VividParticleVelocityOverLifetimeModule velocityOverLifetime = state.system.velocityOverLifetime;
+            VividParticleLimitVelocityOverLifetimeModule limitVelocityOverLifetime =
+                state.system.limitVelocityOverLifetime;
+            VividParticleTextureSheetAnimationModule textureSheetAnimation = state.system.textureSheetAnimation;
+            VividParticleNativeRenderModuleConfig previous = s_NativeRenderModuleConfigs[slot];
+            var config = new VividParticleNativeRenderModuleConfig
+            {
+                ColorOverLifetimeEnabled = colorOverLifetime.enabled ? 1 : 0,
+                ColorBySpeedEnabled = colorBySpeed.enabled ? 1 : 0,
+                SizeOverLifetimeEnabled = sizeOverLifetime.enabled ? 1 : 0,
+                SizeBySpeedEnabled = sizeBySpeed.enabled ? 1 : 0,
+                RotationOverLifetimeEnabled = rotationOverLifetime.enabled ? 1 : 0,
+                RotationBySpeedEnabled = rotationBySpeed.enabled ? 1 : 0,
+                NoiseEnabled = noiseModule.enabled ? 1 : 0,
+                NoiseDamping = noiseModule.damping ? 1 : 0,
+                NoiseOctaveCount = noiseModule.octaveCount,
+                VelocityOverLifetimeEnabled = velocityOverLifetime.enabled ? 1 : 0,
+                VelocityOverLifetimeSpace = (int)velocityOverLifetime.space,
+                LimitVelocityOverLifetimeEnabled = limitVelocityOverLifetime.enabled ? 1 : 0,
+                LimitVelocitySeparateAxes = limitVelocityOverLifetime.separateAxes ? 1 : 0,
+                LimitVelocitySpace = (int)limitVelocityOverLifetime.space,
+                LimitVelocityMultiplyDragByParticleSize =
+                    limitVelocityOverLifetime.multiplyDragByParticleSize ? 1 : 0,
+                LimitVelocityMultiplyDragByParticleVelocity =
+                    limitVelocityOverLifetime.multiplyDragByParticleVelocity ? 1 : 0,
+                LimitVelocityDampen = limitVelocityOverLifetime.dampen,
+                TextureSheetAnimationEnabled = textureSheetAnimation.enabled ? 1 : 0,
+                TextureSheetTilesX = textureSheetAnimation.numTilesX,
+                TextureSheetTilesY = textureSheetAnimation.numTilesY,
+                TextureSheetAnimationType = (int)textureSheetAnimation.animation,
+                TextureSheetRowIndex = textureSheetAnimation.rowIndex,
+                TextureSheetStartFrame = textureSheetAnimation.startFrame,
+                TextureSheetCycleCount = textureSheetAnimation.cycleCount,
+                ColorBySpeedRange = new float2(colorBySpeed.range.x, colorBySpeed.range.y),
+                SizeBySpeedRange = new float2(sizeBySpeed.range.x, sizeBySpeed.range.y),
+                RotationBySpeedRange = new float2(rotationBySpeed.range.x, rotationBySpeed.range.y),
+                NoiseFrequency = noiseModule.frequency,
+                NoiseOctaveMultiplier = noiseModule.octaveMultiplier,
+                NoiseOctaveScale = noiseModule.octaveScale,
+                NoiseSizeMaxMultiplier = 1.0f,
+                SizeOverLifetimeMaxMultiplier = 1.0f,
+                SizeBySpeedMaxMultiplier = 1.0f,
+                Version = previous.Version + 1,
+            };
+
+            float maxSizeMultiplier = 0.0f;
+            float maxSizeBySpeedMultiplier = 0.0f;
+            float* colorLut = config.ColorOverLifetimeLut;
+            float* colorBySpeedLut = config.ColorBySpeedLut;
+            float* sizeLut = config.SizeOverLifetimeLut;
+            float* sizeBySpeedLut = config.SizeBySpeedLut;
+            float* rotationLut = config.RotationOverLifetimeLut;
+            float* rotationBySpeedLut = config.RotationBySpeedLut;
+            float* noiseStrengthLut = config.NoiseStrengthLut;
+            float* noiseScrollSpeedLut = config.NoiseScrollSpeedLut;
+            float* noisePositionAmountLut = config.NoisePositionAmountLut;
+            float* noiseRotationAmountLut = config.NoiseRotationAmountLut;
+            float* noiseSizeAmountLut = config.NoiseSizeAmountLut;
+            float* velocityLut = config.VelocityOverLifetimeLut;
+            float* limitVelocityLut = config.LimitVelocityLut;
+            float* limitVelocityDragLut = config.LimitVelocityDragLut;
+            float* textureSheetFrameLut = config.TextureSheetFrameOverTimeLut;
+            float previousAngularVelocity = rotationOverLifetime.EvaluateAngularVelocity(0.0f) * Mathf.Deg2Rad;
+            float integratedRotation = 0.0f;
+            float maxNoiseStrength = 0.0f;
+            float maxNoiseSizeAmount = 0.0f;
+            for (int sampleIndex = 0;
+                 sampleIndex < VividParticleNativeRenderModuleConfig.LifetimeLutResolution;
+                 sampleIndex++)
+            {
+                float normalizedLifetime = sampleIndex
+                    / (float)(VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+                Color colorSample = colorOverLifetime.Evaluate(normalizedLifetime);
+                int colorOffset = sampleIndex * 4;
+                colorLut[colorOffset] = Mathf.Max(0.0f, colorSample.r);
+                colorLut[colorOffset + 1] = Mathf.Max(0.0f, colorSample.g);
+                colorLut[colorOffset + 2] = Mathf.Max(0.0f, colorSample.b);
+                colorLut[colorOffset + 3] = Mathf.Max(0.0f, colorSample.a);
+                float speedSample = Mathf.Lerp(colorBySpeed.range.x, colorBySpeed.range.y, normalizedLifetime);
+                Color colorBySpeedSample = colorBySpeed.Evaluate(speedSample);
+                colorBySpeedLut[colorOffset] = Mathf.Max(0.0f, colorBySpeedSample.r);
+                colorBySpeedLut[colorOffset + 1] = Mathf.Max(0.0f, colorBySpeedSample.g);
+                colorBySpeedLut[colorOffset + 2] = Mathf.Max(0.0f, colorBySpeedSample.b);
+                colorBySpeedLut[colorOffset + 3] = Mathf.Max(0.0f, colorBySpeedSample.a);
+
+                float sizeSample = sizeOverLifetime.Evaluate(normalizedLifetime);
+                sizeLut[sampleIndex] = sizeSample;
+                maxSizeMultiplier = Mathf.Max(maxSizeMultiplier, sizeSample);
+                float sizeSpeedSample = Mathf.Lerp(sizeBySpeed.range.x, sizeBySpeed.range.y, normalizedLifetime);
+                float sizeBySpeedSample = sizeBySpeed.Evaluate(sizeSpeedSample);
+                sizeBySpeedLut[sampleIndex] = sizeBySpeedSample;
+                maxSizeBySpeedMultiplier = Mathf.Max(maxSizeBySpeedMultiplier, sizeBySpeedSample);
+
+                if (sampleIndex > 0)
+                {
+                    float angularVelocity = rotationOverLifetime.EvaluateAngularVelocity(normalizedLifetime)
+                        * Mathf.Deg2Rad;
+                    integratedRotation += (previousAngularVelocity + angularVelocity)
+                        * 0.5f
+                        / (VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+                    previousAngularVelocity = angularVelocity;
+                }
+
+                rotationLut[sampleIndex] = integratedRotation;
+                float rotationSpeedSample = Mathf.Lerp(
+                    rotationBySpeed.range.x,
+                    rotationBySpeed.range.y,
+                    normalizedLifetime);
+                Vector3 rotationBySpeedSample = rotationBySpeed.EvaluateAngularVelocity(rotationSpeedSample);
+                int rotationBySpeedOffset = sampleIndex * 3;
+                rotationBySpeedLut[rotationBySpeedOffset] = rotationBySpeedSample.x;
+                rotationBySpeedLut[rotationBySpeedOffset + 1] = rotationBySpeedSample.y;
+                rotationBySpeedLut[rotationBySpeedOffset + 2] = rotationBySpeedSample.z;
+                Vector3 noiseStrengthSample = noiseModule.EvaluateStrength(normalizedLifetime);
+                noiseStrengthLut[rotationBySpeedOffset] = noiseStrengthSample.x;
+                noiseStrengthLut[rotationBySpeedOffset + 1] = noiseStrengthSample.y;
+                noiseStrengthLut[rotationBySpeedOffset + 2] = noiseStrengthSample.z;
+                noiseScrollSpeedLut[sampleIndex] = noiseModule.EvaluateScrollSpeed(normalizedLifetime);
+                noisePositionAmountLut[sampleIndex] = noiseModule.EvaluatePositionAmount(normalizedLifetime);
+                noiseRotationAmountLut[sampleIndex] = noiseModule.EvaluateRotationAmount(normalizedLifetime);
+                float noiseSizeAmount = noiseModule.EvaluateSizeAmount(normalizedLifetime);
+                noiseSizeAmountLut[sampleIndex] = noiseSizeAmount;
+                maxNoiseStrength = Mathf.Max(
+                    maxNoiseStrength,
+                    Mathf.Abs(noiseStrengthSample.x),
+                    Mathf.Abs(noiseStrengthSample.y),
+                    Mathf.Abs(noiseStrengthSample.z));
+                maxNoiseSizeAmount = Mathf.Max(maxNoiseSizeAmount, Mathf.Abs(noiseSizeAmount));
+                Vector3 velocitySample = velocityOverLifetime.Evaluate(normalizedLifetime);
+                int velocityOffset = sampleIndex * 3;
+                velocityLut[velocityOffset] = velocitySample.x;
+                velocityLut[velocityOffset + 1] = velocitySample.y;
+                velocityLut[velocityOffset + 2] = velocitySample.z;
+                Vector3 limitVelocitySample = limitVelocityOverLifetime.EvaluateLimit(normalizedLifetime);
+                limitVelocityLut[velocityOffset] = limitVelocitySample.x;
+                limitVelocityLut[velocityOffset + 1] = limitVelocitySample.y;
+                limitVelocityLut[velocityOffset + 2] = limitVelocitySample.z;
+                limitVelocityDragLut[sampleIndex] =
+                    limitVelocityOverLifetime.EvaluateDrag(normalizedLifetime);
+                textureSheetFrameLut[sampleIndex] = textureSheetAnimation.EvaluateFrame(normalizedLifetime);
+            }
+
+            config.SizeOverLifetimeMaxMultiplier = sizeOverLifetime.enabled
+                ? maxSizeMultiplier
+                : 1.0f;
+            config.SizeBySpeedMaxMultiplier = sizeBySpeed.enabled
+                ? maxSizeBySpeedMultiplier
+                : 1.0f;
+            config.NoiseSizeMaxMultiplier = noiseModule.enabled && noiseModule.hasSizeEffect
+                ? Mathf.Max(1.0f, 1.0f + maxNoiseStrength * maxNoiseSizeAmount * 0.5f)
+                : 1.0f;
+            s_NativeRenderModuleConfigs[slot] = config;
+        }
+
+        private static unsafe bool TryGetNativeSpeedModuleData(
+            int configSlot,
+            out float4* colorLut,
+            out float* sizeLut,
+            out int colorEnabled,
+            out int sizeEnabled,
+            out float2 colorRange,
+            out float2 sizeRange,
+            out float maxSizeMultiplier)
+        {
+            colorLut = null;
+            sizeLut = null;
+            colorEnabled = 0;
+            sizeEnabled = 0;
+            colorRange = new float2(0.0f, 1.0f);
+            sizeRange = new float2(0.0f, 1.0f);
+            maxSizeMultiplier = 1.0f;
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return false;
+            }
+
+            VividParticleNativeRenderModuleConfig* configs =
+                (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                    .AsArray()
+                    .GetUnsafeReadOnlyPtr();
+            VividParticleNativeRenderModuleConfig* config = configs + configSlot;
+            colorLut = (float4*)config->ColorBySpeedLut;
+            sizeLut = config->SizeBySpeedLut;
+            colorEnabled = config->ColorBySpeedEnabled;
+            sizeEnabled = config->SizeBySpeedEnabled;
+            colorRange = config->ColorBySpeedRange;
+            sizeRange = config->SizeBySpeedRange;
+            maxSizeMultiplier = math.max(0.0f, config->SizeBySpeedMaxMultiplier);
+            return true;
+        }
+
+        private static unsafe bool TryGetNativeRotationBySpeedData(
+            int configSlot,
+            out float3* rotationLut,
+            out int enabled,
+            out float2 speedRange)
+        {
+            rotationLut = null;
+            enabled = 0;
+            speedRange = new float2(0.0f, 1.0f);
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return false;
+            }
+
+            VividParticleNativeRenderModuleConfig* configs =
+                (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                    .AsArray()
+                    .GetUnsafeReadOnlyPtr();
+            VividParticleNativeRenderModuleConfig* config = configs + configSlot;
+            rotationLut = (float3*)config->RotationBySpeedLut;
+            enabled = config->RotationBySpeedEnabled;
+            speedRange = config->RotationBySpeedRange;
+            return true;
+        }
+
+        private static unsafe bool TryGetNativeNoiseData(
+            int configSlot,
+            out float3* strengthLut,
+            out float* scrollSpeedLut,
+            out float* positionAmountLut,
+            out float* rotationAmountLut,
+            out float* sizeAmountLut,
+            out float noiseSizeMaxMultiplier,
+            out int enabled,
+            out float frequency,
+            out int damping,
+            out int octaveCount,
+            out float octaveMultiplier,
+            out float octaveScale)
+        {
+            strengthLut = null;
+            scrollSpeedLut = null;
+            positionAmountLut = null;
+            rotationAmountLut = null;
+            sizeAmountLut = null;
+            noiseSizeMaxMultiplier = 1.0f;
+            enabled = 0;
+            frequency = 0.0f;
+            damping = 0;
+            octaveCount = 1;
+            octaveMultiplier = 0.5f;
+            octaveScale = 2.0f;
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+                return false;
+
+            VividParticleNativeRenderModuleConfig* configs =
+                (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                    .AsArray()
+                    .GetUnsafeReadOnlyPtr();
+            VividParticleNativeRenderModuleConfig* config = configs + configSlot;
+            strengthLut = (float3*)config->NoiseStrengthLut;
+            scrollSpeedLut = config->NoiseScrollSpeedLut;
+            positionAmountLut = config->NoisePositionAmountLut;
+            rotationAmountLut = config->NoiseRotationAmountLut;
+            sizeAmountLut = config->NoiseSizeAmountLut;
+            noiseSizeMaxMultiplier = math.max(1.0f, config->NoiseSizeMaxMultiplier);
+            enabled = config->NoiseEnabled;
+            frequency = math.max(0.0f, config->NoiseFrequency);
+            damping = config->NoiseDamping;
+            octaveCount = math.clamp(config->NoiseOctaveCount, 1, 4);
+            octaveMultiplier = math.saturate(config->NoiseOctaveMultiplier);
+            octaveScale = math.max(1.0f, config->NoiseOctaveScale);
+            return true;
+        }
+
+        private static unsafe bool TryGetNativeLifetimeModuleData(
+            int configSlot,
+            out float4* colorLut,
+            out float* sizeLut,
+            out float* rotationLut,
+            out float3* velocityLut,
+            out int colorEnabled,
+            out int sizeEnabled,
+            out int rotationEnabled,
+            out int velocityEnabled,
+            out int velocitySpace,
+            out float maxSizeMultiplier)
+        {
+            colorLut = null;
+            sizeLut = null;
+            rotationLut = null;
+            velocityLut = null;
+            colorEnabled = 0;
+            sizeEnabled = 0;
+            rotationEnabled = 0;
+            velocityEnabled = 0;
+            velocitySpace = 0;
+            maxSizeMultiplier = 1.0f;
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return false;
+            }
+
+            VividParticleNativeRenderModuleConfig* configs =
+                (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                    .AsArray()
+                    .GetUnsafeReadOnlyPtr();
+            VividParticleNativeRenderModuleConfig* config = configs + configSlot;
+            colorLut = (float4*)config->ColorOverLifetimeLut;
+            sizeLut = config->SizeOverLifetimeLut;
+            rotationLut = config->RotationOverLifetimeLut;
+            velocityLut = (float3*)config->VelocityOverLifetimeLut;
+            colorEnabled = config->ColorOverLifetimeEnabled;
+            sizeEnabled = config->SizeOverLifetimeEnabled;
+            rotationEnabled = config->RotationOverLifetimeEnabled;
+            velocityEnabled = config->VelocityOverLifetimeEnabled;
+            velocitySpace = config->VelocityOverLifetimeSpace;
+            maxSizeMultiplier = math.max(0.0f, config->SizeOverLifetimeMaxMultiplier);
+            return true;
+        }
+
+        private static unsafe bool TryGetNativeTextureSheetAnimationData(
+            int configSlot,
+            out float* frameOverTimeLut,
+            out int enabled,
+            out int tilesX,
+            out int tilesY,
+            out int animationType,
+            out int rowIndex,
+            out float startFrame,
+            out float cycleCount)
+        {
+            frameOverTimeLut = null;
+            enabled = 0;
+            tilesX = 1;
+            tilesY = 1;
+            animationType = 0;
+            rowIndex = 0;
+            startFrame = 0.0f;
+            cycleCount = 1.0f;
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return false;
+            }
+
+            VividParticleNativeRenderModuleConfig* configs =
+                (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                    .AsArray()
+                    .GetUnsafeReadOnlyPtr();
+            VividParticleNativeRenderModuleConfig* config = configs + configSlot;
+            frameOverTimeLut = config->TextureSheetFrameOverTimeLut;
+            enabled = config->TextureSheetAnimationEnabled;
+            tilesX = math.max(1, config->TextureSheetTilesX);
+            tilesY = math.max(1, config->TextureSheetTilesY);
+            animationType = config->TextureSheetAnimationType;
+            rowIndex = math.clamp(config->TextureSheetRowIndex, 0, tilesY - 1);
+            startFrame = config->TextureSheetStartFrame;
+            cycleCount = math.max(0.0f, config->TextureSheetCycleCount);
+            return true;
+        }
+
+        private static unsafe bool TryGetNativeLimitVelocityData(
+            int configSlot,
+            out float3* limitLut,
+            out float* dragLut,
+            out int enabled,
+            out int separateAxes,
+            out int space,
+            out float dampen,
+            out int multiplyDragByParticleSize,
+            out int multiplyDragByParticleVelocity)
+        {
+            limitLut = null;
+            dragLut = null;
+            enabled = 0;
+            separateAxes = 0;
+            space = 0;
+            dampen = 0.0f;
+            multiplyDragByParticleSize = 0;
+            multiplyDragByParticleVelocity = 0;
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return false;
+            }
+
+            VividParticleNativeRenderModuleConfig* configs =
+                (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                    .AsArray()
+                    .GetUnsafeReadOnlyPtr();
+            VividParticleNativeRenderModuleConfig* config = configs + configSlot;
+            limitLut = (float3*)config->LimitVelocityLut;
+            dragLut = config->LimitVelocityDragLut;
+            enabled = config->LimitVelocityOverLifetimeEnabled;
+            separateAxes = config->LimitVelocitySeparateAxes;
+            space = config->LimitVelocitySpace;
+            dampen = math.saturate(config->LimitVelocityDampen);
+            multiplyDragByParticleSize = config->LimitVelocityMultiplyDragByParticleSize;
+            multiplyDragByParticleVelocity = config->LimitVelocityMultiplyDragByParticleVelocity;
+            return true;
         }
 
         private static void RebuildNativeSimulationBursts()
@@ -2566,6 +3193,7 @@ namespace VividRP.Runtime.Particle
             private bool[] m_BurstTriggered = Array.Empty<bool>();
             private ulong m_BurstTriggeredMask;
             private int m_BurstStateCount = -1;
+            private int m_NativeBurstHash = int.MinValue;
             private uint m_AutomaticRandomState;
             private VividParticleBurst[] m_BurstSnapshotBuffer = Array.Empty<VividParticleBurst>();
             private JobHandle m_PendingJob;
@@ -2604,6 +3232,7 @@ namespace VividRP.Runtime.Particle
             private VividParticleGpuDataLayout m_CachedGpuLayout;
             private VividParticleSystemFrameSnapshot m_LastSettingsSnapshot;
             private VividParticleRendererSharedKey m_LastRendererSharedKey;
+            private ParticleRenderEntry m_CachedRenderIdentity;
             private Bounds m_CachedWorldBounds;
             private int m_CachedBoundsParticleCount = -1;
             private bool m_BatchCreated;
@@ -2622,10 +3251,14 @@ namespace VividRP.Runtime.Particle
             private bool m_AutomaticSnapshotDirty = true;
             private bool m_HasCachedGpuLayout;
             private bool m_HasRendererSharedKey;
+            private bool m_HasCachedRenderIdentity;
+            private bool m_RenderIdentityDirty = true;
             private bool m_HasCachedWorldBounds;
             private bool m_SharedDataDirty;
             private uint m_SharedDataDirtyBits;
             private bool m_RendererInitialized;
+            private int m_RenderIdentityVersion;
+            private int m_RenderIdentityRefreshCount;
             private readonly int m_NativeSimulationConfigSlot;
 
             public ParticleSystemState(
@@ -2637,6 +3270,11 @@ namespace VividRP.Runtime.Particle
                 m_NativeSimulationConfigSlot = nativeSimulationConfigSlot;
                 m_Storage = new VividParticleEcsStorage(s_ParticleEcsWorld);
                 m_Storage.systemId = systemId;
+                SyncEcsModuleSharedKey();
+                if (system != null && system.velocityOverLifetime.enabled)
+                    m_Storage.EnsureAnimatedMotionColumn();
+                if (system != null && system.noise.enabled)
+                    m_Storage.EnsureNoiseStateColumn();
                 RefreshEditorSelectionState();
                 ResetEditorUpdateTime();
             }
@@ -2646,6 +3284,8 @@ namespace VividRP.Runtime.Particle
             public int storageCapacity => m_Storage.capacity;
 
             public int storagePageCount => m_Storage.pageCount;
+
+            internal bool hasNoiseStateColumn => m_Storage.hasNoiseStateColumn;
 
             public bool usesEcsStorage => true;
 
@@ -2670,6 +3310,16 @@ namespace VividRP.Runtime.Particle
                 && activeCount > 0;
 
             internal bool hasRendererHandle => m_Storage.rendererHandle.IsValid;
+
+            internal int renderIdentityRefreshCount => m_RenderIdentityRefreshCount;
+
+            internal VividParticleModuleSharedKey moduleSharedKey => m_Storage.moduleSharedKey;
+
+            internal VividParticleSimulationKernelSharedKey simulationKernelSharedKey =>
+                m_Storage.simulationKernelSharedKey;
+
+            internal VividParticleRenderKernelSharedKey renderKernelSharedKey =>
+                m_Storage.renderKernelSharedKey;
 
             internal void SetSimulationActive(bool active)
             {
@@ -2763,7 +3413,9 @@ namespace VividRP.Runtime.Particle
 
             public void MarkResourcesDirty()
             {
+                SyncEcsModuleSharedKey();
                 m_ResourcesDirty = true;
+                m_RenderIdentityDirty = true;
                 InvalidateAutomaticSnapshot();
                 MarkBoundsDirty();
                 MarkAllInstanceDataDirty();
@@ -2771,8 +3423,24 @@ namespace VividRP.Runtime.Particle
 
             public void MarkRendererModuleDirty()
             {
+                SyncEcsModuleSharedKey();
                 m_LastUploadedFrame = -1;
+                m_RenderIdentityDirty = true;
+                if (m_System == null
+                    || !IsInitialized
+                    || m_SourceMaterial != m_System.rendererModule.material
+                    || m_SourceMesh != ResolveRenderMesh(m_System.rendererModule)
+                    || m_RenderMode != m_System.rendererModule.renderMode
+                    || m_RenderQueueOffset != m_System.rendererModule.renderQueueOffset)
+                {
+                    m_ResourcesDirty = true;
+                }
                 MarkBoundsDirty();
+            }
+
+            internal void MarkParticleDataDirty(int columnMask)
+            {
+                MarkInstanceRangeDirty(0, activeCount, columnMask);
             }
 
             public void NotifySettingsChanged()
@@ -2780,23 +3448,58 @@ namespace VividRP.Runtime.Particle
                 if (m_System == null)
                     return;
 
+                SyncEcsModuleSharedKey();
+                m_RenderIdentityDirty = true;
                 CompletePending();
+                if (m_System.velocityOverLifetime.enabled)
+                    m_Storage.EnsureAnimatedMotionColumn();
+                else
+                    m_Storage.ClearAnimatedMotion();
+                if (m_System.noise.enabled)
+                    m_Storage.EnsureNoiseStateColumn();
                 InvalidateAutomaticSnapshot();
                 VividParticleSystemFrameSnapshot snapshot = CaptureFrameSnapshot(0.0f);
                 int oldCapacity = storageCapacity;
                 EnsureStorageCapacity(snapshot.MaxParticles);
                 EnsureBurstState(snapshot.Bursts);
-                VividParticleGpuDataLayout layout = GetCurrentGpuDataLayout();
+                VividParticleGpuDataLayoutDescriptor layoutDescriptor = GetCurrentGpuDataLayoutDescriptor();
+                bool layoutChanged = m_HasCachedGpuLayout
+                    && !m_CachedGpuLayoutDescriptor.Equals(layoutDescriptor);
+                VividParticleGpuDataLayout layout = GetGpuDataLayout(layoutDescriptor);
                 uint sharedDataBits = GetSettingsSharedDataDirtyBits(snapshot, layout);
                 m_LastSettingsSnapshot = snapshot;
                 m_HasLastSettingsSnapshot = true;
-                if (oldCapacity != storageCapacity)
+                if (oldCapacity != storageCapacity || layoutChanged)
                     MarkResourcesDirty();
                 else
                 {
                     MarkSharedDataDirty(sharedDataBits);
                     MarkBoundsDirty();
                 }
+            }
+
+            internal bool RefreshNativeBurstHash()
+            {
+                VividParticleBurst[] bursts = m_System != null
+                    ? m_System.emission.bursts
+                    : null;
+                int burstCount = bursts?.Length ?? 0;
+                int hash = 17;
+                unchecked
+                {
+                    hash = hash * 31 + burstCount;
+                    for (int index = 0; index < burstCount; index++)
+                    {
+                        hash = hash * 31 + bursts[index].time.GetHashCode();
+                        hash = hash * 31 + bursts[index].count;
+                    }
+                }
+
+                if (hash == m_NativeBurstHash)
+                    return false;
+
+                m_NativeBurstHash = hash;
+                return true;
             }
 
             private uint GetSettingsSharedDataDirtyBits(
@@ -3309,7 +4012,7 @@ namespace VividRP.Runtime.Particle
                 if (!forceUpload && !m_ResourcesDirty && m_LastUploadedFrame == Time.frameCount)
                     return CreateRenderEntry(out entry);
 
-                if (!EnsureResources())
+                if ((!IsInitialized || m_ResourcesDirty) && !EnsureResources())
                 {
                     SetRendererInactive();
                     return false;
@@ -3335,11 +4038,64 @@ namespace VividRP.Runtime.Particle
                 m_LastUploadedCount = count;
                 m_LastUploadOperationCount = 0;
                 m_LastUploadByteCount = 0;
+                int layer = Mathf.Clamp(m_System.gameObject.layer, 0, 31);
+                if (!m_HasCachedRenderIdentity
+                    || m_RenderIdentityDirty
+                    || m_CachedRenderIdentity.Layer != layer)
+                {
+                    if (!RefreshRenderIdentity(layer))
+                        return false;
+                }
+
+                MarkRenderStateDirtyIfNeeded(count);
+                ParticleRenderEntry identity = m_CachedRenderIdentity;
+                entry = new ParticleRenderEntry(
+                    this,
+                    identity.IdentityVersion,
+                    identity.EcsLineId,
+                    identity.Material,
+                    identity.Mesh,
+                    identity.Meshes,
+                    identity.MeshCount,
+                    identity.RenderMode,
+                    identity.GpuLayout,
+                    identity.RendererSharedKey,
+                    identity.Layer,
+                    ResolveGameObjectSceneCullingMask(m_System.gameObject),
+                    identity.Capacity,
+                    count,
+                    m_System.transform.localToWorldMatrix,
+                    identity.SimulationSpace,
+                    identity.RendererColor,
+                    identity.SizeScale,
+                    identity.StretchLengthScale,
+                    identity.StretchSpeedScale,
+                    identity.Pivot,
+                    identity.MinParticleSize,
+                    identity.MaxParticleSize,
+                    identity.Flip,
+                    identity.ShadowCastingMode,
+                    identity.MotionMode,
+                    identity.RenderingLayerMask,
+                    identity.ReceiveShadows,
+                    identity.StaticShadowCaster,
+                    m_System.gameObject.GetEntityId(),
+                    m_IsEditorSelected,
+                    identity.SortMode,
+                    identity.SortingPriority,
+                    identity.BatchLayer);
+                return true;
+            }
+
+            private bool RefreshRenderIdentity(int layer)
+            {
+                if (m_System == null || m_RegisteredMaterial == null || m_QuadMesh == null || m_Capacity <= 0)
+                    return false;
+
                 VividParticleGpuDataLayoutDescriptor gpuLayoutDescriptor =
-                    VividParticleGpuDataLayoutDescriptor.Create(m_System.rendererModule);
+                    GetCurrentGpuDataLayoutDescriptor();
                 VividParticleGpuDataLayout gpuLayout = GetGpuDataLayout(gpuLayoutDescriptor);
                 EnsureRenderMeshBuffer();
-                MarkRenderStateDirtyIfNeeded(count);
                 int meshSetHash = m_RenderMode == VividParticleRenderMode.Mesh
                     ? m_System.rendererModule.meshSetHash
                     : m_QuadMesh.GetEntityId().GetHashCode();
@@ -3347,7 +4103,7 @@ namespace VividRP.Runtime.Particle
                     m_RegisteredMaterial.GetEntityId().GetHashCode(),
                     meshSetHash,
                     (int)m_RenderMode,
-                    Mathf.Clamp(m_System.gameObject.layer, 0, 31),
+                    layer,
                     gpuLayout.Hash,
                     gpuLayout.DataPerSharpBits,
                     (int)m_System.rendererModule.shadowCastingMode,
@@ -3359,8 +4115,12 @@ namespace VividRP.Runtime.Particle
                     m_System.rendererModule.batchLayer,
                     (int)m_System.rendererModule.motionVectorGenerationMode);
                 UpdateRendererSharedKey(rendererSharedKey);
-                entry = new ParticleRenderEntry(
+                m_RenderIdentityVersion = m_RenderIdentityVersion == int.MaxValue
+                    ? 1
+                    : m_RenderIdentityVersion + 1;
+                m_CachedRenderIdentity = new ParticleRenderEntry(
                     this,
+                    m_RenderIdentityVersion,
                     m_Storage.archetypeLineId,
                     m_RegisteredMaterial,
                     m_QuadMesh,
@@ -3369,10 +4129,10 @@ namespace VividRP.Runtime.Particle
                     m_RenderMode,
                     gpuLayout,
                     rendererSharedKey,
-                    m_System.gameObject.layer,
+                    layer,
                     ResolveGameObjectSceneCullingMask(m_System.gameObject),
                     m_Capacity,
-                    count,
+                    Mathf.Min(activeCount, m_Capacity),
                     m_System.transform.localToWorldMatrix,
                     m_System.main.simulationSpace,
                     m_System.rendererModule.color,
@@ -3393,6 +4153,9 @@ namespace VividRP.Runtime.Particle
                     m_System.rendererModule.sortMode,
                     m_System.rendererModule.sortingPriority,
                     m_System.rendererModule.batchLayer);
+                m_HasCachedRenderIdentity = true;
+                m_RenderIdentityDirty = false;
+                m_RenderIdentityRefreshCount++;
                 return true;
             }
 
@@ -3404,6 +4167,51 @@ namespace VividRP.Runtime.Particle
                 m_Storage.rendererSharedKey = rendererSharedKey;
                 m_LastRendererSharedKey = rendererSharedKey;
                 m_HasRendererSharedKey = true;
+            }
+
+            private void SyncEcsModuleSharedKey()
+            {
+                if (m_System == null)
+                {
+                    m_Storage.moduleSharedKey = VividParticleModuleSharedKey.None;
+                    m_Storage.simulationKernelSharedKey = VividParticleSimulationKernelSharedKey.Base;
+                    m_Storage.renderKernelSharedKey = VividParticleRenderKernelSharedKey.Base;
+                    return;
+                }
+
+                VividParticleModuleFlags flags = VividParticleModuleFlags.None;
+                if (m_System.forceOverLifetime.enabled)
+                    flags |= VividParticleModuleFlags.ForceOverLifetime;
+                if (m_System.velocityOverLifetime.enabled)
+                    flags |= VividParticleModuleFlags.VelocityOverLifetime;
+                if (m_System.limitVelocityOverLifetime.enabled)
+                    flags |= VividParticleModuleFlags.LimitVelocityOverLifetime;
+                if (m_System.colorOverLifetime.enabled)
+                    flags |= VividParticleModuleFlags.ColorOverLifetime;
+                if (m_System.colorBySpeed.enabled)
+                    flags |= VividParticleModuleFlags.ColorBySpeed;
+                if (m_System.sizeOverLifetime.enabled)
+                    flags |= VividParticleModuleFlags.SizeOverLifetime;
+                if (m_System.sizeBySpeed.enabled)
+                    flags |= VividParticleModuleFlags.SizeBySpeed;
+                if (m_System.rotationOverLifetime.enabled)
+                    flags |= VividParticleModuleFlags.RotationOverLifetime;
+                if (m_System.rotationBySpeed.enabled)
+                    flags |= VividParticleModuleFlags.RotationBySpeed;
+                if (m_System.noise.enabled)
+                    flags |= VividParticleModuleFlags.Noise;
+                if (m_System.textureSheetAnimation.enabled)
+                    flags |= VividParticleModuleFlags.TextureSheetAnimation;
+                if (m_System.rendererModule.renderMode == VividParticleRenderMode.Mesh)
+                    flags |= VividParticleModuleFlags.MeshRenderer;
+                if (m_System.rendererModule.renderMode == VividParticleRenderMode.Stretch)
+                    flags |= VividParticleModuleFlags.StretchRenderer;
+                if (m_System.rendererModule.sortMode != VividParticleSortMode.None)
+                    flags |= VividParticleModuleFlags.Sorting;
+
+                m_Storage.moduleSharedKey = new VividParticleModuleSharedKey(flags);
+                m_Storage.simulationKernelSharedKey = new VividParticleSimulationKernelSharedKey(flags);
+                m_Storage.renderKernelSharedKey = new VividParticleRenderKernelSharedKey(flags);
             }
 
             internal void SetRendererHandle(VividParticleRendererHandle rendererHandle)
@@ -3426,8 +4234,21 @@ namespace VividRP.Runtime.Particle
             private VividParticleGpuDataLayout GetCurrentGpuDataLayout()
             {
                 return m_System != null
-                    ? GetGpuDataLayout(VividParticleGpuDataLayoutDescriptor.Create(m_System.rendererModule))
+                    ? GetGpuDataLayout(GetCurrentGpuDataLayoutDescriptor())
                     : VividParticleGpuDataLayout.Create(VividParticleRenderMode.Billboard);
+            }
+
+            private VividParticleGpuDataLayoutDescriptor GetCurrentGpuDataLayoutDescriptor()
+            {
+                return m_System != null
+                    ? VividParticleGpuDataLayoutDescriptor.Create(
+                        m_System.rendererModule,
+                        m_System.colorOverLifetime.enabled || m_System.colorBySpeed.enabled,
+                        m_System.sizeOverLifetime.enabled || m_System.sizeBySpeed.enabled,
+                        m_System.rotationOverLifetime.enabled || m_System.rotationBySpeed.enabled,
+                        m_System.velocityOverLifetime.enabled,
+                        m_System.textureSheetAnimation.enabled)
+                    : VividParticleGpuDataLayoutDescriptor.Create(VividParticleRenderMode.Billboard);
             }
 
             private void EnsureRenderMeshBuffer()
@@ -3488,7 +4309,7 @@ namespace VividRP.Runtime.Particle
                 if (renderMode == VividParticleRenderMode.Stretch)
                     return GetStretchParticleMatrix(particleIndex, position, size);
 
-                return Matrix4x4.TRS(position, Quaternion.identity, Vector3.one * size);
+                return Matrix4x4.TRS(position, GetParticleRenderRotation(particleIndex), Vector3.one * size);
             }
 
             public Color GetParticleRenderColor(int particleIndex)
@@ -3506,6 +4327,10 @@ namespace VividRP.Runtime.Particle
                     ? Mathf.Clamp01(m_Storage.GetRemainingLifetime(particleIndex) / startLifetime)
                     : 0.0f;
                 Color color = m_Storage.GetColor(particleIndex) * m_System.rendererModule.color;
+                if (m_System.colorOverLifetime.enabled)
+                    color *= m_System.colorOverLifetime.Evaluate(1.0f - lifetimeRatio);
+                if (m_System.colorBySpeed.enabled)
+                    color *= m_System.colorBySpeed.Evaluate(GetParticleSpeed(particleIndex));
                 color.a *= lifetimeRatio;
                 return color;
             }
@@ -3604,6 +4429,7 @@ namespace VividRP.Runtime.Particle
                 {
                     Positions = columnView.Positions,
                     Velocities = columnView.Velocities,
+                    AnimatedVelocities = columnView.AnimatedVelocities,
                     Sizes = columnView.Sizes,
                     ActiveCount = count,
                     LocalToWorld = ToFloat4x4(localToWorld),
@@ -3613,6 +4439,8 @@ namespace VividRP.Runtime.Particle
                     StretchLengthScale = stretchLengthScale,
                     StretchSpeedScale = stretchSpeedScale,
                     MeshExtent = meshExtent,
+                    SizeOverLifetimeMaxMultiplier = GetSizeOverLifetimeMaxMultiplier(),
+                    VelocityOverLifetimeEnabled = m_System.velocityOverLifetime.enabled ? 1 : 0,
                 };
                 return true;
             }
@@ -3846,7 +4674,7 @@ namespace VividRP.Runtime.Particle
                 return ScheduleIntegrateViaRegistry(snapshot);
             }
 
-            private bool ScheduleSimulationBatch(
+            private unsafe bool ScheduleSimulationBatch(
                 VividParticleSystemFrameSnapshot snapshot,
                 bool allowEmission,
                 float3 gravity,
@@ -3863,9 +4691,82 @@ namespace VividRP.Runtime.Particle
                 m_HasPendingStandaloneJob = false;
                 m_HasPendingJob = false;
 
+                TryGetNativeLifetimeModuleData(
+                    m_NativeSimulationConfigSlot,
+                    out _,
+                    out _,
+                    out _,
+                    out float3* velocityOverLifetimeLut,
+                    out _,
+                    out _,
+                    out _,
+                    out int velocityOverLifetimeEnabled,
+                    out int velocityOverLifetimeSpace,
+                    out _);
+                float3x3 velocityTransform = ResolveVelocityOverLifetimeTransform(
+                    snapshot,
+                    velocityOverLifetimeSpace);
+                TryGetNativeLimitVelocityData(
+                    m_NativeSimulationConfigSlot,
+                    out float3* limitVelocityLut,
+                    out float* limitVelocityDragLut,
+                    out int limitVelocityEnabled,
+                    out int limitVelocitySeparateAxes,
+                    out int limitVelocitySpace,
+                    out float limitVelocityDampen,
+                    out int limitVelocityMultiplyDragByParticleSize,
+                    out int limitVelocityMultiplyDragByParticleVelocity);
+                float3x3 limitVelocityTransform = ResolveVelocityOverLifetimeTransform(
+                    snapshot,
+                    limitVelocitySpace);
+                TryGetNativeRotationBySpeedData(
+                    m_NativeSimulationConfigSlot,
+                    out float3* rotationBySpeedLut,
+                    out int rotationBySpeedEnabled,
+                    out float2 rotationBySpeedRange);
+                TryGetNativeNoiseData(
+                    m_NativeSimulationConfigSlot,
+                    out float3* noiseStrengthLut,
+                    out float* noiseScrollSpeedLut,
+                    out float* noisePositionAmountLut,
+                    out float* noiseRotationAmountLut,
+                    out float* noiseSizeAmountLut,
+                    out _,
+                    out int noiseEnabled,
+                    out float noiseFrequency,
+                    out int noiseDamping,
+                    out int noiseOctaveCount,
+                    out float noiseOctaveMultiplier,
+                    out float noiseOctaveScale);
+
                 if (m_Storage.AddIntegratePageWorks(
                     snapshot.DeltaTime,
                     new Vector3(gravity.x, gravity.y, gravity.z),
+                    velocityOverLifetimeLut,
+                    velocityOverLifetimeEnabled,
+                    velocityTransform,
+                    limitVelocityLut,
+                    limitVelocityDragLut,
+                    limitVelocityEnabled,
+                    limitVelocitySeparateAxes,
+                    limitVelocityDampen,
+                    limitVelocityMultiplyDragByParticleSize,
+                    limitVelocityMultiplyDragByParticleVelocity,
+                    limitVelocityTransform,
+                    rotationBySpeedLut,
+                    rotationBySpeedEnabled,
+                    rotationBySpeedRange,
+                    noiseStrengthLut,
+                    noiseScrollSpeedLut,
+                    noisePositionAmountLut,
+                    noiseRotationAmountLut,
+                    noiseSizeAmountLut,
+                    noiseEnabled,
+                    noiseFrequency,
+                    noiseDamping,
+                    noiseOctaveCount,
+                    noiseOctaveMultiplier,
+                    noiseOctaveScale,
                     pageWorks,
                     compactWorks))
                 {
@@ -3886,13 +4787,85 @@ namespace VividRP.Runtime.Particle
                 return m_Storage.isCreated && activeCount > 0 && snapshot.DeltaTime > 0.0f;
             }
 
-            internal JobHandle ScheduleIntegrateJob(
+            internal unsafe JobHandle ScheduleIntegrateJob(
                 VividParticleSystemFrameSnapshot snapshot,
                 JobHandle dependency)
             {
+                TryGetNativeLifetimeModuleData(
+                    m_NativeSimulationConfigSlot,
+                    out _,
+                    out _,
+                    out _,
+                    out float3* velocityOverLifetimeLut,
+                    out _,
+                    out _,
+                    out _,
+                    out int velocityOverLifetimeEnabled,
+                    out int velocityOverLifetimeSpace,
+                    out _);
+                float3x3 velocityTransform = ResolveVelocityOverLifetimeTransform(
+                    snapshot,
+                    velocityOverLifetimeSpace);
+                TryGetNativeLimitVelocityData(
+                    m_NativeSimulationConfigSlot,
+                    out float3* limitVelocityLut,
+                    out float* limitVelocityDragLut,
+                    out int limitVelocityEnabled,
+                    out int limitVelocitySeparateAxes,
+                    out int limitVelocitySpace,
+                    out float limitVelocityDampen,
+                    out int limitVelocityMultiplyDragByParticleSize,
+                    out int limitVelocityMultiplyDragByParticleVelocity);
+                float3x3 limitVelocityTransform = ResolveVelocityOverLifetimeTransform(
+                    snapshot,
+                    limitVelocitySpace);
+                TryGetNativeRotationBySpeedData(
+                    m_NativeSimulationConfigSlot,
+                    out float3* rotationBySpeedLut,
+                    out int rotationBySpeedEnabled,
+                    out float2 rotationBySpeedRange);
+                TryGetNativeNoiseData(
+                    m_NativeSimulationConfigSlot,
+                    out float3* noiseStrengthLut,
+                    out float* noiseScrollSpeedLut,
+                    out float* noisePositionAmountLut,
+                    out float* noiseRotationAmountLut,
+                    out float* noiseSizeAmountLut,
+                    out _,
+                    out int noiseEnabled,
+                    out float noiseFrequency,
+                    out int noiseDamping,
+                    out int noiseOctaveCount,
+                    out float noiseOctaveMultiplier,
+                    out float noiseOctaveScale);
                 if (!m_Storage.ScheduleIntegrate(
                     snapshot.DeltaTime,
                     ResolveSimulationAcceleration(snapshot),
+                    velocityOverLifetimeLut,
+                    velocityOverLifetimeEnabled,
+                    velocityTransform,
+                    limitVelocityLut,
+                    limitVelocityDragLut,
+                    limitVelocityEnabled,
+                    limitVelocitySeparateAxes,
+                    limitVelocityDampen,
+                    limitVelocityMultiplyDragByParticleSize,
+                    limitVelocityMultiplyDragByParticleVelocity,
+                    limitVelocityTransform,
+                    rotationBySpeedLut,
+                    rotationBySpeedEnabled,
+                    rotationBySpeedRange,
+                    noiseStrengthLut,
+                    noiseScrollSpeedLut,
+                    noisePositionAmountLut,
+                    noiseRotationAmountLut,
+                    noiseSizeAmountLut,
+                    noiseEnabled,
+                    noiseFrequency,
+                    noiseDamping,
+                    noiseOctaveCount,
+                    noiseOctaveMultiplier,
+                    noiseOctaveScale,
                     dependency,
                     out JobHandle handle))
                 {
@@ -3904,6 +4877,26 @@ namespace VividRP.Runtime.Particle
                 ScheduledJobCount++;
                 LastScheduledFrame = Time.frameCount;
                 return handle;
+            }
+
+            private static float3x3 ResolveVelocityOverLifetimeTransform(
+                VividParticleSystemFrameSnapshot snapshot,
+                int velocityOverLifetimeSpace)
+            {
+                bool particlesUseWorldSpace = snapshot.SimulationSpace
+                    == VividParticleSystemSimulationSpace.World;
+                bool velocityUsesWorldSpace = velocityOverLifetimeSpace
+                    == (int)VividParticleForceSpace.World;
+                if (particlesUseWorldSpace == velocityUsesWorldSpace)
+                    return float3x3.identity;
+
+                quaternion rotation = new(
+                    snapshot.WorldRotation.x,
+                    snapshot.WorldRotation.y,
+                    snapshot.WorldRotation.z,
+                    snapshot.WorldRotation.w);
+                return new float3x3(
+                    particlesUseWorldSpace ? rotation : math.inverse(rotation));
             }
 
             private bool ScheduleIntegrateViaRegistry(VividParticleSystemFrameSnapshot snapshot)
@@ -4175,14 +5168,101 @@ namespace VividRP.Runtime.Particle
 
             private float GetParticleRenderSize(int particleIndex)
             {
-                return Mathf.Max(
+                float renderSize = Mathf.Max(
                     VividParticleMainModule.MinimumStartSize,
                     m_Storage.GetSize(particleIndex) * (m_System != null ? m_System.rendererModule.sizeScale : 1.0f));
+                if (m_System == null
+                    || (!m_System.sizeOverLifetime.enabled && !m_System.sizeBySpeed.enabled))
+                    return renderSize;
+
+                float multiplier = 1.0f;
+                if (m_System.sizeOverLifetime.enabled)
+                {
+                    float startLifetime = m_Storage.GetStartLifetime(particleIndex);
+                    float lifetimeRatio = startLifetime > 0.0f
+                        ? Mathf.Clamp01(m_Storage.GetRemainingLifetime(particleIndex) / startLifetime)
+                        : 0.0f;
+                    multiplier *= m_System.sizeOverLifetime.Evaluate(1.0f - lifetimeRatio);
+                }
+
+                if (m_System.sizeBySpeed.enabled)
+                    multiplier *= m_System.sizeBySpeed.Evaluate(GetParticleSpeed(particleIndex));
+
+                return Mathf.Max(
+                    VividParticleMainModule.MinimumStartSize,
+                    renderSize * multiplier);
+            }
+
+            private unsafe float GetSizeOverLifetimeMaxMultiplier()
+            {
+                if (m_System == null
+                    || (!m_System.sizeOverLifetime.enabled && !m_System.sizeBySpeed.enabled))
+                    return 1.0f;
+
+                float lifetimeMultiplier = TryGetNativeLifetimeModuleData(
+                        m_NativeSimulationConfigSlot,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out float maxSizeMultiplier)
+                    ? maxSizeMultiplier
+                    : 1.0f;
+                float speedMultiplier = TryGetNativeSpeedModuleData(
+                        m_NativeSimulationConfigSlot,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out _,
+                        out float maxSpeedSizeMultiplier)
+                    ? maxSpeedSizeMultiplier
+                    : 1.0f;
+                return lifetimeMultiplier * speedMultiplier;
+            }
+
+            private float GetParticleSpeed(int particleIndex)
+            {
+                Vector3 velocity = m_Storage.GetVelocity(particleIndex);
+                if (m_System != null && m_System.velocityOverLifetime.enabled)
+                    velocity += m_Storage.GetAnimatedVelocity(particleIndex);
+                return velocity.magnitude;
+            }
+
+            private Quaternion GetParticleRenderRotation(int particleIndex)
+            {
+                if (m_System == null
+                    || (!m_System.rotationOverLifetime.enabled && !m_System.rotationBySpeed.enabled))
+                    return Quaternion.identity;
+
+                Vector3 radians = m_System.rotationBySpeed.enabled
+                    ? m_Storage.GetAccumulatedRotation(particleIndex)
+                    : Vector3.zero;
+                if (m_System.rotationOverLifetime.enabled)
+                {
+                    float startLifetime = m_Storage.GetStartLifetime(particleIndex);
+                    float lifetimeRatio = startLifetime > 0.0f
+                        ? Mathf.Clamp01(m_Storage.GetRemainingLifetime(particleIndex) / startLifetime)
+                        : 0.0f;
+                    radians.z += m_System.rotationOverLifetime.EvaluateIntegratedRadians(
+                        1.0f - lifetimeRatio,
+                        startLifetime);
+                }
+
+                return Quaternion.Euler(radians * Mathf.Rad2Deg);
             }
 
             private Matrix4x4 GetStretchParticleMatrix(int particleIndex, Vector3 position, float size)
             {
                 Vector3 velocity = m_Storage.GetVelocity(particleIndex);
+                if (m_System.velocityOverLifetime.enabled)
+                    velocity += m_Storage.GetAnimatedVelocity(particleIndex);
                 Vector3 up = velocity.sqrMagnitude > 0.000001f
                     ? velocity.normalized
                     : Vector3.up;
@@ -4276,6 +5356,7 @@ namespace VividRP.Runtime.Particle
 
                 m_BatchCreated = true;
                 m_ResourcesDirty = false;
+                m_RenderIdentityDirty = true;
                 CullingCallCount = 0;
                 VisibleCullingCallCount = 0;
                 LastVisible = false;
@@ -4368,6 +5449,9 @@ namespace VividRP.Runtime.Particle
             {
                 m_BatchCreated = false;
                 m_RendererInitialized = false;
+                m_HasCachedRenderIdentity = false;
+                m_RenderIdentityDirty = true;
+                m_CachedRenderIdentity = default;
 
                 for (int index = 0; index < m_InstanceDataBuffers.Length; index++)
                 {
@@ -4751,15 +5835,49 @@ namespace VividRP.Runtime.Particle
                 if (!m_Storage.TryGetColumnView(out VividParticleEcsColumnView columnView))
                     return false;
 
+                TryGetNativeLifetimeModuleData(
+                    m_NativeSimulationConfigSlot,
+                    out float4* colorOverLifetimeLut,
+                    out float* sizeOverLifetimeLut,
+                    out float* rotationOverLifetimeLut,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _,
+                    out _);
+                TryGetNativeTextureSheetAnimationData(
+                    m_NativeSimulationConfigSlot,
+                    out float* textureSheetFrameOverTimeLut,
+                    out int textureSheetAnimationEnabled,
+                    out int textureSheetTilesX,
+                    out int textureSheetTilesY,
+                    out int textureSheetAnimationType,
+                    out int textureSheetRowIndex,
+                    out float textureSheetStartFrame,
+                    out float textureSheetCycleCount);
+                TryGetNativeSpeedModuleData(
+                    m_NativeSimulationConfigSlot,
+                    out float4* colorBySpeedLut,
+                    out float* sizeBySpeedLut,
+                    out int colorBySpeedEnabled,
+                    out int sizeBySpeedEnabled,
+                    out float2 colorBySpeedRange,
+                    out float2 sizeBySpeedRange,
+                    out _);
+
                 source = new ParticleRenderUploadSource
                 {
                     Positions = columnView.Positions,
                     Velocities = columnView.Velocities,
+                    AnimatedVelocities = columnView.AnimatedVelocities,
                     StartLifetimes = columnView.StartLifetimes,
                     RemainingLifetimes = columnView.RemainingLifetimes,
                     Colors = columnView.Colors,
                     Sizes = columnView.Sizes,
                     MeshIndices = columnView.MeshIndices,
+                    AccumulatedRotations = columnView.AccumulatedRotations,
                     ActiveCount = activeCount,
                     ArchetypeLineId = columnView.ArchetypeLineId,
                     BatchBaseIndex = batchBaseIndex,
@@ -4767,6 +5885,24 @@ namespace VividRP.Runtime.Particle
                     SizeScale = m_System.rendererModule.sizeScale,
                     MeshCount = Mathf.Max(0, m_System.rendererModule.meshCount),
                     RendererColor = ToFloat4(m_System.rendererModule.color),
+                    ColorOverLifetimeLut = colorOverLifetimeLut,
+                    ColorBySpeedLut = colorBySpeedLut,
+                    SizeOverLifetimeLut = sizeOverLifetimeLut,
+                    SizeBySpeedLut = sizeBySpeedLut,
+                    RotationOverLifetimeLut = rotationOverLifetimeLut,
+                    TextureSheetFrameOverTimeLut = textureSheetFrameOverTimeLut,
+                    RenderKernelFlags = (uint)m_Storage.renderKernelSharedKey.EnabledFlags,
+                    ColorBySpeedEnabled = colorBySpeedEnabled,
+                    SizeBySpeedEnabled = sizeBySpeedEnabled,
+                    ColorBySpeedRange = colorBySpeedRange,
+                    SizeBySpeedRange = sizeBySpeedRange,
+                    TextureSheetAnimationEnabled = textureSheetAnimationEnabled,
+                    TextureSheetTilesX = textureSheetTilesX,
+                    TextureSheetTilesY = textureSheetTilesY,
+                    TextureSheetAnimationType = textureSheetAnimationType,
+                    TextureSheetRowIndex = textureSheetRowIndex,
+                    TextureSheetStartFrame = textureSheetStartFrame,
+                    TextureSheetCycleCount = textureSheetCycleCount,
                     BufferBase = bufferBase,
                 };
                 return true;
@@ -5561,6 +6697,7 @@ namespace VividRP.Runtime.Particle
                 VividParticleGpuDataMode rotationDataMode,
                 VividParticleGpuDataMode velocityDataMode,
                 VividParticleGpuDataMode sizeDataMode,
+                VividParticleGpuDataMode uvDataMode,
                 bool includeUV,
                 bool includeCustomData1,
                 bool includeCustomData2,
@@ -5571,6 +6708,7 @@ namespace VividRP.Runtime.Particle
                 RotationDataMode = rotationDataMode;
                 VelocityDataMode = velocityDataMode;
                 SizeDataMode = sizeDataMode;
+                UVDataMode = uvDataMode;
                 IncludeUV = includeUV;
                 IncludeCustomData1 = includeCustomData1;
                 IncludeCustomData2 = includeCustomData2;
@@ -5587,6 +6725,8 @@ namespace VividRP.Runtime.Particle
 
             public VividParticleGpuDataMode SizeDataMode { get; }
 
+            public VividParticleGpuDataMode UVDataMode { get; }
+
             public bool IncludeUV { get; }
 
             public bool IncludeCustomData1 { get; }
@@ -5602,6 +6742,7 @@ namespace VividRP.Runtime.Particle
                     && RotationDataMode == other.RotationDataMode
                     && VelocityDataMode == other.VelocityDataMode
                     && SizeDataMode == other.SizeDataMode
+                    && UVDataMode == other.UVDataMode
                     && IncludeUV == other.IncludeUV
                     && IncludeCustomData1 == other.IncludeCustomData1
                     && IncludeCustomData2 == other.IncludeCustomData2
@@ -5622,6 +6763,7 @@ namespace VividRP.Runtime.Particle
                     hash = (hash * 397) ^ (int)RotationDataMode;
                     hash = (hash * 397) ^ (int)VelocityDataMode;
                     hash = (hash * 397) ^ (int)SizeDataMode;
+                    hash = (hash * 397) ^ (int)UVDataMode;
                     hash = (hash * 397) ^ (IncludeUV ? 1 : 0);
                     hash = (hash * 397) ^ (IncludeCustomData1 ? 1 : 0);
                     hash = (hash * 397) ^ (IncludeCustomData2 ? 1 : 0);
@@ -5638,6 +6780,7 @@ namespace VividRP.Runtime.Particle
                     VividParticleGpuDataMode.Shared,
                     VividParticleGpuDataMode.Shared,
                     VividParticleGpuDataMode.Shared,
+                    VividParticleGpuDataMode.Shared,
                     includeUV: false,
                     includeCustomData1: false,
                     includeCustomData2: false,
@@ -5646,16 +6789,84 @@ namespace VividRP.Runtime.Particle
 
             public static VividParticleGpuDataLayoutDescriptor Create(VividParticleRendererModule rendererModule)
             {
+                return Create(
+                    rendererModule,
+                    requiresPerParticleColor: false,
+                    requiresPerParticleSize: false);
+            }
+
+            public static VividParticleGpuDataLayoutDescriptor Create(
+                VividParticleRendererModule rendererModule,
+                bool requiresPerParticleColor,
+                bool requiresPerParticleSize)
+            {
+                return Create(
+                    rendererModule,
+                    requiresPerParticleColor,
+                    requiresPerParticleSize,
+                    requiresPerParticleRotation: false);
+            }
+
+            public static VividParticleGpuDataLayoutDescriptor Create(
+                VividParticleRendererModule rendererModule,
+                bool requiresPerParticleColor,
+                bool requiresPerParticleSize,
+                bool requiresPerParticleRotation)
+            {
+                return Create(
+                    rendererModule,
+                    requiresPerParticleColor,
+                    requiresPerParticleSize,
+                    requiresPerParticleRotation,
+                    requiresPerParticleVelocity: false,
+                    requiresPerParticleUV: false);
+            }
+
+            public static VividParticleGpuDataLayoutDescriptor Create(
+                VividParticleRendererModule rendererModule,
+                bool requiresPerParticleColor,
+                bool requiresPerParticleSize,
+                bool requiresPerParticleRotation,
+                bool requiresPerParticleVelocity)
+            {
+                return Create(
+                    rendererModule,
+                    requiresPerParticleColor,
+                    requiresPerParticleSize,
+                    requiresPerParticleRotation,
+                    requiresPerParticleVelocity,
+                    requiresPerParticleUV: false);
+            }
+
+            public static VividParticleGpuDataLayoutDescriptor Create(
+                VividParticleRendererModule rendererModule,
+                bool requiresPerParticleColor,
+                bool requiresPerParticleSize,
+                bool requiresPerParticleRotation,
+                bool requiresPerParticleVelocity,
+                bool requiresPerParticleUV)
+            {
                 if (rendererModule == null)
                     return Create(VividParticleRenderMode.Billboard);
 
                 return new VividParticleGpuDataLayoutDescriptor(
                     rendererModule.renderMode,
-                    rendererModule.colorDataMode,
-                    rendererModule.rotationDataMode,
-                    rendererModule.velocityDataMode,
-                    rendererModule.sizeDataMode,
-                    rendererModule.uvDataEnabled,
+                    requiresPerParticleColor
+                        ? VividParticleGpuDataMode.PerParticle
+                        : rendererModule.colorDataMode,
+                    requiresPerParticleRotation
+                        ? VividParticleGpuDataMode.PerParticle
+                        : rendererModule.rotationDataMode,
+                    requiresPerParticleVelocity
+                        ? VividParticleGpuDataMode.PerParticle
+                        : rendererModule.velocityDataMode,
+                    requiresPerParticleSize
+                        ? VividParticleGpuDataMode.PerParticle
+                        : rendererModule.sizeDataMode,
+                    requiresPerParticleUV
+                        ? VividParticleGpuDataMode.PerParticle
+                        : VividParticleGpuDataMode.Shared,
+                    rendererModule.uvDataEnabled || requiresPerParticleUV,
                     rendererModule.customData1Enabled,
                     rendererModule.customData2Enabled,
                     rendererModule.meshIndexDataEnabled);
@@ -6023,13 +7234,21 @@ namespace VividRP.Runtime.Particle
                         : VividParticleGpuDataFrequency.PerSharp);
 
                 if (descriptor.IncludeUV)
-                    dataInfos[index++] = CreateInfo(VividParticleGpuDataId.UV, VividParticleGpuDataFrequency.PerInstance);
+                {
+                    dataInfos[index++] = CreateInfo(
+                        VividParticleGpuDataId.UV,
+                        ResolveFrequency(descriptor.UVDataMode, perSharpWhenShared: true));
+                }
 
                 if (descriptor.IncludeCustomData1)
-                    dataInfos[index++] = CreateInfo(VividParticleGpuDataId.CustomData1, VividParticleGpuDataFrequency.PerInstance);
+                    dataInfos[index++] = CreateInfo(
+                        VividParticleGpuDataId.CustomData1,
+                        VividParticleGpuDataFrequency.PerSharp);
 
                 if (descriptor.IncludeCustomData2)
-                    dataInfos[index++] = CreateInfo(VividParticleGpuDataId.CustomData2, VividParticleGpuDataFrequency.PerInstance);
+                    dataInfos[index++] = CreateInfo(
+                        VividParticleGpuDataId.CustomData2,
+                        VividParticleGpuDataFrequency.PerSharp);
 
                 if (descriptor.IncludeMeshIndex)
                     dataInfos[index] = CreateInfo(VividParticleGpuDataId.MeshIndex, VividParticleGpuDataFrequency.PerInstance);
@@ -6506,6 +7725,7 @@ namespace VividRP.Runtime.Particle
         private readonly struct ParticleRenderEntry
         {
             public readonly ParticleSystemState State;
+            public readonly int IdentityVersion;
             public readonly int EcsLineId;
             public readonly Material Material;
             public readonly Mesh Mesh;
@@ -6541,6 +7761,7 @@ namespace VividRP.Runtime.Particle
 
             public ParticleRenderEntry(
                 ParticleSystemState state,
+                int identityVersion,
                 int ecsLineId,
                 Material material,
                 Mesh mesh,
@@ -6575,6 +7796,7 @@ namespace VividRP.Runtime.Particle
                 int batchLayer)
             {
                 State = state;
+                IdentityVersion = identityVersion;
                 EcsLineId = ecsLineId;
                 Material = material;
                 Mesh = mesh;
@@ -6698,6 +7920,7 @@ namespace VividRP.Runtime.Particle
         private sealed class ParticleRenderRecord
         {
             public ParticleSystemState State;
+            public int IdentityVersion = -1;
             public int EcsLineId = -1;
             public Material Material;
             public Mesh Mesh;
@@ -6749,10 +7972,19 @@ namespace VividRP.Runtime.Particle
             public int MeshVisibleCountCount;
             public bool UploadDirtyQueued;
 
-            public void Update(ParticleRenderEntry entry)
+            public void Update(ParticleRenderEntry entry, bool updateIdentity, ParticleDrawKey key)
             {
                 State = entry.State;
                 EcsLineId = entry.EcsLineId;
+                SceneCullingMask = entry.SceneCullingMask;
+                LocalToWorldMatrix = entry.LocalToWorldMatrix;
+                PickingEntityId = entry.PickingEntityId;
+                IsEditorSelected = entry.IsEditorSelected;
+                ActiveCount = Mathf.Clamp(entry.ActiveCount, 0, Mathf.Max(1, entry.Capacity));
+                if (!updateIdentity)
+                    return;
+
+                IdentityVersion = entry.IdentityVersion;
                 Material = entry.Material;
                 Mesh = entry.Mesh;
                 Meshes = entry.Meshes ?? Array.Empty<Mesh>();
@@ -6761,10 +7993,8 @@ namespace VividRP.Runtime.Particle
                 GpuLayout = entry.GpuLayout;
                 RendererSharedKey = entry.RendererSharedKey;
                 Layer = Mathf.Clamp(entry.Layer, 0, 31);
-                SceneCullingMask = entry.SceneCullingMask;
                 Capacity = Mathf.Max(1, entry.Capacity);
                 ActiveCount = Mathf.Clamp(entry.ActiveCount, 0, Capacity);
-                LocalToWorldMatrix = entry.LocalToWorldMatrix;
                 SimulationSpace = entry.SimulationSpace;
                 RendererColor = entry.RendererColor;
                 SizeScale = entry.SizeScale;
@@ -6779,13 +8009,11 @@ namespace VividRP.Runtime.Particle
                 RenderingLayerMask = entry.RenderingLayerMask;
                 ReceiveShadows = entry.ReceiveShadows;
                 StaticShadowCaster = entry.StaticShadowCaster;
-                PickingEntityId = entry.PickingEntityId;
-                IsEditorSelected = entry.IsEditorSelected;
                 SortMode = entry.SortMode;
                 SortingPriority = entry.SortingPriority;
                 BatchLayer = entry.BatchLayer;
                 RequiresSortingPositions = VividParticleSystemManager.RequiresSortingPositions(SortMode);
-                Key = new ParticleDrawKey(entry);
+                Key = key;
             }
         }
 
@@ -6956,6 +8184,8 @@ namespace VividRP.Runtime.Particle
             [NativeDisableUnsafePtrRestriction]
             public float3* Velocities;
             [NativeDisableUnsafePtrRestriction]
+            public float3* AnimatedVelocities;
+            [NativeDisableUnsafePtrRestriction]
             public float* StartLifetimes;
             [NativeDisableUnsafePtrRestriction]
             public float* RemainingLifetimes;
@@ -6966,7 +8196,21 @@ namespace VividRP.Runtime.Particle
             [NativeDisableUnsafePtrRestriction]
             public int* MeshIndices;
             [NativeDisableUnsafePtrRestriction]
+            public float3* AccumulatedRotations;
+            [NativeDisableUnsafePtrRestriction]
             public byte* BufferBase;
+            [NativeDisableUnsafePtrRestriction]
+            public float4* ColorOverLifetimeLut;
+            [NativeDisableUnsafePtrRestriction]
+            public float4* ColorBySpeedLut;
+            [NativeDisableUnsafePtrRestriction]
+            public float* SizeOverLifetimeLut;
+            [NativeDisableUnsafePtrRestriction]
+            public float* SizeBySpeedLut;
+            [NativeDisableUnsafePtrRestriction]
+            public float* RotationOverLifetimeLut;
+            [NativeDisableUnsafePtrRestriction]
+            public float* TextureSheetFrameOverTimeLut;
 
             public int StartIndex;
             public int Count;
@@ -6977,6 +8221,18 @@ namespace VividRP.Runtime.Particle
             public float SizeScale;
             public int MeshCount;
             public float4 RendererColor;
+            public uint RenderKernelFlags;
+            public int ColorBySpeedEnabled;
+            public int SizeBySpeedEnabled;
+            public float2 ColorBySpeedRange;
+            public float2 SizeBySpeedRange;
+            public int TextureSheetAnimationEnabled;
+            public int TextureSheetTilesX;
+            public int TextureSheetTilesY;
+            public int TextureSheetAnimationType;
+            public int TextureSheetRowIndex;
+            public float TextureSheetStartFrame;
+            public float TextureSheetCycleCount;
         }
 
         private struct ParticleRenderUploadPageWork
@@ -7120,6 +8376,8 @@ namespace VividRP.Runtime.Particle
             [NativeDisableUnsafePtrRestriction]
             public float3* Velocities;
             [NativeDisableUnsafePtrRestriction]
+            public float3* AnimatedVelocities;
+            [NativeDisableUnsafePtrRestriction]
             public float* Sizes;
 
             public int ActiveCount;
@@ -7130,6 +8388,8 @@ namespace VividRP.Runtime.Particle
             public float StretchLengthScale;
             public float StretchSpeedScale;
             public float MeshExtent;
+            public float SizeOverLifetimeMaxMultiplier;
+            public int VelocityOverLifetimeEnabled;
         }
 
         private struct ParticleBoundsPageWork
@@ -7197,10 +8457,16 @@ namespace VividRP.Runtime.Particle
             public NativeList<int> SplitPlaneCounts;
             public NativeArray<ParticleCullingSplit> Splits;
             public NativeArray<ParticleCullingPlanePacket4> PlanePackets;
+            public NativeArray<ParticleDrawCommandInput> FilteredCommands;
+            public NativeArray<ParticleDrawRangeInput> FilteredRanges;
 
             public int splitCapacity => Splits.IsCreated ? Splits.Length : 0;
 
             public int packetCapacity => PlanePackets.IsCreated ? PlanePackets.Length : 0;
+
+            public int filteredCommandCapacity => FilteredCommands.IsCreated ? FilteredCommands.Length : 0;
+
+            public int filteredRangeCapacity => FilteredRanges.IsCreated ? FilteredRanges.Length : 0;
 
             public void Begin()
             {
@@ -7213,6 +8479,12 @@ namespace VividRP.Runtime.Particle
                 EnsurePacketCapacity(packetCount);
             }
 
+            public void EnsureFilteredLayoutCapacity(int commandCount)
+            {
+                EnsureFilteredCommandCapacity(commandCount);
+                EnsureFilteredRangeCapacity(commandCount);
+            }
+
             public void Dispose()
             {
                 if (ReceiverPlanes.IsCreated)
@@ -7223,11 +8495,17 @@ namespace VividRP.Runtime.Particle
                     Splits.Dispose();
                 if (PlanePackets.IsCreated)
                     PlanePackets.Dispose();
+                if (FilteredCommands.IsCreated)
+                    FilteredCommands.Dispose();
+                if (FilteredRanges.IsCreated)
+                    FilteredRanges.Dispose();
 
                 ReceiverPlanes = default;
                 SplitPlaneCounts = default;
                 Splits = default;
                 PlanePackets = default;
+                FilteredCommands = default;
+                FilteredRanges = default;
             }
 
             private void EnsureLists()
@@ -7266,6 +8544,34 @@ namespace VividRP.Runtime.Particle
                 if (PlanePackets.IsCreated)
                     PlanePackets.Dispose();
                 PlanePackets = new NativeArray<ParticleCullingPlanePacket4>(
+                    requiredCapacity,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+            }
+
+            private void EnsureFilteredCommandCapacity(int requiredCount)
+            {
+                int requiredCapacity = ResolvePersistentScratchCapacity(requiredCount);
+                if (FilteredCommands.IsCreated && FilteredCommands.Length >= requiredCapacity)
+                    return;
+
+                if (FilteredCommands.IsCreated)
+                    FilteredCommands.Dispose();
+                FilteredCommands = new NativeArray<ParticleDrawCommandInput>(
+                    requiredCapacity,
+                    Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+            }
+
+            private void EnsureFilteredRangeCapacity(int requiredCount)
+            {
+                int requiredCapacity = ResolvePersistentScratchCapacity(requiredCount);
+                if (FilteredRanges.IsCreated && FilteredRanges.Length >= requiredCapacity)
+                    return;
+
+                if (FilteredRanges.IsCreated)
+                    FilteredRanges.Dispose();
+                FilteredRanges = new NativeArray<ParticleDrawRangeInput>(
                     requiredCapacity,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory);
@@ -7948,10 +9254,22 @@ namespace VividRP.Runtime.Particle
             private uint m_LastUploadDataBits;
             private uint m_LastRenderJobModuleFlags;
             private int m_LastRenderPageJobModuleCount;
+            private uint m_LastRenderKernelFlags;
+            private int m_LastAnimatedTransformPageWorkCount;
+            private int m_LastAnimatedColorPageWorkCount;
+            private int m_LastAnimatedVelocityPageWorkCount;
             private uint m_PendingRenderJobFlags;
             private bool m_UploadCopyWorksAreSorted = true;
 
             public bool hasPendingUpload => m_HasPendingUpload;
+
+            public uint lastRenderKernelFlags => m_LastRenderKernelFlags;
+
+            public int lastAnimatedTransformPageWorkCount => m_LastAnimatedTransformPageWorkCount;
+
+            public int lastAnimatedColorPageWorkCount => m_LastAnimatedColorPageWorkCount;
+
+            public int lastAnimatedVelocityPageWorkCount => m_LastAnimatedVelocityPageWorkCount;
 
             public bool hasPendingCullingRecordBuild => m_HasPendingCullingRecordBuild;
 
@@ -8067,6 +9385,8 @@ namespace VividRP.Runtime.Particle
                 m_CullingScratchSlotCursor,
                 m_LastCullingScratchSplitCount,
                 m_LastCullingScratchPacketCount,
+                GetCullingScratchFilteredCommandCapacity(),
+                GetCullingScratchFilteredRangeCapacity(),
                 m_LastCullingViewType,
                 m_LastBoundsPageWorkCount,
                 m_LastBoundsRecordWorkCount,
@@ -8297,6 +9617,10 @@ namespace VividRP.Runtime.Particle
                 m_LastUploadCopySortCount = 0;
                 m_LastRenderJobModuleFlags = 0u;
                 m_LastRenderPageJobModuleCount = 0;
+                m_LastRenderKernelFlags = 0u;
+                m_LastAnimatedTransformPageWorkCount = 0;
+                m_LastAnimatedColorPageWorkCount = 0;
+                m_LastAnimatedVelocityPageWorkCount = 0;
                 m_UploadCopyWorksAreSorted = true;
             }
 
@@ -8308,11 +9632,11 @@ namespace VividRP.Runtime.Particle
                     return;
                 }
 
-                ParticleDrawKey key = new(entry);
                 if (!m_Records.TryGetValue(state, out ParticleRenderRecord record))
                 {
+                    ParticleDrawKey initialKey = new(entry);
                     record = AcquireRenderRecord();
-                    record.Update(entry);
+                    record.Update(entry, updateIdentity: true, key: initialKey);
                     AllocateRecordSlot(record);
                     state.SetRendererHandle(new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                     m_Records.Add(state, record);
@@ -8322,11 +9646,13 @@ namespace VividRP.Runtime.Particle
                 }
 
                 int oldLineId = record.EcsLineId;
-                bool layoutChanged = !record.Key.Equals(key)
+                bool identityChanged = record.IdentityVersion != entry.IdentityVersion;
+                ParticleDrawKey key = identityChanged ? new ParticleDrawKey(entry) : record.Key;
+                bool layoutChanged = (identityChanged && !record.Key.Equals(key))
                     || record.Capacity != entry.Capacity
                     || record.SceneCullingMask != entry.SceneCullingMask
                     || oldLineId != entry.EcsLineId;
-                record.Update(entry);
+                record.Update(entry, identityChanged, key);
                 state.SetRendererHandle(new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                 if (layoutChanged)
                     m_LayoutDirty = true;
@@ -8495,6 +9821,7 @@ namespace VividRP.Runtime.Particle
             private static void ResetRenderRecordForPool(ParticleRenderRecord record)
             {
                 record.State = null;
+                record.IdentityVersion = -1;
                 record.EcsLineId = -1;
                 record.Material = null;
                 record.Mesh = null;
@@ -10059,6 +11386,10 @@ namespace VividRP.Runtime.Particle
                         m_LastUploadDataBits = 0u;
                         m_LastRenderJobModuleFlags = 0u;
                         m_LastRenderPageJobModuleCount = 0;
+                        m_LastRenderKernelFlags = 0u;
+                        m_LastAnimatedTransformPageWorkCount = 0;
+                        m_LastAnimatedColorPageWorkCount = 0;
+                        m_LastAnimatedVelocityPageWorkCount = 0;
 
                         if (forceFullUpload)
                         {
@@ -10954,6 +12285,25 @@ namespace VividRP.Runtime.Particle
                 pageWork.ColumnMask = columnMask;
                 works.Add(pageWork);
                 m_PendingRenderJobFlags |= (uint)flag;
+                uint renderKernelFlags = pageWork.Source.RenderKernelFlags;
+                m_LastRenderKernelFlags |= renderKernelFlags;
+                if (flag == ParticleRenderJobFlags.TransformUpload
+                    && (renderKernelFlags & (uint)(
+                        VividParticleModuleFlags.SizeOverLifetime
+                        | VividParticleModuleFlags.RotationOverLifetime)) != 0u)
+                {
+                    m_LastAnimatedTransformPageWorkCount++;
+                }
+                else if (flag == ParticleRenderJobFlags.ColorUpload
+                    && (renderKernelFlags & (uint)VividParticleModuleFlags.ColorOverLifetime) != 0u)
+                {
+                    m_LastAnimatedColorPageWorkCount++;
+                }
+                else if (flag == ParticleRenderJobFlags.VelocityStretchUpload
+                    && (renderKernelFlags & (uint)VividParticleModuleFlags.VelocityOverLifetime) != 0u)
+                {
+                    m_LastAnimatedVelocityPageWorkCount++;
+                }
             }
 
             private static ParticleRenderUploadPageWork CreateUploadPageWork(
@@ -11496,6 +12846,22 @@ namespace VividRP.Runtime.Particle
                 m_LastCullingScratchPacketCount = 0;
             }
 
+            private int GetCullingScratchFilteredCommandCapacity()
+            {
+                int capacity = 0;
+                for (int slotIndex = 0; slotIndex < m_CullingScratchSlots.Count; slotIndex++)
+                    capacity += m_CullingScratchSlots[slotIndex]?.filteredCommandCapacity ?? 0;
+                return capacity;
+            }
+
+            private int GetCullingScratchFilteredRangeCapacity()
+            {
+                int capacity = 0;
+                for (int slotIndex = 0; slotIndex < m_CullingScratchSlots.Count; slotIndex++)
+                    capacity += m_CullingScratchSlots[slotIndex]?.filteredRangeCapacity ?? 0;
+                return capacity;
+            }
+
             private void CompletePendingCullingRecordBuild()
             {
                 if (!m_HasPendingCullingRecordBuild)
@@ -11698,6 +13064,8 @@ namespace VividRP.Runtime.Particle
                     return default;
                 }
 
+                ParticleCullingScratchSlot cullingScratch = AcquireCullingScratchSlot();
+                cullingScratch.Begin();
                 ParticlePickingIncludeExcludeFilterScope pickingFilterScope =
                     CreatePickingIncludeExcludeFilter(cullingContext);
                 ParticlePickingIncludeExcludeFilter pickingFilter = pickingFilterScope.Filter;
@@ -11723,14 +13091,13 @@ namespace VividRP.Runtime.Particle
                 {
                     m_LastCullingFilterPassCount = 1;
                     m_LastCullingFilterCommandCount = sourceDrawCommandCount;
-                    filteredCommandStorage = new NativeArray<ParticleDrawCommandInput>(
-                        sourceDrawCommandCount,
-                        Allocator.TempJob,
-                        NativeArrayOptions.UninitializedMemory);
-                    filteredRangeStorage = new NativeArray<ParticleDrawRangeInput>(
-                        sourceDrawCommandCount,
-                        Allocator.TempJob,
-                        NativeArrayOptions.UninitializedMemory);
+                    cullingScratch.EnsureFilteredLayoutCapacity(sourceDrawCommandCount);
+                    filteredCommandStorage = cullingScratch.FilteredCommands.GetSubArray(
+                        0,
+                        sourceDrawCommandCount);
+                    filteredRangeStorage = cullingScratch.FilteredRanges.GetSubArray(
+                        0,
+                        sourceDrawCommandCount);
                     using (s_CullingFilterCompactMarker.Auto())
                     {
                         FillFilteredDrawLayout(
@@ -11763,10 +13130,7 @@ namespace VividRP.Runtime.Particle
                         false,
                         hasPickingFilter);
                     pickingFilterScope.Dispose();
-                    if (filteredCommandStorage.IsCreated)
-                        filteredCommandStorage.Dispose();
-                    if (filteredRangeStorage.IsCreated)
-                        filteredRangeStorage.Dispose();
+                    ReleaseUnusedCullingScratchSlot();
                     WriteEmptyDrawCommands(cullingOutput);
                     return default;
                 }
@@ -11790,10 +13154,8 @@ namespace VividRP.Runtime.Particle
                 }
                 else
                 {
-                    if (filteredCommandStorage.IsCreated)
-                        filteredCommandStorage.Dispose();
-                    if (filteredRangeStorage.IsCreated)
-                        filteredRangeStorage.Dispose();
+                    filteredCommandStorage = default;
+                    filteredRangeStorage = default;
                 }
 
                 RecordCullingLayoutStats(
@@ -11853,6 +13215,7 @@ namespace VividRP.Runtime.Particle
 
                 NativeArray<ParticleCullingSplit> cullingSplits = CreatePackedCullingData(
                     cullingContext,
+                    cullingScratch,
                     out NativeArray<ParticleCullingPlanePacket4> cullingPlanePackets);
 
                 var job = new ParticleDrawCommandOutputJob
@@ -11876,21 +13239,11 @@ namespace VividRP.Runtime.Particle
                     ? m_PendingCullingRecordBuildHandle
                     : default;
                 JobHandle outputHandle = job.Schedule(drawCommandCount, 4, outputDependency);
-                JobHandle combinedHandle = outputHandle;
-                if (ownsFilteredDrawLayout)
-                {
-                    JobHandle disposeCommandsHandle = filteredCommandStorage.Dispose(outputHandle);
-                    JobHandle disposeRangesHandle = filteredRangeStorage.Dispose(outputHandle);
-                    combinedHandle = JobHandle.CombineDependencies(
-                        combinedHandle,
-                        JobHandle.CombineDependencies(disposeCommandsHandle, disposeRangesHandle));
-                }
-
                 m_PendingCullingOutputHandle = m_HasPendingCullingOutput
-                    ? JobHandle.CombineDependencies(m_PendingCullingOutputHandle, combinedHandle)
-                    : combinedHandle;
+                    ? JobHandle.CombineDependencies(m_PendingCullingOutputHandle, outputHandle)
+                    : outputHandle;
                 m_HasPendingCullingOutput = true;
-                return combinedHandle;
+                return outputHandle;
             }
 
             private static unsafe ParticlePickingIncludeExcludeFilterScope CreatePickingIncludeExcludeFilter(
@@ -12134,12 +13487,17 @@ namespace VividRP.Runtime.Particle
                 return m_CullingScratchSlots[slotIndex];
             }
 
+            private void ReleaseUnusedCullingScratchSlot()
+            {
+                if (m_CullingScratchSlotCursor > 0)
+                    m_CullingScratchSlotCursor--;
+            }
+
             private NativeArray<ParticleCullingSplit> CreatePackedCullingData(
                 BatchCullingContext cullingContext,
+                ParticleCullingScratchSlot scratch,
                 out NativeArray<ParticleCullingPlanePacket4> planePackets)
             {
-                ParticleCullingScratchSlot scratch = AcquireCullingScratchSlot();
-                scratch.Begin();
                 NativeArray<Plane> sourcePlanes = cullingContext.cullingPlanes;
                 int sourcePlaneCount = sourcePlanes.IsCreated ? sourcePlanes.Length : 0;
                 var sourceSplits = cullingContext.cullingSplits;
@@ -12617,7 +13975,9 @@ namespace VividRP.Runtime.Particle
         {
             float renderSize = math.max(
                 VividParticleMainModule.MinimumStartSize,
-                source.Sizes[particleIndex] * source.SizeScale);
+                source.Sizes[particleIndex]
+                * source.SizeScale
+                * math.max(0.0f, source.SizeOverLifetimeMaxMultiplier));
 
             if (source.RenderMode == (int)VividParticleRenderMode.Mesh && source.MeshExtent > 0.0f)
                 return math.max(VividParticleMainModule.MinimumStartSize, source.MeshExtent * renderSize);
@@ -12627,11 +13987,19 @@ namespace VividRP.Runtime.Particle
                 float length = math.max(
                     VividParticleMainModule.MinimumStartSize,
                     renderSize * source.StretchLengthScale
-                    + math.length(source.Velocities[particleIndex]) * source.StretchSpeedScale);
+                    + math.length(GetBoundsVelocity(source, particleIndex)) * source.StretchSpeedScale);
                 return math.max(renderSize, length) * 0.5f;
             }
 
             return renderSize * 0.5f;
+        }
+
+        private static unsafe float3 GetBoundsVelocity(ParticleBoundsSource source, int particleIndex)
+        {
+            float3 velocity = source.Velocities[particleIndex];
+            if (source.VelocityOverLifetimeEnabled != 0 && source.AnimatedVelocities != null)
+                velocity += source.AnimatedVelocities[particleIndex];
+            return velocity;
         }
 
         private static ParticleBoundsData CreateBoundsData(float3 min, float3 max)
@@ -13898,20 +15266,57 @@ namespace VividRP.Runtime.Particle
                 int activeColumnMask,
                 int endIndex)
             {
+                bool writePositionSize = (activeColumnMask & UploadColumnPositionSizeMask) != 0;
+                bool writeScale = (activeColumnMask & UploadColumnScaleMask) != 0;
+                bool animatedSize = (HasRenderKernelFlag(
+                        source,
+                        VividParticleModuleFlags.SizeOverLifetime)
+                        && source.SizeOverLifetimeLut != null)
+                    || (HasRenderKernelFlag(source, VividParticleModuleFlags.SizeBySpeed)
+                        && source.SizeBySpeedEnabled != 0
+                        && source.SizeBySpeedLut != null);
+                if (writePositionSize || writeScale)
+                {
+                    for (int particleIndex = source.StartIndex; particleIndex < endIndex; particleIndex++)
+                    {
+                        float size = animatedSize
+                            ? GetDynamicRenderSize(source, particleIndex)
+                            : GetBaseRenderSize(source, particleIndex);
+                        if (writePositionSize)
+                        {
+                            WriteParticleValue(
+                                work,
+                                particleIndex,
+                                work.PositionSizeByteOffset,
+                                new float4(source.Positions[particleIndex], size));
+                        }
+
+                        if (writeScale)
+                        {
+                            WriteParticleValue(
+                                work,
+                                particleIndex,
+                                work.ScaleByteOffset,
+                                new float4(size, size, size, 1.0f));
+                        }
+                    }
+                }
+
+                if ((activeColumnMask & UploadColumnRotationMask) == 0)
+                    return;
+
+                bool animatedRotation = (HasRenderKernelFlag(
+                        source,
+                        VividParticleModuleFlags.RotationOverLifetime)
+                        && source.RotationOverLifetimeLut != null)
+                    || (HasRenderKernelFlag(source, VividParticleModuleFlags.RotationBySpeed)
+                        && source.AccumulatedRotations != null);
                 for (int particleIndex = source.StartIndex; particleIndex < endIndex; particleIndex++)
                 {
-                    if ((activeColumnMask & UploadColumnPositionSizeMask) != 0)
-                        WriteParticleValue(work, particleIndex, work.PositionSizeByteOffset, GetPositionSize(source, particleIndex));
-
-                    if ((activeColumnMask & UploadColumnRotationMask) != 0)
-                        WriteParticleValue(
-                            work,
-                            particleIndex,
-                            work.RotationByteOffset,
-                            new float4(0.0f, 0.0f, 0.0f, 1.0f));
-
-                    if ((activeColumnMask & UploadColumnScaleMask) != 0)
-                        WriteParticleValue(work, particleIndex, work.ScaleByteOffset, GetScale(source, particleIndex));
+                    float4 rotation = animatedRotation
+                        ? GetAnimatedRotation(source, particleIndex)
+                        : new float4(0.0f, 0.0f, 0.0f, 1.0f);
+                    WriteParticleValue(work, particleIndex, work.RotationByteOffset, rotation);
                 }
             }
 
@@ -13920,8 +15325,20 @@ namespace VividRP.Runtime.Particle
                 ParticleRenderUploadSource source,
                 int endIndex)
             {
+                bool animatedColor = (HasRenderKernelFlag(
+                        source,
+                        VividParticleModuleFlags.ColorOverLifetime)
+                        && source.ColorOverLifetimeLut != null)
+                    || (HasRenderKernelFlag(source, VividParticleModuleFlags.ColorBySpeed)
+                        && source.ColorBySpeedEnabled != 0
+                        && source.ColorBySpeedLut != null);
                 for (int particleIndex = source.StartIndex; particleIndex < endIndex; particleIndex++)
-                    WriteParticleValue(work, particleIndex, work.BaseColorByteOffset, GetRenderColor(source, particleIndex));
+                {
+                    float4 color = animatedColor
+                        ? GetAnimatedRenderColor(source, particleIndex)
+                        : GetBaseRenderColor(source, particleIndex);
+                    WriteParticleValue(work, particleIndex, work.BaseColorByteOffset, color);
+                }
             }
 
             private static void WriteVelocityStretchPage(
@@ -13929,13 +15346,20 @@ namespace VividRP.Runtime.Particle
                 ParticleRenderUploadSource source,
                 int endIndex)
             {
+                bool animatedVelocity = HasRenderKernelFlag(
+                    source,
+                    VividParticleModuleFlags.VelocityOverLifetime)
+                    && source.AnimatedVelocities != null;
                 for (int particleIndex = source.StartIndex; particleIndex < endIndex; particleIndex++)
                 {
+                    float3 velocity = source.Velocities[particleIndex];
+                    if (animatedVelocity)
+                        velocity += source.AnimatedVelocities[particleIndex];
                     WriteParticleValue(
                         work,
                         particleIndex,
                         work.VelocityStretchByteOffset,
-                        GetVelocityStretch(source, particleIndex));
+                        new float4(velocity, 0.0f));
                 }
             }
 
@@ -13952,7 +15376,7 @@ namespace VividRP.Runtime.Particle
                             work,
                             particleIndex,
                             work.UVByteOffset,
-                            new float4(0.0f, 0.0f, 1.0f, 1.0f));
+                            GetTextureSheetAnimationUV(source, particleIndex));
 
                     if ((activeColumnMask & UploadColumnCustomData1Mask) != 0)
                         WriteParticleValue(work, particleIndex, work.CustomData1ByteOffset, float4.zero);
@@ -14134,30 +15558,77 @@ namespace VividRP.Runtime.Particle
                 }
             }
 
-            private static float4 GetPositionSize(ParticleRenderUploadSource source, int particleIndex)
+            private static bool HasRenderKernelFlag(
+                ParticleRenderUploadSource source,
+                VividParticleModuleFlags flag)
             {
-                return new float4(
-                    source.Positions[particleIndex],
-                    GetRenderSize(source, particleIndex));
+                return (source.RenderKernelFlags & (uint)flag) != 0u;
             }
 
-            private static float4 GetVelocityStretch(ParticleRenderUploadSource source, int particleIndex)
+            private static float GetBaseRenderSize(ParticleRenderUploadSource source, int particleIndex)
             {
-                return new float4(source.Velocities[particleIndex], 0.0f);
+                return math.max(
+                    VividParticleMainModule.MinimumStartSize,
+                    source.Sizes[particleIndex] * source.SizeScale);
             }
 
-            private static float GetRenderSize(ParticleRenderUploadSource source, int particleIndex)
+            private static float GetDynamicRenderSize(
+                ParticleRenderUploadSource source,
+                int particleIndex)
             {
-                return math.max(VividParticleMainModule.MinimumStartSize, source.Sizes[particleIndex] * source.SizeScale);
+                float sizeMultiplier = 1.0f;
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.SizeOverLifetime)
+                    && source.SizeOverLifetimeLut != null)
+                {
+                    sizeMultiplier *= math.max(
+                        0.0f,
+                        SampleLifetimeLut(
+                            source.SizeOverLifetimeLut,
+                            GetNormalizedLifetime(source, particleIndex)));
+                }
+
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.SizeBySpeed)
+                    && source.SizeBySpeedEnabled != 0
+                    && source.SizeBySpeedLut != null)
+                {
+                    sizeMultiplier *= math.max(
+                        0.0f,
+                        SampleLifetimeLut(
+                            source.SizeBySpeedLut,
+                            GetNormalizedSpeed(source, particleIndex, source.SizeBySpeedRange)));
+                }
+
+                return math.max(
+                    VividParticleMainModule.MinimumStartSize,
+                    source.Sizes[particleIndex] * source.SizeScale * sizeMultiplier);
             }
 
-            private static float4 GetScale(ParticleRenderUploadSource source, int particleIndex)
+            private static float4 GetAnimatedRotation(
+                ParticleRenderUploadSource source,
+                int particleIndex)
             {
-                float size = GetRenderSize(source, particleIndex);
-                return new float4(size, size, size, 1.0f);
+                float3 integratedRadians = float3.zero;
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.RotationOverLifetime)
+                    && source.RotationOverLifetimeLut != null)
+                {
+                    float startLifetime = source.StartLifetimes[particleIndex];
+                    integratedRadians.z += SampleLifetimeLut(
+                        source.RotationOverLifetimeLut,
+                        GetNormalizedLifetime(source, particleIndex)) * math.max(0.0f, startLifetime);
+                }
+
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.RotationBySpeed)
+                    && source.AccumulatedRotations != null)
+                {
+                    integratedRadians += source.AccumulatedRotations[particleIndex];
+                }
+
+                return quaternion.EulerXYZ(integratedRadians).value;
             }
 
-            private static float4 GetRenderColor(ParticleRenderUploadSource source, int particleIndex)
+            private static float4 GetBaseRenderColor(
+                ParticleRenderUploadSource source,
+                int particleIndex)
             {
                 float startLifetime = source.StartLifetimes[particleIndex];
                 float lifetimeRatio = startLifetime > 0.0f
@@ -14168,11 +15639,114 @@ namespace VividRP.Runtime.Particle
                 return color;
             }
 
+            private static float4 GetAnimatedRenderColor(
+                ParticleRenderUploadSource source,
+                int particleIndex)
+            {
+                float startLifetime = source.StartLifetimes[particleIndex];
+                float lifetimeRatio = startLifetime > 0.0f
+                    ? math.saturate(source.RemainingLifetimes[particleIndex] / startLifetime)
+                    : 0.0f;
+                float4 color = source.Colors[particleIndex] * source.RendererColor;
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.ColorOverLifetime)
+                    && source.ColorOverLifetimeLut != null)
+                {
+                    color *= math.max(
+                        float4.zero,
+                        SampleLifetimeLut(
+                            source.ColorOverLifetimeLut,
+                            1.0f - lifetimeRatio));
+                }
+
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.ColorBySpeed)
+                    && source.ColorBySpeedEnabled != 0
+                    && source.ColorBySpeedLut != null)
+                {
+                    color *= math.max(
+                        float4.zero,
+                        SampleLifetimeLut(
+                            source.ColorBySpeedLut,
+                            GetNormalizedSpeed(source, particleIndex, source.ColorBySpeedRange)));
+                }
+
+                color.w *= lifetimeRatio;
+                return color;
+            }
+
+            private static float GetNormalizedSpeed(
+                ParticleRenderUploadSource source,
+                int particleIndex,
+                float2 speedRange)
+            {
+                float3 velocity = source.Velocities[particleIndex];
+                if (HasRenderKernelFlag(source, VividParticleModuleFlags.VelocityOverLifetime)
+                    && source.AnimatedVelocities != null)
+                {
+                    velocity += source.AnimatedVelocities[particleIndex];
+                }
+
+                float rangeLength = math.max(0.000001f, speedRange.y - speedRange.x);
+                return math.saturate((math.length(velocity) - speedRange.x) / rangeLength);
+            }
+
+            private static float GetNormalizedLifetime(
+                ParticleRenderUploadSource source,
+                int particleIndex)
+            {
+                float startLifetime = source.StartLifetimes[particleIndex];
+                return startLifetime > 0.0f
+                    ? 1.0f - math.saturate(source.RemainingLifetimes[particleIndex] / startLifetime)
+                    : 1.0f;
+            }
+
+            private static float SampleLifetimeLut(float* lut, float normalizedLifetime)
+            {
+                float samplePosition = math.saturate(normalizedLifetime)
+                    * (VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+                int firstIndex = (int)math.floor(samplePosition);
+                int secondIndex = math.min(
+                    firstIndex + 1,
+                    VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+                return math.lerp(lut[firstIndex], lut[secondIndex], samplePosition - firstIndex);
+            }
+
+            private static float4 SampleLifetimeLut(float4* lut, float normalizedLifetime)
+            {
+                float samplePosition = math.saturate(normalizedLifetime)
+                    * (VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+                int firstIndex = (int)math.floor(samplePosition);
+                int secondIndex = math.min(
+                    firstIndex + 1,
+                    VividParticleNativeRenderModuleConfig.LifetimeLutResolution - 1);
+                return math.lerp(lut[firstIndex], lut[secondIndex], samplePosition - firstIndex);
+            }
+
             private static float4 GetMeshIndex(ParticleRenderUploadSource source, int particleIndex)
             {
                 int meshCount = math.max(1, source.MeshCount);
                 int meshIndex = ResolveMeshIndexSlot(source.MeshIndices[particleIndex], meshCount);
                 return new float4(meshIndex, meshCount, 0.0f, 0.0f);
+            }
+
+            private static float4 GetTextureSheetAnimationUV(
+                ParticleRenderUploadSource source,
+                int particleIndex)
+            {
+                if (source.TextureSheetAnimationEnabled == 0
+                    || source.TextureSheetFrameOverTimeLut == null)
+                {
+                    return new float4(0.0f, 0.0f, 1.0f, 1.0f);
+                }
+
+                float normalizedLifetime = GetNormalizedLifetime(source, particleIndex);
+                return ResolveTextureSheetAnimationUV(
+                    source.TextureSheetTilesX,
+                    source.TextureSheetTilesY,
+                    (VividParticleTextureSheetAnimationType)source.TextureSheetAnimationType,
+                    source.TextureSheetRowIndex,
+                    source.TextureSheetStartFrame,
+                    source.TextureSheetCycleCount,
+                    SampleLifetimeLut(source.TextureSheetFrameOverTimeLut, normalizedLifetime));
             }
         }
 
@@ -14276,6 +15850,8 @@ namespace VividRP.Runtime.Particle
             public readonly int ActiveCullingScratchSlotCount;
             public readonly int LastCullingScratchSplitCount;
             public readonly int LastCullingScratchPacketCount;
+            public readonly int CullingScratchFilteredCommandCapacity;
+            public readonly int CullingScratchFilteredRangeCapacity;
             public readonly BatchCullingViewType LastCullingViewType;
             public readonly int LastBoundsPageWorkCount;
             public readonly int LastBoundsRecordWorkCount;
@@ -14385,6 +15961,8 @@ namespace VividRP.Runtime.Particle
                 int activeCullingScratchSlotCount,
                 int lastCullingScratchSplitCount,
                 int lastCullingScratchPacketCount,
+                int cullingScratchFilteredCommandCapacity,
+                int cullingScratchFilteredRangeCapacity,
                 BatchCullingViewType lastCullingViewType,
                 int lastBoundsPageWorkCount,
                 int lastBoundsRecordWorkCount,
@@ -14493,6 +16071,8 @@ namespace VividRP.Runtime.Particle
                 ActiveCullingScratchSlotCount = activeCullingScratchSlotCount;
                 LastCullingScratchSplitCount = lastCullingScratchSplitCount;
                 LastCullingScratchPacketCount = lastCullingScratchPacketCount;
+                CullingScratchFilteredCommandCapacity = cullingScratchFilteredCommandCapacity;
+                CullingScratchFilteredRangeCapacity = cullingScratchFilteredRangeCapacity;
                 LastCullingViewType = lastCullingViewType;
                 LastBoundsPageWorkCount = lastBoundsPageWorkCount;
                 LastBoundsRecordWorkCount = lastBoundsRecordWorkCount;

@@ -41,9 +41,6 @@ Shader "VividRP/Particles/Unlit"
         [HideInInspector] _VividParticleCustomData1("Vivid Particle Custom Data 1", Vector) = (0, 0, 0, 0)
         [HideInInspector] _VividParticleCustomData2("Vivid Particle Custom Data 2", Vector) = (0, 0, 0, 0)
         [HideInInspector] _VividParticleMeshIndex("Vivid Particle Mesh Index", Vector) = (0, 0, 0, 0)
-        [HideInInspector] _SelectionID("Selection ID", Color) = (0, 0, 0, 0)
-        [HideInInspector] _ObjectId("Object ID", Float) = 0.0
-        [HideInInspector] _PassValue("Pass Value", Float) = 0.0
     }
 
     SubShader
@@ -89,13 +86,10 @@ Shader "VividRP/Particles/Unlit"
                 float4 _VividParticleCustomData1;
                 float4 _VividParticleCustomData2;
                 float4 _VividParticleMeshIndex;
-                float4 _SelectionID;
                 float _AlphaCutoff;
                 float _AlphaRemapMin;
                 float _AlphaRemapMax;
                 float _VividParticleRenderMode;
-                float _ObjectId;
-                float _PassValue;
             CBUFFER_END
 
             TEXTURE2D(_UnlitColorMap);
@@ -155,6 +149,9 @@ Shader "VividRP/Particles/Unlit"
                 float4 rotation;
                 float4 velocityStretch;
                 float4 scale;
+                float4 uv;
+                float4 customData1;
+                float4 customData2;
                 float4 meshIndex;
                 float4 sharedSize;
                 float4 rendererParameters;
@@ -179,6 +176,9 @@ Shader "VividRP/Particles/Unlit"
                 static const uint VIVID_PARTICLE_ROTATION_BIT = 1u << 4u;
                 static const uint VIVID_PARTICLE_VELOCITY_STRETCH_BIT = 1u << 5u;
                 static const uint VIVID_PARTICLE_SCALE_BIT = 1u << 6u;
+                static const uint VIVID_PARTICLE_UV_BIT = 1u << 7u;
+                static const uint VIVID_PARTICLE_CUSTOM_DATA1_BIT = 1u << 8u;
+                static const uint VIVID_PARTICLE_CUSTOM_DATA2_BIT = 1u << 9u;
                 static const uint VIVID_PARTICLE_SHARED_LOCAL_TO_WORLD_0 = 0u;
                 static const uint VIVID_PARTICLE_SHARED_LOCAL_TO_WORLD_1 = 1u;
                 static const uint VIVID_PARTICLE_SHARED_LOCAL_TO_WORLD_2 = 2u;
@@ -266,6 +266,9 @@ Shader "VividRP/Particles/Unlit"
                     data.rotation = VividLoadParticleFloat4(VIVID_PARTICLE_ROTATION_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_ROTATION_BIT, float4(0.0, 0.0, 0.0, 1.0));
                     data.velocityStretch = VividLoadParticleFloat4(VIVID_PARTICLE_VELOCITY_STRETCH_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_VELOCITY_STRETCH_BIT, float4(0.0, 1.0, 0.0, 1.0));
                     data.scale = VividLoadParticleFloat4(VIVID_PARTICLE_SCALE_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_SCALE_BIT, float4(data.positionSize.w, data.positionSize.w, data.positionSize.w, 1.0));
+                    data.uv = VividLoadParticleFloat4(VIVID_PARTICLE_UV_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_UV_BIT, float4(0.0, 0.0, 1.0, 1.0));
+                    data.customData1 = VividLoadParticleFloat4(VIVID_PARTICLE_CUSTOM_DATA1_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_CUSTOM_DATA1_BIT, float4(0.0, 0.0, 0.0, 0.0));
+                    data.customData2 = VividLoadParticleFloat4(VIVID_PARTICLE_CUSTOM_DATA2_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, VIVID_PARTICLE_CUSTOM_DATA2_BIT, float4(0.0, 0.0, 0.0, 0.0));
                     data.meshIndex = VividLoadParticleFloat4(VIVID_PARTICLE_MESH_INDEX_METADATA, particleIndex, data.sharpIndex, dataPerSharpBits, 0u, float4(0.0, 1.0, 0.0, 0.0));
                     data.sharedSize = VividLoadParticleSharedFloat4(
                         VIVID_PARTICLE_SHARED_DATA_METADATA,
@@ -326,6 +329,9 @@ Shader "VividRP/Particles/Unlit"
                     data.rotation = _VividParticleRotation;
                     data.velocityStretch = _VividParticleVelocityStretch;
                     data.scale = _VividParticleScale;
+                    data.uv = _VividParticleUV;
+                    data.customData1 = _VividParticleCustomData1;
+                    data.customData2 = _VividParticleCustomData2;
                     data.meshIndex = _VividParticleMeshIndex;
                     data.sharedSize = float4(1.0, 0.0, 0.0, 1.0);
                     data.rendererParameters = float4(2.0, 0.0, 0.0, _VividParticleRenderMode);
@@ -429,7 +435,7 @@ Shader "VividRP/Particles/Unlit"
                 VividParticleData particle = VividLoadParticleData(input);
                 output.particleVisible = particle.visible;
                 output.instanceColor = particle.instanceColor;
-                output.uv = TransformParticleUnlitUV(input.uv);
+                output.uv = TransformParticleUnlitUV(input.uv * particle.uv.zw + particle.uv.xy);
                 if (particle.visible <= 0.0)
                 {
                     output.positionCS = float4(0.0, 0.0, 0.0, 1.0);
@@ -453,7 +459,10 @@ Shader "VividRP/Particles/Unlit"
                 particleLocal.x = ShouldFlipParticleAxis(particle.particleIndex, particle.flip.x, 0x9E3779B9u) ? -particleLocal.x : particleLocal.x;
                 particleLocal.y = ShouldFlipParticleAxis(particle.particleIndex, particle.flip.y, 0xBB67AE85u) ? -particleLocal.y : particleLocal.y;
                 particleLocal.z = ShouldFlipParticleAxis(particle.particleIndex, particle.flip.z, 0x3C6EF372u) ? -particleLocal.z : particleLocal.z;
-                float3 meshLocal = (particleLocal - particle.pivot) * size;
+                float3 rotatedParticleLocal = RotateParticleVector(
+                    particleLocal - particle.pivot,
+                    rotation);
+                float3 meshLocal = rotatedParticleLocal * size;
                 float3 positionRWS;
 
                 if (particle.renderMode < 0.5)
@@ -473,7 +482,7 @@ Shader "VividRP/Particles/Unlit"
                             + length(velocityRWS) * particle.rendererParameters.y);
                     positionRWS = centerRWS
                         + stretchRight * meshLocal.x
-                        + stretchUp * ((particleLocal.y - particle.pivot.y) * stretchLength);
+                        + stretchUp * (rotatedParticleLocal.y * stretchLength);
                 }
                 else if (particle.renderMode < 2.5)
                 {
@@ -496,7 +505,7 @@ Shader "VividRP/Particles/Unlit"
                 }
                 else
                 {
-                    positionRWS = centerRWS + RotateParticleVector(meshLocal, rotation);
+                    positionRWS = centerRWS + meshLocal;
                 }
 
                 output.positionCS = TransformWorldToHClip(positionRWS);
@@ -551,6 +560,7 @@ Shader "VividRP/Particles/Unlit"
                 #pragma target 4.5
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma vertex Vert
                 #pragma fragment Frag
@@ -571,6 +581,7 @@ Shader "VividRP/Particles/Unlit"
                 #pragma target 4.5
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma vertex Vert
                 #pragma fragment Frag
@@ -587,10 +598,13 @@ Shader "VividRP/Particles/Unlit"
             Cull [_CullMode]
 
             HLSLPROGRAM
+                float4 _SelectionID;
+
                 #pragma target 4.5
                 #pragma editor_sync_compilation
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma vertex Vert
                 #pragma fragment FragPicking
@@ -607,10 +621,14 @@ Shader "VividRP/Particles/Unlit"
             Cull [_CullMode]
 
             HLSLPROGRAM
+                int _ObjectId;
+                int _PassValue;
+
                 #pragma target 4.5
                 #pragma editor_sync_compilation
                 #pragma multi_compile_instancing
                 #pragma multi_compile _ DOTS_INSTANCING_ON
+                #pragma shader_feature_local _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_fragment _ALPHATEST_ON
                 #pragma vertex Vert
                 #pragma fragment FragSceneSelection

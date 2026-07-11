@@ -36,6 +36,12 @@ namespace VividRP.Runtime.Particle.ECS
         [NativeDisableUnsafePtrRestriction]
         public float* NoiseSizeMultipliers;
         [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerPreviousInside;
+        [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerCurrentInside;
+        [NativeDisableUnsafePtrRestriction]
+        public ulong* TriggerColliderEntityIds;
+        [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
         [NativeDisableUnsafePtrRestriction]
         public int* ActiveCountOutput;
@@ -63,6 +69,7 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_AnimatedMotionTypeIndex;
         private readonly VividEcsTypeIndex m_NoiseStateTypeIndex;
         private readonly VividEcsTypeIndex m_InheritVelocityStateTypeIndex;
+        private readonly VividEcsTypeIndex m_TriggerStateTypeIndex;
         private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
         private readonly VividEcsTypeIndex m_ModuleSharedKeyTypeIndex;
         private readonly VividEcsTypeIndex m_SimulationKernelSharedKeyTypeIndex;
@@ -75,6 +82,7 @@ namespace VividRP.Runtime.Particle.ECS
         private VividEcsSoaColumn<VividParticleAnimatedMotion> m_AnimatedMotionColumn;
         private VividEcsSoaColumn<VividParticleNoiseState> m_NoiseStateColumn;
         private VividEcsSoaColumn<VividParticleInheritVelocityState> m_InheritVelocityStateColumn;
+        private VividEcsSoaColumn<VividParticleTriggerState> m_TriggerStateColumn;
         private readonly bool m_OwnsWorld;
         private readonly Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> m_LineGroupScratch = new();
         private NativeArray<int> m_ActiveCountOutput;
@@ -93,6 +101,7 @@ namespace VividRP.Runtime.Particle.ECS
         private int m_CachedAnimatedMotionColumnVersion = -1;
         private int m_CachedNoiseStateColumnVersion = -1;
         private int m_CachedInheritVelocityStateColumnVersion = -1;
+        private int m_CachedTriggerStateColumnVersion = -1;
         private int m_CachedKeepMaskCapacity = -1;
         private int m_CachedActiveCountOutputLength = -1;
         private int m_ColumnViewVersion;
@@ -120,6 +129,7 @@ namespace VividRP.Runtime.Particle.ECS
             m_NoiseStateTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleNoiseState>();
             m_InheritVelocityStateTypeIndex =
                 VividEcsTypeManager.GetTypeIndex<VividParticleInheritVelocityState>();
+            m_TriggerStateTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleTriggerState>();
             m_SystemIdTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             m_ModuleSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleModuleSharedKey>();
             m_SimulationKernelSharedKeyTypeIndex =
@@ -183,6 +193,8 @@ namespace VividRP.Runtime.Particle.ECS
         public bool hasNoiseStateColumn => m_NoiseStateColumn != null;
 
         public bool hasInheritVelocityStateColumn => m_InheritVelocityStateColumn != null;
+
+        public bool hasTriggerStateColumn => m_TriggerStateColumn != null;
 
         public void EnsureAnimatedMotionColumn()
         {
@@ -248,6 +260,49 @@ namespace VividRP.Runtime.Particle.ECS
                 initialVelocities[index] = value;
             m_CachedInheritVelocityStateColumnVersion = -1;
             m_ColumnView = default;
+        }
+
+        public void EnsureTriggerStateColumn()
+        {
+            if (m_TriggerStateColumn != null)
+                return;
+            m_World.AddComponentType(m_Line, m_TriggerStateTypeIndex);
+            m_TriggerStateColumn =
+                m_Line.GetColumn<VividEcsSoaColumn<VividParticleTriggerState>>(m_TriggerStateTypeIndex);
+            NativeArray<byte> previous = m_TriggerStateColumn.GetFieldArray<byte>(
+                VividParticleTriggerState.PreviousInsideFieldIndex);
+            NativeArray<byte> current = m_TriggerStateColumn.GetFieldArray<byte>(
+                VividParticleTriggerState.CurrentInsideFieldIndex);
+            NativeArray<ulong> colliderIds = m_TriggerStateColumn.GetFieldArray<ulong>(
+                VividParticleTriggerState.ColliderEntityIdFieldIndex);
+            int count = math.min(activeCount, math.min(previous.Length, math.min(current.Length, colliderIds.Length)));
+            for (int index = 0; index < count; index++)
+            {
+                previous[index] = 0;
+                current[index] = 0;
+                colliderIds[index] = 0UL;
+            }
+            m_CachedTriggerStateColumnVersion = -1;
+            m_ColumnView = default;
+        }
+
+        public void ClearTriggerState()
+        {
+            if (m_TriggerStateColumn == null)
+                return;
+            NativeArray<byte> previous = m_TriggerStateColumn.GetFieldArray<byte>(
+                VividParticleTriggerState.PreviousInsideFieldIndex);
+            NativeArray<byte> current = m_TriggerStateColumn.GetFieldArray<byte>(
+                VividParticleTriggerState.CurrentInsideFieldIndex);
+            NativeArray<ulong> colliderIds = m_TriggerStateColumn.GetFieldArray<ulong>(
+                VividParticleTriggerState.ColliderEntityIdFieldIndex);
+            int count = math.min(activeCount, math.min(previous.Length, math.min(current.Length, colliderIds.Length)));
+            for (int index = 0; index < count; index++)
+            {
+                previous[index] = 0;
+                current[index] = 0;
+                colliderIds[index] = 0UL;
+            }
         }
 
         public VividParticleSystemId systemId
@@ -394,6 +449,7 @@ namespace VividRP.Runtime.Particle.ECS
             m_CachedAnimatedMotionColumnVersion = -1;
             m_CachedNoiseStateColumnVersion = -1;
             m_CachedInheritVelocityStateColumnVersion = -1;
+            m_CachedTriggerStateColumnVersion = -1;
             m_CachedKeepMaskCapacity = -1;
             m_CachedActiveCountOutputLength = -1;
             m_PendingIntegrateActiveCount = 0;
@@ -445,6 +501,21 @@ namespace VividRP.Runtime.Particle.ECS
                     VividParticleInheritVelocityState.InitialVelocityFieldIndex,
                     index,
                     ToFloat3(initialEmitterVelocity));
+            }
+            if (m_TriggerStateColumn != null)
+            {
+                m_TriggerStateColumn.SetFieldValue(
+                    VividParticleTriggerState.PreviousInsideFieldIndex,
+                    index,
+                    (byte)0);
+                m_TriggerStateColumn.SetFieldValue(
+                    VividParticleTriggerState.CurrentInsideFieldIndex,
+                    index,
+                    (byte)0);
+                m_TriggerStateColumn.SetFieldValue(
+                    VividParticleTriggerState.ColliderEntityIdFieldIndex,
+                    index,
+                    0UL);
             }
             if (m_KeepMask.IsCreated && index < m_KeepMask.Length)
                 m_KeepMask[index] = 1;
@@ -554,6 +625,9 @@ namespace VividRP.Runtime.Particle.ECS
                 AccumulatedRotations = columnView.AccumulatedRotations,
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                TriggerPreviousInside = columnView.TriggerPreviousInside,
+                TriggerCurrentInside = columnView.TriggerCurrentInside,
+                TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
                 AnimatedVelocities = columnView.AnimatedVelocities,
                 InitialEmitterVelocities = columnView.InitialEmitterVelocities,
                 EmitterVelocity = ToFloat3(emitterVelocity),
@@ -578,6 +652,9 @@ namespace VividRP.Runtime.Particle.ECS
                 return ScheduleIntegrate(
                     deltaTime,
                     gravity,
+                    default,
+                    default,
+                    default,
                     null,
                     0,
                     float3x3.identity,
@@ -618,6 +695,9 @@ namespace VividRP.Runtime.Particle.ECS
         public unsafe bool ScheduleIntegrate(
             float deltaTime,
             Vector3 gravity,
+            VividParticleCollisionJobConfig collision,
+            VividParticleTriggerJobConfig trigger,
+            VividParticleExternalForcesJobConfig externalForces,
             float3* velocityOverLifetimeLut,
             int velocityOverLifetimeEnabled,
             float3x3 velocityOverLifetimeTransform,
@@ -682,6 +762,9 @@ namespace VividRP.Runtime.Particle.ECS
                     Page = m_SimulationPages[pageIndex],
                     DeltaTime = deltaTime,
                     Gravity = ToFloat3(gravity),
+                    Collision = collision,
+                    Trigger = trigger,
+                    ExternalForces = externalForces,
                     PositionLength = columnView.Capacity,
                     Positions = columnView.Positions,
                     Velocities = columnView.Velocities,
@@ -707,6 +790,9 @@ namespace VividRP.Runtime.Particle.ECS
                     AccumulatedRotations = columnView.AccumulatedRotations,
                     NoisePhases = columnView.NoisePhases,
                     NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                    TriggerPreviousInside = columnView.TriggerPreviousInside,
+                    TriggerCurrentInside = columnView.TriggerCurrentInside,
+                    TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
                     NoisePositionAmountLut = noisePositionAmountLut,
                     NoiseRotationAmountLut = noiseRotationAmountLut,
                     NoiseSizeAmountLut = noiseSizeAmountLut,
@@ -750,6 +836,9 @@ namespace VividRP.Runtime.Particle.ECS
         public unsafe bool AddIntegratePageWorks(
             float deltaTime,
             Vector3 gravity,
+            VividParticleCollisionJobConfig collision,
+            VividParticleTriggerJobConfig trigger,
+            VividParticleExternalForcesJobConfig externalForces,
             float3* velocityOverLifetimeLut,
             int velocityOverLifetimeEnabled,
             float3x3 velocityOverLifetimeTransform,
@@ -818,6 +907,9 @@ namespace VividRP.Runtime.Particle.ECS
                     Page = page,
                     DeltaTime = deltaTime,
                     Gravity = gravityValue,
+                    Collision = collision,
+                    Trigger = trigger,
+                    ExternalForces = externalForces,
                     PositionLength = columnView.Capacity,
                     Positions = columnView.Positions,
                     Velocities = columnView.Velocities,
@@ -843,6 +935,9 @@ namespace VividRP.Runtime.Particle.ECS
                     AccumulatedRotations = columnView.AccumulatedRotations,
                     NoisePhases = columnView.NoisePhases,
                     NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                    TriggerPreviousInside = columnView.TriggerPreviousInside,
+                    TriggerCurrentInside = columnView.TriggerCurrentInside,
+                    TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
                     NoisePositionAmountLut = noisePositionAmountLut,
                     NoiseRotationAmountLut = noiseRotationAmountLut,
                     NoiseSizeAmountLut = noiseSizeAmountLut,
@@ -1001,6 +1096,7 @@ namespace VividRP.Runtime.Particle.ECS
                 || m_CachedNoiseStateColumnVersion != (m_NoiseStateColumn?.version ?? -1)
                 || m_CachedInheritVelocityStateColumnVersion
                     != (m_InheritVelocityStateColumn?.version ?? -1)
+                || m_CachedTriggerStateColumnVersion != (m_TriggerStateColumn?.version ?? -1)
                 || m_CachedKeepMaskCapacity != keepMaskCapacity
                 || m_CachedActiveCountOutputLength != activeCountOutputLength)
             {
@@ -1031,6 +1127,18 @@ namespace VividRP.Runtime.Particle.ECS
                     ? m_InheritVelocityStateColumn.GetFieldArray<float3>(
                         VividParticleInheritVelocityState.InitialVelocityFieldIndex)
                     : default;
+                NativeArray<byte> triggerPreviousInside = m_TriggerStateColumn != null
+                    ? m_TriggerStateColumn.GetFieldArray<byte>(
+                        VividParticleTriggerState.PreviousInsideFieldIndex)
+                    : default;
+                NativeArray<byte> triggerCurrentInside = m_TriggerStateColumn != null
+                    ? m_TriggerStateColumn.GetFieldArray<byte>(
+                        VividParticleTriggerState.CurrentInsideFieldIndex)
+                    : default;
+                NativeArray<ulong> triggerColliderEntityIds = m_TriggerStateColumn != null
+                    ? m_TriggerStateColumn.GetFieldArray<ulong>(
+                        VividParticleTriggerState.ColliderEntityIdFieldIndex)
+                    : default;
 
                 m_ColumnViewVersion = m_ColumnViewVersion == int.MaxValue ? 1 : m_ColumnViewVersion + 1;
                 m_ColumnView = new VividParticleEcsColumnView
@@ -1053,6 +1161,15 @@ namespace VividRP.Runtime.Particle.ECS
                     NoiseSizeMultipliers = noiseSizeMultipliers.IsCreated
                         ? (float*)noiseSizeMultipliers.GetUnsafePtr()
                         : null,
+                    TriggerPreviousInside = triggerPreviousInside.IsCreated
+                        ? (byte*)triggerPreviousInside.GetUnsafePtr()
+                        : null,
+                    TriggerCurrentInside = triggerCurrentInside.IsCreated
+                        ? (byte*)triggerCurrentInside.GetUnsafePtr()
+                        : null,
+                    TriggerColliderEntityIds = triggerColliderEntityIds.IsCreated
+                        ? (ulong*)triggerColliderEntityIds.GetUnsafePtr()
+                        : null,
                     KeepMask = m_KeepMask.IsCreated ? (byte*)m_KeepMask.GetUnsafePtr() : null,
                     ActiveCountOutput = m_ActiveCountOutput.IsCreated
                         ? (int*)m_ActiveCountOutput.GetUnsafePtr()
@@ -1066,6 +1183,7 @@ namespace VividRP.Runtime.Particle.ECS
                 m_CachedNoiseStateColumnVersion = m_NoiseStateColumn?.version ?? -1;
                 m_CachedInheritVelocityStateColumnVersion =
                     m_InheritVelocityStateColumn?.version ?? -1;
+                m_CachedTriggerStateColumnVersion = m_TriggerStateColumn?.version ?? -1;
                 m_CachedKeepMaskCapacity = keepMaskCapacity;
                 m_CachedActiveCountOutputLength = activeCountOutputLength;
                 m_ColumnViewRefreshCount++;
@@ -1199,6 +1317,9 @@ namespace VividRP.Runtime.Particle.ECS
                 AccumulatedRotations = columnView.AccumulatedRotations,
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                TriggerPreviousInside = columnView.TriggerPreviousInside,
+                TriggerCurrentInside = columnView.TriggerCurrentInside,
+                TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
                 KeepMask = columnView.KeepMask,
                 ActiveCountOutput = columnView.ActiveCountOutput,
             };

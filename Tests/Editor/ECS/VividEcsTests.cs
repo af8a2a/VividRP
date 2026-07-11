@@ -264,6 +264,8 @@ namespace VividRP.Editor.Tests
             VividEcsArchetypeLineGroup sharedOneGroup = FindLineGroup(cache.groups, sharedOneKey);
             Assert.That(sharedOneGroup, Is.Not.Null);
             Assert.That(sharedOneGroup.lineCount, Is.EqualTo(2));
+            Assert.That(sharedOneGroup.TryGetSharedComponent(out TestShared sharedValue), Is.True);
+            Assert.That(sharedValue.Value, Is.EqualTo(1));
 
             first.SetSharedComponent(new TestSharedB(30));
 

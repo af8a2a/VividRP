@@ -54,6 +54,17 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateEditor_UsesVividParticleForceFieldEditor_ForForceField()
+        {
+            VividParticleSystem system = CreateSystem();
+            VividParticleForceField forceField = system.gameObject.AddComponent<VividParticleForceField>();
+
+            m_Editor = UnityEditor.Editor.CreateEditor(forceField);
+
+            Assert.That(m_Editor, Is.TypeOf<VividParticleForceFieldEditor>());
+        }
+
+        [Test]
         public void MenuItems_CreateVividParticleSystemGameObject_AddsComponentAndParents()
         {
             var parent = new GameObject("Vivid Particle Menu Parent");
@@ -101,6 +112,15 @@ namespace VividRP.Editor.Tests
             Assert.That(systemShape, Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindForceOverLifetimeProperty(systemObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindExternalForcesProperty(systemObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindCollisionProperty(systemObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindTriggerProperty(systemObject),
                 Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindColorOverLifetimeProperty(systemObject),
@@ -151,6 +171,15 @@ namespace VividRP.Editor.Tests
             Assert.That(assetShape, Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindForceOverLifetimeProperty(assetObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindExternalForcesProperty(assetObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindCollisionProperty(assetObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindTriggerProperty(assetObject),
                 Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindColorOverLifetimeProperty(assetObject),
@@ -283,6 +312,18 @@ namespace VividRP.Editor.Tests
             system.forceOverLifetime.enabled = true;
             system.forceOverLifetime.force = new Vector3(3.0f, 2.0f, 1.0f);
             system.forceOverLifetime.space = VividParticleForceSpace.World;
+            VividParticleForceField forceField = m_GameObject.AddComponent<VividParticleForceField>();
+            system.externalForces.enabled = true;
+            system.externalForces.influenceFilter = VividParticleGameObjectFilter.List;
+            system.externalForces.multiplier = AnimationCurve.Constant(0.0f, 1.0f, 0.5f);
+            system.externalForces.AddInfluence(forceField);
+            system.collision.enabled = true;
+            system.collision.bounce = 0.75f;
+            system.collision.AddPlane(m_GameObject.transform);
+            SphereCollider triggerCollider = m_GameObject.AddComponent<SphereCollider>();
+            system.trigger.enabled = true;
+            system.trigger.enter = VividParticleOverlapAction.Callback;
+            system.trigger.AddCollider(triggerCollider);
             system.main.emitterVelocityMode = VividParticleEmitterVelocityMode.Custom;
             system.main.customEmitterVelocity = new Vector3(2.0f, 3.0f, 4.0f);
             system.inheritVelocity.enabled = true;
@@ -344,6 +385,18 @@ namespace VividRP.Editor.Tests
             Assert.That(m_Asset.forceOverLifetime.enabled, Is.True);
             Assert.That(m_Asset.forceOverLifetime.force, Is.EqualTo(new Vector3(3.0f, 2.0f, 1.0f)));
             Assert.That(m_Asset.forceOverLifetime.space, Is.EqualTo(VividParticleForceSpace.World));
+            Assert.That(m_Asset.externalForces.enabled, Is.True);
+            Assert.That(
+                m_Asset.externalForces.influenceFilter,
+                Is.EqualTo(VividParticleGameObjectFilter.List));
+            Assert.That(m_Asset.externalForces.EvaluateMultiplier(0.5f), Is.EqualTo(0.5f));
+            Assert.That(m_Asset.externalForces.GetInfluence(0), Is.EqualTo(forceField));
+            Assert.That(m_Asset.collision.enabled, Is.True);
+            Assert.That(m_Asset.collision.bounce, Is.EqualTo(0.75f));
+            Assert.That(m_Asset.collision.GetPlane(0), Is.EqualTo(m_GameObject.transform));
+            Assert.That(m_Asset.trigger.enabled, Is.True);
+            Assert.That(m_Asset.trigger.enter, Is.EqualTo(VividParticleOverlapAction.Callback));
+            Assert.That(m_Asset.trigger.GetCollider(0), Is.SameAs(triggerCollider));
             Assert.That(m_Asset.main.emitterVelocityMode, Is.EqualTo(VividParticleEmitterVelocityMode.Custom));
             Assert.That(m_Asset.main.customEmitterVelocity, Is.EqualTo(new Vector3(2.0f, 3.0f, 4.0f)));
             Assert.That(m_Asset.inheritVelocity.enabled, Is.True);

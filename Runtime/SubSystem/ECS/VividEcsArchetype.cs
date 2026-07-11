@@ -397,6 +397,20 @@ namespace VividRP.Runtime.ECS
 
         public int lineCount => m_Lines.Count;
 
+        public bool TryGetSharedComponent<T>(out T value)
+            where T : struct, IVividEcsSharedComponentData
+        {
+            for (int index = 0; index < m_Lines.Count; index++)
+            {
+                VividEcsArchetypeLine line = m_Lines[index];
+                if (line != null && line.TryGetSharedComponent(out value))
+                    return true;
+            }
+
+            value = default;
+            return false;
+        }
+
         internal void Clear()
         {
             m_Lines.Clear();

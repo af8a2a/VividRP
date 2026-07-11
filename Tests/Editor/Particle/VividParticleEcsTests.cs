@@ -313,6 +313,10 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(groups, Has.Count.EqualTo(1));
                 Assert.That(groups[0].lineCount, Is.EqualTo(1));
+                Assert.That(
+                    groups[0].TryGetSharedComponent(out VividParticleRendererSharedKey groupedRendererKey),
+                    Is.True);
+                Assert.That(groupedRendererKey, Is.EqualTo(rendererKey));
                 Assert.That(groups[0].lines[0].ArchetypeLineId, Is.EqualTo(first.archetypeLineId));
                 Assert.That(first.rendererActive, Is.True);
                 Assert.That(second.rendererActive, Is.False);

@@ -72,6 +72,10 @@ Shader "VividRP/Particles/Unlit"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
             #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Texture.hlsl"
 
+        float4 _SelectionID;
+        int _ObjectId;
+        int _PassValue;
+
             CBUFFER_START(UnityPerMaterial)
                 float4 _UnlitColor;
                 float4 _UnlitColorMap_ST;
@@ -598,7 +602,6 @@ Shader "VividRP/Particles/Unlit"
             Cull [_CullMode]
 
             HLSLPROGRAM
-                float4 _SelectionID;
 
                 #pragma target 4.5
                 #pragma editor_sync_compilation
@@ -621,8 +624,6 @@ Shader "VividRP/Particles/Unlit"
             Cull [_CullMode]
 
             HLSLPROGRAM
-                int _ObjectId;
-                int _PassValue;
 
                 #pragma target 4.5
                 #pragma editor_sync_compilation

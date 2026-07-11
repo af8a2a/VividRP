@@ -103,6 +103,7 @@ namespace VividRP.Runtime.Particle
         public fixed float TextureSheetFrameOverTimeLut[LifetimeLutResolution];
         public fixed float CustomData1Lut[LifetimeLutResolution * 4];
         public fixed float CustomData2Lut[LifetimeLutResolution * 4];
+        public fixed float ExternalForcesMultiplierLut[LifetimeLutResolution];
     }
 
     internal struct VividParticleSimulationPrepareInput

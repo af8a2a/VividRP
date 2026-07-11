@@ -17,6 +17,7 @@ namespace VividRP.Runtime.Particle.ECS
             VividEcsTypeManager.RegisterSoa<VividParticleAnimatedMotion>();
             VividEcsTypeManager.RegisterSoa<VividParticleNoiseState>();
             VividEcsTypeManager.RegisterSoa<VividParticleInheritVelocityState>();
+            VividEcsTypeManager.RegisterSoa<VividParticleTriggerState>();
             VividEcsTypeManager.RegisterShared<VividParticleSystemId>();
             VividEcsTypeManager.RegisterShared<VividParticleModuleSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleSimulationKernelSharedKey>();
@@ -121,6 +122,9 @@ namespace VividRP.Runtime.Particle.ECS
         Noise = 1u << 13,
         InheritVelocity = 1u << 14,
         CustomData = 1u << 15,
+        ExternalForces = 1u << 16,
+        Collision = 1u << 17,
+        Trigger = 1u << 18,
     }
 
     internal readonly struct VividParticleModuleSharedKey : IVividEcsSharedComponentData,
@@ -169,7 +173,10 @@ namespace VividRP.Runtime.Particle.ECS
                 | VividParticleModuleFlags.LimitVelocityOverLifetime
                 | VividParticleModuleFlags.RotationBySpeed
                 | VividParticleModuleFlags.Noise
-                | VividParticleModuleFlags.InheritVelocity);
+                | VividParticleModuleFlags.InheritVelocity
+                | VividParticleModuleFlags.ExternalForces
+                | VividParticleModuleFlags.Collision
+                | VividParticleModuleFlags.Trigger);
         }
 
         public VividParticleModuleFlags EnabledFlags { get; }
@@ -487,6 +494,40 @@ namespace VividRP.Runtime.Particle.ECS
             return index == InitialVelocityFieldIndex
                 ? new VividEcsSoaFieldInfo(InitialVelocityOffsetInPage, Float3SizeInBytes)
                 : throw new ArgumentOutOfRangeException(nameof(index));
+        }
+    }
+
+    internal struct VividParticleTriggerState : IVividEcsSoaComponentData
+    {
+        public const int PreviousInsideFieldIndex = 0;
+        public const int CurrentInsideFieldIndex = 1;
+        public const int ColliderEntityIdFieldIndex = 2;
+        public const int FieldCountValue = 3;
+        public const int ByteSizeInBytes = sizeof(byte);
+        public const int UlongSizeInBytes = sizeof(ulong);
+        public const int PreviousInsideOffsetInPage = 0;
+        public const int CurrentInsideOffsetInPage =
+            PreviousInsideOffsetInPage + ByteSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int ColliderEntityIdOffsetInPage =
+            CurrentInsideOffsetInPage + ByteSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int TypeSizeInBytes =
+            ColliderEntityIdOffsetInPage + UlongSizeInBytes * VividEcsConstants.PageEntryCount;
+
+        public int FieldCount => FieldCountValue;
+        public int TypeSize => TypeSizeInBytes;
+
+        public VividEcsSoaFieldInfo GetFieldInfo(int index)
+        {
+            return index switch
+            {
+                PreviousInsideFieldIndex =>
+                    new VividEcsSoaFieldInfo(PreviousInsideOffsetInPage, ByteSizeInBytes),
+                CurrentInsideFieldIndex =>
+                    new VividEcsSoaFieldInfo(CurrentInsideOffsetInPage, ByteSizeInBytes),
+                ColliderEntityIdFieldIndex =>
+                    new VividEcsSoaFieldInfo(ColliderEntityIdOffsetInPage, UlongSizeInBytes),
+                _ => throw new ArgumentOutOfRangeException(nameof(index)),
+            };
         }
     }
 }

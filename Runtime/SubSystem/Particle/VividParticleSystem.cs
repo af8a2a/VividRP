@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -28,6 +29,18 @@ namespace VividRP.Runtime.Particle
         [SerializeField]
         private VividParticleForceOverLifetimeModule m_ForceOverLifetime =
             VividParticleForceOverLifetimeModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleExternalForcesModule m_ExternalForces =
+            VividParticleExternalForcesModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleCollisionModule m_Collision =
+            VividParticleCollisionModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleTriggerModule m_Trigger =
+            VividParticleTriggerModule.CreateDefault();
 
         [SerializeField]
         private VividParticleVelocityOverLifetimeModule m_VelocityOverLifetime =
@@ -107,6 +120,15 @@ namespace VividRP.Runtime.Particle
         public VividParticleForceOverLifetimeModule forceOverLifetime =>
             m_ForceOverLifetime ??= VividParticleForceOverLifetimeModule.CreateDefault();
 
+        public VividParticleExternalForcesModule externalForces =>
+            m_ExternalForces ??= VividParticleExternalForcesModule.CreateDefault();
+
+        public VividParticleCollisionModule collision =>
+            m_Collision ??= VividParticleCollisionModule.CreateDefault();
+
+        public VividParticleTriggerModule trigger =>
+            m_Trigger ??= VividParticleTriggerModule.CreateDefault();
+
         public VividParticleVelocityOverLifetimeModule velocityOverLifetime =>
             m_VelocityOverLifetime ??= VividParticleVelocityOverLifetimeModule.CreateDefault();
 
@@ -182,6 +204,22 @@ namespace VividRP.Runtime.Particle
         {
             EmitInternal(count);
             RequestEditorRenderUpdate();
+        }
+
+        public int GetCollisionEvents(List<VividParticleCollisionEvent> collisionEvents)
+        {
+            if (collisionEvents == null)
+                throw new ArgumentNullException(nameof(collisionEvents));
+            return VividParticleSystemManager.GetCollisionEvents(this, collisionEvents);
+        }
+
+        public int GetTriggerEvents(
+            VividParticleTriggerEventType eventType,
+            List<VividParticleTriggerEvent> triggerEvents)
+        {
+            if (triggerEvents == null)
+                throw new ArgumentNullException(nameof(triggerEvents));
+            return VividParticleSystemManager.GetTriggerEvents(this, eventType, triggerEvents);
         }
 
         internal int aliveParticleCount => VividParticleSystemManager.GetParticleCount(this);
@@ -410,6 +448,9 @@ namespace VividRP.Runtime.Particle
                 m_Emission,
                 m_Shape,
                 m_ForceOverLifetime,
+                m_ExternalForces,
+                m_Collision,
+                m_Trigger,
                 m_VelocityOverLifetime,
                 m_InheritVelocity,
                 m_LimitVelocityOverLifetime,
@@ -505,6 +546,9 @@ namespace VividRP.Runtime.Particle
             m_Emission ??= VividParticleEmissionModule.CreateDefault();
             m_Shape ??= VividParticleShapeModule.CreateDefault();
             m_ForceOverLifetime ??= VividParticleForceOverLifetimeModule.CreateDefault();
+            m_ExternalForces ??= VividParticleExternalForcesModule.CreateDefault();
+            m_Collision ??= VividParticleCollisionModule.CreateDefault();
+            m_Trigger ??= VividParticleTriggerModule.CreateDefault();
             m_VelocityOverLifetime ??= VividParticleVelocityOverLifetimeModule.CreateDefault();
             m_InheritVelocity ??= VividParticleInheritVelocityModule.CreateDefault();
             m_LimitVelocityOverLifetime ??= VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
@@ -527,6 +571,9 @@ namespace VividRP.Runtime.Particle
             m_Emission.SetChangeCallback(OnSimulationModuleChanged);
             m_Shape.SetChangeCallback(OnSimulationModuleChanged);
             m_ForceOverLifetime.SetChangeCallback(OnSimulationModuleChanged);
+            m_ExternalForces.SetChangeCallback(OnSimulationModuleChanged);
+            m_Collision.SetChangeCallback(OnSimulationModuleChanged);
+            m_Trigger.SetChangeCallback(OnSimulationModuleChanged);
             m_VelocityOverLifetime.SetChangeCallback(OnVelocityOverLifetimeModuleChanged);
             m_InheritVelocity.SetChangeCallback(OnVelocityOverLifetimeModuleChanged);
             m_LimitVelocityOverLifetime.SetChangeCallback(OnSimulationModuleChanged);
@@ -617,6 +664,9 @@ namespace VividRP.Runtime.Particle
             emission.Validate();
             shape.Validate();
             forceOverLifetime.Validate();
+            externalForces.Validate();
+            collision.Validate();
+            trigger.Validate();
             velocityOverLifetime.Validate();
             inheritVelocity.Validate();
             limitVelocityOverLifetime.Validate();

@@ -144,6 +144,21 @@ namespace VividRP.Editor
             return serializedObject?.FindProperty("m_ForceOverLifetime");
         }
 
+        internal static SerializedProperty FindExternalForcesProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_ExternalForces");
+        }
+
+        internal static SerializedProperty FindCollisionProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_Collision");
+        }
+
+        internal static SerializedProperty FindTriggerProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_Trigger");
+        }
+
         internal static SerializedProperty FindColorOverLifetimeProperty(SerializedObject serializedObject)
         {
             return serializedObject?.FindProperty("m_ColorOverLifetime");
@@ -306,6 +321,9 @@ namespace VividRP.Editor
             asset.emission.CopyFrom(system.emission);
             asset.shape.CopyFrom(system.shape);
             asset.forceOverLifetime.CopyFrom(system.forceOverLifetime);
+            asset.externalForces.CopyFrom(system.externalForces);
+            asset.collision.CopyFrom(system.collision);
+            asset.trigger.CopyFrom(system.trigger);
             asset.velocityOverLifetime.CopyFrom(system.velocityOverLifetime);
             asset.inheritVelocity.CopyFrom(system.inheritVelocity);
             asset.limitVelocityOverLifetime.CopyFrom(system.limitVelocityOverLifetime);
@@ -993,6 +1011,12 @@ namespace VividRP.Editor
         private static readonly GUIContent s_ShapeLabel = EditorGUIUtility.TrTextContent("Shape");
         private static readonly GUIContent s_ForceOverLifetimeLabel =
             EditorGUIUtility.TrTextContent("Force over Lifetime");
+        private static readonly GUIContent s_ExternalForcesLabel =
+            EditorGUIUtility.TrTextContent("External Forces");
+        private static readonly GUIContent s_CollisionLabel =
+            EditorGUIUtility.TrTextContent("Collision");
+        private static readonly GUIContent s_TriggerLabel =
+            EditorGUIUtility.TrTextContent("Trigger");
         private static readonly GUIContent s_ColorOverLifetimeLabel =
             EditorGUIUtility.TrTextContent("Color over Lifetime");
         private static readonly GUIContent s_ColorBySpeedLabel =
@@ -1319,6 +1343,9 @@ namespace VividRP.Editor
         private SerializedProperty m_Emission;
         private SerializedProperty m_Shape;
         private SerializedProperty m_ForceOverLifetime;
+        private SerializedProperty m_ExternalForces;
+        private SerializedProperty m_Collision;
+        private SerializedProperty m_Trigger;
         private SerializedProperty m_ColorOverLifetime;
         private SerializedProperty m_ColorBySpeed;
         private SerializedProperty m_SizeOverLifetime;
@@ -1336,6 +1363,9 @@ namespace VividRP.Editor
         private bool m_EmissionExpanded = true;
         private bool m_ShapeExpanded = true;
         private bool m_ForceOverLifetimeExpanded;
+        private bool m_ExternalForcesExpanded;
+        private bool m_CollisionExpanded;
+        private bool m_TriggerExpanded;
         private bool m_ColorOverLifetimeExpanded;
         private bool m_ColorBySpeedExpanded;
         private bool m_SizeOverLifetimeExpanded;
@@ -1365,6 +1395,10 @@ namespace VividRP.Editor
                 out m_Renderer);
             m_ForceOverLifetime =
                 VividParticleSystemEditorUtility.FindForceOverLifetimeProperty(serializedObject);
+            m_ExternalForces =
+                VividParticleSystemEditorUtility.FindExternalForcesProperty(serializedObject);
+            m_Collision = VividParticleSystemEditorUtility.FindCollisionProperty(serializedObject);
+            m_Trigger = VividParticleSystemEditorUtility.FindTriggerProperty(serializedObject);
             m_ColorOverLifetime =
                 VividParticleSystemEditorUtility.FindColorOverLifetimeProperty(serializedObject);
             m_ColorBySpeed =
@@ -1401,6 +1435,18 @@ namespace VividRP.Editor
                 s_ForceOverLifetimeLabel,
                 ref m_ForceOverLifetimeExpanded,
                 () => DrawForceOverLifetimeModule(m_ForceOverLifetime));
+            DrawModule(
+                s_ExternalForcesLabel,
+                ref m_ExternalForcesExpanded,
+                () => DrawExternalForcesModule(m_ExternalForces));
+            DrawModule(
+                s_CollisionLabel,
+                ref m_CollisionExpanded,
+                () => DrawCollisionModule(m_Collision));
+            DrawModule(
+                s_TriggerLabel,
+                ref m_TriggerExpanded,
+                () => DrawTriggerModule(m_Trigger));
             DrawModule(
                 s_VelocityOverLifetimeLabel,
                 ref m_VelocityOverLifetimeExpanded,
@@ -2020,6 +2066,111 @@ namespace VividRP.Editor
             }
         }
 
+        private static void DrawExternalForcesModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                DrawRelative(module, "m_Multiplier");
+                SerializedProperty filter = VividParticleSystemEditorUtility.FindRelative(
+                    module,
+                    "m_InfluenceFilter");
+                EditorGUILayout.PropertyField(filter);
+                if (filter == null || filter.hasMultipleDifferentValues)
+                {
+                    DrawRelative(module, "m_InfluenceMask");
+                    EditorGUILayout.PropertyField(
+                        VividParticleSystemEditorUtility.FindRelative(module, "m_Influences"),
+                        includeChildren: true);
+                    return;
+                }
+
+                var resolvedFilter = (VividParticleGameObjectFilter)filter.enumValueIndex;
+                if (resolvedFilter is VividParticleGameObjectFilter.LayerMask
+                    or VividParticleGameObjectFilter.LayerMaskAndList)
+                {
+                    DrawRelative(module, "m_InfluenceMask");
+                }
+
+                if (resolvedFilter is VividParticleGameObjectFilter.List
+                    or VividParticleGameObjectFilter.LayerMaskAndList)
+                {
+                    EditorGUILayout.PropertyField(
+                        VividParticleSystemEditorUtility.FindRelative(module, "m_Influences"),
+                        includeChildren: true);
+                }
+            }
+        }
+
+        private static void DrawCollisionModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                SerializedProperty type = VividParticleSystemEditorUtility.FindRelative(module, "m_Type");
+                EditorGUILayout.PropertyField(type);
+                DrawRelative(module, "m_Mode");
+                DrawRelative(module, "m_Dampen");
+                DrawRelative(module, "m_Bounce");
+                DrawRelative(module, "m_LifetimeLoss");
+                DrawRelative(module, "m_MinKillSpeed");
+                DrawRelative(module, "m_MaxKillSpeed");
+                DrawRelative(module, "m_RadiusScale");
+
+                bool drawsPlanes = type != null
+                    && !type.hasMultipleDifferentValues
+                    && (VividParticleCollisionType)type.enumValueIndex
+                        == VividParticleCollisionType.Planes;
+                if (drawsPlanes)
+                {
+                    EditorGUILayout.PropertyField(
+                        VividParticleSystemEditorUtility.FindRelative(module, "m_Planes"),
+                        includeChildren: true);
+                }
+                else
+                {
+                    DrawRelative(module, "m_Quality");
+                    DrawRelative(module, "m_CollidesWith");
+                    DrawRelative(module, "m_MaxCollisionShapes");
+                    DrawRelative(module, "m_EnableDynamicColliders");
+                }
+
+                DrawRelative(module, "m_SendCollisionMessages");
+            }
+        }
+
+        private static void DrawTriggerModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                DrawRelative(module, "m_Inside");
+                DrawRelative(module, "m_Outside");
+                DrawRelative(module, "m_Enter");
+                DrawRelative(module, "m_Exit");
+                DrawRelative(module, "m_ColliderQueryMode");
+                DrawRelative(module, "m_RadiusScale");
+                DrawRelative(module, "m_VisualizeBounds");
+                EditorGUILayout.PropertyField(
+                    VividParticleSystemEditorUtility.FindRelative(module, "m_Colliders"),
+                    includeChildren: true);
+            }
+        }
+
         private static void DrawColorOverLifetimeModule(SerializedProperty module)
         {
             DrawEnabledModule(module, "m_Color");
@@ -2586,6 +2737,7 @@ namespace VividRP.Editor
                 return;
 
             serializedObject.Update();
+            DrawTriggerBounds(system);
             if (!VividParticleSystemEditorUtility.TryReadShapeSceneData(m_Shape, out VividParticleShapeSceneData data)
                 || !data.Enabled
                 || data.ShapeType == VividParticleShapeType.Point)
@@ -2603,6 +2755,111 @@ namespace VividRP.Editor
             VividParticleSystemEditorUtility.WriteShapeSceneData(m_Shape, editedData);
             serializedObject.ApplyModifiedProperties();
             EditorUtility.SetDirty(system);
+        }
+
+        private static void DrawTriggerBounds(VividParticleSystem system)
+        {
+            if (system?.trigger == null
+                || !system.trigger.enabled
+                || !system.trigger.visualizeBounds)
+            {
+                return;
+            }
+
+            CompareFunction previousZTest = Handles.zTest;
+            Color previousColor = Handles.color;
+            Handles.zTest = CompareFunction.LessEqual;
+            Handles.color = new Color(0.95f, 0.55f, 0.15f, 0.9f);
+            for (int index = 0; index < system.trigger.colliderCount; index++)
+            {
+                switch (system.trigger.GetCollider(index))
+                {
+                    case SphereCollider sphere:
+                        DrawSphereColliderWire(sphere);
+                        break;
+                    case BoxCollider box:
+                        DrawBoxColliderWire(box);
+                        break;
+                    case CapsuleCollider capsule:
+                        DrawCapsuleColliderWire(capsule);
+                        break;
+                }
+            }
+            Handles.color = previousColor;
+            Handles.zTest = previousZTest;
+        }
+
+        private static void DrawSphereColliderWire(SphereCollider collider)
+        {
+            Transform transform = collider.transform;
+            Vector3 center = transform.TransformPoint(collider.center);
+            Vector3 scale = transform.lossyScale;
+            float radius = collider.radius * Mathf.Max(
+                Mathf.Abs(scale.x),
+                Mathf.Abs(scale.y),
+                Mathf.Abs(scale.z));
+            Handles.DrawWireDisc(center, transform.right, radius);
+            Handles.DrawWireDisc(center, transform.up, radius);
+            Handles.DrawWireDisc(center, transform.forward, radius);
+        }
+
+        private static void DrawBoxColliderWire(BoxCollider collider)
+        {
+            Transform transform = collider.transform;
+            Vector3 scale = transform.lossyScale;
+            Vector3 size = Vector3.Scale(
+                collider.size,
+                new Vector3(Mathf.Abs(scale.x), Mathf.Abs(scale.y), Mathf.Abs(scale.z)));
+            using (new Handles.DrawingScope(Matrix4x4.TRS(
+                transform.TransformPoint(collider.center),
+                transform.rotation,
+                size)))
+            {
+                Handles.DrawWireCube(Vector3.zero, Vector3.one);
+            }
+        }
+
+        private static void DrawCapsuleColliderWire(CapsuleCollider collider)
+        {
+            Transform transform = collider.transform;
+            Vector3 scale = transform.lossyScale;
+            Vector3 axis;
+            float axisScale;
+            float radialScale;
+            switch (collider.direction)
+            {
+                case 0:
+                    axis = transform.right;
+                    axisScale = Mathf.Abs(scale.x);
+                    radialScale = Mathf.Max(Mathf.Abs(scale.y), Mathf.Abs(scale.z));
+                    break;
+                case 2:
+                    axis = transform.forward;
+                    axisScale = Mathf.Abs(scale.z);
+                    radialScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.y));
+                    break;
+                default:
+                    axis = transform.up;
+                    axisScale = Mathf.Abs(scale.y);
+                    radialScale = Mathf.Max(Mathf.Abs(scale.x), Mathf.Abs(scale.z));
+                    break;
+            }
+            Vector3 center = transform.TransformPoint(collider.center);
+            float radius = collider.radius * radialScale;
+            float halfSegment = Mathf.Max(0.0f, collider.height * axisScale * 0.5f - radius);
+            Vector3 first = center - axis * halfSegment;
+            Vector3 second = center + axis * halfSegment;
+            Vector3 tangent = Vector3.Cross(axis, Vector3.up);
+            if (tangent.sqrMagnitude < 0.0001f)
+                tangent = Vector3.Cross(axis, Vector3.right);
+            tangent.Normalize();
+            Vector3 bitangent = Vector3.Cross(axis, tangent).normalized;
+            Handles.DrawWireDisc(first, axis, radius);
+            Handles.DrawWireDisc(second, axis, radius);
+            Handles.DrawLine(first + tangent * radius, second + tangent * radius);
+            Handles.DrawLine(first - tangent * radius, second - tangent * radius);
+            Handles.DrawLine(first + bitangent * radius, second + bitangent * radius);
+            Handles.DrawLine(first - bitangent * radius, second - bitangent * radius);
         }
 
         private static void DrawShapeSceneHandles(

@@ -1,3 +1,4 @@
+using System.Threading;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
@@ -7,6 +8,96 @@ using VividRP.Runtime.ECS;
 
 namespace VividRP.Runtime.Particle.ECS
 {
+    internal unsafe struct VividParticleTriggerJobConfig
+    {
+        public int Enabled;
+        public int ColliderCount;
+        public int SelectedColliderCount;
+        public int InsideAction;
+        public int OutsideAction;
+        public int EnterAction;
+        public int ExitAction;
+        public int ColliderQueryMode;
+        public int SimulationSpace;
+        public float RadiusScale;
+        public int TriggerEventCapacity;
+        public float4x4 ParticleLocalToWorld;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* SelectedColliderIndices;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeCollider* Colliders;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeTriggerEvent* TriggerEvents;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* TriggerEventCount;
+    }
+
+    internal unsafe struct VividParticleCollisionJobConfig
+    {
+        public int Enabled;
+        public int PlaneCount;
+        public int ColliderCount;
+        public int MaxCollisionShapes;
+        public int CollidesWith;
+        public int EnableDynamicColliders;
+        public int Quality;
+        public int SimulationSpace;
+        public float Dampen;
+        public float Bounce;
+        public float LifetimeLoss;
+        public float MinKillSpeedSquared;
+        public float MaxKillSpeedSquared;
+        public float RadiusScale;
+        public int SendCollisionEvents;
+        public int CollisionEventCapacity;
+        public float4x4 ParticleLocalToWorld;
+        public float4x4 ParticleWorldToLocal;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeCollisionPlane* Planes;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeCollider* Colliders;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeCollisionEvent* CollisionEvents;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* CollisionEventCount;
+    }
+
+    internal unsafe struct VividParticleExternalForcesJobConfig
+    {
+        public int Enabled;
+        public int InfluenceCount;
+        public int ForceFieldCount;
+        public int VectorFieldValueCount;
+        public int WindZoneCount;
+        public int SimulationSpace;
+        public float TimeSinceLevelLoad;
+        public float4x4 ParticleLocalToWorld;
+        public float4x4 ParticleWorldToLocal;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* InfluenceIndices;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeForceField* ForceFields;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float4* VectorFieldData;
+
+        [NativeDisableUnsafePtrRestriction]
+        public float* MultiplierLut;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleNativeWindZone* WindZones;
+    }
+
     internal unsafe struct VividParticleEcsIntegratePageWork
     {
         public VividEcsPageInfo Page;
@@ -67,6 +158,15 @@ namespace VividRP.Runtime.Particle.ECS
         public float* NoiseSizeMultipliers;
 
         [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerPreviousInside;
+
+        [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerCurrentInside;
+
+        [NativeDisableUnsafePtrRestriction]
+        public ulong* TriggerColliderEntityIds;
+
+        [NativeDisableUnsafePtrRestriction]
         public float3* NoiseStrengthLut;
 
         [NativeDisableUnsafePtrRestriction]
@@ -99,6 +199,12 @@ namespace VividRP.Runtime.Particle.ECS
         public float3 EmitterVelocity;
         public int InheritVelocityEnabled;
         public int InheritVelocityMode;
+
+        public VividParticleExternalForcesJobConfig ExternalForces;
+
+        public VividParticleCollisionJobConfig Collision;
+
+        public VividParticleTriggerJobConfig Trigger;
 
         [NativeDisableUnsafePtrRestriction]
         public float* RemainingLifetimes;
@@ -147,6 +253,15 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public float* NoiseSizeMultipliers;
+
+        [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerPreviousInside;
+
+        [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerCurrentInside;
+
+        [NativeDisableUnsafePtrRestriction]
+        public ulong* TriggerColliderEntityIds;
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
@@ -213,6 +328,15 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public float* NoiseSizeMultipliers;
+
+        [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerPreviousInside;
+
+        [NativeDisableUnsafePtrRestriction]
+        public byte* TriggerCurrentInside;
+
+        [NativeDisableUnsafePtrRestriction]
+        public ulong* TriggerColliderEntityIds;
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
@@ -545,7 +669,10 @@ namespace VividRP.Runtime.Particle.ECS
                 || work.LimitVelocityEnabled != 0
                 || work.RotationBySpeedEnabled != 0
                 || work.NoiseEnabled != 0
-                || work.InheritVelocityEnabled != 0)
+                || work.InheritVelocityEnabled != 0
+                || work.ExternalForces.Enabled != 0
+                || work.Collision.Enabled != 0
+                || work.Trigger.Enabled != 0)
             {
                 IntegrateModulePage(work, page.StartIndex, pageEnd);
                 return;
@@ -688,11 +815,1049 @@ namespace VividRP.Runtime.Particle.ECS
                         math.radians(angularVelocityDegrees) * work.DeltaTime;
                 }
 
+                if (work.ExternalForces.Enabled != 0)
+                {
+                    velocity = ApplyExternalForces(
+                        work,
+                        index,
+                        normalizedLifetime,
+                        velocity,
+                        animatedVelocity);
+                }
+
+                float3 nextPosition = work.Positions[index]
+                    + (velocity + animatedVelocity) * work.DeltaTime;
+                if (work.Collision.Enabled != 0)
+                {
+                    ResolveCollisions(
+                        work,
+                        index,
+                        animatedVelocity,
+                        ref velocity,
+                        ref nextPosition,
+                        ref remainingLifetime);
+                }
+
+                if (work.Trigger.Enabled != 0)
+                {
+                    ResolveTriggers(
+                        work,
+                        index,
+                        nextPosition,
+                        ref remainingLifetime);
+                }
+
                 work.Velocities[index] = velocity;
-                work.Positions[index] += (velocity + animatedVelocity) * work.DeltaTime;
+                work.Positions[index] = nextPosition;
                 work.RemainingLifetimes[index] = remainingLifetime;
-                work.KeepMask[index] = 1;
+                work.KeepMask[index] = remainingLifetime > 0.0f ? (byte)1 : (byte)0;
             }
+        }
+
+        private static void ResolveTriggers(
+            VividParticleEcsIntegratePageWork work,
+            int particleIndex,
+            float3 simulationPosition,
+            ref float remainingLifetime)
+        {
+            VividParticleTriggerJobConfig config = work.Trigger;
+            if (config.Colliders == null
+                || config.SelectedColliderIndices == null
+                || config.SelectedColliderCount <= 0
+                || work.TriggerPreviousInside == null
+                || work.TriggerCurrentInside == null
+                || work.TriggerColliderEntityIds == null)
+            {
+                return;
+            }
+
+            float3 worldPosition = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.transform(config.ParticleLocalToWorld, simulationPosition)
+                : simulationPosition;
+            float particleSize = work.Sizes != null
+                ? math.max(VividParticleMainModule.MinimumStartSize, work.Sizes[particleIndex])
+                : 1.0f;
+            float particleRadius = math.max(0.0f, particleSize * config.RadiusScale * 0.5f);
+            bool isInside = false;
+            ulong currentColliderId = 0UL;
+            bool wasInside = work.TriggerPreviousInside[particleIndex] != 0;
+            bool queryAll = config.ColliderQueryMode == (int)VividParticleColliderQueryMode.All;
+            VividParticleTriggerEventType insideEventType = wasInside
+                ? VividParticleTriggerEventType.Inside
+                : VividParticleTriggerEventType.Enter;
+            int insideAction = wasInside ? config.InsideAction : config.EnterAction;
+            bool recordedAllInsideCallbacks = false;
+            for (int selectedIndex = 0; selectedIndex < config.SelectedColliderCount; selectedIndex++)
+            {
+                int colliderIndex = config.SelectedColliderIndices[selectedIndex];
+                if ((uint)colliderIndex >= (uint)config.ColliderCount)
+                    continue;
+                VividParticleNativeCollider collider = config.Colliders[colliderIndex];
+                if (collider.Active == 0
+                    || !TryResolvePrimitiveCollider(
+                        collider,
+                        worldPosition,
+                        particleRadius,
+                        out _,
+                        out _))
+                {
+                    continue;
+                }
+                isInside = true;
+                if (currentColliderId == 0UL)
+                    currentColliderId = collider.EntityId;
+                if (queryAll && insideAction == (int)VividParticleOverlapAction.Callback)
+                {
+                    RecordTriggerEvent(
+                        config,
+                        particleIndex,
+                        collider.EntityId,
+                        insideEventType);
+                    recordedAllInsideCallbacks = true;
+                }
+                if (!queryAll)
+                    break;
+            }
+
+            ulong previousColliderId = work.TriggerColliderEntityIds[particleIndex];
+            work.TriggerCurrentInside[particleIndex] = isInside ? (byte)1 : (byte)0;
+            work.TriggerPreviousInside[particleIndex] = isInside ? (byte)1 : (byte)0;
+            work.TriggerColliderEntityIds[particleIndex] = isInside ? currentColliderId : 0UL;
+
+            VividParticleTriggerEventType eventType;
+            int action;
+            ulong eventColliderId;
+            if (isInside)
+            {
+                bool enters = !wasInside;
+                eventType = enters
+                    ? VividParticleTriggerEventType.Enter
+                    : VividParticleTriggerEventType.Inside;
+                action = enters ? config.EnterAction : config.InsideAction;
+                eventColliderId = currentColliderId;
+            }
+            else
+            {
+                bool exits = wasInside;
+                eventType = exits
+                    ? VividParticleTriggerEventType.Exit
+                    : VividParticleTriggerEventType.Outside;
+                action = exits ? config.ExitAction : config.OutsideAction;
+                eventColliderId = exits ? previousColliderId : 0UL;
+            }
+
+            if (action == (int)VividParticleOverlapAction.Kill)
+            {
+                remainingLifetime = 0.0f;
+                return;
+            }
+            if (action == (int)VividParticleOverlapAction.Callback
+                && !(isInside && recordedAllInsideCallbacks))
+            {
+                RecordTriggerEvent(config, particleIndex, eventColliderId, eventType);
+            }
+        }
+
+        private static void RecordTriggerEvent(
+            VividParticleTriggerJobConfig config,
+            int particleIndex,
+            ulong colliderEntityId,
+            VividParticleTriggerEventType eventType)
+        {
+            if (config.TriggerEvents == null
+                || config.TriggerEventCount == null
+                || config.TriggerEventCapacity <= 0)
+            {
+                return;
+            }
+            int eventIndex = Interlocked.Increment(ref config.TriggerEventCount[0]) - 1;
+            if ((uint)eventIndex >= (uint)config.TriggerEventCapacity)
+                return;
+            config.TriggerEvents[eventIndex] = new VividParticleNativeTriggerEvent
+            {
+                ColliderEntityId = config.ColliderQueryMode == (int)VividParticleColliderQueryMode.Disabled
+                    ? 0UL
+                    : colliderEntityId,
+                ParticleIndex = particleIndex,
+                EventType = (int)eventType,
+            };
+        }
+
+        private static void ResolveCollisions(
+            VividParticleEcsIntegratePageWork work,
+            int particleIndex,
+            float3 animatedVelocity,
+            ref float3 velocity,
+            ref float3 nextPosition,
+            ref float remainingLifetime)
+        {
+            VividParticleCollisionJobConfig config = work.Collision;
+            if ((config.Planes == null || config.PlaneCount <= 0)
+                && (config.Colliders == null || config.ColliderCount <= 0))
+                return;
+
+            float3 currentPosition = work.Positions[particleIndex];
+            float3 totalVelocity = velocity + animatedVelocity;
+            float3 worldCurrent = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.transform(config.ParticleLocalToWorld, currentPosition)
+                : currentPosition;
+            float3 worldNext = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.transform(config.ParticleLocalToWorld, nextPosition)
+                : nextPosition;
+            float3 worldVelocity = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.mul((float3x3)config.ParticleLocalToWorld, totalVelocity)
+                : totalVelocity;
+            float particleSize = work.Sizes != null
+                ? math.max(VividParticleMainModule.MinimumStartSize, work.Sizes[particleIndex])
+                : 1.0f;
+            float radius = math.max(0.0f, particleSize * config.RadiusScale * 0.5f);
+            bool collided = false;
+            bool highQuality = config.Quality == (int)VividParticleCollisionQuality.High;
+
+            if (config.Planes != null)
+            {
+                for (int planeIndex = 0; planeIndex < config.PlaneCount; planeIndex++)
+                {
+                    VividParticleNativeCollisionPlane plane = config.Planes[planeIndex];
+                    float3 normal = math.normalizesafe(plane.Normal, new float3(0.0f, 1.0f, 0.0f));
+                    float previousDistance = math.dot(worldCurrent - plane.Position, normal);
+                    float nextDistance = math.dot(worldNext - plane.Position, normal);
+                    float normalSpeed = math.dot(worldVelocity, normal);
+                    if (nextDistance >= radius || (previousDistance < radius && normalSpeed >= 0.0f))
+                        continue;
+
+                    if (ShouldKillCollision(config, worldVelocity))
+                    {
+                        remainingLifetime = 0.0f;
+                        return;
+                    }
+
+                    float hitTime = 1.0f;
+                    float3 collisionPoint;
+                    if (highQuality && previousDistance >= radius && nextDistance < radius)
+                    {
+                        hitTime = math.saturate(
+                            (previousDistance - radius)
+                            / math.max(0.000001f, previousDistance - nextDistance));
+                        collisionPoint = math.lerp(worldCurrent, worldNext, hitTime);
+                    }
+                    else
+                    {
+                        worldNext += normal * (radius - nextDistance);
+                        collisionPoint = worldNext;
+                    }
+                    ResolveCollisionVelocity(config, normal, ref worldVelocity);
+                    if (highQuality && hitTime < 1.0f)
+                    {
+                        worldNext = collisionPoint
+                            + worldVelocity * work.DeltaTime * (1.0f - hitTime);
+                        worldCurrent = collisionPoint;
+                    }
+                    RecordCollisionEvent(
+                        config,
+                        particleIndex,
+                        plane.EntityId,
+                        collisionPoint,
+                        normal,
+                        worldVelocity);
+                    collided = true;
+                }
+            }
+
+            if (config.Colliders != null)
+            {
+                int resolvedColliderCount = 0;
+                for (int colliderIndex = 0; colliderIndex < config.ColliderCount; colliderIndex++)
+                {
+                    VividParticleNativeCollider collider = config.Colliders[colliderIndex];
+                    if (collider.Active == 0
+                        || collider.IsTrigger != 0
+                        || (config.EnableDynamicColliders == 0 && collider.IsDynamic != 0)
+                        || (config.CollidesWith & (1 << collider.Layer)) == 0)
+                    {
+                        continue;
+                    }
+
+                    float hitTime = 0.0f;
+                    float3 normal = default;
+                    bool swept = highQuality && TrySweepPrimitiveCollider(
+                        collider,
+                        worldCurrent,
+                        worldNext,
+                        radius,
+                        out hitTime,
+                        out normal);
+                    float penetration = 0.0f;
+                    if (!swept && !TryResolvePrimitiveCollider(
+                            collider,
+                            worldNext,
+                            radius,
+                            out normal,
+                            out penetration))
+                    {
+                        continue;
+                    }
+
+                    if (ShouldKillCollision(config, worldVelocity))
+                    {
+                        remainingLifetime = 0.0f;
+                        return;
+                    }
+
+                    float3 collisionPoint;
+                    if (swept)
+                    {
+                        collisionPoint = math.lerp(worldCurrent, worldNext, hitTime);
+                    }
+                    else
+                    {
+                        worldNext += normal * penetration;
+                        collisionPoint = worldNext;
+                    }
+                    ResolveCollisionVelocity(config, normal, ref worldVelocity);
+                    if (swept)
+                    {
+                        worldNext = collisionPoint
+                            + worldVelocity * work.DeltaTime * (1.0f - hitTime);
+                        worldCurrent = collisionPoint;
+                    }
+                    RecordCollisionEvent(
+                        config,
+                        particleIndex,
+                        collider.EntityId,
+                        collisionPoint,
+                        normal,
+                        worldVelocity);
+                    collided = true;
+                    resolvedColliderCount++;
+                    if (resolvedColliderCount >= math.max(1, config.MaxCollisionShapes))
+                        break;
+                }
+            }
+
+            if (!collided)
+                return;
+
+            if (config.LifetimeLoss > 0.0f && work.StartLifetimes != null)
+            {
+                remainingLifetime -= work.StartLifetimes[particleIndex]
+                    * math.saturate(config.LifetimeLoss);
+            }
+
+            if (config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local)
+            {
+                nextPosition = math.transform(config.ParticleWorldToLocal, worldNext);
+                float3 resolvedTotalVelocity = math.mul(
+                    (float3x3)config.ParticleWorldToLocal,
+                    worldVelocity);
+                velocity = resolvedTotalVelocity - animatedVelocity;
+            }
+            else
+            {
+                nextPosition = worldNext;
+                velocity = worldVelocity - animatedVelocity;
+            }
+        }
+
+        private static bool ShouldKillCollision(
+            VividParticleCollisionJobConfig config,
+            float3 velocity)
+        {
+            float speedSquared = math.lengthsq(velocity);
+            return speedSquared < config.MinKillSpeedSquared
+                || speedSquared > config.MaxKillSpeedSquared;
+        }
+
+        private static void RecordCollisionEvent(
+            VividParticleCollisionJobConfig config,
+            int particleIndex,
+            ulong colliderEntityId,
+            float3 intersection,
+            float3 normal,
+            float3 velocity)
+        {
+            if (config.SendCollisionEvents == 0
+                || config.CollisionEvents == null
+                || config.CollisionEventCount == null
+                || config.CollisionEventCapacity <= 0)
+            {
+                return;
+            }
+
+            int eventIndex = Interlocked.Increment(ref config.CollisionEventCount[0]) - 1;
+            if ((uint)eventIndex >= (uint)config.CollisionEventCapacity)
+                return;
+            config.CollisionEvents[eventIndex] = new VividParticleNativeCollisionEvent
+            {
+                ColliderEntityId = colliderEntityId,
+                ParticleIndex = particleIndex,
+                Intersection = intersection,
+                Normal = normal,
+                Velocity = velocity,
+            };
+        }
+
+        private static void ResolveCollisionVelocity(
+            VividParticleCollisionJobConfig config,
+            float3 normal,
+            ref float3 velocity)
+        {
+            float normalSpeed = math.dot(velocity, normal);
+            if (normalSpeed >= 0.0f)
+                return;
+            float3 normalVelocity = normal * normalSpeed;
+            float3 tangentVelocity = velocity - normalVelocity;
+            velocity = tangentVelocity * (1.0f - math.saturate(config.Dampen))
+                - normalVelocity * math.max(0.0f, config.Bounce);
+        }
+
+        private static bool TrySweepPrimitiveCollider(
+            VividParticleNativeCollider collider,
+            float3 start,
+            float3 end,
+            float particleRadius,
+            out float hitTime,
+            out float3 normal)
+        {
+            switch ((VividParticleNativeColliderShape)collider.Shape)
+            {
+                case VividParticleNativeColliderShape.Sphere:
+                    return TrySweepSphere(
+                        start,
+                        end,
+                        collider.Center,
+                        collider.Radius + particleRadius,
+                        out hitTime,
+                        out normal);
+                case VividParticleNativeColliderShape.Box:
+                    return TrySweepBox(
+                        start,
+                        end,
+                        collider,
+                        particleRadius,
+                        out hitTime,
+                        out normal);
+                case VividParticleNativeColliderShape.Capsule:
+                    return TrySweepCapsule(
+                        start,
+                        end,
+                        collider.SegmentA,
+                        collider.SegmentB,
+                        collider.Radius + particleRadius,
+                        out hitTime,
+                        out normal);
+                default:
+                    hitTime = 0.0f;
+                    normal = default;
+                    return false;
+            }
+        }
+
+        private static bool TrySweepSphere(
+            float3 start,
+            float3 end,
+            float3 center,
+            float radius,
+            out float hitTime,
+            out float3 normal)
+        {
+            float3 direction = end - start;
+            float directionLengthSquared = math.lengthsq(direction);
+            float3 offset = start - center;
+            float c = math.lengthsq(offset) - radius * radius;
+            if (c <= 0.0f || directionLengthSquared <= 0.0000001f)
+            {
+                hitTime = 0.0f;
+                normal = default;
+                return false;
+            }
+            float b = math.dot(offset, direction);
+            float discriminant = b * b - directionLengthSquared * c;
+            if (discriminant < 0.0f)
+            {
+                hitTime = 0.0f;
+                normal = default;
+                return false;
+            }
+            float t = (-b - math.sqrt(discriminant)) / directionLengthSquared;
+            if (t < 0.0f || t > 1.0f)
+            {
+                hitTime = 0.0f;
+                normal = default;
+                return false;
+            }
+            float3 hitPoint = math.lerp(start, end, t);
+            hitTime = t;
+            normal = math.normalizesafe(hitPoint - center, new float3(0.0f, 1.0f, 0.0f));
+            return true;
+        }
+
+        private static bool TrySweepBox(
+            float3 start,
+            float3 end,
+            VividParticleNativeCollider collider,
+            float particleRadius,
+            out float hitTime,
+            out float3 normal)
+        {
+            float3 startOffset = start - collider.Center;
+            float3 direction = end - start;
+            float3 localStart = new(
+                math.dot(startOffset, collider.AxisX),
+                math.dot(startOffset, collider.AxisY),
+                math.dot(startOffset, collider.AxisZ));
+            float3 localDirection = new(
+                math.dot(direction, collider.AxisX),
+                math.dot(direction, collider.AxisY),
+                math.dot(direction, collider.AxisZ));
+            float3 extents = math.max(float3.zero, collider.HalfExtents) + particleRadius;
+            if (math.all(math.abs(localStart) <= extents))
+            {
+                hitTime = 0.0f;
+                normal = default;
+                return false;
+            }
+
+            float tMin = 0.0f;
+            float tMax = 1.0f;
+            int hitAxis = -1;
+            float hitSign = 0.0f;
+            for (int axis = 0; axis < 3; axis++)
+            {
+                float origin = localStart[axis];
+                float delta = localDirection[axis];
+                float extent = extents[axis];
+                if (math.abs(delta) <= 0.000001f)
+                {
+                    if (origin < -extent || origin > extent)
+                    {
+                        hitTime = 0.0f;
+                        normal = default;
+                        return false;
+                    }
+                    continue;
+                }
+                float inverse = 1.0f / delta;
+                float first = (-extent - origin) * inverse;
+                float second = (extent - origin) * inverse;
+                float near = math.min(first, second);
+                float far = math.max(first, second);
+                if (near > tMin)
+                {
+                    tMin = near;
+                    hitAxis = axis;
+                    hitSign = first < second ? -1.0f : 1.0f;
+                }
+                tMax = math.min(tMax, far);
+                if (tMin > tMax)
+                {
+                    hitTime = 0.0f;
+                    normal = default;
+                    return false;
+                }
+            }
+            if (hitAxis < 0 || tMin < 0.0f || tMin > 1.0f)
+            {
+                hitTime = 0.0f;
+                normal = default;
+                return false;
+            }
+            hitTime = tMin;
+            normal = hitAxis switch
+            {
+                0 => collider.AxisX * hitSign,
+                1 => collider.AxisY * hitSign,
+                _ => collider.AxisZ * hitSign,
+            };
+            return true;
+        }
+
+        private static bool TrySweepCapsule(
+            float3 start,
+            float3 end,
+            float3 segmentA,
+            float3 segmentB,
+            float radius,
+            out float hitTime,
+            out float3 normal)
+        {
+            float3 direction = end - start;
+            float3 segment = segmentB - segmentA;
+            float3 origin = start - segmentA;
+            float segmentLengthSquared = math.lengthsq(segment);
+            float directionLengthSquared = math.lengthsq(direction);
+            float segmentDirection = math.dot(segment, direction);
+            float segmentOrigin = math.dot(segment, origin);
+            float directionOrigin = math.dot(direction, origin);
+            float originLengthSquared = math.lengthsq(origin);
+            float a = segmentLengthSquared * directionLengthSquared
+                - segmentDirection * segmentDirection;
+            float b = segmentLengthSquared * directionOrigin
+                - segmentOrigin * segmentDirection;
+            float c = segmentLengthSquared * originLengthSquared
+                - segmentOrigin * segmentOrigin
+                - radius * radius * segmentLengthSquared;
+
+            bool found = false;
+            float bestTime = 2.0f;
+            float3 bestNormal = default;
+            float discriminant = b * b - a * c;
+            if (math.abs(a) > 0.0000001f && discriminant >= 0.0f)
+            {
+                float t = (-b - math.sqrt(discriminant)) / a;
+                float y = segmentOrigin + t * segmentDirection;
+                if (t >= 0.0f && t <= 1.0f && y > 0.0f && y < segmentLengthSquared)
+                {
+                    float3 hitPoint = math.lerp(start, end, t);
+                    float3 closest = segmentA + segment * (y / segmentLengthSquared);
+                    bestTime = t;
+                    bestNormal = math.normalizesafe(
+                        hitPoint - closest,
+                        new float3(0.0f, 1.0f, 0.0f));
+                    found = true;
+                }
+            }
+
+            if (TrySweepSphere(start, end, segmentA, radius, out float capATime, out float3 capANormal)
+                && capATime < bestTime)
+            {
+                bestTime = capATime;
+                bestNormal = capANormal;
+                found = true;
+            }
+            if (TrySweepSphere(start, end, segmentB, radius, out float capBTime, out float3 capBNormal)
+                && capBTime < bestTime)
+            {
+                bestTime = capBTime;
+                bestNormal = capBNormal;
+                found = true;
+            }
+            hitTime = found ? bestTime : 0.0f;
+            normal = bestNormal;
+            return found;
+        }
+
+        private static bool TryResolvePrimitiveCollider(
+            VividParticleNativeCollider collider,
+            float3 position,
+            float particleRadius,
+            out float3 normal,
+            out float penetration)
+        {
+            switch ((VividParticleNativeColliderShape)collider.Shape)
+            {
+                case VividParticleNativeColliderShape.Sphere:
+                    return TryResolveSphere(
+                        position,
+                        particleRadius,
+                        collider.Center,
+                        collider.Radius,
+                        out normal,
+                        out penetration);
+                case VividParticleNativeColliderShape.Box:
+                    return TryResolveBox(
+                        position,
+                        particleRadius,
+                        collider,
+                        out normal,
+                        out penetration);
+                case VividParticleNativeColliderShape.Capsule:
+                    float3 segment = collider.SegmentB - collider.SegmentA;
+                    float segmentLengthSquared = math.lengthsq(segment);
+                    float t = segmentLengthSquared > 0.0000001f
+                        ? math.saturate(math.dot(position - collider.SegmentA, segment) / segmentLengthSquared)
+                        : 0.0f;
+                    float3 closest = collider.SegmentA + segment * t;
+                    return TryResolveSphere(
+                        position,
+                        particleRadius,
+                        closest,
+                        collider.Radius,
+                        out normal,
+                        out penetration);
+                default:
+                    normal = new float3(0.0f, 1.0f, 0.0f);
+                    penetration = 0.0f;
+                    return false;
+            }
+        }
+
+        private static bool TryResolveSphere(
+            float3 position,
+            float particleRadius,
+            float3 center,
+            float colliderRadius,
+            out float3 normal,
+            out float penetration)
+        {
+            float3 delta = position - center;
+            float distanceSquared = math.lengthsq(delta);
+            float combinedRadius = math.max(0.0f, particleRadius + colliderRadius);
+            if (distanceSquared >= combinedRadius * combinedRadius)
+            {
+                normal = default;
+                penetration = 0.0f;
+                return false;
+            }
+            float distance = math.sqrt(distanceSquared);
+            normal = distance > 0.000001f
+                ? delta / distance
+                : new float3(0.0f, 1.0f, 0.0f);
+            penetration = combinedRadius - distance;
+            return penetration > 0.0f;
+        }
+
+        private static bool TryResolveBox(
+            float3 position,
+            float particleRadius,
+            VividParticleNativeCollider collider,
+            out float3 normal,
+            out float penetration)
+        {
+            float3 delta = position - collider.Center;
+            float3 local = new(
+                math.dot(delta, collider.AxisX),
+                math.dot(delta, collider.AxisY),
+                math.dot(delta, collider.AxisZ));
+            float3 halfExtents = math.max(float3.zero, collider.HalfExtents);
+            float3 closestLocal = math.clamp(local, -halfExtents, halfExtents);
+            float3 closest = collider.Center
+                + collider.AxisX * closestLocal.x
+                + collider.AxisY * closestLocal.y
+                + collider.AxisZ * closestLocal.z;
+            float3 outsideDelta = position - closest;
+            float outsideDistanceSquared = math.lengthsq(outsideDelta);
+            if (outsideDistanceSquared > 0.0000001f)
+            {
+                float outsideDistance = math.sqrt(outsideDistanceSquared);
+                if (outsideDistance >= particleRadius)
+                {
+                    normal = default;
+                    penetration = 0.0f;
+                    return false;
+                }
+                normal = outsideDelta / outsideDistance;
+                penetration = particleRadius - outsideDistance;
+                return true;
+            }
+
+            float3 faceDistances = halfExtents - math.abs(local);
+            if (faceDistances.x <= faceDistances.y && faceDistances.x <= faceDistances.z)
+            {
+                normal = collider.AxisX * (local.x >= 0.0f ? 1.0f : -1.0f);
+                penetration = particleRadius + faceDistances.x;
+            }
+            else if (faceDistances.y <= faceDistances.z)
+            {
+                normal = collider.AxisY * (local.y >= 0.0f ? 1.0f : -1.0f);
+                penetration = particleRadius + faceDistances.y;
+            }
+            else
+            {
+                normal = collider.AxisZ * (local.z >= 0.0f ? 1.0f : -1.0f);
+                penetration = particleRadius + faceDistances.z;
+            }
+            return penetration > 0.0f;
+        }
+
+        private static float3 ApplyExternalForces(
+            VividParticleEcsIntegratePageWork work,
+            int particleIndex,
+            float normalizedLifetime,
+            float3 velocity,
+            float3 animatedVelocity)
+        {
+            VividParticleExternalForcesJobConfig config = work.ExternalForces;
+            float multiplier = config.MultiplierLut != null
+                ? SampleScalarLut(config.MultiplierLut, normalizedLifetime)
+                : 1.0f;
+            if (math.abs(multiplier) <= 0.000001f)
+                return velocity;
+
+            float3 simulationPosition = work.Positions[particleIndex];
+            float3 worldPosition = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.transform(config.ParticleLocalToWorld, simulationPosition)
+                : simulationPosition;
+            float particleSize = work.Sizes != null
+                ? math.max(VividParticleMainModule.MinimumStartSize, work.Sizes[particleIndex])
+                : 1.0f;
+
+            velocity = ApplyWindZones(
+                config,
+                worldPosition,
+                velocity,
+                multiplier,
+                work.DeltaTime);
+
+            if (config.ForceFields == null
+                || config.InfluenceIndices == null
+                || config.InfluenceCount <= 0)
+            {
+                return velocity;
+            }
+
+            for (int influenceIndex = 0; influenceIndex < config.InfluenceCount; influenceIndex++)
+            {
+                int fieldIndex = config.InfluenceIndices[influenceIndex];
+                if ((uint)fieldIndex >= (uint)config.ForceFieldCount)
+                    continue;
+                VividParticleNativeForceField* field = config.ForceFields + fieldIndex;
+                if (field->Active == 0 || field->EndRange <= 0.0f)
+                    continue;
+
+                float3 localPosition = math.transform(field->WorldToLocal, worldPosition);
+                if (!TryGetNormalizedFieldDistance(field, localPosition, out float distance, out float t))
+                    continue;
+
+                float3 localDirection = new float3(
+                    SampleForceFieldLut(field->DirectionXLut, t),
+                    SampleForceFieldLut(field->DirectionYLut, t),
+                    SampleForceFieldLut(field->DirectionZLut, t));
+                if (math.lengthsq(localDirection) > 0.0000001f)
+                {
+                    velocity += TransformFieldDirection(config, field, localDirection, preserveMagnitude: true)
+                        * multiplier
+                        * work.DeltaTime;
+                }
+
+                float gravity = SampleForceFieldLut(field->GravityLut, t);
+                if (math.abs(gravity) > 0.000001f)
+                {
+                    float3 radial = math.normalizesafe(localPosition);
+                    float focusDistance = math.lerp(
+                        field->StartRange,
+                        field->EndRange,
+                        math.saturate(field->GravityFocus));
+                    if (distance < focusDistance)
+                        radial = -radial;
+                    float3 gravityDirection = TransformFieldDirection(
+                        config,
+                        field,
+                        -radial,
+                        preserveMagnitude: false);
+                    velocity += gravityDirection
+                        * gravity
+                        * multiplier
+                        * work.DeltaTime
+                        * 30.0f;
+                }
+
+                float rotationSpeed = SampleForceFieldLut(field->RotationSpeedLut, t);
+                float rotationAttraction = SampleForceFieldLut(field->RotationAttractionLut, t);
+                if (math.abs(rotationSpeed) > 0.000001f
+                    && math.abs(rotationAttraction) > 0.000001f)
+                {
+                    float3 tangent = new float3(localPosition.z, 0.0f, -localPosition.x);
+                    tangent = ApplyRotationRandomness(field, tangent, particleIndex);
+                    tangent = TransformFieldDirection(config, field, tangent, preserveMagnitude: false)
+                        * rotationSpeed
+                        * multiplier;
+                    velocity += (tangent - velocity)
+                        * rotationAttraction
+                        * multiplier
+                        * work.DeltaTime
+                        * 30.0f;
+                }
+
+                if (field->VectorFieldOffset >= 0
+                    && config.VectorFieldData != null
+                    && field->VectorFieldWidth > 0
+                    && field->VectorFieldHeight > 0
+                    && field->VectorFieldDepth > 0)
+                {
+                    float attraction = SampleForceFieldLut(field->VectorFieldAttractionLut, t);
+                    if (math.abs(attraction) > 0.000001f)
+                    {
+                        float3 vectorVelocity = SampleVectorField(config, field, localPosition)
+                            * SampleForceFieldLut(field->VectorFieldSpeedLut, t);
+                        vectorVelocity = TransformFieldDirection(
+                            config,
+                            field,
+                            vectorVelocity,
+                            preserveMagnitude: true);
+                        velocity = math.lerp(
+                            velocity,
+                            vectorVelocity,
+                            math.saturate(attraction * multiplier * work.DeltaTime * 30.0f));
+                    }
+                }
+
+                float drag = SampleForceFieldLut(field->DragLut, t);
+                if (drag > 0.0f)
+                {
+                    float3 totalVelocity = velocity + animatedVelocity;
+                    float speedSquared = math.lengthsq(totalVelocity);
+                    float dragAmount = drag;
+                    if (field->MultiplyDragByParticleSize != 0)
+                    {
+                        float radius = particleSize * 0.5f;
+                        dragAmount *= math.PI * radius * radius;
+                    }
+                    if (field->MultiplyDragByParticleVelocity != 0)
+                        dragAmount *= speedSquared;
+                    float speed = math.sqrt(speedSquared);
+                    float reducedSpeed = math.max(
+                        0.0f,
+                        speed - dragAmount * work.DeltaTime * multiplier);
+                    totalVelocity = speed > 0.000001f
+                        ? totalVelocity * (reducedSpeed / speed)
+                        : float3.zero;
+                    velocity = totalVelocity - animatedVelocity;
+                }
+            }
+
+            return velocity;
+        }
+
+        private static float3 ApplyWindZones(
+            VividParticleExternalForcesJobConfig config,
+            float3 worldPosition,
+            float3 velocity,
+            float multiplier,
+            float deltaTime)
+        {
+            if (config.WindZones == null || config.WindZoneCount <= 0)
+                return velocity;
+
+            for (int zoneIndex = 0; zoneIndex < config.WindZoneCount; zoneIndex++)
+            {
+                VividParticleNativeWindZone zone = config.WindZones[zoneIndex];
+                if (zone.Active == 0)
+                    continue;
+                float phase = config.TimeSinceLevelLoad * math.PI * zone.PulseFrequency;
+                float pulse = (
+                        math.cos(phase)
+                        + math.cos(phase * 0.375f)
+                        + math.cos(phase * 0.05f))
+                    * (1.0f / 3.0f);
+                float strength = zone.WindMain * (1.0f + pulse * zone.PulseMagnitude);
+                if (zone.Mode == (int)UnityEngine.WindZoneMode.Directional)
+                {
+                    float3 windDirection = ResolveWorldDirection(config, zone.Forward);
+                    velocity += windDirection * strength * multiplier * deltaTime;
+                    continue;
+                }
+
+                if (zone.Radius <= 0.0f)
+                    continue;
+                float3 offset = worldPosition - zone.Position;
+                float distanceSquared = math.lengthsq(offset);
+                float radiusSquared = zone.Radius * zone.Radius;
+                if (distanceSquared > radiusSquared)
+                    continue;
+                float distance = math.sqrt(distanceSquared);
+                float attenuation = 1.0f - math.saturate(distance / zone.Radius);
+                attenuation = 1.0f - (1.0f - attenuation) * (1.0f - attenuation);
+                float3 sphericalDirection = ResolveWorldDirection(config, math.normalizesafe(offset));
+                velocity += sphericalDirection * attenuation * strength * multiplier * deltaTime;
+            }
+            return velocity;
+        }
+
+        private static float3 ResolveWorldDirection(
+            VividParticleExternalForcesJobConfig config,
+            float3 worldDirection)
+        {
+            float3 direction = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.mul((float3x3)config.ParticleWorldToLocal, worldDirection)
+                : worldDirection;
+            return math.normalizesafe(direction);
+        }
+
+        private static bool TryGetNormalizedFieldDistance(
+            VividParticleNativeForceField* field,
+            float3 localPosition,
+            out float distance,
+            out float normalizedDistance)
+        {
+            distance = field->Shape switch
+            {
+                (int)VividParticleForceFieldShape.Box => math.cmax(math.abs(localPosition)),
+                (int)VividParticleForceFieldShape.Cylinder => math.length(localPosition.xz),
+                _ => math.length(localPosition),
+            };
+            if (field->Shape == (int)VividParticleForceFieldShape.Hemisphere
+                && localPosition.y < 0.0f)
+            {
+                normalizedDistance = 0.0f;
+                return false;
+            }
+            if (field->Shape == (int)VividParticleForceFieldShape.Cylinder
+                && math.abs(localPosition.y) > field->Length * 0.5f)
+            {
+                normalizedDistance = 0.0f;
+                return false;
+            }
+            if (distance < field->StartRange || distance > field->EndRange)
+            {
+                normalizedDistance = 0.0f;
+                return false;
+            }
+            normalizedDistance = math.saturate(
+                (distance - field->StartRange)
+                / math.max(0.000001f, field->EndRange - field->StartRange));
+            return true;
+        }
+
+        private static float3 TransformFieldDirection(
+            VividParticleExternalForcesJobConfig config,
+            VividParticleNativeForceField* field,
+            float3 localDirection,
+            bool preserveMagnitude)
+        {
+            float magnitude = math.length(localDirection);
+            float3 worldDirection = math.mul((float3x3)field->LocalToWorld, localDirection);
+            float3 simulationDirection = config.SimulationSpace
+                    == (int)VividParticleSystemSimulationSpace.Local
+                ? math.mul((float3x3)config.ParticleWorldToLocal, worldDirection)
+                : worldDirection;
+            if (!preserveMagnitude)
+                return math.normalizesafe(simulationDirection);
+            return math.normalizesafe(simulationDirection) * magnitude;
+        }
+
+        private static float3 ApplyRotationRandomness(
+            VividParticleNativeForceField* field,
+            float3 tangent,
+            int particleIndex)
+        {
+            if (math.cmax(field->RotationRandomness) <= 0.000001f)
+                return tangent;
+            uint seed = math.hash(new uint3(
+                (uint)particleIndex,
+                (uint)(field->EntityId & uint.MaxValue),
+                (uint)(field->EntityId >> 32)));
+            var random = Unity.Mathematics.Random.CreateFromIndex(seed);
+            float x = (random.NextFloat() - 0.5f) * math.PI * 2.0f * field->RotationRandomness.x;
+            float z = (random.NextFloat() - 0.5f) * math.PI * 2.0f * field->RotationRandomness.y;
+            return math.mul(float3x3.EulerXYZ(new float3(x, 0.0f, z)), tangent);
+        }
+
+        private static float3 SampleVectorField(
+            VividParticleExternalForcesJobConfig config,
+            VividParticleNativeForceField* field,
+            float3 localPosition)
+        {
+            float3 uvw = localPosition / math.max(0.000001f, field->EndRange) * 0.5f + 0.5f;
+            int x = math.clamp((int)(uvw.x * field->VectorFieldWidth), 0, field->VectorFieldWidth - 1);
+            int y = math.clamp((int)(uvw.y * field->VectorFieldHeight), 0, field->VectorFieldHeight - 1);
+            int z = math.clamp((int)(uvw.z * field->VectorFieldDepth), 0, field->VectorFieldDepth - 1);
+            int index = field->VectorFieldOffset
+                + x
+                + y * field->VectorFieldWidth
+                + z * field->VectorFieldWidth * field->VectorFieldHeight;
+            if ((uint)index >= (uint)config.VectorFieldValueCount)
+                return float3.zero;
+            return config.VectorFieldData[index].xyz;
+        }
+
+        private static float SampleForceFieldLut(float* lut, float normalizedDistance)
+        {
+            float sample = math.saturate(normalizedDistance)
+                * (VividParticleNativeForceField.LutResolution - 1);
+            int lower = (int)math.floor(sample);
+            int upper = math.min(lower + 1, VividParticleNativeForceField.LutResolution - 1);
+            return math.lerp(lut[lower], lut[upper], sample - lower);
         }
 
         private static float3 SampleVelocityLut(float3* lut, float normalizedLifetime)
@@ -884,6 +2049,12 @@ namespace VividRP.Runtime.Particle.ECS
                 work.NoisePhases[destinationIndex] = work.NoisePhases[sourceIndex];
             if (work.NoiseSizeMultipliers != null)
                 work.NoiseSizeMultipliers[destinationIndex] = work.NoiseSizeMultipliers[sourceIndex];
+            if (work.TriggerPreviousInside != null)
+                work.TriggerPreviousInside[destinationIndex] = work.TriggerPreviousInside[sourceIndex];
+            if (work.TriggerCurrentInside != null)
+                work.TriggerCurrentInside[destinationIndex] = work.TriggerCurrentInside[sourceIndex];
+            if (work.TriggerColliderEntityIds != null)
+                work.TriggerColliderEntityIds[destinationIndex] = work.TriggerColliderEntityIds[sourceIndex];
             work.KeepMask[destinationIndex] = work.KeepMask[sourceIndex];
         }
     }
@@ -947,6 +2118,12 @@ namespace VividRP.Runtime.Particle.ECS
                         new float3(1024.0f));
                 if (work.NoiseSizeMultipliers != null)
                     work.NoiseSizeMultipliers[particleIndex] = 1.0f;
+                if (work.TriggerPreviousInside != null)
+                    work.TriggerPreviousInside[particleIndex] = 0;
+                if (work.TriggerCurrentInside != null)
+                    work.TriggerCurrentInside[particleIndex] = 0;
+                if (work.TriggerColliderEntityIds != null)
+                    work.TriggerColliderEntityIds[particleIndex] = 0UL;
                 work.KeepMask[particleIndex] = 1;
             }
         }

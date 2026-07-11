@@ -19,6 +19,18 @@ namespace VividRP.Runtime.Particle
             VividParticleForceOverLifetimeModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleExternalForcesModule m_ExternalForces =
+            VividParticleExternalForcesModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleCollisionModule m_Collision =
+            VividParticleCollisionModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleTriggerModule m_Trigger =
+            VividParticleTriggerModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleVelocityOverLifetimeModule m_VelocityOverLifetime =
             VividParticleVelocityOverLifetimeModule.CreateDefault();
 
@@ -77,6 +89,15 @@ namespace VividRP.Runtime.Particle
         public VividParticleForceOverLifetimeModule forceOverLifetime =>
             m_ForceOverLifetime ??= VividParticleForceOverLifetimeModule.CreateDefault();
 
+        public VividParticleExternalForcesModule externalForces =>
+            m_ExternalForces ??= VividParticleExternalForcesModule.CreateDefault();
+
+        public VividParticleCollisionModule collision =>
+            m_Collision ??= VividParticleCollisionModule.CreateDefault();
+
+        public VividParticleTriggerModule trigger =>
+            m_Trigger ??= VividParticleTriggerModule.CreateDefault();
+
         public VividParticleVelocityOverLifetimeModule velocityOverLifetime =>
             m_VelocityOverLifetime ??= VividParticleVelocityOverLifetimeModule.CreateDefault();
 
@@ -119,6 +140,9 @@ namespace VividRP.Runtime.Particle
             VividParticleEmissionModule targetEmission,
             VividParticleShapeModule targetShape,
             VividParticleForceOverLifetimeModule targetForceOverLifetime,
+            VividParticleExternalForcesModule targetExternalForces,
+            VividParticleCollisionModule targetCollision,
+            VividParticleTriggerModule targetTrigger,
             VividParticleVelocityOverLifetimeModule targetVelocityOverLifetime,
             VividParticleInheritVelocityModule targetInheritVelocity,
             VividParticleLimitVelocityOverLifetimeModule targetLimitVelocityOverLifetime,
@@ -137,6 +161,9 @@ namespace VividRP.Runtime.Particle
             targetEmission?.CopyFrom(emission);
             targetShape?.CopyFrom(shape);
             targetForceOverLifetime?.CopyFrom(forceOverLifetime);
+            targetExternalForces?.CopyFrom(externalForces);
+            targetCollision?.CopyFrom(collision);
+            targetTrigger?.CopyFrom(trigger);
             targetVelocityOverLifetime?.CopyFrom(velocityOverLifetime);
             targetInheritVelocity?.CopyFrom(inheritVelocity);
             targetLimitVelocityOverLifetime?.CopyFrom(limitVelocityOverLifetime);
@@ -163,6 +190,9 @@ namespace VividRP.Runtime.Particle
             emission.Validate();
             shape.Validate();
             forceOverLifetime.Validate();
+            externalForces.Validate();
+            collision.Validate();
+            trigger.Validate();
             velocityOverLifetime.Validate();
             inheritVelocity.Validate();
             limitVelocityOverLifetime.Validate();

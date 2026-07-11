@@ -47,6 +47,12 @@ namespace VividRP.Editor.Tests
             VividParticleShapeModule shape = VividParticleShapeModule.CreateDefault();
             VividParticleForceOverLifetimeModule forceOverLifetime =
                 VividParticleForceOverLifetimeModule.CreateDefault();
+            VividParticleExternalForcesModule externalForces =
+                VividParticleExternalForcesModule.CreateDefault();
+            VividParticleCollisionModule collision =
+                VividParticleCollisionModule.CreateDefault();
+            VividParticleTriggerModule trigger =
+                VividParticleTriggerModule.CreateDefault();
             VividParticleVelocityOverLifetimeModule velocityOverLifetime =
                 VividParticleVelocityOverLifetimeModule.CreateDefault();
             VividParticleInheritVelocityModule inheritVelocity =
@@ -99,6 +105,23 @@ namespace VividRP.Editor.Tests
             Assert.That(forceOverLifetime.enabled, Is.False);
             Assert.That(forceOverLifetime.force, Is.EqualTo(Vector3.zero));
             Assert.That(forceOverLifetime.space, Is.EqualTo(VividParticleForceSpace.Local));
+            Assert.That(externalForces.enabled, Is.False);
+            Assert.That(
+                externalForces.influenceFilter,
+                Is.EqualTo(VividParticleGameObjectFilter.LayerMask));
+            Assert.That(externalForces.influenceCount, Is.EqualTo(0));
+            Assert.That(externalForces.EvaluateMultiplier(0.5f), Is.EqualTo(1.0f));
+            Assert.That(collision.enabled, Is.False);
+            Assert.That(collision.type, Is.EqualTo(VividParticleCollisionType.Planes));
+            Assert.That(collision.mode, Is.EqualTo(VividParticleCollisionMode.Collision3D));
+            Assert.That(collision.bounce, Is.EqualTo(1.0f));
+            Assert.That(collision.radiusScale, Is.EqualTo(1.0f));
+            Assert.That(collision.planeCount, Is.EqualTo(0));
+            Assert.That(trigger.enabled, Is.False);
+            Assert.That(trigger.enter, Is.EqualTo(VividParticleOverlapAction.Ignore));
+            Assert.That(trigger.colliderQueryMode, Is.EqualTo(VividParticleColliderQueryMode.One));
+            Assert.That(trigger.radiusScale, Is.EqualTo(1.0f));
+            Assert.That(trigger.colliderCount, Is.EqualTo(0));
             Assert.That(velocityOverLifetime.enabled, Is.False);
             Assert.That(velocityOverLifetime.Evaluate(0.5f), Is.EqualTo(Vector3.zero));
             Assert.That(velocityOverLifetime.space, Is.EqualTo(VividParticleForceSpace.Local));
@@ -331,6 +354,10 @@ namespace VividRP.Editor.Tests
             asset.forceOverLifetime.enabled = true;
             asset.forceOverLifetime.force = new Vector3(1.0f, 2.0f, 3.0f);
             asset.forceOverLifetime.space = VividParticleForceSpace.World;
+            asset.externalForces.enabled = true;
+            asset.externalForces.influenceFilter = VividParticleGameObjectFilter.LayerMask;
+            asset.externalForces.influenceMask = 1 << 8;
+            asset.externalForces.multiplier = AnimationCurve.Constant(0.0f, 1.0f, 0.5f);
             asset.velocityOverLifetime.enabled = true;
             asset.velocityOverLifetime.x = AnimationCurve.Constant(0.0f, 1.0f, 3.0f);
             asset.velocityOverLifetime.space = VividParticleForceSpace.World;
@@ -406,6 +433,9 @@ namespace VividRP.Editor.Tests
             Assert.That(system.forceOverLifetime.enabled, Is.True);
             Assert.That(system.forceOverLifetime.force, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
             Assert.That(system.forceOverLifetime.space, Is.EqualTo(VividParticleForceSpace.World));
+            Assert.That(system.externalForces.enabled, Is.True);
+            Assert.That(system.externalForces.influenceMask.value, Is.EqualTo(1 << 8));
+            Assert.That(system.externalForces.EvaluateMultiplier(0.5f), Is.EqualTo(0.5f));
             Assert.That(system.velocityOverLifetime.enabled, Is.True);
             Assert.That(system.velocityOverLifetime.Evaluate(0.5f).x, Is.EqualTo(3.0f));
             Assert.That(system.velocityOverLifetime.space, Is.EqualTo(VividParticleForceSpace.World));
@@ -474,6 +504,8 @@ namespace VividRP.Editor.Tests
             asset.emission.bursts[0] = new VividParticleBurst(0.25f, 9);
             asset.forceOverLifetime.force = Vector3.down;
             asset.forceOverLifetime.enabled = false;
+            asset.externalForces.enabled = false;
+            asset.externalForces.multiplier = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
             asset.velocityOverLifetime.enabled = false;
             asset.velocityOverLifetime.x = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
             asset.main.customEmitterVelocity = Vector3.one * 9.0f;
@@ -519,6 +551,8 @@ namespace VividRP.Editor.Tests
             Assert.That(system.emission.bursts[0].count, Is.EqualTo(2));
             Assert.That(system.forceOverLifetime.enabled, Is.True);
             Assert.That(system.forceOverLifetime.force, Is.EqualTo(new Vector3(1.0f, 2.0f, 3.0f)));
+            Assert.That(system.externalForces.enabled, Is.True);
+            Assert.That(system.externalForces.EvaluateMultiplier(0.5f), Is.EqualTo(0.5f));
             Assert.That(system.velocityOverLifetime.enabled, Is.True);
             Assert.That(system.velocityOverLifetime.Evaluate(0.5f).x, Is.EqualTo(3.0f));
             Assert.That(system.main.customEmitterVelocity, Is.EqualTo(new Vector3(2.0f, 3.0f, 4.0f)));
@@ -1636,6 +1670,433 @@ namespace VividRP.Editor.Tests
             Assert.That(position.y, Is.EqualTo(1.0f).Within(0.0001f));
             Assert.That(position.z, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(VividParticleSystemManager.pendingSimulationPageWorkCountForTests, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Simulate_ExternalForces_AppliesListedDirectionalFieldInBurstPageJob()
+        {
+            VividParticleForceField field = CreateForceField();
+            field.endRange = 10.0f;
+            field.directionX = AnimationCurve.Constant(0.0f, 1.0f, 2.0f);
+            VividParticleSystem system = CreateSystem();
+            ConfigureExternalForcesSystem(system);
+            system.externalForces.influenceFilter = VividParticleGameObjectFilter.List;
+            system.externalForces.AddInfluence(field);
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.x, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(position.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(position.z, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(
+                VividParticleSystemManager.GetSimulationKernelFlagsForTests(system)
+                    & VividParticleModuleFlags.ExternalForces,
+                Is.EqualTo(VividParticleModuleFlags.ExternalForces));
+        }
+
+        [Test]
+        public void ForceFieldRegistry_RebuildsOnlyForRegistrationSettingsOrTransformChanges()
+        {
+            VividParticleForceField field = CreateForceField();
+            Assert.That(VividParticleSystemManager.PrepareForceFieldRegistryForTests(), Is.EqualTo(1));
+            int initialVersion = VividParticleSystemManager.GetForceFieldRegistryVersionForTests();
+
+            Assert.That(VividParticleSystemManager.PrepareForceFieldRegistryForTests(), Is.EqualTo(1));
+            Assert.That(
+                VividParticleSystemManager.GetForceFieldRegistryVersionForTests(),
+                Is.EqualTo(initialVersion));
+
+            field.transform.position = Vector3.right;
+            Assert.That(VividParticleSystemManager.PrepareForceFieldRegistryForTests(), Is.EqualTo(1));
+            Assert.That(
+                VividParticleSystemManager.GetForceFieldRegistryVersionForTests(),
+                Is.EqualTo(initialVersion + 1));
+
+            field.enabled = false;
+            Assert.That(VividParticleSystemManager.PrepareForceFieldRegistryForTests(), Is.EqualTo(0));
+        }
+
+        [Test]
+        public void WindZoneRegistry_DiscoversOnceAndUsesIncrementalPropertyUpdates()
+        {
+            WindZone windZone = CreateWindZone();
+            int trackedCount = VividParticleSystemManager.PrepareWindZoneRegistryForTests();
+            int initialVersion = VividParticleSystemManager.GetWindZoneRegistryVersionForTests();
+            int initialDiscoveryCount = VividParticleSystemManager.GetWindZoneDiscoveryCountForTests();
+            Assert.That(trackedCount, Is.GreaterThanOrEqualTo(1));
+            Assert.That(initialDiscoveryCount, Is.EqualTo(1));
+
+            VividParticleSystemManager.PrepareWindZoneRegistryForTests();
+            Assert.That(
+                VividParticleSystemManager.GetWindZoneRegistryVersionForTests(),
+                Is.EqualTo(initialVersion));
+            Assert.That(
+                VividParticleSystemManager.GetWindZoneDiscoveryCountForTests(),
+                Is.EqualTo(initialDiscoveryCount));
+
+            windZone.windMain += 1.0f;
+            VividParticleSystemManager.PrepareWindZoneRegistryForTests();
+            Assert.That(
+                VividParticleSystemManager.GetWindZoneRegistryVersionForTests(),
+                Is.EqualTo(initialVersion + 1));
+            Assert.That(
+                VividParticleSystemManager.GetWindZoneDiscoveryCountForTests(),
+                Is.EqualTo(initialDiscoveryCount));
+        }
+
+        [Test]
+        public void Simulate_ExternalForces_AppliesDirectionalWindAndListFilterExcludesIt()
+        {
+            WindZone windZone = CreateWindZone();
+            windZone.mode = WindZoneMode.Directional;
+            windZone.windMain = 10000.0f;
+            windZone.windPulseMagnitude = 0.0f;
+            windZone.transform.rotation = Quaternion.Euler(0.0f, 90.0f, 0.0f);
+            VividParticleSystem affected = CreateSystem();
+            VividParticleSystem excluded = CreateSystem();
+            ConfigureExternalForcesSystem(affected);
+            ConfigureExternalForcesSystem(excluded);
+            affected.externalForces.influenceFilter = VividParticleGameObjectFilter.LayerMask;
+            excluded.externalForces.influenceFilter = VividParticleGameObjectFilter.List;
+
+            affected.Emit(1);
+            excluded.Emit(1);
+            affected.Simulate(0.1f, withChildren: false, restart: false, fixedTimeStep: false);
+            excluded.Simulate(0.1f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 affectedPosition = affected.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Vector3 excludedPosition = excluded.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(affectedPosition.x, Is.GreaterThan(50.0f));
+            Assert.That(excludedPosition, Is.EqualTo(Vector3.zero));
+        }
+
+        [Test]
+        public void Simulate_ExternalForces_LayerMaskFilterUpdatesWithoutSceneScan()
+        {
+            VividParticleForceField field = CreateForceField();
+            field.gameObject.layer = 8;
+            field.endRange = 10.0f;
+            field.directionX = AnimationCurve.Constant(0.0f, 1.0f, 2.0f);
+            VividParticleSystem system = CreateSystem();
+            ConfigureExternalForcesSystem(system);
+            system.externalForces.influenceFilter = VividParticleGameObjectFilter.LayerMask;
+            system.externalForces.influenceMask = 1 << 7;
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+            Vector3 excludedPosition = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(excludedPosition, Is.EqualTo(Vector3.zero));
+
+            system.externalForces.influenceMask = 1 << 8;
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+            Vector3 includedPosition = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(includedPosition.x, Is.EqualTo(0.5f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Simulate_ExternalForces_DragReducesBaseVelocityBeforeMove()
+        {
+            VividParticleForceField field = CreateForceField();
+            field.endRange = 10.0f;
+            field.drag = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            VividParticleSystem system = CreateSystem();
+            ConfigureExternalForcesSystem(system);
+            system.main.startSpeed = 2.0f;
+            system.externalForces.influenceFilter = VividParticleGameObjectFilter.List;
+            system.externalForces.AddInfluence(field);
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.z, Is.EqualTo(0.75f).Within(0.0001f));
+        }
+
+        [Test]
+        public void Simulate_ExternalForces_SamplesReadableVectorFieldInBurstJob()
+        {
+            var vectorField = new Texture3D(1, 1, 1, TextureFormat.RGBAFloat, mipChain: false);
+            vectorField.SetPixels(new[] { new Color(1.0f, 0.0f, 0.0f, 0.0f) });
+            vectorField.Apply(updateMipmaps: false, makeNoLongerReadable: false);
+            m_ToDestroy.Add(vectorField);
+            VividParticleForceField field = CreateForceField();
+            field.endRange = 10.0f;
+            field.vectorField = vectorField;
+            field.vectorFieldSpeed = AnimationCurve.Constant(0.0f, 1.0f, 2.0f);
+            field.vectorFieldAttraction = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+            VividParticleSystem system = CreateSystem();
+            ConfigureExternalForcesSystem(system);
+            system.externalForces.influenceFilter = VividParticleGameObjectFilter.List;
+            system.externalForces.AddInfluence(field);
+
+            system.Emit(1);
+            system.Simulate(0.1f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.x, Is.EqualTo(0.2f).Within(0.0001f));
+        }
+
+        [Test]
+        public void CollisionModule_CopyFrom_ClonesPlaneListAndClampsValues()
+        {
+            Transform plane = CreateCollisionPlane();
+            VividParticleCollisionModule source = VividParticleCollisionModule.CreateDefault();
+            source.enabled = true;
+            source.dampen = 2.0f;
+            source.bounce = -1.0f;
+            source.minKillSpeed = 4.0f;
+            source.maxKillSpeed = 2.0f;
+            source.AddPlane(plane);
+
+            VividParticleCollisionModule copy = VividParticleCollisionModule.CreateDefault();
+            copy.CopyFrom(source);
+            source.RemoveAllPlanes();
+
+            Assert.That(copy.enabled, Is.True);
+            Assert.That(copy.dampen, Is.EqualTo(1.0f));
+            Assert.That(copy.bounce, Is.EqualTo(0.0f));
+            Assert.That(copy.maxKillSpeed, Is.EqualTo(copy.minKillSpeed));
+            Assert.That(copy.planeCount, Is.EqualTo(1));
+            Assert.That(copy.GetPlane(0), Is.SameAs(plane));
+        }
+
+        [Test]
+        public void Simulate_CollisionPlane_ResolvesAndBouncesInBurstPageJob()
+        {
+            Transform plane = CreateCollisionPlane();
+            VividParticleSystem system = CreateSystem();
+            ConfigurePlaneCollisionSystem(system, plane);
+
+            system.Emit(1);
+            system.Simulate(1.0f, withChildren: false, restart: false, fixedTimeStep: false);
+            Vector3 contactPosition = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(contactPosition.y, Is.EqualTo(0.5f).Within(0.0001f));
+
+            system.Simulate(0.25f, withChildren: false, restart: false, fixedTimeStep: false);
+            Vector3 bouncedPosition = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(bouncedPosition.y, Is.EqualTo(0.75f).Within(0.0001f));
+            Assert.That(
+                VividParticleSystemManager.GetSimulationKernelFlagsForTests(system)
+                    & VividParticleModuleFlags.Collision,
+                Is.EqualTo(VividParticleModuleFlags.Collision));
+        }
+
+        [Test]
+        public void Simulate_CollisionPlane_KillsParticleOutsideConfiguredSpeedRange()
+        {
+            Transform plane = CreateCollisionPlane();
+            VividParticleSystem system = CreateSystem();
+            ConfigurePlaneCollisionSystem(system, plane);
+            system.collision.maxKillSpeed = 0.5f;
+
+            system.Emit(1);
+            system.Simulate(1.0f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Assert.That(system.particleCount, Is.EqualTo(0));
+        }
+
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(2)]
+        public void Simulate_WorldPrimitiveCollider_ResolvesInSharedBurstRegistry(int shape)
+        {
+            Collider collider = CreateWorldCollider(shape, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureWorldCollisionSystem(system, 1 << 30);
+
+            system.Emit(1);
+            system.Simulate(1.0f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 contactPosition = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(contactPosition.y, Is.EqualTo(1.5f).Within(0.0001f));
+            Assert.That(collider.enabled, Is.True);
+            var collisionEvents = new List<VividParticleCollisionEvent>();
+            Assert.That(system.GetCollisionEvents(collisionEvents), Is.EqualTo(1));
+            Assert.That(collisionEvents[0].colliderComponent, Is.SameAs(collider));
+            Assert.That(collisionEvents[0].intersection.y, Is.EqualTo(1.5f).Within(0.0001f));
+            Assert.That(collisionEvents[0].normal.y, Is.EqualTo(1.0f).Within(0.0001f));
+            Assert.That(collisionEvents[0].velocity.y, Is.EqualTo(1.0f).Within(0.0001f));
+        }
+
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(2)]
+        public void Simulate_HighQualityCollision_SweepsFastParticleAcrossPrimitive(int shape)
+        {
+            CreateWorldCollider(shape, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureWorldCollisionSystem(system, 1 << 30);
+            system.transform.position = Vector3.up * 3.0f;
+            system.main.startSpeed = 10.0f;
+            system.collision.quality = VividParticleCollisionQuality.High;
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.y, Is.EqualTo(5.0f).Within(0.001f));
+        }
+
+        [Test]
+        public void Simulate_LowQualityCollision_UsesDiscreteOverlapForFastParticle()
+        {
+            CreateWorldCollider(shape: 0, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureWorldCollisionSystem(system, 1 << 30);
+            system.transform.position = Vector3.up * 3.0f;
+            system.main.startSpeed = 10.0f;
+            system.collision.quality = VividParticleCollisionQuality.Low;
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.y, Is.EqualTo(-2.0f).Within(0.001f));
+        }
+
+        [Test]
+        public void Simulate_HighQualityCollision_TransformsSweepForLocalSimulation()
+        {
+            CreateWorldCollider(shape: 0, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureWorldCollisionSystem(system, 1 << 30);
+            system.transform.position = Vector3.up * 3.0f;
+            system.main.startSpeed = 10.0f;
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.Local;
+            system.collision.quality = VividParticleCollisionQuality.High;
+
+            system.Emit(1);
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Vector3 position = system.GetParticleObjectToWorldMatrix(0).GetColumn(3);
+            Assert.That(position.y, Is.EqualTo(5.0f).Within(0.001f));
+        }
+
+        [Test]
+        public void ColliderRegistry_RebuildsForShapeChangesWithoutRepeatedDiscovery()
+        {
+            SphereCollider collider = (SphereCollider)CreateWorldCollider(shape: 0, layer: 30);
+            int initialCount = VividParticleSystemManager.PrepareColliderRegistryForTests();
+            int initialVersion = VividParticleSystemManager.GetColliderRegistryVersionForTests();
+            int initialDiscoveryCount = VividParticleSystemManager.GetColliderDiscoveryCountForTests();
+            Assert.That(initialCount, Is.GreaterThanOrEqualTo(1));
+            Assert.That(initialDiscoveryCount, Is.EqualTo(1));
+
+            VividParticleSystemManager.PrepareColliderRegistryForTests();
+            Assert.That(
+                VividParticleSystemManager.GetColliderRegistryVersionForTests(),
+                Is.EqualTo(initialVersion));
+            Assert.That(
+                VividParticleSystemManager.GetColliderDiscoveryCountForTests(),
+                Is.EqualTo(initialDiscoveryCount));
+
+            collider.radius = 2.0f;
+            VividParticleSystemManager.PrepareColliderRegistryForTests();
+            Assert.That(
+                VividParticleSystemManager.GetColliderRegistryVersionForTests(),
+                Is.EqualTo(initialVersion + 1));
+            Assert.That(
+                VividParticleSystemManager.GetColliderDiscoveryCountForTests(),
+                Is.EqualTo(initialDiscoveryCount));
+        }
+
+        [Test]
+        public void Simulate_Trigger_ClassifiesOutsideEnterInsideAndExitEvents()
+        {
+            Collider collider = CreateWorldCollider(shape: 0, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureTriggerSystem(system, collider);
+            system.trigger.outside = VividParticleOverlapAction.Callback;
+            system.trigger.enter = VividParticleOverlapAction.Callback;
+            system.trigger.inside = VividParticleOverlapAction.Callback;
+            system.trigger.exit = VividParticleOverlapAction.Callback;
+            var events = new List<VividParticleTriggerEvent>();
+
+            system.Emit(1);
+            system.Simulate(0.25f, withChildren: false, restart: false, fixedTimeStep: false);
+            Assert.That(
+                system.GetTriggerEvents(VividParticleTriggerEventType.Outside, events),
+                Is.EqualTo(1));
+
+            system.Simulate(0.5f, withChildren: false, restart: false, fixedTimeStep: false);
+            Assert.That(
+                system.GetTriggerEvents(VividParticleTriggerEventType.Enter, events),
+                Is.EqualTo(1));
+            Assert.That(events[0].collider, Is.SameAs(collider));
+
+            system.Simulate(0.1f, withChildren: false, restart: false, fixedTimeStep: false);
+            Assert.That(
+                system.GetTriggerEvents(VividParticleTriggerEventType.Inside, events),
+                Is.EqualTo(1));
+
+            system.Simulate(3.0f, withChildren: false, restart: false, fixedTimeStep: false);
+            Assert.That(
+                system.GetTriggerEvents(VividParticleTriggerEventType.Exit, events),
+                Is.EqualTo(1));
+            Assert.That(events[0].collider, Is.SameAs(collider));
+            Assert.That(
+                VividParticleSystemManager.GetSimulationKernelFlagsForTests(system)
+                    & VividParticleModuleFlags.Trigger,
+                Is.EqualTo(VividParticleModuleFlags.Trigger));
+            Assert.That(VividParticleSystemManager.HasTriggerStateColumnForTests(system), Is.True);
+        }
+
+        [Test]
+        public void Simulate_TriggerEnterKill_RemovesParticleThroughSharedCompactionJob()
+        {
+            Collider collider = CreateWorldCollider(shape: 0, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureTriggerSystem(system, collider);
+            system.trigger.enter = VividParticleOverlapAction.Kill;
+
+            system.Emit(1);
+            system.Simulate(0.75f, withChildren: false, restart: false, fixedTimeStep: false);
+
+            Assert.That(system.particleCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Simulate_TriggerDisabledColliderQuery_OmitsColliderReference()
+        {
+            Collider collider = CreateWorldCollider(shape: 0, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureTriggerSystem(system, collider);
+            system.trigger.enter = VividParticleOverlapAction.Callback;
+            system.trigger.colliderQueryMode = VividParticleColliderQueryMode.Disabled;
+
+            system.Emit(1);
+            system.Simulate(0.75f, withChildren: false, restart: false, fixedTimeStep: false);
+            var events = new List<VividParticleTriggerEvent>();
+
+            Assert.That(
+                system.GetTriggerEvents(VividParticleTriggerEventType.Enter, events),
+                Is.EqualTo(1));
+            Assert.That(events[0].collider, Is.Null);
+        }
+
+        [Test]
+        public void Simulate_TriggerAllColliderQuery_ReturnsEveryOverlappingCollider()
+        {
+            Collider first = CreateWorldCollider(shape: 0, layer: 30);
+            Collider second = CreateWorldCollider(shape: 0, layer: 30);
+            VividParticleSystem system = CreateSystem();
+            ConfigureTriggerSystem(system, first);
+            system.trigger.AddCollider(second);
+            system.trigger.enter = VividParticleOverlapAction.Callback;
+            system.trigger.colliderQueryMode = VividParticleColliderQueryMode.All;
+
+            system.Emit(1);
+            system.Simulate(0.75f, withChildren: false, restart: false, fixedTimeStep: false);
+            var events = new List<VividParticleTriggerEvent>();
+
+            Assert.That(
+                system.GetTriggerEvents(VividParticleTriggerEventType.Enter, events),
+                Is.EqualTo(2));
+            Assert.That(
+                new[] { events[0].collider, events[1].collider },
+                Is.EquivalentTo(new[] { first, second }));
         }
 
         [Test]
@@ -3362,6 +3823,75 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.LastLockCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastCopyOperationCount, Is.GreaterThan(0));
             Assert.That(rendererStats.LastUploadBatchWorkCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Manager_RendererNativeDynamicRecord_TracksActiveCountAndTransform()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.rendererModule.enabled = true;
+            system.main.maxParticles = 8;
+            system.main.startLifetime = 10.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.transform.position = new Vector3(2.0f, 3.0f, 4.0f);
+
+            system.Emit(1);
+
+            Assert.That(
+                VividParticleSystemManager.TryGetRendererNativeDynamicRecordForTests(
+                    system,
+                    out int activeCount,
+                    out float4x4 localToWorld,
+                    out ulong sceneCullingMask,
+                    out bool isEditorSelected),
+                Is.True);
+            Assert.That(activeCount, Is.EqualTo(1));
+            Assert.That(
+                math.distance(localToWorld.c3.xyz, new float3(2.0f, 3.0f, 4.0f)),
+                Is.LessThan(0.00001f));
+            Assert.That(sceneCullingMask, Is.Not.EqualTo(0UL));
+            Assert.That(isEditorSelected, Is.False);
+
+            system.transform.position = new Vector3(-1.0f, 5.0f, 7.0f);
+            system.Emit(2);
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            Assert.That(
+                VividParticleSystemManager.TryGetRendererNativeDynamicRecordForTests(
+                    system,
+                    out activeCount,
+                    out localToWorld,
+                    out _,
+                    out _),
+                Is.True);
+            Assert.That(activeCount, Is.EqualTo(3));
+            Assert.That(
+                math.distance(localToWorld.c3.xyz, new float3(-1.0f, 5.0f, 7.0f)),
+                Is.LessThan(0.00001f));
+            Vector3[] cullingBoundsCenters =
+                VividParticleSystemManager.GetRendererCullingRecordBoundsCentersForTests();
+            Assert.That(cullingBoundsCenters, Is.Not.Empty);
+            bool containsUpdatedCenter = false;
+            for (int index = 0; index < cullingBoundsCenters.Length; index++)
+            {
+                containsUpdatedCenter |= Vector3.Distance(
+                    cullingBoundsCenters[index],
+                    new Vector3(-1.0f, 5.0f, 7.0f)) < 0.0001f;
+            }
+            Assert.That(containsUpdatedCenter, Is.True);
+
+            system.Stop(withChildren: false, VividParticleSystemStopBehavior.StopEmittingAndClear);
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            Assert.That(
+                VividParticleSystemManager.TryGetRendererNativeDynamicRecordForTests(
+                    system,
+                    out _,
+                    out _,
+                    out _,
+                    out _),
+                Is.False);
         }
 
         [Test]
@@ -5660,6 +6190,140 @@ namespace VividRP.Editor.Tests
             system.inheritVelocity.enabled = true;
             system.inheritVelocity.mode = mode;
             system.inheritVelocity.curve = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+        }
+
+        private static void ConfigureExternalForcesSystem(VividParticleSystem system)
+        {
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 0.0f;
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.World;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.externalForces.enabled = true;
+            system.externalForces.multiplier = AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+        }
+
+        private static void ConfigurePlaneCollisionSystem(
+            VividParticleSystem system,
+            Transform plane)
+        {
+            system.transform.position = Vector3.up;
+            system.transform.rotation = Quaternion.Euler(90.0f, 0.0f, 0.0f);
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 1.0f;
+            system.main.startSize = 1.0f;
+            system.main.gravityModifier = 0.0f;
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.World;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.collision.enabled = true;
+            system.collision.type = VividParticleCollisionType.Planes;
+            system.collision.radiusScale = 1.0f;
+            system.collision.dampen = 0.0f;
+            system.collision.bounce = 1.0f;
+            system.collision.AddPlane(plane);
+        }
+
+        private static void ConfigureWorldCollisionSystem(
+            VividParticleSystem system,
+            LayerMask collidesWith)
+        {
+            system.transform.position = Vector3.up * 2.0f;
+            system.transform.rotation = Quaternion.Euler(90.0f, 0.0f, 0.0f);
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 1.0f;
+            system.main.startSize = 1.0f;
+            system.main.gravityModifier = 0.0f;
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.World;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.collision.enabled = true;
+            system.collision.type = VividParticleCollisionType.World;
+            system.collision.collidesWith = collidesWith;
+            system.collision.radiusScale = 1.0f;
+            system.collision.dampen = 0.0f;
+            system.collision.bounce = 1.0f;
+            system.collision.sendCollisionMessages = true;
+        }
+
+        private static void ConfigureTriggerSystem(
+            VividParticleSystem system,
+            Collider collider)
+        {
+            system.transform.position = Vector3.up * 2.0f;
+            system.transform.rotation = Quaternion.Euler(90.0f, 0.0f, 0.0f);
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 1.0f;
+            system.main.startSize = 1.0f;
+            system.main.gravityModifier = 0.0f;
+            system.main.simulationSpace = VividParticleSystemSimulationSpace.World;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+            system.trigger.enabled = true;
+            system.trigger.radiusScale = 1.0f;
+            system.trigger.colliderQueryMode = VividParticleColliderQueryMode.One;
+            system.trigger.AddCollider(collider);
+        }
+
+        private Transform CreateCollisionPlane()
+        {
+            var gameObject = new GameObject("Vivid Particle Collision Plane");
+            m_ToDestroy.Add(gameObject);
+            return gameObject.transform;
+        }
+
+        private Collider CreateWorldCollider(int shape, int layer)
+        {
+            var gameObject = new GameObject("Vivid Particle World Collider");
+            gameObject.layer = layer;
+            m_ToDestroy.Add(gameObject);
+            return shape switch
+            {
+                1 => CreateBoxCollider(gameObject),
+                2 => gameObject.AddComponent<CapsuleCollider>(),
+                _ => CreateSphereCollider(gameObject),
+            };
+        }
+
+        private static SphereCollider CreateSphereCollider(GameObject gameObject)
+        {
+            SphereCollider collider = gameObject.AddComponent<SphereCollider>();
+            collider.radius = 1.0f;
+            return collider;
+        }
+
+        private static BoxCollider CreateBoxCollider(GameObject gameObject)
+        {
+            BoxCollider collider = gameObject.AddComponent<BoxCollider>();
+            collider.size = Vector3.one * 2.0f;
+            return collider;
+        }
+
+        private VividParticleForceField CreateForceField()
+        {
+            var gameObject = new GameObject("Vivid Particle Force Field Test");
+            m_ToDestroy.Add(gameObject);
+            VividParticleForceField field = gameObject.AddComponent<VividParticleForceField>();
+            field.shape = VividParticleForceFieldShape.Sphere;
+            field.startRange = 0.0f;
+            field.endRange = 1.0f;
+            return field;
+        }
+
+        private WindZone CreateWindZone()
+        {
+            var gameObject = new GameObject("Vivid Particle Wind Zone Test");
+            m_ToDestroy.Add(gameObject);
+            WindZone windZone = gameObject.AddComponent<WindZone>();
+            windZone.windMain = 1.0f;
+            windZone.windPulseMagnitude = 0.0f;
+            windZone.windPulseFrequency = 0.0f;
+            return windZone;
         }
 
         private VividParticleSystem CreateActiveSystem()

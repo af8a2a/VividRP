@@ -9,6 +9,41 @@ using VividRP.Runtime.ECS;
 
 namespace VividRP.Runtime.Particle.ECS
 {
+    internal unsafe struct VividParticleEcsColumnView
+    {
+        [NativeDisableUnsafePtrRestriction]
+        public float3* Positions;
+        [NativeDisableUnsafePtrRestriction]
+        public float3* Velocities;
+        [NativeDisableUnsafePtrRestriction]
+        public float* StartLifetimes;
+        [NativeDisableUnsafePtrRestriction]
+        public float* RemainingLifetimes;
+        [NativeDisableUnsafePtrRestriction]
+        public float4* Colors;
+        [NativeDisableUnsafePtrRestriction]
+        public float* Sizes;
+        [NativeDisableUnsafePtrRestriction]
+        public int* MeshIndices;
+        [NativeDisableUnsafePtrRestriction]
+        public byte* KeepMask;
+        [NativeDisableUnsafePtrRestriction]
+        public int* ActiveCountOutput;
+
+        public int ArchetypeLineId;
+        public int Capacity;
+        public int Version;
+
+        public bool IsValid => Positions != null
+            && Velocities != null
+            && StartLifetimes != null
+            && RemainingLifetimes != null
+            && Colors != null
+            && Sizes != null
+            && MeshIndices != null
+            && Capacity > 0;
+    }
+
     internal sealed class VividParticleEcsStorage : IDisposable
     {
         private readonly VividEcsWorld m_World;
@@ -16,6 +51,10 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_CommonTypeIndex;
         private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
         private readonly VividEcsTypeIndex m_RendererSharedKeyTypeIndex;
+        private readonly VividEcsTypeIndex m_RendererHandleTypeIndex;
+        private readonly VividEcsTypeIndex m_SimulationActiveTypeIndex;
+        private readonly VividEcsTypeIndex m_RendererActiveTypeIndex;
+        private readonly VividEcsSoaColumn<VividParticleCommon> m_CommonColumn;
         private readonly bool m_OwnsWorld;
         private readonly Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> m_LineGroupScratch = new();
         private NativeArray<int> m_ActiveCountOutput;
@@ -23,6 +62,12 @@ namespace VividRP.Runtime.Particle.ECS
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
         private NativeArray<VividParticleEcsCompactWork> m_StandaloneCompactWorks;
         private VividParticleRendererSharedKey m_RendererSharedKey = VividParticleRendererSharedKey.Invalid;
+        private VividParticleEcsColumnView m_ColumnView;
+        private int m_CachedCommonColumnVersion = -1;
+        private int m_CachedKeepMaskCapacity = -1;
+        private int m_CachedActiveCountOutputLength = -1;
+        private int m_ColumnViewVersion;
+        private int m_ColumnViewRefreshCount;
         private int m_PendingIntegrateActiveCount;
 
         public VividParticleEcsStorage()
@@ -44,15 +89,21 @@ namespace VividRP.Runtime.Particle.ECS
             m_CommonTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
             m_SystemIdTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             m_RendererSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
+            m_RendererHandleTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererHandle>();
+            m_SimulationActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
+            m_RendererActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
             m_World = world;
             m_OwnsWorld = ownsWorld;
             m_Line = m_World.CreateArchetypeLine(
                 0,
                 m_CommonTypeIndex,
                 m_SystemIdTypeIndex,
-                m_RendererSharedKeyTypeIndex);
+                m_RendererSharedKeyTypeIndex,
+                m_RendererHandleTypeIndex);
             m_Line.SetSharedComponent(VividParticleSystemId.Invalid);
             m_Line.SetSharedComponent(VividParticleRendererSharedKey.Invalid);
+            m_Line.SetSharedComponent(VividParticleRendererHandle.Invalid);
+            m_CommonColumn = m_Line.GetColumn<VividEcsSoaColumn<VividParticleCommon>>(m_CommonTypeIndex);
         }
 
         public bool isCreated => m_Line.isCreated;
@@ -79,6 +130,10 @@ namespace VividRP.Runtime.Particle.ECS
 
         public int queryLineGroupCount => CountLineGroups();
 
+        public int columnViewVersion => m_ColumnView.Version;
+
+        public int columnViewRefreshCount => m_ColumnViewRefreshCount;
+
         public VividParticleSystemId systemId
         {
             get => m_Line.TryGetSharedComponent(out VividParticleSystemId value) ? value : VividParticleSystemId.Invalid;
@@ -95,6 +150,44 @@ namespace VividRP.Runtime.Particle.ECS
 
                 m_RendererSharedKey = value;
                 m_Line.SetSharedComponent(value);
+            }
+        }
+
+        public VividParticleRendererHandle rendererHandle
+        {
+            get => m_Line.TryGetSharedComponent(out VividParticleRendererHandle value)
+                ? value
+                : VividParticleRendererHandle.Invalid;
+            set => m_Line.SetSharedComponent(value);
+        }
+
+        public bool rendererActive
+        {
+            get => m_Line.Contains(m_RendererActiveTypeIndex);
+            set
+            {
+                if (value == m_Line.Contains(m_RendererActiveTypeIndex))
+                    return;
+
+                if (value)
+                    m_World.AddComponentType(m_Line, m_RendererActiveTypeIndex);
+                else
+                    m_World.RemoveComponentType(m_Line, m_RendererActiveTypeIndex);
+            }
+        }
+
+        public bool simulationActive
+        {
+            get => m_Line.Contains(m_SimulationActiveTypeIndex);
+            set
+            {
+                if (value == m_Line.Contains(m_SimulationActiveTypeIndex))
+                    return;
+
+                if (value)
+                    m_World.AddComponentType(m_Line, m_SimulationActiveTypeIndex);
+                else
+                    m_World.RemoveComponentType(m_Line, m_SimulationActiveTypeIndex);
             }
         }
 
@@ -138,6 +231,10 @@ namespace VividRP.Runtime.Particle.ECS
             m_SimulationPages = default;
             m_StandaloneCompactWorks = default;
             m_LineGroupScratch.Clear();
+            m_ColumnView = default;
+            m_CachedCommonColumnVersion = -1;
+            m_CachedKeepMaskCapacity = -1;
+            m_CachedActiveCountOutputLength = -1;
             m_PendingIntegrateActiveCount = 0;
         }
 
@@ -184,23 +281,46 @@ namespace VividRP.Runtime.Particle.ECS
             if (reservedCount <= 0)
                 return false;
 
-            EnsureKeepMaskCapacity(capacity);
-            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
-            NativeArray<float3> positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
-            NativeArray<float3> velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
-            NativeArray<float> startLifetimes =
-                common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex);
-            NativeArray<float> remainingLifetimes =
-                common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
-            NativeArray<float4> colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
-            NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
-            NativeArray<int> meshIndices = common.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
-
-            works.Add(new VividParticleEcsInitializeParticlesWork
+            if (!TryCreateInitializeParticlesTemplate(
+                snapshot,
+                randomSeed,
+                out VividParticleEcsInitializeParticlesWork work,
+                out _))
             {
-                StartIndex = firstIndex,
-                Count = reservedCount,
-                Capacity = positions.Length,
+                return false;
+            }
+
+            work.StartIndex = firstIndex;
+            work.Count = reservedCount;
+            works.Add(work);
+            return true;
+        }
+
+        public unsafe bool TryCreateInitializeParticlesTemplate(
+            VividParticleSystemFrameSnapshot snapshot,
+            uint randomSeed,
+            out VividParticleEcsInitializeParticlesWork work,
+            out int* activeCountOutput)
+        {
+            work = default;
+            activeCountOutput = null;
+            if (!isCreated)
+                return false;
+
+            if (!m_ActiveCountOutput.IsCreated)
+                m_ActiveCountOutput = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
+
+            EnsureKeepMaskCapacity(capacity);
+            if (!TryGetColumnView(out VividParticleEcsColumnView columnView))
+                return false;
+
+            m_ActiveCountOutput[0] = activeCount;
+            activeCountOutput = (int*)NativeArrayUnsafeUtility.GetUnsafePtr(m_ActiveCountOutput);
+            work = new VividParticleEcsInitializeParticlesWork
+            {
+                StartIndex = activeCount,
+                Count = 0,
+                Capacity = columnView.Capacity,
                 ShapeEnabled = snapshot.ShapeEnabled ? 1 : 0,
                 ShapeType = (int)snapshot.ShapeType,
                 SimulationSpace = (int)snapshot.SimulationSpace,
@@ -215,15 +335,15 @@ namespace VividRP.Runtime.Particle.ECS
                 StartColor = ToFloat4(snapshot.StartColor),
                 LocalToWorldMatrix = ToFloat4x4(snapshot.LocalToWorldMatrix),
                 WorldRotation = ToQuaternion(snapshot.WorldRotation),
-                Positions = (float3*)positions.GetUnsafePtr(),
-                Velocities = (float3*)velocities.GetUnsafePtr(),
-                StartLifetimes = (float*)startLifetimes.GetUnsafePtr(),
-                RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
-                Colors = (float4*)colors.GetUnsafePtr(),
-                Sizes = (float*)sizes.GetUnsafePtr(),
-                MeshIndices = (int*)meshIndices.GetUnsafePtr(),
-                KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
-            });
+                Positions = columnView.Positions,
+                Velocities = columnView.Velocities,
+                StartLifetimes = columnView.StartLifetimes,
+                RemainingLifetimes = columnView.RemainingLifetimes,
+                Colors = columnView.Colors,
+                Sizes = columnView.Sizes,
+                MeshIndices = columnView.MeshIndices,
+                KeepMask = columnView.KeepMask,
+            };
             return true;
         }
 
@@ -253,11 +373,12 @@ namespace VividRP.Runtime.Particle.ECS
             for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
                 m_SimulationPages[pageIndex] = m_Line.GetPageInfo(pageIndex);
 
-            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
+            VividEcsSoaColumn<VividParticleCommon> common = m_CommonColumn;
             NativeArray<VividEcsPageInfo> pages = m_SimulationPages.GetSubArray(0, livePageCount);
+            EnsureStandaloneCompactWorkCapacity();
+            m_StandaloneCompactWorks[0] = CreateCompactWork(count);
             var job = new VividParticleEcsIntegratePagesJob
             {
-                Pages = pages,
                 DeltaTime = deltaTime,
                 Gravity = ToFloat3(gravity),
                 Positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex),
@@ -266,9 +387,11 @@ namespace VividRP.Runtime.Particle.ECS
                 KeepMask = m_KeepMask,
             };
 
-            JobHandle integrateHandle = job.Schedule(livePageCount, innerloopBatchCount: 1, dependency);
-            EnsureStandaloneCompactWorkCapacity();
-            m_StandaloneCompactWorks[0] = CreateCompactWork(count);
+            JobHandle integrateHandle = job.ScheduleParallel(
+                pages,
+                dependency,
+                innerloopBatchCount: 1,
+                VividEcsPageDispatchMode.Average);
             var compactJob = new VividParticleEcsCompactWorksJob
             {
                 Works = m_StandaloneCompactWorks,
@@ -304,25 +427,23 @@ namespace VividRP.Runtime.Particle.ECS
             if (livePageCount <= 0)
                 return false;
 
-            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
-            NativeArray<float3> positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
-            NativeArray<float3> velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
-            NativeArray<float> remainingLifetimes =
-                common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
+            if (!TryGetColumnView(out VividParticleEcsColumnView columnView))
+                return false;
 
             float3 gravityValue = ToFloat3(gravity);
             for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
             {
+                VividEcsPageInfo page = m_Line.GetPageInfo(pageIndex);
                 pageWorks.Add(new VividParticleEcsIntegratePageWork
                 {
-                    Page = m_Line.GetPageInfo(pageIndex),
+                    Page = page,
                     DeltaTime = deltaTime,
                     Gravity = gravityValue,
-                    PositionLength = positions.Length,
-                    Positions = (float3*)positions.GetUnsafePtr(),
-                    Velocities = (float3*)velocities.GetUnsafePtr(),
-                    RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
-                    KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
+                    PositionLength = columnView.Capacity,
+                    Positions = columnView.Positions,
+                    Velocities = columnView.Velocities,
+                    RemainingLifetimes = columnView.RemainingLifetimes,
+                    KeepMask = columnView.KeepMask,
                 });
             }
 
@@ -412,6 +533,69 @@ namespace VividRP.Runtime.Particle.ECS
                 m_RendererSharedKeyTypeIndex);
         }
 
+        public unsafe bool TryGetColumnView(out VividParticleEcsColumnView view)
+        {
+            view = default;
+            if (!isCreated)
+                return false;
+
+            VividEcsSoaColumn<VividParticleCommon> common = m_CommonColumn;
+            int keepMaskCapacity = m_KeepMask.IsCreated ? m_KeepMask.Length : 0;
+            int activeCountOutputLength = m_ActiveCountOutput.IsCreated ? m_ActiveCountOutput.Length : 0;
+            if (!m_ColumnView.IsValid
+                || m_CachedCommonColumnVersion != common.version
+                || m_CachedKeepMaskCapacity != keepMaskCapacity
+                || m_CachedActiveCountOutputLength != activeCountOutputLength)
+            {
+                NativeArray<float3> positions =
+                    common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
+                NativeArray<float3> velocities =
+                    common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
+                NativeArray<float> startLifetimes =
+                    common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex);
+                NativeArray<float> remainingLifetimes =
+                    common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
+                NativeArray<float4> colors =
+                    common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
+                NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
+                NativeArray<int> meshIndices = common.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
+
+                m_ColumnViewVersion = m_ColumnViewVersion == int.MaxValue ? 1 : m_ColumnViewVersion + 1;
+                m_ColumnView = new VividParticleEcsColumnView
+                {
+                    Positions = (float3*)positions.GetUnsafePtr(),
+                    Velocities = (float3*)velocities.GetUnsafePtr(),
+                    StartLifetimes = (float*)startLifetimes.GetUnsafePtr(),
+                    RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
+                    Colors = (float4*)colors.GetUnsafePtr(),
+                    Sizes = (float*)sizes.GetUnsafePtr(),
+                    MeshIndices = (int*)meshIndices.GetUnsafePtr(),
+                    KeepMask = m_KeepMask.IsCreated ? (byte*)m_KeepMask.GetUnsafePtr() : null,
+                    ActiveCountOutput = m_ActiveCountOutput.IsCreated
+                        ? (int*)m_ActiveCountOutput.GetUnsafePtr()
+                        : null,
+                    ArchetypeLineId = m_Line.ArchetypeLineId,
+                    Capacity = positions.Length,
+                    Version = m_ColumnViewVersion,
+                };
+                m_CachedCommonColumnVersion = common.version;
+                m_CachedKeepMaskCapacity = keepMaskCapacity;
+                m_CachedActiveCountOutputLength = activeCountOutputLength;
+                m_ColumnViewRefreshCount++;
+            }
+
+            view = m_ColumnView;
+            return view.IsValid;
+        }
+
+        public bool EnsureColumnView()
+        {
+            unsafe
+            {
+                return TryGetColumnView(out _);
+            }
+        }
+
         public bool TryGetCommonArrays(
             out NativeArray<float3> positions,
             out NativeArray<float3> velocities,
@@ -450,8 +634,7 @@ namespace VividRP.Runtime.Particle.ECS
             return true;
         }
 
-        private VividEcsSoaColumn<VividParticleCommon> commonColumn =>
-            m_Line.GetColumn<VividEcsSoaColumn<VividParticleCommon>>(m_CommonTypeIndex);
+        private VividEcsSoaColumn<VividParticleCommon> commonColumn => m_CommonColumn;
 
         private void EnsureKeepMaskCapacity(int requestedCapacity)
         {
@@ -493,29 +676,22 @@ namespace VividRP.Runtime.Particle.ECS
 
         private unsafe VividParticleEcsCompactWork CreateCompactWork(int count)
         {
-            VividEcsSoaColumn<VividParticleCommon> common = commonColumn;
-            NativeArray<float3> positions = common.GetFieldArray<float3>(VividParticleCommon.PositionFieldIndex);
-            NativeArray<float3> velocities = common.GetFieldArray<float3>(VividParticleCommon.VelocityFieldIndex);
-            NativeArray<float> startLifetimes =
-                common.GetFieldArray<float>(VividParticleCommon.StartLifetimeFieldIndex);
-            NativeArray<float> remainingLifetimes =
-                common.GetFieldArray<float>(VividParticleCommon.RemainingLifetimeFieldIndex);
-            NativeArray<float4> colors = common.GetFieldArray<float4>(VividParticleCommon.StartColorFieldIndex);
-            NativeArray<float> sizes = common.GetFieldArray<float>(VividParticleCommon.SizeFieldIndex);
-            NativeArray<int> meshIndices = common.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
+            if (!TryGetColumnView(out VividParticleEcsColumnView columnView))
+                return default;
+
             return new VividParticleEcsCompactWork
             {
                 ActiveCount = count,
-                Capacity = positions.Length,
-                Positions = (float3*)positions.GetUnsafePtr(),
-                Velocities = (float3*)velocities.GetUnsafePtr(),
-                StartLifetimes = (float*)startLifetimes.GetUnsafePtr(),
-                RemainingLifetimes = (float*)remainingLifetimes.GetUnsafePtr(),
-                Colors = (float4*)colors.GetUnsafePtr(),
-                Sizes = (float*)sizes.GetUnsafePtr(),
-                MeshIndices = (int*)meshIndices.GetUnsafePtr(),
-                KeepMask = (byte*)m_KeepMask.GetUnsafePtr(),
-                ActiveCountOutput = (int*)m_ActiveCountOutput.GetUnsafePtr(),
+                Capacity = columnView.Capacity,
+                Positions = columnView.Positions,
+                Velocities = columnView.Velocities,
+                StartLifetimes = columnView.StartLifetimes,
+                RemainingLifetimes = columnView.RemainingLifetimes,
+                Colors = columnView.Colors,
+                Sizes = columnView.Sizes,
+                MeshIndices = columnView.MeshIndices,
+                KeepMask = columnView.KeepMask,
+                ActiveCountOutput = columnView.ActiveCountOutput,
             };
         }
 

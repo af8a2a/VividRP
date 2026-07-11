@@ -1,9 +1,92 @@
 using System;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine;
+using VividRP.Runtime.Particle.ECS;
 
 namespace VividRP.Runtime.Particle
 {
+    internal struct VividParticleNativeBurst
+    {
+        public float Time;
+        public int Count;
+    }
+
+    internal struct VividParticleNativeSimulationConfig
+    {
+        public float Duration;
+        public float StartLifetime;
+        public float StartSpeed;
+        public float StartSize;
+        public float GravityModifier;
+        public float RateOverTime;
+        public float ShapeRadius;
+        public float ShapeAngleRadians;
+        public float3 ShapeBoxSize;
+        public float3 ForceOverLifetime;
+        public float4 StartColor;
+        public uint RandomSeed;
+        public int MaxParticles;
+        public int Loop;
+        public int UseAutoRandomSeed;
+        public int EmissionEnabled;
+        public int ShapeEnabled;
+        public int ShapeType;
+        public int SimulationSpace;
+        public int ForceOverLifetimeEnabled;
+        public int ForceOverLifetimeSpace;
+        public int BurstOffset;
+        public int BurstCount;
+        public int Version;
+    }
+
+    internal struct VividParticleSimulationPrepareInput
+    {
+        public int SystemId;
+        public int ConfigSlot;
+        public int ActiveCount;
+        public VividParticleSimulationTimeStep TimeStep;
+    }
+
+    internal struct VividParticleSimulationPrepareOutput
+    {
+        public int SystemId;
+        public int ShouldSchedule;
+        public float3 Gravity;
+        public VividParticleSimulationTimeStep TimeStep;
+    }
+
+    internal unsafe struct VividParticleEmissionPlanInput
+    {
+        public int SystemId;
+        public int ConfigSlot;
+        public int AllowEmission;
+        public float DeltaTime;
+        public float Time;
+        public float EmissionAccumulator;
+        public ulong BurstTriggeredMask;
+        public uint RandomState;
+        public int CanReserveNative;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* ActiveCountOutput;
+
+        public VividParticleEcsInitializeParticlesWork InitializeTemplate;
+    }
+
+    internal unsafe struct VividParticleEmissionPlanOutput
+    {
+        public int SystemId;
+        public int EmitCount;
+        public int RequiresManagedFallback;
+        public float Time;
+        public float EmissionAccumulator;
+        public ulong BurstTriggeredMask;
+        public uint RandomState;
+        public int ReservedCount;
+        public VividParticleEcsInitializeParticlesWork InitializeWork;
+    }
+
     internal readonly struct VividParticleSimulationTimeStep
     {
         public readonly float DeltaTime;
@@ -115,6 +198,9 @@ namespace VividRP.Runtime.Particle
         public readonly float ShapeRadius;
         public readonly Vector3 ShapeBoxSize;
         public readonly float ShapeAngle;
+        public readonly bool ForceOverLifetimeEnabled;
+        public readonly Vector3 ForceOverLifetime;
+        public readonly VividParticleForceSpace ForceOverLifetimeSpace;
         public readonly bool RendererEnabled;
         public readonly VividParticleRenderMode RenderMode;
         public readonly Material RendererMaterial;
@@ -156,6 +242,9 @@ namespace VividRP.Runtime.Particle
             float shapeRadius,
             Vector3 shapeBoxSize,
             float shapeAngle,
+            bool forceOverLifetimeEnabled,
+            Vector3 forceOverLifetime,
+            VividParticleForceSpace forceOverLifetimeSpace,
             bool rendererEnabled,
             VividParticleRenderMode renderMode,
             Material rendererMaterial,
@@ -199,6 +288,9 @@ namespace VividRP.Runtime.Particle
                 Mathf.Max(0.0f, shapeBoxSize.y),
                 Mathf.Max(0.0f, shapeBoxSize.z));
             ShapeAngle = Mathf.Clamp(shapeAngle, 0.0f, 89.0f);
+            ForceOverLifetimeEnabled = forceOverLifetimeEnabled;
+            ForceOverLifetime = forceOverLifetime;
+            ForceOverLifetimeSpace = forceOverLifetimeSpace;
             RendererEnabled = rendererEnabled;
             RenderMode = renderMode;
             RendererMaterial = rendererMaterial;
@@ -252,6 +344,9 @@ namespace VividRP.Runtime.Particle
                 ShapeRadius,
                 ShapeBoxSize,
                 ShapeAngle,
+                ForceOverLifetimeEnabled,
+                ForceOverLifetime,
+                ForceOverLifetimeSpace,
                 RendererEnabled,
                 RenderMode,
                 RendererMaterial,
@@ -296,6 +391,9 @@ namespace VividRP.Runtime.Particle
                 ShapeRadius,
                 ShapeBoxSize,
                 ShapeAngle,
+                ForceOverLifetimeEnabled,
+                ForceOverLifetime,
+                ForceOverLifetimeSpace,
                 RendererEnabled,
                 RenderMode,
                 RendererMaterial,

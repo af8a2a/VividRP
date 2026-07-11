@@ -20,14 +20,23 @@ namespace VividRP.Editor.Tests
             VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
             VividEcsTypeIndex systemIdIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
+            VividEcsTypeIndex rendererHandleIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererHandle>();
+            VividEcsTypeIndex simulationActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
+            VividEcsTypeIndex rendererActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
             VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
 
             Assert.That(commonIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.IsValid, Is.True);
             Assert.That(rendererKeyIndex.IsValid, Is.True);
+            Assert.That(rendererHandleIndex.IsValid, Is.True);
+            Assert.That(simulationActiveIndex.IsValid, Is.True);
+            Assert.That(rendererActiveIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
             Assert.That(systemIdIndex.IsSharedComponentType, Is.True);
             Assert.That(rendererKeyIndex.IsSharedComponentType, Is.True);
+            Assert.That(rendererHandleIndex.IsSharedComponentType, Is.True);
+            Assert.That(simulationActiveIndex.IsTagComponentType, Is.True);
+            Assert.That(rendererActiveIndex.IsTagComponentType, Is.True);
             Assert.That(VividEcsTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
             Assert.That(commonType.IsSoa, Is.True);
             Assert.That(commonType.SoaFieldCount, Is.EqualTo(VividParticleCommon.FieldCountValue));
@@ -126,6 +135,11 @@ namespace VividRP.Editor.Tests
                 renderingLayerMask: 0xffu,
                 receiveShadows: false);
             storage.rendererSharedKey = rendererKey;
+            var rendererHandle = new VividParticleRendererHandle(recordSlot: 7, recordVersion: 3);
+            Assert.That(storage.rendererHandle, Is.EqualTo(VividParticleRendererHandle.Invalid));
+            Assert.That(storage.rendererActive, Is.False);
+            storage.rendererActive = true;
+            storage.rendererHandle = rendererHandle;
             storage.EnsureCapacity(4);
             Assert.That(AddParticle(storage, 0), Is.True);
 
@@ -137,6 +151,93 @@ namespace VividRP.Editor.Tests
             Assert.That(groups, Has.Count.EqualTo(1));
             Assert.That(groups[0].activeCount, Is.EqualTo(1));
             Assert.That(storage.rendererSharedKey, Is.EqualTo(rendererKey));
+            Assert.That(storage.rendererHandle, Is.EqualTo(rendererHandle));
+            Assert.That(storage.rendererActive, Is.True);
+            storage.rendererHandle = VividParticleRendererHandle.Invalid;
+            Assert.That(storage.rendererHandle, Is.EqualTo(VividParticleRendererHandle.Invalid));
+            Assert.That(storage.rendererActive, Is.True);
+            storage.rendererActive = false;
+            Assert.That(storage.rendererActive, Is.False);
+        }
+
+        [Test]
+        public void GlobalStorage_RendererQuery_OnlyIncludesActiveRendererHandles()
+        {
+            VividParticleEcsBootstrap.RegisterTypes();
+            VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
+            VividEcsTypeIndex rendererActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
+            using var world = new VividEcsWorld();
+            var first = new VividParticleEcsStorage(world);
+            var second = new VividParticleEcsStorage(world);
+            try
+            {
+                var rendererKey = new VividParticleRendererSharedKey(
+                    materialId: 1,
+                    meshId: 2,
+                    renderMode: (int)VividParticleRenderMode.Billboard,
+                    layer: 3,
+                    gpuDataLayoutHash: 4,
+                    dataPerSharpBits: 5u,
+                    shadowCastingMode: 0,
+                    sortMode: 0,
+                    renderingLayerMask: 0xffu,
+                    receiveShadows: false);
+                first.rendererSharedKey = rendererKey;
+                second.rendererSharedKey = rendererKey;
+                first.rendererActive = true;
+                first.rendererHandle = new VividParticleRendererHandle(recordSlot: 2, recordVersion: 7);
+
+                VividEcsQuery query = world.CreateQuery().WithAll(commonIndex, rendererActiveIndex);
+                List<VividEcsArchetypeLineGroup> groups =
+                    world.CreateArchetypeLineGroups(query, rendererKeyIndex);
+
+                Assert.That(groups, Has.Count.EqualTo(1));
+                Assert.That(groups[0].lineCount, Is.EqualTo(1));
+                Assert.That(groups[0].lines[0].ArchetypeLineId, Is.EqualTo(first.archetypeLineId));
+                Assert.That(first.rendererActive, Is.True);
+                Assert.That(second.rendererActive, Is.False);
+            }
+            finally
+            {
+                first.Dispose();
+                second.Dispose();
+            }
+        }
+
+        [Test]
+        public void GlobalStorage_SimulationQuery_OnlyIncludesActiveSimulationLines()
+        {
+            VividParticleEcsBootstrap.RegisterTypes();
+            VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividEcsTypeIndex simulationActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
+            using var world = new VividEcsWorld();
+            var first = new VividParticleEcsStorage(world);
+            var second = new VividParticleEcsStorage(world);
+            try
+            {
+                first.systemId = new VividParticleSystemId(17);
+                second.systemId = new VividParticleSystemId(23);
+                first.simulationActive = true;
+
+                VividEcsQuery query = world.CreateQuery().WithAll(commonIndex, simulationActiveIndex);
+
+                Assert.That(query.PrepareMatchingLines(), Is.EqualTo(1));
+                Assert.That(query.GetMatchingLine(0).ArchetypeLineId, Is.EqualTo(first.archetypeLineId));
+                Assert.That(first.simulationActive, Is.True);
+                Assert.That(second.simulationActive, Is.False);
+
+                first.simulationActive = false;
+                second.simulationActive = true;
+
+                Assert.That(query.PrepareMatchingLines(), Is.EqualTo(1));
+                Assert.That(query.GetMatchingLine(0).ArchetypeLineId, Is.EqualTo(second.archetypeLineId));
+            }
+            finally
+            {
+                first.Dispose();
+                second.Dispose();
+            }
         }
 
         [Test]
@@ -602,6 +703,40 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_ColumnView_RefreshesOnlyWhenBackingMemoryChanges()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(32);
+
+            Assert.That(storage.EnsureColumnView(), Is.True);
+            int initialVersion = storage.columnViewVersion;
+            Assert.That(storage.capacity, Is.EqualTo(256));
+            Assert.That(storage.columnViewRefreshCount, Is.EqualTo(1));
+
+            Assert.That(AddParticle(storage, 0), Is.True);
+            storage.rendererHandle = new VividParticleRendererHandle(recordSlot: 4, recordVersion: 2);
+            storage.EnsureCapacity(128);
+
+            Assert.That(storage.EnsureColumnView(), Is.True);
+            Assert.That(storage.columnViewVersion, Is.EqualTo(initialVersion));
+            Assert.That(storage.columnViewRefreshCount, Is.EqualTo(1));
+
+            storage.EnsureCapacity(300);
+
+            Assert.That(storage.EnsureColumnView(), Is.True);
+            int resizedVersion = storage.columnViewVersion;
+            Assert.That(storage.capacity, Is.EqualTo(512));
+            Assert.That(resizedVersion, Is.Not.EqualTo(initialVersion));
+            Assert.That(storage.columnViewRefreshCount, Is.EqualTo(2));
+            AssertVector3(new Vector3(0.0f, 1.0f, 2.0f), storage.GetPosition(0));
+
+            storage.EnsureCapacity(300);
+            Assert.That(storage.EnsureColumnView(), Is.True);
+            Assert.That(storage.columnViewVersion, Is.EqualTo(resizedVersion));
+            Assert.That(storage.columnViewRefreshCount, Is.EqualTo(2));
+        }
+
+        [Test]
         public void Storage_DisposeCanRepeat_WithoutThrowing()
         {
             var storage = new VividParticleEcsStorage();
@@ -687,9 +822,9 @@ namespace VividRP.Editor.Tests
         {
             public NativeArray<int> Counts;
 
-            public void Execute(VividEcsPageInfo page)
+            public void Execute(VividEcsPageInfo page, int pageIndex)
             {
-                Counts[page.PageIndex] = page.EntryCount;
+                Counts[pageIndex] = page.EntryCount;
             }
         }
     }

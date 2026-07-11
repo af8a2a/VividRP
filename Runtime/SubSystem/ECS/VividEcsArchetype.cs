@@ -397,6 +397,17 @@ namespace VividRP.Runtime.ECS
 
         public int lineCount => m_Lines.Count;
 
+        internal void Clear()
+        {
+            m_Lines.Clear();
+        }
+
+        internal void AddLine(VividEcsArchetypeLine line)
+        {
+            if (line != null)
+                m_Lines.Add(line);
+        }
+
         public int activeCount
         {
             get
@@ -447,6 +458,7 @@ namespace VividRP.Runtime.ECS
         private readonly List<VividEcsTypeIndex> m_Types = new();
         private readonly List<int> m_EntityIds = new();
         private readonly VividEcsTileAllocator m_TileAllocator;
+        private readonly Action<VividEcsTypeIndex, bool> m_OnQueryDataChanged;
         private NativeArray<int> m_PageEntryCounts;
         private VividEcsTileRange m_TileRange = VividEcsTileRange.Invalid;
         private int m_MaxEntries;
@@ -461,10 +473,20 @@ namespace VividRP.Runtime.ECS
             int archetypeLineId,
             VividEcsTileAllocator tileAllocator,
             params VividEcsTypeIndex[] componentTypes)
+            : this(archetypeLineId, tileAllocator, null, componentTypes)
+        {
+        }
+
+        internal VividEcsArchetypeLine(
+            int archetypeLineId,
+            VividEcsTileAllocator tileAllocator,
+            Action<VividEcsTypeIndex, bool> onQueryDataChanged,
+            params VividEcsTypeIndex[] componentTypes)
         {
             ArchetypeLineId = archetypeLineId;
             m_TileAllocator = tileAllocator;
             AddComponentTypes(componentTypes);
+            m_OnQueryDataChanged = onQueryDataChanged;
         }
 
         public int ArchetypeLineId { get; }
@@ -533,12 +555,14 @@ namespace VividRP.Runtime.ECS
             if (componentTypes == null)
                 return;
 
+            bool changed = false;
             for (int index = 0; index < componentTypes.Length; index++)
             {
                 VividEcsTypeIndex typeIndex = componentTypes[index];
                 if (!typeIndex.IsValid || m_Types.Contains(typeIndex))
                     continue;
 
+                changed = true;
                 m_Types.Add(typeIndex);
                 VividEcsTypeInfo typeInfo = VividEcsTypeManager.GetTypeInfo(typeIndex);
                 if (typeInfo.IsShared || typeInfo.IsTag)
@@ -550,6 +574,8 @@ namespace VividRP.Runtime.ECS
             }
 
             m_Types.Sort();
+            if (changed)
+                m_OnQueryDataChanged?.Invoke(VividEcsTypeIndex.Invalid, false);
         }
 
         public void RemoveComponentTypes(params VividEcsTypeIndex[] componentTypes)
@@ -557,17 +583,25 @@ namespace VividRP.Runtime.ECS
             if (componentTypes == null)
                 return;
 
+            bool changed = false;
             for (int index = 0; index < componentTypes.Length; index++)
             {
                 VividEcsTypeIndex typeIndex = componentTypes[index];
-                m_Types.Remove(typeIndex);
-                m_SharedComponents.Remove(typeIndex);
+                if (!m_Types.Remove(typeIndex))
+                    continue;
+
+                changed = true;
+                if (m_SharedComponents.Remove(typeIndex))
+                    m_OnQueryDataChanged?.Invoke(typeIndex, true);
                 if (m_Columns.TryGetValue(typeIndex, out IVividEcsColumn column))
                 {
                     column.Dispose();
                     m_Columns.Remove(typeIndex);
                 }
             }
+
+            if (changed)
+                m_OnQueryDataChanged?.Invoke(VividEcsTypeIndex.Invalid, false);
         }
 
         public TColumn GetColumn<TColumn>(VividEcsTypeIndex typeIndex)
@@ -587,11 +621,20 @@ namespace VividRP.Runtime.ECS
             if (!typeIndex.IsValid)
                 typeIndex = VividEcsTypeManager.RegisterShared<T>();
 
-            if (!m_Types.Contains(typeIndex))
+            bool addedType = !m_Types.Contains(typeIndex);
+            bool valueChanged = !m_SharedComponents.TryGetValue(typeIndex, out object previousValue)
+                || !Equals(previousValue, value);
+            if (!addedType && !valueChanged)
+                return;
+
+            if (addedType)
                 m_Types.Add(typeIndex);
 
             m_SharedComponents[typeIndex] = value;
             m_Types.Sort();
+            if (addedType)
+                m_OnQueryDataChanged?.Invoke(VividEcsTypeIndex.Invalid, false);
+            m_OnQueryDataChanged?.Invoke(typeIndex, true);
         }
 
         public bool TryGetSharedComponent<T>(out T value)

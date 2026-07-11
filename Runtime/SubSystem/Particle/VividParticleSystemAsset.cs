@@ -15,6 +15,10 @@ namespace VividRP.Runtime.Particle
         private VividParticleShapeModule m_Shape = VividParticleShapeModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleForceOverLifetimeModule m_ForceOverLifetime =
+            VividParticleForceOverLifetimeModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleRendererModule m_Renderer = VividParticleRendererModule.CreateDefault();
 
         public VividParticleMainModule main => m_Main ??= VividParticleMainModule.CreateDefault();
@@ -23,17 +27,22 @@ namespace VividRP.Runtime.Particle
 
         public VividParticleShapeModule shape => m_Shape ??= VividParticleShapeModule.CreateDefault();
 
+        public VividParticleForceOverLifetimeModule forceOverLifetime =>
+            m_ForceOverLifetime ??= VividParticleForceOverLifetimeModule.CreateDefault();
+
         public VividParticleRendererModule rendererModule => m_Renderer ??= VividParticleRendererModule.CreateDefault();
 
         internal void CopyModulesTo(
             VividParticleMainModule targetMain,
             VividParticleEmissionModule targetEmission,
             VividParticleShapeModule targetShape,
+            VividParticleForceOverLifetimeModule targetForceOverLifetime,
             VividParticleRendererModule targetRenderer)
         {
             targetMain?.CopyFrom(main);
             targetEmission?.CopyFrom(emission);
             targetShape?.CopyFrom(shape);
+            targetForceOverLifetime?.CopyFrom(forceOverLifetime);
             targetRenderer?.CopyFrom(rendererModule);
         }
 
@@ -47,6 +56,7 @@ namespace VividRP.Runtime.Particle
             main.Validate();
             emission.Validate();
             shape.Validate();
+            forceOverLifetime.Validate();
             rendererModule.Validate();
         }
     }

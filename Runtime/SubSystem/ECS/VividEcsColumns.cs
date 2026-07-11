@@ -91,6 +91,7 @@ namespace VividRP.Runtime.ECS
         private NativeArray<byte>[] m_Fields = Array.Empty<NativeArray<byte>>();
         private VividEcsTypeInfo m_TypeInfo;
         private int m_Capacity;
+        private int m_Version = 1;
 
         public VividEcsSoaColumn(VividEcsTypeIndex typeIndex)
         {
@@ -104,6 +105,8 @@ namespace VividRP.Runtime.ECS
         public bool isCreated => m_Fields.Length > 0 && m_Fields[0].IsCreated;
 
         public int capacity => m_Capacity;
+
+        public int version => m_Version;
 
         public void EnsureCapacity(int requestedCapacity)
         {
@@ -129,9 +132,10 @@ namespace VividRP.Runtime.ECS
                 }
             }
 
-            Dispose();
+            DisposeFields();
             m_Fields = newFields;
             m_Capacity = requestedCapacity;
+            IncrementVersion();
         }
 
         public NativeArray<TField> GetFieldArray<TField>(int fieldIndex)
@@ -189,13 +193,27 @@ namespace VividRP.Runtime.ECS
 
         public void Dispose()
         {
+            bool hadStorage = m_Capacity != 0 || isCreated;
+            DisposeFields();
+            m_Capacity = 0;
+            if (hadStorage)
+                IncrementVersion();
+        }
+
+        private void DisposeFields()
+        {
             for (int fieldIndex = 0; fieldIndex < m_Fields.Length; fieldIndex++)
             {
                 if (m_Fields[fieldIndex].IsCreated)
                     m_Fields[fieldIndex].Dispose();
             }
 
-            m_Capacity = 0;
+            m_Fields = new NativeArray<byte>[m_TypeInfo.SoaFieldCount];
+        }
+
+        private void IncrementVersion()
+        {
+            m_Version = m_Version == int.MaxValue ? 1 : m_Version + 1;
         }
     }
 

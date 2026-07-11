@@ -153,8 +153,11 @@ namespace VividRP.Runtime.ECS
         private readonly List<VividEcsArchetypeLine> m_Lines = new();
         private readonly VividEcsSparseTable<EntityRecord> m_Entities = new();
         private readonly VividEcsTileAllocator m_TileAllocator = new();
+        private readonly Dictionary<VividEcsTypeIndex, int> m_SharedComponentVersions = new();
         private int m_NextLineId;
         private int m_NextEntityId;
+        private int m_QueryStructureVersion = 1;
+        private int m_AnySharedComponentVersion;
 
         public int archetypeLineCount => m_Lines.Count;
 
@@ -164,11 +167,16 @@ namespace VividRP.Runtime.ECS
 
         public VividEcsArchetypeLine CreateArchetypeLine(int maxEntries, params VividEcsTypeIndex[] componentTypes)
         {
-            var line = new VividEcsArchetypeLine(m_NextLineId++, m_TileAllocator, componentTypes);
+            var line = new VividEcsArchetypeLine(
+                m_NextLineId++,
+                m_TileAllocator,
+                OnLineQueryDataChanged,
+                componentTypes);
             if (maxEntries > 0)
                 line.EnsureCapacity(maxEntries);
 
             m_Lines.Add(line);
+            IncrementQueryStructureVersion();
             return line;
         }
 
@@ -190,6 +198,7 @@ namespace VividRP.Runtime.ECS
 
             m_Lines.RemoveAt(index);
             line.Dispose();
+            IncrementQueryStructureVersion();
             return true;
         }
 
@@ -247,7 +256,7 @@ namespace VividRP.Runtime.ECS
 
         public VividEcsQuery CreateQuery()
         {
-            return new VividEcsQuery(m_Lines);
+            return new VividEcsQuery(this);
         }
 
         public VividEcsPageGroup CreatePageGroup(VividEcsQuery query, Allocator allocator)
@@ -256,11 +265,10 @@ namespace VividRP.Runtime.ECS
                 throw new ArgumentNullException(nameof(query));
 
             int pageCount = 0;
-            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            int matchingLineCount = query.PrepareMatchingLines();
+            for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
             {
-                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
-                if (!query.MatchesLine(line))
-                    continue;
+                VividEcsArchetypeLine line = query.GetMatchingLine(lineIndex);
 
                 if (line != null)
                     pageCount += GetLivePageCount(line.activeCount);
@@ -268,11 +276,9 @@ namespace VividRP.Runtime.ECS
 
             var pages = new NativeArray<VividEcsPageInfo>(pageCount, allocator, NativeArrayOptions.UninitializedMemory);
             int writeIndex = 0;
-            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
             {
-                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
-                if (!query.MatchesLine(line))
-                    continue;
+                VividEcsArchetypeLine line = query.GetMatchingLine(lineIndex);
 
                 int linePageCount = line != null ? GetLivePageCount(line.activeCount) : 0;
                 for (int pageIndex = 0; pageIndex < linePageCount; pageIndex++)
@@ -374,11 +380,10 @@ namespace VividRP.Runtime.ECS
 
             ClearLineGroupMap(groups);
 
-            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            int matchingLineCount = query.PrepareMatchingLines();
+            for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
             {
-                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
-                if (!query.MatchesLine(line))
-                    continue;
+                VividEcsArchetypeLine line = query.GetMatchingLine(lineIndex);
 
                 VividEcsSharedComponentKey key =
                     sharedComponentTypes != null && sharedComponentTypes.Length > 0
@@ -403,11 +408,10 @@ namespace VividRP.Runtime.ECS
 
             ClearLineGroupMap(groups);
 
-            for (int lineIndex = 0; lineIndex < query.candidateLineCount; lineIndex++)
+            int matchingLineCount = query.PrepareMatchingLines();
+            for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
             {
-                VividEcsArchetypeLine line = query.GetCandidateLine(lineIndex);
-                if (!query.MatchesLine(line))
-                    continue;
+                VividEcsArchetypeLine line = query.GetMatchingLine(lineIndex);
 
                 VividEcsSharedComponentKey key = line.GetSharedComponentKey(sharedComponentType);
                 AddLineToGroupMap(groups, key, line);
@@ -469,8 +473,46 @@ namespace VividRP.Runtime.ECS
             m_Lines.Clear();
             m_Entities.Clear();
             m_TileAllocator.Clear();
+            m_SharedComponentVersions.Clear();
             m_NextLineId = 0;
             m_NextEntityId = 0;
+            IncrementQueryStructureVersion();
+        }
+
+        internal IReadOnlyList<VividEcsArchetypeLine> querySourceLines => m_Lines;
+
+        internal int queryStructureVersion => m_QueryStructureVersion;
+
+        internal int anySharedComponentVersion => m_AnySharedComponentVersion;
+
+        internal int GetSharedComponentVersion(VividEcsTypeIndex typeIndex)
+        {
+            return typeIndex.IsValid && m_SharedComponentVersions.TryGetValue(typeIndex, out int version)
+                ? version
+                : 0;
+        }
+
+        private void OnLineQueryDataChanged(VividEcsTypeIndex typeIndex, bool sharedValueOnly)
+        {
+            if (!sharedValueOnly)
+            {
+                IncrementQueryStructureVersion();
+                return;
+            }
+
+            m_SharedComponentVersions.TryGetValue(typeIndex, out int version);
+            m_SharedComponentVersions[typeIndex] = NextVersion(version);
+            m_AnySharedComponentVersion = NextVersion(m_AnySharedComponentVersion);
+        }
+
+        private void IncrementQueryStructureVersion()
+        {
+            m_QueryStructureVersion = NextVersion(m_QueryStructureVersion);
+        }
+
+        private static int NextVersion(int version)
+        {
+            return version == int.MaxValue ? 1 : version + 1;
         }
 
         private bool TryGetRecord(VividEcsEntity entity, out EntityRecord record)
@@ -508,32 +550,47 @@ namespace VividRP.Runtime.ECS
 
     internal sealed class VividEcsQuery
     {
-        private readonly IReadOnlyList<VividEcsArchetypeLine> m_Lines;
+        private readonly VividEcsWorld m_World;
+        private readonly IReadOnlyList<VividEcsArchetypeLine> m_SourceLines;
+        private readonly List<VividEcsArchetypeLine> m_MatchingLines = new();
+        private readonly List<VividEcsArchetypeLine> m_RebuildMatchingLines = new();
         private readonly List<VividEcsTypeIndex> m_All = new();
         private readonly List<VividEcsTypeIndex> m_Any = new();
         private readonly List<VividEcsTypeIndex> m_None = new();
         private readonly List<SharedFilter> m_SharedFilters = new();
+        private readonly List<int> m_CachedSharedFilterVersions = new();
+        private int m_DefinitionVersion = 1;
+        private int m_CachedDefinitionVersion = -1;
+        private int m_CachedStructureVersion = -1;
+        private int m_CacheRebuildCount;
+        private int m_CacheHitCount;
+        private int m_LastSourceScanCount;
+        private int m_MatchingLinesRevision;
 
-        public VividEcsQuery(IReadOnlyList<VividEcsArchetypeLine> lines)
+        public VividEcsQuery(VividEcsWorld world)
         {
-            m_Lines = lines ?? throw new ArgumentNullException(nameof(lines));
+            m_World = world ?? throw new ArgumentNullException(nameof(world));
+            m_SourceLines = world.querySourceLines;
         }
 
         public VividEcsQuery WithAll(params VividEcsTypeIndex[] types)
         {
-            AddRange(m_All, types);
+            if (AddRange(m_All, types))
+                InvalidateDefinition();
             return this;
         }
 
         public VividEcsQuery WithAny(params VividEcsTypeIndex[] types)
         {
-            AddRange(m_Any, types);
+            if (AddRange(m_Any, types))
+                InvalidateDefinition();
             return this;
         }
 
         public VividEcsQuery WithNone(params VividEcsTypeIndex[] types)
         {
-            AddRange(m_None, types);
+            if (AddRange(m_None, types))
+                InvalidateDefinition();
             return this;
         }
 
@@ -545,54 +602,93 @@ namespace VividRP.Runtime.ECS
                 typeIndex = VividEcsTypeManager.RegisterShared<T>();
 
             m_SharedFilters.Add(new SharedFilter(typeIndex, value));
+            InvalidateDefinition();
             return this;
         }
 
         public int MatchingLineCount()
         {
-            int count = 0;
-            for (int index = 0; index < m_Lines.Count; index++)
-            {
-                if (Matches(m_Lines[index]))
-                    count++;
-            }
-
-            return count;
+            return PrepareMatchingLines();
         }
 
         public int MatchingEntriesCount()
         {
             int count = 0;
-            for (int index = 0; index < m_Lines.Count; index++)
-            {
-                VividEcsArchetypeLine line = m_Lines[index];
-                if (Matches(line))
-                    count += line.activeCount;
-            }
+            int matchingLineCount = PrepareMatchingLines();
+            for (int index = 0; index < matchingLineCount; index++)
+                count += m_MatchingLines[index].activeCount;
 
             return count;
         }
 
-        internal int candidateLineCount => m_Lines.Count;
+        public int cachedMatchingLineCount => m_MatchingLines.Count;
 
-        internal VividEcsArchetypeLine GetCandidateLine(int index)
-        {
-            return m_Lines[index];
-        }
+        public int cacheRebuildCount => m_CacheRebuildCount;
 
-        internal bool MatchesLine(VividEcsArchetypeLine line)
+        public int cacheHitCount => m_CacheHitCount;
+
+        public int lastSourceScanCount => m_LastSourceScanCount;
+
+        internal int cacheRevision => m_MatchingLinesRevision;
+
+        internal int anySharedComponentVersion => m_World.anySharedComponentVersion;
+
+        internal int GetSharedComponentVersion(VividEcsTypeIndex typeIndex)
         {
-            return Matches(line);
+            return m_World.GetSharedComponentVersion(typeIndex);
         }
 
         public IEnumerable<VividEcsArchetypeLine> MatchLines()
         {
-            for (int index = 0; index < m_Lines.Count; index++)
+            int matchingLineCount = PrepareMatchingLines();
+            for (int index = 0; index < matchingLineCount; index++)
+                yield return m_MatchingLines[index];
+        }
+
+        internal int PrepareMatchingLines()
+        {
+            if (IsCacheValid())
             {
-                VividEcsArchetypeLine line = m_Lines[index];
-                if (Matches(line))
-                    yield return line;
+                m_CacheHitCount++;
+                m_LastSourceScanCount = 0;
+                return m_MatchingLines.Count;
             }
+
+            m_RebuildMatchingLines.Clear();
+            m_LastSourceScanCount = m_SourceLines.Count;
+            for (int index = 0; index < m_SourceLines.Count; index++)
+            {
+                VividEcsArchetypeLine line = m_SourceLines[index];
+                if (Matches(line))
+                    m_RebuildMatchingLines.Add(line);
+            }
+
+            if (!HaveSameLines(m_MatchingLines, m_RebuildMatchingLines))
+            {
+                m_MatchingLines.Clear();
+                m_MatchingLines.AddRange(m_RebuildMatchingLines);
+                m_MatchingLinesRevision = m_MatchingLinesRevision == int.MaxValue
+                    ? 1
+                    : m_MatchingLinesRevision + 1;
+            }
+            m_RebuildMatchingLines.Clear();
+
+            m_CachedDefinitionVersion = m_DefinitionVersion;
+            m_CachedStructureVersion = m_World.queryStructureVersion;
+            m_CachedSharedFilterVersions.Clear();
+            for (int index = 0; index < m_SharedFilters.Count; index++)
+            {
+                m_CachedSharedFilterVersions.Add(
+                    m_World.GetSharedComponentVersion(m_SharedFilters[index].TypeIndex));
+            }
+
+            m_CacheRebuildCount++;
+            return m_MatchingLines.Count;
+        }
+
+        internal VividEcsArchetypeLine GetMatchingLine(int index)
+        {
+            return m_MatchingLines[index];
         }
 
         private bool Matches(VividEcsArchetypeLine line)
@@ -632,17 +728,65 @@ namespace VividRP.Runtime.ECS
             return true;
         }
 
-        private static void AddRange(List<VividEcsTypeIndex> target, VividEcsTypeIndex[] source)
+        private bool IsCacheValid()
+        {
+            if (m_CachedDefinitionVersion != m_DefinitionVersion
+                || m_CachedStructureVersion != m_World.queryStructureVersion
+                || m_CachedSharedFilterVersions.Count != m_SharedFilters.Count)
+            {
+                return false;
+            }
+
+            for (int index = 0; index < m_SharedFilters.Count; index++)
+            {
+                if (m_CachedSharedFilterVersions[index]
+                    != m_World.GetSharedComponentVersion(m_SharedFilters[index].TypeIndex))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool HaveSameLines(
+            List<VividEcsArchetypeLine> left,
+            List<VividEcsArchetypeLine> right)
+        {
+            if (left.Count != right.Count)
+                return false;
+
+            for (int index = 0; index < left.Count; index++)
+            {
+                if (!ReferenceEquals(left[index], right[index]))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private void InvalidateDefinition()
+        {
+            m_DefinitionVersion = m_DefinitionVersion == int.MaxValue ? 1 : m_DefinitionVersion + 1;
+        }
+
+        private static bool AddRange(List<VividEcsTypeIndex> target, VividEcsTypeIndex[] source)
         {
             if (source == null)
-                return;
+                return false;
 
+            bool changed = false;
             for (int index = 0; index < source.Length; index++)
             {
                 VividEcsTypeIndex type = source[index];
                 if (type.IsValid && !target.Contains(type))
+                {
                     target.Add(type);
+                    changed = true;
+                }
             }
+
+            return changed;
         }
 
         private readonly struct SharedFilter
@@ -655,6 +799,150 @@ namespace VividRP.Runtime.ECS
 
             public readonly VividEcsTypeIndex TypeIndex;
             public readonly object Value;
+        }
+    }
+
+    internal sealed class VividEcsArchetypeLineGroupCache
+    {
+        private readonly VividEcsQuery m_Query;
+        private readonly VividEcsTypeIndex[] m_SharedComponentTypes;
+        private readonly int[] m_CachedSharedComponentVersions;
+        private readonly Dictionary<VividEcsSharedComponentKey, VividEcsArchetypeLineGroup> m_GroupLookup = new();
+        private readonly List<VividEcsArchetypeLineGroup> m_ActiveGroups = new();
+        private int m_CachedQueryRevision = -1;
+        private int m_CachedAnySharedComponentVersion = -1;
+        private int m_CacheRebuildCount;
+        private int m_CacheHitCount;
+        private int m_LastSourceLineScanCount;
+
+        public VividEcsArchetypeLineGroupCache(
+            VividEcsQuery query,
+            VividEcsTypeIndex sharedComponentType)
+            : this(query, new[] { sharedComponentType })
+        {
+        }
+
+        public VividEcsArchetypeLineGroupCache(
+            VividEcsQuery query,
+            params VividEcsTypeIndex[] sharedComponentTypes)
+        {
+            m_Query = query ?? throw new ArgumentNullException(nameof(query));
+            m_SharedComponentTypes = CopyValidDistinctTypes(sharedComponentTypes);
+            m_CachedSharedComponentVersions = new int[m_SharedComponentTypes.Length];
+            for (int index = 0; index < m_CachedSharedComponentVersions.Length; index++)
+                m_CachedSharedComponentVersions[index] = -1;
+        }
+
+        public IReadOnlyList<VividEcsArchetypeLineGroup> groups => m_ActiveGroups;
+
+        public int groupCount => m_ActiveGroups.Count;
+
+        public int cacheRebuildCount => m_CacheRebuildCount;
+
+        public int cacheHitCount => m_CacheHitCount;
+
+        public int lastSourceLineScanCount => m_LastSourceLineScanCount;
+
+        public bool Matches(VividEcsQuery query, VividEcsTypeIndex sharedComponentType)
+        {
+            return ReferenceEquals(m_Query, query)
+                && m_SharedComponentTypes.Length == 1
+                && m_SharedComponentTypes[0] == sharedComponentType;
+        }
+
+        public bool Prepare()
+        {
+            int matchingLineCount = m_Query.PrepareMatchingLines();
+            if (IsCacheValid())
+            {
+                m_CacheHitCount++;
+                m_LastSourceLineScanCount = 0;
+                return false;
+            }
+
+            for (int index = 0; index < m_ActiveGroups.Count; index++)
+                m_ActiveGroups[index].Clear();
+            m_ActiveGroups.Clear();
+
+            m_LastSourceLineScanCount = matchingLineCount;
+            for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
+            {
+                VividEcsArchetypeLine line = m_Query.GetMatchingLine(lineIndex);
+                VividEcsSharedComponentKey key = GetSharedComponentKey(line);
+                if (!m_GroupLookup.TryGetValue(key, out VividEcsArchetypeLineGroup group))
+                {
+                    group = new VividEcsArchetypeLineGroup(key, null);
+                    m_GroupLookup.Add(key, group);
+                }
+
+                if (group.lineCount == 0)
+                    m_ActiveGroups.Add(group);
+                group.AddLine(line);
+            }
+
+            m_CachedQueryRevision = m_Query.cacheRevision;
+            if (m_SharedComponentTypes.Length == 0)
+            {
+                m_CachedAnySharedComponentVersion = m_Query.anySharedComponentVersion;
+            }
+            else
+            {
+                for (int index = 0; index < m_SharedComponentTypes.Length; index++)
+                {
+                    m_CachedSharedComponentVersions[index] =
+                        m_Query.GetSharedComponentVersion(m_SharedComponentTypes[index]);
+                }
+            }
+
+            m_CacheRebuildCount++;
+            return true;
+        }
+
+        private bool IsCacheValid()
+        {
+            if (m_CachedQueryRevision != m_Query.cacheRevision)
+                return false;
+
+            if (m_SharedComponentTypes.Length == 0)
+                return m_CachedAnySharedComponentVersion == m_Query.anySharedComponentVersion;
+
+            for (int index = 0; index < m_SharedComponentTypes.Length; index++)
+            {
+                if (m_CachedSharedComponentVersions[index]
+                    != m_Query.GetSharedComponentVersion(m_SharedComponentTypes[index]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private VividEcsSharedComponentKey GetSharedComponentKey(VividEcsArchetypeLine line)
+        {
+            if (m_SharedComponentTypes.Length == 0)
+                return line.GetSharedComponentKey();
+
+            if (m_SharedComponentTypes.Length == 1)
+                return line.GetSharedComponentKey(m_SharedComponentTypes[0]);
+
+            return line.GetSharedComponentKey(m_SharedComponentTypes);
+        }
+
+        private static VividEcsTypeIndex[] CopyValidDistinctTypes(VividEcsTypeIndex[] source)
+        {
+            if (source == null || source.Length == 0)
+                return Array.Empty<VividEcsTypeIndex>();
+
+            var result = new List<VividEcsTypeIndex>(source.Length);
+            for (int index = 0; index < source.Length; index++)
+            {
+                VividEcsTypeIndex typeIndex = source[index];
+                if (typeIndex.IsValid && !result.Contains(typeIndex))
+                    result.Add(typeIndex);
+            }
+
+            return result.ToArray();
         }
     }
 

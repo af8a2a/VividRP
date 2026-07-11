@@ -16,6 +16,9 @@ namespace VividRP.Runtime.Particle.ECS
             VividEcsTypeManager.RegisterSoa<VividParticleCommon>();
             VividEcsTypeManager.RegisterShared<VividParticleSystemId>();
             VividEcsTypeManager.RegisterShared<VividParticleRendererSharedKey>();
+            VividEcsTypeManager.RegisterShared<VividParticleRendererHandle>();
+            VividEcsTypeManager.RegisterTag<VividParticleSimulationActive>();
+            VividEcsTypeManager.RegisterTag<VividParticleRendererActive>();
             s_Registered = true;
         }
     }
@@ -47,6 +50,49 @@ namespace VividRP.Runtime.Particle.ECS
         {
             return Value;
         }
+    }
+
+    internal readonly struct VividParticleRendererHandle : IVividEcsSharedComponentData, IEquatable<VividParticleRendererHandle>
+    {
+        public static readonly VividParticleRendererHandle Invalid = new(-1, -1);
+
+        public VividParticleRendererHandle(int recordSlot, int recordVersion)
+        {
+            RecordSlot = recordSlot;
+            RecordVersion = recordVersion;
+        }
+
+        public int RecordSlot { get; }
+
+        public int RecordVersion { get; }
+
+        public bool IsValid => RecordSlot >= 0 && RecordVersion >= 0;
+
+        public bool Equals(VividParticleRendererHandle other)
+        {
+            return RecordSlot == other.RecordSlot && RecordVersion == other.RecordVersion;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividParticleRendererHandle other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (RecordSlot * 397) ^ RecordVersion;
+            }
+        }
+    }
+
+    internal struct VividParticleRendererActive : IVividEcsTagComponentData
+    {
+    }
+
+    internal struct VividParticleSimulationActive : IVividEcsTagComponentData
+    {
     }
 
     internal readonly struct VividParticleRendererSharedKey : IVividEcsSharedComponentData, IEquatable<VividParticleRendererSharedKey>

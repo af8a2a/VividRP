@@ -301,6 +301,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PreviewUtility_ScrubsDeterministically_AndRestartsPlayback()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.main.playOnAwake = false;
+            system.main.duration = 2.0f;
+            system.main.loop = false;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.emission.enabled = true;
+            system.emission.rateOverTime = 4.0f;
+            system.shape.enabled = false;
+
+            Assert.That(VividParticleSystemEditorUtility.ScrubPreview(system, 0.5f), Is.True);
+            Assert.That(system.isPaused, Is.True);
+            Assert.That(system.time, Is.EqualTo(0.5f).Within(0.0001f));
+            Assert.That(system.particleCount, Is.EqualTo(2));
+
+            Assert.That(VividParticleSystemEditorUtility.RestartPreview(system, play: true), Is.True);
+            Assert.That(system.isPlaying, Is.True);
+            Assert.That(system.isPaused, Is.False);
+            Assert.That(system.time, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(system.particleCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemEditorUtility.ScrubPreview(null, 1.0f), Is.False);
+            Assert.That(VividParticleSystemEditorUtility.RestartPreview(null, play: true), Is.False);
+        }
+
+        [Test]
         public void GpuLayoutPreview_CreatesDescriptorFromSerializedRendererModule()
         {
             VividParticleSystem system = CreateSystem();
@@ -522,10 +549,17 @@ namespace VividRP.Editor.Tests
             Assert.That(summary, Does.Contain("Reduce"));
             Assert.That(summary, Does.Contain("PickBuild"));
             Assert.That(summary, Does.Contain("BatchBuild"));
+            Assert.That(summary, Does.Contain("Filter"));
+            Assert.That(summary, Does.Contain("Scratch"));
             Assert.That(rendererStats.LastCullingSourceDrawCommandCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingFilteredDrawCommandCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCullingUsedFilteredLayout, Is.False);
             Assert.That(rendererStats.LastCullingUsedPickingFilter, Is.False);
+            Assert.That(rendererStats.LastCullingFilterPassCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastCullingFilterCommandCount, Is.EqualTo(0));
+            Assert.That(rendererStats.ActiveCullingScratchSlotCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastCullingScratchSplitCount, Is.EqualTo(0));
+            Assert.That(rendererStats.LastCullingScratchPacketCount, Is.EqualTo(0));
             Assert.That(rendererStats.CullingPageBoundsCapacity, Is.GreaterThan(0));
             Assert.That(rendererStats.LastCullingRecordBuildWorkCount, Is.EqualTo(1));
             Assert.That(rendererStats.HasPendingCullingRecordBuild, Is.False);

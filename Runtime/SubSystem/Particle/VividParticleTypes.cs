@@ -1,10 +1,17 @@
 using System;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime.Particle
 {
     public enum VividParticleSystemSimulationSpace
+    {
+        Local,
+        World,
+    }
+
+    public enum VividParticleForceSpace
     {
         Local,
         World,
@@ -573,6 +580,104 @@ namespace VividRP.Runtime.Particle
                 Mathf.Max(value.x, minimum.x),
                 Mathf.Max(value.y, minimum.y),
                 Mathf.Max(value.z, minimum.z));
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleForceOverLifetimeModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private Vector3 m_Force;
+
+        [SerializeField]
+        private VividParticleForceSpace m_Space = VividParticleForceSpace.Local;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set
+            {
+                if (m_Enabled == value)
+                    return;
+
+                m_Enabled = value;
+                NotifyChanged();
+            }
+        }
+
+        public Vector3 force
+        {
+            get => m_Force;
+            set
+            {
+                if (m_Force == value)
+                    return;
+
+                m_Force = value;
+                NotifyChanged();
+            }
+        }
+
+        public VividParticleForceSpace space
+        {
+            get => m_Space;
+            set
+            {
+                if (m_Space == value)
+                    return;
+
+                m_Space = value;
+                NotifyChanged();
+            }
+        }
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleForceOverLifetimeModule CreateDefault()
+        {
+            return new VividParticleForceOverLifetimeModule();
+        }
+
+        internal VividParticleForceOverLifetimeModule Clone()
+        {
+            var clone = new VividParticleForceOverLifetimeModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleForceOverLifetimeModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Force = source.m_Force;
+            m_Space = source.m_Space;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            if (!float.IsFinite(m_Force.x))
+                m_Force.x = 0.0f;
+            if (!float.IsFinite(m_Force.y))
+                m_Force.y = 0.0f;
+            if (!float.IsFinite(m_Force.z))
+                m_Force.z = 0.0f;
         }
 
         private void NotifyChanged()
@@ -1294,7 +1399,7 @@ namespace VividRP.Runtime.Particle
 
         private static int GetMeshHash(Mesh mesh)
         {
-            return mesh != null ? mesh.GetEntityId().GetHashCode() : 0;
+            return mesh != null ? RuntimeHelpers.GetHashCode(mesh) : 0;
         }
 
         private static MotionVectorGenerationMode ValidateMotionVectorGenerationMode(MotionVectorGenerationMode mode)

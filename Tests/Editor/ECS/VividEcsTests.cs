@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using VividRP.Runtime.ECS;
@@ -169,6 +170,130 @@ namespace VividRP.Editor.Tests
 
             Assert.That(matchedLines, Has.Count.EqualTo(1));
             Assert.That(matchedLines[0], Is.SameAs(line));
+        }
+
+        [Test]
+        public void World_QueryCache_ReusesMatchingLinesUntilStructureChanges()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex tagIndex = VividEcsTypeManager.RegisterTag<TestTag>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestShared(2));
+            VividEcsQuery query = world.CreateQuery().WithAll(dataIndex);
+
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(2));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(1));
+            Assert.That(query.cacheHitCount, Is.EqualTo(0));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(2));
+
+            first.SetSharedComponent(new TestShared(3));
+
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(2));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(1));
+            Assert.That(query.cacheHitCount, Is.EqualTo(1));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(0));
+
+            world.AddComponentType(first, tagIndex);
+
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(2));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(2));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(2));
+
+            Assert.That(world.DestroyArchetypeLine(second), Is.True);
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(1));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(3));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void World_QueryCache_SharedFilterTracksOnlyRelevantSharedType()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine line = world.CreateArchetypeLine(8, dataIndex);
+            line.SetSharedComponent(new TestShared(1));
+            line.SetSharedComponent(new TestSharedB(10));
+            VividEcsQuery query = world.CreateQuery()
+                .WithAll(dataIndex)
+                .WithShared(new TestShared(1));
+
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(1));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(1));
+
+            line.SetSharedComponent(new TestSharedB(20));
+
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(1));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(1));
+            Assert.That(query.cacheHitCount, Is.EqualTo(1));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(0));
+
+            line.SetSharedComponent(new TestShared(2));
+
+            Assert.That(query.MatchingLineCount(), Is.EqualTo(0));
+            Assert.That(query.cacheRebuildCount, Is.EqualTo(2));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void World_LineGroupCache_ReusesGroupsUntilSelectedSharedKeyChanges()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex);
+            VividEcsArchetypeLine third = world.CreateArchetypeLine(8, dataIndex);
+            first.SetSharedComponent(new TestShared(1));
+            first.SetSharedComponent(new TestSharedB(10));
+            second.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestSharedB(20));
+            third.SetSharedComponent(new TestShared(2));
+            third.SetSharedComponent(new TestSharedB(10));
+            VividEcsQuery query = world.CreateQuery().WithAll(dataIndex);
+            var cache = new VividEcsArchetypeLineGroupCache(query, sharedIndex);
+
+            Assert.That(cache.Prepare(), Is.True);
+            Assert.That(cache.groupCount, Is.EqualTo(2));
+            Assert.That(cache.cacheRebuildCount, Is.EqualTo(1));
+            Assert.That(cache.cacheHitCount, Is.EqualTo(0));
+            Assert.That(cache.lastSourceLineScanCount, Is.EqualTo(3));
+            VividEcsSharedComponentKey sharedOneKey = first.GetSharedComponentKey(sharedIndex);
+            VividEcsArchetypeLineGroup sharedOneGroup = FindLineGroup(cache.groups, sharedOneKey);
+            Assert.That(sharedOneGroup, Is.Not.Null);
+            Assert.That(sharedOneGroup.lineCount, Is.EqualTo(2));
+
+            first.SetSharedComponent(new TestSharedB(30));
+
+            Assert.That(cache.Prepare(), Is.False);
+            Assert.That(cache.cacheRebuildCount, Is.EqualTo(1));
+            Assert.That(cache.cacheHitCount, Is.EqualTo(1));
+            Assert.That(cache.lastSourceLineScanCount, Is.EqualTo(0));
+            Assert.That(FindLineGroup(cache.groups, sharedOneKey), Is.SameAs(sharedOneGroup));
+
+            first.SetSharedComponent(new TestShared(2));
+
+            Assert.That(cache.Prepare(), Is.True);
+            Assert.That(cache.cacheRebuildCount, Is.EqualTo(2));
+            Assert.That(cache.lastSourceLineScanCount, Is.EqualTo(3));
+            Assert.That(FindLineGroup(cache.groups, sharedOneKey), Is.SameAs(sharedOneGroup));
+            Assert.That(sharedOneGroup.lineCount, Is.EqualTo(1));
+
+            world.RemoveComponentType(second, sharedIndex);
+
+            Assert.That(cache.Prepare(), Is.True);
+            Assert.That(cache.cacheRebuildCount, Is.EqualTo(3));
+            Assert.That(FindLineGroup(cache.groups, sharedOneKey), Is.Null);
+            Assert.That(sharedOneGroup.lineCount, Is.EqualTo(0));
+
+            second.SetSharedComponent(new TestShared(1));
+
+            Assert.That(cache.Prepare(), Is.True);
+            Assert.That(cache.cacheRebuildCount, Is.EqualTo(4));
+            Assert.That(FindLineGroup(cache.groups, sharedOneKey), Is.SameAs(sharedOneGroup));
+            Assert.That(sharedOneGroup.lineCount, Is.EqualTo(1));
         }
 
         [Test]
@@ -406,15 +531,99 @@ namespace VividRP.Editor.Tests
                     Counts = counts,
                 };
 
-                JobHandle handle = job.ScheduleParallel(pageGroup.pages);
-                handle.Complete();
+                foreach (VividEcsPageDispatchMode dispatchMode in new[]
+                         {
+                             VividEcsPageDispatchMode.Dynamic,
+                             VividEcsPageDispatchMode.Average,
+                         })
+                {
+                    counts[0] = 0;
+                    counts[1] = 0;
+                    JobHandle handle = job.ScheduleParallel(
+                        pageGroup.pages,
+                        dispatchMode: dispatchMode);
+                    handle.Complete();
 
-                Assert.That(counts[0], Is.EqualTo(256));
-                Assert.That(counts[1], Is.EqualTo(44));
+                    Assert.That(counts[0], Is.EqualTo(256));
+                    Assert.That(counts[1], Is.EqualTo(44));
+                }
             }
             finally
             {
                 counts.Dispose();
+            }
+        }
+
+        [Test]
+        public void PageJob_CustomProducer_RespectsDependency()
+        {
+            var pages = new NativeArray<VividEcsPageInfo>(2, Allocator.TempJob, NativeArrayOptions.UninitializedMemory)
+            {
+                [0] = new VividEcsPageInfo(7, 0, 0, 256),
+                [1] = new VividEcsPageInfo(7, 1, 256, 31),
+            };
+            var gate = new NativeArray<int>(1, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            var counts = new NativeArray<int>(2, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            try
+            {
+                JobHandle dependency = new WriteRegistryValueJob
+                {
+                    Values = gate,
+                    Index = 0,
+                    Value = 9,
+                }.Schedule();
+                var job = new CapturePageDependencyJob
+                {
+                    Gate = gate,
+                    Counts = counts,
+                };
+
+                JobHandle handle = job.Schedule(pages, dependency);
+                handle.Complete();
+
+                Assert.That(counts[0], Is.EqualTo(265));
+                Assert.That(counts[1], Is.EqualTo(40));
+            }
+            finally
+            {
+                counts.Dispose();
+                gate.Dispose();
+                pages.Dispose();
+            }
+        }
+
+        [Test]
+        public void PageJob_EmbeddedPages_UseWorkStrideWithoutCopy()
+        {
+            var works = new NativeArray<EmbeddedPageWork>(3, Allocator.TempJob, NativeArrayOptions.UninitializedMemory)
+            {
+                [0] = new EmbeddedPageWork(new VividEcsPageInfo(4, 0, 0, 256), 3),
+                [1] = new EmbeddedPageWork(new VividEcsPageInfo(4, 1, 256, 17), 5),
+                [2] = new EmbeddedPageWork(new VividEcsPageInfo(8, 0, 0, 9), 7),
+            };
+            var values = new NativeArray<int>(3, Allocator.TempJob, NativeArrayOptions.ClearMemory);
+            try
+            {
+                var job = new CaptureEmbeddedPageWorkJob
+                {
+                    Works = works,
+                    Values = values,
+                };
+
+                JobHandle handle = job.ScheduleParallelEmbedded(
+                    works,
+                    pageInfoByteOffset: 0,
+                    dispatchMode: VividEcsPageDispatchMode.Dynamic);
+                handle.Complete();
+
+                Assert.That(values[0], Is.EqualTo(259));
+                Assert.That(values[1], Is.EqualTo(22));
+                Assert.That(values[2], Is.EqualTo(16));
+            }
+            finally
+            {
+                values.Dispose();
+                works.Dispose();
             }
         }
 
@@ -567,7 +776,7 @@ namespace VividRP.Editor.Tests
                     "a",
                     10,
                     ModuleRegistryContext.ModuleA,
-                    (context, dependency) => new WriteRegistryValueJob
+                    (context, dependency) => new WriteParallelRegistryValueJob
                     {
                         Values = context.Values,
                         Index = 0,
@@ -577,7 +786,7 @@ namespace VividRP.Editor.Tests
                     "b",
                     0,
                     ModuleRegistryContext.ModuleB,
-                    (context, dependency) => new WriteRegistryValueJob
+                    (context, dependency) => new WriteParallelRegistryValueJob
                     {
                         Values = context.Values,
                         Index = 1,
@@ -587,7 +796,7 @@ namespace VividRP.Editor.Tests
                     "disabled",
                     5,
                     ModuleRegistryContext.ModuleC,
-                    (context, dependency) => new WriteRegistryValueJob
+                    (context, dependency) => new WriteParallelRegistryValueJob
                     {
                         Values = context.Values,
                         Index = 2,
@@ -680,9 +889,50 @@ namespace VividRP.Editor.Tests
         {
             public NativeArray<int> Counts;
 
-            public void Execute(VividEcsPageInfo page)
+            public void Execute(VividEcsPageInfo page, int pageIndex)
             {
-                Counts[page.PageIndex] = page.EntryCount;
+                Counts[pageIndex] = page.EntryCount;
+            }
+        }
+
+        [BurstCompile]
+        private struct CapturePageDependencyJob : IVividEcsPageJob
+        {
+            [ReadOnly]
+            public NativeArray<int> Gate;
+
+            public NativeArray<int> Counts;
+
+            public void Execute(VividEcsPageInfo page, int pageIndex)
+            {
+                Counts[pageIndex] = Gate[0] + page.EntryCount;
+            }
+        }
+
+        private readonly struct EmbeddedPageWork
+        {
+            public EmbeddedPageWork(VividEcsPageInfo page, int value)
+            {
+                Page = page;
+                Value = value;
+            }
+
+            public readonly VividEcsPageInfo Page;
+
+            public readonly int Value;
+        }
+
+        [BurstCompile]
+        private struct CaptureEmbeddedPageWorkJob : IVividEcsPageJob
+        {
+            [ReadOnly]
+            public NativeArray<EmbeddedPageWork> Works;
+
+            public NativeArray<int> Values;
+
+            public void Execute(VividEcsPageInfo page, int pageIndex)
+            {
+                Values[pageIndex] = page.EntryCount + Works[pageIndex].Value;
             }
         }
 
@@ -729,6 +979,21 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        private struct WriteParallelRegistryValueJob : IJob
+        {
+            [NativeDisableContainerSafetyRestriction]
+            public NativeArray<int> Values;
+
+            public int Index;
+
+            public int Value;
+
+            public void Execute()
+            {
+                Values[Index] = Value;
+            }
+        }
+
         private static bool ContainsGroupWithActiveCount(
             List<VividEcsArchetypeLineGroup> groups,
             int activeCount)
@@ -740,6 +1005,19 @@ namespace VividRP.Editor.Tests
             }
 
             return false;
+        }
+
+        private static VividEcsArchetypeLineGroup FindLineGroup(
+            IReadOnlyList<VividEcsArchetypeLineGroup> groups,
+            VividEcsSharedComponentKey sharedKey)
+        {
+            for (int index = 0; index < groups.Count; index++)
+            {
+                if (groups[index].SharedKey.Equals(sharedKey))
+                    return groups[index];
+            }
+
+            return null;
         }
 
         private static bool ContainsLineListReference(

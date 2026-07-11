@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Mathematics;
@@ -26,9 +27,10 @@ namespace VividRP.Runtime.ECS
         Average = 1,
     }
 
+    [JobProducerType(typeof(VividEcsPageJobExtensions.VividEcsPageJobProducer<>))]
     internal interface IVividEcsPageJob
     {
-        void Execute(VividEcsPageInfo page);
+        void Execute(VividEcsPageInfo page, int pageIndex);
     }
 
     internal static class VividEcsPageJobExtensions
@@ -41,18 +43,28 @@ namespace VividRP.Runtime.ECS
             JobHandle dependency = default)
             where TJob : struct, IVividEcsPageJob
         {
-            if (!pages.IsCreated || pages.Length == 0)
-                return dependency;
+            return ScheduleInternal(
+                ref jobData,
+                new NativeSlice<VividEcsPageInfo>(pages),
+                dependency,
+                innerloopBatchCount: 1,
+                isParallel: false,
+                VividEcsPageDispatchMode.Dynamic);
+        }
 
-            using (s_ScheduleMarker.Auto())
-            {
-                var wrapper = new VividEcsPageJobWrapper<TJob>
-                {
-                    Pages = pages,
-                    JobData = jobData,
-                };
-                return wrapper.Schedule(pages.Length, 1, dependency);
-            }
+        public static JobHandle ScheduleByRef<TJob>(
+            this ref TJob jobData,
+            NativeArray<VividEcsPageInfo> pages,
+            JobHandle dependency = default)
+            where TJob : struct, IVividEcsPageJob
+        {
+            return ScheduleInternal(
+                ref jobData,
+                new NativeSlice<VividEcsPageInfo>(pages),
+                dependency,
+                innerloopBatchCount: 1,
+                isParallel: false,
+                VividEcsPageDispatchMode.Dynamic);
         }
 
         public static JobHandle ScheduleParallel<TJob>(
@@ -63,11 +75,92 @@ namespace VividRP.Runtime.ECS
             VividEcsPageDispatchMode dispatchMode = VividEcsPageDispatchMode.Average)
             where TJob : struct, IVividEcsPageJob
         {
-            if (!pages.IsCreated || pages.Length == 0)
+            return ScheduleInternal(
+                ref jobData,
+                new NativeSlice<VividEcsPageInfo>(pages),
+                dependency,
+                innerloopBatchCount,
+                isParallel: true,
+                dispatchMode);
+        }
+
+        public static JobHandle ScheduleParallelByRef<TJob>(
+            this ref TJob jobData,
+            NativeArray<VividEcsPageInfo> pages,
+            JobHandle dependency = default,
+            int innerloopBatchCount = 1,
+            VividEcsPageDispatchMode dispatchMode = VividEcsPageDispatchMode.Average)
+            where TJob : struct, IVividEcsPageJob
+        {
+            return ScheduleInternal(
+                ref jobData,
+                new NativeSlice<VividEcsPageInfo>(pages),
+                dependency,
+                innerloopBatchCount,
+                isParallel: true,
+                dispatchMode);
+        }
+
+        public static JobHandle ScheduleParallelEmbedded<TJob, TWork>(
+            this TJob jobData,
+            NativeArray<TWork> pageWorks,
+            int pageInfoByteOffset,
+            JobHandle dependency = default,
+            int innerloopBatchCount = 1,
+            VividEcsPageDispatchMode dispatchMode = VividEcsPageDispatchMode.Average)
+            where TJob : struct, IVividEcsPageJob
+            where TWork : unmanaged
+        {
+            NativeSlice<VividEcsPageInfo> pages = CreateEmbeddedPageSlice(pageWorks, pageInfoByteOffset);
+            return ScheduleInternal(
+                ref jobData,
+                pages,
+                dependency,
+                innerloopBatchCount,
+                isParallel: true,
+                dispatchMode);
+        }
+
+        public static JobHandle ScheduleParallelEmbeddedByRef<TJob, TWork>(
+            this ref TJob jobData,
+            NativeArray<TWork> pageWorks,
+            int pageInfoByteOffset,
+            JobHandle dependency = default,
+            int innerloopBatchCount = 1,
+            VividEcsPageDispatchMode dispatchMode = VividEcsPageDispatchMode.Average)
+            where TJob : struct, IVividEcsPageJob
+            where TWork : unmanaged
+        {
+            NativeSlice<VividEcsPageInfo> pages = CreateEmbeddedPageSlice(pageWorks, pageInfoByteOffset);
+            return ScheduleInternal(
+                ref jobData,
+                pages,
+                dependency,
+                innerloopBatchCount,
+                isParallel: true,
+                dispatchMode);
+        }
+
+        public static void EarlyJobInit<TJob>()
+            where TJob : struct, IVividEcsPageJob
+        {
+            VividEcsPageJobProducer<TJob>.Initialize();
+        }
+
+        private static unsafe JobHandle ScheduleInternal<TJob>(
+            ref TJob jobData,
+            NativeSlice<VividEcsPageInfo> pages,
+            JobHandle dependency,
+            int innerloopBatchCount,
+            bool isParallel,
+            VividEcsPageDispatchMode dispatchMode)
+            where TJob : struct, IVividEcsPageJob
+        {
+            if (pages.Length == 0)
                 return dependency;
 
             int batchCount = math.max(1, innerloopBatchCount);
-            if (dispatchMode == VividEcsPageDispatchMode.Average)
+            if (isParallel && dispatchMode == VividEcsPageDispatchMode.Average)
             {
                 int workerCount = math.max(JobsUtility.JobWorkerCount, 1) + 1;
                 batchCount = math.max(1, (pages.Length + workerCount - 1) / workerCount);
@@ -79,26 +172,131 @@ namespace VividRP.Runtime.ECS
                 {
                     Pages = pages,
                     JobData = jobData,
+                    IsParallel = isParallel ? 1 : 0,
                 };
-                return wrapper.Schedule(pages.Length, batchCount, dependency);
+                var scheduleParameters = new JobsUtility.JobScheduleParameters(
+                    UnsafeUtility.AddressOf(ref wrapper),
+                    GetReflectionData<TJob>(),
+                    dependency,
+                    isParallel ? ScheduleMode.Parallel : ScheduleMode.Single);
+                return isParallel
+                    ? JobsUtility.ScheduleParallelFor(ref scheduleParameters, pages.Length, batchCount)
+                    : JobsUtility.Schedule(ref scheduleParameters);
             }
         }
-    }
 
-    [BurstCompile]
-    internal struct VividEcsPageJobWrapper<TJob> : IJobParallelFor
-        where TJob : struct, IVividEcsPageJob
-    {
-        [ReadOnly]
-        public NativeArray<VividEcsPageInfo> Pages;
-
-        public TJob JobData;
-
-        public void Execute(int index)
+        private static unsafe NativeSlice<VividEcsPageInfo> CreateEmbeddedPageSlice<TWork>(
+            NativeArray<TWork> pageWorks,
+            int pageInfoByteOffset)
+            where TWork : unmanaged
         {
-            VividEcsPageInfo page = Pages[index];
-            if (page.EntryCount > 0)
-                JobData.Execute(page);
+            if (!pageWorks.IsCreated || pageWorks.Length == 0)
+                return default;
+
+            int workStride = UnsafeUtility.SizeOf<TWork>();
+            int pageInfoSize = UnsafeUtility.SizeOf<VividEcsPageInfo>();
+            if (pageInfoByteOffset < 0 || pageInfoByteOffset + pageInfoSize > workStride)
+                throw new ArgumentOutOfRangeException(nameof(pageInfoByteOffset));
+
+            byte* pageData = (byte*)pageWorks.GetUnsafeReadOnlyPtr() + pageInfoByteOffset;
+            NativeSlice<VividEcsPageInfo> pages = NativeSliceUnsafeUtility.ConvertExistingDataToNativeSlice<VividEcsPageInfo>(
+                pageData,
+                workStride,
+                pageWorks.Length);
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            NativeSliceUnsafeUtility.SetAtomicSafetyHandle(
+                ref pages,
+                NativeArrayUnsafeUtility.GetAtomicSafetyHandle(pageWorks));
+#endif
+            return pages;
+        }
+
+        private static IntPtr GetReflectionData<TJob>()
+            where TJob : struct, IVividEcsPageJob
+        {
+            VividEcsPageJobProducer<TJob>.Initialize();
+            IntPtr reflectionData = VividEcsPageJobProducer<TJob>.ReflectionData.Data;
+            CollectionHelper.CheckReflectionDataCorrect<TJob>(reflectionData);
+            return reflectionData;
+        }
+
+        internal struct VividEcsPageJobWrapper<TJob>
+            where TJob : struct, IVividEcsPageJob
+        {
+            [ReadOnly]
+            public NativeSlice<VividEcsPageInfo> Pages;
+
+            public TJob JobData;
+
+            public int IsParallel;
+        }
+
+        internal struct VividEcsPageJobProducer<TJob>
+            where TJob : struct, IVividEcsPageJob
+        {
+            internal static readonly SharedStatic<IntPtr> ReflectionData =
+                SharedStatic<IntPtr>.GetOrCreate<VividEcsPageJobProducer<TJob>>();
+
+            [BurstDiscard]
+            internal static void Initialize()
+            {
+                if (ReflectionData.Data == IntPtr.Zero)
+                {
+                    ReflectionData.Data = JobsUtility.CreateJobReflectionData(
+                        typeof(VividEcsPageJobWrapper<TJob>),
+                        typeof(TJob),
+                        (ExecuteJobFunction)Execute);
+                }
+            }
+
+            internal delegate void ExecuteJobFunction(
+                ref VividEcsPageJobWrapper<TJob> wrapper,
+                IntPtr additionalPtr,
+                IntPtr bufferRangePatchData,
+                ref JobRanges ranges,
+                int jobIndex);
+
+            public static unsafe void Execute(
+                ref VividEcsPageJobWrapper<TJob> wrapper,
+                IntPtr additionalPtr,
+                IntPtr bufferRangePatchData,
+                ref JobRanges ranges,
+                int jobIndex)
+            {
+                bool isParallel = wrapper.IsParallel != 0;
+                while (true)
+                {
+                    int beginPageIndex = 0;
+                    int endPageIndex = wrapper.Pages.Length;
+                    if (isParallel
+                        && !JobsUtility.GetWorkStealingRange(
+                            ref ranges,
+                            jobIndex,
+                            out beginPageIndex,
+                            out endPageIndex))
+                    {
+                        return;
+                    }
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                    JobsUtility.PatchBufferMinMaxRanges(
+                        bufferRangePatchData,
+                        UnsafeUtility.AddressOf(ref wrapper),
+                        beginPageIndex,
+                        endPageIndex - beginPageIndex);
+#endif
+
+                    for (int pageIndex = beginPageIndex; pageIndex < endPageIndex; pageIndex++)
+                    {
+                        VividEcsPageInfo page = wrapper.Pages[pageIndex];
+                        if (page.EntryCount > 0)
+                            wrapper.JobData.Execute(page, pageIndex);
+                    }
+
+                    if (!isParallel)
+                        return;
+                }
+            }
         }
     }
 

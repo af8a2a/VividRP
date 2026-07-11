@@ -65,6 +65,7 @@ namespace VividRP.Runtime.Particle.ECS
         public int StartIndex;
         public int Count;
         public int Capacity;
+        public int RandomIndexOffset;
         public int ShapeEnabled;
         public int ShapeType;
         public int SimulationSpace;
@@ -103,6 +104,225 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public byte* KeepMask;
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal struct VividParticleSimulationPrepareJob : IJobParallelFor
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleNativeSimulationConfig> Configs;
+
+        [ReadOnly]
+        public NativeArray<VividParticleSimulationPrepareInput> Inputs;
+
+        [WriteOnly]
+        public NativeArray<VividParticleSimulationPrepareOutput> Outputs;
+
+        public float GravityAcceleration;
+
+        public void Execute(int index)
+        {
+            VividParticleSimulationPrepareInput input = Inputs[index];
+            var output = new VividParticleSimulationPrepareOutput
+            {
+                SystemId = input.SystemId,
+                TimeStep = input.TimeStep,
+            };
+
+            if ((uint)input.ConfigSlot >= (uint)Configs.Length)
+            {
+                Outputs[index] = output;
+                return;
+            }
+
+            VividParticleNativeSimulationConfig config = Configs[input.ConfigSlot];
+            output.ShouldSchedule = input.TimeStep.RequiresAutomaticUpdate(
+                    input.ActiveCount,
+                    requireActive: true)
+                ? 1
+                : 0;
+            float3 acceleration = new float3(0.0f, -GravityAcceleration * config.GravityModifier, 0.0f);
+            if (config.ForceOverLifetimeEnabled != 0)
+            {
+                float3 force = config.ForceOverLifetime;
+                bool particlesUseWorldSpace = config.SimulationSpace == 1;
+                bool forceUsesWorldSpace = config.ForceOverLifetimeSpace == 1;
+                if (particlesUseWorldSpace != forceUsesWorldSpace)
+                {
+                    force = particlesUseWorldSpace
+                        ? math.mul(input.TimeStep.WorldRotation, force)
+                        : math.mul(math.inverse(input.TimeStep.WorldRotation), force);
+                }
+
+                acceleration += force;
+            }
+
+            output.Gravity = acceleration;
+            Outputs[index] = output;
+        }
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal unsafe struct VividParticleEmissionPlanJob : IJobParallelFor
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleNativeSimulationConfig> Configs;
+
+        [ReadOnly]
+        public NativeArray<VividParticleNativeBurst> Bursts;
+
+        [ReadOnly]
+        public NativeArray<VividParticleEmissionPlanInput> Inputs;
+
+        [WriteOnly]
+        public NativeArray<VividParticleEmissionPlanOutput> Outputs;
+
+        public float MinimumSimulationStep;
+        public float EmissionAccumulatorTolerance;
+
+        public void Execute(int index)
+        {
+            VividParticleEmissionPlanInput input = Inputs[index];
+            var output = new VividParticleEmissionPlanOutput
+            {
+                SystemId = input.SystemId,
+                Time = input.Time,
+                EmissionAccumulator = input.EmissionAccumulator,
+                BurstTriggeredMask = input.BurstTriggeredMask,
+                RandomState = input.RandomState,
+            };
+
+            if ((uint)input.ConfigSlot >= (uint)Configs.Length)
+            {
+                output.RequiresManagedFallback = 1;
+                Outputs[index] = output;
+                return;
+            }
+
+            VividParticleNativeSimulationConfig config = Configs[input.ConfigSlot];
+            if (config.BurstCount > 64
+                || config.BurstOffset < 0
+                || config.BurstCount < 0
+                || config.BurstOffset + config.BurstCount > Bursts.Length)
+            {
+                output.RequiresManagedFallback = 1;
+                Outputs[index] = output;
+                return;
+            }
+
+            float duration = math.max(MinimumSimulationStep, config.Duration);
+            float remaining = math.max(0.0f, input.DeltaTime);
+            while (remaining > MinimumSimulationStep)
+            {
+                float segmentEnd = math.min(duration, output.Time + remaining);
+                float segmentDelta = math.max(0.0f, segmentEnd - output.Time);
+                if (input.AllowEmission != 0 && config.EmissionEnabled != 0 && segmentDelta > 0.0f)
+                {
+                    PlanTimeRange(
+                        config,
+                        output.Time,
+                        segmentEnd,
+                        segmentDelta,
+                        ref output);
+                }
+
+                remaining -= segmentDelta;
+                output.Time = segmentEnd;
+                if (output.Time < duration)
+                    break;
+
+                if (config.Loop == 0)
+                {
+                    output.Time = duration;
+                    break;
+                }
+
+                output.Time = 0.0f;
+                output.BurstTriggeredMask = 0UL;
+                if (segmentDelta <= 0.0f)
+                    break;
+            }
+
+            if (output.EmitCount > 0)
+            {
+                if (input.CanReserveNative == 0 || input.ActiveCountOutput == null)
+                {
+                    output.RequiresManagedFallback = 1;
+                    Outputs[index] = output;
+                    return;
+                }
+
+                int activeCount = math.max(0, *input.ActiveCountOutput);
+                int maxParticles = math.min(
+                    math.max(0, config.MaxParticles),
+                    math.max(0, input.InitializeTemplate.Capacity));
+                int reservedCount = math.min(output.EmitCount, math.max(0, maxParticles - activeCount));
+                if (reservedCount > 0)
+                {
+                    VividParticleEcsInitializeParticlesWork initializeWork = input.InitializeTemplate;
+                    initializeWork.StartIndex = activeCount;
+                    initializeWork.Count = reservedCount;
+                    initializeWork.RandomSeed = NextRandomState(ref output.RandomState);
+                    output.InitializeWork = initializeWork;
+                    output.ReservedCount = reservedCount;
+                    *input.ActiveCountOutput = activeCount + reservedCount;
+                }
+            }
+
+            Outputs[index] = output;
+        }
+
+        private void PlanTimeRange(
+            VividParticleNativeSimulationConfig config,
+            float startTime,
+            float endTime,
+            float deltaTime,
+            ref VividParticleEmissionPlanOutput output)
+        {
+            output.EmissionAccumulator += config.RateOverTime * deltaTime;
+            float nearestWholeCount = math.round(output.EmissionAccumulator);
+            int continuousCount = math.abs(output.EmissionAccumulator - nearestWholeCount)
+                <= EmissionAccumulatorTolerance
+                    ? math.max(0, (int)math.round(nearestWholeCount))
+                    : math.max(0, (int)math.floor(output.EmissionAccumulator));
+            if (continuousCount > 0)
+            {
+                output.EmissionAccumulator = math.max(
+                    0.0f,
+                    output.EmissionAccumulator - continuousCount);
+                output.EmitCount = AddSaturated(output.EmitCount, continuousCount);
+            }
+
+            for (int burstIndex = 0; burstIndex < config.BurstCount; burstIndex++)
+            {
+                ulong burstBit = 1UL << burstIndex;
+                if ((output.BurstTriggeredMask & burstBit) != 0UL)
+                    continue;
+
+                VividParticleNativeBurst burst = Bursts[config.BurstOffset + burstIndex];
+                if (burst.Time < startTime || burst.Time > endTime)
+                    continue;
+
+                output.BurstTriggeredMask |= burstBit;
+                output.EmitCount = AddSaturated(output.EmitCount, math.max(0, burst.Count));
+            }
+        }
+
+        private static int AddSaturated(int left, int right)
+        {
+            long value = (long)left + right;
+            return value >= int.MaxValue ? int.MaxValue : (int)value;
+        }
+
+        private static uint NextRandomState(ref uint state)
+        {
+            uint value = state == 0u ? 1u : state;
+            value ^= value << 13;
+            value ^= value >> 17;
+            value ^= value << 5;
+            state = value == 0u ? 1u : value;
+            return state;
+        }
     }
 
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
@@ -159,11 +379,8 @@ namespace VividRP.Runtime.Particle.ECS
     }
 
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct VividParticleEcsIntegratePagesJob : IJobParallelFor
+    internal struct VividParticleEcsIntegratePagesJob : IVividEcsPageJob
     {
-        [ReadOnly]
-        public NativeArray<VividEcsPageInfo> Pages;
-
         public float DeltaTime;
         public float3 Gravity;
 
@@ -179,9 +396,8 @@ namespace VividRP.Runtime.Particle.ECS
         [NativeDisableParallelForRestriction]
         public NativeArray<byte> KeepMask;
 
-        public void Execute(int pageIndex)
+        public void Execute(VividEcsPageInfo page, int pageIndex)
         {
-            VividEcsPageInfo page = Pages[pageIndex];
             int pageEnd = math.min(page.StartIndex + page.EntryCount, Positions.Length);
             for (int index = page.StartIndex; index < pageEnd; index++)
             {
@@ -202,15 +418,14 @@ namespace VividRP.Runtime.Particle.ECS
     }
 
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
-    internal unsafe struct VividParticleEcsIntegratePageWorksJob : IJobParallelFor
+    internal unsafe struct VividParticleEcsIntegratePageWorksJob : IVividEcsPageJob
     {
         [ReadOnly]
         public NativeArray<VividParticleEcsIntegratePageWork> Works;
 
-        public void Execute(int workIndex)
+        public void Execute(VividEcsPageInfo page, int workIndex)
         {
             VividParticleEcsIntegratePageWork work = Works[workIndex];
-            VividEcsPageInfo page = work.Page;
             int pageEnd = math.min(page.StartIndex + page.EntryCount, work.PositionLength);
             for (int index = page.StartIndex; index < pageEnd; index++)
             {
@@ -278,7 +493,11 @@ namespace VividRP.Runtime.Particle.ECS
 
         public void Execute(int workIndex)
         {
-            VividParticleEcsInitializeParticlesWork work = Works[workIndex];
+            ExecuteWork(Works[workIndex]);
+        }
+
+        internal static void ExecuteWork(VividParticleEcsInitializeParticlesWork work)
+        {
             int count = math.max(0, work.Count);
             for (int localIndex = 0; localIndex < count; localIndex++)
             {
@@ -286,7 +505,10 @@ namespace VividRP.Runtime.Particle.ECS
                 if ((uint)particleIndex >= (uint)work.Capacity)
                     break;
 
-                Random random = CreateRandom(work.RandomSeed, particleIndex, localIndex);
+                Random random = CreateRandom(
+                    work.RandomSeed,
+                    particleIndex,
+                    work.RandomIndexOffset + localIndex);
                 SampleShape(work, ref random, out float3 localPosition, out float3 localDirection);
                 localDirection = math.lengthsq(localDirection) > 0.000001f
                     ? math.normalize(localDirection)
@@ -410,6 +632,52 @@ namespace VividRP.Runtime.Particle.ECS
             float sinTheta = math.sqrt(math.max(0.0f, 1.0f - cosTheta * cosTheta));
             float phi = random.NextFloat(0.0f, math.PI * 2.0f);
             return math.normalize(new float3(math.cos(phi) * sinTheta, math.sin(phi) * sinTheta, cosTheta));
+        }
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal unsafe struct VividParticleEcsBuildInitializePageWorksJob : IJobParallelFor
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleEmissionPlanOutput> Plans;
+
+        public NativeList<VividParticleEcsInitializeParticlesWork>.ParallelWriter PageWorks;
+
+        public void Execute(int index)
+        {
+            VividParticleEmissionPlanOutput plan = Plans[index];
+            if (plan.RequiresManagedFallback != 0 || plan.ReservedCount <= 0)
+                return;
+
+            VividParticleEcsInitializeParticlesWork source = plan.InitializeWork;
+            int sourceStart = source.StartIndex;
+            int cursor = sourceStart;
+            int remaining = math.min(source.Count, math.max(0, source.Capacity - sourceStart));
+            while (remaining > 0)
+            {
+                int pageRemaining = VividEcsConstants.PageEntryCount
+                    - cursor % VividEcsConstants.PageEntryCount;
+                int pageCount = math.min(remaining, pageRemaining);
+                VividParticleEcsInitializeParticlesWork pageWork = source;
+                pageWork.StartIndex = cursor;
+                pageWork.Count = pageCount;
+                pageWork.RandomIndexOffset = cursor - sourceStart;
+                PageWorks.AddNoResize(pageWork);
+                cursor += pageCount;
+                remaining -= pageCount;
+            }
+        }
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal unsafe struct VividParticleEcsInitializeParticlePagesJob : IJobParallelForDefer
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleEcsInitializeParticlesWork> PageWorks;
+
+        public void Execute(int index)
+        {
+            VividParticleEcsInitializeParticlesJob.ExecuteWork(PageWorks[index]);
         }
     }
 }

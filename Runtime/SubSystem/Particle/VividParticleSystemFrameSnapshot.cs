@@ -73,6 +73,13 @@ namespace VividRP.Runtime.Particle
         public int TextureSheetAnimationEnabled;
         public int CustomData1Mode;
         public int CustomData2Mode;
+        public int LightsEnabled;
+        public int LightsUseRandomDistribution;
+        public int LightsUseParticleColor;
+        public int LightsSizeAffectsRange;
+        public int LightsAlphaAffectsIntensity;
+        public float LightsRatio;
+        public int LightsMaxLights;
         public int TextureSheetTilesX;
         public int TextureSheetTilesY;
         public int TextureSheetAnimationType;
@@ -109,6 +116,8 @@ namespace VividRP.Runtime.Particle
         public fixed float CustomData1Lut[LifetimeLutResolution * 4];
         public fixed float CustomData2Lut[LifetimeLutResolution * 4];
         public fixed float ExternalForcesMultiplierLut[LifetimeLutResolution];
+        public fixed float LightsRangeLut[LifetimeLutResolution];
+        public fixed float LightsIntensityLut[LifetimeLutResolution];
     }
 
     internal struct VividParticleSimulationPrepareInput

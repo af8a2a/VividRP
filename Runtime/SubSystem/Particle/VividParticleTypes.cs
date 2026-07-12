@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -3154,6 +3155,227 @@ namespace VividRP.Runtime.Particle
             if (source == null)
                 return CreateDefaultCurve();
 
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
+    public sealed class VividParticleLightsModule
+    {
+        internal const int MinimumMaxLights = 0;
+
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private Light m_Light;
+
+        [SerializeField]
+        [Range(0.0f, 1.0f)]
+        private float m_Ratio = 1.0f;
+
+        [SerializeField]
+        private bool m_UseRandomDistribution = true;
+
+        [SerializeField]
+        private bool m_UseParticleColor = true;
+
+        [SerializeField]
+        private bool m_SizeAffectsRange = true;
+
+        [SerializeField]
+        private bool m_AlphaAffectsIntensity = true;
+
+        [SerializeField]
+        private AnimationCurve m_Range = CreateDefaultCurve();
+
+        [SerializeField]
+        private float m_RangeMultiplier = 1.0f;
+
+        [SerializeField]
+        private AnimationCurve m_Intensity = CreateDefaultCurve();
+
+        [SerializeField]
+        private float m_IntensityMultiplier = 1.0f;
+
+        [SerializeField]
+        private int m_MaxLights = 20;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set => SetValue(ref m_Enabled, value);
+        }
+
+        public Light light
+        {
+            get => m_Light;
+            set => SetValue(ref m_Light, value);
+        }
+
+        public float ratio
+        {
+            get => m_Ratio;
+            set => SetValue(ref m_Ratio, Mathf.Clamp01(value));
+        }
+
+        public bool useRandomDistribution
+        {
+            get => m_UseRandomDistribution;
+            set => SetValue(ref m_UseRandomDistribution, value);
+        }
+
+        public bool useParticleColor
+        {
+            get => m_UseParticleColor;
+            set => SetValue(ref m_UseParticleColor, value);
+        }
+
+        public bool sizeAffectsRange
+        {
+            get => m_SizeAffectsRange;
+            set => SetValue(ref m_SizeAffectsRange, value);
+        }
+
+        public bool alphaAffectsIntensity
+        {
+            get => m_AlphaAffectsIntensity;
+            set => SetValue(ref m_AlphaAffectsIntensity, value);
+        }
+
+        public AnimationCurve range
+        {
+            get => m_Range ??= CreateDefaultCurve();
+            set
+            {
+                m_Range = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public float rangeMultiplier
+        {
+            get => m_RangeMultiplier;
+            set => SetValue(ref m_RangeMultiplier, Mathf.Max(0.0f, value));
+        }
+
+        public AnimationCurve intensity
+        {
+            get => m_Intensity ??= CreateDefaultCurve();
+            set
+            {
+                m_Intensity = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public float intensityMultiplier
+        {
+            get => m_IntensityMultiplier;
+            set => SetValue(ref m_IntensityMultiplier, Mathf.Max(0.0f, value));
+        }
+
+        public int maxLights
+        {
+            get => m_MaxLights;
+            set => SetValue(ref m_MaxLights, Mathf.Max(MinimumMaxLights, value));
+        }
+
+        internal bool isActive => m_Enabled
+            && m_Light != null
+            && m_Light.enabled
+            && m_Ratio > 0.0f
+            && m_MaxLights > 0
+            && m_Light.type is LightType.Point or LightType.Spot;
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleLightsModule CreateDefault()
+        {
+            return new VividParticleLightsModule();
+        }
+
+        internal VividParticleLightsModule Clone()
+        {
+            var clone = new VividParticleLightsModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleLightsModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Light = source.m_Light;
+            m_Ratio = source.m_Ratio;
+            m_UseRandomDistribution = source.m_UseRandomDistribution;
+            m_UseParticleColor = source.m_UseParticleColor;
+            m_SizeAffectsRange = source.m_SizeAffectsRange;
+            m_AlphaAffectsIntensity = source.m_AlphaAffectsIntensity;
+            m_Range = CloneCurve(source.m_Range);
+            m_RangeMultiplier = source.m_RangeMultiplier;
+            m_Intensity = CloneCurve(source.m_Intensity);
+            m_IntensityMultiplier = source.m_IntensityMultiplier;
+            m_MaxLights = source.m_MaxLights;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Ratio = Mathf.Clamp01(m_Ratio);
+            m_RangeMultiplier = Mathf.Max(0.0f, m_RangeMultiplier);
+            m_IntensityMultiplier = Mathf.Max(0.0f, m_IntensityMultiplier);
+            m_MaxLights = Mathf.Max(MinimumMaxLights, m_MaxLights);
+            m_Range ??= CreateDefaultCurve();
+            m_Intensity ??= CreateDefaultCurve();
+        }
+
+        internal float EvaluateRange(float normalizedLifetime)
+        {
+            return Mathf.Max(0.0f, range.Evaluate(Mathf.Clamp01(normalizedLifetime)))
+                * m_RangeMultiplier;
+        }
+
+        internal float EvaluateIntensity(float normalizedLifetime)
+        {
+            return Mathf.Max(0.0f, intensity.Evaluate(Mathf.Clamp01(normalizedLifetime)))
+                * m_IntensityMultiplier;
+        }
+
+        private void SetValue<T>(ref T field, T value)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+                return;
+
+            field = value;
+            NotifyChanged();
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            source ??= CreateDefaultCurve();
             return new AnimationCurve(source.keys)
             {
                 preWrapMode = source.preWrapMode,

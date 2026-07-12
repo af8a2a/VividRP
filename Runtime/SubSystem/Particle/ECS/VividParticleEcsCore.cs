@@ -125,6 +125,7 @@ namespace VividRP.Runtime.Particle.ECS
         Collision = 1u << 17,
         Trigger = 1u << 18,
         LifetimeByEmitterSpeed = 1u << 19,
+        Lights = 1u << 20,
     }
 
     internal readonly struct VividParticleModuleSharedKey : IVividEcsSharedComponentData,
@@ -383,7 +384,8 @@ namespace VividRP.Runtime.Particle.ECS
         public const int SizeFieldIndex = 5;
         public const int MeshIndexFieldIndex = 6;
         public const int AccumulatedRotationFieldIndex = 7;
-        public const int FieldCountValue = 8;
+        public const int RandomSeedFieldIndex = 8;
+        public const int FieldCountValue = 9;
         public const int FloatSizeInBytes = sizeof(float);
         public const int IntSizeInBytes = sizeof(int);
         public const int Float3SizeInBytes = sizeof(float) * 3;
@@ -397,8 +399,10 @@ namespace VividRP.Runtime.Particle.ECS
         public const int MeshIndexOffsetInPage = SizeOffsetInPage + FloatSizeInBytes * VividEcsConstants.PageEntryCount;
         public const int AccumulatedRotationOffsetInPage =
             MeshIndexOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
-        public const int TypeSizeInBytes =
+        public const int RandomSeedOffsetInPage =
             AccumulatedRotationOffsetInPage + Float3SizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int TypeSizeInBytes =
+            RandomSeedOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
 
         public int FieldCount => FieldCountValue;
 
@@ -417,6 +421,7 @@ namespace VividRP.Runtime.Particle.ECS
                 MeshIndexFieldIndex => new VividEcsSoaFieldInfo(MeshIndexOffsetInPage, IntSizeInBytes),
                 AccumulatedRotationFieldIndex =>
                     new VividEcsSoaFieldInfo(AccumulatedRotationOffsetInPage, Float3SizeInBytes),
+                RandomSeedFieldIndex => new VividEcsSoaFieldInfo(RandomSeedOffsetInPage, IntSizeInBytes),
                 _ => throw new ArgumentOutOfRangeException(nameof(index)),
             };
         }

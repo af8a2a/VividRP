@@ -32,6 +32,8 @@ namespace VividRP.Runtime.Particle.ECS
         [NativeDisableUnsafePtrRestriction]
         public float3* AccumulatedRotations;
         [NativeDisableUnsafePtrRestriction]
+        public uint* RandomSeeds;
+        [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
         [NativeDisableUnsafePtrRestriction]
         public float* NoiseSizeMultipliers;
@@ -58,6 +60,7 @@ namespace VividRP.Runtime.Particle.ECS
             && Sizes != null
             && MeshIndices != null
             && AccumulatedRotations != null
+            && RandomSeeds != null
             && Capacity > 0;
     }
 
@@ -368,7 +371,18 @@ namespace VividRP.Runtime.Particle.ECS
 
         public VividParticleRendererHandle rendererHandle
         {
-            get => m_RendererHandle;
+            get
+            {
+                if (!m_RendererHandle.IsValid
+                    && m_World.TryGetLineAttachment(
+                        m_Line,
+                        out VividParticleRendererHandle binding))
+                {
+                    m_RendererHandle = binding;
+                }
+
+                return m_RendererHandle;
+            }
             set => SetRendererHandle(value);
         }
 
@@ -396,6 +410,12 @@ namespace VividRP.Runtime.Particle.ECS
             where T : struct, IVividEcsLineAttachmentData
         {
             return m_World.TryGetLineAttachment(m_Line, out value);
+        }
+
+        public bool RemoveLineAttachment<T>()
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            return m_World.RemoveLineAttachment<T>(m_Line);
         }
 
         public bool rendererActive
@@ -492,7 +512,8 @@ namespace VividRP.Runtime.Particle.ECS
             float size,
             Color color,
             int meshIndex = 0,
-            Vector3 initialEmitterVelocity = default)
+            Vector3 initialEmitterVelocity = default,
+            uint randomSeed = 1u)
         {
             if (!isCreated || !m_Line.Append(out int index))
                 return false;
@@ -506,6 +527,10 @@ namespace VividRP.Runtime.Particle.ECS
             common.SetFieldValue(VividParticleCommon.SizeFieldIndex, index, size);
             common.SetFieldValue(VividParticleCommon.MeshIndexFieldIndex, index, math.max(0, meshIndex));
             common.SetFieldValue(VividParticleCommon.AccumulatedRotationFieldIndex, index, float3.zero);
+            common.SetFieldValue(
+                VividParticleCommon.RandomSeedFieldIndex,
+                index,
+                randomSeed == 0u ? 1u : randomSeed);
             if (m_AnimatedMotionColumn != null)
             {
                 m_AnimatedMotionColumn.SetFieldValue(
@@ -652,6 +677,7 @@ namespace VividRP.Runtime.Particle.ECS
                 Sizes = columnView.Sizes,
                 MeshIndices = columnView.MeshIndices,
                 AccumulatedRotations = columnView.AccumulatedRotations,
+                RandomSeeds = columnView.RandomSeeds,
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
                 TriggerPreviousInside = columnView.TriggerPreviousInside,
@@ -1068,6 +1094,11 @@ namespace VividRP.Runtime.Particle.ECS
                 VividParticleCommon.AccumulatedRotationFieldIndex)[index]);
         }
 
+        public uint GetRandomSeed(int index)
+        {
+            return commonColumn.GetFieldArray<uint>(VividParticleCommon.RandomSeedFieldIndex)[index];
+        }
+
         public float GetNoiseSizeMultiplier(int index)
         {
             if (m_NoiseStateColumn == null)
@@ -1143,6 +1174,8 @@ namespace VividRP.Runtime.Particle.ECS
                 NativeArray<int> meshIndices = common.GetFieldArray<int>(VividParticleCommon.MeshIndexFieldIndex);
                 NativeArray<float3> accumulatedRotations = common.GetFieldArray<float3>(
                     VividParticleCommon.AccumulatedRotationFieldIndex);
+                NativeArray<uint> randomSeeds = common.GetFieldArray<uint>(
+                    VividParticleCommon.RandomSeedFieldIndex);
                 NativeArray<float3> animatedVelocities = m_AnimatedMotionColumn != null
                     ? m_AnimatedMotionColumn.GetFieldArray<float3>(VividParticleAnimatedMotion.VelocityFieldIndex)
                     : default;
@@ -1186,6 +1219,7 @@ namespace VividRP.Runtime.Particle.ECS
                     Sizes = (float*)sizes.GetUnsafePtr(),
                     MeshIndices = (int*)meshIndices.GetUnsafePtr(),
                     AccumulatedRotations = (float3*)accumulatedRotations.GetUnsafePtr(),
+                    RandomSeeds = (uint*)randomSeeds.GetUnsafePtr(),
                     NoisePhases = noisePhases.IsCreated ? (float3*)noisePhases.GetUnsafePtr() : null,
                     NoiseSizeMultipliers = noiseSizeMultipliers.IsCreated
                         ? (float*)noiseSizeMultipliers.GetUnsafePtr()
@@ -1344,6 +1378,7 @@ namespace VividRP.Runtime.Particle.ECS
                 Sizes = columnView.Sizes,
                 MeshIndices = columnView.MeshIndices,
                 AccumulatedRotations = columnView.AccumulatedRotations,
+                RandomSeeds = columnView.RandomSeeds,
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
                 TriggerPreviousInside = columnView.TriggerPreviousInside,

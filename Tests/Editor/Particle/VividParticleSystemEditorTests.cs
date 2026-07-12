@@ -1201,6 +1201,30 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(VividParticleRendererInspectorNotice.None));
         }
 
+        [Test]
+        public void LightsModule_IsDiscoverable_AndTemplateCopyIsIndependent()
+        {
+            VividParticleSystem system = CreateSystem();
+            m_Asset = ScriptableObject.CreateInstance<VividParticleSystemAsset>();
+            using var serializedSystem = new SerializedObject(system);
+
+            SerializedProperty lights = VividParticleSystemEditorUtility.FindLightsProperty(serializedSystem);
+            Assert.That(lights, Is.Not.Null);
+            Assert.That(lights.FindPropertyRelative("m_Ratio"), Is.Not.Null);
+            Assert.That(lights.FindPropertyRelative("m_MaxLights"), Is.Not.Null);
+
+            system.lights.ratio = 0.25f;
+            system.lights.maxLights = 7;
+            Assert.That(
+                VividParticleSystemEditorUtility.CopyComponentSettingsToAsset(system, m_Asset),
+                Is.True);
+            system.lights.ratio = 1.0f;
+            system.lights.maxLights = 1;
+
+            Assert.That(m_Asset.lights.ratio, Is.EqualTo(0.25f));
+            Assert.That(m_Asset.lights.maxLights, Is.EqualTo(7));
+        }
+
         private static Gradient CreateGradient(Color start, Color end)
         {
             var gradient = new Gradient();

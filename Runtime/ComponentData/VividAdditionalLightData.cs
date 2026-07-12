@@ -9,6 +9,13 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    internal interface IVividLightRenderDataProvider
+    {
+        int estimatedLightCount { get; }
+
+        int CopyLightData(NativeArray<VividLightRenderData> destination, int destinationOffset);
+    }
+
     [Flags]
     public enum VividLightRenderDataFlags : uint
     {
@@ -55,6 +62,7 @@ namespace VividRP.Runtime
         private const int k_InlinePrepareLightThreshold = 64;
 
         private readonly List<VividAdditionalLightData> m_RegisteredAdditionalLightData = new();
+        private readonly List<IVividLightRenderDataProvider> m_ExternalLightProviders = new();
         private readonly List<VividLightRenderData> m_LightData = new();
         private readonly List<VividLightRenderData> m_PreparedSceneLightData = new();
         private readonly Dictionary<EntityId, int> m_EntityIdToDataIndex = new(new EntityIdComparer());
@@ -72,6 +80,18 @@ namespace VividRP.Runtime
         public IReadOnlyList<VividLightRenderData> lightData => m_LightData;
 
         internal IReadOnlyList<VividLightRenderData> sceneLightData => m_PreparedSceneLightData;
+
+        internal void RegisterProvider(IVividLightRenderDataProvider provider)
+        {
+            if (provider != null && !m_ExternalLightProviders.Contains(provider))
+                m_ExternalLightProviders.Add(provider);
+        }
+
+        internal void UnregisterProvider(IVividLightRenderDataProvider provider)
+        {
+            if (provider != null)
+                m_ExternalLightProviders.Remove(provider);
+        }
 
         internal VividLightRenderData RegisterLight(VividAdditionalLightData additionalLightData)
         {
@@ -185,7 +205,14 @@ namespace VividRP.Runtime
             CompleteScheduledSceneLightPrepare(true);
 
             var registeredCount = m_RegisteredAdditionalLightData.Count;
-            EnsureSceneLightPrepareCapacity(registeredCount);
+            int externalLightCapacity = 0;
+            for (int providerIndex = 0; providerIndex < m_ExternalLightProviders.Count; providerIndex++)
+            {
+                IVividLightRenderDataProvider provider = m_ExternalLightProviders[providerIndex];
+                if (provider != null)
+                    externalLightCapacity += Mathf.Max(0, provider.estimatedLightCount);
+            }
+            EnsureSceneLightPrepareCapacity(registeredCount + externalLightCapacity);
 
             var sourceCount = 0;
             for (var lightIndex = 0; lightIndex < registeredCount; lightIndex++)
@@ -201,6 +228,16 @@ namespace VividRP.Runtime
                 var trackedLightData = CreateLightRenderData(light, additionalLightData);
                 StoreLightData(trackedLightData);
                 m_SceneLightSources[sourceCount++] = trackedLightData;
+            }
+
+            for (int providerIndex = 0; providerIndex < m_ExternalLightProviders.Count; providerIndex++)
+            {
+                IVividLightRenderDataProvider provider = m_ExternalLightProviders[providerIndex];
+                if (provider == null || sourceCount >= m_SceneLightSources.Length)
+                    continue;
+
+                int copiedCount = provider.CopyLightData(m_SceneLightSources, sourceCount);
+                sourceCount += Mathf.Clamp(copiedCount, 0, m_SceneLightSources.Length - sourceCount);
             }
 
             m_SceneLightKickRan = true;

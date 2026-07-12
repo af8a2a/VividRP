@@ -3,11 +3,13 @@ using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime.ECS;
 using VividRP.Runtime.Particle;
 using VividRP.Runtime.Particle.ECS;
+using VividRP.Runtime.Particle.Trail;
 
 namespace VividRP.Editor.Tests
 {
@@ -75,6 +77,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 commonType.GetSoaFieldInfo(VividParticleCommon.AccumulatedRotationFieldIndex).ElementSize,
                 Is.EqualTo(VividParticleCommon.Float3SizeInBytes));
+            Assert.That(
+                commonType.GetSoaFieldInfo(VividParticleCommon.RandomSeedFieldIndex).OffsetInPage,
+                Is.EqualTo(VividParticleCommon.RandomSeedOffsetInPage));
+            Assert.That(
+                commonType.GetSoaFieldInfo(VividParticleCommon.RandomSeedFieldIndex).ElementSize,
+                Is.EqualTo(VividParticleCommon.IntSizeInBytes));
             Assert.That(noiseStateType.SoaFieldCount, Is.EqualTo(VividParticleNoiseState.FieldCountValue));
             Assert.That(
                 noiseStateType.GetSoaFieldInfo(VividParticleNoiseState.PhaseFieldIndex).OffsetInPage,
@@ -784,9 +792,9 @@ namespace VividRP.Editor.Tests
         {
             using var storage = new VividParticleEcsStorage();
             storage.EnsureCapacity(3);
-            Assert.That(storage.Add(Vector3.zero, Vector3.zero, 0.05f, 0.05f, 1.0f, Color.red, meshIndex: 0), Is.True);
-            Assert.That(storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 2.0f, Color.green, meshIndex: 1), Is.True);
-            Assert.That(storage.Add(Vector3.right, Vector3.zero, 6.0f, 6.0f, 3.0f, Color.blue, meshIndex: 2), Is.True);
+            Assert.That(storage.Add(Vector3.zero, Vector3.zero, 0.05f, 0.05f, 1.0f, Color.red, meshIndex: 0, randomSeed: 11u), Is.True);
+            Assert.That(storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 2.0f, Color.green, meshIndex: 1, randomSeed: 22u), Is.True);
+            Assert.That(storage.Add(Vector3.right, Vector3.zero, 6.0f, 6.0f, 3.0f, Color.blue, meshIndex: 2, randomSeed: 33u), Is.True);
 
             Assert.That(storage.ScheduleIntegrate(0.1f, Vector3.zero, out JobHandle handle), Is.True);
             handle.Complete();
@@ -795,8 +803,10 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.activeCount, Is.EqualTo(2));
             AssertColor(Color.blue, storage.GetColor(0));
             Assert.That(storage.GetMeshIndex(0), Is.EqualTo(2));
+            Assert.That(storage.GetRandomSeed(0), Is.EqualTo(33u));
             AssertColor(Color.green, storage.GetColor(1));
             Assert.That(storage.GetMeshIndex(1), Is.EqualTo(1));
+            Assert.That(storage.GetRandomSeed(1), Is.EqualTo(22u));
             Assert.That(storage.GetRemainingLifetime(0), Is.EqualTo(5.9f).Within(0.0001f));
         }
 
@@ -830,6 +840,7 @@ namespace VividRP.Editor.Tests
             };
             job.Schedule(works.Length, innerloopBatchCount: 1).Complete();
 
+            var particleSeeds = new HashSet<uint>();
             for (int index = 0; index < 3; index++)
             {
                 AssertVector3(Vector3.zero, storage.GetPosition(index));
@@ -839,6 +850,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(storage.GetSize(index), Is.EqualTo(0.75f));
                 AssertColor(new Color(0.2f, 0.4f, 0.6f, 0.8f), storage.GetColor(index));
                 Assert.That(storage.GetMeshIndex(index), Is.EqualTo(index % 3));
+                Assert.That(storage.GetRandomSeed(index), Is.Not.EqualTo(0u));
+                Assert.That(particleSeeds.Add(storage.GetRandomSeed(index)), Is.True);
                 AssertVector3(emitterVelocity, storage.GetInitialEmitterVelocity(index));
             }
         }
@@ -905,6 +918,102 @@ namespace VividRP.Editor.Tests
 
             Assert.DoesNotThrow(() => storage.Dispose());
             Assert.DoesNotThrow(() => storage.Dispose());
+        }
+
+        [Test]
+        public void TrailTable_ReusesTiles_WithGenerationSafeHandles()
+        {
+            using var table = new VividParticleTrailTable(controlPointCount: 4);
+            table.EnsureCapacity(3);
+
+            Assert.That(table.tileCapacity, Is.EqualTo(8));
+            Assert.That(table.Allocate(11u, out VividParticleTrailHandle first), Is.True);
+            Assert.That(table.Allocate(22u, out VividParticleTrailHandle second), Is.True);
+            Assert.That(table.allocatedCount, Is.EqualTo(2));
+            Assert.That(table.GetView().IsValid(first), Is.True);
+            Assert.That(table.Free(first), Is.True);
+            Assert.That(table.GetView().IsValid(first), Is.False);
+
+            Assert.That(table.Allocate(33u, out VividParticleTrailHandle reused), Is.True);
+            Assert.That(reused.Index, Is.EqualTo(first.Index));
+            Assert.That(reused.Generation, Is.Not.EqualTo(first.Generation));
+            Assert.That(table.GetView().IsValid(reused), Is.True);
+            Assert.That(table.GetView().IsValid(second), Is.True);
+        }
+
+        [Test]
+        public void TrailTable_RingBuffer_PreservesNewestControlPointsAndBounds()
+        {
+            using var table = new VividParticleTrailTable(controlPointCount: 4);
+            table.EnsureCapacity(1);
+            Assert.That(table.Allocate(1u, out VividParticleTrailHandle handle), Is.True);
+            VividParticleTrailTableView view = table.GetView();
+
+            for (int index = 0; index < 6; index++)
+            {
+                Assert.That(
+                    view.AppendControlPoint(handle, new float3(index, index * 2.0f, 0.0f), index, 0.0f),
+                    Is.True);
+            }
+
+            VividParticleTrailTileHeader header = view.Headers[handle.Index];
+            Assert.That(header.PointCount, Is.EqualTo(4));
+            Assert.That(header.TotalLength, Is.EqualTo(math.sqrt(5.0f) * 3.0f).Within(0.0001f));
+            for (int ordinal = 0; ordinal < 4; ordinal++)
+            {
+                Assert.That(
+                    view.TryGetControlPoint(
+                        handle,
+                        ordinal,
+                        out float3 position,
+                        out float time,
+                        out float length),
+                    Is.True);
+                Assert.That(position.x, Is.EqualTo(ordinal + 2));
+                Assert.That(time, Is.EqualTo(ordinal + 2));
+                Assert.That(length, Is.EqualTo(math.sqrt(5.0f) * ordinal).Within(0.0001f));
+            }
+
+            VividParticleTrailBounds bounds = view.CalculateBounds(handle, halfWidth: 0.5f);
+            Assert.That(bounds.IsValid, Is.EqualTo(1));
+            AssertVector3(new Vector3(1.5f, 3.5f, -0.5f), ToVector3(bounds.Minimum));
+            AssertVector3(new Vector3(5.5f, 10.5f, 0.5f), ToVector3(bounds.Maximum));
+        }
+
+        [Test]
+        public void TrailTable_ViewCanAppendAndPruneInsideBurstJob()
+        {
+            using var table = new VividParticleTrailTable(controlPointCount: 8);
+            table.EnsureCapacity(1);
+            Assert.That(table.Allocate(7u, out VividParticleTrailHandle handle), Is.True);
+
+            new AppendAndPruneTrailJob
+            {
+                View = table.GetView(),
+                Handle = handle,
+            }.Schedule().Complete();
+
+            VividParticleTrailTableView view = table.GetView();
+            VividParticleTrailTileHeader header = view.Headers[handle.Index];
+            Assert.That(header.PointCount, Is.EqualTo(2));
+            Assert.That(
+                view.TryGetControlPoint(handle, 0, out float3 first, out _, out _),
+                Is.True);
+            Assert.That(first.x, Is.EqualTo(2.0f));
+            Assert.That(
+                view.TryGetControlPoint(handle, 1, out float3 second, out _, out _),
+                Is.True);
+            Assert.That(second.x, Is.EqualTo(3.0f));
+        }
+
+        [Test]
+        public void TrailTable_DisposeCanRepeat_WithoutThrowing()
+        {
+            var table = new VividParticleTrailTable();
+            table.EnsureCapacity(1);
+
+            Assert.DoesNotThrow(() => table.Dispose());
+            Assert.DoesNotThrow(() => table.Dispose());
         }
 
         private static bool AddParticle(VividParticleEcsStorage storage, int index)
@@ -979,6 +1088,27 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.g, Is.EqualTo(expected.g).Within(0.0001f));
             Assert.That(actual.b, Is.EqualTo(expected.b).Within(0.0001f));
             Assert.That(actual.a, Is.EqualTo(expected.a).Within(0.0001f));
+        }
+
+        private static Vector3 ToVector3(float3 value)
+        {
+            return new Vector3(value.x, value.y, value.z);
+        }
+
+        [BurstCompile]
+        private struct AppendAndPruneTrailJob : IJob
+        {
+            public VividParticleTrailTableView View;
+            public VividParticleTrailHandle Handle;
+
+            public void Execute()
+            {
+                View.AppendControlPoint(Handle, new float3(0.0f, 0.0f, 0.0f), 0.0f, 0.0f);
+                View.AppendControlPoint(Handle, new float3(1.0f, 0.0f, 0.0f), 1.0f, 0.0f);
+                View.AppendControlPoint(Handle, new float3(2.0f, 0.0f, 0.0f), 2.0f, 0.0f);
+                View.AppendControlPoint(Handle, new float3(3.0f, 0.0f, 0.0f), 3.0f, 0.0f);
+                View.PruneExpiredControlPoints(Handle, currentTime: 3.0f, lifetime: 1.5f);
+            }
         }
 
         [BurstCompile]

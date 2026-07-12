@@ -41,6 +41,8 @@ namespace VividRP.Runtime.ECS
 
     internal interface IVividEcsSparseTable
     {
+        int version { get; }
+
         bool Remove(int key);
 
         void Clear();
@@ -53,12 +55,15 @@ namespace VividRP.Runtime.ECS
         private readonly List<int> m_Sparse = new();
         private readonly List<int> m_DenseKeys = new();
         private readonly List<T> m_DenseValues = new();
+        private int m_Version = 1;
 
         public int count => m_DenseKeys.Count;
 
         public int sparseCapacity => m_Sparse.Count;
 
         public int denseCapacity => m_DenseValues.Capacity;
+
+        public int version => m_Version;
 
         public bool ContainsKey(int key)
         {
@@ -75,12 +80,14 @@ namespace VividRP.Runtime.ECS
             if (denseIndex >= 0)
             {
                 m_DenseValues[denseIndex] = value;
+                IncrementVersion();
                 return;
             }
 
             m_Sparse[key] = m_DenseKeys.Count;
             m_DenseKeys.Add(key);
             m_DenseValues.Add(value);
+            IncrementVersion();
         }
 
         public bool TryGetValue(int key, out T value)
@@ -112,6 +119,7 @@ namespace VividRP.Runtime.ECS
             m_DenseKeys.RemoveAt(lastDenseIndex);
             m_DenseValues.RemoveAt(lastDenseIndex);
             m_Sparse[key] = EmptyIndex;
+            IncrementVersion();
             return true;
         }
 
@@ -127,11 +135,20 @@ namespace VividRP.Runtime.ECS
 
         public void Clear()
         {
+            if (m_DenseKeys.Count == 0)
+                return;
+
             for (int index = 0; index < m_DenseKeys.Count; index++)
                 m_Sparse[m_DenseKeys[index]] = EmptyIndex;
 
             m_DenseKeys.Clear();
             m_DenseValues.Clear();
+            IncrementVersion();
+        }
+
+        private void IncrementVersion()
+        {
+            m_Version = m_Version == int.MaxValue ? 1 : m_Version + 1;
         }
 
         private bool TryGetDenseIndex(int key, out int denseIndex)
@@ -305,6 +322,28 @@ namespace VividRP.Runtime.ECS
             return TryGetLineAttachmentTable(out VividEcsSparseTable<T> table)
                 ? table.count
                 : 0;
+        }
+
+        public int GetLineAttachmentVersion<T>()
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            return TryGetLineAttachmentTable(out VividEcsSparseTable<T> table)
+                ? table.version
+                : 0;
+        }
+
+        internal bool TryGetLineAttachment<T>(int lineId, out T value)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            if (lineId >= 0
+                && TryGetLineAttachmentTable(out VividEcsSparseTable<T> table)
+                && table.TryGetValue(lineId, out value))
+            {
+                return true;
+            }
+
+            value = default;
+            return false;
         }
 
         public VividEcsPageGroup CreatePageGroup(VividEcsQuery query, Allocator allocator)
@@ -705,6 +744,8 @@ namespace VividRP.Runtime.ECS
 
         public int cachedMatchingLineCount => m_MatchingLines.Count;
 
+        internal IReadOnlyList<VividEcsArchetypeLine> cachedMatchingLines => m_MatchingLines;
+
         public int cacheRebuildCount => m_CacheRebuildCount;
 
         public int cacheHitCount => m_CacheHitCount;
@@ -1081,6 +1122,148 @@ namespace VividRP.Runtime.ECS
         {
             if (m_Disposed)
                 throw new ObjectDisposedException(nameof(VividEcsEntityCommandBuffer));
+        }
+    }
+
+    internal readonly struct VividEcsLineGroupAttachment<T>
+        where T : unmanaged, IVividEcsLineAttachmentData
+    {
+        public VividEcsLineGroupAttachment(int lineId, T value)
+        {
+            LineId = lineId;
+            Value = value;
+        }
+
+        public int LineId { get; }
+
+        public T Value { get; }
+    }
+
+    internal readonly struct VividEcsLineGroupAttachmentRange
+    {
+        public VividEcsLineGroupAttachmentRange(int groupIndex, int start, int count)
+        {
+            GroupIndex = groupIndex;
+            Start = start;
+            Count = count;
+        }
+
+        public int GroupIndex { get; }
+
+        public int Start { get; }
+
+        public int Count { get; }
+    }
+
+    internal sealed class VividEcsArchetypeLineGroupNativeAttachmentCache<T> : IDisposable
+        where T : unmanaged, IVividEcsLineAttachmentData
+    {
+        private readonly VividEcsWorld m_World;
+        private readonly VividEcsArchetypeLineGroupCache m_LineGroupCache;
+        private NativeList<VividEcsLineGroupAttachment<T>> m_Attachments;
+        private NativeList<VividEcsLineGroupAttachmentRange> m_Ranges;
+        private int m_CachedLineGroupBuildCount = -1;
+        private int m_CachedAttachmentVersion = -1;
+        private int m_CacheRebuildCount;
+        private int m_CacheHitCount;
+        private int m_LastSourceLineScanCount;
+
+        public VividEcsArchetypeLineGroupNativeAttachmentCache(
+            VividEcsWorld world,
+            VividEcsArchetypeLineGroupCache lineGroupCache,
+            Allocator allocator = Allocator.Persistent)
+        {
+            m_World = world ?? throw new ArgumentNullException(nameof(world));
+            m_LineGroupCache = lineGroupCache
+                ?? throw new ArgumentNullException(nameof(lineGroupCache));
+            m_Attachments = new NativeList<VividEcsLineGroupAttachment<T>>(allocator);
+            m_Ranges = new NativeList<VividEcsLineGroupAttachmentRange>(allocator);
+        }
+
+        public NativeArray<VividEcsLineGroupAttachment<T>> attachments =>
+            m_Attachments.IsCreated ? m_Attachments.AsArray() : default;
+
+        public NativeArray<VividEcsLineGroupAttachmentRange> ranges =>
+            m_Ranges.IsCreated ? m_Ranges.AsArray() : default;
+
+        public int groupCount => m_Ranges.IsCreated ? m_Ranges.Length : 0;
+
+        public int attachmentCount => m_Attachments.IsCreated ? m_Attachments.Length : 0;
+
+        public int cacheRebuildCount => m_CacheRebuildCount;
+
+        public int cacheHitCount => m_CacheHitCount;
+
+        public int lastSourceLineScanCount => m_LastSourceLineScanCount;
+
+        public bool Matches(
+            VividEcsWorld world,
+            VividEcsArchetypeLineGroupCache lineGroupCache)
+        {
+            return ReferenceEquals(m_World, world)
+                && ReferenceEquals(m_LineGroupCache, lineGroupCache);
+        }
+
+        public bool Prepare()
+        {
+            bool groupsRebuilt = m_LineGroupCache.Prepare();
+            return Prepare(groupsRebuilt);
+        }
+
+        public bool Prepare(bool groupsRebuilt)
+        {
+            int attachmentVersion = m_World.GetLineAttachmentVersion<T>();
+            if (!groupsRebuilt
+                && m_CachedLineGroupBuildCount == m_LineGroupCache.cacheRebuildCount
+                && m_CachedAttachmentVersion == attachmentVersion)
+            {
+                m_CacheHitCount++;
+                m_LastSourceLineScanCount = 0;
+                return false;
+            }
+
+            m_Attachments.Clear();
+            m_Ranges.Clear();
+            m_LastSourceLineScanCount = 0;
+            IReadOnlyList<VividEcsArchetypeLineGroup> groups = m_LineGroupCache.groups;
+            for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
+            {
+                VividEcsArchetypeLineGroup group = groups[groupIndex];
+                int start = m_Attachments.Length;
+                IReadOnlyList<VividEcsArchetypeLine> lines = group?.lines;
+                int lineCount = lines?.Count ?? 0;
+                m_LastSourceLineScanCount += lineCount;
+                for (int lineIndex = 0; lineIndex < lineCount; lineIndex++)
+                {
+                    VividEcsArchetypeLine line = lines[lineIndex];
+                    if (line != null && m_World.TryGetLineAttachment(line.ArchetypeLineId, out T value))
+                    {
+                        m_Attachments.Add(new VividEcsLineGroupAttachment<T>(
+                            line.ArchetypeLineId,
+                            value));
+                    }
+                }
+
+                m_Ranges.Add(new VividEcsLineGroupAttachmentRange(
+                    groupIndex,
+                    start,
+                    m_Attachments.Length - start));
+            }
+
+            m_CachedLineGroupBuildCount = m_LineGroupCache.cacheRebuildCount;
+            m_CachedAttachmentVersion = attachmentVersion;
+            m_CacheRebuildCount++;
+            return true;
+        }
+
+        public void Dispose()
+        {
+            if (m_Attachments.IsCreated)
+                m_Attachments.Dispose();
+            if (m_Ranges.IsCreated)
+                m_Ranges.Dispose();
+            m_Attachments = default;
+            m_Ranges = default;
         }
     }
 }

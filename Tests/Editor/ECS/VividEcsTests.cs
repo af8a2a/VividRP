@@ -77,6 +77,7 @@ namespace VividRP.Editor.Tests
         public void SparseTable_SetRemoveAndDenseAccess_UsesSwapBack()
         {
             var table = new VividEcsSparseTable<int>();
+            int initialVersion = table.version;
 
             table.Set(12, 120);
             table.Set(3, 30);
@@ -93,6 +94,7 @@ namespace VividRP.Editor.Tests
             Assert.That(table.ContainsKey(12), Is.False);
             Assert.That(table.GetKeyAtDenseIndex(0), Is.EqualTo(3));
             Assert.That(table.GetValueAtDenseIndex(0), Is.EqualTo(30));
+            Assert.That(table.version, Is.GreaterThan(initialVersion));
         }
 
         [Test]
@@ -325,6 +327,50 @@ namespace VividRP.Editor.Tests
             Assert.That(cache.cacheRebuildCount, Is.EqualTo(4));
             Assert.That(FindLineGroup(cache.groups, sharedOneKey), Is.SameAs(sharedOneGroup));
             Assert.That(sharedOneGroup.lineCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void World_LineGroupNativeAttachmentCache_InvalidatesOnlyForGroupsOrAttachments()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            VividEcsTypeIndex sharedIndex = VividEcsTypeManager.RegisterShared<TestShared>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine first = world.CreateArchetypeLine(8, dataIndex, sharedIndex);
+            VividEcsArchetypeLine second = world.CreateArchetypeLine(8, dataIndex, sharedIndex);
+            first.SetSharedComponent(new TestShared(1));
+            second.SetSharedComponent(new TestShared(1));
+            world.SetLineAttachment(first, new TestLineAttachment(10));
+            world.SetLineAttachment(second, new TestLineAttachment(20));
+
+            VividEcsQuery query = world.CreateQuery().WithAll(dataIndex);
+            var groupCache = new VividEcsArchetypeLineGroupCache(query, sharedIndex);
+            using var attachmentCache =
+                new VividEcsArchetypeLineGroupNativeAttachmentCache<TestLineAttachment>(
+                    world,
+                    groupCache);
+
+            Assert.That(attachmentCache.Prepare(), Is.True);
+            Assert.That(attachmentCache.groupCount, Is.EqualTo(1));
+            Assert.That(attachmentCache.attachmentCount, Is.EqualTo(2));
+            Assert.That(attachmentCache.ranges[0].Start, Is.EqualTo(0));
+            Assert.That(attachmentCache.ranges[0].Count, Is.EqualTo(2));
+            Assert.That(attachmentCache.attachments[0].LineId, Is.EqualTo(first.ArchetypeLineId));
+            Assert.That(attachmentCache.attachments[0].Value.Value, Is.EqualTo(10));
+
+            Assert.That(attachmentCache.Prepare(), Is.False);
+            Assert.That(attachmentCache.lastSourceLineScanCount, Is.EqualTo(0));
+
+            world.SetLineAttachment(first, new TestLineAttachment(30));
+
+            Assert.That(attachmentCache.Prepare(), Is.True);
+            Assert.That(groupCache.lastSourceLineScanCount, Is.EqualTo(0));
+            Assert.That(attachmentCache.lastSourceLineScanCount, Is.EqualTo(2));
+            Assert.That(attachmentCache.attachments[0].Value.Value, Is.EqualTo(30));
+
+            Assert.That(world.RemoveLineAttachment<TestLineAttachment>(second), Is.True);
+            Assert.That(attachmentCache.Prepare(), Is.True);
+            Assert.That(attachmentCache.attachmentCount, Is.EqualTo(1));
+            Assert.That(attachmentCache.ranges[0].Count, Is.EqualTo(1));
         }
 
         [Test]

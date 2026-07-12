@@ -82,6 +82,9 @@ namespace VividRP.Runtime.Particle
             VividParticleTextureSheetAnimationModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleLightsModule m_Lights = VividParticleLightsModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleRendererModule m_Renderer = VividParticleRendererModule.CreateDefault();
 
         public VividParticleMainModule main => m_Main ??= VividParticleMainModule.CreateDefault();
@@ -140,6 +143,9 @@ namespace VividRP.Runtime.Particle
         public VividParticleTextureSheetAnimationModule textureSheetAnimation =>
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
 
+        public VividParticleLightsModule lights =>
+            m_Lights ??= VividParticleLightsModule.CreateDefault();
+
         public VividParticleRendererModule rendererModule => m_Renderer ??= VividParticleRendererModule.CreateDefault();
 
         internal void CopyModulesTo(
@@ -163,6 +169,7 @@ namespace VividRP.Runtime.Particle
             VividParticleNoiseModule targetNoise,
             VividParticleCustomDataModule targetCustomData,
             VividParticleTextureSheetAnimationModule targetTextureSheetAnimation,
+            VividParticleLightsModule targetLights,
             VividParticleRendererModule targetRenderer)
         {
             targetMain?.CopyFrom(main);
@@ -185,6 +192,7 @@ namespace VividRP.Runtime.Particle
             targetNoise?.CopyFrom(noise);
             targetCustomData?.CopyFrom(customData);
             targetTextureSheetAnimation?.CopyFrom(textureSheetAnimation);
+            targetLights?.CopyFrom(lights);
             targetRenderer?.CopyFrom(rendererModule);
         }
 
@@ -215,6 +223,7 @@ namespace VividRP.Runtime.Particle
             noise.Validate();
             customData.Validate();
             textureSheetAnimation.Validate();
+            lights.Validate();
             rendererModule.Validate();
         }
     }

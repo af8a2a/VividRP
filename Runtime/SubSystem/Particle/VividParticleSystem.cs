@@ -94,6 +94,9 @@ namespace VividRP.Runtime.Particle
             VividParticleTextureSheetAnimationModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleLightsModule m_Lights = VividParticleLightsModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleRendererModule m_Renderer = VividParticleRendererModule.CreateDefault();
 
         private bool m_IsPlaying;
@@ -170,6 +173,9 @@ namespace VividRP.Runtime.Particle
 
         public VividParticleTextureSheetAnimationModule textureSheetAnimation =>
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
+
+        public VividParticleLightsModule lights =>
+            m_Lights ??= VividParticleLightsModule.CreateDefault();
 
         public VividParticleRendererModule rendererModule => m_Renderer ??= VividParticleRendererModule.CreateDefault();
 
@@ -471,6 +477,7 @@ namespace VividRP.Runtime.Particle
                 m_Noise,
                 m_CustomData,
                 m_TextureSheetAnimation,
+                m_Lights,
                 m_Renderer);
             ValidateModules();
             VividParticleSystemManager.NotifySettingsChanged(this);
@@ -570,6 +577,7 @@ namespace VividRP.Runtime.Particle
             m_Noise ??= VividParticleNoiseModule.CreateDefault();
             m_CustomData ??= VividParticleCustomDataModule.CreateDefault();
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
+            m_Lights ??= VividParticleLightsModule.CreateDefault();
             m_Renderer ??= VividParticleRendererModule.CreateDefault();
             BindModuleCallbacks();
         }
@@ -596,6 +604,7 @@ namespace VividRP.Runtime.Particle
             m_Noise.SetChangeCallback(OnSimulationModuleChanged);
             m_CustomData.SetChangeCallback(OnCustomDataModuleChanged);
             m_TextureSheetAnimation.SetChangeCallback(OnTextureSheetAnimationModuleChanged);
+            m_Lights.SetChangeCallback(OnLightsModuleChanged);
             m_Renderer.SetChangeCallback(OnRendererModuleChanged);
         }
 
@@ -668,6 +677,12 @@ namespace VividRP.Runtime.Particle
             RequestEditorRenderUpdate();
         }
 
+        private void OnLightsModuleChanged()
+        {
+            VividParticleSystemManager.NotifySettingsChanged(this);
+            RequestEditorRenderUpdate();
+        }
+
         private void ValidateModules()
         {
             main.Validate();
@@ -690,6 +705,7 @@ namespace VividRP.Runtime.Particle
             noise.Validate();
             customData.Validate();
             textureSheetAnimation.Validate();
+            lights.Validate();
             rendererModule.Validate();
         }
 

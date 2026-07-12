@@ -249,6 +249,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float3* AccumulatedRotations;
 
         [NativeDisableUnsafePtrRestriction]
+        public uint* RandomSeeds;
+
+        [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
 
         [NativeDisableUnsafePtrRestriction]
@@ -324,6 +327,9 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public float3* AccumulatedRotations;
+
+        [NativeDisableUnsafePtrRestriction]
+        public uint* RandomSeeds;
 
         [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
@@ -603,6 +609,7 @@ namespace VividRP.Runtime.Particle.ECS
         public NativeArray<float4> Colors;
         public NativeArray<float> Sizes;
         public NativeArray<int> MeshIndices;
+        public NativeArray<uint> RandomSeeds;
         public NativeArray<int> ActiveCountOutput;
 
         public void Execute()
@@ -640,6 +647,8 @@ namespace VividRP.Runtime.Particle.ECS
             Sizes[destinationIndex] = Sizes[sourceIndex];
             if (MeshIndices.IsCreated)
                 MeshIndices[destinationIndex] = MeshIndices[sourceIndex];
+            if (RandomSeeds.IsCreated)
+                RandomSeeds[destinationIndex] = RandomSeeds[sourceIndex];
         }
     }
 
@@ -2057,6 +2066,8 @@ namespace VividRP.Runtime.Particle.ECS
             work.MeshIndices[destinationIndex] = work.MeshIndices[sourceIndex];
             if (work.AccumulatedRotations != null)
                 work.AccumulatedRotations[destinationIndex] = work.AccumulatedRotations[sourceIndex];
+            if (work.RandomSeeds != null)
+                work.RandomSeeds[destinationIndex] = work.RandomSeeds[sourceIndex];
             if (work.NoisePhases != null)
                 work.NoisePhases[destinationIndex] = work.NoisePhases[sourceIndex];
             if (work.NoiseSizeMultipliers != null)
@@ -2128,6 +2139,11 @@ namespace VividRP.Runtime.Particle.ECS
                 work.MeshIndices[particleIndex] = ResolveMeshIndex(work, particleIndex);
                 if (work.AccumulatedRotations != null)
                     work.AccumulatedRotations[particleIndex] = float3.zero;
+                if (work.RandomSeeds != null)
+                {
+                    uint particleSeed = random.NextUInt();
+                    work.RandomSeeds[particleIndex] = particleSeed == 0u ? 1u : particleSeed;
+                }
                 if (work.NoisePhases != null)
                     work.NoisePhases[particleIndex] = random.NextFloat3(
                         new float3(-1024.0f),

@@ -224,6 +224,11 @@ namespace VividRP.Editor
             return serializedObject?.FindProperty("m_TextureSheetAnimation");
         }
 
+        internal static SerializedProperty FindLightsProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_Lights");
+        }
+
         internal static bool TryFindEmissionBurstsProperty(
             SerializedObject serializedObject,
             out SerializedProperty bursts)
@@ -331,6 +336,7 @@ namespace VividRP.Editor
             asset.trigger.CopyFrom(system.trigger);
             asset.velocityOverLifetime.CopyFrom(system.velocityOverLifetime);
             asset.inheritVelocity.CopyFrom(system.inheritVelocity);
+            asset.lifetimeByEmitterSpeed.CopyFrom(system.lifetimeByEmitterSpeed);
             asset.limitVelocityOverLifetime.CopyFrom(system.limitVelocityOverLifetime);
             asset.colorOverLifetime.CopyFrom(system.colorOverLifetime);
             asset.colorBySpeed.CopyFrom(system.colorBySpeed);
@@ -341,6 +347,7 @@ namespace VividRP.Editor
             asset.noise.CopyFrom(system.noise);
             asset.customData.CopyFrom(system.customData);
             asset.textureSheetAnimation.CopyFrom(system.textureSheetAnimation);
+            asset.lights.CopyFrom(system.lights);
             asset.rendererModule.CopyFrom(system.rendererModule);
             asset.Validate();
             EditorUtility.SetDirty(asset);
@@ -1129,6 +1136,7 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Texture Sheet Animation");
         private static readonly GUIContent s_CustomDataLabel =
             EditorGUIUtility.TrTextContent("Custom Data");
+        private static readonly GUIContent s_LightsLabel = EditorGUIUtility.TrTextContent("Lights");
         private static readonly GUIContent s_RendererLabel = EditorGUIUtility.TrTextContent("Renderer");
         private static readonly GUIContent s_DebugLabel = EditorGUIUtility.TrTextContent("Debug");
         private static readonly GUIContent s_DataLayoutLabel = EditorGUIUtility.TrTextContent("GPU Data Layout");
@@ -1146,6 +1154,10 @@ namespace VividRP.Editor
         private static readonly GUIContent s_PerformanceSummaryLabel =
             EditorGUIUtility.TrTextContent("Perf Summary");
         private static readonly GUIContent s_ParticleCountLabel = EditorGUIUtility.TrTextContent("Particle Count");
+        private static readonly GUIContent s_ParticleLightSourceCountLabel =
+            EditorGUIUtility.TrTextContent("Particle Light Sources");
+        private static readonly GUIContent s_ParticleLightCountLabel =
+            EditorGUIUtility.TrTextContent("Particle Light Capacity");
         private static readonly GUIContent s_TimeLabel = EditorGUIUtility.TrTextContent("Time");
         private static readonly GUIContent s_PageSizeLabel = EditorGUIUtility.TrTextContent("Page Size");
         private static readonly GUIContent s_StorageCapacityLabel = EditorGUIUtility.TrTextContent("Storage Capacity");
@@ -1254,6 +1266,18 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Handle Record Lookups");
         private static readonly GUIContent s_RendererManagedRecordFallbacksLabel =
             EditorGUIUtility.TrTextContent("Managed Record Fallbacks");
+        private static readonly GUIContent s_RendererRecordSlotFallbackScansLabel =
+            EditorGUIUtility.TrTextContent("Record Slot Fallback Scans");
+        private static readonly GUIContent s_RendererPendingRemovesLabel =
+            EditorGUIUtility.TrTextContent("Pending Renderer Removes");
+        private static readonly GUIContent s_RendererRemoveQueueEntriesLabel =
+            EditorGUIUtility.TrTextContent("Remove Queue Entries");
+        private static readonly GUIContent s_RendererProcessedRemovesLabel =
+            EditorGUIUtility.TrTextContent("Processed Removes");
+        private static readonly GUIContent s_RendererCanceledRemoveEntriesLabel =
+            EditorGUIUtility.TrTextContent("Canceled Remove Entries");
+        private static readonly GUIContent s_RendererStaleRemoveEntriesLabel =
+            EditorGUIUtility.TrTextContent("Stale Remove Entries");
         private static readonly GUIContent s_RendererHandleBindingWritesLabel =
             EditorGUIUtility.TrTextContent("Renderer Handle Binding Writes");
         private static readonly GUIContent s_RendererBatchSeedAttachmentLookupsLabel =
@@ -1277,6 +1301,10 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Culling Page Bounds Capacity");
         private static readonly GUIContent s_CullingRecordBuildWorksLabel =
             EditorGUIUtility.TrTextContent("Culling Record Build Works");
+        private static readonly GUIContent s_CullingCollectScheduledRecordsLabel =
+            EditorGUIUtility.TrTextContent("Culling Collect Scheduled Records");
+        private static readonly GUIContent s_CullingCollectValidRecordsLabel =
+            EditorGUIUtility.TrTextContent("Culling Collect Valid Records");
         private static readonly GUIContent s_PendingCullingRecordBuildLabel =
             EditorGUIUtility.TrTextContent("Pending Culling Record Build");
         private static readonly GUIContent s_DrawCommandsLabel = EditorGUIUtility.TrTextContent("Draw Commands");
@@ -1384,6 +1412,12 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("GPU Buffer Infos");
         private static readonly GUIContent s_RecordCopyDescriptorsLabel =
             EditorGUIUtility.TrTextContent("Record Copy Descriptors");
+        private static readonly GUIContent s_NativeRecordCopyDescriptorsLabel =
+            EditorGUIUtility.TrTextContent("Native Record Copy Descriptors");
+        private static readonly GUIContent s_NativeSharedValueInfosLabel =
+            EditorGUIUtility.TrTextContent("Native Shared Value Infos");
+        private static readonly GUIContent s_NativePerSharpValueInfosLabel =
+            EditorGUIUtility.TrTextContent("Native Per-Sharp Value Infos");
         private static readonly GUIContent s_SharedValueBufferInfosLabel =
             EditorGUIUtility.TrTextContent("Shared Value Buffer Infos");
         private static readonly GUIContent s_PerSharpBufferInfosLabel =
@@ -1411,6 +1445,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_AnimatedVelocityPageWorksLabel =
             EditorGUIUtility.TrTextContent("Animated Velocity Page Works");
         private static readonly GUIContent s_LastUploadCopyWorksLabel = EditorGUIUtility.TrTextContent("Upload Copy Works");
+        private static readonly GUIContent s_UploadCopyCollectWorksLabel =
+            EditorGUIUtility.TrTextContent("Burst Copy Collect Works");
         private static readonly GUIContent s_MergedUploadCopyWorksLabel =
             EditorGUIUtility.TrTextContent("Merged Copy Works");
         private static readonly GUIContent s_UploadCopySortsLabel =
@@ -1490,6 +1526,7 @@ namespace VividRP.Editor
         private SerializedProperty m_LifetimeByEmitterSpeed;
         private SerializedProperty m_LimitVelocityOverLifetime;
         private SerializedProperty m_TextureSheetAnimation;
+        private SerializedProperty m_Lights;
         private SerializedProperty m_Renderer;
         private bool m_MainExpanded = true;
         private bool m_EmissionExpanded = true;
@@ -1511,6 +1548,7 @@ namespace VividRP.Editor
         private bool m_LifetimeByEmitterSpeedExpanded;
         private bool m_LimitVelocityOverLifetimeExpanded;
         private bool m_TextureSheetAnimationExpanded;
+        private bool m_LightsExpanded;
         private bool m_RendererExpanded = true;
         private bool m_DebugExpanded = true;
         private int m_EmitCount = 1;
@@ -1556,6 +1594,7 @@ namespace VividRP.Editor
                 VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(serializedObject);
             m_TextureSheetAnimation =
                 VividParticleSystemEditorUtility.FindTextureSheetAnimationProperty(serializedObject);
+            m_Lights = VividParticleSystemEditorUtility.FindLightsProperty(serializedObject);
         }
 
         public override void OnInspectorGUI()
@@ -1631,6 +1670,7 @@ namespace VividRP.Editor
                 s_TextureSheetAnimationLabel,
                 ref m_TextureSheetAnimationExpanded,
                 () => DrawTextureSheetAnimationModule(m_TextureSheetAnimation));
+            DrawModule(s_LightsLabel, ref m_LightsExpanded, () => DrawLightsModule(m_Lights));
             DrawModule(s_RendererLabel, ref m_RendererExpanded, () => DrawRendererModule(m_Renderer));
             DrawFooterInspector();
 
@@ -1724,6 +1764,12 @@ namespace VividRP.Editor
             using (new EditorGUI.DisabledScope(true))
             {
                 EditorGUILayout.IntField(s_ParticleCountLabel, runtimeStats.ParticleCount);
+                EditorGUILayout.IntField(
+                    s_ParticleLightSourceCountLabel,
+                    VividParticleSystemManager.particleLightSourceCountForTests);
+                EditorGUILayout.IntField(
+                    s_ParticleLightCountLabel,
+                    VividParticleSystemManager.particleLightEstimatedCount);
                 EditorGUILayout.FloatField(s_TimeLabel, runtimeStats.Time);
                 EditorGUILayout.IntField(s_PageSizeLabel, runtimeStats.PageSize);
                 EditorGUILayout.IntField(s_StorageCapacityLabel, runtimeStats.StorageCapacity);
@@ -1880,6 +1926,24 @@ namespace VividRP.Editor
                     s_RendererManagedRecordFallbacksLabel,
                     VividParticleSystemManager.lastRendererManagedRecordFallbackCount);
                 EditorGUILayout.IntField(
+                    s_RendererRecordSlotFallbackScansLabel,
+                    VividParticleSystemManager.lastRendererRecordSlotFallbackScanCount);
+                EditorGUILayout.IntField(
+                    s_RendererPendingRemovesLabel,
+                    VividParticleSystemManager.pendingRendererRemoveCount);
+                EditorGUILayout.IntField(
+                    s_RendererRemoveQueueEntriesLabel,
+                    VividParticleSystemManager.lastRendererRemoveQueueEntryCount);
+                EditorGUILayout.IntField(
+                    s_RendererProcessedRemovesLabel,
+                    VividParticleSystemManager.lastRendererProcessedRemoveCount);
+                EditorGUILayout.IntField(
+                    s_RendererCanceledRemoveEntriesLabel,
+                    VividParticleSystemManager.lastRendererCanceledRemoveEntryCount);
+                EditorGUILayout.IntField(
+                    s_RendererStaleRemoveEntriesLabel,
+                    VividParticleSystemManager.lastRendererStaleRemoveEntryCount);
+                EditorGUILayout.IntField(
                     s_RendererHandleBindingWritesLabel,
                     VividParticleSystemManager.lastRendererHandleBindingWriteCount);
                 EditorGUILayout.IntField(
@@ -1909,6 +1973,12 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_CullingRecordBuildWorksLabel,
                     rendererStats.LastCullingRecordBuildWorkCount);
+                EditorGUILayout.IntField(
+                    s_CullingCollectScheduledRecordsLabel,
+                    VividParticleSystemManager.lastRendererCullingCollectScheduledRecordCount);
+                EditorGUILayout.IntField(
+                    s_CullingCollectValidRecordsLabel,
+                    VividParticleSystemManager.lastRendererCullingCollectValidRecordCount);
                 EditorGUILayout.Toggle(
                     s_PendingCullingRecordBuildLabel,
                     rendererStats.HasPendingCullingRecordBuild);
@@ -2042,6 +2112,15 @@ namespace VividRP.Editor
                     VividParticleSystemManager.SizeOfFloat3);
                 EditorGUILayout.IntField(s_GpuBufferInfosLabel, rendererStats.LastGpuBufferInfoCount);
                 EditorGUILayout.IntField(s_RecordCopyDescriptorsLabel, rendererStats.LastRecordCopyDescriptorCount);
+                EditorGUILayout.IntField(
+                    s_NativeRecordCopyDescriptorsLabel,
+                    VividParticleSystemManager.rendererNativeRecordCopyDescriptorCount);
+                EditorGUILayout.IntField(
+                    s_NativeSharedValueInfosLabel,
+                    VividParticleSystemManager.rendererNativeSharedValueBufferInfoCount);
+                EditorGUILayout.IntField(
+                    s_NativePerSharpValueInfosLabel,
+                    VividParticleSystemManager.rendererNativePerSharpValueBufferInfoCount);
                 EditorGUILayout.IntField(s_SharedValueBufferInfosLabel, rendererStats.LastSharedValueBufferInfoCount);
                 EditorGUILayout.IntField(s_PerSharpBufferInfosLabel, rendererStats.LastPerSharpValueBufferInfoCount);
                 EditorGUILayout.IntField(s_TransformUploadPageWorksLabel, rendererStats.LastTransformUploadPageWorkCount);
@@ -2064,6 +2143,9 @@ namespace VividRP.Editor
                     s_AnimatedVelocityPageWorksLabel,
                     VividParticleSystemManager.lastAnimatedVelocityPageWorkCount);
                 EditorGUILayout.IntField(s_LastUploadCopyWorksLabel, rendererStats.LastUploadCopyWorkCount);
+                EditorGUILayout.IntField(
+                    s_UploadCopyCollectWorksLabel,
+                    VividParticleSystemManager.lastRendererUploadCopyCollectWorkCount);
                 EditorGUILayout.IntField(s_MergedUploadCopyWorksLabel, rendererStats.LastMergedUploadCopyWorkCount);
                 EditorGUILayout.IntField(s_UploadCopySortsLabel, rendererStats.LastUploadCopySortCount);
                 EditorGUILayout.TextField(
@@ -2619,6 +2701,39 @@ namespace VividRP.Editor
                         == VividParticleTextureSheetAnimationType.SingleRow)
                 {
                     DrawRelative(module, "m_RowIndex");
+                }
+            }
+        }
+
+        private static void DrawLightsModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            EditorGUILayout.PropertyField(enabled);
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                DrawRelative(module, "m_Light");
+                DrawRelative(module, "m_Ratio");
+                DrawRelative(module, "m_UseRandomDistribution");
+                DrawRelative(module, "m_UseParticleColor");
+                DrawRelative(module, "m_SizeAffectsRange");
+                DrawRelative(module, "m_AlphaAffectsIntensity");
+                DrawRelative(module, "m_Range");
+                DrawRelative(module, "m_RangeMultiplier");
+                DrawRelative(module, "m_Intensity");
+                DrawRelative(module, "m_IntensityMultiplier");
+                DrawRelative(module, "m_MaxLights");
+
+                SerializedProperty light = VividParticleSystemEditorUtility.FindRelative(module, "m_Light");
+                if (light != null && light.objectReferenceValue is Light template
+                    && template.type is not (LightType.Point or LightType.Spot))
+                {
+                    EditorGUILayout.HelpBox(
+                        "Particle lights support Point and Spot light templates.",
+                        MessageType.Warning);
                 }
             }
         }

@@ -39,7 +39,14 @@ namespace VividRP.Runtime.ECS
         }
     }
 
-    internal sealed class VividEcsSparseTable<T>
+    internal interface IVividEcsSparseTable
+    {
+        bool Remove(int key);
+
+        void Clear();
+    }
+
+    internal sealed class VividEcsSparseTable<T> : IVividEcsSparseTable
     {
         private const int EmptyIndex = -1;
 
@@ -152,6 +159,7 @@ namespace VividRP.Runtime.ECS
     {
         private readonly List<VividEcsArchetypeLine> m_Lines = new();
         private readonly VividEcsSparseTable<EntityRecord> m_Entities = new();
+        private readonly Dictionary<Type, IVividEcsSparseTable> m_LineAttachments = new();
         private readonly VividEcsTileAllocator m_TileAllocator = new();
         private readonly Dictionary<VividEcsTypeIndex, int> m_SharedComponentVersions = new();
         private int m_NextLineId;
@@ -197,6 +205,7 @@ namespace VividRP.Runtime.ECS
             }
 
             m_Lines.RemoveAt(index);
+            RemoveAllLineAttachments(line.ArchetypeLineId);
             line.Dispose();
             IncrementQueryStructureVersion();
             return true;
@@ -257,6 +266,45 @@ namespace VividRP.Runtime.ECS
         public VividEcsQuery CreateQuery()
         {
             return new VividEcsQuery(this);
+        }
+
+        public void SetLineAttachment<T>(VividEcsArchetypeLine line, T value)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            if (line == null)
+                throw new ArgumentNullException(nameof(line));
+
+            GetOrCreateLineAttachmentTable<T>().Set(line.ArchetypeLineId, value);
+        }
+
+        public bool TryGetLineAttachment<T>(VividEcsArchetypeLine line, out T value)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            if (line != null
+                && TryGetLineAttachmentTable(out VividEcsSparseTable<T> table)
+                && table.TryGetValue(line.ArchetypeLineId, out value))
+            {
+                return true;
+            }
+
+            value = default;
+            return false;
+        }
+
+        public bool RemoveLineAttachment<T>(VividEcsArchetypeLine line)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            return line != null
+                && TryGetLineAttachmentTable(out VividEcsSparseTable<T> table)
+                && table.Remove(line.ArchetypeLineId);
+        }
+
+        public int GetLineAttachmentCount<T>()
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            return TryGetLineAttachmentTable(out VividEcsSparseTable<T> table)
+                ? table.count
+                : 0;
         }
 
         public VividEcsPageGroup CreatePageGroup(VividEcsQuery query, Allocator allocator)
@@ -472,11 +520,45 @@ namespace VividRP.Runtime.ECS
 
             m_Lines.Clear();
             m_Entities.Clear();
+            foreach (IVividEcsSparseTable table in m_LineAttachments.Values)
+                table.Clear();
+            m_LineAttachments.Clear();
             m_TileAllocator.Clear();
             m_SharedComponentVersions.Clear();
             m_NextLineId = 0;
             m_NextEntityId = 0;
             IncrementQueryStructureVersion();
+        }
+
+        private VividEcsSparseTable<T> GetOrCreateLineAttachmentTable<T>()
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            Type type = typeof(T);
+            if (m_LineAttachments.TryGetValue(type, out IVividEcsSparseTable existing))
+                return (VividEcsSparseTable<T>)existing;
+
+            var table = new VividEcsSparseTable<T>();
+            m_LineAttachments.Add(type, table);
+            return table;
+        }
+
+        private bool TryGetLineAttachmentTable<T>(out VividEcsSparseTable<T> table)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            if (m_LineAttachments.TryGetValue(typeof(T), out IVividEcsSparseTable existing))
+            {
+                table = (VividEcsSparseTable<T>)existing;
+                return true;
+            }
+
+            table = null;
+            return false;
+        }
+
+        private void RemoveAllLineAttachments(int lineId)
+        {
+            foreach (IVividEcsSparseTable table in m_LineAttachments.Values)
+                table.Remove(lineId);
         }
 
         internal IReadOnlyList<VividEcsArchetypeLine> querySourceLines => m_Lines;

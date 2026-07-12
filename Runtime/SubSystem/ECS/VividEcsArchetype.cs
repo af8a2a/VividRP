@@ -330,6 +330,29 @@ namespace VividRP.Runtime.ECS
             return Count == 0 ? 0 : Hash;
         }
 
+        public bool TryGet<T>(out T value)
+            where T : struct, IVividEcsSharedComponentData
+        {
+            VividEcsTypeIndex typeIndex = VividEcsTypeManager.GetTypeIndex<T>();
+            if (!typeIndex.IsValid)
+            {
+                value = default;
+                return false;
+            }
+
+            for (int index = 0; index < Count; index++)
+            {
+                if (GetTypeAt(index) == typeIndex && GetValueAt(index) is T typedValue)
+                {
+                    value = typedValue;
+                    return true;
+                }
+            }
+
+            value = default;
+            return false;
+        }
+
         private VividEcsTypeIndex GetTypeAt(int index)
         {
             if (Count == 1)
@@ -400,6 +423,9 @@ namespace VividRP.Runtime.ECS
         public bool TryGetSharedComponent<T>(out T value)
             where T : struct, IVividEcsSharedComponentData
         {
+            if (SharedKey.TryGet(out value))
+                return true;
+
             for (int index = 0; index < m_Lines.Count; index++)
             {
                 VividEcsArchetypeLine line = m_Lines[index];

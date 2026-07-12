@@ -989,6 +989,9 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.lastInvalidActiveRendererQueryLineCount, Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.lastRendererHandleRecordLookupCount, Is.EqualTo(1));
             Assert.That(VividParticleSystemManager.lastRendererManagedRecordFallbackCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.lastRendererHandleBindingWriteCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.lastRendererCombinedUpdateBoundsLineCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.lastRendererFallbackBoundsRecordScanCount, Is.EqualTo(0));
             Assert.That(
                 VividParticleSystemManager.GetRendererStatsForTests().RenderRecordCount,
                 Is.EqualTo(1));
@@ -1000,6 +1003,8 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.activeRendererSystemCountForTests, Is.EqualTo(1));
             Assert.That(VividParticleSystemManager.lastRendererHandleRecordLookupCount, Is.EqualTo(1));
             Assert.That(VividParticleSystemManager.lastRendererManagedRecordFallbackCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.lastRendererCombinedUpdateBoundsLineCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.lastRendererFallbackBoundsRecordScanCount, Is.EqualTo(1));
             Assert.That(
                 VividParticleSystemManager.GetRendererStatsForTests().RenderRecordCount,
                 Is.EqualTo(1));
@@ -1012,6 +1017,8 @@ namespace VividRP.Editor.Tests
             Assert.That(VividParticleSystemManager.lastInvalidActiveRendererQueryLineCount, Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.lastRendererHandleRecordLookupCount, Is.EqualTo(0));
             Assert.That(VividParticleSystemManager.lastRendererManagedRecordFallbackCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.lastRendererCombinedUpdateBoundsLineCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.lastRendererFallbackBoundsRecordScanCount, Is.EqualTo(0));
             Assert.That(
                 VividParticleSystemManager.GetRendererStatsForTests().RenderRecordCount,
                 Is.EqualTo(0));
@@ -4200,6 +4207,12 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.DrawBatchPoolCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCreatedDrawBatchCount, Is.EqualTo(1));
             Assert.That(rendererStats.LastReusedDrawBatchCount, Is.EqualTo(0));
+            Assert.That(
+                VividParticleSystemManager.lastRendererBatchSeedAttachmentLookupCount,
+                Is.EqualTo(1));
+            Assert.That(
+                VividParticleSystemManager.lastRendererManagedBatchSeedFallbackCount,
+                Is.EqualTo(0));
 
             system.rendererModule.renderingLayerMask = 0x2u;
             VividParticleSystemManager.RunRendererUpdateForTests();
@@ -4221,6 +4234,12 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.DrawBatchPoolCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastCreatedDrawBatchCount, Is.EqualTo(0));
             Assert.That(rendererStats.LastReusedDrawBatchCount, Is.EqualTo(1));
+            Assert.That(
+                VividParticleSystemManager.lastRendererBatchSeedAttachmentLookupCount,
+                Is.EqualTo(1));
+            Assert.That(
+                VividParticleSystemManager.lastRendererManagedBatchSeedFallbackCount,
+                Is.EqualTo(0));
         }
 
         [Test]
@@ -4526,6 +4545,12 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererStats.EcsMatchedLineCount, Is.EqualTo(2));
             Assert.That(rendererStats.EcsSkippedLineCount, Is.EqualTo(0));
             Assert.That(rendererStats.DrawBatchCount, Is.EqualTo(2));
+            Assert.That(
+                VividParticleSystemManager.lastRendererBatchSeedAttachmentLookupCount,
+                Is.EqualTo(2));
+            Assert.That(
+                VividParticleSystemManager.lastRendererManagedBatchSeedFallbackCount,
+                Is.EqualTo(0));
         }
 
         [Test]
@@ -5959,6 +5984,8 @@ namespace VividRP.Editor.Tests
             Assert.That(cleanCompletedBoundsVersion, Is.EqualTo(cleanBoundsVersion));
             Assert.That(cleanStats.LastBoundsPageWorkCount, Is.EqualTo(0));
             Assert.That(cleanStats.LastBoundsRecordWorkCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.lastRendererCombinedUpdateBoundsLineCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.lastRendererFallbackBoundsRecordScanCount, Is.EqualTo(0));
 
             system.transform.position = new Vector3(4.0f, 5.0f, 6.0f);
             VividParticleSystemManager.RunRendererUpdateForTests();
@@ -5966,6 +5993,8 @@ namespace VividRP.Editor.Tests
                 VividParticleSystemManager.GetRendererStatsForTests();
             Assert.That(movedStats.LastBoundsPageWorkCount, Is.EqualTo(2));
             Assert.That(movedStats.LastBoundsRecordWorkCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.lastRendererCombinedUpdateBoundsLineCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.lastRendererFallbackBoundsRecordScanCount, Is.EqualTo(0));
             Assert.That(
                 VividParticleSystemManager.TryGetRendererNativeBoundsCache(
                     system,

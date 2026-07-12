@@ -1254,6 +1254,16 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Handle Record Lookups");
         private static readonly GUIContent s_RendererManagedRecordFallbacksLabel =
             EditorGUIUtility.TrTextContent("Managed Record Fallbacks");
+        private static readonly GUIContent s_RendererHandleBindingWritesLabel =
+            EditorGUIUtility.TrTextContent("Renderer Handle Binding Writes");
+        private static readonly GUIContent s_RendererBatchSeedAttachmentLookupsLabel =
+            EditorGUIUtility.TrTextContent("Batch Seed Attachment Lookups");
+        private static readonly GUIContent s_RendererManagedBatchSeedFallbacksLabel =
+            EditorGUIUtility.TrTextContent("Managed Batch Seed Fallbacks");
+        private static readonly GUIContent s_CombinedUpdateBoundsLinesLabel =
+            EditorGUIUtility.TrTextContent("Combined Update/Bounds Lines");
+        private static readonly GUIContent s_FallbackBoundsRecordScansLabel =
+            EditorGUIUtility.TrTextContent("Fallback Bounds Record Scans");
         private static readonly GUIContent s_RendererRecordRefsLabel =
             EditorGUIUtility.TrTextContent("Native Renderer Record Refs");
         private static readonly GUIContent s_InvalidRendererRecordRefsLabel =
@@ -1869,6 +1879,21 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_RendererManagedRecordFallbacksLabel,
                     VividParticleSystemManager.lastRendererManagedRecordFallbackCount);
+                EditorGUILayout.IntField(
+                    s_RendererHandleBindingWritesLabel,
+                    VividParticleSystemManager.lastRendererHandleBindingWriteCount);
+                EditorGUILayout.IntField(
+                    s_RendererBatchSeedAttachmentLookupsLabel,
+                    VividParticleSystemManager.lastRendererBatchSeedAttachmentLookupCount);
+                EditorGUILayout.IntField(
+                    s_RendererManagedBatchSeedFallbacksLabel,
+                    VividParticleSystemManager.lastRendererManagedBatchSeedFallbackCount);
+                EditorGUILayout.IntField(
+                    s_CombinedUpdateBoundsLinesLabel,
+                    VividParticleSystemManager.lastRendererCombinedUpdateBoundsLineCount);
+                EditorGUILayout.IntField(
+                    s_FallbackBoundsRecordScansLabel,
+                    VividParticleSystemManager.lastRendererFallbackBoundsRecordScanCount);
                 EditorGUILayout.IntField(s_RendererRecordRefsLabel, rendererStats.RendererRecordRefCount);
                 EditorGUILayout.IntField(
                     s_InvalidRendererRecordRefsLabel,

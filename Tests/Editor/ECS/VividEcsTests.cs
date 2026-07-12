@@ -96,6 +96,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void World_LineAttachments_UseSparseLineBindings_WithoutInvalidatingQueries()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            using var world = new VividEcsWorld();
+            VividEcsArchetypeLine line = world.CreateArchetypeLine(4, dataIndex);
+            world.CreateEntity(line);
+            VividEcsQuery query = world.CreateQuery().WithAll(dataIndex);
+
+            Assert.That(query.PrepareMatchingLines(), Is.EqualTo(1));
+            int cacheRevision = query.cacheRevision;
+
+            world.SetLineAttachment(line, new TestLineAttachment(7));
+            Assert.That(world.TryGetLineAttachment(line, out TestLineAttachment first), Is.True);
+            Assert.That(first.Value, Is.EqualTo(7));
+            Assert.That(world.GetLineAttachmentCount<TestLineAttachment>(), Is.EqualTo(1));
+            Assert.That(query.PrepareMatchingLines(), Is.EqualTo(1));
+            Assert.That(query.cacheRevision, Is.EqualTo(cacheRevision));
+            Assert.That(query.lastSourceScanCount, Is.EqualTo(0));
+
+            world.SetLineAttachment(line, new TestLineAttachment(11));
+            Assert.That(world.TryGetLineAttachment(line, out TestLineAttachment replaced), Is.True);
+            Assert.That(replaced.Value, Is.EqualTo(11));
+            Assert.That(world.GetLineAttachmentCount<TestLineAttachment>(), Is.EqualTo(1));
+
+            Assert.That(world.DestroyArchetypeLine(line), Is.True);
+            Assert.That(world.GetLineAttachmentCount<TestLineAttachment>(), Is.EqualTo(0));
+        }
+
+        [Test]
         public void ArchetypeLine_AppendsAcrossPages_AndCompactsWithKeepMask()
         {
             VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
@@ -397,6 +426,11 @@ namespace VividRP.Editor.Tests
 
             Assert.That(inlineKey.Equals(arrayKey), Is.True);
             Assert.That(inlineKey.GetHashCode(), Is.EqualTo(arrayKey.GetHashCode()));
+            Assert.That(inlineKey.TryGet(out TestShared inlineValue), Is.True);
+            Assert.That(inlineValue, Is.EqualTo(new TestShared(7)));
+            Assert.That(arrayKey.TryGet(out TestShared arrayValue), Is.True);
+            Assert.That(arrayValue, Is.EqualTo(new TestShared(7)));
+            Assert.That(defaultEmptyKey.TryGet(out TestShared _), Is.False);
             Assert.That(defaultEmptyKey.Equals(emptyArrayKey), Is.True);
             Assert.That(defaultEmptyKey.GetHashCode(), Is.EqualTo(emptyArrayKey.GetHashCode()));
             Assert.That(dictionary, Has.Count.EqualTo(1));
@@ -847,6 +881,16 @@ namespace VividRP.Editor.Tests
         private readonly struct TestSharedB : IVividEcsSharedComponentData
         {
             public TestSharedB(int value)
+            {
+                Value = value;
+            }
+
+            public readonly int Value;
+        }
+
+        private readonly struct TestLineAttachment : IVividEcsLineAttachmentData
+        {
+            public TestLineAttachment(int value)
             {
                 Value = value;
             }

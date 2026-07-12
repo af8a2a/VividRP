@@ -28,7 +28,6 @@ namespace VividRP.Editor.Tests
             VividEcsTypeIndex renderKernelKeyIndex =
                 VividEcsTypeManager.GetTypeIndex<VividParticleRenderKernelSharedKey>();
             VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
-            VividEcsTypeIndex rendererHandleIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererHandle>();
             VividEcsTypeIndex simulationActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
             VividEcsTypeIndex rendererActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
             VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
@@ -46,7 +45,9 @@ namespace VividRP.Editor.Tests
             Assert.That(simulationKernelKeyIndex.IsValid, Is.True);
             Assert.That(renderKernelKeyIndex.IsValid, Is.True);
             Assert.That(rendererKeyIndex.IsValid, Is.True);
-            Assert.That(rendererHandleIndex.IsValid, Is.True);
+            Assert.That(
+                typeof(IVividEcsSharedComponentData).IsAssignableFrom(typeof(VividParticleRendererHandle)),
+                Is.False);
             Assert.That(simulationActiveIndex.IsValid, Is.True);
             Assert.That(rendererActiveIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
@@ -55,7 +56,6 @@ namespace VividRP.Editor.Tests
             Assert.That(simulationKernelKeyIndex.IsSharedComponentType, Is.True);
             Assert.That(renderKernelKeyIndex.IsSharedComponentType, Is.True);
             Assert.That(rendererKeyIndex.IsSharedComponentType, Is.True);
-            Assert.That(rendererHandleIndex.IsSharedComponentType, Is.True);
             Assert.That(simulationActiveIndex.IsTagComponentType, Is.True);
             Assert.That(rendererActiveIndex.IsTagComponentType, Is.True);
             Assert.That(VividEcsTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
@@ -239,8 +239,10 @@ namespace VividRP.Editor.Tests
             storage.rendererSharedKey = rendererKey;
             var rendererHandle = new VividParticleRendererHandle(recordSlot: 7, recordVersion: 3);
             Assert.That(storage.rendererHandle, Is.EqualTo(VividParticleRendererHandle.Invalid));
+            Assert.That(storage.hasRendererHandleBinding, Is.False);
             Assert.That(storage.rendererActive, Is.False);
             storage.rendererActive = true;
+            storage.rendererHandle = rendererHandle;
             storage.rendererHandle = rendererHandle;
             storage.EnsureCapacity(4);
             Assert.That(AddParticle(storage, 0), Is.True);
@@ -271,9 +273,13 @@ namespace VividRP.Editor.Tests
                     | VividParticleModuleFlags.Noise
                     | VividParticleModuleFlags.TextureSheetAnimation));
             Assert.That(storage.rendererHandle, Is.EqualTo(rendererHandle));
+            Assert.That(storage.rendererHandleBindingWriteCount, Is.EqualTo(1));
+            Assert.That(storage.hasRendererHandleBinding, Is.True);
             Assert.That(storage.rendererActive, Is.True);
             storage.rendererHandle = VividParticleRendererHandle.Invalid;
             Assert.That(storage.rendererHandle, Is.EqualTo(VividParticleRendererHandle.Invalid));
+            Assert.That(storage.rendererHandleBindingWriteCount, Is.EqualTo(2));
+            Assert.That(storage.hasRendererHandleBinding, Is.False);
             Assert.That(storage.rendererActive, Is.True);
             storage.rendererActive = false;
             Assert.That(storage.rendererActive, Is.False);

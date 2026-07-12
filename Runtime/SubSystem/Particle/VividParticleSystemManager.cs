@@ -203,6 +203,21 @@ namespace VividRP.Runtime.Particle
         internal static int lastRendererManagedRecordFallbackCount =>
             s_RendererManager.lastManagedRecordFallbackCount;
 
+        internal static int lastRendererHandleBindingWriteCount =>
+            s_RendererManager.lastHandleBindingWriteCount;
+
+        internal static int lastRendererBatchSeedAttachmentLookupCount =>
+            s_RendererManager.lastBatchSeedAttachmentLookupCount;
+
+        internal static int lastRendererManagedBatchSeedFallbackCount =>
+            s_RendererManager.lastManagedBatchSeedFallbackCount;
+
+        internal static int lastRendererCombinedUpdateBoundsLineCount =>
+            s_RendererManager.lastCombinedUpdateBoundsLineCount;
+
+        internal static int lastRendererFallbackBoundsRecordScanCount =>
+            s_RendererManager.lastFallbackBoundsRecordScanCount;
+
         internal static int activeSimulationSystemCountForTests => CountActiveSimulationStatesFromEcs();
 
         internal static int lastActiveSimulationQueryLineCount => s_LastActiveSimulationQueryLineCount;
@@ -3319,7 +3334,6 @@ namespace VividRP.Runtime.Particle
             s_RendererManager.CompletePendingUpload();
             CompletePendingSimulations();
             VividEcsQuery activeRendererQuery = GetOrCreateActiveRendererLineQuery();
-            s_RendererManager.SchedulePostSimulationBoundsUpdates(activeRendererQuery);
 
             using (s_BRGUploadUpdateAllMarker.Auto())
             {
@@ -4910,9 +4924,14 @@ namespace VividRP.Runtime.Particle
                 m_Storage.renderKernelSharedKey = new VividParticleRenderKernelSharedKey(flags);
             }
 
-            internal void SetRendererHandle(VividParticleRendererHandle rendererHandle)
+            internal bool SetRendererHandle(VividParticleRendererHandle rendererHandle)
             {
-                m_Storage.rendererHandle = rendererHandle;
+                return m_Storage.SetRendererHandle(rendererHandle);
+            }
+
+            internal void SetRendererBatchSeed(ParticleRendererBatchSeed seed)
+            {
+                m_Storage.SetLineAttachment(seed);
             }
 
             private VividParticleGpuDataLayout GetGpuDataLayout(VividParticleGpuDataLayoutDescriptor descriptor)
@@ -9237,6 +9256,54 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        private readonly struct ParticleRendererBatchSeed : IVividEcsLineAttachmentData
+        {
+            public ParticleRendererBatchSeed(ParticleRenderEntry entry)
+            {
+                Material = entry.Material;
+                Mesh = entry.Mesh;
+                Meshes = entry.Meshes ?? Array.Empty<Mesh>();
+                MeshCount = Mathf.Clamp(entry.MeshCount, 0, Meshes.Length);
+                RenderMode = entry.RenderMode;
+                GpuLayout = entry.GpuLayout;
+                ShadowCastingMode = entry.ShadowCastingMode;
+                MotionMode = entry.MotionMode;
+                ReceiveShadows = entry.ReceiveShadows;
+                StaticShadowCaster = entry.StaticShadowCaster;
+                SortingPriority = entry.SortingPriority;
+                BatchLayer = entry.BatchLayer;
+            }
+
+            public ParticleRendererBatchSeed(ParticleRenderRecord record)
+            {
+                Material = record.Material;
+                Mesh = record.Mesh;
+                Meshes = record.Meshes ?? Array.Empty<Mesh>();
+                MeshCount = Mathf.Clamp(record.MeshCount, 0, Meshes.Length);
+                RenderMode = record.RenderMode;
+                GpuLayout = record.GpuLayout;
+                ShadowCastingMode = record.ShadowCastingMode;
+                MotionMode = record.MotionMode;
+                ReceiveShadows = record.ReceiveShadows;
+                StaticShadowCaster = record.StaticShadowCaster;
+                SortingPriority = record.SortingPriority;
+                BatchLayer = record.BatchLayer;
+            }
+
+            public readonly Material Material;
+            public readonly Mesh Mesh;
+            public readonly Mesh[] Meshes;
+            public readonly int MeshCount;
+            public readonly VividParticleRenderMode RenderMode;
+            public readonly VividParticleGpuDataLayout GpuLayout;
+            public readonly ShadowCastingMode ShadowCastingMode;
+            public readonly MotionVectorGenerationMode MotionMode;
+            public readonly bool ReceiveShadows;
+            public readonly bool StaticShadowCaster;
+            public readonly int SortingPriority;
+            public readonly int BatchLayer;
+        }
+
         private sealed class ParticleRenderRecord
         {
             public ParticleSystemState State;
@@ -9491,6 +9558,7 @@ namespace VividRP.Runtime.Particle
             public int SimulationSpace;
             public int IsEditorSelected;
             public int RenderMode;
+            public VividParticleRendererSharedKey RendererSharedKey;
             public int RendererPriority;
             public int BatchLayer;
             public int ShadowCastingMode;
@@ -10469,6 +10537,8 @@ namespace VividRP.Runtime.Particle
             private const int SharedDataWorkKindSpan = 2;
 
             private static readonly ProfilerMarker s_UpdateRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.UpdateRecords");
+            private static readonly ProfilerMarker s_UpdateRecordsAndBoundsMarker =
+                new("VividRP.Particle.Manager.BRGUpload.UpdateRecordsAndBounds");
             private static readonly ProfilerMarker s_RemoveRecordsMarker = new("VividRP.Particle.Manager.BRGUpload.RemoveRecords");
             private static readonly ProfilerMarker s_CommitMarker = new("VividRP.Particle.Manager.Commit");
             private static readonly ProfilerMarker s_BoundsCollectMarker = new("VividRP.Particle.Manager.Bounds.Collect");
@@ -10608,6 +10678,7 @@ namespace VividRP.Runtime.Particle
             private bool m_HasPendingUpload;
             private bool m_HasPendingUploadPageBuild;
             private bool m_HasPendingBounds;
+            private bool m_HasCollectedBoundsForManagerGraph;
             private bool m_LayoutDirty = true;
             private bool m_ForceFullUpload;
             private bool m_AnyShadowCastingBatch;
@@ -10676,6 +10747,8 @@ namespace VividRP.Runtime.Particle
             private int m_LastEcsRendererLineGroupCacheBuildCount;
             private int m_LastEcsRendererLineGroupCacheHitCount;
             private int m_LastEcsRendererLineGroupCacheSourceScanCount;
+            private int m_LastBatchSeedAttachmentLookupCount;
+            private int m_LastManagedBatchSeedFallbackCount;
             private int m_LastReusedRenderRecordCount;
             private int m_LastCreatedRenderRecordCount;
             private int m_LastReusedLineGroupCount;
@@ -10709,6 +10782,9 @@ namespace VividRP.Runtime.Particle
             private uint m_LastSharedDataFloat4Mask;
             private int m_LastHandleRecordLookupCount;
             private int m_LastManagedRecordFallbackCount;
+            private int m_LastHandleBindingWriteCount;
+            private int m_LastCombinedUpdateBoundsLineCount;
+            private int m_LastFallbackBoundsRecordScanCount;
             private uint m_LastRenderJobModuleFlags;
             private int m_LastRenderPageJobModuleCount;
             private uint m_LastRenderKernelFlags;
@@ -10740,6 +10816,16 @@ namespace VividRP.Runtime.Particle
             public int lastHandleRecordLookupCount => m_LastHandleRecordLookupCount;
 
             public int lastManagedRecordFallbackCount => m_LastManagedRecordFallbackCount;
+
+            public int lastHandleBindingWriteCount => m_LastHandleBindingWriteCount;
+
+            public int lastBatchSeedAttachmentLookupCount => m_LastBatchSeedAttachmentLookupCount;
+
+            public int lastManagedBatchSeedFallbackCount => m_LastManagedBatchSeedFallbackCount;
+
+            public int lastCombinedUpdateBoundsLineCount => m_LastCombinedUpdateBoundsLineCount;
+
+            public int lastFallbackBoundsRecordScanCount => m_LastFallbackBoundsRecordScanCount;
 
             public bool hasPendingCullingRecordBuild => m_HasPendingCullingRecordBuild;
 
@@ -10938,11 +11024,15 @@ namespace VividRP.Runtime.Particle
 
             public void UpdateAll(VividEcsQuery query, bool forceUpload)
             {
-                using (s_UpdateRecordsMarker.Auto())
+                BeginBoundsCollection();
+                m_HasCollectedBoundsForManagerGraph = false;
+                m_LastFallbackBoundsRecordScanCount = 0;
+                using (s_UpdateRecordsAndBoundsMarker.Auto())
                 {
                     ResetRenderRecordPoolStats();
                     ResetRecordLookupStats();
                     int matchingLineCount = query?.PrepareMatchingLines() ?? 0;
+                    m_LastCombinedUpdateBoundsLineCount = matchingLineCount;
                     s_LastActiveRendererQueryLineCount = matchingLineCount;
                     s_LastInvalidActiveRendererQueryLineCount = 0;
                     for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
@@ -10956,10 +11046,22 @@ namespace VividRP.Runtime.Particle
                         }
 
                         UpdateRecord(state, forceUpload);
+                        CollectUpdatedBoundsState(state);
                     }
                 }
 
                 ProcessQueuedRecordRemovals();
+                if (m_LayoutDirty)
+                {
+                    m_BoundsPageWorks.Clear();
+                    m_BoundsRecordWorks.Clear();
+                }
+                else
+                {
+                    m_HasCollectedBoundsForManagerGraph = true;
+                }
+
+                ScheduleCollectedBounds();
             }
 
             public void Update(ParticleSystemState state, bool forceUpload)
@@ -10967,10 +11069,13 @@ namespace VividRP.Runtime.Particle
                 if (state == null)
                     return;
 
+                m_HasCollectedBoundsForManagerGraph = false;
+                m_LastFallbackBoundsRecordScanCount = 0;
                 using (s_UpdateRecordsMarker.Auto())
                 {
                     ResetRenderRecordPoolStats();
                     ResetRecordLookupStats();
+                    m_LastCombinedUpdateBoundsLineCount = 0;
                     UpdateRecord(state, forceUpload);
                 }
 
@@ -10987,6 +11092,15 @@ namespace VividRP.Runtime.Particle
             {
                 m_LastHandleRecordLookupCount = 0;
                 m_LastManagedRecordFallbackCount = 0;
+                m_LastHandleBindingWriteCount = 0;
+            }
+
+            private void AssignRendererHandle(
+                ParticleSystemState state,
+                VividParticleRendererHandle rendererHandle)
+            {
+                if (state != null && state.SetRendererHandle(rendererHandle))
+                    m_LastHandleBindingWriteCount++;
             }
 
 #if UNITY_EDITOR
@@ -11023,14 +11137,6 @@ namespace VividRP.Runtime.Particle
             }
 #endif
 
-            public void SchedulePostSimulationBoundsUpdates(VividEcsQuery query)
-            {
-                if (query == null || query.PrepareMatchingLines() == 0)
-                    return;
-
-                ScheduleBoundsUpdates(query);
-            }
-
             public void Unregister(ParticleSystemState state)
             {
                 CompletePendingUpload();
@@ -11046,7 +11152,7 @@ namespace VividRP.Runtime.Particle
                 m_BRG = null;
                 m_GPUBuffer.Dispose();
                 foreach (ParticleRenderRecord record in m_Records.Values)
-                    record.State?.SetRendererHandle(VividParticleRendererHandle.Invalid);
+                    AssignRendererHandle(record.State, VividParticleRendererHandle.Invalid);
                 m_Records.Clear();
                 DisposeAllDrawBatches();
                 m_EcsRendererLineQuery = null;
@@ -11117,12 +11223,18 @@ namespace VividRP.Runtime.Particle
                 m_LastEcsRendererLineGroupCacheBuildCount = 0;
                 m_LastEcsRendererLineGroupCacheHitCount = 0;
                 m_LastEcsRendererLineGroupCacheSourceScanCount = 0;
+                m_LastBatchSeedAttachmentLookupCount = 0;
+                m_LastManagedBatchSeedFallbackCount = 0;
                 m_LastReusedRenderRecordCount = 0;
                 m_LastCreatedRenderRecordCount = 0;
                 m_LastReusedLineGroupCount = 0;
                 m_LastCreatedLineGroupCount = 0;
                 m_LastReusedDrawBatchCount = 0;
                 m_LastCreatedDrawBatchCount = 0;
+                m_HasCollectedBoundsForManagerGraph = false;
+                m_LastHandleBindingWriteCount = 0;
+                m_LastCombinedUpdateBoundsLineCount = 0;
+                m_LastFallbackBoundsRecordScanCount = 0;
                 m_LastDirtyUploadQueueCount = 0;
                 m_LastInvalidDirtyUploadQueueCount = 0;
                 m_LastDirtyUploadBatchQueueCount = 0;
@@ -11158,7 +11270,8 @@ namespace VividRP.Runtime.Particle
                     m_LastManagedRecordFallbackCount++;
                     if (m_Records.TryGetValue(state, out record))
                     {
-                        state.SetRendererHandle(
+                        AssignRendererHandle(
+                            state,
                             new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                     }
                 }
@@ -11174,7 +11287,10 @@ namespace VividRP.Runtime.Particle
                     record.Update(entry, updateIdentity: true, key: initialKey);
                     AllocateRecordSlot(record);
                     SyncNativeRendererRecord(record, entry);
-                    state.SetRendererHandle(new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
+                    state.SetRendererBatchSeed(new ParticleRendererBatchSeed(entry));
+                    AssignRendererHandle(
+                        state,
+                        new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                     m_Records.Add(state, record);
                     QueueUploadDirty(record);
                     m_LayoutDirty = true;
@@ -11195,9 +11311,10 @@ namespace VividRP.Runtime.Particle
                     || !hasDynamicRecord
                     || previousDynamicRecord.SceneCullingMask != entry.SceneCullingMask
                     || oldLineId != entry.EcsLineId;
+                if (identityChanged)
+                    state.SetRendererBatchSeed(new ParticleRendererBatchSeed(entry));
                 record.Update(entry, identityChanged, key);
                 SyncNativeRendererRecord(record, entry);
-                state.SetRendererHandle(new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                 if (layoutChanged)
                     m_LayoutDirty = true;
 
@@ -11554,6 +11671,7 @@ namespace VividRP.Runtime.Particle
                 dynamicRecord.Layer = Mathf.Clamp(entry.Layer, 0, 31);
                 dynamicRecord.IsEditorSelected = entry.IsEditorSelected ? 1 : 0;
                 dynamicRecord.RenderMode = (int)entry.RenderMode;
+                dynamicRecord.RendererSharedKey = entry.RendererSharedKey;
                 dynamicRecord.RendererPriority = ResolveRendererPriority(entry.SortingPriority);
                 dynamicRecord.BatchLayer = ResolveBatchLayer(entry.BatchLayer);
                 dynamicRecord.ShadowCastingMode = (int)entry.ShadowCastingMode;
@@ -11794,7 +11912,7 @@ namespace VividRP.Runtime.Particle
                 CancelQueuedRemove(state);
                 record.State.SetRendererUploadStats(false, 0, 0, 0, m_GPUBuffer.bufferIndex);
                 record.State.ResetRendererCullingStats();
-                record.State.SetRendererHandle(VividParticleRendererHandle.Invalid);
+                AssignRendererHandle(record.State, VividParticleRendererHandle.Invalid);
                 m_Records.Remove(state);
                 ReleaseRecordSlot(record);
                 ReleaseRenderRecord(record);
@@ -11879,6 +11997,8 @@ namespace VividRP.Runtime.Particle
 
                 EnsureNativeCullingLayout();
                 m_EcsBatchRecordRefs.Clear();
+                m_LastBatchSeedAttachmentLookupCount = 0;
+                m_LastManagedBatchSeedFallbackCount = 0;
 
                 for (int groupIndex = 0; groupIndex < groups.Count; groupIndex++)
                 {
@@ -11898,18 +12018,15 @@ namespace VividRP.Runtime.Particle
                     {
                         VividEcsArchetypeLine line = lines[lineIndex];
                         if (line == null
-                            || !line.TryGetSharedComponent(out VividParticleRendererHandle rendererHandle)
+                            || !s_ParticleEcsWorld.TryGetLineAttachment(
+                                line,
+                                out VividParticleRendererHandle rendererHandle)
                             || !rendererHandle.IsValid
-                            || !TryGetRecord(
+                            || !TryGetNativeRendererRecord(
                                 rendererHandle.RecordSlot,
                                 rendererHandle.RecordVersion,
-                                out ParticleRenderRecord record))
-                        {
-                            m_LastEcsRendererSkippedLineCount++;
-                            continue;
-                        }
-
-                        if (!record.Key.Equals(groupKey))
+                                out ParticleRendererDynamicRecord dynamicRecord)
+                            || !dynamicRecord.RendererSharedKey.Equals(groupKey))
                         {
                             m_LastEcsRendererSkippedLineCount++;
                             continue;
@@ -11917,14 +12034,23 @@ namespace VividRP.Runtime.Particle
 
                         if (batch == null)
                         {
-                            batch = AcquireDrawBatch(record, groupKey);
+                            if (!TryResolveBatchSeed(
+                                    line,
+                                    rendererHandle,
+                                    out ParticleRendererBatchSeed seed))
+                            {
+                                m_LastEcsRendererSkippedLineCount++;
+                                continue;
+                            }
+
+                            batch = AcquireDrawBatch(seed, groupKey, rendererHandle);
                             batch.RecordRefStart = m_EcsBatchRecordRefs.Length;
                         }
 
                         m_EcsBatchRecordRefs.Add(new ParticleRendererRecordRef
                         {
-                            RecordSlot = record.RecordSlot,
-                            RecordVersion = record.RecordVersion,
+                            RecordSlot = rendererHandle.RecordSlot,
+                            RecordVersion = rendererHandle.RecordVersion,
                         });
                         batch.RecordRefCount++;
                         m_LastEcsRendererMatchedLineCount++;
@@ -11936,6 +12062,31 @@ namespace VividRP.Runtime.Particle
                     batch.BatchIndex = m_DrawBatches.Count;
                     m_DrawBatches.Add(batch);
                 }
+            }
+
+            private bool TryResolveBatchSeed(
+                VividEcsArchetypeLine line,
+                VividParticleRendererHandle rendererHandle,
+                out ParticleRendererBatchSeed seed)
+            {
+                if (s_ParticleEcsWorld.TryGetLineAttachment(line, out seed))
+                {
+                    m_LastBatchSeedAttachmentLookupCount++;
+                    return true;
+                }
+
+                m_LastManagedBatchSeedFallbackCount++;
+                if (TryGetRecord(
+                        rendererHandle.RecordSlot,
+                        rendererHandle.RecordVersion,
+                        out ParticleRenderRecord record))
+                {
+                    seed = new ParticleRendererBatchSeed(record);
+                    return true;
+                }
+
+                seed = default;
+                return false;
             }
 
             private VividEcsQuery GetOrCreateEcsRendererLineQuery(
@@ -12095,44 +12246,28 @@ namespace VividRP.Runtime.Particle
                 using (s_ManagerJobGraphScheduleMarker.Auto())
                 {
                     ScheduleRenderUploadGraph();
-                    if (!m_HasPendingBounds)
+                    if (!m_HasPendingBounds && !m_HasCollectedBoundsForManagerGraph)
                         ScheduleBoundsUpdatesFromRecords();
+                    m_HasCollectedBoundsForManagerGraph = false;
                     ScheduleMeshVisibleCountGraph();
                 }
             }
 
-            private void ScheduleBoundsUpdates(VividEcsQuery query)
+            private void BeginBoundsCollection()
             {
                 CompletePendingBoundsUpdates();
                 EnsureNativeBoundsLayout();
                 m_BoundsPageWorks.Clear();
                 m_BoundsRecordWorks.Clear();
                 m_BoundsRequiredPageCapacity = m_CullingPageBoundsCount;
-
-                using (s_BoundsCollectMarker.Auto())
-                {
-                    int matchingLineCount = query?.PrepareMatchingLines() ?? 0;
-                    for (int lineIndex = 0; lineIndex < matchingLineCount; lineIndex++)
-                    {
-                        if (TryResolveParticleState(
-                                query.GetMatchingLine(lineIndex),
-                                out ParticleSystemState state))
-                        {
-                            CollectBoundsState(state);
-                        }
-                    }
-                }
-
-                ScheduleCollectedBounds();
             }
 
             private void ScheduleBoundsUpdatesFromRecords()
             {
-                CompletePendingBoundsUpdates();
-                EnsureNativeBoundsLayout();
-                m_BoundsPageWorks.Clear();
-                m_BoundsRecordWorks.Clear();
-                m_BoundsRequiredPageCapacity = m_CullingPageBoundsCount;
+                BeginBoundsCollection();
+                m_LastFallbackBoundsRecordScanCount = m_RendererRecordRefs.IsCreated
+                    ? m_RendererRecordRefs.Length
+                    : 0;
 
                 using (s_BoundsCollectMarker.Auto())
                 {
@@ -12157,6 +12292,21 @@ namespace VividRP.Runtime.Particle
                 }
 
                 ScheduleCollectedBounds();
+            }
+
+            private void CollectUpdatedBoundsState(ParticleSystemState state)
+            {
+                if (state == null
+                    || !TryGetRecord(state, out ParticleRenderRecord record)
+                    || !TryGetNativeRendererRecord(
+                        record.RecordSlot,
+                        record.RecordVersion,
+                        out ParticleRendererDynamicRecord dynamicRecord))
+                {
+                    return;
+                }
+
+                CollectBoundsState(record, dynamicRecord);
             }
 
             private void CollectBoundsState(ParticleSystemState state)
@@ -13099,8 +13249,9 @@ namespace VividRP.Runtime.Particle
             }
 
             private ParticleDrawBatch AcquireDrawBatch(
-                ParticleRenderRecord firstRecord,
-                VividParticleRendererSharedKey groupKey)
+                ParticleRendererBatchSeed seed,
+                VividParticleRendererSharedKey groupKey,
+                VividParticleRendererHandle ownerHandle)
             {
                 ParticleDrawBatch batch;
                 if (m_DrawBatchPool.Count > 0)
@@ -13115,20 +13266,20 @@ namespace VividRP.Runtime.Particle
                 }
 
                 batch.Key = groupKey;
-                batch.Material = firstRecord.Material;
-                batch.Mesh = firstRecord.Mesh;
-                batch.Meshes = firstRecord.Meshes ?? Array.Empty<Mesh>();
-                batch.MeshCount = firstRecord.MeshCount;
-                batch.ShadowCastingMode = firstRecord.ShadowCastingMode;
-                batch.MotionMode = firstRecord.MotionMode;
-                batch.ReceiveShadows = firstRecord.ReceiveShadows;
-                batch.StaticShadowCaster = firstRecord.StaticShadowCaster;
-                batch.SortingPriority = firstRecord.SortingPriority;
-                batch.BatchLayer = firstRecord.BatchLayer;
+                batch.Material = seed.Material;
+                batch.Mesh = seed.Mesh;
+                batch.Meshes = seed.Meshes ?? Array.Empty<Mesh>();
+                batch.MeshCount = seed.MeshCount;
+                batch.ShadowCastingMode = seed.ShadowCastingMode;
+                batch.MotionMode = seed.MotionMode;
+                batch.ReceiveShadows = seed.ReceiveShadows;
+                batch.StaticShadowCaster = seed.StaticShadowCaster;
+                batch.SortingPriority = seed.SortingPriority;
+                batch.BatchLayer = seed.BatchLayer;
                 batch.SceneCullingMask = 0UL;
-                batch.UsesPageBillboard = UsesPageBillboardRenderMode(firstRecord.RenderMode);
+                batch.UsesPageBillboard = UsesPageBillboardRenderMode(seed.RenderMode);
                 batch.RequiresSortingPositions = false;
-                batch.GpuLayout = firstRecord.GpuLayout;
+                batch.GpuLayout = seed.GpuLayout;
                 batch.BatchId = BatchID.Null;
                 batch.MeshId = BatchMeshID.Null;
                 batch.MaterialId = default;
@@ -13138,8 +13289,8 @@ namespace VividRP.Runtime.Particle
                 batch.MeshVisibleCountCount = 0;
                 batch.CullingMeshIdOffset = -1;
                 batch.SingleMeshVisibleCapacity = 0;
-                batch.OwnerRecordSlot = firstRecord.RecordSlot;
-                batch.OwnerRecordVersion = firstRecord.RecordVersion;
+                batch.OwnerRecordSlot = ownerHandle.RecordSlot;
+                batch.OwnerRecordVersion = ownerHandle.RecordVersion;
                 batch.BatchIndex = -1;
                 batch.Capacity = 0;
                 batch.SharpCapacity = 0;

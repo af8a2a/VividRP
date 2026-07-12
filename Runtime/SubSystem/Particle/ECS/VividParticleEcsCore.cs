@@ -23,7 +23,6 @@ namespace VividRP.Runtime.Particle.ECS
             VividEcsTypeManager.RegisterShared<VividParticleSimulationKernelSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleRenderKernelSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleRendererSharedKey>();
-            VividEcsTypeManager.RegisterShared<VividParticleRendererHandle>();
             VividEcsTypeManager.RegisterTag<VividParticleSimulationActive>();
             VividEcsTypeManager.RegisterTag<VividParticleRendererActive>();
             s_Registered = true;
@@ -59,7 +58,7 @@ namespace VividRP.Runtime.Particle.ECS
         }
     }
 
-    internal readonly struct VividParticleRendererHandle : IVividEcsSharedComponentData, IEquatable<VividParticleRendererHandle>
+    internal readonly struct VividParticleRendererHandle : IVividEcsLineAttachmentData, IEquatable<VividParticleRendererHandle>
     {
         public static readonly VividParticleRendererHandle Invalid = new(-1, -1);
 

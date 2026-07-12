@@ -75,7 +75,6 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_SimulationKernelSharedKeyTypeIndex;
         private readonly VividEcsTypeIndex m_RenderKernelSharedKeyTypeIndex;
         private readonly VividEcsTypeIndex m_RendererSharedKeyTypeIndex;
-        private readonly VividEcsTypeIndex m_RendererHandleTypeIndex;
         private readonly VividEcsTypeIndex m_SimulationActiveTypeIndex;
         private readonly VividEcsTypeIndex m_RendererActiveTypeIndex;
         private readonly VividEcsSoaColumn<VividParticleCommon> m_CommonColumn;
@@ -91,6 +90,7 @@ namespace VividRP.Runtime.Particle.ECS
         private NativeArray<VividParticleEcsIntegratePageWork> m_StandaloneIntegrateWorks;
         private NativeArray<VividParticleEcsCompactWork> m_StandaloneCompactWorks;
         private VividParticleRendererSharedKey m_RendererSharedKey = VividParticleRendererSharedKey.Invalid;
+        private VividParticleRendererHandle m_RendererHandle = VividParticleRendererHandle.Invalid;
         private VividParticleModuleSharedKey m_ModuleSharedKey = VividParticleModuleSharedKey.None;
         private VividParticleSimulationKernelSharedKey m_SimulationKernelSharedKey =
             VividParticleSimulationKernelSharedKey.Base;
@@ -106,6 +106,7 @@ namespace VividRP.Runtime.Particle.ECS
         private int m_CachedActiveCountOutputLength = -1;
         private int m_ColumnViewVersion;
         private int m_ColumnViewRefreshCount;
+        private int m_RendererHandleBindingWriteCount;
         private int m_PendingIntegrateActiveCount;
 
         public VividParticleEcsStorage()
@@ -137,7 +138,6 @@ namespace VividRP.Runtime.Particle.ECS
             m_RenderKernelSharedKeyTypeIndex =
                 VividEcsTypeManager.GetTypeIndex<VividParticleRenderKernelSharedKey>();
             m_RendererSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
-            m_RendererHandleTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererHandle>();
             m_SimulationActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
             m_RendererActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
             m_World = world;
@@ -149,14 +149,12 @@ namespace VividRP.Runtime.Particle.ECS
                 m_ModuleSharedKeyTypeIndex,
                 m_SimulationKernelSharedKeyTypeIndex,
                 m_RenderKernelSharedKeyTypeIndex,
-                m_RendererSharedKeyTypeIndex,
-                m_RendererHandleTypeIndex);
+                m_RendererSharedKeyTypeIndex);
             m_Line.SetSharedComponent(VividParticleSystemId.Invalid);
             m_Line.SetSharedComponent(VividParticleModuleSharedKey.None);
             m_Line.SetSharedComponent(VividParticleSimulationKernelSharedKey.Base);
             m_Line.SetSharedComponent(VividParticleRenderKernelSharedKey.Base);
             m_Line.SetSharedComponent(VividParticleRendererSharedKey.Invalid);
-            m_Line.SetSharedComponent(VividParticleRendererHandle.Invalid);
             m_CommonColumn = m_Line.GetColumn<VividEcsSoaColumn<VividParticleCommon>>(m_CommonTypeIndex);
         }
 
@@ -187,6 +185,11 @@ namespace VividRP.Runtime.Particle.ECS
         public int columnViewVersion => m_ColumnView.Version;
 
         public int columnViewRefreshCount => m_ColumnViewRefreshCount;
+
+        public int rendererHandleBindingWriteCount => m_RendererHandleBindingWriteCount;
+
+        public bool hasRendererHandleBinding =>
+            m_World.TryGetLineAttachment(m_Line, out VividParticleRendererHandle _);
 
         public bool hasAnimatedMotionColumn => m_AnimatedMotionColumn != null;
 
@@ -365,10 +368,34 @@ namespace VividRP.Runtime.Particle.ECS
 
         public VividParticleRendererHandle rendererHandle
         {
-            get => m_Line.TryGetSharedComponent(out VividParticleRendererHandle value)
-                ? value
-                : VividParticleRendererHandle.Invalid;
-            set => m_Line.SetSharedComponent(value);
+            get => m_RendererHandle;
+            set => SetRendererHandle(value);
+        }
+
+        public bool SetRendererHandle(VividParticleRendererHandle value)
+        {
+            if (m_RendererHandle.Equals(value))
+                return false;
+
+            m_RendererHandle = value;
+            if (value.IsValid)
+                m_World.SetLineAttachment(m_Line, value);
+            else
+                m_World.RemoveLineAttachment<VividParticleRendererHandle>(m_Line);
+            m_RendererHandleBindingWriteCount++;
+            return true;
+        }
+
+        public void SetLineAttachment<T>(T value)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            m_World.SetLineAttachment(m_Line, value);
+        }
+
+        public bool TryGetLineAttachment<T>(out T value)
+            where T : struct, IVividEcsLineAttachmentData
+        {
+            return m_World.TryGetLineAttachment(m_Line, out value);
         }
 
         public bool rendererActive
@@ -452,6 +479,8 @@ namespace VividRP.Runtime.Particle.ECS
             m_CachedTriggerStateColumnVersion = -1;
             m_CachedKeepMaskCapacity = -1;
             m_CachedActiveCountOutputLength = -1;
+            m_RendererHandle = VividParticleRendererHandle.Invalid;
+            m_RendererHandleBindingWriteCount = 0;
             m_PendingIntegrateActiveCount = 0;
         }
 

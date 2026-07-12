@@ -152,6 +152,10 @@ namespace VividRP.Runtime.ECS
     {
     }
 
+    internal interface IVividEcsLineAttachmentData
+    {
+    }
+
     internal interface IVividEcsTagComponentData : IVividEcsComponentData
     {
     }

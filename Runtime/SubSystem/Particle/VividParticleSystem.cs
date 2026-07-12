@@ -51,6 +51,10 @@ namespace VividRP.Runtime.Particle
             VividParticleInheritVelocityModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleLifetimeByEmitterSpeedModule m_LifetimeByEmitterSpeed =
+            VividParticleLifetimeByEmitterSpeedModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleLimitVelocityOverLifetimeModule m_LimitVelocityOverLifetime =
             VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
 
@@ -134,6 +138,9 @@ namespace VividRP.Runtime.Particle
 
         public VividParticleInheritVelocityModule inheritVelocity =>
             m_InheritVelocity ??= VividParticleInheritVelocityModule.CreateDefault();
+
+        public VividParticleLifetimeByEmitterSpeedModule lifetimeByEmitterSpeed =>
+            m_LifetimeByEmitterSpeed ??= VividParticleLifetimeByEmitterSpeedModule.CreateDefault();
 
         public VividParticleLimitVelocityOverLifetimeModule limitVelocityOverLifetime =>
             m_LimitVelocityOverLifetime ??= VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
@@ -453,6 +460,7 @@ namespace VividRP.Runtime.Particle
                 m_Trigger,
                 m_VelocityOverLifetime,
                 m_InheritVelocity,
+                m_LifetimeByEmitterSpeed,
                 m_LimitVelocityOverLifetime,
                 m_ColorOverLifetime,
                 m_ColorBySpeed,
@@ -551,6 +559,7 @@ namespace VividRP.Runtime.Particle
             m_Trigger ??= VividParticleTriggerModule.CreateDefault();
             m_VelocityOverLifetime ??= VividParticleVelocityOverLifetimeModule.CreateDefault();
             m_InheritVelocity ??= VividParticleInheritVelocityModule.CreateDefault();
+            m_LifetimeByEmitterSpeed ??= VividParticleLifetimeByEmitterSpeedModule.CreateDefault();
             m_LimitVelocityOverLifetime ??= VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
             m_ColorOverLifetime ??= VividParticleColorOverLifetimeModule.CreateDefault();
             m_ColorBySpeed ??= VividParticleColorBySpeedModule.CreateDefault();
@@ -576,6 +585,7 @@ namespace VividRP.Runtime.Particle
             m_Trigger.SetChangeCallback(OnSimulationModuleChanged);
             m_VelocityOverLifetime.SetChangeCallback(OnVelocityOverLifetimeModuleChanged);
             m_InheritVelocity.SetChangeCallback(OnVelocityOverLifetimeModuleChanged);
+            m_LifetimeByEmitterSpeed.SetChangeCallback(OnSimulationModuleChanged);
             m_LimitVelocityOverLifetime.SetChangeCallback(OnSimulationModuleChanged);
             m_ColorOverLifetime.SetChangeCallback(OnColorOverLifetimeModuleChanged);
             m_ColorBySpeed.SetChangeCallback(OnColorOverLifetimeModuleChanged);
@@ -669,6 +679,7 @@ namespace VividRP.Runtime.Particle
             trigger.Validate();
             velocityOverLifetime.Validate();
             inheritVelocity.Validate();
+            lifetimeByEmitterSpeed.Validate();
             limitVelocityOverLifetime.Validate();
             colorOverLifetime.Validate();
             colorBySpeed.Validate();

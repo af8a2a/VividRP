@@ -101,6 +101,23 @@ namespace VividRP.Runtime.ECS
                 dispatchMode);
         }
 
+        public static JobHandle ScheduleParallelSlice<TJob>(
+            this TJob jobData,
+            NativeSlice<VividEcsPageInfo> pages,
+            JobHandle dependency = default,
+            int innerloopBatchCount = 1,
+            VividEcsPageDispatchMode dispatchMode = VividEcsPageDispatchMode.Average)
+            where TJob : struct, IVividEcsPageJob
+        {
+            return ScheduleInternal(
+                ref jobData,
+                pages,
+                dependency,
+                innerloopBatchCount,
+                isParallel: true,
+                dispatchMode);
+        }
+
         public static JobHandle ScheduleParallelEmbedded<TJob, TWork>(
             this TJob jobData,
             NativeArray<TWork> pageWorks,
@@ -185,7 +202,7 @@ namespace VividRP.Runtime.ECS
             }
         }
 
-        private static unsafe NativeSlice<VividEcsPageInfo> CreateEmbeddedPageSlice<TWork>(
+        public static unsafe NativeSlice<VividEcsPageInfo> CreateEmbeddedPageSlice<TWork>(
             NativeArray<TWork> pageWorks,
             int pageInfoByteOffset)
             where TWork : unmanaged

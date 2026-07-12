@@ -12,8 +12,10 @@ namespace VividRP.Runtime.Particle
         public int Count;
     }
 
-    internal struct VividParticleNativeSimulationConfig
+    internal unsafe struct VividParticleNativeSimulationConfig
     {
+        public const int LifetimeByEmitterSpeedLutResolution = 32;
+
         public float Duration;
         public float StartLifetime;
         public float StartSpeed;
@@ -35,9 +37,12 @@ namespace VividRP.Runtime.Particle
         public int SimulationSpace;
         public int ForceOverLifetimeEnabled;
         public int ForceOverLifetimeSpace;
+        public int LifetimeByEmitterSpeedEnabled;
+        public float2 LifetimeByEmitterSpeedRange;
         public int BurstOffset;
         public int BurstCount;
         public int Version;
+        public fixed float LifetimeByEmitterSpeedLut[LifetimeByEmitterSpeedLutResolution];
     }
 
     internal unsafe struct VividParticleNativeRenderModuleConfig

@@ -39,6 +39,10 @@ namespace VividRP.Runtime.Particle
             VividParticleInheritVelocityModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleLifetimeByEmitterSpeedModule m_LifetimeByEmitterSpeed =
+            VividParticleLifetimeByEmitterSpeedModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleLimitVelocityOverLifetimeModule m_LimitVelocityOverLifetime =
             VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
 
@@ -104,6 +108,9 @@ namespace VividRP.Runtime.Particle
         public VividParticleInheritVelocityModule inheritVelocity =>
             m_InheritVelocity ??= VividParticleInheritVelocityModule.CreateDefault();
 
+        public VividParticleLifetimeByEmitterSpeedModule lifetimeByEmitterSpeed =>
+            m_LifetimeByEmitterSpeed ??= VividParticleLifetimeByEmitterSpeedModule.CreateDefault();
+
         public VividParticleLimitVelocityOverLifetimeModule limitVelocityOverLifetime =>
             m_LimitVelocityOverLifetime ??= VividParticleLimitVelocityOverLifetimeModule.CreateDefault();
 
@@ -145,6 +152,7 @@ namespace VividRP.Runtime.Particle
             VividParticleTriggerModule targetTrigger,
             VividParticleVelocityOverLifetimeModule targetVelocityOverLifetime,
             VividParticleInheritVelocityModule targetInheritVelocity,
+            VividParticleLifetimeByEmitterSpeedModule targetLifetimeByEmitterSpeed,
             VividParticleLimitVelocityOverLifetimeModule targetLimitVelocityOverLifetime,
             VividParticleColorOverLifetimeModule targetColorOverLifetime,
             VividParticleColorBySpeedModule targetColorBySpeed,
@@ -166,6 +174,7 @@ namespace VividRP.Runtime.Particle
             targetTrigger?.CopyFrom(trigger);
             targetVelocityOverLifetime?.CopyFrom(velocityOverLifetime);
             targetInheritVelocity?.CopyFrom(inheritVelocity);
+            targetLifetimeByEmitterSpeed?.CopyFrom(lifetimeByEmitterSpeed);
             targetLimitVelocityOverLifetime?.CopyFrom(limitVelocityOverLifetime);
             targetColorOverLifetime?.CopyFrom(colorOverLifetime);
             targetColorBySpeed?.CopyFrom(colorBySpeed);
@@ -195,6 +204,7 @@ namespace VividRP.Runtime.Particle
             trigger.Validate();
             velocityOverLifetime.Validate();
             inheritVelocity.Validate();
+            lifetimeByEmitterSpeed.Validate();
             limitVelocityOverLifetime.Validate();
             colorOverLifetime.Validate();
             colorBySpeed.Validate();

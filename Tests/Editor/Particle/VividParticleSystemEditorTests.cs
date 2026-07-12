@@ -65,6 +65,30 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ForceFieldEditor_ResolveRanges_ClampsAndOrdersSceneHandleValues()
+        {
+            VividParticleForceFieldEditor.ResolveRanges(
+                startRange: 3.0f,
+                endRange: 1.0f,
+                out float startRange,
+                out float endRange);
+
+            Assert.That(startRange, Is.EqualTo(3.0f));
+            Assert.That(endRange, Is.EqualTo(3.0f));
+
+            VividParticleForceFieldEditor.ResolveRanges(
+                startRange: -2.0f,
+                endRange: 4.0f,
+                out startRange,
+                out endRange);
+
+            Assert.That(startRange, Is.EqualTo(0.0f));
+            Assert.That(endRange, Is.EqualTo(4.0f));
+            Assert.That(VividParticleForceFieldEditor.ResolveLength(-1.0f), Is.EqualTo(0.0f));
+            Assert.That(VividParticleForceFieldEditor.ResolveLength(2.5f), Is.EqualTo(2.5f));
+        }
+
+        [Test]
         public void MenuItems_CreateVividParticleSystemGameObject_AddsComponentAndParents()
         {
             var parent = new GameObject("Vivid Particle Menu Parent");
@@ -147,6 +171,9 @@ namespace VividRP.Editor.Tests
                 VividParticleSystemEditorUtility.FindInheritVelocityProperty(systemObject),
                 Is.Not.Null);
             Assert.That(
+                VividParticleSystemEditorUtility.FindLifetimeByEmitterSpeedProperty(systemObject),
+                Is.Not.Null);
+            Assert.That(
                 VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(systemObject),
                 Is.Not.Null);
             Assert.That(
@@ -204,6 +231,9 @@ namespace VividRP.Editor.Tests
                 Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindInheritVelocityProperty(assetObject),
+                Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindLifetimeByEmitterSpeedProperty(assetObject),
                 Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(assetObject),
@@ -516,6 +546,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ShapeSceneData_ReadsAndWritesRuntimeModule_ForSceneGui()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.shape.enabled = true;
+            system.shape.shapeType = VividParticleShapeType.Cone;
+            system.shape.radius = 3.0f;
+            system.shape.boxSize = new Vector3(2.0f, 4.0f, 6.0f);
+            system.shape.angle = 25.0f;
+
+            Assert.That(
+                VividParticleSystemEditorUtility.TryReadShapeSceneData(
+                    system.shape,
+                    out VividParticleShapeSceneData data),
+                Is.True);
+            Assert.That(data.Enabled, Is.True);
+            Assert.That(data.ShapeType, Is.EqualTo(VividParticleShapeType.Cone));
+            Assert.That(data.Radius, Is.EqualTo(3.0f));
+            Assert.That(data.BoxSize, Is.EqualTo(new Vector3(2.0f, 4.0f, 6.0f)));
+            Assert.That(data.Angle, Is.EqualTo(25.0f));
+
+            data.Radius = -1.0f;
+            data.BoxSize = new Vector3(-2.0f, 5.0f, -6.0f);
+            data.Angle = 180.0f;
+            VividParticleSystemEditorUtility.WriteShapeSceneData(system.shape, data);
+
+            Assert.That(system.shape.radius, Is.EqualTo(VividParticleShapeModule.MinimumRadius));
+            Assert.That(system.shape.boxSize, Is.EqualTo(new Vector3(0.0f, 5.0f, 0.0f)));
+            Assert.That(system.shape.angle, Is.EqualTo(89.0f));
+        }
+
+        [Test]
         public void ShapeSceneData_CalculatesStableConePreviewLength()
         {
             float narrow = VividParticleSystemEditorUtility.GetConePreviewLength(2.0f, 10.0f);
@@ -651,13 +712,15 @@ namespace VividRP.Editor.Tests
                 layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.VelocityStretch, out var velocityInfo),
                 Is.True);
             Assert.That(velocityInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
+            Assert.That(velocityInfo.ElementSize, Is.EqualTo(VividParticleSystemManager.SizeOfFloat3));
             Assert.That(
                 layout.TryGetDataInfo(VividParticleSystemManager.VividParticleGpuDataId.UV, out var uvInfo),
                 Is.True);
             Assert.That(uvInfo.Frequency, Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerInstance));
             Assert.That(
                 layout.PerInstanceElementByteSize,
-                Is.EqualTo(VividParticleSystemManager.SizeOfFloat4 * 4));
+                Is.EqualTo(VividParticleSystemManager.SizeOfFloat4 * 3
+                    + VividParticleSystemManager.SizeOfFloat3));
             Assert.That(
                 layout.PerInstanceUploadColumnMask,
                 Is.EqualTo(VividParticleSystemManager.UploadColumnPositionSizeMask
@@ -822,6 +885,10 @@ namespace VividRP.Editor.Tests
             VividParticleSystem system = CreateSystem();
             system.rendererModule.customData1Enabled = false;
             system.customData.mode1 = VividParticleCustomDataMode.Vector;
+            system.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Linear(0.0f, 0.0f, 1.0f, 1.0f));
 
             using var serializedSystem = new SerializedObject(system);
             SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
@@ -846,6 +913,40 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 layout.CustomDataRenderJobUploadColumnMask,
                 Is.EqualTo(VividParticleSystemManager.UploadColumnCustomData1Mask));
+        }
+
+        [Test]
+        public void GpuLayoutPreview_ConstantCustomDataModuleUsesPerSharpStream()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.rendererModule.customData1Enabled = false;
+            system.customData.mode1 = VividParticleCustomDataMode.Vector;
+            system.customData.SetVector(
+                VividParticleCustomDataStream.Custom1,
+                0,
+                AnimationCurve.Constant(0.0f, 1.0f, 4.0f));
+
+            using var serializedSystem = new SerializedObject(system);
+            SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
+            Assert.That(
+                VividParticleSystemEditorUtility.TryCreateGpuDataLayoutDescriptor(
+                    renderer,
+                    out VividParticleSystemManager.VividParticleGpuDataLayoutDescriptor descriptor),
+                Is.True);
+            Assert.That(descriptor.IncludeCustomData1, Is.True);
+            Assert.That(descriptor.CustomData1Mode, Is.EqualTo(VividParticleGpuDataMode.Shared));
+
+            VividParticleSystemManager.VividParticleGpuDataLayout layout =
+                VividParticleSystemManager.VividParticleGpuDataLayout.Create(descriptor);
+            Assert.That(
+                layout.TryGetDataInfo(
+                    VividParticleSystemManager.VividParticleGpuDataId.CustomData1,
+                    out VividParticleSystemManager.VividParticleGpuDataInfo dataInfo),
+                Is.True);
+            Assert.That(
+                dataInfo.Frequency,
+                Is.EqualTo(VividParticleSystemManager.VividParticleGpuDataFrequency.PerSharp));
+            Assert.That(layout.CustomDataRenderJobUploadColumnMask, Is.EqualTo(0));
         }
 
         [Test]

@@ -125,6 +125,7 @@ namespace VividRP.Runtime.Particle.ECS
         ExternalForces = 1u << 16,
         Collision = 1u << 17,
         Trigger = 1u << 18,
+        LifetimeByEmitterSpeed = 1u << 19,
     }
 
     internal readonly struct VividParticleModuleSharedKey : IVividEcsSharedComponentData,

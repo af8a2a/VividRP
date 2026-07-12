@@ -17,7 +17,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly string[] s_FallbackShaderTagNames =
         {
-            ObjectMotionVectorFallbackShaderTagName,
+            "VividGBuffer",
+            RenderGraphRenderListDesc.ForwardShaderTagName,
+            RenderGraphRenderListDesc.DefaultUnlitShaderTagName,
         };
 
         private static readonly string[] s_MotionVectorShaderTagNames =
@@ -44,7 +46,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_MotionVectorTexture;
 
         private Material m_CameraMotionMaterial;
-        private Shader m_ObjectMotionVectorFallbackShader;
+        private Material m_ObjectMotionVectorFallbackMaterial;
         private Camera m_Camera;
 
         public MotionVectorPass()
@@ -108,7 +110,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_RenderList != null && m_RenderList.IsValid)
                 context.cmd.DrawRendererList(m_RenderList);
 
-            if (m_ObjectMotionVectorFallbackShader != null
+            if (m_ObjectMotionVectorFallbackMaterial != null
                 && m_FallbackRenderList != null
                 && m_FallbackRenderList.IsValid)
             {
@@ -142,7 +144,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CameraMotionMaterial = null;
             }
 
-            m_ObjectMotionVectorFallbackShader = null;
+            if (m_ObjectMotionVectorFallbackMaterial != null)
+            {
+                CoreUtils.Destroy(m_ObjectMotionVectorFallbackMaterial);
+                m_ObjectMotionVectorFallbackMaterial = null;
+            }
+
             m_Camera = null;
         }
 
@@ -158,12 +165,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_CameraMotionMaterial = CoreUtils.CreateEngineMaterial(cameraShader);
             }
 
-            if (m_ObjectMotionVectorFallbackShader == null)
+            if (m_ObjectMotionVectorFallbackMaterial == null)
             {
                 var objectShader = resources?.ObjectMotionVectorFallbackShader;
                 objectShader ??= Shader.Find(ObjectMotionVectorFallbackShaderName);
                 if (objectShader != null)
-                    m_ObjectMotionVectorFallbackShader = objectShader;
+                    m_ObjectMotionVectorFallbackMaterial = CoreUtils.CreateEngineMaterial(objectShader);
             }
         }
 
@@ -181,8 +188,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_FallbackRenderList.desc.ShaderTagNames = (string[])s_FallbackShaderTagNames.Clone();
             m_FallbackRenderList.desc.RendererConfiguration |= PerObjectData.MotionVectors;
-            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = false;
-            m_FallbackRenderList.desc.OverrideShader = m_ObjectMotionVectorFallbackShader;
+            m_FallbackRenderList.desc.ExcludeObjectMotionVectors = true;
+            m_FallbackRenderList.desc.OverrideMaterial = m_ObjectMotionVectorFallbackMaterial;
+            m_FallbackRenderList.desc.OverrideMaterialPassIndex = 0;
+            m_FallbackRenderList.desc.OverrideShader = null;
             m_FallbackRenderList.desc.OverrideShaderPassIndex = 0;
         }
 

@@ -26,7 +26,11 @@ float4 EncodeNoMotionVector()
 
 bool ForceNoMotionVector()
 {
+#if defined(DOTS_INSTANCING_ON)
+    return false;
+#else
     return unity_MotionVectorsParams.y == 0.0;
+#endif
 }
 
 float2 CalcNdcMotionVectorFromCsPositions(float4 positionCS, float4 previousPositionCS, float maxClipMotion)

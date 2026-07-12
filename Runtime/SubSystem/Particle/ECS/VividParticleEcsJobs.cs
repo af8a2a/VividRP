@@ -282,6 +282,8 @@ namespace VividRP.Runtime.Particle.ECS
         public int MeshCount;
         public uint RandomSeed;
         public float StartLifetime;
+        public int LifetimeByEmitterSpeedEnabled;
+        public float LifetimeByEmitterSpeedMultiplier;
         public float StartSpeed;
         public float StartSize;
         public float ShapeRadius;
@@ -499,6 +501,9 @@ namespace VividRP.Runtime.Particle.ECS
                     initializeWork.StartIndex = activeCount;
                     initializeWork.Count = reservedCount;
                     initializeWork.RandomSeed = NextRandomState(ref output.RandomState);
+                    initializeWork.LifetimeByEmitterSpeedEnabled = config.LifetimeByEmitterSpeedEnabled;
+                    initializeWork.LifetimeByEmitterSpeedMultiplier =
+                        EvaluateLifetimeByEmitterSpeed(config, initializeWork.EmitterVelocity);
                     output.InitializeWork = initializeWork;
                     output.ReservedCount = reservedCount;
                     *input.ActiveCountOutput = activeCount + reservedCount;
@@ -558,6 +563,30 @@ namespace VividRP.Runtime.Particle.ECS
             value ^= value << 5;
             state = value == 0u ? 1u : value;
             return state;
+        }
+
+        private static float EvaluateLifetimeByEmitterSpeed(
+            VividParticleNativeSimulationConfig config,
+            float3 emitterVelocity)
+        {
+            if (config.LifetimeByEmitterSpeedEnabled == 0)
+                return 1.0f;
+
+            float minimumSpeed = config.LifetimeByEmitterSpeedRange.x;
+            float maximumSpeed = config.LifetimeByEmitterSpeedRange.y;
+            float speed = math.length(emitterVelocity);
+            float normalizedSpeed = maximumSpeed > minimumSpeed
+                ? math.saturate((speed - minimumSpeed) / (maximumSpeed - minimumSpeed))
+                : 0.0f;
+            float samplePosition = normalizedSpeed
+                * (VividParticleNativeSimulationConfig.LifetimeByEmitterSpeedLutResolution - 1);
+            int lowerIndex = (int)math.floor(samplePosition);
+            int upperIndex = math.min(
+                lowerIndex + 1,
+                VividParticleNativeSimulationConfig.LifetimeByEmitterSpeedLutResolution - 1);
+            float interpolation = samplePosition - lowerIndex;
+            float* lut = config.LifetimeByEmitterSpeedLut;
+            return math.max(0.0f, math.lerp(lut[lowerIndex], lut[upperIndex], interpolation));
         }
     }
 
@@ -1032,27 +1061,9 @@ namespace VividRP.Runtime.Particle.ECS
                         return;
                     }
 
-                    float hitTime = 1.0f;
-                    float3 collisionPoint;
-                    if (highQuality && previousDistance >= radius && nextDistance < radius)
-                    {
-                        hitTime = math.saturate(
-                            (previousDistance - radius)
-                            / math.max(0.000001f, previousDistance - nextDistance));
-                        collisionPoint = math.lerp(worldCurrent, worldNext, hitTime);
-                    }
-                    else
-                    {
-                        worldNext += normal * (radius - nextDistance);
-                        collisionPoint = worldNext;
-                    }
+                    worldNext += normal * (radius - nextDistance);
+                    float3 collisionPoint = worldNext;
                     ResolveCollisionVelocity(config, normal, ref worldVelocity);
-                    if (highQuality && hitTime < 1.0f)
-                    {
-                        worldNext = collisionPoint
-                            + worldVelocity * work.DeltaTime * (1.0f - hitTime);
-                        worldCurrent = collisionPoint;
-                    }
                     RecordCollisionEvent(
                         config,
                         particleIndex,
@@ -1078,22 +1089,23 @@ namespace VividRP.Runtime.Particle.ECS
                         continue;
                     }
 
-                    float hitTime = 0.0f;
-                    float3 normal = default;
-                    bool swept = highQuality && TrySweepPrimitiveCollider(
+                    bool overlapsAtEnd = TryResolvePrimitiveCollider(
                         collider,
-                        worldCurrent,
                         worldNext,
                         radius,
-                        out hitTime,
-                        out normal);
-                    float penetration = 0.0f;
-                    if (!swept && !TryResolvePrimitiveCollider(
+                        out float3 normal,
+                        out float penetration);
+                    float hitTime = 0.0f;
+                    bool swept = !overlapsAtEnd
+                        && highQuality
+                        && TrySweepPrimitiveCollider(
                             collider,
+                            worldCurrent,
                             worldNext,
                             radius,
-                            out normal,
-                            out penetration))
+                            out hitTime,
+                            out normal);
+                    if (!overlapsAtEnd && !swept)
                     {
                         continue;
                     }
@@ -2105,8 +2117,12 @@ namespace VividRP.Runtime.Particle.ECS
                     work.AnimatedVelocities[particleIndex] = float3.zero;
                 if (work.InitialEmitterVelocities != null)
                     work.InitialEmitterVelocities[particleIndex] = work.EmitterVelocity;
-                work.StartLifetimes[particleIndex] = work.StartLifetime;
-                work.RemainingLifetimes[particleIndex] = work.StartLifetime;
+                float lifetimeMultiplier = work.LifetimeByEmitterSpeedEnabled != 0
+                    ? math.max(0.0f, work.LifetimeByEmitterSpeedMultiplier)
+                    : 1.0f;
+                float startLifetime = math.max(0.0f, work.StartLifetime * lifetimeMultiplier);
+                work.StartLifetimes[particleIndex] = startLifetime;
+                work.RemainingLifetimes[particleIndex] = startLifetime;
                 work.Colors[particleIndex] = work.StartColor;
                 work.Sizes[particleIndex] = work.StartSize;
                 work.MeshIndices[particleIndex] = ResolveMeshIndex(work, particleIndex);

@@ -528,6 +528,138 @@ namespace VividRP.Runtime.Particle
     }
 
     [Serializable]
+    public sealed class VividParticleLifetimeByEmitterSpeedModule
+    {
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private AnimationCurve m_Curve = new(
+            new Keyframe(0.0f, 1.0f),
+            new Keyframe(1.0f, 0.0f));
+
+        [SerializeField]
+        private float m_CurveMultiplier = 1.0f;
+
+        [SerializeField]
+        private Vector2 m_Range = Vector2.up;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set { if (m_Enabled != value) { m_Enabled = value; NotifyChanged(); } }
+        }
+
+        public AnimationCurve curve
+        {
+            get => m_Curve ??= CreateDefaultCurve();
+            set
+            {
+                m_Curve = CloneCurve(value ?? CreateDefaultCurve());
+                NotifyChanged();
+            }
+        }
+
+        public float curveMultiplier
+        {
+            get => m_CurveMultiplier;
+            set
+            {
+                float clamped = float.IsFinite(value) ? Mathf.Max(0.0f, value) : 0.0f;
+                if (m_CurveMultiplier == clamped)
+                    return;
+                m_CurveMultiplier = clamped;
+                NotifyChanged();
+            }
+        }
+
+        public Vector2 range
+        {
+            get => m_Range;
+            set
+            {
+                Vector2 validated = ValidateRange(value);
+                if (m_Range == validated)
+                    return;
+                m_Range = validated;
+                NotifyChanged();
+            }
+        }
+
+        internal float EvaluateMultiplier(float emitterSpeed)
+        {
+            if (!m_Enabled)
+                return 1.0f;
+
+            float normalizedSpeed = Mathf.InverseLerp(
+                m_Range.x,
+                m_Range.y,
+                Mathf.Max(0.0f, emitterSpeed));
+            return Mathf.Max(0.0f, curve.Evaluate(normalizedSpeed) * m_CurveMultiplier);
+        }
+
+        internal void SetChangeCallback(Action onChanged) => m_OnChanged = onChanged;
+
+        internal static VividParticleLifetimeByEmitterSpeedModule CreateDefault() => new();
+
+        internal VividParticleLifetimeByEmitterSpeedModule Clone()
+        {
+            var clone = new VividParticleLifetimeByEmitterSpeedModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleLifetimeByEmitterSpeedModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Curve = CloneCurve(source.m_Curve ?? CreateDefaultCurve());
+            m_CurveMultiplier = source.m_CurveMultiplier;
+            m_Range = source.m_Range;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            m_Curve ??= CreateDefaultCurve();
+            m_CurveMultiplier = float.IsFinite(m_CurveMultiplier)
+                ? Mathf.Max(0.0f, m_CurveMultiplier)
+                : 0.0f;
+            m_Range = ValidateRange(m_Range);
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return new AnimationCurve(
+                new Keyframe(0.0f, 1.0f),
+                new Keyframe(1.0f, 0.0f));
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private static Vector2 ValidateRange(Vector2 value)
+        {
+            float minimum = float.IsFinite(value.x) ? Mathf.Max(0.0f, value.x) : 0.0f;
+            float maximum = float.IsFinite(value.y) ? Mathf.Max(minimum, value.y) : minimum;
+            return new Vector2(minimum, maximum);
+        }
+
+        private void NotifyChanged() => m_OnChanged?.Invoke();
+    }
+
+    [Serializable]
     public sealed class VividParticleEmissionModule
     {
         [NonSerialized]
@@ -2595,6 +2727,30 @@ namespace VividRP.Runtime.Particle
                 componentCount > 3 ? GetVectorCurve(stream, 3).Evaluate(t) : 0.0f);
         }
 
+        internal bool IsStreamConstant(VividParticleCustomDataStream stream)
+        {
+            VividParticleCustomDataMode mode = GetMode(stream);
+            if (mode == VividParticleCustomDataMode.Disabled)
+                return true;
+
+            if (mode == VividParticleCustomDataMode.Color)
+                return IsConstantGradient(stream == VividParticleCustomDataStream.Custom2 ? m_Color2 : m_Color1);
+
+            int componentCount = GetVectorComponentCount(stream);
+            for (int component = 0; component < componentCount; component++)
+            {
+                if (!IsConstantCurve(GetVectorCurve(stream, component)))
+                    return false;
+            }
+
+            return true;
+        }
+
+        internal Vector4 GetConstantValue(VividParticleCustomDataStream stream)
+        {
+            return IsStreamConstant(stream) ? Evaluate(stream, 0.0f) : Vector4.zero;
+        }
+
         internal void SetChangeCallback(Action onChanged) => m_OnChanged = onChanged;
 
         internal static VividParticleCustomDataModule CreateDefault() => new();
@@ -2707,6 +2863,64 @@ namespace VividRP.Runtime.Particle
                 preWrapMode = source.preWrapMode,
                 postWrapMode = source.postWrapMode,
             };
+        }
+
+        private static bool IsConstantCurve(AnimationCurve curve)
+        {
+            if (curve == null || curve.length <= 1)
+                return true;
+
+            Keyframe[] keys = curve.keys;
+            float value = keys[0].value;
+            for (int index = 0; index < keys.Length; index++)
+            {
+                Keyframe key = keys[index];
+                if (!Mathf.Approximately(key.value, value)
+                    || !IsConstantTangent(key.inTangent)
+                    || !IsConstantTangent(key.outTangent))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool IsConstantTangent(float tangent)
+        {
+            return Mathf.Approximately(tangent, 0.0f) || float.IsInfinity(tangent);
+        }
+
+        private static bool IsConstantGradient(Gradient gradient)
+        {
+            if (gradient == null)
+                return true;
+
+            GradientColorKey[] colorKeys = gradient.colorKeys;
+            GradientAlphaKey[] alphaKeys = gradient.alphaKeys;
+            Color color = colorKeys.Length > 0 ? colorKeys[0].color : Color.white;
+            float alpha = alphaKeys.Length > 0 ? alphaKeys[0].alpha : 1.0f;
+            for (int index = 1; index < colorKeys.Length; index++)
+            {
+                if (!Approximately(colorKeys[index].color, color))
+                    return false;
+            }
+
+            for (int index = 1; index < alphaKeys.Length; index++)
+            {
+                if (!Mathf.Approximately(alphaKeys[index].alpha, alpha))
+                    return false;
+            }
+
+            return true;
+        }
+
+        private static bool Approximately(Color left, Color right)
+        {
+            return Mathf.Approximately(left.r, right.r)
+                && Mathf.Approximately(left.g, right.g)
+                && Mathf.Approximately(left.b, right.b)
+                && Mathf.Approximately(left.a, right.a);
         }
 
         private static Gradient CreateWhiteGradient()

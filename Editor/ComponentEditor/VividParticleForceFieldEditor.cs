@@ -8,6 +8,10 @@ namespace VividRP.Editor
     [CanEditMultipleObjects]
     internal sealed class VividParticleForceFieldEditor : UnityEditor.Editor
     {
+        private static readonly Color s_EndRangeColor = new(0.25f, 0.8f, 1.0f, 0.85f);
+        private static readonly Color s_StartRangeColor = new(1.0f, 0.72f, 0.2f, 0.85f);
+        private static readonly Color s_LengthColor = new(0.55f, 1.0f, 0.45f, 0.85f);
+
         private SerializedProperty m_Shape;
         private SerializedProperty m_StartRange;
         private SerializedProperty m_EndRange;
@@ -54,24 +58,50 @@ namespace VividRP.Editor
 
         private void OnSceneGUI()
         {
-            if (targets.Length != 1 || target is not VividParticleForceField field)
+            if (target is not VividParticleForceField field)
                 return;
 
             Transform fieldTransform = field.transform;
             using (new Handles.DrawingScope(fieldTransform.localToWorldMatrix))
             {
                 EditorGUI.BeginChangeCheck();
+                Handles.color = s_EndRangeColor;
                 float endRange = DrawRangeHandle(field.shape, field.endRange, field.length);
+                Handles.color = s_StartRangeColor;
+                float startRange = DrawRangeHandle(field.shape, field.startRange, field.length);
+                float length = field.shape == VividParticleForceFieldShape.Cylinder
+                    ? DrawLengthHandle(field.length)
+                    : field.length;
                 if (EditorGUI.EndChangeCheck())
                 {
-                    Undo.RecordObject(field, "Resize Vivid Particle Force Field");
+                    Undo.RecordObject(field, "Edit Vivid Particle Force Field Bounds");
+                    ResolveRanges(startRange, endRange, out startRange, out endRange);
+                    field.startRange = startRange;
                     field.endRange = endRange;
+                    field.length = length;
                     EditorUtility.SetDirty(field);
                 }
 
-                Handles.color = new Color(0.25f, 0.8f, 1.0f, 0.7f);
+                Handles.color = s_StartRangeColor;
                 DrawWireShape(field.shape, field.startRange, field.length);
+                Handles.color = s_EndRangeColor;
+                DrawWireShape(field.shape, field.endRange, field.length);
             }
+        }
+
+        internal static void ResolveRanges(
+            float startRange,
+            float endRange,
+            out float resolvedStartRange,
+            out float resolvedEndRange)
+        {
+            resolvedStartRange = Mathf.Max(0.0f, startRange);
+            resolvedEndRange = Mathf.Max(resolvedStartRange, endRange);
+        }
+
+        internal static float ResolveLength(float length)
+        {
+            return Mathf.Max(0.0f, length);
         }
 
         private static float DrawRangeHandle(
@@ -94,6 +124,22 @@ namespace VividRP.Editor
             }
 
             return Mathf.Max(0.0f, Handles.RadiusHandle(Quaternion.identity, Vector3.zero, range));
+        }
+
+        private static float DrawLengthHandle(float length)
+        {
+            Handles.color = s_LengthColor;
+            float halfLength = Mathf.Max(0.0f, length) * 0.5f;
+            Vector3 worldHandlePosition = Handles.matrix.MultiplyPoint3x4(Vector3.up * halfLength);
+            float handleSize = HandleUtility.GetHandleSize(worldHandlePosition) * 0.12f;
+            Vector3 positive = Handles.Slider(
+                Vector3.up * halfLength,
+                Vector3.up,
+                handleSize,
+                Handles.ConeHandleCap,
+                0.0f);
+            Handles.DrawLine(Vector3.down * halfLength, Vector3.up * halfLength);
+            return ResolveLength(Mathf.Max(0.0f, positive.y) * 2.0f);
         }
 
         private static void DrawWireShape(

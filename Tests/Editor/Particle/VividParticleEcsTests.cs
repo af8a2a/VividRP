@@ -17,6 +17,100 @@ namespace VividRP.Editor.Tests
     public sealed class VividParticleEcsTests
     {
         [Test]
+        public void SimulationPrepareJob_PreservesGenerationSafeSystemHandle()
+        {
+            var expectedHandle = new VividParticleSystemHandle(7, 19);
+            var configs = new NativeArray<VividParticleNativeSimulationConfig>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            var inputs = new NativeArray<VividParticleSimulationPrepareInput>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            var outputs = new NativeArray<VividParticleSimulationPrepareOutput>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            try
+            {
+                inputs[0] = new VividParticleSimulationPrepareInput
+                {
+                    SystemHandle = expectedHandle,
+                    ConfigSlot = -1,
+                };
+
+                new VividParticleSimulationPrepareJob
+                {
+                    Configs = configs,
+                    Inputs = inputs,
+                    Outputs = outputs,
+                }.Run(1);
+
+                Assert.That(outputs[0].SystemHandle, Is.EqualTo(expectedHandle));
+                Assert.That(outputs[0].ShouldSchedule, Is.Zero);
+            }
+            finally
+            {
+                outputs.Dispose();
+                inputs.Dispose();
+                configs.Dispose();
+            }
+        }
+
+        [Test]
+        public void EmissionPlanJob_PreservesGenerationSafeSystemHandle_OnFallback()
+        {
+            var expectedHandle = new VividParticleSystemHandle(3, 11);
+            var configs = new NativeArray<VividParticleNativeSimulationConfig>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            var bursts = new NativeArray<VividParticleNativeBurst>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            var inputs = new NativeArray<VividParticleEmissionPlanInput>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            var outputs = new NativeArray<VividParticleEmissionPlanOutput>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+            try
+            {
+                inputs[0] = new VividParticleEmissionPlanInput
+                {
+                    SystemHandle = expectedHandle,
+                    ConfigSlot = -1,
+                    RandomState = 17u,
+                };
+
+                new VividParticleEmissionPlanJob
+                {
+                    Configs = configs,
+                    Bursts = bursts,
+                    Inputs = inputs,
+                    Outputs = outputs,
+                    MinimumSimulationStep = 0.000001f,
+                    EmissionAccumulatorTolerance = 0.0001f,
+                }.Run(1);
+
+                Assert.That(outputs[0].SystemHandle, Is.EqualTo(expectedHandle));
+                Assert.That(outputs[0].RequiresManagedFallback, Is.EqualTo(1));
+                Assert.That(outputs[0].RandomState, Is.EqualTo(17u));
+            }
+            finally
+            {
+                outputs.Dispose();
+                inputs.Dispose();
+                bursts.Dispose();
+                configs.Dispose();
+            }
+        }
+
+        [Test]
         public void TypeManager_RegistersParticleTypes_WithStableSoaOffsets()
         {
             VividParticleEcsBootstrap.RegisterTypes();

@@ -142,7 +142,7 @@ namespace VividRP.Runtime.Particle
 
     internal struct VividParticleSimulationPrepareInput
     {
-        public int SystemId;
+        public VividParticleSystemHandle SystemHandle;
         public int ConfigSlot;
         public int ActiveCount;
         public VividParticleSimulationTimeStep TimeStep;
@@ -150,7 +150,7 @@ namespace VividRP.Runtime.Particle
 
     internal struct VividParticleSimulationPrepareOutput
     {
-        public int SystemId;
+        public VividParticleSystemHandle SystemHandle;
         public int ShouldSchedule;
         public float3 Gravity;
         public VividParticleSimulationTimeStep TimeStep;
@@ -158,7 +158,7 @@ namespace VividRP.Runtime.Particle
 
     internal unsafe struct VividParticleEmissionPlanInput
     {
-        public int SystemId;
+        public VividParticleSystemHandle SystemHandle;
         public int ConfigSlot;
         public int AllowEmission;
         public float DeltaTime;
@@ -176,7 +176,7 @@ namespace VividRP.Runtime.Particle
 
     internal unsafe struct VividParticleEmissionPlanOutput
     {
-        public int SystemId;
+        public VividParticleSystemHandle SystemHandle;
         public int EmitCount;
         public int RequiresManagedFallback;
         public float Time;

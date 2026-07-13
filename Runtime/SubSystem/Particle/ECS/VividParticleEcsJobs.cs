@@ -420,7 +420,7 @@ namespace VividRP.Runtime.Particle.ECS
             VividParticleSimulationPrepareInput input = Inputs[index];
             var output = new VividParticleSimulationPrepareOutput
             {
-                SystemId = input.SystemId,
+                SystemHandle = input.SystemHandle,
                 TimeStep = input.TimeStep,
             };
 
@@ -480,7 +480,7 @@ namespace VividRP.Runtime.Particle.ECS
             VividParticleEmissionPlanInput input = Inputs[index];
             var output = new VividParticleEmissionPlanOutput
             {
-                SystemId = input.SystemId,
+                SystemHandle = input.SystemHandle,
                 Time = input.Time,
                 EmissionAccumulator = input.EmissionAccumulator,
                 BurstTriggeredMask = input.BurstTriggeredMask,

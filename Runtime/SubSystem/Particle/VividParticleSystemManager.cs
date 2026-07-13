@@ -144,7 +144,7 @@ namespace VividRP.Runtime.Particle
         private static NativeList<VividParticleSimulationPrepareOutput> s_SimulationPrepareOutputs;
         private static NativeList<VividParticleEmissionPlanInput> s_EmissionPlanInputs;
         private static NativeList<VividParticleEmissionPlanOutput> s_EmissionPlanOutputs;
-        private static NativeList<int> s_PendingSimulationSystemIds;
+        private static NativeList<VividParticleSystemHandle> s_PendingSimulationHandles;
         private static NativeList<VividParticleSubEmitterCommand> s_SubEmitterCommands;
         private static NativeList<VividParticleSubEmitterCommand> s_SubEmitterConsumeCommands;
         private static NativeList<VividParticleSubEmitterEventWork> s_SubEmitterEventWorks;
@@ -461,7 +461,7 @@ namespace VividRP.Runtime.Particle
             s_LastInvalidActiveSimulationQueryLineCount;
 
         internal static int pendingSimulationSystemCount =>
-            s_PendingSimulationSystemIds.IsCreated ? s_PendingSimulationSystemIds.Length : 0;
+            s_PendingSimulationHandles.IsCreated ? s_PendingSimulationHandles.Length : 0;
 
         internal static int pendingSimulationSystemCountForTests => pendingSimulationSystemCount;
 
@@ -1167,8 +1167,8 @@ namespace VividRP.Runtime.Particle
             s_SimulationPrepareOutputs = default;
             s_EmissionPlanInputs = default;
             s_EmissionPlanOutputs = default;
-            if (s_PendingSimulationSystemIds.IsCreated)
-                s_PendingSimulationSystemIds.Dispose();
+            if (s_PendingSimulationHandles.IsCreated)
+                s_PendingSimulationHandles.Dispose();
             if (s_SimulationLineWorks.IsCreated)
                 s_SimulationLineWorks.Dispose();
             if (s_SimulationPageDispatches.IsCreated)
@@ -1177,7 +1177,7 @@ namespace VividRP.Runtime.Particle
                 s_VelocitySimulationLineWorks.Dispose();
             if (s_VelocitySimulationPageDispatches.IsCreated)
                 s_VelocitySimulationPageDispatches.Dispose();
-            s_PendingSimulationSystemIds = default;
+            s_PendingSimulationHandles = default;
             if (s_SimulationCompactWorks.IsCreated)
                 s_SimulationCompactWorks.Dispose();
             if (s_EmissionInitializeWorks.IsCreated)
@@ -1340,6 +1340,20 @@ namespace VividRP.Runtime.Particle
         {
             return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
                 ? state.renderIdentityRefreshCount
+                : 0;
+        }
+
+        internal static int GetRenderEntryBuildCount(VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
+                ? state.renderEntryBuildCount
+                : 0;
+        }
+
+        internal static int GetRenderDynamicFastPathCount(VividParticleSystem system)
+        {
+            return system != null && s_States.TryGetValue(system, out ParticleSystemState state)
+                ? state.renderDynamicFastPathCount
                 : 0;
         }
 
@@ -3747,7 +3761,7 @@ namespace VividRP.Runtime.Particle
             using (s_KickScheduleSimulationJobsMarker.Auto())
             {
                 EnsureSimulationPageWorkList();
-                s_PendingSimulationSystemIds.Clear();
+                s_PendingSimulationHandles.Clear();
                 s_SimulationLineWorks.Clear();
                 s_SimulationPageDispatches.Clear();
                 s_VelocitySimulationLineWorks.Clear();
@@ -3761,7 +3775,7 @@ namespace VividRP.Runtime.Particle
                 {
                     VividParticleSimulationPrepareOutput output = s_SimulationPrepareOutputs[prepareIndex];
                     if (output.ShouldSchedule == 0
-                        || !s_StatesBySystemId.TryGetValue(output.SystemId, out ParticleSystemState state)
+                        || !TryResolveParticleState(output.SystemHandle, out ParticleSystemState state)
                         || !state.PrepareAutomaticSimulation(output))
                     {
                         continue;
@@ -3781,7 +3795,7 @@ namespace VividRP.Runtime.Particle
                             s_SimulationCompactWorks))
                         continue;
 
-                    s_PendingSimulationSystemIds.Add(state.systemId.Value);
+                    s_PendingSimulationHandles.Add(state.systemHandle);
                     s_EmissionPlanInputs.Add(state.CreatePreparedEmissionPlanInput());
                     scheduledAnySimulation = true;
                 }
@@ -3916,8 +3930,11 @@ namespace VividRP.Runtime.Particle
 
         private static void EnsureSimulationPageWorkList()
         {
-            if (!s_PendingSimulationSystemIds.IsCreated)
-                s_PendingSimulationSystemIds = new NativeList<int>(64, Allocator.Persistent);
+            if (!s_PendingSimulationHandles.IsCreated)
+            {
+                s_PendingSimulationHandles =
+                    new NativeList<VividParticleSystemHandle>(64, Allocator.Persistent);
+            }
             if (!s_SimulationLineWorks.IsCreated)
                 s_SimulationLineWorks = new NativeList<VividParticleEcsIntegratePageWork>(64, Allocator.Persistent);
             if (!s_SimulationPageDispatches.IsCreated)
@@ -3965,8 +3982,8 @@ namespace VividRP.Runtime.Particle
         private static void CompletePendingSimulations(bool allowDeferredParticleDataInitialization = false)
         {
             CompletePendingParticleDataInitialization();
-            int pendingSystemCount = s_PendingSimulationSystemIds.IsCreated
-                ? s_PendingSimulationSystemIds.Length
+            int pendingSystemCount = s_PendingSimulationHandles.IsCreated
+                ? s_PendingSimulationHandles.Length
                 : 0;
             if (pendingSystemCount == 0 && !s_HasPendingSimulationBatch)
                 return;
@@ -3983,8 +4000,8 @@ namespace VividRP.Runtime.Particle
 
                 for (int index = 0; index < pendingSystemCount; index++)
                 {
-                    if (!s_StatesBySystemId.TryGetValue(
-                            s_PendingSimulationSystemIds[index],
+                    if (!TryResolveParticleState(
+                            s_PendingSimulationHandles[index],
                             out ParticleSystemState state)
                         || state == null
                         || !state.hasPendingSimulationJob)
@@ -4038,8 +4055,8 @@ namespace VividRP.Runtime.Particle
                 {
                     for (int index = pendingSystemCount - 1; index >= 0; index--)
                     {
-                        if (!s_StatesBySystemId.TryGetValue(
-                                s_PendingSimulationSystemIds[index],
+                        if (!TryResolveParticleState(
+                                s_PendingSimulationHandles[index],
                                 out ParticleSystemState state)
                             || state == null)
                         {
@@ -4126,8 +4143,8 @@ namespace VividRP.Runtime.Particle
 
                 for (int index = 0; index < pendingSystemCount; index++)
                 {
-                    if (s_StatesBySystemId.TryGetValue(
-                            s_PendingSimulationSystemIds[index],
+                    if (TryResolveParticleState(
+                            s_PendingSimulationHandles[index],
                             out ParticleSystemState state))
                     {
                         state?.AppendPendingSubEmitterProducerWorks();
@@ -4148,7 +4165,7 @@ namespace VividRP.Runtime.Particle
                         initializeWorkCount);
                     s_LastEmissionInitializeScheduledWorkCount += initializeWorkCount;
                 }
-                s_PendingSimulationSystemIds.Clear();
+                s_PendingSimulationHandles.Clear();
             }
         }
 
@@ -4223,16 +4240,16 @@ namespace VividRP.Runtime.Particle
 
         private static void RemovePendingSimulationState(ParticleSystemState state)
         {
-            if (state == null || !s_PendingSimulationSystemIds.IsCreated)
+            if (state == null || !s_PendingSimulationHandles.IsCreated)
                 return;
 
-            int systemId = state.systemId.Value;
-            for (int index = s_PendingSimulationSystemIds.Length - 1; index >= 0; index--)
+            VividParticleSystemHandle systemHandle = state.systemHandle;
+            for (int index = s_PendingSimulationHandles.Length - 1; index >= 0; index--)
             {
-                if (s_PendingSimulationSystemIds[index] != systemId)
+                if (!s_PendingSimulationHandles[index].Equals(systemHandle))
                     continue;
 
-                s_PendingSimulationSystemIds.RemoveAtSwapBack(index);
+                s_PendingSimulationHandles.RemoveAtSwapBack(index);
                 return;
             }
         }
@@ -5774,6 +5791,8 @@ namespace VividRP.Runtime.Particle
             private bool m_RendererInitialized;
             private int m_RenderIdentityVersion;
             private int m_RenderIdentityRefreshCount;
+            private int m_RenderEntryBuildCount;
+            private int m_RenderDynamicFastPathCount;
             private readonly VividParticleSystemHandle m_SystemHandle;
             private readonly int m_NativeSimulationConfigSlot;
             private readonly List<VividParticleSubEmitterBirthRange> m_PendingBirthRanges = new(4);
@@ -5877,6 +5896,10 @@ namespace VividRP.Runtime.Particle
             internal VividParticleRendererHandle rendererHandle => m_Storage.rendererHandle;
 
             internal int renderIdentityRefreshCount => m_RenderIdentityRefreshCount;
+
+            internal int renderEntryBuildCount => m_RenderEntryBuildCount;
+
+            internal int renderDynamicFastPathCount => m_RenderDynamicFastPathCount;
 
             internal VividParticleModuleSharedKey moduleSharedKey => m_Storage.moduleSharedKey;
 
@@ -6244,7 +6267,7 @@ namespace VividRP.Runtime.Particle
 
                 input = new VividParticleSimulationPrepareInput
                 {
-                    SystemId = systemId.Value,
+                    SystemHandle = m_SystemHandle,
                     ConfigSlot = m_NativeSimulationConfigSlot,
                     ActiveCount = activeCount,
                     TimeStep = timeStep,
@@ -6254,7 +6277,7 @@ namespace VividRP.Runtime.Particle
 
             public bool PrepareAutomaticSimulation(VividParticleSimulationPrepareOutput output)
             {
-                if (output.ShouldSchedule == 0 || output.SystemId != systemId.Value)
+                if (output.ShouldSchedule == 0 || !output.SystemHandle.Equals(m_SystemHandle))
                 {
                     m_HasPreparedAutomaticSimulation = false;
                     return false;
@@ -6456,7 +6479,7 @@ namespace VividRP.Runtime.Particle
                 ApplyPendingIntegrationResult();
                 if (m_HasPendingSimulation)
                 {
-                    if (emissionPlan.SystemId == systemId.Value
+                    if (emissionPlan.SystemHandle.Equals(m_SystemHandle)
                         && emissionPlan.RequiresManagedFallback == 0)
                     {
                         m_Time = emissionPlan.Time;
@@ -6501,7 +6524,7 @@ namespace VividRP.Runtime.Particle
                     out int* activeCountOutput);
                 return new VividParticleEmissionPlanInput
                 {
-                    SystemId = systemId.Value,
+                    SystemHandle = m_SystemHandle,
                     ConfigSlot = m_NativeSimulationConfigSlot,
                     AllowEmission = m_PreparedAutomaticTimeStep.allowEmission ? 1 : 0,
                     DeltaTime = m_PreparedAutomaticSnapshot.DeltaTime,
@@ -6709,6 +6732,35 @@ namespace VividRP.Runtime.Particle
                 s_RendererManager.Update(this, forceUpload);
             }
 
+            internal bool TryPrepareCachedRenderDynamicUpdate(bool forceUpload)
+            {
+                if (forceUpload
+                    || m_System == null
+                    || !m_System.isActiveAndEnabled
+                    || activeCount <= 0
+                    || !ParticleSystemState.CanRender(m_System.rendererModule)
+                    || !m_HasCachedRenderIdentity
+                    || m_RenderIdentityDirty
+                    || m_ResourcesDirty
+                    || !IsInitialized
+                    || m_RegisteredMaterial == null
+                    || m_QuadMesh == null
+                    || m_Capacity <= 0
+                    || m_CachedRenderIdentity.Layer != Mathf.Clamp(m_System.gameObject.layer, 0, 31))
+                {
+                    return false;
+                }
+
+                int count = Mathf.Min(activeCount, m_Capacity);
+                m_LastUploadedCount = count;
+                m_LastUploadOperationCount = 0;
+                m_LastUploadByteCount = 0;
+                MarkRenderStateDirtyIfNeeded(count);
+                m_LastUploadedFrame = Time.frameCount;
+                m_RenderDynamicFastPathCount++;
+                return true;
+            }
+
             internal bool PrepareRenderEntry(bool forceUpload, out ParticleRenderEntry entry)
             {
                 entry = default;
@@ -6825,6 +6877,7 @@ namespace VividRP.Runtime.Particle
                         m_System.main.startSize),
                     identity.PerSharpCustomData1,
                     identity.PerSharpCustomData2);
+                m_RenderEntryBuildCount++;
                 return true;
             }
 
@@ -13975,12 +14028,6 @@ namespace VividRP.Runtime.Particle
 
             private void UpdateRecord(ParticleSystemState state, bool forceUpload)
             {
-                if (!state.PrepareRenderEntry(forceUpload, out ParticleRenderEntry entry))
-                {
-                    RemoveRecord(state);
-                    return;
-                }
-
                 bool foundByHandle = TryGetRecordFromHandle(state, out ParticleRenderRecord record);
                 if (!foundByHandle)
                 {
@@ -13995,6 +14042,27 @@ namespace VividRP.Runtime.Particle
                 else
                 {
                     m_LastHandleRecordLookupCount++;
+                }
+
+                if (record != null
+                    && TryGetNativeRendererRecord(
+                        record.RecordSlot,
+                        record.RecordVersion,
+                        out ParticleRendererDynamicRecord cachedDynamicRecord)
+                    && state.TryPrepareCachedRenderDynamicUpdate(forceUpload))
+                {
+                    record.State = state;
+                    state.RefreshRendererDynamicBoundsData(ref cachedDynamicRecord);
+                    m_NativeRendererRecords[record.RecordSlot] = cachedDynamicRecord;
+                    if (state.HasPendingUploadData())
+                        QueueUploadDirty(record);
+                    return;
+                }
+
+                if (!state.PrepareRenderEntry(forceUpload, out ParticleRenderEntry entry))
+                {
+                    RemoveRecord(state);
+                    return;
                 }
 
                 if (record == null)

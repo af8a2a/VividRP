@@ -1326,6 +1326,10 @@ namespace VividRP.Editor
         private static readonly GUIContent s_SubEmitterDeferredLifetimeLabel =
             EditorGUIUtility.TrTextContent("Sub Emitter Async (Scheduled/Completed)");
         private static readonly GUIContent s_RenderRecordsLabel = EditorGUIUtility.TrTextContent("Render Records");
+        private static readonly GUIContent s_RenderEntryBuildsLabel =
+            EditorGUIUtility.TrTextContent("Render Entry Builds");
+        private static readonly GUIContent s_RenderDynamicFastPathLabel =
+            EditorGUIUtility.TrTextContent("Render Dynamic Fast Path");
         private static readonly GUIContent s_RenderRecordPoolLabel = EditorGUIUtility.TrTextContent("Render Record Pool");
         private static readonly GUIContent s_ReusedRenderRecordsLabel = EditorGUIUtility.TrTextContent("Reused Render Records");
         private static readonly GUIContent s_CreatedRenderRecordsLabel = EditorGUIUtility.TrTextContent("Created Render Records");
@@ -2158,6 +2162,12 @@ namespace VividRP.Editor
                 EditorGUILayout.TextField(
                     s_PerformanceSummaryLabel,
                 VividParticleSystemEditorUtility.FormatPerformanceSummary(runtimeStats, rendererStats));
+                EditorGUILayout.IntField(
+                    s_RenderEntryBuildsLabel,
+                    VividParticleSystemManager.GetRenderEntryBuildCount(system));
+                EditorGUILayout.IntField(
+                    s_RenderDynamicFastPathLabel,
+                    VividParticleSystemManager.GetRenderDynamicFastPathCount(system));
                 EditorGUILayout.IntField(s_RenderRecordsLabel, rendererStats.RenderRecordCount);
                 EditorGUILayout.IntField(s_RenderRecordPoolLabel, rendererStats.RenderRecordPoolCount);
                 EditorGUILayout.IntField(s_ReusedRenderRecordsLabel, rendererStats.LastReusedRenderRecordCount);

@@ -4639,7 +4639,12 @@ namespace VividRP.Editor.Tests
             _ = VividParticleSystemManager.GetRendererStatsForTests();
             int initialRefreshCount =
                 VividParticleSystemManager.GetRenderIdentityRefreshCountForTests(system);
+            int initialEntryBuildCount =
+                VividParticleSystemManager.GetRenderEntryBuildCount(system);
+            int initialFastPathCount =
+                VividParticleSystemManager.GetRenderDynamicFastPathCount(system);
             Assert.That(initialRefreshCount, Is.EqualTo(1));
+            Assert.That(initialEntryBuildCount, Is.EqualTo(1));
 
             system.transform.position = new Vector3(1.0f, 2.0f, 3.0f);
             VividParticleSystemManager.RunRendererUpdateForTests();
@@ -4648,6 +4653,21 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemManager.GetRenderIdentityRefreshCountForTests(system),
                 Is.EqualTo(initialRefreshCount));
+            Assert.That(
+                VividParticleSystemManager.GetRenderEntryBuildCount(system),
+                Is.EqualTo(initialEntryBuildCount));
+            Assert.That(
+                VividParticleSystemManager.GetRenderDynamicFastPathCount(system),
+                Is.EqualTo(initialFastPathCount + 2));
+            Assert.That(
+                VividParticleSystemManager.TryGetRendererNativeDynamicRecordForTests(
+                    system,
+                    out _,
+                    out float4x4 localToWorld,
+                    out _,
+                    out _),
+                Is.True);
+            Assert.That(localToWorld.c3.xyz, Is.EqualTo(new float3(1.0f, 2.0f, 3.0f)));
 
             system.rendererModule.color = Color.red;
             VividParticleSystemManager.RunRendererUpdateForTests();
@@ -4655,6 +4675,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemManager.GetRenderIdentityRefreshCountForTests(system),
                 Is.EqualTo(initialRefreshCount + 1));
+            Assert.That(
+                VividParticleSystemManager.GetRenderEntryBuildCount(system),
+                Is.EqualTo(initialEntryBuildCount + 1));
+            Assert.That(
+                VividParticleSystemManager.GetRenderDynamicFastPathCount(system),
+                Is.EqualTo(initialFastPathCount + 2));
         }
 
         [Test]

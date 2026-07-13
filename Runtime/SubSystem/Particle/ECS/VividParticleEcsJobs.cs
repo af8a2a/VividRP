@@ -21,6 +21,7 @@ namespace VividRP.Runtime.Particle.ECS
         public int SimulationSpace;
         public float RadiusScale;
         public int TriggerEventCapacity;
+        public int CaptureSubEmitterEvents;
         public float4x4 ParticleLocalToWorld;
 
         [NativeDisableUnsafePtrRestriction]
@@ -53,6 +54,7 @@ namespace VividRP.Runtime.Particle.ECS
         public float MaxKillSpeedSquared;
         public float RadiusScale;
         public int SendCollisionEvents;
+        public int CaptureSubEmitterEvents;
         public int CollisionEventCapacity;
         public float4x4 ParticleLocalToWorld;
         public float4x4 ParticleWorldToLocal;
@@ -143,7 +145,13 @@ namespace VividRP.Runtime.Particle.ECS
         public float* Sizes;
 
         [NativeDisableUnsafePtrRestriction]
+        public float4* Colors;
+
+        [NativeDisableUnsafePtrRestriction]
         public float3* AccumulatedRotations;
+
+        [NativeDisableUnsafePtrRestriction]
+        public uint* RandomSeeds;
 
         [NativeDisableUnsafePtrRestriction]
         public float3* RotationBySpeedLut;
@@ -213,6 +221,12 @@ namespace VividRP.Runtime.Particle.ECS
         public byte* KeepMask;
     }
 
+    internal struct VividParticleEcsIntegratePageDispatch
+    {
+        public VividEcsPageInfo Page;
+        public int LineWorkIndex;
+    }
+
     internal unsafe struct VividParticleEcsCompactWork
     {
         public int ActiveCount;
@@ -252,6 +266,12 @@ namespace VividRP.Runtime.Particle.ECS
         public uint* RandomSeeds;
 
         [NativeDisableUnsafePtrRestriction]
+        public int* TrailHandleIndices;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* TrailHandleGenerations;
+
+        [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
 
         [NativeDisableUnsafePtrRestriction]
@@ -271,10 +291,30 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public int* ActiveCountOutput;
+
+        [NativeDisableUnsafePtrRestriction]
+        public VividParticleSubEmitterParticleData* DeathEvents;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* DeathEventCount;
+    }
+
+    internal struct VividParticleSubEmitterParticleData
+    {
+        public float3 Position;
+        public float3 Velocity;
+        public float3 Rotation;
+        public float4 Color;
+        public float StartLifetime;
+        public float RemainingLifetime;
+        public float Size;
+        public uint RandomSeed;
     }
 
     internal unsafe struct VividParticleEcsInitializeParticlesWork
     {
+        internal const uint MeshSelectionRandomnessId = 0xbc524e5fu;
+
         public int StartIndex;
         public int Count;
         public int Capacity;
@@ -283,7 +323,9 @@ namespace VividRP.Runtime.Particle.ECS
         public int ShapeType;
         public int SimulationSpace;
         public int MeshCount;
+        public int MeshWeightingsUniform;
         public uint RandomSeed;
+        public float MeshWeightingTotal;
         public float StartLifetime;
         public int LifetimeByEmitterSpeedEnabled;
         public float LifetimeByEmitterSpeedMultiplier;
@@ -323,6 +365,9 @@ namespace VividRP.Runtime.Particle.ECS
         public float* Sizes;
 
         [NativeDisableUnsafePtrRestriction]
+        public float* MeshWeightings;
+
+        [NativeDisableUnsafePtrRestriction]
         public int* MeshIndices;
 
         [NativeDisableUnsafePtrRestriction]
@@ -330,6 +375,12 @@ namespace VividRP.Runtime.Particle.ECS
 
         [NativeDisableUnsafePtrRestriction]
         public uint* RandomSeeds;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* TrailHandleIndices;
+
+        [NativeDisableUnsafePtrRestriction]
+        public int* TrailHandleGenerations;
 
         [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
@@ -699,7 +750,13 @@ namespace VividRP.Runtime.Particle.ECS
 
         public void Execute(VividEcsPageInfo page, int workIndex)
         {
-            VividParticleEcsIntegratePageWork work = Works[workIndex];
+            ExecuteWork(Works[workIndex], page);
+        }
+
+        internal static void ExecuteWork(
+            VividParticleEcsIntegratePageWork work,
+            VividEcsPageInfo page)
+        {
             int pageEnd = math.min(page.StartIndex + page.EntryCount, work.PositionLength);
             if ((work.VelocityOverLifetimeEnabled != 0
                     && work.AnimatedVelocities != null
@@ -912,6 +969,13 @@ namespace VividRP.Runtime.Particle.ECS
             float3 worldPosition = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
                 ? math.transform(config.ParticleLocalToWorld, simulationPosition)
                 : simulationPosition;
+            float3 simulationVelocity = work.Velocities[particleIndex]
+                + (work.AnimatedVelocities != null
+                    ? work.AnimatedVelocities[particleIndex]
+                    : float3.zero);
+            float3 worldVelocity = config.SimulationSpace == (int)VividParticleSystemSimulationSpace.Local
+                ? math.mul((float3x3)config.ParticleLocalToWorld, simulationVelocity)
+                : simulationVelocity;
             float particleSize = work.Sizes != null
                 ? math.max(VividParticleMainModule.MinimumStartSize, work.Sizes[particleIndex])
                 : 1.0f;
@@ -924,7 +988,7 @@ namespace VividRP.Runtime.Particle.ECS
                 ? VividParticleTriggerEventType.Inside
                 : VividParticleTriggerEventType.Enter;
             int insideAction = wasInside ? config.InsideAction : config.EnterAction;
-            bool recordedAllInsideCallbacks = false;
+            bool recordedAllInsideEvents = false;
             for (int selectedIndex = 0; selectedIndex < config.SelectedColliderCount; selectedIndex++)
             {
                 int colliderIndex = config.SelectedColliderIndices[selectedIndex];
@@ -944,14 +1008,22 @@ namespace VividRP.Runtime.Particle.ECS
                 isInside = true;
                 if (currentColliderId == 0UL)
                     currentColliderId = collider.EntityId;
-                if (queryAll && insideAction == (int)VividParticleOverlapAction.Callback)
+                if (queryAll
+                    && (insideAction == (int)VividParticleOverlapAction.Callback
+                        || (config.CaptureSubEmitterEvents != 0
+                            && insideEventType == VividParticleTriggerEventType.Enter)))
                 {
                     RecordTriggerEvent(
+                        work,
                         config,
                         particleIndex,
                         collider.EntityId,
-                        insideEventType);
-                    recordedAllInsideCallbacks = true;
+                        insideEventType,
+                        worldPosition,
+                        worldVelocity,
+                        remainingLifetime,
+                        insideAction == (int)VividParticleOverlapAction.Callback);
+                    recordedAllInsideEvents = true;
                 }
                 if (!queryAll)
                     break;
@@ -986,21 +1058,52 @@ namespace VividRP.Runtime.Particle.ECS
 
             if (action == (int)VividParticleOverlapAction.Kill)
             {
+                if (config.CaptureSubEmitterEvents != 0
+                    && eventType == VividParticleTriggerEventType.Enter
+                    && !(isInside && recordedAllInsideEvents))
+                {
+                    RecordTriggerEvent(
+                        work,
+                        config,
+                        particleIndex,
+                        eventColliderId,
+                        eventType,
+                        worldPosition,
+                        worldVelocity,
+                        remainingLifetime,
+                        isCallback: false);
+                }
                 remainingLifetime = 0.0f;
                 return;
             }
-            if (action == (int)VividParticleOverlapAction.Callback
-                && !(isInside && recordedAllInsideCallbacks))
+            if ((action == (int)VividParticleOverlapAction.Callback
+                    || (config.CaptureSubEmitterEvents != 0
+                        && eventType == VividParticleTriggerEventType.Enter))
+                && !(isInside && recordedAllInsideEvents))
             {
-                RecordTriggerEvent(config, particleIndex, eventColliderId, eventType);
+                RecordTriggerEvent(
+                    work,
+                    config,
+                    particleIndex,
+                    eventColliderId,
+                    eventType,
+                    worldPosition,
+                    worldVelocity,
+                    remainingLifetime,
+                    action == (int)VividParticleOverlapAction.Callback);
             }
         }
 
         private static void RecordTriggerEvent(
+            VividParticleEcsIntegratePageWork work,
             VividParticleTriggerJobConfig config,
             int particleIndex,
             ulong colliderEntityId,
-            VividParticleTriggerEventType eventType)
+            VividParticleTriggerEventType eventType,
+            float3 worldPosition,
+            float3 worldVelocity,
+            float remainingLifetime,
+            bool isCallback)
         {
             if (config.TriggerEvents == null
                 || config.TriggerEventCount == null
@@ -1018,6 +1121,13 @@ namespace VividRP.Runtime.Particle.ECS
                     : colliderEntityId,
                 ParticleIndex = particleIndex,
                 EventType = (int)eventType,
+                IsCallback = isCallback ? 1 : 0,
+                Particle = CreateSubEmitterParticleData(
+                    work,
+                    particleIndex,
+                    worldPosition,
+                    worldVelocity,
+                    remainingLifetime),
             };
         }
 
@@ -1074,12 +1184,14 @@ namespace VividRP.Runtime.Particle.ECS
                     float3 collisionPoint = worldNext;
                     ResolveCollisionVelocity(config, normal, ref worldVelocity);
                     RecordCollisionEvent(
+                        work,
                         config,
                         particleIndex,
                         plane.EntityId,
                         collisionPoint,
                         normal,
-                        worldVelocity);
+                        worldVelocity,
+                        remainingLifetime);
                     collided = true;
                 }
             }
@@ -1143,12 +1255,14 @@ namespace VividRP.Runtime.Particle.ECS
                         worldCurrent = collisionPoint;
                     }
                     RecordCollisionEvent(
+                        work,
                         config,
                         particleIndex,
                         collider.EntityId,
                         collisionPoint,
                         normal,
-                        worldVelocity);
+                        worldVelocity,
+                        remainingLifetime);
                     collided = true;
                     resolvedColliderCount++;
                     if (resolvedColliderCount >= math.max(1, config.MaxCollisionShapes))
@@ -1190,14 +1304,16 @@ namespace VividRP.Runtime.Particle.ECS
         }
 
         private static void RecordCollisionEvent(
+            VividParticleEcsIntegratePageWork work,
             VividParticleCollisionJobConfig config,
             int particleIndex,
             ulong colliderEntityId,
             float3 intersection,
             float3 normal,
-            float3 velocity)
+            float3 velocity,
+            float remainingLifetime)
         {
-            if (config.SendCollisionEvents == 0
+            if ((config.SendCollisionEvents == 0 && config.CaptureSubEmitterEvents == 0)
                 || config.CollisionEvents == null
                 || config.CollisionEventCount == null
                 || config.CollisionEventCapacity <= 0)
@@ -1215,6 +1331,41 @@ namespace VividRP.Runtime.Particle.ECS
                 Intersection = intersection,
                 Normal = normal,
                 Velocity = velocity,
+                IsUserEvent = config.SendCollisionEvents,
+                Particle = CreateSubEmitterParticleData(
+                    work,
+                    particleIndex,
+                    intersection,
+                    velocity,
+                    remainingLifetime),
+            };
+        }
+
+        private static VividParticleSubEmitterParticleData CreateSubEmitterParticleData(
+            VividParticleEcsIntegratePageWork work,
+            int particleIndex,
+            float3 worldPosition,
+            float3 worldVelocity,
+            float remainingLifetime)
+        {
+            return new VividParticleSubEmitterParticleData
+            {
+                Position = worldPosition,
+                Velocity = worldVelocity,
+                Rotation = work.AccumulatedRotations != null
+                    ? work.AccumulatedRotations[particleIndex]
+                    : float3.zero,
+                Color = work.Colors != null
+                    ? work.Colors[particleIndex]
+                    : new float4(1.0f),
+                StartLifetime = work.StartLifetimes != null
+                    ? work.StartLifetimes[particleIndex]
+                    : math.max(0.0f, remainingLifetime),
+                RemainingLifetime = math.max(0.0f, remainingLifetime),
+                Size = work.Sizes != null ? work.Sizes[particleIndex] : 1.0f,
+                RandomSeed = work.RandomSeeds != null
+                    ? work.RandomSeeds[particleIndex]
+                    : (uint)(particleIndex + 1),
             };
         }
 
@@ -2025,6 +2176,26 @@ namespace VividRP.Runtime.Particle.ECS
     }
 
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal unsafe struct VividParticleEcsIntegrateLinePagesJob : IVividEcsPageJob
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleEcsIntegratePageWork> LineWorks;
+
+        [ReadOnly]
+        public NativeArray<VividParticleEcsIntegratePageDispatch> PageDispatches;
+
+        public void Execute(VividEcsPageInfo page, int pageIndex)
+        {
+            VividParticleEcsIntegratePageDispatch dispatch = PageDispatches[pageIndex];
+            int lineWorkIndex = dispatch.LineWorkIndex;
+            if ((uint)lineWorkIndex >= (uint)LineWorks.Length)
+                return;
+
+            VividParticleEcsIntegratePageWorksJob.ExecuteWork(LineWorks[lineWorkIndex], page);
+        }
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
     internal unsafe struct VividParticleEcsCompactWorksJob : IJobParallelFor
     {
         [ReadOnly]
@@ -2034,6 +2205,7 @@ namespace VividRP.Runtime.Particle.ECS
         {
             VividParticleEcsCompactWork work = Works[workIndex];
             int count = math.clamp(work.ActiveCount, 0, work.Capacity);
+            CaptureDeathEvents(work, count);
             int index = 0;
             while (index < count)
             {
@@ -2049,6 +2221,38 @@ namespace VividRP.Runtime.Particle.ECS
             }
 
             work.ActiveCountOutput[0] = count;
+        }
+
+        private static void CaptureDeathEvents(VividParticleEcsCompactWork work, int count)
+        {
+            if (work.DeathEvents == null || work.DeathEventCount == null)
+                return;
+
+            int eventCount = 0;
+            for (int index = 0; index < count; index++)
+            {
+                if (work.KeepMask[index] != 0)
+                    continue;
+
+                work.DeathEvents[eventCount++] = new VividParticleSubEmitterParticleData
+                {
+                    Position = work.Positions[index],
+                    Velocity = work.Velocities[index]
+                        + (work.AnimatedVelocities != null
+                            ? work.AnimatedVelocities[index]
+                            : float3.zero),
+                    Rotation = work.AccumulatedRotations != null
+                        ? work.AccumulatedRotations[index]
+                        : float3.zero,
+                    Color = work.Colors[index],
+                    StartLifetime = work.StartLifetimes[index],
+                    RemainingLifetime = math.max(0.0f, work.RemainingLifetimes[index]),
+                    Size = work.Sizes[index],
+                    RandomSeed = work.RandomSeeds != null ? work.RandomSeeds[index] : (uint)(index + 1),
+                };
+            }
+
+            work.DeathEventCount[0] = eventCount;
         }
 
         private static void CopyParticle(VividParticleEcsCompactWork work, int sourceIndex, int destinationIndex)
@@ -2068,6 +2272,10 @@ namespace VividRP.Runtime.Particle.ECS
                 work.AccumulatedRotations[destinationIndex] = work.AccumulatedRotations[sourceIndex];
             if (work.RandomSeeds != null)
                 work.RandomSeeds[destinationIndex] = work.RandomSeeds[sourceIndex];
+            if (work.TrailHandleIndices != null)
+                work.TrailHandleIndices[destinationIndex] = work.TrailHandleIndices[sourceIndex];
+            if (work.TrailHandleGenerations != null)
+                work.TrailHandleGenerations[destinationIndex] = work.TrailHandleGenerations[sourceIndex];
             if (work.NoisePhases != null)
                 work.NoisePhases[destinationIndex] = work.NoisePhases[sourceIndex];
             if (work.NoiseSizeMultipliers != null)
@@ -2136,14 +2344,18 @@ namespace VividRP.Runtime.Particle.ECS
                 work.RemainingLifetimes[particleIndex] = startLifetime;
                 work.Colors[particleIndex] = work.StartColor;
                 work.Sizes[particleIndex] = work.StartSize;
-                work.MeshIndices[particleIndex] = ResolveMeshIndex(work, particleIndex);
+                uint particleSeed = random.NextUInt();
+                if (particleSeed == 0u)
+                    particleSeed = 1u;
+                work.MeshIndices[particleIndex] = ResolveMeshIndex(work, particleSeed);
                 if (work.AccumulatedRotations != null)
                     work.AccumulatedRotations[particleIndex] = float3.zero;
                 if (work.RandomSeeds != null)
-                {
-                    uint particleSeed = random.NextUInt();
-                    work.RandomSeeds[particleIndex] = particleSeed == 0u ? 1u : particleSeed;
-                }
+                    work.RandomSeeds[particleIndex] = particleSeed;
+                if (work.TrailHandleIndices != null)
+                    work.TrailHandleIndices[particleIndex] = -1;
+                if (work.TrailHandleGenerations != null)
+                    work.TrailHandleGenerations[particleIndex] = 0;
                 if (work.NoisePhases != null)
                     work.NoisePhases[particleIndex] = random.NextFloat3(
                         new float3(-1024.0f),
@@ -2162,13 +2374,33 @@ namespace VividRP.Runtime.Particle.ECS
 
         private static int ResolveMeshIndex(
             VividParticleEcsInitializeParticlesWork work,
-            int particleIndex)
+            uint particleSeed)
         {
             int meshCount = math.max(1, work.MeshCount);
             if (meshCount <= 1)
                 return 0;
 
-            return particleIndex % meshCount;
+            uint selectionSeed = particleSeed + VividParticleEcsInitializeParticlesWork.MeshSelectionRandomnessId;
+            var random = new Random(selectionSeed == 0u ? 1u : selectionSeed);
+            float sample = random.NextFloat();
+            if (work.MeshWeightingsUniform != 0
+                || work.MeshWeightings == null
+                || work.MeshWeightingTotal <= 0.0f)
+            {
+                return math.min((int)math.floor(sample * meshCount), meshCount - 1);
+            }
+
+            float weightedSample = sample * work.MeshWeightingTotal;
+            for (int meshIndex = 0; meshIndex < meshCount - 1; meshIndex++)
+            {
+                float weighting = math.max(0.0f, work.MeshWeightings[meshIndex]);
+                if (weightedSample < weighting)
+                    return meshIndex;
+
+                weightedSample -= weighting;
+            }
+
+            return meshCount - 1;
         }
 
         private static Random CreateRandom(uint seed, int particleIndex, int localIndex)
@@ -2259,13 +2491,23 @@ namespace VividRP.Runtime.Particle.ECS
         }
     }
 
+    internal struct VividParticleEcsInitializePageDispatch
+    {
+        public int LineWorkIndex;
+        public int StartIndex;
+        public int Count;
+        public int RandomIndexOffset;
+    }
+
     [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
-    internal unsafe struct VividParticleEcsBuildInitializePageWorksJob : IJobParallelFor
+    internal unsafe struct VividParticleEcsBuildInitializeLinePagesJob : IJobParallelFor
     {
         [ReadOnly]
         public NativeArray<VividParticleEmissionPlanOutput> Plans;
 
-        public NativeList<VividParticleEcsInitializeParticlesWork>.ParallelWriter PageWorks;
+        public NativeArray<VividParticleEcsInitializeParticlesWork> LineWorks;
+
+        public NativeList<VividParticleEcsInitializePageDispatch>.ParallelWriter PageDispatches;
 
         public void Execute(int index)
         {
@@ -2274,6 +2516,7 @@ namespace VividRP.Runtime.Particle.ECS
                 return;
 
             VividParticleEcsInitializeParticlesWork source = plan.InitializeWork;
+            LineWorks[index] = source;
             int sourceStart = source.StartIndex;
             int cursor = sourceStart;
             int remaining = math.min(source.Count, math.max(0, source.Capacity - sourceStart));
@@ -2282,11 +2525,13 @@ namespace VividRP.Runtime.Particle.ECS
                 int pageRemaining = VividEcsConstants.PageEntryCount
                     - cursor % VividEcsConstants.PageEntryCount;
                 int pageCount = math.min(remaining, pageRemaining);
-                VividParticleEcsInitializeParticlesWork pageWork = source;
-                pageWork.StartIndex = cursor;
-                pageWork.Count = pageCount;
-                pageWork.RandomIndexOffset = cursor - sourceStart;
-                PageWorks.AddNoResize(pageWork);
+                PageDispatches.AddNoResize(new VividParticleEcsInitializePageDispatch
+                {
+                    LineWorkIndex = index,
+                    StartIndex = cursor,
+                    Count = pageCount,
+                    RandomIndexOffset = cursor - sourceStart,
+                });
                 cursor += pageCount;
                 remaining -= pageCount;
             }
@@ -2297,11 +2542,23 @@ namespace VividRP.Runtime.Particle.ECS
     internal unsafe struct VividParticleEcsInitializeParticlePagesJob : IJobParallelForDefer
     {
         [ReadOnly]
-        public NativeArray<VividParticleEcsInitializeParticlesWork> PageWorks;
+        public NativeArray<VividParticleEcsInitializeParticlesWork> LineWorks;
+
+        [ReadOnly]
+        public NativeArray<VividParticleEcsInitializePageDispatch> PageDispatches;
 
         public void Execute(int index)
         {
-            VividParticleEcsInitializeParticlesJob.ExecuteWork(PageWorks[index]);
+            VividParticleEcsInitializePageDispatch dispatch = PageDispatches[index];
+            int lineWorkIndex = dispatch.LineWorkIndex;
+            if ((uint)lineWorkIndex >= (uint)LineWorks.Length)
+                return;
+
+            VividParticleEcsInitializeParticlesWork work = LineWorks[lineWorkIndex];
+            work.StartIndex = dispatch.StartIndex;
+            work.Count = dispatch.Count;
+            work.RandomIndexOffset = dispatch.RandomIndexOffset;
+            VividParticleEcsInitializeParticlesJob.ExecuteWork(work);
         }
     }
 }

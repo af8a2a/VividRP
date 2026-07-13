@@ -2,6 +2,7 @@ using NUnit.Framework;
 using System.Collections.Generic;
 using Unity.Burst;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
@@ -32,6 +33,8 @@ namespace VividRP.Editor.Tests
             VividEcsTypeIndex rendererKeyIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
             VividEcsTypeIndex simulationActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
             VividEcsTypeIndex rendererActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
+            VividEcsTypeIndex lightsActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleLightsActive>();
+            VividEcsTypeIndex trailsActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleTrailsActive>();
             VividEcsTypeInfo commonType = VividEcsTypeManager.GetTypeInfo(commonIndex);
             VividEcsTypeInfo noiseStateType = VividEcsTypeManager.GetTypeInfo(noiseStateIndex);
             VividEcsTypeInfo inheritVelocityStateType =
@@ -52,6 +55,8 @@ namespace VividRP.Editor.Tests
                 Is.False);
             Assert.That(simulationActiveIndex.IsValid, Is.True);
             Assert.That(rendererActiveIndex.IsValid, Is.True);
+            Assert.That(lightsActiveIndex.IsValid, Is.True);
+            Assert.That(trailsActiveIndex.IsValid, Is.True);
             Assert.That(systemIdIndex.Value, Is.Not.EqualTo(commonIndex.Value));
             Assert.That(systemIdIndex.IsSharedComponentType, Is.True);
             Assert.That(moduleKeyIndex.IsSharedComponentType, Is.True);
@@ -60,6 +65,8 @@ namespace VividRP.Editor.Tests
             Assert.That(rendererKeyIndex.IsSharedComponentType, Is.True);
             Assert.That(simulationActiveIndex.IsTagComponentType, Is.True);
             Assert.That(rendererActiveIndex.IsTagComponentType, Is.True);
+            Assert.That(lightsActiveIndex.IsTagComponentType, Is.True);
+            Assert.That(trailsActiveIndex.IsTagComponentType, Is.True);
             Assert.That(VividEcsTypeManager.RegisteredTypeCount, Is.GreaterThanOrEqualTo(2));
             Assert.That(commonType.IsSoa, Is.True);
             Assert.That(commonType.SoaFieldCount, Is.EqualTo(VividParticleCommon.FieldCountValue));
@@ -130,6 +137,43 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.tileCount, Is.EqualTo(1));
             Assert.That(storage.allocatorLiveTileCount, Is.EqualTo(1));
             Assert.That(storage.allocatorHighWatermarkTileCount, Is.GreaterThanOrEqualTo(2));
+        }
+
+        [Test]
+        public void SimulationPageDispatch_IsCompactRelativeToLineWork()
+        {
+            int dispatchSize = UnsafeUtility.SizeOf<VividParticleEcsIntegratePageDispatch>();
+            int lineWorkSize = UnsafeUtility.SizeOf<VividParticleEcsIntegratePageWork>();
+
+            Assert.That(dispatchSize, Is.LessThan(lineWorkSize / 4));
+            Assert.That(dispatchSize, Is.GreaterThanOrEqualTo(UnsafeUtility.SizeOf<VividEcsPageInfo>()));
+        }
+
+        [Test]
+        public void InitializePageDispatch_IsCompactRelativeToLineWork()
+        {
+            int dispatchSize = UnsafeUtility.SizeOf<VividParticleEcsInitializePageDispatch>();
+            int lineWorkSize = UnsafeUtility.SizeOf<VividParticleEcsInitializeParticlesWork>();
+
+            Assert.That(dispatchSize, Is.LessThan(lineWorkSize / 4));
+        }
+
+        [Test]
+        public void Storage_ReserveParticleRange_ClampsToLogicalMaxParticles()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(300);
+
+            Assert.That(storage.ReserveParticleRange(260, out int firstIndex), Is.EqualTo(260));
+            Assert.That(firstIndex, Is.EqualTo(0));
+            Assert.That(storage.activeCount, Is.EqualTo(260));
+
+            Assert.That(storage.ReserveParticleRange(100, out firstIndex), Is.EqualTo(40));
+            Assert.That(firstIndex, Is.EqualTo(260));
+            Assert.That(storage.activeCount, Is.EqualTo(300));
+
+            Assert.That(storage.ReserveParticleRange(1, out firstIndex), Is.EqualTo(0));
+            Assert.That(firstIndex, Is.EqualTo(300));
         }
 
         [Test]
@@ -334,6 +378,48 @@ namespace VividRP.Editor.Tests
                 Assert.That(groups[0].lines[0].ArchetypeLineId, Is.EqualTo(first.archetypeLineId));
                 Assert.That(first.rendererActive, Is.True);
                 Assert.That(second.rendererActive, Is.False);
+            }
+            finally
+            {
+                first.Dispose();
+                second.Dispose();
+            }
+        }
+
+        [Test]
+        public void GlobalStorage_ModuleQueries_TrackOnlyActiveLightAndTrailLines()
+        {
+            VividParticleEcsBootstrap.RegisterTypes();
+            VividEcsTypeIndex commonIndex = VividEcsTypeManager.GetTypeIndex<VividParticleCommon>();
+            VividEcsTypeIndex rendererActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
+            VividEcsTypeIndex lightsActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleLightsActive>();
+            VividEcsTypeIndex trailsActiveIndex = VividEcsTypeManager.GetTypeIndex<VividParticleTrailsActive>();
+            using var world = new VividEcsWorld();
+            var first = new VividParticleEcsStorage(world);
+            var second = new VividParticleEcsStorage(world);
+            try
+            {
+                first.rendererActive = true;
+                second.rendererActive = true;
+                first.lightsActive = true;
+                second.trailsActive = true;
+                VividEcsQuery lightQuery = world.CreateQuery()
+                    .WithAll(commonIndex, rendererActiveIndex, lightsActiveIndex);
+                VividEcsQuery trailQuery = world.CreateQuery()
+                    .WithAll(commonIndex, rendererActiveIndex, trailsActiveIndex);
+
+                Assert.That(lightQuery.PrepareMatchingLines(), Is.EqualTo(1));
+                Assert.That(lightQuery.GetMatchingLine(0).ArchetypeLineId, Is.EqualTo(first.archetypeLineId));
+                Assert.That(trailQuery.PrepareMatchingLines(), Is.EqualTo(1));
+                Assert.That(trailQuery.GetMatchingLine(0).ArchetypeLineId, Is.EqualTo(second.archetypeLineId));
+
+                first.lightsActive = false;
+                second.lightsActive = true;
+                second.trailsActive = false;
+
+                Assert.That(lightQuery.PrepareMatchingLines(), Is.EqualTo(1));
+                Assert.That(lightQuery.GetMatchingLine(0).ArchetypeLineId, Is.EqualTo(second.archetypeLineId));
+                Assert.That(trailQuery.PrepareMatchingLines(), Is.EqualTo(0));
             }
             finally
             {
@@ -811,6 +897,71 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Storage_DeathEventCapture_PreservesParticlesBeforeSwapBack()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(3);
+            storage.captureDeathEvents = true;
+            Assert.That(
+                storage.Add(
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    new Vector3(4.0f, 5.0f, 6.0f),
+                    0.05f,
+                    0.05f,
+                    2.0f,
+                    Color.red,
+                    randomSeed: 17u),
+                Is.True);
+            Assert.That(
+                storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 1.0f, Color.green),
+                Is.True);
+
+            Assert.That(storage.ScheduleIntegrate(0.1f, Vector3.zero, out JobHandle handle), Is.True);
+            handle.Complete();
+            storage.ApplyScheduledIntegrateResult();
+
+            Assert.That(storage.activeCount, Is.EqualTo(1));
+            Assert.That(storage.deathEventCount, Is.EqualTo(1));
+            VividParticleSubEmitterParticleData death = storage.GetDeathEvent(0);
+            Assert.That(death.Position, Is.EqualTo(new float3(1.0f, 2.0f, 3.0f)));
+            Assert.That(death.Velocity, Is.EqualTo(new float3(4.0f, 5.0f, 6.0f)));
+            Assert.That(death.Color, Is.EqualTo(new float4(1.0f, 0.0f, 0.0f, 1.0f)));
+            Assert.That(death.Size, Is.EqualTo(2.0f));
+            Assert.That(death.RandomSeed, Is.EqualTo(17u));
+
+            storage.ClearDeathEvents();
+            Assert.That(storage.deathEventCount, Is.EqualTo(0));
+        }
+
+        [Test]
+        public void Storage_TrailLinkColumn_InitializesAndCompactsWithParticles()
+        {
+            using var storage = new VividParticleEcsStorage();
+            storage.EnsureCapacity(3);
+            storage.EnsureTrailLinkColumn();
+            Assert.That(storage.hasTrailLinkColumn, Is.True);
+            Assert.That(storage.Add(Vector3.zero, Vector3.zero, 0.05f, 0.05f, 1.0f, Color.red), Is.True);
+            Assert.That(storage.Add(Vector3.one, Vector3.zero, 5.0f, 5.0f, 1.0f, Color.green), Is.True);
+            Assert.That(storage.Add(Vector3.right, Vector3.zero, 6.0f, 6.0f, 1.0f, Color.blue), Is.True);
+            Assert.That(storage.TryGetTrailHandle(0, out _, out _), Is.False);
+            Assert.That(storage.SetTrailHandle(0, 10, 1), Is.True);
+            Assert.That(storage.SetTrailHandle(1, 20, 2), Is.True);
+            Assert.That(storage.SetTrailHandle(2, 30, 3), Is.True);
+
+            Assert.That(storage.ScheduleIntegrate(0.1f, Vector3.zero, out JobHandle handle), Is.True);
+            handle.Complete();
+            storage.ApplyScheduledIntegrateResult();
+
+            Assert.That(storage.activeCount, Is.EqualTo(2));
+            Assert.That(storage.TryGetTrailHandle(0, out int firstIndex, out int firstGeneration), Is.True);
+            Assert.That(firstIndex, Is.EqualTo(30));
+            Assert.That(firstGeneration, Is.EqualTo(3));
+            Assert.That(storage.TryGetTrailHandle(1, out int secondIndex, out int secondGeneration), Is.True);
+            Assert.That(secondIndex, Is.EqualTo(20));
+            Assert.That(secondGeneration, Is.EqualTo(2));
+        }
+
+        [Test]
         public void Storage_ReserveInitializeParticles_WritesPointParticlesInBurst()
         {
             using var storage = new VividParticleEcsStorage();
@@ -849,7 +1000,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(storage.GetRemainingLifetime(index), Is.EqualTo(3.0f));
                 Assert.That(storage.GetSize(index), Is.EqualTo(0.75f));
                 AssertColor(new Color(0.2f, 0.4f, 0.6f, 0.8f), storage.GetColor(index));
-                Assert.That(storage.GetMeshIndex(index), Is.EqualTo(index % 3));
+                Assert.That(storage.GetMeshIndex(index), Is.InRange(0, 2));
                 Assert.That(storage.GetRandomSeed(index), Is.Not.EqualTo(0u));
                 Assert.That(particleSeeds.Add(storage.GetRandomSeed(index)), Is.True);
                 AssertVector3(emitterVelocity, storage.GetInitialEmitterVelocity(index));
@@ -888,6 +1039,36 @@ namespace VividRP.Editor.Tests
             Assert.That(storage.EnsureColumnView(), Is.True);
             Assert.That(storage.columnViewVersion, Is.EqualTo(resizedVersion));
             Assert.That(storage.columnViewRefreshCount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void Storage_InitializeParticles_UsesNonUniformMeshWeightings()
+        {
+            using var storage = new VividParticleEcsStorage();
+            using var works = new NativeList<VividParticleEcsInitializeParticlesWork>(1, Allocator.TempJob);
+            storage.EnsureCapacity(32);
+            VividParticleSystemFrameSnapshot snapshot = CreatePointSnapshot(
+                meshCount: 3,
+                meshWeightings: new[] { 0.0f, 0.0f, 5.0f });
+
+            Assert.That(
+                storage.ReserveInitializeParticles(
+                    32,
+                    snapshot,
+                    123u,
+                    works,
+                    out _,
+                    out int count),
+                Is.True);
+            Assert.That(count, Is.EqualTo(32));
+
+            new VividParticleEcsInitializeParticlesJob
+            {
+                Works = works.AsArray(),
+            }.Schedule(works.Length, innerloopBatchCount: 1).Complete();
+
+            for (int particleIndex = 0; particleIndex < count; particleIndex++)
+                Assert.That(storage.GetMeshIndex(particleIndex), Is.EqualTo(2));
         }
 
         [Test]
@@ -1007,6 +1188,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TrailTable_ParallelBurstAllocationAndFree_UsesEveryTileOnce()
+        {
+            const int count = 64;
+            using var table = new VividParticleTrailTable(controlPointCount: 4);
+            table.EnsureCapacity(count);
+            using var handles = new NativeArray<VividParticleTrailHandle>(
+                count,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
+
+            new AllocateTrailHandlesJob
+            {
+                View = table.GetView(),
+                Handles = handles,
+            }.Schedule(count, innerloopBatchCount: 1).Complete();
+
+            Assert.That(table.allocatedCount, Is.EqualTo(count));
+            Assert.That(table.freeCount, Is.EqualTo(0));
+            var indices = new HashSet<int>();
+            for (int index = 0; index < count; index++)
+            {
+                Assert.That(handles[index].IsValid, Is.True);
+                Assert.That(indices.Add(handles[index].Index), Is.True);
+            }
+
+            new FreeTrailHandlesJob
+            {
+                View = table.GetView(),
+                Handles = handles,
+            }.Schedule(count, innerloopBatchCount: 1).Complete();
+
+            Assert.That(table.allocatedCount, Is.EqualTo(0));
+            Assert.That(table.freeCount, Is.EqualTo(count));
+        }
+
+        [Test]
         public void TrailTable_DisposeCanRepeat_WithoutThrowing()
         {
             var table = new VividParticleTrailTable();
@@ -1028,7 +1245,9 @@ namespace VividRP.Editor.Tests
                 index % 3);
         }
 
-        private static VividParticleSystemFrameSnapshot CreatePointSnapshot(int meshCount = 0)
+        private static VividParticleSystemFrameSnapshot CreatePointSnapshot(
+            int meshCount = 0,
+            float[] meshWeightings = null)
         {
             return new VividParticleSystemFrameSnapshot(
                 0.0f,
@@ -1072,7 +1291,8 @@ namespace VividRP.Editor.Tests
                 Vector3.zero,
                 Matrix4x4.identity,
                 Quaternion.identity,
-                1);
+                1,
+                meshWeightings);
         }
 
         private static void AssertVector3(Vector3 expected, Vector3 actual)
@@ -1108,6 +1328,32 @@ namespace VividRP.Editor.Tests
                 View.AppendControlPoint(Handle, new float3(2.0f, 0.0f, 0.0f), 2.0f, 0.0f);
                 View.AppendControlPoint(Handle, new float3(3.0f, 0.0f, 0.0f), 3.0f, 0.0f);
                 View.PruneExpiredControlPoints(Handle, currentTime: 3.0f, lifetime: 1.5f);
+            }
+        }
+
+        [BurstCompile]
+        private struct AllocateTrailHandlesJob : IJobParallelFor
+        {
+            public VividParticleTrailTableView View;
+            public NativeArray<VividParticleTrailHandle> Handles;
+
+            public void Execute(int index)
+            {
+                View.TryAllocate((uint)(index + 1), out VividParticleTrailHandle handle);
+                Handles[index] = handle;
+            }
+        }
+
+        [BurstCompile]
+        private struct FreeTrailHandlesJob : IJobParallelFor
+        {
+            public VividParticleTrailTableView View;
+            [ReadOnly]
+            public NativeArray<VividParticleTrailHandle> Handles;
+
+            public void Execute(int index)
+            {
+                View.Free(Handles[index]);
             }
         }
 

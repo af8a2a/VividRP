@@ -82,6 +82,13 @@ namespace VividRP.Runtime.Particle
             VividParticleTextureSheetAnimationModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleSubEmittersModule m_SubEmitters =
+            VividParticleSubEmittersModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleTrailsModule m_Trails = VividParticleTrailsModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleLightsModule m_Lights = VividParticleLightsModule.CreateDefault();
 
         [SerializeField]
@@ -143,6 +150,12 @@ namespace VividRP.Runtime.Particle
         public VividParticleTextureSheetAnimationModule textureSheetAnimation =>
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
 
+        public VividParticleSubEmittersModule subEmitters =>
+            m_SubEmitters ??= VividParticleSubEmittersModule.CreateDefault();
+
+        public VividParticleTrailsModule trails =>
+            m_Trails ??= VividParticleTrailsModule.CreateDefault();
+
         public VividParticleLightsModule lights =>
             m_Lights ??= VividParticleLightsModule.CreateDefault();
 
@@ -169,6 +182,8 @@ namespace VividRP.Runtime.Particle
             VividParticleNoiseModule targetNoise,
             VividParticleCustomDataModule targetCustomData,
             VividParticleTextureSheetAnimationModule targetTextureSheetAnimation,
+            VividParticleSubEmittersModule targetSubEmitters,
+            VividParticleTrailsModule targetTrails,
             VividParticleLightsModule targetLights,
             VividParticleRendererModule targetRenderer)
         {
@@ -192,6 +207,8 @@ namespace VividRP.Runtime.Particle
             targetNoise?.CopyFrom(noise);
             targetCustomData?.CopyFrom(customData);
             targetTextureSheetAnimation?.CopyFrom(textureSheetAnimation);
+            targetSubEmitters?.CopyFrom(subEmitters);
+            targetTrails?.CopyFrom(trails);
             targetLights?.CopyFrom(lights);
             targetRenderer?.CopyFrom(rendererModule);
         }
@@ -223,6 +240,8 @@ namespace VividRP.Runtime.Particle
             noise.Validate();
             customData.Validate();
             textureSheetAnimation.Validate();
+            subEmitters.Validate();
+            trails.Validate();
             lights.Validate();
             rendererModule.Validate();
         }

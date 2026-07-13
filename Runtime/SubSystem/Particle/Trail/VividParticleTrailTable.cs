@@ -1,5 +1,7 @@
 using System;
+using System.Threading;
 using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 
 namespace VividRP.Runtime.Particle.Trail
@@ -58,6 +60,11 @@ namespace VividRP.Runtime.Particle.Trail
         public int TailIndex;
         public float TotalLength;
         public uint RandomSeed;
+        public int LastSeenUpdate;
+        public int IsDetached;
+        public int DieWithParticles;
+        public float Lifetime;
+        public float DetachTime;
     }
 
     internal readonly struct VividParticleTrailBounds
@@ -82,17 +89,114 @@ namespace VividRP.Runtime.Particle.Trail
 
     internal struct VividParticleTrailTableView
     {
+        private const int FreeCountStateIndex = 0;
+        private const int AllocatedCountStateIndex = 1;
+        private const int AllocatorLockStateIndex = 2;
+        internal const int AllocatorStateCount = 3;
+
+        [NativeDisableParallelForRestriction]
         public NativeArray<VividParticleTrailTileHeader> Headers;
+        [NativeDisableParallelForRestriction]
         public NativeArray<float3> Positions;
+        [NativeDisableParallelForRestriction]
         public NativeArray<float> Times;
+        [NativeDisableParallelForRestriction]
         public NativeArray<float> CumulativeLengths;
+        [NativeDisableParallelForRestriction]
+        public NativeArray<int> FreeIndices;
+        [NativeDisableParallelForRestriction]
+        public NativeArray<int> AllocatorState;
         public int ControlPointCount;
 
         public bool IsCreated => Headers.IsCreated
             && Positions.IsCreated
             && Times.IsCreated
             && CumulativeLengths.IsCreated
+            && FreeIndices.IsCreated
+            && AllocatorState.IsCreated
+            && AllocatorState.Length >= AllocatorStateCount
             && ControlPointCount > 1;
+
+        public int FreeCount => IsCreated ? math.max(0, AllocatorState[FreeCountStateIndex]) : 0;
+
+        public int AllocatedCount => IsCreated
+            ? math.max(0, AllocatorState[AllocatedCountStateIndex])
+            : 0;
+
+        public unsafe bool TryAllocate(uint randomSeed, out VividParticleTrailHandle handle)
+        {
+            handle = VividParticleTrailHandle.Invalid;
+            if (!IsCreated)
+                return false;
+
+            int* state = (int*)AllocatorState.GetUnsafePtr();
+            AcquireAllocatorLock(state);
+            int freeCount = state[FreeCountStateIndex];
+            if (freeCount <= 0)
+            {
+                ReleaseAllocatorLock(state);
+                return false;
+            }
+
+            int tileIndex = FreeIndices[freeCount - 1];
+            state[FreeCountStateIndex] = freeCount - 1;
+            state[AllocatedCountStateIndex]++;
+            VividParticleTrailTileHeader header = Headers[tileIndex];
+            header.Generation = math.max(1, header.Generation);
+            header.IsAllocated = 1;
+            header.PointCount = 0;
+            header.HeadIndex = 0;
+            header.TailIndex = 0;
+            header.TotalLength = 0.0f;
+            header.RandomSeed = randomSeed == 0u ? 1u : randomSeed;
+            header.LastSeenUpdate = 0;
+            header.IsDetached = 0;
+            header.DieWithParticles = 1;
+            header.Lifetime = 0.0f;
+            header.DetachTime = 0.0f;
+            Headers[tileIndex] = header;
+            ClearTileData(tileIndex);
+            handle = new VividParticleTrailHandle(tileIndex, header.Generation);
+            ReleaseAllocatorLock(state);
+            return true;
+        }
+
+        public unsafe bool Free(VividParticleTrailHandle handle)
+        {
+            if (!IsCreated || !handle.IsValid || (uint)handle.Index >= (uint)Headers.Length)
+                return false;
+
+            int* state = (int*)AllocatorState.GetUnsafePtr();
+            AcquireAllocatorLock(state);
+            VividParticleTrailTileHeader header = Headers[handle.Index];
+            if (header.IsAllocated == 0 || header.Generation != handle.Generation)
+            {
+                ReleaseAllocatorLock(state);
+                return false;
+            }
+
+            header.IsAllocated = 0;
+            header.PointCount = 0;
+            header.HeadIndex = 0;
+            header.TailIndex = 0;
+            header.TotalLength = 0.0f;
+            header.RandomSeed = 0u;
+            header.LastSeenUpdate = 0;
+            header.IsDetached = 0;
+            header.DieWithParticles = 1;
+            header.Lifetime = 0.0f;
+            header.DetachTime = 0.0f;
+            header.Generation = NextGeneration(header.Generation);
+            Headers[handle.Index] = header;
+            int freeCount = math.clamp(state[FreeCountStateIndex], 0, FreeIndices.Length - 1);
+            FreeIndices[freeCount] = handle.Index;
+            state[FreeCountStateIndex] = freeCount + 1;
+            state[AllocatedCountStateIndex] = math.max(
+                0,
+                state[AllocatedCountStateIndex] - 1);
+            ReleaseAllocatorLock(state);
+            return true;
+        }
 
         public bool IsValid(VividParticleTrailHandle handle)
         {
@@ -267,6 +371,38 @@ namespace VividRP.Runtime.Particle.Trail
         {
             return index == 0 ? count - 1 : index - 1;
         }
+
+        private void ClearTileData(int tileIndex)
+        {
+            int start = tileIndex * ControlPointCount;
+            int end = start + ControlPointCount;
+            for (int index = start; index < end; index++)
+            {
+                Positions[index] = float3.zero;
+                Times[index] = 0.0f;
+                CumulativeLengths[index] = 0.0f;
+            }
+        }
+
+        private static int NextGeneration(int generation)
+        {
+            return generation == int.MaxValue ? 1 : math.max(1, generation + 1);
+        }
+
+        private static unsafe void AcquireAllocatorLock(int* state)
+        {
+            while (Interlocked.CompareExchange(
+                ref state[AllocatorLockStateIndex],
+                1,
+                0) != 0)
+            {
+            }
+        }
+
+        private static unsafe void ReleaseAllocatorLock(int* state)
+        {
+            Volatile.Write(ref state[AllocatorLockStateIndex], 0);
+        }
     }
 
     internal sealed class VividParticleTrailTable : IDisposable
@@ -279,7 +415,7 @@ namespace VividRP.Runtime.Particle.Trail
         private NativeList<float> m_Times;
         private NativeList<float> m_CumulativeLengths;
         private NativeList<int> m_FreeIndices;
-        private int m_AllocatedCount;
+        private NativeArray<int> m_AllocatorState;
 
         public VividParticleTrailTable(int controlPointCount = DefaultControlPointCount)
         {
@@ -290,9 +426,13 @@ namespace VividRP.Runtime.Particle.Trail
 
         public int tileCapacity => m_Headers.IsCreated ? m_Headers.Length : 0;
 
-        public int allocatedCount => m_AllocatedCount;
+        public int allocatedCount => m_AllocatorState.IsCreated
+            ? m_AllocatorState[1]
+            : 0;
 
-        public int freeCount => m_FreeIndices.IsCreated ? m_FreeIndices.Length : 0;
+        public int freeCount => m_AllocatorState.IsCreated
+            ? m_AllocatorState[0]
+            : 0;
 
         public bool isCreated => m_Headers.IsCreated;
 
@@ -311,59 +451,30 @@ namespace VividRP.Runtime.Particle.Trail
             m_CumulativeLengths.Resize(
                 nextCapacity * m_ControlPointCount,
                 NativeArrayOptions.ClearMemory);
+            m_FreeIndices.ResizeUninitialized(nextCapacity);
+            int freeCount = m_AllocatorState[0];
             for (int tileIndex = nextCapacity - 1; tileIndex >= previousCapacity; tileIndex--)
             {
                 m_Headers[tileIndex] = new VividParticleTrailTileHeader
                 {
                     Generation = 1,
                 };
-                m_FreeIndices.Add(tileIndex);
+                m_FreeIndices[freeCount++] = tileIndex;
             }
+            m_AllocatorState[0] = freeCount;
         }
 
         public bool Allocate(uint randomSeed, out VividParticleTrailHandle handle)
         {
             handle = VividParticleTrailHandle.Invalid;
-            if (!m_FreeIndices.IsCreated || m_FreeIndices.Length == 0)
+            if (!m_AllocatorState.IsCreated || freeCount == 0)
                 EnsureCapacity(math.max(8, tileCapacity * 2));
-            if (m_FreeIndices.Length == 0)
-                return false;
-
-            int lastFreeIndex = m_FreeIndices.Length - 1;
-            int tileIndex = m_FreeIndices[lastFreeIndex];
-            m_FreeIndices.RemoveAt(lastFreeIndex);
-            VividParticleTrailTileHeader header = m_Headers[tileIndex];
-            header.Generation = math.max(1, header.Generation);
-            header.IsAllocated = 1;
-            header.PointCount = 0;
-            header.HeadIndex = 0;
-            header.TailIndex = 0;
-            header.TotalLength = 0.0f;
-            header.RandomSeed = randomSeed == 0u ? 1u : randomSeed;
-            m_Headers[tileIndex] = header;
-            ClearTileData(tileIndex);
-            m_AllocatedCount++;
-            handle = new VividParticleTrailHandle(tileIndex, header.Generation);
-            return true;
+            return GetView().TryAllocate(randomSeed, out handle);
         }
 
         public bool Free(VividParticleTrailHandle handle)
         {
-            if (!GetView().IsValid(handle))
-                return false;
-
-            VividParticleTrailTileHeader header = m_Headers[handle.Index];
-            header.IsAllocated = 0;
-            header.PointCount = 0;
-            header.HeadIndex = 0;
-            header.TailIndex = 0;
-            header.TotalLength = 0.0f;
-            header.RandomSeed = 0u;
-            header.Generation = NextGeneration(header.Generation);
-            m_Headers[handle.Index] = header;
-            m_FreeIndices.Add(handle.Index);
-            m_AllocatedCount = math.max(0, m_AllocatedCount - 1);
-            return true;
+            return GetView().Free(handle);
         }
 
         public VividParticleTrailTableView GetView()
@@ -376,6 +487,8 @@ namespace VividRP.Runtime.Particle.Trail
                 CumulativeLengths = m_CumulativeLengths.IsCreated
                     ? m_CumulativeLengths.AsArray()
                     : default,
+                FreeIndices = m_FreeIndices.IsCreated ? m_FreeIndices.AsArray() : default,
+                AllocatorState = m_AllocatorState,
                 ControlPointCount = m_ControlPointCount,
             };
         }
@@ -385,7 +498,7 @@ namespace VividRP.Runtime.Particle.Trail
             if (!m_Headers.IsCreated)
                 return;
 
-            m_FreeIndices.Clear();
+            int freeCount = 0;
             for (int tileIndex = m_Headers.Length - 1; tileIndex >= 0; tileIndex--)
             {
                 VividParticleTrailTileHeader header = m_Headers[tileIndex];
@@ -397,10 +510,17 @@ namespace VividRP.Runtime.Particle.Trail
                 header.TailIndex = 0;
                 header.TotalLength = 0.0f;
                 header.RandomSeed = 0u;
+                header.LastSeenUpdate = 0;
+                header.IsDetached = 0;
+                header.DieWithParticles = 1;
+                header.Lifetime = 0.0f;
+                header.DetachTime = 0.0f;
                 m_Headers[tileIndex] = header;
-                m_FreeIndices.Add(tileIndex);
+                m_FreeIndices[freeCount++] = tileIndex;
             }
-            m_AllocatedCount = 0;
+            m_AllocatorState[0] = freeCount;
+            m_AllocatorState[1] = 0;
+            m_AllocatorState[2] = 0;
         }
 
         public void Dispose()
@@ -415,12 +535,14 @@ namespace VividRP.Runtime.Particle.Trail
                 m_CumulativeLengths.Dispose();
             if (m_FreeIndices.IsCreated)
                 m_FreeIndices.Dispose();
+            if (m_AllocatorState.IsCreated)
+                m_AllocatorState.Dispose();
             m_Headers = default;
             m_Positions = default;
             m_Times = default;
             m_CumulativeLengths = default;
             m_FreeIndices = default;
-            m_AllocatedCount = 0;
+            m_AllocatorState = default;
         }
 
         private void EnsureCreated()
@@ -435,18 +557,10 @@ namespace VividRP.Runtime.Particle.Trail
                 8 * m_ControlPointCount,
                 Allocator.Persistent);
             m_FreeIndices = new NativeList<int>(8, Allocator.Persistent);
-        }
-
-        private void ClearTileData(int tileIndex)
-        {
-            int start = tileIndex * m_ControlPointCount;
-            int end = start + m_ControlPointCount;
-            for (int index = start; index < end; index++)
-            {
-                m_Positions[index] = float3.zero;
-                m_Times[index] = 0.0f;
-                m_CumulativeLengths[index] = 0.0f;
-            }
+            m_AllocatorState = new NativeArray<int>(
+                VividParticleTrailTableView.AllocatorStateCount,
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
         }
 
         private static int NextGeneration(int generation)

@@ -54,6 +54,20 @@ namespace VividRP.Runtime.Particle
         ByDistance,
     }
 
+    public enum VividParticleTrailMode
+    {
+        PerParticle,
+        Ribbon,
+    }
+
+    public enum VividParticleTrailTextureMode
+    {
+        Stretch,
+        Tile,
+        DistributePerSegment,
+        RepeatPerSegment,
+    }
+
     public enum VividParticleTextureSheetAnimationType
     {
         WholeSheet,
@@ -3169,6 +3183,373 @@ namespace VividRP.Runtime.Particle
     }
 
     [Serializable]
+    public sealed class VividParticleTrailsModule
+    {
+        internal const int MinimumRibbonCount = 1;
+
+        [NonSerialized]
+        private Action m_OnChanged;
+
+        [SerializeField]
+        private bool m_Enabled;
+
+        [SerializeField]
+        private VividParticleTrailMode m_Mode = VividParticleTrailMode.PerParticle;
+
+        [SerializeField]
+        [Range(0.0f, 1.0f)]
+        private float m_Ratio = 1.0f;
+
+        [SerializeField]
+        private AnimationCurve m_Lifetime = CreateDefaultCurve();
+
+        [SerializeField]
+        private float m_LifetimeMultiplier = 1.0f;
+
+        [SerializeField]
+        private float m_MinimumVertexDistance = 0.2f;
+
+        [SerializeField]
+        private bool m_WorldSpace;
+
+        [SerializeField]
+        private bool m_DieWithParticles = true;
+
+        [SerializeField]
+        private VividParticleTrailTextureMode m_TextureMode = VividParticleTrailTextureMode.Stretch;
+
+        [SerializeField]
+        private Vector2 m_TextureScale = Vector2.one;
+
+        [SerializeField]
+        private bool m_SizeAffectsWidth = true;
+
+        [SerializeField]
+        private bool m_SizeAffectsLifetime;
+
+        [SerializeField]
+        private bool m_InheritParticleColor = true;
+
+        [SerializeField]
+        private Gradient m_ColorOverLifetime = CreateDefaultGradient();
+
+        [SerializeField]
+        private AnimationCurve m_WidthOverTrail = CreateDefaultCurve();
+
+        [SerializeField]
+        private float m_WidthMultiplier = 1.0f;
+
+        [SerializeField]
+        private Gradient m_ColorOverTrail = CreateDefaultGradient();
+
+        [SerializeField]
+        private bool m_GenerateLightingData;
+
+        [SerializeField]
+        [Range(0.0f, 1.0f)]
+        private float m_ShadowBias = 0.5f;
+
+        [SerializeField]
+        private int m_RibbonCount = 1;
+
+        [SerializeField]
+        private bool m_SplitSubEmitterRibbons;
+
+        [SerializeField]
+        private bool m_AttachRibbonsToTransform;
+
+        public bool enabled
+        {
+            get => m_Enabled;
+            set => SetValue(ref m_Enabled, value);
+        }
+
+        public VividParticleTrailMode mode
+        {
+            get => m_Mode;
+            set => SetValue(ref m_Mode, value);
+        }
+
+        public float ratio
+        {
+            get => m_Ratio;
+            set => SetValue(ref m_Ratio, Mathf.Clamp01(value));
+        }
+
+        public AnimationCurve lifetime
+        {
+            get => m_Lifetime ??= CreateDefaultCurve();
+            set
+            {
+                m_Lifetime = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public float lifetimeMultiplier
+        {
+            get => m_LifetimeMultiplier;
+            set => SetValue(ref m_LifetimeMultiplier, Mathf.Max(0.0f, value));
+        }
+
+        public float minimumVertexDistance
+        {
+            get => m_MinimumVertexDistance;
+            set => SetValue(ref m_MinimumVertexDistance, Mathf.Max(0.0f, value));
+        }
+
+        public bool worldSpace
+        {
+            get => m_WorldSpace;
+            set => SetValue(ref m_WorldSpace, value);
+        }
+
+        public bool dieWithParticles
+        {
+            get => m_DieWithParticles;
+            set => SetValue(ref m_DieWithParticles, value);
+        }
+
+        public VividParticleTrailTextureMode textureMode
+        {
+            get => m_TextureMode;
+            set => SetValue(ref m_TextureMode, value);
+        }
+
+        public Vector2 textureScale
+        {
+            get => m_TextureScale;
+            set => SetValue(ref m_TextureScale, value);
+        }
+
+        public bool sizeAffectsWidth
+        {
+            get => m_SizeAffectsWidth;
+            set => SetValue(ref m_SizeAffectsWidth, value);
+        }
+
+        public bool sizeAffectsLifetime
+        {
+            get => m_SizeAffectsLifetime;
+            set => SetValue(ref m_SizeAffectsLifetime, value);
+        }
+
+        public bool inheritParticleColor
+        {
+            get => m_InheritParticleColor;
+            set => SetValue(ref m_InheritParticleColor, value);
+        }
+
+        public Gradient colorOverLifetime
+        {
+            get => m_ColorOverLifetime ??= CreateDefaultGradient();
+            set
+            {
+                m_ColorOverLifetime = CloneGradient(value);
+                NotifyChanged();
+            }
+        }
+
+        public AnimationCurve widthOverTrail
+        {
+            get => m_WidthOverTrail ??= CreateDefaultCurve();
+            set
+            {
+                m_WidthOverTrail = CloneCurve(value);
+                NotifyChanged();
+            }
+        }
+
+        public float widthMultiplier
+        {
+            get => m_WidthMultiplier;
+            set => SetValue(ref m_WidthMultiplier, Mathf.Max(0.0f, value));
+        }
+
+        public Gradient colorOverTrail
+        {
+            get => m_ColorOverTrail ??= CreateDefaultGradient();
+            set
+            {
+                m_ColorOverTrail = CloneGradient(value);
+                NotifyChanged();
+            }
+        }
+
+        public bool generateLightingData
+        {
+            get => m_GenerateLightingData;
+            set => SetValue(ref m_GenerateLightingData, value);
+        }
+
+        public float shadowBias
+        {
+            get => m_ShadowBias;
+            set => SetValue(ref m_ShadowBias, Mathf.Clamp01(value));
+        }
+
+        public int ribbonCount
+        {
+            get => m_RibbonCount;
+            set => SetValue(ref m_RibbonCount, Mathf.Max(MinimumRibbonCount, value));
+        }
+
+        public bool splitSubEmitterRibbons
+        {
+            get => m_SplitSubEmitterRibbons;
+            set => SetValue(ref m_SplitSubEmitterRibbons, value);
+        }
+
+        public bool attachRibbonsToTransform
+        {
+            get => m_AttachRibbonsToTransform;
+            set => SetValue(ref m_AttachRibbonsToTransform, value);
+        }
+
+        internal bool isActive => m_Enabled && m_Ratio > 0.0f && m_WidthMultiplier > 0.0f;
+
+        internal void SetChangeCallback(Action onChanged)
+        {
+            m_OnChanged = onChanged;
+        }
+
+        internal static VividParticleTrailsModule CreateDefault()
+        {
+            return new VividParticleTrailsModule();
+        }
+
+        internal VividParticleTrailsModule Clone()
+        {
+            var clone = new VividParticleTrailsModule();
+            clone.CopyFrom(this);
+            return clone;
+        }
+
+        internal void CopyFrom(VividParticleTrailsModule source)
+        {
+            if (source == null)
+                return;
+
+            m_Enabled = source.m_Enabled;
+            m_Mode = source.m_Mode;
+            m_Ratio = source.m_Ratio;
+            m_Lifetime = CloneCurve(source.m_Lifetime);
+            m_LifetimeMultiplier = source.m_LifetimeMultiplier;
+            m_MinimumVertexDistance = source.m_MinimumVertexDistance;
+            m_WorldSpace = source.m_WorldSpace;
+            m_DieWithParticles = source.m_DieWithParticles;
+            m_TextureMode = source.m_TextureMode;
+            m_TextureScale = source.m_TextureScale;
+            m_SizeAffectsWidth = source.m_SizeAffectsWidth;
+            m_SizeAffectsLifetime = source.m_SizeAffectsLifetime;
+            m_InheritParticleColor = source.m_InheritParticleColor;
+            m_ColorOverLifetime = CloneGradient(source.m_ColorOverLifetime);
+            m_WidthOverTrail = CloneCurve(source.m_WidthOverTrail);
+            m_WidthMultiplier = source.m_WidthMultiplier;
+            m_ColorOverTrail = CloneGradient(source.m_ColorOverTrail);
+            m_GenerateLightingData = source.m_GenerateLightingData;
+            m_ShadowBias = source.m_ShadowBias;
+            m_RibbonCount = source.m_RibbonCount;
+            m_SplitSubEmitterRibbons = source.m_SplitSubEmitterRibbons;
+            m_AttachRibbonsToTransform = source.m_AttachRibbonsToTransform;
+            Validate();
+        }
+
+        internal void Validate()
+        {
+            if (!Enum.IsDefined(typeof(VividParticleTrailMode), m_Mode))
+                m_Mode = VividParticleTrailMode.PerParticle;
+            if (!Enum.IsDefined(typeof(VividParticleTrailTextureMode), m_TextureMode))
+                m_TextureMode = VividParticleTrailTextureMode.Stretch;
+            m_Ratio = Mathf.Clamp01(m_Ratio);
+            m_LifetimeMultiplier = Mathf.Max(0.0f, m_LifetimeMultiplier);
+            m_MinimumVertexDistance = Mathf.Max(0.0f, m_MinimumVertexDistance);
+            m_WidthMultiplier = Mathf.Max(0.0f, m_WidthMultiplier);
+            m_ShadowBias = Mathf.Clamp01(m_ShadowBias);
+            m_RibbonCount = Mathf.Max(MinimumRibbonCount, m_RibbonCount);
+            m_Lifetime ??= CreateDefaultCurve();
+            m_WidthOverTrail ??= CreateDefaultCurve();
+            m_ColorOverLifetime ??= CreateDefaultGradient();
+            m_ColorOverTrail ??= CreateDefaultGradient();
+        }
+
+        internal float EvaluateLifetime(float normalizedLifetime)
+        {
+            return Mathf.Max(0.0f, lifetime.Evaluate(Mathf.Clamp01(normalizedLifetime)))
+                * m_LifetimeMultiplier;
+        }
+
+        internal float EvaluateWidth(float normalizedLength)
+        {
+            return Mathf.Max(0.0f, widthOverTrail.Evaluate(Mathf.Clamp01(normalizedLength)))
+                * m_WidthMultiplier;
+        }
+
+        internal Color EvaluateColor(float normalizedLifetime, float normalizedLength)
+        {
+            return colorOverLifetime.Evaluate(Mathf.Clamp01(normalizedLifetime))
+                * colorOverTrail.Evaluate(Mathf.Clamp01(normalizedLength));
+        }
+
+        private void SetValue<T>(ref T field, T value)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value))
+                return;
+
+            field = value;
+            NotifyChanged();
+        }
+
+        private static AnimationCurve CreateDefaultCurve()
+        {
+            return AnimationCurve.Constant(0.0f, 1.0f, 1.0f);
+        }
+
+        private static AnimationCurve CloneCurve(AnimationCurve source)
+        {
+            source ??= CreateDefaultCurve();
+            return new AnimationCurve(source.keys)
+            {
+                preWrapMode = source.preWrapMode,
+                postWrapMode = source.postWrapMode,
+            };
+        }
+
+        private static Gradient CreateDefaultGradient()
+        {
+            var gradient = new Gradient();
+            gradient.SetKeys(
+                new[]
+                {
+                    new GradientColorKey(Color.white, 0.0f),
+                    new GradientColorKey(Color.white, 1.0f),
+                },
+                new[]
+                {
+                    new GradientAlphaKey(1.0f, 0.0f),
+                    new GradientAlphaKey(1.0f, 1.0f),
+                });
+            return gradient;
+        }
+
+        private static Gradient CloneGradient(Gradient source)
+        {
+            source ??= CreateDefaultGradient();
+            var clone = new Gradient
+            {
+                mode = source.mode,
+            };
+            clone.SetKeys(source.colorKeys, source.alphaKeys);
+            return clone;
+        }
+
+        private void NotifyChanged()
+        {
+            m_OnChanged?.Invoke();
+        }
+    }
+
+    [Serializable]
     public sealed class VividParticleLightsModule
     {
         internal const int MinimumMaxLights = 0;
@@ -3411,10 +3792,16 @@ namespace VividRP.Runtime.Particle
         private Material m_Material;
 
         [SerializeField]
+        private Material m_TrailMaterial;
+
+        [SerializeField]
         private Mesh m_Mesh;
 
         [SerializeField]
         private Mesh[] m_Meshes = Array.Empty<Mesh>();
+
+        [SerializeField]
+        private float[] m_MeshWeightings = Array.Empty<float>();
 
         [SerializeField]
         private Color m_Color = Color.white;
@@ -3530,6 +3917,19 @@ namespace VividRP.Runtime.Particle
             }
         }
 
+        public Material trailMaterial
+        {
+            get => m_TrailMaterial;
+            set
+            {
+                if (m_TrailMaterial == value)
+                    return;
+
+                m_TrailMaterial = value;
+                NotifyChanged();
+            }
+        }
+
         public Mesh mesh
         {
             get => m_Mesh;
@@ -3539,6 +3939,7 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 m_Mesh = value;
+                EnsureMeshWeightings();
                 NotifyChanged();
             }
         }
@@ -3553,11 +3954,18 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 m_Meshes = copy;
+                EnsureMeshWeightings();
                 NotifyChanged();
             }
         }
 
         public int meshCount => GetMeshCount();
+
+        public float[] meshWeightings
+        {
+            get => CopyMeshWeightings(m_MeshWeightings);
+            set => SetMeshWeightings(value);
+        }
 
         public Color color
         {
@@ -3920,8 +4328,10 @@ namespace VividRP.Runtime.Particle
             m_Enabled = source.m_Enabled;
             m_RenderMode = source.m_RenderMode;
             m_Material = source.m_Material;
+            m_TrailMaterial = source.m_TrailMaterial;
             m_Mesh = source.m_Mesh;
             m_Meshes = CopyMeshes(source.m_Meshes);
+            m_MeshWeightings = CopyMeshWeightings(source.m_MeshWeightings);
             m_Color = source.m_Color;
             m_SizeScale = source.m_SizeScale;
             m_StretchLengthScale = source.m_StretchLengthScale;
@@ -3959,6 +4369,7 @@ namespace VividRP.Runtime.Particle
             m_MaxParticleSize = Mathf.Max(0.0f, m_MaxParticleSize);
             m_BatchLayer = Mathf.Clamp(m_BatchLayer, MinimumBatchLayer, MaximumBatchLayer);
             m_Meshes ??= Array.Empty<Mesh>();
+            EnsureMeshWeightings();
             m_MotionVectorGenerationMode = ValidateMotionVectorGenerationMode(m_MotionVectorGenerationMode);
             m_Flip = new Vector3(
                 Mathf.Clamp01(m_Flip.x),
@@ -3969,6 +4380,26 @@ namespace VividRP.Runtime.Particle
         internal Mesh renderMesh => ResolveRenderMesh();
 
         internal bool hasRenderMesh => renderMesh != null;
+
+        internal float[] meshWeightingsForSnapshot => m_MeshWeightings;
+
+        internal int meshWeightingsHash
+        {
+            get
+            {
+                unchecked
+                {
+                    int hash = 17;
+                    float[] weightings = m_MeshWeightings;
+                    int count = weightings?.Length ?? 0;
+                    hash = (hash * 397) ^ count;
+                    for (int index = 0; index < count; index++)
+                        hash = (hash * 397) ^ weightings[index].GetHashCode();
+
+                    return hash;
+                }
+            }
+        }
 
         internal int meshSetHash
         {
@@ -4041,7 +4472,52 @@ namespace VividRP.Runtime.Particle
 
             m_Mesh = primary;
             m_Meshes = extraMeshes;
+            EnsureMeshWeightings();
             NotifyChanged();
+        }
+
+        public int GetMeshWeightings(float[] weightings)
+        {
+            int count = GetMeshCount();
+            int destinationCount = Mathf.Min(count, weightings?.Length ?? 0);
+            for (int index = 0; index < destinationCount; index++)
+                weightings[index] = GetMeshWeightAtIndex(index);
+
+            return count;
+        }
+
+        public void SetMeshWeightings(float[] weightings)
+        {
+            SetMeshWeightings(weightings, weightings?.Length ?? 0);
+        }
+
+        public void SetMeshWeightings(float[] weightings, int size)
+        {
+            int meshCount = GetMeshCount();
+            int sourceCount = Mathf.Clamp(size, 0, weightings?.Length ?? 0);
+            var copy = meshCount > 0 ? new float[meshCount] : Array.Empty<float>();
+            for (int index = 0; index < meshCount; index++)
+            {
+                copy[index] = index < sourceCount
+                    ? ValidateMeshWeighting(weightings[index])
+                    : 1.0f;
+            }
+
+            if (FloatArraysEqual(m_MeshWeightings, copy))
+                return;
+
+            m_MeshWeightings = copy;
+            NotifyChanged();
+        }
+
+        public float GetMeshWeightAtIndex(int index)
+        {
+            if ((uint)index >= (uint)GetMeshCount())
+                throw new ArgumentOutOfRangeException(nameof(index));
+
+            return index < (m_MeshWeightings?.Length ?? 0)
+                ? ValidateMeshWeighting(m_MeshWeightings[index])
+                : 1.0f;
         }
 
         private Mesh ResolveRenderMesh()
@@ -4082,6 +4558,60 @@ namespace VividRP.Runtime.Particle
             var copy = new Mesh[source.Length];
             Array.Copy(source, copy, source.Length);
             return copy;
+        }
+
+        private void EnsureMeshWeightings()
+        {
+            int meshCount = GetMeshCount();
+            float[] source = m_MeshWeightings;
+            if ((source?.Length ?? 0) != meshCount)
+            {
+                var resized = meshCount > 0 ? new float[meshCount] : Array.Empty<float>();
+                int copyCount = Mathf.Min(meshCount, source?.Length ?? 0);
+                for (int index = 0; index < copyCount; index++)
+                    resized[index] = ValidateMeshWeighting(source[index]);
+                for (int index = copyCount; index < meshCount; index++)
+                    resized[index] = 1.0f;
+
+                m_MeshWeightings = resized;
+                return;
+            }
+
+            for (int index = 0; index < meshCount; index++)
+                source[index] = ValidateMeshWeighting(source[index]);
+        }
+
+        private static float[] CopyMeshWeightings(float[] source)
+        {
+            if (source == null || source.Length == 0)
+                return Array.Empty<float>();
+
+            var copy = new float[source.Length];
+            Array.Copy(source, copy, source.Length);
+            return copy;
+        }
+
+        private static float ValidateMeshWeighting(float value)
+        {
+            return float.IsNaN(value) || float.IsInfinity(value)
+                ? 0.0f
+                : Mathf.Max(0.0f, value);
+        }
+
+        private static bool FloatArraysEqual(float[] left, float[] right)
+        {
+            int leftCount = left?.Length ?? 0;
+            int rightCount = right?.Length ?? 0;
+            if (leftCount != rightCount)
+                return false;
+
+            for (int index = 0; index < leftCount; index++)
+            {
+                if (left[index] != right[index])
+                    return false;
+            }
+
+            return true;
         }
 
         private static bool MeshArraysEqual(Mesh[] left, Mesh[] right)

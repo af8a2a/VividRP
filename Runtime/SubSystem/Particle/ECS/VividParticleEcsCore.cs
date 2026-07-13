@@ -18,6 +18,7 @@ namespace VividRP.Runtime.Particle.ECS
             VividEcsTypeManager.RegisterSoa<VividParticleNoiseState>();
             VividEcsTypeManager.RegisterSoa<VividParticleInheritVelocityState>();
             VividEcsTypeManager.RegisterSoa<VividParticleTriggerState>();
+            VividEcsTypeManager.RegisterSoa<VividParticleTrailLink>();
             VividEcsTypeManager.RegisterShared<VividParticleSystemId>();
             VividEcsTypeManager.RegisterShared<VividParticleModuleSharedKey>();
             VividEcsTypeManager.RegisterShared<VividParticleSimulationKernelSharedKey>();
@@ -25,6 +26,8 @@ namespace VividRP.Runtime.Particle.ECS
             VividEcsTypeManager.RegisterShared<VividParticleRendererSharedKey>();
             VividEcsTypeManager.RegisterTag<VividParticleSimulationActive>();
             VividEcsTypeManager.RegisterTag<VividParticleRendererActive>();
+            VividEcsTypeManager.RegisterTag<VividParticleLightsActive>();
+            VividEcsTypeManager.RegisterTag<VividParticleTrailsActive>();
             s_Registered = true;
         }
     }
@@ -93,11 +96,54 @@ namespace VividRP.Runtime.Particle.ECS
         }
     }
 
+    internal readonly struct VividParticleSystemHandle : IVividEcsLineAttachmentData, IEquatable<VividParticleSystemHandle>
+    {
+        public static readonly VividParticleSystemHandle Invalid = new(-1, -1);
+
+        public VividParticleSystemHandle(int slot, int version)
+        {
+            Slot = slot;
+            Version = version;
+        }
+
+        public int Slot { get; }
+
+        public int Version { get; }
+
+        public bool IsValid => Slot >= 0 && Version > 0;
+
+        public bool Equals(VividParticleSystemHandle other)
+        {
+            return Slot == other.Slot && Version == other.Version;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VividParticleSystemHandle other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                return (Slot * 397) ^ Version;
+            }
+        }
+    }
+
     internal struct VividParticleRendererActive : IVividEcsTagComponentData
     {
     }
 
     internal struct VividParticleSimulationActive : IVividEcsTagComponentData
+    {
+    }
+
+    internal struct VividParticleLightsActive : IVividEcsTagComponentData
+    {
+    }
+
+    internal struct VividParticleTrailsActive : IVividEcsTagComponentData
     {
     }
 
@@ -126,6 +172,7 @@ namespace VividRP.Runtime.Particle.ECS
         Trigger = 1u << 18,
         LifetimeByEmitterSpeed = 1u << 19,
         Lights = 1u << 20,
+        Trails = 1u << 21,
     }
 
     internal readonly struct VividParticleModuleSharedKey : IVividEcsSharedComponentData,
@@ -217,7 +264,8 @@ namespace VividRP.Runtime.Particle.ECS
             | VividParticleModuleFlags.RotationBySpeed
             | VividParticleModuleFlags.Noise
             | VividParticleModuleFlags.InheritVelocity
-            | VividParticleModuleFlags.CustomData;
+            | VividParticleModuleFlags.CustomData
+            | VividParticleModuleFlags.Trails;
 
         public static readonly VividParticleRenderKernelSharedKey Base = new(
             VividParticleModuleFlags.None);
@@ -449,6 +497,37 @@ namespace VividRP.Runtime.Particle.ECS
             return index == VelocityFieldIndex
                 ? new VividEcsSoaFieldInfo(VelocityOffsetInPage, Float3SizeInBytes)
                 : throw new ArgumentOutOfRangeException(nameof(index));
+        }
+    }
+
+    internal struct VividParticleTrailLink : IVividEcsSoaComponentData
+    {
+        public const int HandleIndexFieldIndex = 0;
+        public const int HandleGenerationFieldIndex = 1;
+        public const int FieldCountValue = 2;
+        public const int IntSizeInBytes = sizeof(int);
+        public const int HandleIndexOffsetInPage = 0;
+        public const int HandleGenerationOffsetInPage =
+            HandleIndexOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
+        public const int TypeSizeInBytes =
+            HandleGenerationOffsetInPage + IntSizeInBytes * VividEcsConstants.PageEntryCount;
+
+        public int FieldCount => FieldCountValue;
+
+        public int TypeSize => TypeSizeInBytes;
+
+        public VividEcsSoaFieldInfo GetFieldInfo(int index)
+        {
+            return index switch
+            {
+                HandleIndexFieldIndex => new VividEcsSoaFieldInfo(
+                    HandleIndexOffsetInPage,
+                    IntSizeInBytes),
+                HandleGenerationFieldIndex => new VividEcsSoaFieldInfo(
+                    HandleGenerationOffsetInPage,
+                    IntSizeInBytes),
+                _ => throw new ArgumentOutOfRangeException(nameof(index)),
+            };
         }
     }
 

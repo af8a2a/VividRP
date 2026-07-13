@@ -2,6 +2,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.UIElements;
 using VividRP.Runtime.Particle;
 
 namespace VividRP.Editor.Tests
@@ -182,6 +183,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividParticleSystemEditorUtility.FindCustomDataProperty(systemObject),
                 Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindSubEmittersProperty(systemObject),
+                Is.Not.Null);
             Assert.That(systemRenderer, Is.Not.Null);
             Assert.That(VividParticleSystemEditorUtility.FindAssetProperty(systemObject), Is.Not.Null);
 
@@ -196,6 +200,9 @@ namespace VividRP.Editor.Tests
             Assert.That(assetMain, Is.Not.Null);
             Assert.That(assetEmission, Is.Not.Null);
             Assert.That(assetShape, Is.Not.Null);
+            Assert.That(
+                VividParticleSystemEditorUtility.FindSubEmittersProperty(assetObject),
+                Is.Not.Null);
             Assert.That(
                 VividParticleSystemEditorUtility.FindForceOverLifetimeProperty(assetObject),
                 Is.Not.Null);
@@ -245,6 +252,59 @@ namespace VividRP.Editor.Tests
                 VividParticleSystemEditorUtility.FindCustomDataProperty(assetObject),
                 Is.Not.Null);
             Assert.That(assetRenderer, Is.Not.Null);
+        }
+
+        [Test]
+        public void InspectorUtility_ModuleHeaderState_SupportsMultiObjectEditingAndScopedFoldoutKeys()
+        {
+            VividParticleSystem firstSystem = CreateSystem();
+            var secondGameObject = new GameObject("Vivid Particle Module Header Second Target");
+            VividParticleSystem secondSystem = secondGameObject.AddComponent<VividParticleSystem>();
+            m_Asset = ScriptableObject.CreateInstance<VividParticleSystemAsset>();
+            try
+            {
+                firstSystem.shape.enabled = true;
+                secondSystem.shape.enabled = false;
+                using var multiObject = new SerializedObject(new Object[] { firstSystem, secondSystem });
+                SerializedProperty multiShape = multiObject.FindProperty("m_Shape");
+                SerializedProperty multiEnabled =
+                    VividParticleSystemEditorUtility.FindModuleEnabledProperty(multiShape);
+
+                Assert.That(multiEnabled, Is.Not.Null);
+                Assert.That(multiEnabled.hasMultipleDifferentValues, Is.True);
+                Assert.That(
+                    VividParticleSystemEditorUtility.TrySetModuleEnabled(multiShape, enabled: false),
+                    Is.True);
+                multiObject.ApplyModifiedProperties();
+                Assert.That(firstSystem.shape.enabled, Is.False);
+                Assert.That(secondSystem.shape.enabled, Is.False);
+
+                using var componentObject = new SerializedObject(firstSystem);
+                using var assetObject = new SerializedObject(m_Asset);
+                SerializedProperty componentMain = componentObject.FindProperty("m_Main");
+                SerializedProperty componentShape = componentObject.FindProperty("m_Shape");
+                SerializedProperty assetShape = assetObject.FindProperty("m_Shape");
+                Assert.That(
+                    VividParticleSystemEditorUtility.TrySetModuleEnabled(
+                        componentMain,
+                        enabled: false),
+                    Is.False);
+
+                string componentKey =
+                    VividParticleSystemEditorUtility.GetModuleFoldoutSessionKey(componentShape);
+                string assetKey =
+                    VividParticleSystemEditorUtility.GetModuleFoldoutSessionKey(assetShape);
+                Assert.That(componentKey, Is.Not.Empty);
+                Assert.That(assetKey, Is.Not.Empty);
+                Assert.That(componentKey, Is.Not.EqualTo(assetKey));
+                Assert.That(
+                    VividParticleSystemEditorUtility.GetModuleFoldoutSessionKey(null),
+                    Is.Empty);
+            }
+            finally
+            {
+                Object.DestroyImmediate(secondGameObject);
+            }
         }
 
         [Test]
@@ -665,6 +725,101 @@ namespace VividRP.Editor.Tests
             Assert.That(system.particleCount, Is.EqualTo(0));
             Assert.That(VividParticleSystemEditorUtility.ScrubPreview(null, 1.0f), Is.False);
             Assert.That(VividParticleSystemEditorUtility.RestartPreview(null, play: true), Is.False);
+        }
+
+        [Test]
+        public void SceneOverlay_ResolvesSelectedParticleSystem_AndCreatesPlaybackControls()
+        {
+            VividParticleSystem system = CreateSystem();
+            var nonParticleObject = new GameObject("Vivid Particle Overlay Non Particle");
+            bool previousShowBounds = VividParticleSystemSceneOverlay.showBounds;
+            try
+            {
+                VividParticleSystemSceneOverlay.showBounds = true;
+                var overlay = new VividParticleSystemSceneOverlay();
+                Selection.activeGameObject = system.gameObject;
+                Assert.That(overlay.visible, Is.True);
+                Assert.That(VividParticleSystemSceneOverlay.ResolveSelectedSystem(), Is.SameAs(system));
+
+                VisualElement content = overlay.CreatePanelContent();
+                Assert.That(
+                    content.Q<Button>(VividParticleSystemSceneOverlayContent.PlayButtonName),
+                    Is.Not.Null);
+                Assert.That(
+                    content.Q<Button>(VividParticleSystemSceneOverlayContent.PauseButtonName),
+                    Is.Not.Null);
+                Assert.That(
+                    content.Q<Button>(VividParticleSystemSceneOverlayContent.RestartButtonName),
+                    Is.Not.Null);
+                Assert.That(
+                    content.Q<Button>(VividParticleSystemSceneOverlayContent.StopButtonName),
+                    Is.Not.Null);
+                Assert.That(
+                    content.Q<Slider>(VividParticleSystemSceneOverlayContent.TimeSliderName),
+                    Is.Not.Null);
+                Assert.That(
+                    content.Q<Toggle>(VividParticleSystemSceneOverlayContent.ShowBoundsToggleName).value,
+                    Is.True);
+
+                Selection.activeGameObject = nonParticleObject;
+                Assert.That(overlay.visible, Is.False);
+                Assert.That(VividParticleSystemSceneOverlay.ResolveSelectedSystem(), Is.Null);
+            }
+            finally
+            {
+                VividParticleSystemSceneOverlay.showBounds = previousShowBounds;
+                Selection.activeObject = null;
+                Object.DestroyImmediate(nonParticleObject);
+            }
+        }
+
+        [Test]
+        public void SceneOverlay_PreviewCommands_PreserveSynchronousEditorSemantics()
+        {
+            VividParticleSystem system = CreateSystem();
+            system.main.playOnAwake = false;
+            system.Stop(
+                withChildren: false,
+                VividParticleSystemStopBehavior.StopEmittingAndClear);
+
+            Assert.That(
+                VividParticleSystemSceneOverlay.ExecutePreviewCommand(
+                    system,
+                    VividParticlePreviewCommand.Play),
+                Is.True);
+            Assert.That(system.isPlaying, Is.True);
+
+            Assert.That(
+                VividParticleSystemSceneOverlay.ExecutePreviewCommand(
+                    system,
+                    VividParticlePreviewCommand.Pause),
+                Is.True);
+            Assert.That(system.isPaused, Is.True);
+
+            system.Emit(3);
+            Assert.That(system.particleCount, Is.EqualTo(3));
+            Assert.That(
+                VividParticleSystemSceneOverlay.ExecutePreviewCommand(
+                    system,
+                    VividParticlePreviewCommand.Restart),
+                Is.True);
+            Assert.That(system.isPlaying, Is.True);
+            Assert.That(system.particleCount, Is.EqualTo(0));
+
+            system.Emit(2);
+            Assert.That(
+                VividParticleSystemSceneOverlay.ExecutePreviewCommand(
+                    system,
+                    VividParticlePreviewCommand.StopAndClear),
+                Is.True);
+            Assert.That(system.isPlaying, Is.False);
+            Assert.That(system.isPaused, Is.False);
+            Assert.That(system.particleCount, Is.EqualTo(0));
+            Assert.That(
+                VividParticleSystemSceneOverlay.ExecutePreviewCommand(
+                    null,
+                    VividParticlePreviewCommand.Play),
+                Is.False);
         }
 
         [Test]
@@ -1223,6 +1378,77 @@ namespace VividRP.Editor.Tests
 
             Assert.That(m_Asset.lights.ratio, Is.EqualTo(0.25f));
             Assert.That(m_Asset.lights.maxLights, Is.EqualTo(7));
+        }
+
+        [Test]
+        public void TrailsModule_IsDiscoverable_AndTemplateCopyIsIndependent()
+        {
+            VividParticleSystem system = CreateSystem();
+            m_Asset = ScriptableObject.CreateInstance<VividParticleSystemAsset>();
+            using var serializedSystem = new SerializedObject(system);
+
+            SerializedProperty trails = VividParticleSystemEditorUtility.FindTrailsProperty(serializedSystem);
+            Assert.That(trails, Is.Not.Null);
+            Assert.That(trails.FindPropertyRelative("m_Mode"), Is.Not.Null);
+            Assert.That(trails.FindPropertyRelative("m_WidthOverTrail"), Is.Not.Null);
+            Assert.That(trails.FindPropertyRelative("m_RibbonCount"), Is.Not.Null);
+            SerializedProperty renderer = serializedSystem.FindProperty("m_Renderer");
+            Assert.That(renderer.FindPropertyRelative("m_TrailMaterial"), Is.Not.Null);
+
+            system.trails.enabled = true;
+            system.trails.mode = VividParticleTrailMode.Ribbon;
+            system.trails.ratio = 0.25f;
+            system.trails.ribbonCount = 4;
+            system.trails.widthOverTrail = AnimationCurve.Constant(0.0f, 1.0f, 0.75f);
+            Assert.That(
+                VividParticleSystemEditorUtility.CopyComponentSettingsToAsset(system, m_Asset),
+                Is.True);
+            system.trails.enabled = false;
+            system.trails.ratio = 1.0f;
+            system.trails.ribbonCount = 1;
+            system.trails.widthOverTrail = AnimationCurve.Constant(0.0f, 1.0f, 9.0f);
+
+            Assert.That(m_Asset.trails.enabled, Is.True);
+            Assert.That(m_Asset.trails.mode, Is.EqualTo(VividParticleTrailMode.Ribbon));
+            Assert.That(m_Asset.trails.ratio, Is.EqualTo(0.25f));
+            Assert.That(m_Asset.trails.ribbonCount, Is.EqualTo(4));
+            Assert.That(m_Asset.trails.EvaluateWidth(0.5f), Is.EqualTo(0.75f));
+        }
+
+        [Test]
+        public void SubEmittersModule_IsDiscoverable_AndTemplateCopyIsIndependent()
+        {
+            VividParticleSystem system = CreateSystem();
+            var childObject = new GameObject("Vivid Sub Emitter Child");
+            childObject.transform.SetParent(m_GameObject.transform);
+            VividParticleSystem child = childObject.AddComponent<VividParticleSystem>();
+            m_Asset = ScriptableObject.CreateInstance<VividParticleSystemAsset>();
+            using var serializedSystem = new SerializedObject(system);
+
+            SerializedProperty subEmitters =
+                VividParticleSystemEditorUtility.FindSubEmittersProperty(serializedSystem);
+            Assert.That(subEmitters, Is.Not.Null);
+            Assert.That(subEmitters.FindPropertyRelative("m_Enabled"), Is.Not.Null);
+            Assert.That(subEmitters.FindPropertyRelative("m_SubEmitters"), Is.Not.Null);
+
+            system.subEmitters.enabled = true;
+            system.subEmitters.AddSubEmitter(
+                child,
+                VividParticleSubEmitterType.Death,
+                VividParticleSubEmitterProperties.InheritColor,
+                0.5f);
+            Assert.That(
+                VividParticleSystemEditorUtility.CopyComponentSettingsToAsset(system, m_Asset),
+                Is.True);
+            system.subEmitters.SetSubEmitterEmitProbability(0, 1.0f);
+
+            Assert.That(m_Asset.subEmitters.enabled, Is.True);
+            Assert.That(m_Asset.subEmitters.subEmittersCount, Is.EqualTo(1));
+            Assert.That(m_Asset.subEmitters.GetSubEmitterSystem(0), Is.SameAs(child));
+            Assert.That(
+                m_Asset.subEmitters.GetSubEmitterType(0),
+                Is.EqualTo(VividParticleSubEmitterType.Death));
+            Assert.That(m_Asset.subEmitters.GetSubEmitterEmitProbability(0), Is.EqualTo(0.5f));
         }
 
         private static Gradient CreateGradient(Color start, Color end)

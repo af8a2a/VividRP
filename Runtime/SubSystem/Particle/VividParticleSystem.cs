@@ -94,6 +94,13 @@ namespace VividRP.Runtime.Particle
             VividParticleTextureSheetAnimationModule.CreateDefault();
 
         [SerializeField]
+        private VividParticleSubEmittersModule m_SubEmitters =
+            VividParticleSubEmittersModule.CreateDefault();
+
+        [SerializeField]
+        private VividParticleTrailsModule m_Trails = VividParticleTrailsModule.CreateDefault();
+
+        [SerializeField]
         private VividParticleLightsModule m_Lights = VividParticleLightsModule.CreateDefault();
 
         [SerializeField]
@@ -174,6 +181,12 @@ namespace VividRP.Runtime.Particle
         public VividParticleTextureSheetAnimationModule textureSheetAnimation =>
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
 
+        public VividParticleSubEmittersModule subEmitters =>
+            m_SubEmitters ??= VividParticleSubEmittersModule.CreateDefault();
+
+        public VividParticleTrailsModule trails =>
+            m_Trails ??= VividParticleTrailsModule.CreateDefault();
+
         public VividParticleLightsModule lights =>
             m_Lights ??= VividParticleLightsModule.CreateDefault();
 
@@ -216,6 +229,12 @@ namespace VividRP.Runtime.Particle
         public void Emit(int count)
         {
             EmitInternal(count);
+            RequestEditorRenderUpdate();
+        }
+
+        public void TriggerSubEmitter(int subEmitterIndex, int count = 1)
+        {
+            VividParticleSystemManager.TriggerSubEmitter(this, subEmitterIndex, count);
             RequestEditorRenderUpdate();
         }
 
@@ -357,7 +376,9 @@ namespace VividRP.Runtime.Particle
                 transform.position,
                 transform.localToWorldMatrix,
                 transform.rotation,
-                GetEntityId().GetHashCode());
+                GetEntityId().GetHashCode(),
+                rendererModule.meshWeightingsForSnapshot,
+                rendererModule.meshWeightingsHash);
         }
 
         private static VividParticleBurst[] CopyBurstsToSnapshotBuffer(
@@ -477,6 +498,8 @@ namespace VividRP.Runtime.Particle
                 m_Noise,
                 m_CustomData,
                 m_TextureSheetAnimation,
+                m_SubEmitters,
+                m_Trails,
                 m_Lights,
                 m_Renderer);
             ValidateModules();
@@ -577,6 +600,8 @@ namespace VividRP.Runtime.Particle
             m_Noise ??= VividParticleNoiseModule.CreateDefault();
             m_CustomData ??= VividParticleCustomDataModule.CreateDefault();
             m_TextureSheetAnimation ??= VividParticleTextureSheetAnimationModule.CreateDefault();
+            m_SubEmitters ??= VividParticleSubEmittersModule.CreateDefault();
+            m_Trails ??= VividParticleTrailsModule.CreateDefault();
             m_Lights ??= VividParticleLightsModule.CreateDefault();
             m_Renderer ??= VividParticleRendererModule.CreateDefault();
             BindModuleCallbacks();
@@ -604,6 +629,8 @@ namespace VividRP.Runtime.Particle
             m_Noise.SetChangeCallback(OnSimulationModuleChanged);
             m_CustomData.SetChangeCallback(OnCustomDataModuleChanged);
             m_TextureSheetAnimation.SetChangeCallback(OnTextureSheetAnimationModuleChanged);
+            m_SubEmitters.SetChangeCallback(OnSimulationModuleChanged);
+            m_Trails.SetChangeCallback(OnTrailsModuleChanged);
             m_Lights.SetChangeCallback(OnLightsModuleChanged);
             m_Renderer.SetChangeCallback(OnRendererModuleChanged);
         }
@@ -683,6 +710,13 @@ namespace VividRP.Runtime.Particle
             RequestEditorRenderUpdate();
         }
 
+        private void OnTrailsModuleChanged()
+        {
+            VividParticleSystemManager.NotifySettingsChanged(this);
+            VividParticleSystemManager.MarkRendererDirty(this);
+            RequestEditorRenderUpdate();
+        }
+
         private void ValidateModules()
         {
             main.Validate();
@@ -705,6 +739,8 @@ namespace VividRP.Runtime.Particle
             noise.Validate();
             customData.Validate();
             textureSheetAnimation.Validate();
+            subEmitters.Validate();
+            trails.Validate();
             lights.Validate();
             rendererModule.Validate();
         }

@@ -80,6 +80,22 @@ namespace VividRP.Runtime.Particle
         public int LightsAlphaAffectsIntensity;
         public float LightsRatio;
         public int LightsMaxLights;
+        public int TrailsEnabled;
+        public int TrailsMode;
+        public int TrailsWorldSpace;
+        public int TrailsDieWithParticles;
+        public int TrailsSizeAffectsWidth;
+        public int TrailsSizeAffectsLifetime;
+        public int TrailsInheritParticleColor;
+        public int TrailsGenerateLightingData;
+        public int TrailsTextureMode;
+        public int TrailsRibbonCount;
+        public int TrailsSplitSubEmitterRibbons;
+        public int TrailsAttachRibbonsToTransform;
+        public float TrailsRatio;
+        public float TrailsMinimumVertexDistance;
+        public float TrailsShadowBias;
+        public float2 TrailsTextureScale;
         public int TextureSheetTilesX;
         public int TextureSheetTilesY;
         public int TextureSheetAnimationType;
@@ -118,6 +134,10 @@ namespace VividRP.Runtime.Particle
         public fixed float ExternalForcesMultiplierLut[LifetimeLutResolution];
         public fixed float LightsRangeLut[LifetimeLutResolution];
         public fixed float LightsIntensityLut[LifetimeLutResolution];
+        public fixed float TrailsLifetimeLut[LifetimeLutResolution];
+        public fixed float TrailsWidthLut[LifetimeLutResolution];
+        public fixed float TrailsColorOverLifetimeLut[LifetimeLutResolution * 4];
+        public fixed float TrailsColorOverTrailLut[LifetimeLutResolution * 4];
     }
 
     internal struct VividParticleSimulationPrepareInput
@@ -286,6 +306,8 @@ namespace VividRP.Runtime.Particle
         public readonly Material RendererMaterial;
         public readonly Mesh RendererMesh;
         public readonly int RendererMeshCount;
+        public readonly float[] RendererMeshWeightings;
+        public readonly int RendererMeshWeightingsHash;
         public readonly Color RendererColor;
         public readonly float RendererSizeScale;
         public readonly float StretchLengthScale;
@@ -339,7 +361,9 @@ namespace VividRP.Runtime.Particle
             Vector3 transformPosition,
             Matrix4x4 localToWorldMatrix,
             Quaternion worldRotation,
-            int entityHash)
+            int entityHash,
+            float[] rendererMeshWeightings = null,
+            int rendererMeshWeightingsHash = 0)
         {
             DeltaTime = Mathf.Max(0.0f, deltaTime);
             IsActiveAndEnabled = isActiveAndEnabled;
@@ -376,6 +400,8 @@ namespace VividRP.Runtime.Particle
             RendererMaterial = rendererMaterial;
             RendererMesh = rendererMesh;
             RendererMeshCount = Mathf.Max(0, rendererMeshCount);
+            RendererMeshWeightings = rendererMeshWeightings ?? Array.Empty<float>();
+            RendererMeshWeightingsHash = rendererMeshWeightingsHash;
             RendererColor = rendererColor;
             RendererSizeScale = Mathf.Max(VividParticleRendererModule.MinimumSizeScale, rendererSizeScale);
             StretchLengthScale = Mathf.Max(VividParticleRendererModule.MinimumStretchLengthScale, stretchLengthScale);
@@ -441,7 +467,9 @@ namespace VividRP.Runtime.Particle
                 transformPosition,
                 localToWorldMatrix,
                 worldRotation,
-                EntityHash);
+                EntityHash,
+                RendererMeshWeightings,
+                RendererMeshWeightingsHash);
         }
 
         public VividParticleSystemFrameSnapshot WithFrameState(VividParticleSimulationTimeStep timeStep)
@@ -488,7 +516,9 @@ namespace VividRP.Runtime.Particle
                 timeStep.ToTransformPosition(),
                 timeStep.ToMatrix4x4(),
                 timeStep.ToQuaternion(),
-                EntityHash);
+                EntityHash,
+                RendererMeshWeightings,
+                RendererMeshWeightingsHash);
         }
     }
 }

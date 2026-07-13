@@ -1,6 +1,7 @@
 using System;
 using Unity.Mathematics;
 using UnityEngine;
+using VividRP.Runtime.Particle.ECS;
 
 namespace VividRP.Runtime.Particle
 {
@@ -241,6 +242,8 @@ namespace VividRP.Runtime.Particle
         public float3 Intersection;
         public float3 Normal;
         public float3 Velocity;
+        public int IsUserEvent;
+        public VividParticleSubEmitterParticleData Particle;
     }
 
     public enum VividParticleOverlapAction
@@ -428,5 +431,7 @@ namespace VividRP.Runtime.Particle
         public ulong ColliderEntityId;
         public int ParticleIndex;
         public int EventType;
+        public int IsCallback;
+        public VividParticleSubEmitterParticleData Particle;
     }
 }

@@ -224,6 +224,16 @@ namespace VividRP.Editor
             return serializedObject?.FindProperty("m_TextureSheetAnimation");
         }
 
+        internal static SerializedProperty FindSubEmittersProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_SubEmitters");
+        }
+
+        internal static SerializedProperty FindTrailsProperty(SerializedObject serializedObject)
+        {
+            return serializedObject?.FindProperty("m_Trails");
+        }
+
         internal static SerializedProperty FindLightsProperty(SerializedObject serializedObject)
         {
             return serializedObject?.FindProperty("m_Lights");
@@ -240,6 +250,29 @@ namespace VividRP.Editor
         internal static SerializedProperty FindRelative(SerializedProperty property, string path)
         {
             return property?.FindPropertyRelative(path);
+        }
+
+        internal static SerializedProperty FindModuleEnabledProperty(SerializedProperty module)
+        {
+            return FindRelative(module, "m_Enabled");
+        }
+
+        internal static bool TrySetModuleEnabled(SerializedProperty module, bool enabled)
+        {
+            SerializedProperty enabledProperty = FindModuleEnabledProperty(module);
+            if (enabledProperty == null || enabledProperty.propertyType != SerializedPropertyType.Boolean)
+                return false;
+
+            enabledProperty.boolValue = enabled;
+            return true;
+        }
+
+        internal static string GetModuleFoldoutSessionKey(SerializedProperty module)
+        {
+            if (module?.serializedObject?.targetObject == null)
+                return string.Empty;
+
+            return $"VividRP.Particles.ModuleFoldout.{module.serializedObject.targetObject.GetType().FullName}.{module.propertyPath}";
         }
 
         internal static bool TryWriteBurstElement(SerializedProperty burst, float time, int count)
@@ -347,6 +380,8 @@ namespace VividRP.Editor
             asset.noise.CopyFrom(system.noise);
             asset.customData.CopyFrom(system.customData);
             asset.textureSheetAnimation.CopyFrom(system.textureSheetAnimation);
+            asset.subEmitters.CopyFrom(system.subEmitters);
+            asset.trails.CopyFrom(system.trails);
             asset.lights.CopyFrom(system.lights);
             asset.rendererModule.CopyFrom(system.rendererModule);
             asset.Validate();
@@ -1134,8 +1169,11 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Limit Velocity over Lifetime");
         private static readonly GUIContent s_TextureSheetAnimationLabel =
             EditorGUIUtility.TrTextContent("Texture Sheet Animation");
+        private static readonly GUIContent s_SubEmittersLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitters");
         private static readonly GUIContent s_CustomDataLabel =
             EditorGUIUtility.TrTextContent("Custom Data");
+        private static readonly GUIContent s_TrailsLabel = EditorGUIUtility.TrTextContent("Trails");
         private static readonly GUIContent s_LightsLabel = EditorGUIUtility.TrTextContent("Lights");
         private static readonly GUIContent s_RendererLabel = EditorGUIUtility.TrTextContent("Renderer");
         private static readonly GUIContent s_DebugLabel = EditorGUIUtility.TrTextContent("Debug");
@@ -1154,10 +1192,36 @@ namespace VividRP.Editor
         private static readonly GUIContent s_PerformanceSummaryLabel =
             EditorGUIUtility.TrTextContent("Perf Summary");
         private static readonly GUIContent s_ParticleCountLabel = EditorGUIUtility.TrTextContent("Particle Count");
+        private static readonly GUIContent s_SystemHandleSlotsLabel =
+            EditorGUIUtility.TrTextContent("System Handle Slots");
+        private static readonly GUIContent s_FreeSystemHandleSlotsLabel =
+            EditorGUIUtility.TrTextContent("Free System Handle Slots");
+        private static readonly GUIContent s_RendererHandleCacheLabel =
+            EditorGUIUtility.TrTextContent("Renderer Handle Cache (Rebuild/Hit)");
+        private static readonly GUIContent s_LightHandleCacheLabel =
+            EditorGUIUtility.TrTextContent("Light Handle Cache (Rebuild/Hit)");
+        private static readonly GUIContent s_TrailHandleCacheLabel =
+            EditorGUIUtility.TrTextContent("Trail Handle Cache (Rebuild/Hit)");
         private static readonly GUIContent s_ParticleLightSourceCountLabel =
             EditorGUIUtility.TrTextContent("Particle Light Sources");
         private static readonly GUIContent s_ParticleLightCountLabel =
             EditorGUIUtility.TrTextContent("Particle Light Capacity");
+        private static readonly GUIContent s_ActiveLightQueryLinesLabel =
+            EditorGUIUtility.TrTextContent("Active Light Query Lines");
+        private static readonly GUIContent s_InvalidLightQueryLinesLabel =
+            EditorGUIUtility.TrTextContent("Invalid Light Query Lines");
+        private static readonly GUIContent s_ParticleTrailSourceCountLabel =
+            EditorGUIUtility.TrTextContent("Particle Trail Sources");
+        private static readonly GUIContent s_ParticleTrailPageWorkCountLabel =
+            EditorGUIUtility.TrTextContent("Particle Trail Page Works");
+        private static readonly GUIContent s_ParticleTrailCountLabel =
+            EditorGUIUtility.TrTextContent("Particle Trail Count");
+        private static readonly GUIContent s_ParticleTrailTileCapacityLabel =
+            EditorGUIUtility.TrTextContent("Particle Trail Tile Capacity");
+        private static readonly GUIContent s_ActiveTrailQueryLinesLabel =
+            EditorGUIUtility.TrTextContent("Active Trail Query Lines");
+        private static readonly GUIContent s_InvalidTrailQueryLinesLabel =
+            EditorGUIUtility.TrTextContent("Invalid Trail Query Lines");
         private static readonly GUIContent s_TimeLabel = EditorGUIUtility.TrTextContent("Time");
         private static readonly GUIContent s_PageSizeLabel = EditorGUIUtility.TrTextContent("Page Size");
         private static readonly GUIContent s_StorageCapacityLabel = EditorGUIUtility.TrTextContent("Storage Capacity");
@@ -1195,6 +1259,10 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Base Simulation Page Works");
         private static readonly GUIContent s_VelocitySimulationPageWorksLabel =
             EditorGUIUtility.TrTextContent("Velocity Simulation Page Works");
+        private static readonly GUIContent s_BaseSimulationLineWorksLabel =
+            EditorGUIUtility.TrTextContent("Base Simulation Line Works");
+        private static readonly GUIContent s_VelocitySimulationLineWorksLabel =
+            EditorGUIUtility.TrTextContent("Velocity Simulation Line Works");
         private static readonly GUIContent s_PendingSimulationSystemsLabel =
             EditorGUIUtility.TrTextContent("Pending Simulation Systems");
         private static readonly GUIContent s_NativeSimulationConfigsLabel =
@@ -1227,6 +1295,36 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Emission Init Scheduled Works");
         private static readonly GUIContent s_EmissionInitializePageWorksLabel =
             EditorGUIUtility.TrTextContent("Emission Init Page Works");
+        private static readonly GUIContent s_EmissionInitializeLineWorksLabel =
+            EditorGUIUtility.TrTextContent("Emission Init Line Works");
+        private static readonly GUIContent s_EmissionManagedInitializeDispatchLabel =
+            EditorGUIUtility.TrTextContent("Emission Managed Init (Immediate/Deferred)");
+        private static readonly GUIContent s_EmissionManagedDeferredLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Emission Managed Async (Scheduled/Completed)");
+        private static readonly GUIContent s_SubEmitterCommandsLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Commands");
+        private static readonly GUIContent s_DroppedSubEmitterCommandsLabel =
+            EditorGUIUtility.TrTextContent("Dropped Sub Emitter Commands");
+        private static readonly GUIContent s_SubEmitterProducerWorksLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Producer Works");
+        private static readonly GUIContent s_SubEmitterProducerCandidatesLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Producer Candidates");
+        private static readonly GUIContent s_SubEmitterProducerDispatchLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Producer (Inline/Scheduled)");
+        private static readonly GUIContent s_SubEmitterBindingCacheLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Binding Cache (Rebuild/Hit)");
+        private static readonly GUIContent s_SubEmitterConsumeGroupsLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Consume Groups");
+        private static readonly GUIContent s_SubEmitterTargetResolvesLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Target Resolves");
+        private static readonly GUIContent s_SubEmitterInitializeWorksLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Initialize Works");
+        private static readonly GUIContent s_SubEmitterConsumeSortPassLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Consume (Sort/Pass)");
+        private static readonly GUIContent s_SubEmitterInitializeDispatchLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Init (Immediate/Deferred)");
+        private static readonly GUIContent s_SubEmitterDeferredLifetimeLabel =
+            EditorGUIUtility.TrTextContent("Sub Emitter Async (Scheduled/Completed)");
         private static readonly GUIContent s_RenderRecordsLabel = EditorGUIUtility.TrTextContent("Render Records");
         private static readonly GUIContent s_RenderRecordPoolLabel = EditorGUIUtility.TrTextContent("Render Record Pool");
         private static readonly GUIContent s_ReusedRenderRecordsLabel = EditorGUIUtility.TrTextContent("Reused Render Records");
@@ -1262,6 +1360,12 @@ namespace VividRP.Editor
             EditorGUIUtility.TrTextContent("Active Renderer Query Lines");
         private static readonly GUIContent s_InvalidActiveRendererQueryLinesLabel =
             EditorGUIUtility.TrTextContent("Invalid Active Renderer Lines");
+        private static readonly GUIContent s_ActiveRendererSharedGroupsLabel =
+            EditorGUIUtility.TrTextContent("Active Renderer Shared Groups");
+        private static readonly GUIContent s_RendererSharedGroupCacheLabel =
+            EditorGUIUtility.TrTextContent("Renderer Shared Group Cache (Build/Hit)");
+        private static readonly GUIContent s_RendererSharedGroupSourceScansLabel =
+            EditorGUIUtility.TrTextContent("Renderer Shared Group Source Scans");
         private static readonly GUIContent s_RendererHandleRecordLookupsLabel =
             EditorGUIUtility.TrTextContent("Handle Record Lookups");
         private static readonly GUIContent s_RendererManagedRecordFallbacksLabel =
@@ -1526,6 +1630,8 @@ namespace VividRP.Editor
         private SerializedProperty m_LifetimeByEmitterSpeed;
         private SerializedProperty m_LimitVelocityOverLifetime;
         private SerializedProperty m_TextureSheetAnimation;
+        private SerializedProperty m_SubEmitters;
+        private SerializedProperty m_Trails;
         private SerializedProperty m_Lights;
         private SerializedProperty m_Renderer;
         private bool m_MainExpanded = true;
@@ -1548,6 +1654,8 @@ namespace VividRP.Editor
         private bool m_LifetimeByEmitterSpeedExpanded;
         private bool m_LimitVelocityOverLifetimeExpanded;
         private bool m_TextureSheetAnimationExpanded;
+        private bool m_SubEmittersExpanded;
+        private bool m_TrailsExpanded;
         private bool m_LightsExpanded;
         private bool m_RendererExpanded = true;
         private bool m_DebugExpanded = true;
@@ -1594,7 +1702,47 @@ namespace VividRP.Editor
                 VividParticleSystemEditorUtility.FindLimitVelocityOverLifetimeProperty(serializedObject);
             m_TextureSheetAnimation =
                 VividParticleSystemEditorUtility.FindTextureSheetAnimationProperty(serializedObject);
+            m_SubEmitters = VividParticleSystemEditorUtility.FindSubEmittersProperty(serializedObject);
+            m_Trails = VividParticleSystemEditorUtility.FindTrailsProperty(serializedObject);
             m_Lights = VividParticleSystemEditorUtility.FindLightsProperty(serializedObject);
+            RestoreModuleFoldoutStates();
+        }
+
+        private void RestoreModuleFoldoutStates()
+        {
+            RestoreModuleFoldoutState(m_Main, ref m_MainExpanded);
+            RestoreModuleFoldoutState(m_Emission, ref m_EmissionExpanded);
+            RestoreModuleFoldoutState(m_Shape, ref m_ShapeExpanded);
+            RestoreModuleFoldoutState(m_ForceOverLifetime, ref m_ForceOverLifetimeExpanded);
+            RestoreModuleFoldoutState(m_ExternalForces, ref m_ExternalForcesExpanded);
+            RestoreModuleFoldoutState(m_Collision, ref m_CollisionExpanded);
+            RestoreModuleFoldoutState(m_Trigger, ref m_TriggerExpanded);
+            RestoreModuleFoldoutState(m_VelocityOverLifetime, ref m_VelocityOverLifetimeExpanded);
+            RestoreModuleFoldoutState(m_InheritVelocity, ref m_InheritVelocityExpanded);
+            RestoreModuleFoldoutState(m_LifetimeByEmitterSpeed, ref m_LifetimeByEmitterSpeedExpanded);
+            RestoreModuleFoldoutState(m_LimitVelocityOverLifetime, ref m_LimitVelocityOverLifetimeExpanded);
+            RestoreModuleFoldoutState(m_ColorOverLifetime, ref m_ColorOverLifetimeExpanded);
+            RestoreModuleFoldoutState(m_ColorBySpeed, ref m_ColorBySpeedExpanded);
+            RestoreModuleFoldoutState(m_SizeOverLifetime, ref m_SizeOverLifetimeExpanded);
+            RestoreModuleFoldoutState(m_SizeBySpeed, ref m_SizeBySpeedExpanded);
+            RestoreModuleFoldoutState(m_RotationOverLifetime, ref m_RotationOverLifetimeExpanded);
+            RestoreModuleFoldoutState(m_RotationBySpeed, ref m_RotationBySpeedExpanded);
+            RestoreModuleFoldoutState(m_Noise, ref m_NoiseExpanded);
+            RestoreModuleFoldoutState(m_CustomData, ref m_CustomDataExpanded);
+            RestoreModuleFoldoutState(m_TextureSheetAnimation, ref m_TextureSheetAnimationExpanded);
+            RestoreModuleFoldoutState(m_SubEmitters, ref m_SubEmittersExpanded);
+            RestoreModuleFoldoutState(m_Trails, ref m_TrailsExpanded);
+            RestoreModuleFoldoutState(m_Lights, ref m_LightsExpanded);
+            RestoreModuleFoldoutState(m_Renderer, ref m_RendererExpanded);
+        }
+
+        private static void RestoreModuleFoldoutState(
+            SerializedProperty module,
+            ref bool expanded)
+        {
+            string key = VividParticleSystemEditorUtility.GetModuleFoldoutSessionKey(module);
+            if (!string.IsNullOrEmpty(key))
+                expanded = SessionState.GetBool(key, expanded);
         }
 
         public override void OnInspectorGUI()
@@ -1602,76 +1750,98 @@ namespace VividRP.Editor
             serializedObject.Update();
 
             DrawHeaderInspector();
-            DrawModule(s_MainLabel, ref m_MainExpanded, () => DrawMainModule(m_Main));
-            DrawModule(s_EmissionLabel, ref m_EmissionExpanded, () => DrawEmissionModule(m_Emission));
-            DrawModule(s_ShapeLabel, ref m_ShapeExpanded, () => DrawShapeModule(m_Shape));
+            DrawModule(s_MainLabel, m_Main, ref m_MainExpanded, () => DrawMainModule(m_Main));
+            DrawModule(s_EmissionLabel, m_Emission, ref m_EmissionExpanded, () => DrawEmissionModule(m_Emission));
+            DrawModule(s_ShapeLabel, m_Shape, ref m_ShapeExpanded, () => DrawShapeModule(m_Shape));
             DrawModule(
                 s_ForceOverLifetimeLabel,
+                m_ForceOverLifetime,
                 ref m_ForceOverLifetimeExpanded,
                 () => DrawForceOverLifetimeModule(m_ForceOverLifetime));
             DrawModule(
                 s_ExternalForcesLabel,
+                m_ExternalForces,
                 ref m_ExternalForcesExpanded,
                 () => DrawExternalForcesModule(m_ExternalForces));
             DrawModule(
                 s_CollisionLabel,
+                m_Collision,
                 ref m_CollisionExpanded,
                 () => DrawCollisionModule(m_Collision));
             DrawModule(
                 s_TriggerLabel,
+                m_Trigger,
                 ref m_TriggerExpanded,
                 () => DrawTriggerModule(m_Trigger));
             DrawModule(
                 s_VelocityOverLifetimeLabel,
+                m_VelocityOverLifetime,
                 ref m_VelocityOverLifetimeExpanded,
                 () => DrawVelocityOverLifetimeModule(m_VelocityOverLifetime));
             DrawModule(
                 s_InheritVelocityLabel,
+                m_InheritVelocity,
                 ref m_InheritVelocityExpanded,
                 () => DrawInheritVelocityModule(m_InheritVelocity));
             DrawModule(
                 s_LifetimeByEmitterSpeedLabel,
+                m_LifetimeByEmitterSpeed,
                 ref m_LifetimeByEmitterSpeedExpanded,
                 () => DrawLifetimeByEmitterSpeedModule(m_LifetimeByEmitterSpeed));
             DrawModule(
                 s_LimitVelocityOverLifetimeLabel,
+                m_LimitVelocityOverLifetime,
                 ref m_LimitVelocityOverLifetimeExpanded,
                 () => DrawLimitVelocityOverLifetimeModule(m_LimitVelocityOverLifetime));
             DrawModule(
                 s_ColorOverLifetimeLabel,
+                m_ColorOverLifetime,
                 ref m_ColorOverLifetimeExpanded,
                 () => DrawColorOverLifetimeModule(m_ColorOverLifetime));
             DrawModule(
                 s_ColorBySpeedLabel,
+                m_ColorBySpeed,
                 ref m_ColorBySpeedExpanded,
                 () => DrawColorBySpeedModule(m_ColorBySpeed));
             DrawModule(
                 s_SizeOverLifetimeLabel,
+                m_SizeOverLifetime,
                 ref m_SizeOverLifetimeExpanded,
                 () => DrawSizeOverLifetimeModule(m_SizeOverLifetime));
             DrawModule(
                 s_SizeBySpeedLabel,
+                m_SizeBySpeed,
                 ref m_SizeBySpeedExpanded,
                 () => DrawSizeBySpeedModule(m_SizeBySpeed));
             DrawModule(
                 s_RotationOverLifetimeLabel,
+                m_RotationOverLifetime,
                 ref m_RotationOverLifetimeExpanded,
                 () => DrawRotationOverLifetimeModule(m_RotationOverLifetime));
             DrawModule(
                 s_RotationBySpeedLabel,
+                m_RotationBySpeed,
                 ref m_RotationBySpeedExpanded,
                 () => DrawRotationBySpeedModule(m_RotationBySpeed));
-            DrawModule(s_NoiseLabel, ref m_NoiseExpanded, () => DrawNoiseModule(m_Noise));
+            DrawModule(s_NoiseLabel, m_Noise, ref m_NoiseExpanded, () => DrawNoiseModule(m_Noise));
             DrawModule(
                 s_CustomDataLabel,
+                m_CustomData,
                 ref m_CustomDataExpanded,
                 () => DrawCustomDataModule(m_CustomData));
             DrawModule(
                 s_TextureSheetAnimationLabel,
+                m_TextureSheetAnimation,
                 ref m_TextureSheetAnimationExpanded,
                 () => DrawTextureSheetAnimationModule(m_TextureSheetAnimation));
-            DrawModule(s_LightsLabel, ref m_LightsExpanded, () => DrawLightsModule(m_Lights));
-            DrawModule(s_RendererLabel, ref m_RendererExpanded, () => DrawRendererModule(m_Renderer));
+            DrawModule(
+                s_SubEmittersLabel,
+                m_SubEmitters,
+                ref m_SubEmittersExpanded,
+                () => DrawSubEmittersModule(m_SubEmitters));
+            DrawModule(s_TrailsLabel, m_Trails, ref m_TrailsExpanded, () => DrawTrailsModule(m_Trails));
+            DrawModule(s_LightsLabel, m_Lights, ref m_LightsExpanded, () => DrawLightsModule(m_Lights));
+            DrawModule(s_RendererLabel, m_Renderer, ref m_RendererExpanded, () => DrawRendererModule(m_Renderer));
             DrawFooterInspector();
 
             serializedObject.ApplyModifiedProperties();
@@ -1765,11 +1935,102 @@ namespace VividRP.Editor
             {
                 EditorGUILayout.IntField(s_ParticleCountLabel, runtimeStats.ParticleCount);
                 EditorGUILayout.IntField(
+                    s_SystemHandleSlotsLabel,
+                    VividParticleSystemManager.particleSystemHandleSlotCountForTests);
+                EditorGUILayout.IntField(
+                    s_FreeSystemHandleSlotsLabel,
+                    VividParticleSystemManager.freeParticleSystemHandleSlotCountForTests);
+                EditorGUILayout.IntField(
+                    s_SubEmitterCommandsLabel,
+                    VividParticleSystemManager.lastSubEmitterCommandCount);
+                EditorGUILayout.IntField(
+                    s_DroppedSubEmitterCommandsLabel,
+                    VividParticleSystemManager.lastSubEmitterDroppedCommandCount);
+                EditorGUILayout.IntField(
+                    s_SubEmitterProducerWorksLabel,
+                    VividParticleSystemManager.lastSubEmitterProducerWorkCount);
+                EditorGUILayout.IntField(
+                    s_SubEmitterProducerCandidatesLabel,
+                    VividParticleSystemManager.lastSubEmitterProducerCandidateCount);
+                EditorGUILayout.Vector2IntField(
+                    s_SubEmitterProducerDispatchLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.lastSubEmitterProducerInlineWorkCount,
+                        VividParticleSystemManager.lastSubEmitterProducerScheduledWorkCount));
+                EditorGUILayout.Vector2IntField(
+                    s_SubEmitterBindingCacheLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.subEmitterBindingRebuildCount,
+                        VividParticleSystemManager.subEmitterBindingCacheHitCount));
+                EditorGUILayout.IntField(
+                    s_SubEmitterConsumeGroupsLabel,
+                    VividParticleSystemManager.lastSubEmitterConsumeGroupCount);
+                EditorGUILayout.IntField(
+                    s_SubEmitterTargetResolvesLabel,
+                    VividParticleSystemManager.lastSubEmitterConsumeTargetResolveCount);
+                EditorGUILayout.IntField(
+                    s_SubEmitterInitializeWorksLabel,
+                    VividParticleSystemManager.lastSubEmitterConsumeInitializeWorkCount);
+                EditorGUILayout.Vector2IntField(
+                    s_SubEmitterConsumeSortPassLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.lastSubEmitterConsumeSortCount,
+                        VividParticleSystemManager.lastSubEmitterConsumePassCount));
+                EditorGUILayout.Vector2IntField(
+                    s_SubEmitterInitializeDispatchLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.lastSubEmitterConsumeImmediateWorkCount,
+                        VividParticleSystemManager.lastSubEmitterConsumeDeferredWorkCount));
+                EditorGUILayout.Vector2IntField(
+                    s_SubEmitterDeferredLifetimeLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.subEmitterDeferredScheduleCount,
+                        VividParticleSystemManager.subEmitterDeferredCompleteCount));
+                EditorGUILayout.Vector2IntField(
+                    s_RendererHandleCacheLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.rendererSystemHandleCacheRebuildCountForTests,
+                        VividParticleSystemManager.rendererSystemHandleCacheHitCountForTests));
+                EditorGUILayout.Vector2IntField(
+                    s_LightHandleCacheLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.lightSystemHandleCacheRebuildCountForTests,
+                        VividParticleSystemManager.lightSystemHandleCacheHitCountForTests));
+                EditorGUILayout.Vector2IntField(
+                    s_TrailHandleCacheLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.trailSystemHandleCacheRebuildCountForTests,
+                        VividParticleSystemManager.trailSystemHandleCacheHitCountForTests));
+                EditorGUILayout.IntField(
                     s_ParticleLightSourceCountLabel,
                     VividParticleSystemManager.particleLightSourceCountForTests);
                 EditorGUILayout.IntField(
                     s_ParticleLightCountLabel,
                     VividParticleSystemManager.particleLightEstimatedCount);
+                EditorGUILayout.IntField(
+                    s_ActiveLightQueryLinesLabel,
+                    VividParticleSystemManager.lastActiveLightQueryLineCount);
+                EditorGUILayout.IntField(
+                    s_InvalidLightQueryLinesLabel,
+                    VividParticleSystemManager.lastInvalidActiveLightQueryLineCount);
+                EditorGUILayout.IntField(
+                    s_ParticleTrailSourceCountLabel,
+                    VividParticleSystemManager.particleTrailSourceCountForTests);
+                EditorGUILayout.IntField(
+                    s_ParticleTrailPageWorkCountLabel,
+                    VividParticleSystemManager.particleTrailPageWorkCountForTests);
+                EditorGUILayout.IntField(
+                    s_ParticleTrailCountLabel,
+                    VividParticleSystemManager.particleTrailCountForTests);
+                EditorGUILayout.IntField(
+                    s_ParticleTrailTileCapacityLabel,
+                    VividParticleSystemManager.particleTrailTileCapacityForTests);
+                EditorGUILayout.IntField(
+                    s_ActiveTrailQueryLinesLabel,
+                    VividParticleSystemManager.lastActiveTrailQueryLineCount);
+                EditorGUILayout.IntField(
+                    s_InvalidTrailQueryLinesLabel,
+                    VividParticleSystemManager.lastInvalidActiveTrailQueryLineCount);
                 EditorGUILayout.FloatField(s_TimeLabel, runtimeStats.Time);
                 EditorGUILayout.IntField(s_PageSizeLabel, runtimeStats.PageSize);
                 EditorGUILayout.IntField(s_StorageCapacityLabel, runtimeStats.StorageCapacity);
@@ -1822,6 +2083,12 @@ namespace VividRP.Editor
                     s_VelocitySimulationPageWorksLabel,
                     VividParticleSystemManager.lastVelocitySimulationPageWorkCount);
                 EditorGUILayout.IntField(
+                    s_BaseSimulationLineWorksLabel,
+                    VividParticleSystemManager.lastBaseSimulationLineWorkCount);
+                EditorGUILayout.IntField(
+                    s_VelocitySimulationLineWorksLabel,
+                    VividParticleSystemManager.lastVelocitySimulationLineWorkCount);
+                EditorGUILayout.IntField(
                     s_PendingSimulationSystemsLabel,
                     VividParticleSystemManager.pendingSimulationSystemCount);
                 EditorGUILayout.IntField(
@@ -1869,6 +2136,19 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_EmissionInitializePageWorksLabel,
                     VividParticleSystemManager.lastEmissionInitializePageWorkCount);
+                EditorGUILayout.IntField(
+                    s_EmissionInitializeLineWorksLabel,
+                    VividParticleSystemManager.lastEmissionInitializeLineWorkCount);
+                EditorGUILayout.Vector2IntField(
+                    s_EmissionManagedInitializeDispatchLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.lastEmissionManagedInitializeImmediateWorkCount,
+                        VividParticleSystemManager.lastEmissionManagedInitializeDeferredWorkCount));
+                EditorGUILayout.Vector2IntField(
+                    s_EmissionManagedDeferredLifetimeLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.emissionManagedDeferredScheduleCount,
+                        VividParticleSystemManager.emissionManagedDeferredCompleteCount));
             }
 
             VividParticleSystemManager.VividParticleRendererManagerStats rendererStats =
@@ -1919,6 +2199,17 @@ namespace VividRP.Editor
                 EditorGUILayout.IntField(
                     s_InvalidActiveRendererQueryLinesLabel,
                     VividParticleSystemManager.lastInvalidActiveRendererQueryLineCount);
+                EditorGUILayout.IntField(
+                    s_ActiveRendererSharedGroupsLabel,
+                    VividParticleSystemManager.lastActiveRendererSharedGroupCount);
+                EditorGUILayout.Vector2IntField(
+                    s_RendererSharedGroupCacheLabel,
+                    new Vector2Int(
+                        VividParticleSystemManager.lastRendererSharedGroupCacheBuildCount,
+                        VividParticleSystemManager.lastRendererSharedGroupCacheHitCount));
+                EditorGUILayout.IntField(
+                    s_RendererSharedGroupSourceScansLabel,
+                    VividParticleSystemManager.lastRendererSharedGroupSourceScanCount);
                 EditorGUILayout.IntField(
                     s_RendererHandleRecordLookupsLabel,
                     VividParticleSystemManager.lastRendererHandleRecordLookupCount);
@@ -2177,17 +2468,56 @@ namespace VividRP.Editor
             }
         }
 
-        private static void DrawModule(GUIContent label, ref bool expanded, Action draw)
+        private static void DrawModule(
+            GUIContent label,
+            SerializedProperty module,
+            ref bool expanded,
+            Action draw)
         {
             EditorGUILayout.Space();
-            expanded = EditorGUILayout.BeginFoldoutHeaderGroup(expanded, label);
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindModuleEnabledProperty(module);
+            Rect headerRect = EditorGUILayout.GetControlRect(
+                hasLabel: false,
+                height: EditorGUIUtility.singleLineHeight + 4.0f);
+            GUI.Box(headerRect, GUIContent.none, EditorStyles.helpBox);
+
+            float toggleWidth = enabled != null ? 18.0f : 0.0f;
+            if (enabled != null)
+            {
+                var toggleRect = new Rect(
+                    headerRect.x + 5.0f,
+                    headerRect.y + 2.0f,
+                    toggleWidth,
+                    EditorGUIUtility.singleLineHeight);
+                EditorGUI.BeginProperty(toggleRect, GUIContent.none, enabled);
+                EditorGUI.showMixedValue = enabled.hasMultipleDifferentValues;
+                EditorGUI.BeginChangeCheck();
+                bool nextEnabled = EditorGUI.Toggle(toggleRect, enabled.boolValue);
+                if (EditorGUI.EndChangeCheck())
+                    enabled.boolValue = nextEnabled;
+                EditorGUI.showMixedValue = false;
+                EditorGUI.EndProperty();
+            }
+
+            var foldoutRect = new Rect(
+                headerRect.x + 5.0f + toggleWidth,
+                headerRect.y + 2.0f,
+                headerRect.width - 10.0f - toggleWidth,
+                EditorGUIUtility.singleLineHeight);
+            bool previousExpanded = expanded;
+            expanded = EditorGUI.Foldout(foldoutRect, expanded, label, toggleOnLabelClick: true);
+            if (previousExpanded != expanded)
+            {
+                string key = VividParticleSystemEditorUtility.GetModuleFoldoutSessionKey(module);
+                if (!string.IsNullOrEmpty(key))
+                    SessionState.SetBool(key, expanded);
+            }
+
             if (expanded)
             {
                 using (new EditorGUI.IndentLevelScope())
                     draw();
             }
-
-            EditorGUILayout.EndFoldoutHeaderGroup();
         }
 
         private static void DrawMainModule(SerializedProperty module)
@@ -2228,7 +2558,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
                 DrawRelative(module, "m_RateOverTime");
@@ -2312,7 +2641,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
                 SerializedProperty shapeType = VividParticleSystemEditorUtility.FindRelative(module, "m_ShapeType");
@@ -2338,7 +2666,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2353,7 +2680,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2394,7 +2720,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2435,7 +2760,6 @@ namespace VividRP.Editor
             if (module == null)
                 return;
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2483,7 +2807,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2510,7 +2833,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2562,7 +2884,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2579,7 +2900,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2594,7 +2914,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2610,7 +2929,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2683,7 +3001,6 @@ namespace VividRP.Editor
             if (module == null)
                 return;
 
-            DrawRelative(module, "m_Enabled");
             SerializedProperty enabled = module.FindPropertyRelative("m_Enabled");
             using (new EditorGUI.DisabledScope(enabled != null && !enabled.boolValue))
             {
@@ -2705,13 +3022,68 @@ namespace VividRP.Editor
             }
         }
 
+        private static void DrawTrailsModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                DrawRelative(module, "m_Mode");
+                DrawRelative(module, "m_Ratio");
+                DrawRelative(module, "m_Lifetime");
+                DrawRelative(module, "m_LifetimeMultiplier");
+                DrawRelative(module, "m_MinimumVertexDistance");
+                DrawRelative(module, "m_WorldSpace");
+                DrawRelative(module, "m_DieWithParticles");
+                DrawRelative(module, "m_TextureMode");
+                DrawRelative(module, "m_TextureScale");
+                DrawRelative(module, "m_SizeAffectsWidth");
+                DrawRelative(module, "m_SizeAffectsLifetime");
+                DrawRelative(module, "m_InheritParticleColor");
+                DrawRelative(module, "m_ColorOverLifetime");
+                DrawRelative(module, "m_WidthOverTrail");
+                DrawRelative(module, "m_WidthMultiplier");
+                DrawRelative(module, "m_ColorOverTrail");
+                DrawRelative(module, "m_GenerateLightingData");
+                DrawRelative(module, "m_ShadowBias");
+
+                SerializedProperty mode = VividParticleSystemEditorUtility.FindRelative(module, "m_Mode");
+                if (mode == null
+                    || mode.hasMultipleDifferentValues
+                    || (VividParticleTrailMode)mode.enumValueIndex == VividParticleTrailMode.Ribbon)
+                {
+                    DrawRelative(module, "m_RibbonCount");
+                    DrawRelative(module, "m_SplitSubEmitterRibbons");
+                    DrawRelative(module, "m_AttachRibbonsToTransform");
+                }
+            }
+        }
+
+        private static void DrawSubEmittersModule(SerializedProperty module)
+        {
+            if (module == null)
+                return;
+
+            SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
+            using (new EditorGUI.DisabledScope(
+                enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
+            {
+                SerializedProperty entries = VividParticleSystemEditorUtility.FindRelative(
+                    module,
+                    "m_SubEmitters");
+                EditorGUILayout.PropertyField(entries, includeChildren: true);
+            }
+        }
+
         private static void DrawLightsModule(SerializedProperty module)
         {
             if (module == null)
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2752,7 +3124,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(
                 enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
@@ -2768,7 +3139,6 @@ namespace VividRP.Editor
                 return;
 
             SerializedProperty enabled = VividParticleSystemEditorUtility.FindRelative(module, "m_Enabled");
-            EditorGUILayout.PropertyField(enabled);
             using (new EditorGUI.DisabledScope(enabled != null && !enabled.hasMultipleDifferentValues && !enabled.boolValue))
             {
                 SerializedProperty renderMode = VividParticleSystemEditorUtility.FindRelative(module, "m_RenderMode");
@@ -2778,10 +3148,12 @@ namespace VividRP.Editor
                     : VividParticleRenderMode.Billboard;
 
                 DrawRelative(module, "m_Material");
+                DrawRelative(module, "m_TrailMaterial");
                 if (resolvedMode == VividParticleRenderMode.Mesh)
                 {
                     DrawRelative(module, "m_Mesh");
                     DrawRelative(module, "m_Meshes");
+                    DrawRelative(module, "m_MeshWeightings");
                 }
 
                 DrawRelative(module, "m_Color");
@@ -3066,6 +3438,7 @@ namespace VividRP.Editor
             if (target is not VividParticleSystem system || system == null)
                 return;
 
+            DrawSystemBounds(system);
             DrawTriggerBounds(system);
             if (!VividParticleSystemEditorUtility.TryReadShapeSceneData(
                     system.shape,
@@ -3085,6 +3458,24 @@ namespace VividRP.Editor
             Undo.RecordObject(system, "Edit Vivid Particle Shape");
             VividParticleSystemEditorUtility.WriteShapeSceneData(system.shape, editedData);
             EditorUtility.SetDirty(system);
+        }
+
+        private static void DrawSystemBounds(VividParticleSystem system)
+        {
+            if (!VividParticleSystemSceneOverlay.showBounds)
+                return;
+
+            Bounds bounds = system.worldBounds;
+            if (bounds.size.sqrMagnitude <= Mathf.Epsilon)
+                return;
+
+            CompareFunction previousZTest = Handles.zTest;
+            Color previousColor = Handles.color;
+            Handles.zTest = CompareFunction.LessEqual;
+            Handles.color = new Color(0.2f, 0.85f, 0.95f, 0.9f);
+            Handles.DrawWireCube(bounds.center, bounds.size);
+            Handles.color = previousColor;
+            Handles.zTest = previousZTest;
         }
 
         private static void DrawTriggerBounds(VividParticleSystem system)

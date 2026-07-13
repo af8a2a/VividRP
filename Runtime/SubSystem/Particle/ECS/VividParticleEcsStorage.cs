@@ -34,6 +34,10 @@ namespace VividRP.Runtime.Particle.ECS
         [NativeDisableUnsafePtrRestriction]
         public uint* RandomSeeds;
         [NativeDisableUnsafePtrRestriction]
+        public int* TrailHandleIndices;
+        [NativeDisableUnsafePtrRestriction]
+        public int* TrailHandleGenerations;
+        [NativeDisableUnsafePtrRestriction]
         public float3* NoisePhases;
         [NativeDisableUnsafePtrRestriction]
         public float* NoiseSizeMultipliers;
@@ -73,6 +77,7 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_NoiseStateTypeIndex;
         private readonly VividEcsTypeIndex m_InheritVelocityStateTypeIndex;
         private readonly VividEcsTypeIndex m_TriggerStateTypeIndex;
+        private readonly VividEcsTypeIndex m_TrailLinkTypeIndex;
         private readonly VividEcsTypeIndex m_SystemIdTypeIndex;
         private readonly VividEcsTypeIndex m_ModuleSharedKeyTypeIndex;
         private readonly VividEcsTypeIndex m_SimulationKernelSharedKeyTypeIndex;
@@ -80,18 +85,29 @@ namespace VividRP.Runtime.Particle.ECS
         private readonly VividEcsTypeIndex m_RendererSharedKeyTypeIndex;
         private readonly VividEcsTypeIndex m_SimulationActiveTypeIndex;
         private readonly VividEcsTypeIndex m_RendererActiveTypeIndex;
+        private readonly VividEcsTypeIndex m_LightsActiveTypeIndex;
+        private readonly VividEcsTypeIndex m_TrailsActiveTypeIndex;
         private readonly VividEcsSoaColumn<VividParticleCommon> m_CommonColumn;
         private VividEcsSoaColumn<VividParticleAnimatedMotion> m_AnimatedMotionColumn;
         private VividEcsSoaColumn<VividParticleNoiseState> m_NoiseStateColumn;
         private VividEcsSoaColumn<VividParticleInheritVelocityState> m_InheritVelocityStateColumn;
         private VividEcsSoaColumn<VividParticleTriggerState> m_TriggerStateColumn;
+        private VividEcsSoaColumn<VividParticleTrailLink> m_TrailLinkColumn;
         private readonly bool m_OwnsWorld;
         private readonly Dictionary<VividEcsSharedComponentKey, List<VividEcsArchetypeLine>> m_LineGroupScratch = new();
         private NativeArray<int> m_ActiveCountOutput;
         private NativeArray<byte> m_KeepMask;
+        private NativeArray<VividParticleSubEmitterParticleData> m_DeathEvents;
+        private NativeArray<int> m_DeathEventCount;
         private NativeArray<VividEcsPageInfo> m_SimulationPages;
         private NativeArray<VividParticleEcsIntegratePageWork> m_StandaloneIntegrateWorks;
         private NativeArray<VividParticleEcsCompactWork> m_StandaloneCompactWorks;
+        private NativeList<float> m_MeshWeightings;
+        private float[] m_CachedMeshWeightingSource;
+        private int m_CachedMeshWeightingCount = -1;
+        private int m_CachedMeshWeightingHash;
+        private float m_MeshWeightingTotal;
+        private bool m_MeshWeightingsUniform = true;
         private VividParticleRendererSharedKey m_RendererSharedKey = VividParticleRendererSharedKey.Invalid;
         private VividParticleRendererHandle m_RendererHandle = VividParticleRendererHandle.Invalid;
         private VividParticleModuleSharedKey m_ModuleSharedKey = VividParticleModuleSharedKey.None;
@@ -105,12 +121,27 @@ namespace VividRP.Runtime.Particle.ECS
         private int m_CachedNoiseStateColumnVersion = -1;
         private int m_CachedInheritVelocityStateColumnVersion = -1;
         private int m_CachedTriggerStateColumnVersion = -1;
+        private int m_CachedTrailLinkColumnVersion = -1;
         private int m_CachedKeepMaskCapacity = -1;
         private int m_CachedActiveCountOutputLength = -1;
         private int m_ColumnViewVersion;
         private int m_ColumnViewRefreshCount;
         private int m_RendererHandleBindingWriteCount;
         private int m_PendingIntegrateActiveCount;
+        private bool m_CaptureDeathEvents;
+
+        public bool captureDeathEvents
+        {
+            get => m_CaptureDeathEvents;
+            set => m_CaptureDeathEvents = value;
+        }
+
+        public int deathEventCount => m_DeathEventCount.IsCreated ? m_DeathEventCount[0] : 0;
+
+        public NativeArray<VividParticleSubEmitterParticleData> deathEvents =>
+            m_DeathEvents.IsCreated && deathEventCount > 0
+                ? m_DeathEvents.GetSubArray(0, math.min(deathEventCount, m_DeathEvents.Length))
+                : default;
 
         public VividParticleEcsStorage()
             : this(new VividEcsWorld(), ownsWorld: true)
@@ -134,6 +165,7 @@ namespace VividRP.Runtime.Particle.ECS
             m_InheritVelocityStateTypeIndex =
                 VividEcsTypeManager.GetTypeIndex<VividParticleInheritVelocityState>();
             m_TriggerStateTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleTriggerState>();
+            m_TrailLinkTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleTrailLink>();
             m_SystemIdTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSystemId>();
             m_ModuleSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleModuleSharedKey>();
             m_SimulationKernelSharedKeyTypeIndex =
@@ -143,6 +175,8 @@ namespace VividRP.Runtime.Particle.ECS
             m_RendererSharedKeyTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererSharedKey>();
             m_SimulationActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleSimulationActive>();
             m_RendererActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleRendererActive>();
+            m_LightsActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleLightsActive>();
+            m_TrailsActiveTypeIndex = VividEcsTypeManager.GetTypeIndex<VividParticleTrailsActive>();
             m_World = world;
             m_OwnsWorld = ownsWorld;
             m_Line = m_World.CreateArchetypeLine(
@@ -201,6 +235,8 @@ namespace VividRP.Runtime.Particle.ECS
         public bool hasInheritVelocityStateColumn => m_InheritVelocityStateColumn != null;
 
         public bool hasTriggerStateColumn => m_TriggerStateColumn != null;
+
+        public bool hasTrailLinkColumn => m_TrailLinkColumn != null;
 
         public void EnsureAnimatedMotionColumn()
         {
@@ -308,6 +344,46 @@ namespace VividRP.Runtime.Particle.ECS
                 previous[index] = 0;
                 current[index] = 0;
                 colliderIds[index] = 0UL;
+            }
+        }
+
+        public void EnsureTrailLinkColumn()
+        {
+            if (m_TrailLinkColumn != null)
+                return;
+
+            m_World.AddComponentType(m_Line, m_TrailLinkTypeIndex);
+            m_TrailLinkColumn =
+                m_Line.GetColumn<VividEcsSoaColumn<VividParticleTrailLink>>(m_TrailLinkTypeIndex);
+            NativeArray<int> handleIndices = m_TrailLinkColumn.GetFieldArray<int>(
+                VividParticleTrailLink.HandleIndexFieldIndex);
+            NativeArray<int> handleGenerations = m_TrailLinkColumn.GetFieldArray<int>(
+                VividParticleTrailLink.HandleGenerationFieldIndex);
+            int count = math.min(activeCount, math.min(handleIndices.Length, handleGenerations.Length));
+            for (int index = 0; index < count; index++)
+            {
+                handleIndices[index] = -1;
+                handleGenerations[index] = 0;
+            }
+
+            m_CachedTrailLinkColumnVersion = -1;
+            m_ColumnView = default;
+        }
+
+        public void ClearTrailLinks()
+        {
+            if (m_TrailLinkColumn == null)
+                return;
+
+            NativeArray<int> handleIndices = m_TrailLinkColumn.GetFieldArray<int>(
+                VividParticleTrailLink.HandleIndexFieldIndex);
+            NativeArray<int> handleGenerations = m_TrailLinkColumn.GetFieldArray<int>(
+                VividParticleTrailLink.HandleGenerationFieldIndex);
+            int count = math.min(activeCount, math.min(handleIndices.Length, handleGenerations.Length));
+            for (int index = 0; index < count; index++)
+            {
+                handleIndices[index] = -1;
+                handleGenerations[index] = 0;
             }
         }
 
@@ -448,6 +524,18 @@ namespace VividRP.Runtime.Particle.ECS
             }
         }
 
+        public bool lightsActive
+        {
+            get => m_Line.Contains(m_LightsActiveTypeIndex);
+            set => SetTagActive(m_LightsActiveTypeIndex, value);
+        }
+
+        public bool trailsActive
+        {
+            get => m_Line.Contains(m_TrailsActiveTypeIndex);
+            set => SetTagActive(m_TrailsActiveTypeIndex, value);
+        }
+
         public void EnsureCapacity(int maxParticles)
         {
             m_Line.EnsureCapacity(maxParticles);
@@ -455,6 +543,17 @@ namespace VividRP.Runtime.Particle.ECS
                 m_ActiveCountOutput = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
 
             EnsureKeepMaskCapacity(capacity);
+        }
+
+        private void SetTagActive(VividEcsTypeIndex typeIndex, bool active)
+        {
+            if (active == m_Line.Contains(typeIndex))
+                return;
+
+            if (active)
+                m_World.AddComponentType(m_Line, typeIndex);
+            else
+                m_World.RemoveComponentType(m_Line, typeIndex);
         }
 
         public void Clear()
@@ -476,6 +575,10 @@ namespace VividRP.Runtime.Particle.ECS
 
             if (m_KeepMask.IsCreated)
                 m_KeepMask.Dispose();
+            if (m_DeathEvents.IsCreated)
+                m_DeathEvents.Dispose();
+            if (m_DeathEventCount.IsCreated)
+                m_DeathEventCount.Dispose();
 
             if (m_SimulationPages.IsCreated)
                 m_SimulationPages.Dispose();
@@ -484,12 +587,22 @@ namespace VividRP.Runtime.Particle.ECS
                 m_StandaloneCompactWorks.Dispose();
             if (m_StandaloneIntegrateWorks.IsCreated)
                 m_StandaloneIntegrateWorks.Dispose();
+            if (m_MeshWeightings.IsCreated)
+                m_MeshWeightings.Dispose();
 
             m_ActiveCountOutput = default;
             m_KeepMask = default;
+            m_DeathEvents = default;
+            m_DeathEventCount = default;
             m_SimulationPages = default;
             m_StandaloneCompactWorks = default;
             m_StandaloneIntegrateWorks = default;
+            m_MeshWeightings = default;
+            m_CachedMeshWeightingSource = null;
+            m_CachedMeshWeightingCount = -1;
+            m_CachedMeshWeightingHash = 0;
+            m_MeshWeightingTotal = 0.0f;
+            m_MeshWeightingsUniform = true;
             m_LineGroupScratch.Clear();
             m_ColumnView = default;
             m_CachedCommonColumnVersion = -1;
@@ -497,11 +610,13 @@ namespace VividRP.Runtime.Particle.ECS
             m_CachedNoiseStateColumnVersion = -1;
             m_CachedInheritVelocityStateColumnVersion = -1;
             m_CachedTriggerStateColumnVersion = -1;
+            m_CachedTrailLinkColumnVersion = -1;
             m_CachedKeepMaskCapacity = -1;
             m_CachedActiveCountOutputLength = -1;
             m_RendererHandle = VividParticleRendererHandle.Invalid;
             m_RendererHandleBindingWriteCount = 0;
             m_PendingIntegrateActiveCount = 0;
+            m_CaptureDeathEvents = false;
         }
 
         public bool Add(
@@ -571,10 +686,33 @@ namespace VividRP.Runtime.Particle.ECS
                     index,
                     0UL);
             }
+            if (m_TrailLinkColumn != null)
+            {
+                m_TrailLinkColumn.SetFieldValue(
+                    VividParticleTrailLink.HandleIndexFieldIndex,
+                    index,
+                    -1);
+                m_TrailLinkColumn.SetFieldValue(
+                    VividParticleTrailLink.HandleGenerationFieldIndex,
+                    index,
+                    0);
+            }
             if (m_KeepMask.IsCreated && index < m_KeepMask.Length)
                 m_KeepMask[index] = 1;
 
             return true;
+        }
+
+        public int ReserveParticleRange(int requestedCount, out int firstIndex)
+        {
+            firstIndex = activeCount;
+            if (!isCreated || requestedCount <= 0)
+                return 0;
+
+            int reservedCount = m_Line.AppendRange(requestedCount, out int reservedStart);
+            if (reservedCount > 0)
+                firstIndex = reservedStart;
+            return reservedCount;
         }
 
         public unsafe bool ReserveInitializeParticles(
@@ -650,6 +788,7 @@ namespace VividRP.Runtime.Particle.ECS
 
             m_ActiveCountOutput[0] = activeCount;
             activeCountOutput = (int*)NativeArrayUnsafeUtility.GetUnsafePtr(m_ActiveCountOutput);
+            PrepareMeshWeightings(snapshot);
             work = new VividParticleEcsInitializeParticlesWork
             {
                 StartIndex = activeCount,
@@ -659,7 +798,9 @@ namespace VividRP.Runtime.Particle.ECS
                 ShapeType = (int)snapshot.ShapeType,
                 SimulationSpace = (int)snapshot.SimulationSpace,
                 MeshCount = math.max(1, snapshot.RendererMeshCount),
+                MeshWeightingsUniform = m_MeshWeightingsUniform ? 1 : 0,
                 RandomSeed = randomSeed == 0u ? 1u : randomSeed,
+                MeshWeightingTotal = m_MeshWeightingTotal,
                 StartLifetime = snapshot.StartLifetime,
                 StartSpeed = snapshot.StartSpeed,
                 StartSize = snapshot.StartSize,
@@ -675,9 +816,14 @@ namespace VividRP.Runtime.Particle.ECS
                 RemainingLifetimes = columnView.RemainingLifetimes,
                 Colors = columnView.Colors,
                 Sizes = columnView.Sizes,
+                MeshWeightings = m_MeshWeightings.IsCreated
+                    ? (float*)m_MeshWeightings.GetUnsafeReadOnlyPtr()
+                    : null,
                 MeshIndices = columnView.MeshIndices,
                 AccumulatedRotations = columnView.AccumulatedRotations,
                 RandomSeeds = columnView.RandomSeeds,
+                TrailHandleIndices = columnView.TrailHandleIndices,
+                TrailHandleGenerations = columnView.TrailHandleGenerations,
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
                 TriggerPreviousInside = columnView.TriggerPreviousInside,
@@ -842,7 +988,9 @@ namespace VividRP.Runtime.Particle.ECS
                     LimitVelocityMultiplyDragByParticleVelocity = limitVelocityMultiplyDragByParticleVelocity,
                     LimitVelocityTransform = limitVelocityTransform,
                     Sizes = columnView.Sizes,
+                    Colors = columnView.Colors,
                     AccumulatedRotations = columnView.AccumulatedRotations,
+                    RandomSeeds = columnView.RandomSeeds,
                     NoisePhases = columnView.NoisePhases,
                     NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
                     TriggerPreviousInside = columnView.TriggerPreviousInside,
@@ -866,9 +1014,9 @@ namespace VividRP.Runtime.Particle.ECS
                     NoiseOctaveMultiplier = noiseOctaveMultiplier,
                     NoiseOctaveScale = noiseOctaveScale,
                     RemainingLifetimes = columnView.RemainingLifetimes,
-                    KeepMask = columnView.KeepMask,
-                };
-            }
+                KeepMask = columnView.KeepMask,
+            };
+        }
 
             var job = new VividParticleEcsIntegratePageWorksJob
             {
@@ -926,14 +1074,16 @@ namespace VividRP.Runtime.Particle.ECS
             int noiseOctaveCount,
             float noiseOctaveMultiplier,
             float noiseOctaveScale,
-            NativeList<VividParticleEcsIntegratePageWork> pageWorks,
+            NativeList<VividParticleEcsIntegratePageWork> lineWorks,
+            NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
             NativeList<VividParticleEcsCompactWork> compactWorks)
         {
             int count = activeCount;
             if (!isCreated
                 || count <= 0
                 || deltaTime <= 0.0f
-                || !pageWorks.IsCreated
+                || !lineWorks.IsCreated
+                || !pageDispatches.IsCreated
                 || !compactWorks.IsCreated)
             {
                 return false;
@@ -954,64 +1104,72 @@ namespace VividRP.Runtime.Particle.ECS
                 return false;
 
             float3 gravityValue = ToFloat3(gravity);
+            int lineWorkIndex = lineWorks.Length;
+            lineWorks.Add(new VividParticleEcsIntegratePageWork
+            {
+                Page = default,
+                DeltaTime = deltaTime,
+                Gravity = gravityValue,
+                Collision = collision,
+                Trigger = trigger,
+                ExternalForces = externalForces,
+                PositionLength = columnView.Capacity,
+                Positions = columnView.Positions,
+                Velocities = columnView.Velocities,
+                AnimatedVelocities = columnView.AnimatedVelocities,
+                InitialEmitterVelocities = columnView.InitialEmitterVelocities,
+                StartLifetimes = columnView.StartLifetimes,
+                VelocityOverLifetimeLut = velocityOverLifetimeLut,
+                VelocityOverLifetimeEnabled = velocityOverLifetimeEnabled,
+                VelocityOverLifetimeTransform = velocityOverLifetimeTransform,
+                InheritVelocityLut = inheritVelocityLut,
+                InheritVelocityEnabled = inheritVelocityEnabled,
+                InheritVelocityMode = inheritVelocityMode,
+                EmitterVelocity = emitterVelocity,
+                LimitVelocityLut = limitVelocityLut,
+                LimitVelocityDragLut = limitVelocityDragLut,
+                LimitVelocityEnabled = limitVelocityEnabled,
+                LimitVelocitySeparateAxes = limitVelocitySeparateAxes,
+                LimitVelocityDampen = limitVelocityDampen,
+                LimitVelocityMultiplyDragByParticleSize = limitVelocityMultiplyDragByParticleSize,
+                LimitVelocityMultiplyDragByParticleVelocity = limitVelocityMultiplyDragByParticleVelocity,
+                LimitVelocityTransform = limitVelocityTransform,
+                Sizes = columnView.Sizes,
+                Colors = columnView.Colors,
+                AccumulatedRotations = columnView.AccumulatedRotations,
+                RandomSeeds = columnView.RandomSeeds,
+                NoisePhases = columnView.NoisePhases,
+                NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
+                TriggerPreviousInside = columnView.TriggerPreviousInside,
+                TriggerCurrentInside = columnView.TriggerCurrentInside,
+                TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
+                NoisePositionAmountLut = noisePositionAmountLut,
+                NoiseRotationAmountLut = noiseRotationAmountLut,
+                NoiseSizeAmountLut = noiseSizeAmountLut,
+                NoiseRemapLut = noiseRemapLut,
+                RotationBySpeedLut = rotationBySpeedLut,
+                RotationBySpeedEnabled = rotationBySpeedEnabled,
+                RotationBySpeedRange = rotationBySpeedRange,
+                NoiseStrengthLut = noiseStrengthLut,
+                NoiseScrollSpeedLut = noiseScrollSpeedLut,
+                NoiseEnabled = noiseEnabled,
+                NoiseQuality = noiseQuality,
+                NoiseRemapEnabled = noiseRemapEnabled,
+                NoiseFrequency = noiseFrequency,
+                NoiseDamping = noiseDamping,
+                NoiseOctaveCount = noiseOctaveCount,
+                NoiseOctaveMultiplier = noiseOctaveMultiplier,
+                NoiseOctaveScale = noiseOctaveScale,
+                RemainingLifetimes = columnView.RemainingLifetimes,
+                KeepMask = columnView.KeepMask,
+            });
+
             for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
             {
-                VividEcsPageInfo page = m_Line.GetPageInfo(pageIndex);
-                pageWorks.Add(new VividParticleEcsIntegratePageWork
+                pageDispatches.Add(new VividParticleEcsIntegratePageDispatch
                 {
-                    Page = page,
-                    DeltaTime = deltaTime,
-                    Gravity = gravityValue,
-                    Collision = collision,
-                    Trigger = trigger,
-                    ExternalForces = externalForces,
-                    PositionLength = columnView.Capacity,
-                    Positions = columnView.Positions,
-                    Velocities = columnView.Velocities,
-                    AnimatedVelocities = columnView.AnimatedVelocities,
-                    InitialEmitterVelocities = columnView.InitialEmitterVelocities,
-                    StartLifetimes = columnView.StartLifetimes,
-                    VelocityOverLifetimeLut = velocityOverLifetimeLut,
-                    VelocityOverLifetimeEnabled = velocityOverLifetimeEnabled,
-                    VelocityOverLifetimeTransform = velocityOverLifetimeTransform,
-                    InheritVelocityLut = inheritVelocityLut,
-                    InheritVelocityEnabled = inheritVelocityEnabled,
-                    InheritVelocityMode = inheritVelocityMode,
-                    EmitterVelocity = emitterVelocity,
-                    LimitVelocityLut = limitVelocityLut,
-                    LimitVelocityDragLut = limitVelocityDragLut,
-                    LimitVelocityEnabled = limitVelocityEnabled,
-                    LimitVelocitySeparateAxes = limitVelocitySeparateAxes,
-                    LimitVelocityDampen = limitVelocityDampen,
-                    LimitVelocityMultiplyDragByParticleSize = limitVelocityMultiplyDragByParticleSize,
-                    LimitVelocityMultiplyDragByParticleVelocity = limitVelocityMultiplyDragByParticleVelocity,
-                    LimitVelocityTransform = limitVelocityTransform,
-                    Sizes = columnView.Sizes,
-                    AccumulatedRotations = columnView.AccumulatedRotations,
-                    NoisePhases = columnView.NoisePhases,
-                    NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
-                    TriggerPreviousInside = columnView.TriggerPreviousInside,
-                    TriggerCurrentInside = columnView.TriggerCurrentInside,
-                    TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
-                    NoisePositionAmountLut = noisePositionAmountLut,
-                    NoiseRotationAmountLut = noiseRotationAmountLut,
-                    NoiseSizeAmountLut = noiseSizeAmountLut,
-                    NoiseRemapLut = noiseRemapLut,
-                    RotationBySpeedLut = rotationBySpeedLut,
-                    RotationBySpeedEnabled = rotationBySpeedEnabled,
-                    RotationBySpeedRange = rotationBySpeedRange,
-                    NoiseStrengthLut = noiseStrengthLut,
-                    NoiseScrollSpeedLut = noiseScrollSpeedLut,
-                    NoiseEnabled = noiseEnabled,
-                    NoiseQuality = noiseQuality,
-                    NoiseRemapEnabled = noiseRemapEnabled,
-                    NoiseFrequency = noiseFrequency,
-                    NoiseDamping = noiseDamping,
-                    NoiseOctaveCount = noiseOctaveCount,
-                    NoiseOctaveMultiplier = noiseOctaveMultiplier,
-                    NoiseOctaveScale = noiseOctaveScale,
-                    RemainingLifetimes = columnView.RemainingLifetimes,
-                    KeepMask = columnView.KeepMask,
+                    Page = m_Line.GetPageInfo(pageIndex),
+                    LineWorkIndex = lineWorkIndex,
                 });
             }
 
@@ -1094,9 +1252,85 @@ namespace VividRP.Runtime.Particle.ECS
                 VividParticleCommon.AccumulatedRotationFieldIndex)[index]);
         }
 
+        public bool SetAccumulatedRotation(int index, Vector3 rotation)
+        {
+            if (!IsValidIndex(index))
+                return false;
+
+            commonColumn.SetFieldValue(
+                VividParticleCommon.AccumulatedRotationFieldIndex,
+                index,
+                ToFloat3(rotation));
+            return true;
+        }
+
+        public VividParticleSubEmitterParticleData GetSubEmitterParticleData(int index)
+        {
+            if (!IsValidIndex(index))
+                return default;
+
+            return new VividParticleSubEmitterParticleData
+            {
+                Position = ToFloat3(GetPosition(index)),
+                Velocity = ToFloat3(GetVelocity(index) + GetAnimatedVelocity(index)),
+                Rotation = ToFloat3(GetAccumulatedRotation(index)),
+                Color = ToFloat4(GetColor(index)),
+                StartLifetime = GetStartLifetime(index),
+                RemainingLifetime = GetRemainingLifetime(index),
+                Size = GetSize(index),
+                RandomSeed = GetRandomSeed(index),
+            };
+        }
+
+        public VividParticleSubEmitterParticleData GetDeathEvent(int index)
+        {
+            if (!m_DeathEvents.IsCreated || (uint)index >= (uint)deathEventCount)
+                return default;
+
+            return m_DeathEvents[index];
+        }
+
+        public void ClearDeathEvents()
+        {
+            if (m_DeathEventCount.IsCreated)
+                m_DeathEventCount[0] = 0;
+        }
+
         public uint GetRandomSeed(int index)
         {
             return commonColumn.GetFieldArray<uint>(VividParticleCommon.RandomSeedFieldIndex)[index];
+        }
+
+        public bool TryGetTrailHandle(int index, out int handleIndex, out int handleGeneration)
+        {
+            handleIndex = -1;
+            handleGeneration = 0;
+            if (m_TrailLinkColumn == null || !IsValidIndex(index))
+                return false;
+
+            handleIndex = m_TrailLinkColumn.GetFieldArray<int>(
+                VividParticleTrailLink.HandleIndexFieldIndex)[index];
+            handleGeneration = m_TrailLinkColumn.GetFieldArray<int>(
+                VividParticleTrailLink.HandleGenerationFieldIndex)[index];
+            return handleIndex >= 0 && handleGeneration > 0;
+        }
+
+        public bool SetTrailHandle(int index, int handleIndex, int handleGeneration)
+        {
+            if (m_TrailLinkColumn == null || !IsValidIndex(index))
+                return false;
+
+            m_TrailLinkColumn.SetFieldValue(
+                VividParticleTrailLink.HandleIndexFieldIndex,
+                index,
+                handleIndex);
+            m_TrailLinkColumn.SetFieldValue(
+                VividParticleTrailLink.HandleGenerationFieldIndex,
+                index,
+                handleGeneration);
+            m_CachedTrailLinkColumnVersion = -1;
+            m_ColumnView = default;
+            return true;
         }
 
         public float GetNoiseSizeMultiplier(int index)
@@ -1157,6 +1391,7 @@ namespace VividRP.Runtime.Particle.ECS
                 || m_CachedInheritVelocityStateColumnVersion
                     != (m_InheritVelocityStateColumn?.version ?? -1)
                 || m_CachedTriggerStateColumnVersion != (m_TriggerStateColumn?.version ?? -1)
+                || m_CachedTrailLinkColumnVersion != (m_TrailLinkColumn?.version ?? -1)
                 || m_CachedKeepMaskCapacity != keepMaskCapacity
                 || m_CachedActiveCountOutputLength != activeCountOutputLength)
             {
@@ -1201,6 +1436,14 @@ namespace VividRP.Runtime.Particle.ECS
                     ? m_TriggerStateColumn.GetFieldArray<ulong>(
                         VividParticleTriggerState.ColliderEntityIdFieldIndex)
                     : default;
+                NativeArray<int> trailHandleIndices = m_TrailLinkColumn != null
+                    ? m_TrailLinkColumn.GetFieldArray<int>(
+                        VividParticleTrailLink.HandleIndexFieldIndex)
+                    : default;
+                NativeArray<int> trailHandleGenerations = m_TrailLinkColumn != null
+                    ? m_TrailLinkColumn.GetFieldArray<int>(
+                        VividParticleTrailLink.HandleGenerationFieldIndex)
+                    : default;
 
                 m_ColumnViewVersion = m_ColumnViewVersion == int.MaxValue ? 1 : m_ColumnViewVersion + 1;
                 m_ColumnView = new VividParticleEcsColumnView
@@ -1220,6 +1463,12 @@ namespace VividRP.Runtime.Particle.ECS
                     MeshIndices = (int*)meshIndices.GetUnsafePtr(),
                     AccumulatedRotations = (float3*)accumulatedRotations.GetUnsafePtr(),
                     RandomSeeds = (uint*)randomSeeds.GetUnsafePtr(),
+                    TrailHandleIndices = trailHandleIndices.IsCreated
+                        ? (int*)trailHandleIndices.GetUnsafePtr()
+                        : null,
+                    TrailHandleGenerations = trailHandleGenerations.IsCreated
+                        ? (int*)trailHandleGenerations.GetUnsafePtr()
+                        : null,
                     NoisePhases = noisePhases.IsCreated ? (float3*)noisePhases.GetUnsafePtr() : null,
                     NoiseSizeMultipliers = noiseSizeMultipliers.IsCreated
                         ? (float*)noiseSizeMultipliers.GetUnsafePtr()
@@ -1247,6 +1496,7 @@ namespace VividRP.Runtime.Particle.ECS
                 m_CachedInheritVelocityStateColumnVersion =
                     m_InheritVelocityStateColumn?.version ?? -1;
                 m_CachedTriggerStateColumnVersion = m_TriggerStateColumn?.version ?? -1;
+                m_CachedTrailLinkColumnVersion = m_TrailLinkColumn?.version ?? -1;
                 m_CachedKeepMaskCapacity = keepMaskCapacity;
                 m_CachedActiveCountOutputLength = activeCountOutputLength;
                 m_ColumnViewRefreshCount++;
@@ -1303,6 +1553,56 @@ namespace VividRP.Runtime.Particle.ECS
         }
 
         private VividEcsSoaColumn<VividParticleCommon> commonColumn => m_CommonColumn;
+
+        private void PrepareMeshWeightings(VividParticleSystemFrameSnapshot snapshot)
+        {
+            int meshCount = math.max(1, snapshot.RendererMeshCount);
+            float[] source = snapshot.RendererMeshWeightings;
+            if (ReferenceEquals(source, m_CachedMeshWeightingSource)
+                && m_CachedMeshWeightingCount == meshCount
+                && m_CachedMeshWeightingHash == snapshot.RendererMeshWeightingsHash
+                && m_MeshWeightings.IsCreated)
+            {
+                return;
+            }
+
+            if (!m_MeshWeightings.IsCreated)
+                m_MeshWeightings = new NativeList<float>(meshCount, Allocator.Persistent);
+            m_MeshWeightings.ResizeUninitialized(meshCount);
+
+            float total = 0.0f;
+            float firstWeighting = 0.0f;
+            bool uniform = true;
+            for (int meshIndex = 0; meshIndex < meshCount; meshIndex++)
+            {
+                float weighting = meshIndex < (source?.Length ?? 0)
+                    ? source[meshIndex]
+                    : 1.0f;
+                if (!math.isfinite(weighting))
+                    weighting = 0.0f;
+                weighting = math.max(0.0f, weighting);
+                m_MeshWeightings[meshIndex] = weighting;
+                total += weighting;
+                if (meshIndex == 0)
+                    firstWeighting = weighting;
+                else if (math.abs(weighting - firstWeighting) > 0.000001f)
+                    uniform = false;
+            }
+
+            if (total <= 0.000001f)
+            {
+                for (int meshIndex = 0; meshIndex < meshCount; meshIndex++)
+                    m_MeshWeightings[meshIndex] = 1.0f;
+                total = meshCount;
+                uniform = true;
+            }
+
+            m_CachedMeshWeightingSource = source;
+            m_CachedMeshWeightingCount = meshCount;
+            m_CachedMeshWeightingHash = snapshot.RendererMeshWeightingsHash;
+            m_MeshWeightingTotal = total;
+            m_MeshWeightingsUniform = uniform;
+        }
 
         private void EnsureKeepMaskCapacity(int requestedCapacity)
         {
@@ -1364,6 +1664,11 @@ namespace VividRP.Runtime.Particle.ECS
             if (!TryGetColumnView(out VividParticleEcsColumnView columnView))
                 return default;
 
+            if (m_CaptureDeathEvents)
+                EnsureDeathEventCapacity(count);
+            else
+                ClearDeathEvents();
+
             return new VividParticleEcsCompactWork
             {
                 ActiveCount = count,
@@ -1379,6 +1684,8 @@ namespace VividRP.Runtime.Particle.ECS
                 MeshIndices = columnView.MeshIndices,
                 AccumulatedRotations = columnView.AccumulatedRotations,
                 RandomSeeds = columnView.RandomSeeds,
+                TrailHandleIndices = columnView.TrailHandleIndices,
+                TrailHandleGenerations = columnView.TrailHandleGenerations,
                 NoisePhases = columnView.NoisePhases,
                 NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
                 TriggerPreviousInside = columnView.TriggerPreviousInside,
@@ -1386,7 +1693,39 @@ namespace VividRP.Runtime.Particle.ECS
                 TriggerColliderEntityIds = columnView.TriggerColliderEntityIds,
                 KeepMask = columnView.KeepMask,
                 ActiveCountOutput = columnView.ActiveCountOutput,
+                DeathEvents = m_CaptureDeathEvents && m_DeathEvents.IsCreated
+                    ? (VividParticleSubEmitterParticleData*)m_DeathEvents.GetUnsafePtr()
+                    : null,
+                DeathEventCount = m_CaptureDeathEvents && m_DeathEventCount.IsCreated
+                    ? (int*)m_DeathEventCount.GetUnsafePtr()
+                    : null,
             };
+        }
+
+        private void EnsureDeathEventCapacity(int requestedCapacity)
+        {
+            requestedCapacity = math.max(1, requestedCapacity);
+            if (!m_DeathEventCount.IsCreated)
+            {
+                m_DeathEventCount = new NativeArray<int>(
+                    1,
+                    Allocator.Persistent,
+                    NativeArrayOptions.ClearMemory);
+            }
+            else
+            {
+                m_DeathEventCount[0] = 0;
+            }
+
+            if (m_DeathEvents.IsCreated && m_DeathEvents.Length >= requestedCapacity)
+                return;
+
+            if (m_DeathEvents.IsCreated)
+                m_DeathEvents.Dispose();
+            m_DeathEvents = new NativeArray<VividParticleSubEmitterParticleData>(
+                requestedCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
         }
 
         private void SyncRendererSharedKeyForQueries()

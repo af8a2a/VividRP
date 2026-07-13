@@ -102,7 +102,9 @@ namespace VividRP.Runtime.Particle
             m_Sources.Add(source);
         }
 
-        public void Schedule(NativeArray<VividParticleNativeRenderModuleConfig> configs)
+        public void Schedule(
+            NativeArray<VividParticleNativeRenderModuleConfig> configs,
+            JobHandle particleDataDependency = default)
         {
             Complete();
             if (!m_Sources.IsCreated || m_Sources.Length == 0 || m_EstimatedLightCount <= 0)
@@ -120,7 +122,10 @@ namespace VividRP.Runtime.Particle
                 Output = m_Output,
                 SourceCounts = m_SourceCounts,
             };
-            JobHandle buildHandle = buildJob.Schedule(m_Sources.Length, 1);
+            JobHandle buildHandle = buildJob.Schedule(
+                m_Sources.Length,
+                1,
+                particleDataDependency);
             m_PendingHandle = new VividParticleLightCompactJob
             {
                 Sources = m_Sources.AsArray(),

@@ -62,6 +62,10 @@ namespace VividRP.Runtime.Particle.Trail
 
         public int sourceCount => m_SourceCount;
 
+        internal bool hasPendingJob => m_HasPendingJob;
+
+        internal JobHandle pendingJob => m_PendingHandle;
+
         public int pageWorkCount => m_PageWorkCount;
 
         public int activeParticleCount => m_ActiveParticleCount;

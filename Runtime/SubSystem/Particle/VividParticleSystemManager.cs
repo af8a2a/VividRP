@@ -192,6 +192,8 @@ namespace VividRP.Runtime.Particle
         private static bool s_Initialized;
         private static bool s_ShuttingDown;
         private static bool s_HasPendingSimulationBatch;
+        private static bool s_PendingSimulationRequiresImmediateCompletion;
+        private static bool s_RendererUpdatePreparedByKick;
         private static bool s_ApplyingPendingSimulations;
         private static VividEcsQuery s_ActiveSimulationLineQuery;
         private static VividEcsArchetypeLineGroupCache s_ActiveSimulationModuleLineGroupCache;
@@ -1082,6 +1084,12 @@ namespace VividRP.Runtime.Particle
 
         internal static void RunRendererUpdateForTests()
         {
+            if (s_RendererUpdatePreparedByKick)
+            {
+                s_RendererUpdatePreparedByKick = false;
+                return;
+            }
+
             ScheduleRendererUpdate(forceUpload: false, oncePerFrame: false);
         }
 
@@ -1246,6 +1254,8 @@ namespace VividRP.Runtime.Particle
             s_SubEmitterCommandsRequireSort = false;
             s_PendingSimulationBatchHandle = default;
             s_HasPendingSimulationBatch = false;
+            s_PendingSimulationRequiresImmediateCompletion = false;
+            s_RendererUpdatePreparedByKick = false;
             s_ApplyingPendingSimulations = false;
             s_LastEmissionInitializeWorkCount = 0;
             s_LastEmissionInitializeInlineWorkCount = 0;
@@ -3653,12 +3663,19 @@ namespace VividRP.Runtime.Particle
 
             using (s_RendererUpdateMarker.Auto())
             {
+                if (s_RendererUpdatePreparedByKick)
+                {
+                    s_RendererUpdatePreparedByKick = false;
+                    return;
+                }
+
                 ScheduleRendererUpdate(forceUpload: false, oncePerFrame: true);
             }
         }
 
         private static void ScheduleAutomaticUpdates(float? deltaTimeOverride)
         {
+            s_RendererUpdatePreparedByKick = false;
             s_RendererManager.CompletePendingUpload();
             CompletePendingSimulations();
             VividParticleForceFieldRegistry.Prepare();
@@ -3756,6 +3773,39 @@ namespace VividRP.Runtime.Particle
                 }
             }
 
+            bool hasPreparedAutomaticSimulation = false;
+            s_PendingSimulationRequiresImmediateCompletion = false;
+            for (int prepareIndex = 0; prepareIndex < s_SimulationPrepareOutputs.Length; prepareIndex++)
+            {
+                VividParticleSimulationPrepareOutput output = s_SimulationPrepareOutputs[prepareIndex];
+                if (output.ShouldSchedule == 0
+                    || !TryResolveParticleState(output.SystemHandle, out ParticleSystemState state))
+                {
+                    continue;
+                }
+
+                hasPreparedAutomaticSimulation = true;
+                s_PendingSimulationRequiresImmediateCompletion |=
+                    state.requiresCurrentFrameSimulationCompletion;
+            }
+
+            JobHandle rendererReadDependency = default;
+            bool hasRendererReadDependency = false;
+            if (hasPreparedAutomaticSimulation
+                && !s_PendingSimulationRequiresImmediateCompletion)
+            {
+                // Capture the last completed simulation for rendering before the next simulation
+                // starts writing the ECS particle columns in place. The new simulation depends on
+                // every asynchronous renderer-side reader of those columns.
+                ScheduleRendererUpdate(
+                    forceUpload: false,
+                    oncePerFrame: false,
+                    forceSimulationCompletion: false);
+                s_RendererUpdatePreparedByKick = true;
+                rendererReadDependency = GetPendingRendererReadDependency(
+                    out hasRendererReadDependency);
+            }
+
             bool scheduledAnyJob = false;
             bool scheduledAnySimulation = false;
             using (s_KickScheduleSimulationJobsMarker.Auto())
@@ -3818,6 +3868,7 @@ namespace VividRP.Runtime.Particle
                     integrateHandle = integrateJob.ScheduleParallelEmbedded(
                         s_SimulationPageDispatches.AsArray(),
                         pageInfoByteOffset: 0,
+                        dependency: hasRendererReadDependency ? rendererReadDependency : default,
                         innerloopBatchCount: 1,
                         dispatchMode: VividEcsPageDispatchMode.Average);
                     hasIntegrateHandle = true;
@@ -3833,6 +3884,7 @@ namespace VividRP.Runtime.Particle
                     JobHandle velocityIntegrateHandle = velocityIntegrateJob.ScheduleParallelEmbedded(
                         s_VelocitySimulationPageDispatches.AsArray(),
                         pageInfoByteOffset: 0,
+                        dependency: hasRendererReadDependency ? rendererReadDependency : default,
                         innerloopBatchCount: 1,
                         dispatchMode: VividEcsPageDispatchMode.Average);
                     integrateHandle = hasIntegrateHandle
@@ -3880,7 +3932,11 @@ namespace VividRP.Runtime.Particle
                     JobHandle emissionPlanHandle = emissionPlanJob.Schedule(
                         emissionPlanCount,
                         innerloopBatchCount: 16,
-                        hasSimulationGraphHandle ? simulationGraphHandle : default);
+                        hasSimulationGraphHandle
+                            ? simulationGraphHandle
+                            : hasRendererReadDependency
+                                ? rendererReadDependency
+                                : default);
                     s_EmissionInitializeLineWorks.ResizeUninitialized(emissionPlanCount);
                     EnsureEmissionInitializePageDispatchCapacity();
                     var buildInitializePageWorksJob = new VividParticleEcsBuildInitializeLinePagesJob
@@ -3920,8 +3976,13 @@ namespace VividRP.Runtime.Particle
 
             if (scheduledAnySimulation)
             {
-                s_LastRendererUpdateFrame = -1;
+                if (!s_RendererUpdatePreparedByKick)
+                    s_LastRendererUpdateFrame = -1;
                 s_LastCompleteAndUploadFrame = -1;
+            }
+            else
+            {
+                s_PendingSimulationRequiresImmediateCompletion = false;
             }
 
             s_LastPlayerLoopFrame = Time.frameCount;
@@ -3986,10 +4047,14 @@ namespace VividRP.Runtime.Particle
                 ? s_PendingSimulationHandles.Length
                 : 0;
             if (pendingSystemCount == 0 && !s_HasPendingSimulationBatch)
+            {
+                s_PendingSimulationRequiresImmediateCompletion = false;
                 return;
+            }
 
             using (s_KickCompleteSimulationMarker.Auto())
             {
+                s_PendingSimulationRequiresImmediateCompletion = false;
                 JobHandle combinedHandle = default;
                 bool hasJob = false;
                 if (s_HasPendingSimulationBatch)
@@ -5152,18 +5217,29 @@ namespace VividRP.Runtime.Particle
 
         private static void CompleteAndUploadAll(bool forceUpload, bool oncePerFrame)
         {
-            ScheduleRendererUpdate(forceUpload, oncePerFrame);
+            s_RendererUpdatePreparedByKick = false;
+            ScheduleRendererUpdate(
+                forceUpload,
+                oncePerFrame,
+                forceSimulationCompletion: true);
             CompletePendingUploadForRendering(oncePerFrame);
         }
 
-        private static void ScheduleRendererUpdate(bool forceUpload, bool oncePerFrame)
+        private static void ScheduleRendererUpdate(
+            bool forceUpload,
+            bool oncePerFrame,
+            bool forceSimulationCompletion = false)
         {
             if (oncePerFrame && s_LastRendererUpdateFrame == Time.frameCount)
                 return;
 
             s_RendererManager.DrainCullingResults();
             s_RendererManager.CompletePendingUpload();
-            CompletePendingSimulations(allowDeferredParticleDataInitialization: true);
+            if (forceSimulationCompletion || s_PendingSimulationRequiresImmediateCompletion)
+            {
+                CompletePendingSimulations(
+                    allowDeferredParticleDataInitialization: true);
+            }
             JobHandle particleDataDependency =
                 GetPendingParticleDataInitializationDependency(out bool hasParticleDataDependency);
             VividEcsQuery activeRendererQuery = GetOrCreateActiveRendererLineQuery();
@@ -5205,6 +5281,35 @@ namespace VividRP.Runtime.Particle
             s_LastRendererUpdateFrame = Time.frameCount;
             s_LastCompleteAndUploadFrame = -1;
             RequestEditorRenderUpdateForActiveSystems();
+        }
+
+        private static JobHandle GetPendingRendererReadDependency(out bool hasDependency)
+        {
+            JobHandle dependency = default;
+            hasDependency = false;
+            if (s_RendererManager.hasPendingUpload)
+            {
+                dependency = s_RendererManager.pendingUpload;
+                hasDependency = true;
+            }
+
+            if (s_LightManager.hasPendingJob)
+            {
+                dependency = hasDependency
+                    ? JobHandle.CombineDependencies(dependency, s_LightManager.pendingJob)
+                    : s_LightManager.pendingJob;
+                hasDependency = true;
+            }
+
+            if (s_TrailManager.hasPendingJob)
+            {
+                dependency = hasDependency
+                    ? JobHandle.CombineDependencies(dependency, s_TrailManager.pendingJob)
+                    : s_TrailManager.pendingJob;
+                hasDependency = true;
+            }
+
+            return dependency;
         }
 
         private static void ScheduleParticleLightUpdate(JobHandle particleDataDependency)
@@ -5933,6 +6038,38 @@ namespace VividRP.Runtime.Particle
             internal bool hasPendingSimulationJob => m_HasPendingStandaloneJob;
 
             internal JobHandle pendingSimulationJob => m_PendingJob;
+
+            internal bool requiresCurrentFrameSimulationCompletion
+            {
+                get
+                {
+                    if (LastCompletedFrame < 0 || m_System == null)
+                        return true;
+
+                    VividParticleSubEmittersModule subEmitters = m_System.subEmitters;
+                    if (subEmitters.enabled)
+                    {
+                        for (int index = 0; index < subEmitters.subEmittersCount; index++)
+                        {
+                            if (subEmitters.GetSubEmitterSystem(index) != null)
+                                return true;
+                        }
+                    }
+
+                    if (m_System.collision.enabled
+                        && m_System.collision.sendCollisionMessages)
+                    {
+                        return true;
+                    }
+
+                    VividParticleTriggerModule trigger = m_System.trigger;
+                    return trigger.enabled
+                        && (trigger.inside == VividParticleOverlapAction.Callback
+                            || trigger.outside == VividParticleOverlapAction.Callback
+                            || trigger.enter == VividParticleOverlapAction.Callback
+                            || trigger.exit == VividParticleOverlapAction.Callback);
+                }
+            }
 
             public VividParticleSystemManagerStats stats => new(
                 IsInitialized,
@@ -13480,6 +13617,8 @@ namespace VividRP.Runtime.Particle
             private bool m_UploadCopyWorksAreSorted = true;
 
             public bool hasPendingUpload => m_HasPendingUpload;
+
+            public JobHandle pendingUpload => m_PendingUploadHandle;
 
             public int nativeRecordCopyDescriptorCount =>
                 m_NativeRecordCopyDescriptors.IsCreated

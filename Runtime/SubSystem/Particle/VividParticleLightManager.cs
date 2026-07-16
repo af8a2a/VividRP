@@ -71,6 +71,10 @@ namespace VividRP.Runtime.Particle
 
         public int sourceCount => m_Sources.IsCreated ? m_Sources.Length : 0;
 
+        internal bool hasPendingJob => m_HasPendingJob;
+
+        internal JobHandle pendingJob => m_PendingHandle;
+
         public int lightCount
         {
             get

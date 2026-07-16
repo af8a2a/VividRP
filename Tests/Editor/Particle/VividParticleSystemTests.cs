@@ -1713,6 +1713,79 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_RendererUpdateDefersSteadyStateSimulation_UntilNextPlayerLoopKick()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.main.gravityModifier = 1.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var firstStats), Is.True);
+            Assert.That(firstStats.PendingJobCount, Is.EqualTo(0));
+            Assert.That(firstStats.CompletedJobCount, Is.EqualTo(1));
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            Assert.That(
+                VividParticleSystemManager.TryGetRuntimeStats(
+                    system,
+                    out VividParticleSystemManager.VividParticleSystemRuntimeStats deferredStats),
+                Is.True);
+            Assert.That(deferredStats.HasPendingSimulation, Is.True);
+            Assert.That(deferredStats.PendingJobCount, Is.EqualTo(1));
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var secondStats), Is.True);
+            Assert.That(secondStats.CompletedJobCount, Is.EqualTo(1));
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var thirdStats), Is.True);
+            Assert.That(thirdStats.PendingJobCount, Is.EqualTo(1));
+            Assert.That(thirdStats.CompletedJobCount, Is.EqualTo(2));
+
+            VividParticleSystemManager.CompleteAndUploadForTests();
+        }
+
+        [Test]
+        public void Manager_RendererUpdateCompletesCurrentSimulation_WhenCollisionCallbacksAreEnabled()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            system.collision.enabled = true;
+            system.collision.sendCollisionMessages = true;
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+            VividParticleSystemManager.RunRendererUpdateForTests();
+
+            Assert.That(
+                VividParticleSystemManager.TryGetRuntimeStats(
+                    system,
+                    out VividParticleSystemManager.VividParticleSystemRuntimeStats runtimeStats),
+                Is.True);
+            Assert.That(runtimeStats.HasPendingSimulation, Is.False);
+            Assert.That(runtimeStats.PendingJobCount, Is.EqualTo(0));
+            Assert.That(VividParticleSystemManager.TryGetStats(system, out var stats), Is.True);
+            Assert.That(stats.CompletedJobCount, Is.EqualTo(2));
+        }
+
+        [Test]
         public void Manager_EmissionInitialize_IsScheduledInsideManagerGraph_ForSingleWork()
         {
             VividParticleSystem system = CreateActiveSystem();

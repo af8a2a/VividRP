@@ -98,7 +98,7 @@ namespace VividRP.Runtime.Particle
         private const float MinimumSimulationStep = 0.000001f;
         private const float EmissionAccumulatorTolerance = 0.0001f;
         private const float MaximumEditorSimulationStep = 0.1f;
-        private const int SimulationPrepareScheduleThreshold = 16;
+        private const int SimulationPrepareScheduleThreshold = 256;
         private const int MaximumSubEmitterCommandDepth = 4;
         private const int MaximumSubEmitterCommandsPerFlush = 65536;
 
@@ -115,6 +115,8 @@ namespace VividRP.Runtime.Particle
         private static readonly ProfilerMarker s_KickCompleteSimulationMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.CompleteSimulation");
         private static readonly ProfilerMarker s_KickCollectActiveMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.CollectActive");
         private static readonly ProfilerMarker s_KickPrepareSnapshotsMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.PrepareSnapshots");
+        private static readonly ProfilerMarker s_KickPrepareSnapshotsScheduleMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.PrepareSnapshots.Schedule");
+        private static readonly ProfilerMarker s_KickPrepareSnapshotsWaitMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.PrepareSnapshots.Wait");
         private static readonly ProfilerMarker s_KickScheduleSimulationJobsMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.ScheduleSimulationJobs");
         private static readonly ProfilerMarker s_KickInitializeEmittedParticlesMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.Kick.InitializeEmittedParticles");
         private static readonly ProfilerMarker s_RendererUpdateMarker = new("VividRP.PlayerLoop.PreLateUpdate/VividParticleSystemManager.RendererUpdate");
@@ -3776,9 +3778,16 @@ namespace VividRP.Runtime.Particle
                     }
                     else
                     {
-                        prepareJob.Schedule(
-                            prepareCount,
-                            innerloopBatchCount: 16).Complete();
+                        JobHandle prepareHandle;
+                        using (s_KickPrepareSnapshotsScheduleMarker.Auto())
+                        {
+                            prepareHandle = prepareJob.Schedule(
+                                prepareCount,
+                                innerloopBatchCount: 16);
+                        }
+
+                        using (s_KickPrepareSnapshotsWaitMarker.Auto())
+                            prepareHandle.Complete();
                         s_LastSimulationPrepareScheduledCount = prepareCount;
                     }
                 }

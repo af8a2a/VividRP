@@ -996,6 +996,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_PrepareSnapshots_RunsInlineFor128Systems()
+        {
+            const int systemCount = 128;
+            for (int index = 0; index < systemCount; index++)
+            {
+                VividParticleSystem system = CreateActiveSystem();
+                system.main.maxParticles = 1;
+                system.emission.enabled = false;
+                system.shape.enabled = false;
+                system.Play(withChildren: false);
+            }
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.016f);
+
+            Assert.That(
+                VividParticleSystemManager.lastSimulationPrepareInlineCount,
+                Is.EqualTo(systemCount));
+            Assert.That(
+                VividParticleSystemManager.lastSimulationPrepareScheduledCount,
+                Is.EqualTo(0));
+        }
+
+        [Test]
         public void Manager_NativeSimulationConfigAndBursts_FollowRegistrationAndSettingsDirty()
         {
             VividParticleSystem system = CreateActiveSystem();

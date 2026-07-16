@@ -1182,7 +1182,9 @@ namespace VividRP.Runtime.Particle.ECS
             if (!m_ActiveCountOutput.IsCreated)
                 return;
 
-            m_Line.SetActiveCount(m_ActiveCountOutput[0]);
+            int activeCount = m_ActiveCountOutput[0];
+            if (activeCount != m_Line.activeCount)
+                m_Line.SetActiveCount(activeCount);
             m_PendingIntegrateActiveCount = 0;
         }
 

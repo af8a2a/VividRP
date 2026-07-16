@@ -690,6 +690,55 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ArchetypeLine_SetActiveCount_PreservesPageMetadataAcrossBoundaryChanges()
+        {
+            VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();
+            using var line = new VividEcsArchetypeLine(8, dataIndex);
+            line.EnsureCapacity(700);
+
+            line.SetActiveCount(600);
+
+            Assert.That(line.GetPageInfo(0).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(1).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(2).EntryCount, Is.EqualTo(88));
+
+            line.SetActiveCount(300);
+            line.SetActiveCount(300);
+
+            Assert.That(line.GetPageInfo(0).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(1).EntryCount, Is.EqualTo(44));
+            Assert.That(line.GetPageInfo(2).EntryCount, Is.EqualTo(0));
+
+            line.EnsureCapacity(900);
+
+            Assert.That(line.GetPageInfo(0).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(1).EntryCount, Is.EqualTo(44));
+            Assert.That(line.GetPageInfo(2).EntryCount, Is.EqualTo(0));
+            Assert.That(line.GetPageInfo(3).EntryCount, Is.EqualTo(0));
+
+            line.SetActiveCount(769);
+
+            Assert.That(line.GetPageInfo(0).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(1).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(2).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(3).EntryCount, Is.EqualTo(1));
+
+            line.SetActiveCount(0);
+
+            Assert.That(line.GetPageInfo(0).EntryCount, Is.EqualTo(0));
+            Assert.That(line.GetPageInfo(1).EntryCount, Is.EqualTo(0));
+            Assert.That(line.GetPageInfo(2).EntryCount, Is.EqualTo(0));
+            Assert.That(line.GetPageInfo(3).EntryCount, Is.EqualTo(0));
+
+            line.SetActiveCount(256);
+
+            Assert.That(line.GetPageInfo(0).EntryCount, Is.EqualTo(256));
+            Assert.That(line.GetPageInfo(1).EntryCount, Is.EqualTo(0));
+            Assert.That(line.GetPageInfo(2).EntryCount, Is.EqualTo(0));
+            Assert.That(line.GetPageInfo(3).EntryCount, Is.EqualTo(0));
+        }
+
+        [Test]
         public void PageJob_ScheduleParallel_VisitsEachLivePage()
         {
             VividEcsTypeIndex dataIndex = VividEcsTypeManager.RegisterComponent<TestData>();

@@ -583,6 +583,7 @@ namespace VividRP.Runtime.ECS
 
             m_MaxEntries = requestedMaxEntries;
             SetActiveCount(math.min(activeCount, m_MaxEntries));
+            RebuildPageEntryCounts();
         }
 
         public bool Contains(VividEcsTypeIndex typeIndex)
@@ -889,14 +890,26 @@ namespace VividRP.Runtime.ECS
 
         public void SetActiveCount(int count)
         {
-            m_ActiveCount = math.clamp(count, 0, math.min(capacity, m_MaxEntries));
-            while (m_EntityIds.Count > m_ActiveCount)
-                m_EntityIds.RemoveAt(m_EntityIds.Count - 1);
+            int previousActiveCount = m_ActiveCount;
+            int nextActiveCount = math.clamp(count, 0, math.min(capacity, m_MaxEntries));
+            if (nextActiveCount == previousActiveCount
+                && m_EntityIds.Count == nextActiveCount)
+            {
+                return;
+            }
+
+            m_ActiveCount = nextActiveCount;
+            if (m_EntityIds.Count > m_ActiveCount)
+            {
+                m_EntityIds.RemoveRange(
+                    m_ActiveCount,
+                    m_EntityIds.Count - m_ActiveCount);
+            }
 
             while (m_EntityIds.Count < m_ActiveCount)
                 m_EntityIds.Add(-1);
 
-            RebuildPageEntryCounts();
+            UpdatePageEntryCounts(previousActiveCount, m_ActiveCount);
         }
 
         public int GetEntityId(int index)
@@ -957,6 +970,33 @@ namespace VividRP.Runtime.ECS
                 int start = pageIndex * VividEcsConstants.PageEntryCount;
                 m_PageEntryCounts[pageIndex] = math.clamp(
                     m_ActiveCount - start,
+                    0,
+                    VividEcsConstants.PageEntryCount);
+            }
+        }
+
+        private void UpdatePageEntryCounts(int previousActiveCount, int activeCount)
+        {
+            if (!m_PageEntryCounts.IsCreated
+                || m_PageEntryCounts.Length == 0
+                || previousActiveCount == activeCount)
+                return;
+
+            int minimumCount = math.min(previousActiveCount, activeCount);
+            int maximumCount = math.max(previousActiveCount, activeCount);
+            int firstPageIndex = math.clamp(
+                minimumCount / VividEcsConstants.PageEntryCount,
+                0,
+                m_PageEntryCounts.Length - 1);
+            int lastPageIndex = math.clamp(
+                (maximumCount - 1) / VividEcsConstants.PageEntryCount,
+                firstPageIndex,
+                m_PageEntryCounts.Length - 1);
+            for (int pageIndex = firstPageIndex; pageIndex <= lastPageIndex; pageIndex++)
+            {
+                int start = pageIndex * VividEcsConstants.PageEntryCount;
+                m_PageEntryCounts[pageIndex] = math.clamp(
+                    activeCount - start,
                     0,
                     VividEcsConstants.PageEntryCount);
             }

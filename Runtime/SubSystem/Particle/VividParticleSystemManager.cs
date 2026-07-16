@@ -206,6 +206,8 @@ namespace VividRP.Runtime.Particle
         private static bool s_HasPendingSimulationBatch;
         private static bool s_PendingSimulationRequiresImmediateCompletion;
         private static bool s_RendererUpdatePreparedByKick;
+        private static int s_KickTransformSnapshotVersion;
+        private static int s_ActiveRendererTransformSnapshotVersion;
         private static bool s_ApplyingPendingSimulations;
         private static VividEcsQuery s_ActiveSimulationLineQuery;
         private static VividEcsArchetypeLineGroupCache s_ActiveSimulationModuleLineGroupCache;
@@ -1269,6 +1271,8 @@ namespace VividRP.Runtime.Particle
             s_HasPendingSimulationBatch = false;
             s_PendingSimulationRequiresImmediateCompletion = false;
             s_RendererUpdatePreparedByKick = false;
+            s_KickTransformSnapshotVersion = 0;
+            s_ActiveRendererTransformSnapshotVersion = 0;
             s_ApplyingPendingSimulations = false;
             s_LastEmissionInitializeWorkCount = 0;
             s_LastEmissionInitializeInlineWorkCount = 0;
@@ -3730,6 +3734,9 @@ namespace VividRP.Runtime.Particle
 
             using (s_KickPrepareSnapshotsMarker.Auto())
             {
+                s_KickTransformSnapshotVersion = s_KickTransformSnapshotVersion == int.MaxValue
+                    ? 1
+                    : s_KickTransformSnapshotVersion + 1;
                 EnsureNativeSimulationData();
                 s_SimulationPrepareInputs.Clear();
                 for (int groupIndex = 0; groupIndex < moduleGroups.Length; groupIndex++)
@@ -3817,10 +3824,18 @@ namespace VividRP.Runtime.Particle
                 // Capture the last completed simulation for rendering before the next simulation
                 // starts writing the ECS particle columns in place. The new simulation depends on
                 // every asynchronous renderer-side reader of those columns.
-                ScheduleRendererUpdate(
-                    forceUpload: false,
-                    oncePerFrame: false,
-                    forceSimulationCompletion: false);
+                s_ActiveRendererTransformSnapshotVersion = s_KickTransformSnapshotVersion;
+                try
+                {
+                    ScheduleRendererUpdate(
+                        forceUpload: false,
+                        oncePerFrame: false,
+                        forceSimulationCompletion: false);
+                }
+                finally
+                {
+                    s_ActiveRendererTransformSnapshotVersion = 0;
+                }
                 s_RendererUpdatePreparedByKick = true;
                 rendererReadDependency = GetPendingRendererReadDependency(
                     out hasRendererReadDependency);
@@ -5848,6 +5863,8 @@ namespace VividRP.Runtime.Particle
             private VividParticleSystemFrameSnapshot m_PreparedAutomaticSnapshot;
             private VividParticleSimulationTimeStep m_PreparedAutomaticTimeStep;
             private float3 m_PreparedAutomaticGravity;
+            private Matrix4x4 m_KickRendererLocalToWorld;
+            private int m_KickRendererTransformSnapshotVersion;
             private VividParticleSystemFrameSnapshot m_CachedAutomaticSnapshot;
             private double m_LastEditorUpdateTime;
             private float m_Time;
@@ -6570,6 +6587,12 @@ namespace VividRP.Runtime.Particle
                 if (deltaTime <= 0.0f)
                     return false;
 
+                Transform systemTransform = m_System.transform;
+                Vector3 transformPosition = systemTransform.position;
+                Matrix4x4 localToWorldMatrix = systemTransform.localToWorldMatrix;
+                Quaternion worldRotation = systemTransform.rotation;
+                m_KickRendererLocalToWorld = localToWorldMatrix;
+                m_KickRendererTransformSnapshotVersion = s_KickTransformSnapshotVersion;
                 timeStep = new VividParticleSimulationTimeStep(
                     deltaTime,
                     m_System.isActiveAndEnabled,
@@ -6577,10 +6600,24 @@ namespace VividRP.Runtime.Particle
                     m_System.isPaused,
                     m_System.stopEmitting || m_SubEmitterDriven,
                     m_System.gameObject.layer,
-                    m_System.transform.position,
-                    m_System.transform.localToWorldMatrix,
-                    m_System.transform.rotation);
+                    transformPosition,
+                    localToWorldMatrix,
+                    worldRotation);
                 return true;
+            }
+
+            private Matrix4x4 GetRendererLocalToWorldMatrix()
+            {
+                if (s_ActiveRendererTransformSnapshotVersion != 0
+                    && m_KickRendererTransformSnapshotVersion
+                        == s_ActiveRendererTransformSnapshotVersion)
+                {
+                    return m_KickRendererLocalToWorld;
+                }
+
+                return m_System != null
+                    ? m_System.transform.localToWorldMatrix
+                    : Matrix4x4.identity;
             }
 
             private bool RequiresAutomaticUpdate(VividParticleSimulationTimeStep timeStep, bool requireActive)
@@ -6934,9 +6971,7 @@ namespace VividRP.Runtime.Particle
             {
                 if (forceUpload
                     || m_System == null
-                    || !m_System.isActiveAndEnabled
-                    || activeCount <= 0
-                    || !ParticleSystemState.CanRender(m_System.rendererModule)
+                    || !m_RendererActive
                     || !m_HasCachedRenderIdentity
                     || m_RenderIdentityDirty
                     || m_ResourcesDirty
@@ -7026,7 +7061,7 @@ namespace VividRP.Runtime.Particle
 
                 MarkRenderStateDirtyIfNeeded(count);
                 ParticleRenderEntry identity = m_CachedRenderIdentity;
-                Matrix4x4 localToWorldMatrix = m_System.transform.localToWorldMatrix;
+                Matrix4x4 localToWorldMatrix = GetRendererLocalToWorldMatrix();
                 float sharedSize = Mathf.Max(
                     VividParticleMainModule.MinimumStartSize,
                     m_System.main.startSize * identity.SizeScale);
@@ -7127,7 +7162,7 @@ namespace VividRP.Runtime.Particle
                     ResolveGameObjectSceneCullingMask(m_System.gameObject),
                     m_Capacity,
                     Mathf.Min(activeCount, m_Capacity),
-                    m_System.transform.localToWorldMatrix,
+                    GetRendererLocalToWorldMatrix(),
                     m_System.main.simulationSpace,
                     m_System.rendererModule.color,
                     m_System.rendererModule.sizeScale,
@@ -7428,7 +7463,7 @@ namespace VividRP.Runtime.Particle
                     || !m_HasCachedWorldBounds
                     || !m_HasCachedBoundsTransform
                     || m_System == null
-                    || m_CachedBoundsLocalToWorld != m_System.transform.localToWorldMatrix
+                    || m_CachedBoundsLocalToWorld != GetRendererLocalToWorldMatrix()
                     || m_CachedBoundsParticleCount != count;
             }
 
@@ -7441,7 +7476,7 @@ namespace VividRP.Runtime.Particle
                     return;
                 }
 
-                float4x4 localToWorld = ToFloat4x4(m_System.transform.localToWorldMatrix);
+                float4x4 localToWorld = ToFloat4x4(GetRendererLocalToWorldMatrix());
                 int simulationSpace = (int)m_System.main.simulationSpace;
                 if (!dynamicRecord.LocalToWorld.Equals(localToWorld)
                     || dynamicRecord.SimulationSpace != simulationSpace)
@@ -7466,8 +7501,7 @@ namespace VividRP.Runtime.Particle
                 dynamicRecord.Positions = null;
                 dynamicRecord.MeshIndices = null;
                 if (m_System == null
-                    || !m_System.isActiveAndEnabled
-                    || !ParticleSystemState.CanRender(m_System.rendererModule)
+                    || !m_RendererActive
                     || !m_Storage.isCreated
                     || !m_Storage.TryGetColumnView(out VividParticleEcsColumnView columnView))
                 {
@@ -7486,16 +7520,17 @@ namespace VividRP.Runtime.Particle
                 if (sourceDirty)
                 {
                     dynamicRecord.BoundsSource = default;
+                    ParticleRenderEntry renderIdentity = m_CachedRenderIdentity;
                     if (dynamicRecord.ActiveCount > 0
                         && TryCreateBoundsSource(
                             dynamicRecord.ActiveCount,
                             dynamicRecord.LocalToWorld,
                             dynamicRecord.SimulationSpace,
-                            m_System.rendererModule.renderMode,
-                            m_System.rendererModule.renderMesh,
-                            m_System.rendererModule.sizeScale,
-                            m_System.rendererModule.stretchLengthScale,
-                            m_System.rendererModule.stretchSpeedScale,
+                            renderIdentity.RenderMode,
+                            renderIdentity.Mesh,
+                            renderIdentity.SizeScale,
+                            renderIdentity.StretchLengthScale,
+                            renderIdentity.StretchSpeedScale,
                             out ParticleBoundsSource boundsSource))
                     {
                         dynamicRecord.BoundsSource = boundsSource;
@@ -7532,7 +7567,7 @@ namespace VividRP.Runtime.Particle
                 count = Mathf.Clamp(count, 0, Mathf.Max(0, m_System.main.maxParticles));
                 return TryCreateBoundsSource(
                     count,
-                    ToFloat4x4(m_System.transform.localToWorldMatrix),
+                    ToFloat4x4(GetRendererLocalToWorldMatrix()),
                     (int)m_System.main.simulationSpace,
                     renderMode,
                     m_System.rendererModule.renderMesh,
@@ -7738,7 +7773,7 @@ namespace VividRP.Runtime.Particle
                     return;
                 }
 
-                m_CachedBoundsLocalToWorld = m_System.transform.localToWorldMatrix;
+                m_CachedBoundsLocalToWorld = GetRendererLocalToWorldMatrix();
                 m_HasCachedBoundsTransform = true;
             }
 
@@ -9537,17 +9572,18 @@ namespace VividRP.Runtime.Particle
                     return;
 
                 VividParticleGpuDataLayout layout = GetCurrentGpuDataLayout();
-                Matrix4x4 localToWorld = m_System.transform.localToWorldMatrix;
-                Color rendererColor = m_System.rendererModule.color;
-                float sizeScale = m_System.rendererModule.sizeScale;
-                float stretchLengthScale = m_System.rendererModule.stretchLengthScale;
-                float stretchSpeedScale = m_System.rendererModule.stretchSpeedScale;
-                Vector3 pivot = m_System.rendererModule.pivot;
-                float minParticleSize = m_System.rendererModule.minParticleSize;
-                float maxParticleSize = m_System.rendererModule.maxParticleSize;
-                Vector3 flip = m_System.rendererModule.flip;
-                VividParticleRenderMode renderMode = m_System.rendererModule.renderMode;
-                VividParticleSystemSimulationSpace simulationSpace = m_System.main.simulationSpace;
+                Matrix4x4 localToWorld = GetRendererLocalToWorldMatrix();
+                ParticleRenderEntry renderIdentity = m_CachedRenderIdentity;
+                Color rendererColor = renderIdentity.RendererColor;
+                float sizeScale = renderIdentity.SizeScale;
+                float stretchLengthScale = renderIdentity.StretchLengthScale;
+                float stretchSpeedScale = renderIdentity.StretchSpeedScale;
+                Vector3 pivot = renderIdentity.Pivot;
+                float minParticleSize = renderIdentity.MinParticleSize;
+                float maxParticleSize = renderIdentity.MaxParticleSize;
+                Vector3 flip = renderIdentity.Flip;
+                VividParticleRenderMode renderMode = renderIdentity.RenderMode;
+                VividParticleSystemSimulationSpace simulationSpace = renderIdentity.SimulationSpace;
                 int previousActiveCount = m_LastUploadedRenderStateActiveCount;
                 bool activeCountChanged = !m_HasUploadedRenderStateSnapshot || previousActiveCount != count;
                 bool localToWorldChanged = !m_HasUploadedRenderStateSnapshot || m_LastUploadedLocalToWorldMatrix != localToWorld;
@@ -10084,7 +10120,7 @@ namespace VividRP.Runtime.Particle
                         return true;
                     case VividParticleGpuDataId.VelocityStretch:
                         value = ResolveSharedVelocityStretchData(
-                            ToFloat4x4(m_System.transform.localToWorldMatrix),
+                            ToFloat4x4(GetRendererLocalToWorldMatrix()),
                             m_System.main.simulationSpace,
                             m_System.main.startSpeed,
                             m_System.main.startSize);
@@ -12730,6 +12766,20 @@ namespace VividRP.Runtime.Particle
             public int ResultIndex;
         }
 
+        private struct ParticleBoundsWorkBuildInput
+        {
+            public ParticleBoundsSource Source;
+            public int RecordSlot;
+            public int RecordVersion;
+            public int BoundsVersion;
+            public int EcsLineId;
+            public int WorkStart;
+            public int PageStart;
+            public int PageCount;
+            public int ActiveCount;
+            public int UsesPageBillboard;
+        }
+
         private struct ParticleBoundsRecordReduceWork
         {
             public int RecordSlot;
@@ -13544,6 +13594,7 @@ namespace VividRP.Runtime.Particle
             private NativeArray<ParticleNativeDrawBatchRecord> m_MeshVisibleDrawBatchesView;
             private NativeArray<ParticleMeshVisibleRecordCountRef> m_MeshVisibleRecordCountRefsView;
             private NativeList<ParticleBoundsPageWork> m_BoundsPageWorks;
+            private NativeList<ParticleBoundsWorkBuildInput> m_BoundsWorkBuildInputs;
             private NativeList<ParticleBoundsRecordReduceWork> m_BoundsRecordWorks;
             private NativeArray<ParticleBoundsData> m_BoundsPageResults;
             private NativeArray<ParticleBoundsRecordResult> m_BoundsRecordResults;
@@ -13562,6 +13613,7 @@ namespace VividRP.Runtime.Particle
             private JobHandle m_PendingUploadHandle;
             private JobHandle m_PendingUploadPageBuildHandle;
             private JobHandle m_PendingBoundsHandle;
+            private int m_PendingBoundsResultCount;
             private JobHandle m_ParticleDataDependency;
             private BatchRendererGroup m_BRG;
             private bool m_HasPendingCullingOutput;
@@ -13603,6 +13655,7 @@ namespace VividRP.Runtime.Particle
             private int m_MaxMeshBatchVisibleCountOutputCapacity;
             private int m_CullingPageBoundsCount;
             private int m_BoundsRequiredPageCapacity;
+            private int m_BoundsRequiredPageWorkCount;
             private int m_TotalBufferByteSize;
             private int m_LastBoundsPageWorkCount;
             private int m_LastBoundsRecordWorkCount;
@@ -14027,8 +14080,15 @@ namespace VividRP.Runtime.Particle
                                 continue;
                             }
 
-                            UpdateRecord(state, forceUpload);
-                            CollectUpdatedBoundsState(state);
+                            if (UpdateRecord(
+                                    state,
+                                    forceUpload,
+                                    out int recordSlot,
+                                    out ParticleRendererDynamicRecord dynamicRecord)
+                                && !m_LayoutDirty)
+                            {
+                                CollectBoundsState(recordSlot, dynamicRecord);
+                            }
                         }
                     }
                 }
@@ -14036,8 +14096,10 @@ namespace VividRP.Runtime.Particle
                 ProcessQueuedRecordRemovals();
                 if (m_LayoutDirty)
                 {
+                    m_BoundsWorkBuildInputs.Clear();
                     m_BoundsPageWorks.Clear();
                     m_BoundsRecordWorks.Clear();
+                    m_BoundsRequiredPageWorkCount = 0;
                 }
                 else
                 {
@@ -14061,7 +14123,7 @@ namespace VividRP.Runtime.Particle
                     ResetRenderRecordPoolStats();
                     ResetRecordLookupStats();
                     m_LastCombinedUpdateBoundsLineCount = 0;
-                    UpdateRecord(state, forceUpload);
+                    UpdateRecord(state, forceUpload, out _, out _);
                 }
 
                 Commit();
@@ -14255,8 +14317,14 @@ namespace VividRP.Runtime.Particle
                 m_UploadCopyWorksAreSorted = true;
             }
 
-            private void UpdateRecord(ParticleSystemState state, bool forceUpload)
+            private bool UpdateRecord(
+                ParticleSystemState state,
+                bool forceUpload,
+                out int updatedRecordSlot,
+                out ParticleRendererDynamicRecord updatedDynamicRecord)
             {
+                updatedRecordSlot = -1;
+                updatedDynamicRecord = default;
                 bool foundByHandle = TryGetRecordFromHandle(state, out ParticleRenderRecord record);
                 if (!foundByHandle)
                 {
@@ -14285,13 +14353,15 @@ namespace VividRP.Runtime.Particle
                     m_NativeRendererRecords[record.RecordSlot] = cachedDynamicRecord;
                     if (state.HasPendingUploadData())
                         QueueUploadDirty(record);
-                    return;
+                    updatedRecordSlot = record.RecordSlot;
+                    updatedDynamicRecord = cachedDynamicRecord;
+                    return true;
                 }
 
                 if (!state.PrepareRenderEntry(forceUpload, out ParticleRenderEntry entry))
                 {
                     RemoveRecord(state);
-                    return;
+                    return false;
                 }
 
                 if (record == null)
@@ -14299,14 +14369,19 @@ namespace VividRP.Runtime.Particle
                     record = AcquireRenderRecord();
                     record.State = state;
                     AllocateRecordSlot(record);
-                    SyncNativeRendererRecord(record, entry);
+                    bool synced = SyncNativeRendererRecord(
+                        record,
+                        entry,
+                        out ParticleRendererDynamicRecord dynamicRecord);
                     state.SetRendererBatchSeed(new ParticleRendererBatchSeed(entry));
                     AssignRendererHandle(
                         state,
                         new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                     QueueUploadDirty(record);
                     m_LayoutDirty = true;
-                    return;
+                    updatedRecordSlot = record.RecordSlot;
+                    updatedDynamicRecord = dynamicRecord;
+                    return synced;
                 }
 
                 bool hasDynamicRecord = TryGetNativeRendererRecord(
@@ -14324,12 +14399,18 @@ namespace VividRP.Runtime.Particle
                 if (identityChanged)
                     state.SetRendererBatchSeed(new ParticleRendererBatchSeed(entry));
                 record.State = state;
-                SyncNativeRendererRecord(record, entry);
+                bool recordSynced = SyncNativeRendererRecord(
+                    record,
+                    entry,
+                    out ParticleRendererDynamicRecord currentDynamicRecord);
                 if (layoutChanged)
                     m_LayoutDirty = true;
 
                 if (forceUpload || state.HasPendingUploadData())
                     QueueUploadDirty(record);
+                updatedRecordSlot = record.RecordSlot;
+                updatedDynamicRecord = currentDynamicRecord;
+                return recordSynced;
             }
 
             public void QueueUploadDirty(ParticleSystemState state)
@@ -14740,12 +14821,14 @@ namespace VividRP.Runtime.Particle
                     m_NativePendingUploadStates[index] = default;
             }
 
-            private void SyncNativeRendererRecord(
+            private bool SyncNativeRendererRecord(
                 ParticleRenderRecord record,
-                ParticleRenderEntry entry)
+                ParticleRenderEntry entry,
+                out ParticleRendererDynamicRecord dynamicRecord)
             {
+                dynamicRecord = default;
                 if (record == null || record.RecordSlot < 0)
-                    return;
+                    return false;
 
                 EnsureNativeRendererRecordSlotCapacity(record.RecordSlot + 1);
                 EnsureNativePendingUploadStateSlotCapacity(record.RecordSlot + 1);
@@ -14763,7 +14846,7 @@ namespace VividRP.Runtime.Particle
                 TryGetNativeRendererRecord(
                     record.RecordSlot,
                     record.RecordVersion,
-                    out ParticleRendererDynamicRecord dynamicRecord);
+                    out dynamicRecord);
                 dynamicRecord.RecordVersion = record.RecordVersion;
                 dynamicRecord.IdentityVersion = entry.IdentityVersion;
                 dynamicRecord.IsValid = 1;
@@ -14814,6 +14897,7 @@ namespace VividRP.Runtime.Particle
                     dynamicRecord.LocalToWorld = ToFloat4x4(entry.LocalToWorldMatrix);
                 }
                 m_NativeRendererRecords[record.RecordSlot] = dynamicRecord;
+                return true;
             }
 
             private void SyncNativeRendererLayout(ParticleRenderRecord record)
@@ -15366,9 +15450,11 @@ namespace VividRP.Runtime.Particle
             {
                 CompletePendingBoundsUpdates();
                 EnsureNativeBoundsLayout();
+                m_BoundsWorkBuildInputs.Clear();
                 m_BoundsPageWorks.Clear();
                 m_BoundsRecordWorks.Clear();
                 m_BoundsRequiredPageCapacity = m_CullingPageBoundsCount;
+                m_BoundsRequiredPageWorkCount = 0;
             }
 
             private void ScheduleBoundsUpdatesFromRecords()
@@ -15394,28 +15480,13 @@ namespace VividRP.Runtime.Particle
                                     recordRef.RecordVersion,
                                     out ParticleRendererDynamicRecord dynamicRecord))
                             {
-                                CollectBoundsState(record, dynamicRecord);
+                                CollectBoundsState(recordRef.RecordSlot, dynamicRecord);
                             }
                         }
                     }
                 }
 
                 ScheduleCollectedBounds();
-            }
-
-            private void CollectUpdatedBoundsState(ParticleSystemState state)
-            {
-                if (state == null
-                    || !TryGetRecord(state, out ParticleRenderRecord record)
-                    || !TryGetNativeRendererRecord(
-                        record.RecordSlot,
-                        record.RecordVersion,
-                        out ParticleRendererDynamicRecord dynamicRecord))
-                {
-                    return;
-                }
-
-                CollectBoundsState(record, dynamicRecord);
             }
 
             private void CollectBoundsState(ParticleSystemState state)
@@ -15433,14 +15504,14 @@ namespace VividRP.Runtime.Particle
                 state.RefreshRendererDynamicBoundsData(ref dynamicRecord);
                 m_NativeRendererRecords[record.RecordSlot] = dynamicRecord;
 
-                CollectBoundsState(record, dynamicRecord);
+                CollectBoundsState(record.RecordSlot, dynamicRecord);
             }
 
             private void CollectBoundsState(
-                ParticleRenderRecord record,
+                int recordSlot,
                 ParticleRendererDynamicRecord dynamicRecord)
             {
-                if (record == null || dynamicRecord.IsRenderable == 0)
+                if (recordSlot < 0 || dynamicRecord.IsRenderable == 0)
                     return;
 
                 int count = Mathf.Clamp(
@@ -15461,7 +15532,7 @@ namespace VividRP.Runtime.Particle
                     dynamicRecord.CachedBoundsActiveCount = count;
                     dynamicRecord.HasCachedWorldBounds = 1;
                     dynamicRecord.CompletedBoundsVersion = dynamicRecord.BoundsVersion;
-                    m_NativeRendererRecords[record.RecordSlot] = dynamicRecord;
+                    m_NativeRendererRecords[recordSlot] = dynamicRecord;
                     return;
                 }
 
@@ -15477,28 +15548,17 @@ namespace VividRP.Runtime.Particle
                     pageStart = m_BoundsRequiredPageCapacity;
                 }
 
+                int workStart = m_BoundsRequiredPageWorkCount;
                 m_BoundsRequiredPageCapacity = Mathf.Max(m_BoundsRequiredPageCapacity, pageStart + pageCount);
-                for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+                m_BoundsRequiredPageWorkCount += pageCount;
+                m_BoundsWorkBuildInputs.Add(new ParticleBoundsWorkBuildInput
                 {
-                    int particleStart = pageIndex * BillboardPageSize;
-                    int particleCount = Mathf.Clamp(count - particleStart, 0, BillboardPageSize);
-                    m_BoundsPageWorks.Add(new ParticleBoundsPageWork
-                    {
-                        Page = new VividEcsPageInfo(
-                            dynamicRecord.EcsLineId,
-                            pageIndex,
-                            particleStart,
-                            particleCount),
-                        Source = source,
-                        ResultIndex = pageStart + pageIndex,
-                    });
-                }
-
-                m_BoundsRecordWorks.Add(new ParticleBoundsRecordReduceWork
-                {
-                    RecordSlot = record.RecordSlot,
-                    RecordVersion = record.RecordVersion,
+                    RecordSlot = recordSlot,
+                    RecordVersion = dynamicRecord.RecordVersion,
                     BoundsVersion = dynamicRecord.BoundsVersion,
+                    EcsLineId = dynamicRecord.EcsLineId,
+                    Source = source,
+                    WorkStart = workStart,
                     PageStart = pageStart,
                     PageCount = pageCount,
                     ActiveCount = count,
@@ -15509,41 +15569,59 @@ namespace VividRP.Runtime.Particle
 
             private void ScheduleCollectedBounds()
             {
-                if (m_BoundsPageWorks.Length <= 0 || m_BoundsRecordWorks.Length <= 0)
+                int recordWorkCount = m_BoundsWorkBuildInputs.IsCreated
+                    ? m_BoundsWorkBuildInputs.Length
+                    : 0;
+                if (m_BoundsRequiredPageWorkCount <= 0 || recordWorkCount <= 0)
                 {
                     m_LastBoundsPageWorkCount = 0;
                     m_LastBoundsRecordWorkCount = 0;
                     return;
                 }
 
-                EnsureBoundsResultCapacity(m_BoundsRequiredPageCapacity, m_BoundsRecordWorks.Length);
-                m_LastBoundsPageWorkCount = m_BoundsPageWorks.Length;
-                m_LastBoundsRecordWorkCount = m_BoundsRecordWorks.Length;
+                m_BoundsPageWorks.ResizeUninitialized(m_BoundsRequiredPageWorkCount);
+                m_BoundsRecordWorks.ResizeUninitialized(recordWorkCount);
+                EnsureBoundsResultCapacity(m_BoundsRequiredPageCapacity, recordWorkCount);
+                m_LastBoundsPageWorkCount = m_BoundsRequiredPageWorkCount;
+                m_LastBoundsRecordWorkCount = recordWorkCount;
 
                 using (s_BoundsScheduleMarker.Auto())
                 {
+                    var buildJob = new ParticleBoundsWorkBuildJob
+                    {
+                        Inputs = m_BoundsWorkBuildInputs.AsArray(),
+                        PageWorks = m_BoundsPageWorks.AsArray(),
+                        RecordWorks = m_BoundsRecordWorks.AsArray(),
+                    };
+                    JobHandle buildHandle = buildJob.Schedule(
+                        recordWorkCount,
+                        innerloopBatchCount: 16);
+                    m_PendingBoundsHandle = buildHandle;
+                    m_PendingBoundsResultCount = 0;
+                    m_HasPendingBounds = true;
                     var pageJob = new ParticleBoundsBatchPageJob
                     {
                         Works = m_BoundsPageWorks.AsArray(),
                         PageBounds = m_BoundsPageResults,
                     };
-                    JobHandle pageDependency = m_HasPendingCullingRecordBuild
-                        ? m_PendingCullingRecordBuildHandle
-                        : default;
+                    JobHandle pageDependency = buildHandle;
+                    if (m_HasPendingCullingRecordBuild)
+                    {
+                        pageDependency = JobHandle.CombineDependencies(
+                            pageDependency,
+                            m_PendingCullingRecordBuildHandle);
+                    }
                     if (m_HasParticleDataDependency)
                     {
-                        pageDependency = m_HasPendingCullingRecordBuild
-                            ? JobHandle.CombineDependencies(
-                                pageDependency,
-                                m_ParticleDataDependency)
-                            : m_ParticleDataDependency;
+                        pageDependency = JobHandle.CombineDependencies(
+                            pageDependency,
+                            m_ParticleDataDependency);
                     }
-                    JobHandle pageHandle = pageJob.ScheduleParallelEmbedded(
-                        m_BoundsPageWorks.AsArray(),
-                        pageInfoByteOffset: 0,
-                        dependency: pageDependency,
+                    JobHandle pageHandle = pageJob.Schedule(
+                        m_BoundsRequiredPageWorkCount,
                         innerloopBatchCount: 1,
-                        dispatchMode: VividEcsPageDispatchMode.Average);
+                        dependsOn: pageDependency);
+                    m_PendingBoundsHandle = pageHandle;
 
                     var reduceJob = new ParticleBoundsBatchReduceJob
                     {
@@ -15552,8 +15630,11 @@ namespace VividRP.Runtime.Particle
                         RecordResults = m_BoundsRecordResults,
                     };
 
-                    m_PendingBoundsHandle = reduceJob.Schedule(m_BoundsRecordWorks.Length, innerloopBatchCount: 1, pageHandle);
-                    m_HasPendingBounds = true;
+                    m_PendingBoundsHandle = reduceJob.Schedule(
+                        recordWorkCount,
+                        innerloopBatchCount: 1,
+                        dependsOn: pageHandle);
+                    m_PendingBoundsResultCount = recordWorkCount;
                     JobHandle.ScheduleBatchedJobs();
                 }
             }
@@ -15570,7 +15651,7 @@ namespace VividRP.Runtime.Particle
                     m_HasPendingBounds = false;
 
                     int resultCount = Mathf.Min(
-                        m_BoundsRecordWorks.IsCreated ? m_BoundsRecordWorks.Length : 0,
+                        m_PendingBoundsResultCount,
                         m_BoundsRecordResults.IsCreated ? m_BoundsRecordResults.Length : 0);
                     for (int recordIndex = 0; recordIndex < resultCount; recordIndex++)
                     {
@@ -15593,7 +15674,10 @@ namespace VividRP.Runtime.Particle
 
                     m_BoundsPageWorks.Clear();
                     m_BoundsRecordWorks.Clear();
+                    m_BoundsWorkBuildInputs.Clear();
                     m_BoundsRequiredPageCapacity = m_CullingPageBoundsCount;
+                    m_BoundsRequiredPageWorkCount = 0;
+                    m_PendingBoundsResultCount = 0;
                 }
             }
 
@@ -17763,6 +17847,12 @@ namespace VividRP.Runtime.Particle
                 if (!m_BoundsPageWorks.IsCreated)
                     m_BoundsPageWorks = new NativeList<ParticleBoundsPageWork>(64, Allocator.Persistent);
 
+                if (!m_BoundsWorkBuildInputs.IsCreated)
+                {
+                    m_BoundsWorkBuildInputs =
+                        new NativeList<ParticleBoundsWorkBuildInput>(16, Allocator.Persistent);
+                }
+
                 if (!m_BoundsRecordWorks.IsCreated)
                     m_BoundsRecordWorks = new NativeList<ParticleBoundsRecordReduceWork>(16, Allocator.Persistent);
             }
@@ -17802,6 +17892,9 @@ namespace VividRP.Runtime.Particle
                 if (m_BoundsPageWorks.IsCreated)
                     m_BoundsPageWorks.Dispose();
 
+                if (m_BoundsWorkBuildInputs.IsCreated)
+                    m_BoundsWorkBuildInputs.Dispose();
+
                 if (m_BoundsRecordWorks.IsCreated)
                     m_BoundsRecordWorks.Dispose();
 
@@ -17812,6 +17905,7 @@ namespace VividRP.Runtime.Particle
                     m_BoundsRecordResults.Dispose();
 
                 m_BoundsPageWorks = default;
+                m_BoundsWorkBuildInputs = default;
                 m_BoundsRecordWorks = default;
                 m_BoundsPageResults = default;
                 m_BoundsRecordResults = default;
@@ -20058,8 +20152,60 @@ namespace VividRP.Runtime.Particle
             };
         }
 
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+        private struct ParticleBoundsWorkBuildJob : IJobParallelFor
+        {
+            [ReadOnly]
+            public NativeArray<ParticleBoundsWorkBuildInput> Inputs;
+
+            [NativeDisableParallelForRestriction]
+            public NativeArray<ParticleBoundsPageWork> PageWorks;
+
+            [NativeDisableParallelForRestriction]
+            public NativeArray<ParticleBoundsRecordReduceWork> RecordWorks;
+
+            public void Execute(int index)
+            {
+                ParticleBoundsWorkBuildInput input = Inputs[index];
+                if ((uint)index >= (uint)RecordWorks.Length)
+                    return;
+
+                int pageEnd = math.min(input.WorkStart + input.PageCount, PageWorks.Length);
+                for (int workIndex = input.WorkStart; workIndex < pageEnd; workIndex++)
+                {
+                    int pageIndex = workIndex - input.WorkStart;
+                    int particleStart = pageIndex * BillboardPageSize;
+                    int particleCount = math.clamp(
+                        input.ActiveCount - particleStart,
+                        0,
+                        BillboardPageSize);
+                    PageWorks[workIndex] = new ParticleBoundsPageWork
+                    {
+                        Page = new VividEcsPageInfo(
+                            input.EcsLineId,
+                            pageIndex,
+                            particleStart,
+                            particleCount),
+                        Source = input.Source,
+                        ResultIndex = input.PageStart + pageIndex,
+                    };
+                }
+
+                RecordWorks[index] = new ParticleBoundsRecordReduceWork
+                {
+                    RecordSlot = input.RecordSlot,
+                    RecordVersion = input.RecordVersion,
+                    BoundsVersion = input.BoundsVersion,
+                    PageStart = input.PageStart,
+                    PageCount = input.PageCount,
+                    ActiveCount = input.ActiveCount,
+                    UsesPageBillboard = input.UsesPageBillboard,
+                };
+            }
+        }
+
         [BurstCompile(DisableSafetyChecks = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
-        private struct ParticleBoundsBatchPageJob : IVividEcsPageJob
+        private struct ParticleBoundsBatchPageJob : IJobParallelFor
         {
             [ReadOnly]
             public NativeArray<ParticleBoundsPageWork> Works;
@@ -20067,7 +20213,7 @@ namespace VividRP.Runtime.Particle
             [NativeDisableParallelForRestriction]
             public NativeArray<ParticleBoundsData> PageBounds;
 
-            public void Execute(VividEcsPageInfo page, int index)
+            public void Execute(int index)
             {
                 ParticleBoundsPageWork work = Works[index];
                 if ((uint)work.ResultIndex >= (uint)PageBounds.Length)
@@ -20075,8 +20221,8 @@ namespace VividRP.Runtime.Particle
 
                 PageBounds[work.ResultIndex] = CalculateParticleBoundsPage(
                     work.Source,
-                    page.StartIndex,
-                    page.EntryCount);
+                    work.Page.StartIndex,
+                    work.Page.EntryCount);
             }
         }
 

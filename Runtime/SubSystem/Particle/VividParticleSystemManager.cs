@@ -4759,6 +4759,23 @@ namespace VividRP.Runtime.Particle
             return true;
         }
 
+        private static unsafe bool TryGetNativeRenderModuleConfig(
+            int configSlot,
+            out VividParticleNativeRenderModuleConfig* config)
+        {
+            config = null;
+            if (!s_NativeRenderModuleConfigs.IsCreated
+                || (uint)configSlot >= (uint)s_NativeRenderModuleConfigs.Length)
+            {
+                return false;
+            }
+
+            config = (VividParticleNativeRenderModuleConfig*)s_NativeRenderModuleConfigs
+                .AsArray()
+                .GetUnsafeReadOnlyPtr() + configSlot;
+            return true;
+        }
+
         private static unsafe bool TryGetNativeRotationBySpeedData(
             int configSlot,
             out float3* rotationLut,
@@ -5864,6 +5881,7 @@ namespace VividRP.Runtime.Particle
             private VividParticleSimulationTimeStep m_PreparedAutomaticTimeStep;
             private float3 m_PreparedAutomaticGravity;
             private Matrix4x4 m_KickRendererLocalToWorld;
+            private int m_KickRendererLayer;
             private int m_KickRendererTransformSnapshotVersion;
             private VividParticleSystemFrameSnapshot m_CachedAutomaticSnapshot;
             private double m_LastEditorUpdateTime;
@@ -5914,6 +5932,7 @@ namespace VividRP.Runtime.Particle
             private bool m_HasPreparedAutomaticSimulation;
             private bool m_BoundsDirty = true;
             private bool m_RendererBoundsDirty = true;
+            private bool m_RendererBoundsSourceDirty = true;
             private int m_BoundsVersion = 1;
             private bool m_IsEditorSelected;
             private bool m_HasUploadedRenderStateSnapshot;
@@ -6591,7 +6610,9 @@ namespace VividRP.Runtime.Particle
                 Vector3 transformPosition = systemTransform.position;
                 Matrix4x4 localToWorldMatrix = systemTransform.localToWorldMatrix;
                 Quaternion worldRotation = systemTransform.rotation;
+                int layer = m_System.gameObject.layer;
                 m_KickRendererLocalToWorld = localToWorldMatrix;
+                m_KickRendererLayer = layer;
                 m_KickRendererTransformSnapshotVersion = s_KickTransformSnapshotVersion;
                 timeStep = new VividParticleSimulationTimeStep(
                     deltaTime,
@@ -6599,7 +6620,7 @@ namespace VividRP.Runtime.Particle
                     m_System.isPlaying || m_SubEmitterDriven,
                     m_System.isPaused,
                     m_System.stopEmitting || m_SubEmitterDriven,
-                    m_System.gameObject.layer,
+                    layer,
                     transformPosition,
                     localToWorldMatrix,
                     worldRotation);
@@ -6618,6 +6639,18 @@ namespace VividRP.Runtime.Particle
                 return m_System != null
                     ? m_System.transform.localToWorldMatrix
                     : Matrix4x4.identity;
+            }
+
+            private int GetRendererLayer()
+            {
+                if (s_ActiveRendererTransformSnapshotVersion != 0
+                    && m_KickRendererTransformSnapshotVersion
+                        == s_ActiveRendererTransformSnapshotVersion)
+                {
+                    return m_KickRendererLayer;
+                }
+
+                return m_System != null ? m_System.gameObject.layer : 0;
             }
 
             private bool RequiresAutomaticUpdate(VividParticleSimulationTimeStep timeStep, bool requireActive)
@@ -6967,8 +7000,13 @@ namespace VividRP.Runtime.Particle
                 s_RendererManager.Update(this, forceUpload);
             }
 
-            internal bool TryPrepareCachedRenderDynamicUpdate(bool forceUpload)
+            internal bool TryPrepareCachedRenderDynamicUpdate(
+                bool forceUpload,
+                out int count,
+                out Matrix4x4 localToWorldMatrix)
             {
+                count = 0;
+                localToWorldMatrix = Matrix4x4.identity;
                 if (forceUpload
                     || m_System == null
                     || !m_RendererActive
@@ -6979,16 +7017,22 @@ namespace VividRP.Runtime.Particle
                     || m_RegisteredMaterial == null
                     || m_QuadMesh == null
                     || m_Capacity <= 0
-                    || m_CachedRenderIdentity.Layer != Mathf.Clamp(m_System.gameObject.layer, 0, 31))
+                    || m_CachedRenderIdentity.Layer != Mathf.Clamp(GetRendererLayer(), 0, 31))
                 {
                     return false;
                 }
 
-                int count = Mathf.Min(activeCount, m_Capacity);
+                count = GetRenderActiveCount();
+                localToWorldMatrix = GetRendererLocalToWorldMatrix();
                 m_LastUploadedCount = count;
                 m_LastUploadOperationCount = 0;
                 m_LastUploadByteCount = 0;
-                MarkRenderStateDirtyIfNeeded(count);
+                if (!m_HasUploadedRenderStateSnapshot
+                    || m_LastUploadedRenderStateActiveCount != count
+                    || m_LastUploadedLocalToWorldMatrix != localToWorldMatrix)
+                {
+                    MarkRenderStateDirtyIfNeeded(count, localToWorldMatrix);
+                }
                 m_LastUploadedFrame = Time.frameCount;
                 m_RenderDynamicFastPathCount++;
                 return true;
@@ -7050,7 +7094,7 @@ namespace VividRP.Runtime.Particle
                 m_LastUploadedCount = count;
                 m_LastUploadOperationCount = 0;
                 m_LastUploadByteCount = 0;
-                int layer = Mathf.Clamp(m_System.gameObject.layer, 0, 31);
+                int layer = Mathf.Clamp(GetRendererLayer(), 0, 31);
                 if (!m_HasCachedRenderIdentity
                     || m_RenderIdentityDirty
                     || m_CachedRenderIdentity.Layer != layer)
@@ -7059,9 +7103,9 @@ namespace VividRP.Runtime.Particle
                         return false;
                 }
 
-                MarkRenderStateDirtyIfNeeded(count);
-                ParticleRenderEntry identity = m_CachedRenderIdentity;
                 Matrix4x4 localToWorldMatrix = GetRendererLocalToWorldMatrix();
+                MarkRenderStateDirtyIfNeeded(count, localToWorldMatrix);
+                ParticleRenderEntry identity = m_CachedRenderIdentity;
                 float sharedSize = Mathf.Max(
                     VividParticleMainModule.MinimumStartSize,
                     m_System.main.startSize * identity.SizeScale);
@@ -7189,6 +7233,7 @@ namespace VividRP.Runtime.Particle
                     ToFloat4(m_System.customData.GetConstantValue(VividParticleCustomDataStream.Custom1)),
                     ToFloat4(m_System.customData.GetConstantValue(VividParticleCustomDataStream.Custom2)));
                 m_HasCachedRenderIdentity = true;
+                m_RendererBoundsSourceDirty = true;
                 m_RenderIdentityDirty = false;
                 m_RenderIdentityRefreshCount++;
                 return true;
@@ -7320,6 +7365,25 @@ namespace VividRP.Runtime.Particle
                 return m_System != null
                     ? GetGpuDataLayout(GetCurrentGpuDataLayoutDescriptor())
                     : VividParticleGpuDataLayout.Create(VividParticleRenderMode.Billboard);
+            }
+
+            private VividParticleGpuDataLayout GetRenderGpuDataLayout()
+            {
+                if (m_HasCachedRenderIdentity
+                    && !m_RenderIdentityDirty
+                    && !m_ResourcesDirty)
+                {
+                    return m_CachedRenderIdentity.GpuLayout;
+                }
+
+                return GetCurrentGpuDataLayout();
+            }
+
+            private int GetRenderActiveCount()
+            {
+                return m_Storage.isCreated
+                    ? Mathf.Min(m_Storage.activeCount, m_Capacity)
+                    : 0;
             }
 
             private VividParticleGpuDataLayoutDescriptor GetCurrentGpuDataLayoutDescriptor()
@@ -7470,29 +7534,64 @@ namespace VividRP.Runtime.Particle
             internal void RefreshRendererDynamicBoundsData(
                 ref ParticleRendererDynamicRecord dynamicRecord)
             {
+                RefreshRendererDynamicBoundsData(
+                    ref dynamicRecord,
+                    Mathf.Clamp(activeCount, 0, m_Capacity),
+                    GetRendererLocalToWorldMatrix());
+            }
+
+            internal void RefreshRendererDynamicBoundsData(
+                ref ParticleRendererDynamicRecord dynamicRecord,
+                int count,
+                Matrix4x4 localToWorldMatrix)
+            {
+                RefreshRendererDynamicBoundsData(
+                    ref dynamicRecord,
+                    count,
+                    localToWorldMatrix,
+                    out _);
+            }
+
+            internal void RefreshRendererDynamicBoundsData(
+                ref ParticleRendererDynamicRecord dynamicRecord,
+                int count,
+                Matrix4x4 localToWorldMatrix,
+                out VividParticleEcsColumnView columnView)
+            {
+                columnView = default;
                 if (m_System == null)
                 {
                     dynamicRecord.ActiveCount = 0;
                     return;
                 }
 
-                float4x4 localToWorld = ToFloat4x4(GetRendererLocalToWorldMatrix());
-                int simulationSpace = (int)m_System.main.simulationSpace;
+                float4x4 localToWorld = ToFloat4x4(localToWorldMatrix);
+                int simulationSpace = (int)(m_HasCachedRenderIdentity
+                    ? m_CachedRenderIdentity.SimulationSpace
+                    : m_System.main.simulationSpace);
                 if (!dynamicRecord.LocalToWorld.Equals(localToWorld)
                     || dynamicRecord.SimulationSpace != simulationSpace)
                 {
                     MarkBoundsDirty();
                 }
 
-                dynamicRecord.ActiveCount = Mathf.Clamp(activeCount, 0, m_Capacity);
+                dynamicRecord.ActiveCount = Mathf.Clamp(count, 0, m_Capacity);
                 dynamicRecord.LocalToWorld = localToWorld;
                 dynamicRecord.SimulationSpace = simulationSpace;
-                RefreshRendererDynamicStorageData(ref dynamicRecord);
+                RefreshRendererDynamicStorageData(ref dynamicRecord, out columnView);
             }
 
             internal unsafe void RefreshRendererDynamicStorageData(
                 ref ParticleRendererDynamicRecord dynamicRecord)
             {
+                RefreshRendererDynamicStorageData(ref dynamicRecord, out _);
+            }
+
+            internal unsafe void RefreshRendererDynamicStorageData(
+                ref ParticleRendererDynamicRecord dynamicRecord,
+                out VividParticleEcsColumnView columnView)
+            {
+                columnView = default;
                 int previousStorageCapacity = dynamicRecord.StorageCapacity;
                 float3* previousPositions = dynamicRecord.Positions;
                 int* previousMeshIndices = dynamicRecord.MeshIndices;
@@ -7503,15 +7602,22 @@ namespace VividRP.Runtime.Particle
                 if (m_System == null
                     || !m_RendererActive
                     || !m_Storage.isCreated
-                    || !m_Storage.TryGetColumnView(out VividParticleEcsColumnView columnView))
+                    || !m_Storage.TryGetColumnView(out columnView))
                 {
                     return;
                 }
 
-                bool sourceDirty = m_RendererBoundsDirty
+                bool sourceDirty = m_RendererBoundsSourceDirty
                     || previousStorageCapacity != columnView.Capacity
                     || previousPositions != columnView.Positions
-                    || previousMeshIndices != columnView.MeshIndices;
+                    || previousMeshIndices != columnView.MeshIndices
+                    || dynamicRecord.BoundsSource.Positions != columnView.Positions
+                    || dynamicRecord.BoundsSource.Velocities != columnView.Velocities
+                    || dynamicRecord.BoundsSource.AnimatedVelocities
+                        != columnView.AnimatedVelocities
+                    || dynamicRecord.BoundsSource.NoiseSizeMultipliers
+                        != columnView.NoiseSizeMultipliers
+                    || dynamicRecord.BoundsSource.Sizes != columnView.Sizes;
                 dynamicRecord.IsRenderable = 1;
                 dynamicRecord.StorageCapacity = Mathf.Max(0, columnView.Capacity);
                 dynamicRecord.Positions = columnView.Positions;
@@ -7531,6 +7637,7 @@ namespace VividRP.Runtime.Particle
                             renderIdentity.SizeScale,
                             renderIdentity.StretchLengthScale,
                             renderIdentity.StretchSpeedScale,
+                            columnView,
                             out ParticleBoundsSource boundsSource))
                     {
                         dynamicRecord.BoundsSource = boundsSource;
@@ -7544,6 +7651,7 @@ namespace VividRP.Runtime.Particle
                 }
 
                 m_RendererBoundsDirty = false;
+                m_RendererBoundsSourceDirty = false;
             }
 
             internal unsafe bool TryCreateCurrentBoundsSource(
@@ -7599,9 +7707,52 @@ namespace VividRP.Runtime.Particle
                 if (!m_Storage.TryGetColumnView(out VividParticleEcsColumnView columnView))
                     return false;
 
+                return TryCreateBoundsSource(
+                    count,
+                    localToWorld,
+                    simulationSpace,
+                    renderMode,
+                    mesh,
+                    sizeScale,
+                    stretchLengthScale,
+                    stretchSpeedScale,
+                    columnView,
+                    out source);
+            }
+
+            private unsafe bool TryCreateBoundsSource(
+                int count,
+                float4x4 localToWorld,
+                int simulationSpace,
+                VividParticleRenderMode renderMode,
+                Mesh mesh,
+                float sizeScale,
+                float stretchLengthScale,
+                float stretchSpeedScale,
+                VividParticleEcsColumnView columnView,
+                out ParticleBoundsSource source)
+            {
+                source = default;
+                if (!columnView.IsValid || count <= 0)
+                    return false;
+
                 float meshExtent = 0.0f;
                 if (renderMode == VividParticleRenderMode.Mesh && mesh != null)
                     meshExtent = mesh.bounds.extents.magnitude;
+
+                TryGetNativeRenderModuleConfig(
+                    m_NativeSimulationConfigSlot,
+                    out VividParticleNativeRenderModuleConfig* config);
+                float sizeOverLifetimeMaxMultiplier = config != null
+                    ? math.max(0.0f, config->SizeOverLifetimeMaxMultiplier)
+                        * math.max(0.0f, config->SizeBySpeedMaxMultiplier)
+                    : 1.0f;
+                int animatedVelocityEnabled = config != null
+                    && (config->VelocityOverLifetimeEnabled != 0
+                        || config->InheritVelocityEnabled != 0
+                        || config->NoiseEnabled != 0)
+                        ? 1
+                        : 0;
 
                 source = new ParticleBoundsSource
                 {
@@ -7618,12 +7769,8 @@ namespace VividRP.Runtime.Particle
                     StretchLengthScale = stretchLengthScale,
                     StretchSpeedScale = stretchSpeedScale,
                     MeshExtent = meshExtent,
-                    SizeOverLifetimeMaxMultiplier = GetSizeOverLifetimeMaxMultiplier(),
-                    AnimatedVelocityEnabled = m_System.velocityOverLifetime.enabled
-                        || m_System.inheritVelocity.enabled
-                        || (m_System.noise.enabled && m_System.noise.hasPositionEffect)
-                            ? 1
-                            : 0,
+                    SizeOverLifetimeMaxMultiplier = sizeOverLifetimeMaxMultiplier,
+                    AnimatedVelocityEnabled = animatedVelocityEnabled,
                 };
                 return true;
             }
@@ -9162,40 +9309,6 @@ namespace VividRP.Runtime.Particle
                     renderSize * multiplier);
             }
 
-            private unsafe float GetSizeOverLifetimeMaxMultiplier()
-            {
-                if (m_System == null
-                    || (!m_System.sizeOverLifetime.enabled && !m_System.sizeBySpeed.enabled))
-                    return 1.0f;
-
-                float lifetimeMultiplier = TryGetNativeLifetimeModuleData(
-                        m_NativeSimulationConfigSlot,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out float maxSizeMultiplier)
-                    ? maxSizeMultiplier
-                    : 1.0f;
-                float speedMultiplier = TryGetNativeSpeedModuleData(
-                        m_NativeSimulationConfigSlot,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out _,
-                        out float maxSpeedSizeMultiplier)
-                    ? maxSpeedSizeMultiplier
-                    : 1.0f;
-                return lifetimeMultiplier * speedMultiplier;
-            }
-
             private float GetParticleSpeed(int particleIndex)
             {
                 Vector3 velocity = m_Storage.GetVelocity(particleIndex);
@@ -9527,7 +9640,10 @@ namespace VividRP.Runtime.Particle
 
             private void MarkInstanceRangeDirty(int startIndex, int count)
             {
-                MarkInstanceRangeDirty(startIndex, count, GetCurrentGpuDataLayout().PerInstanceUploadColumnMask);
+                MarkInstanceRangeDirty(
+                    startIndex,
+                    count,
+                    GetRenderGpuDataLayout().PerInstanceUploadColumnMask);
             }
 
             private void MarkInstanceRangeDirty(int startIndex, int count, int columnMask)
@@ -9540,7 +9656,7 @@ namespace VividRP.Runtime.Particle
                 if (count <= 0)
                     return;
 
-                VividParticleGpuDataLayout layout = GetCurrentGpuDataLayout();
+                VividParticleGpuDataLayout layout = GetRenderGpuDataLayout();
                 columnMask &= layout.PerInstanceUploadColumnMask;
                 if (columnMask == 0)
                     return;
@@ -9555,7 +9671,7 @@ namespace VividRP.Runtime.Particle
             {
                 ranges.Clear();
                 ranges.AddZeroBlock();
-                ranges.AddInstanceRange(0, m_Capacity, GetCurrentGpuDataLayout());
+                ranges.AddInstanceRange(0, m_Capacity, GetRenderGpuDataLayout());
                 QueueUploadDirtyIfNeeded();
                 MarkBoundsDirty();
             }
@@ -9568,11 +9684,16 @@ namespace VividRP.Runtime.Particle
 
             private void MarkRenderStateDirtyIfNeeded(int count)
             {
+                MarkRenderStateDirtyIfNeeded(count, GetRendererLocalToWorldMatrix());
+            }
+
+            private void MarkRenderStateDirtyIfNeeded(
+                int count,
+                Matrix4x4 localToWorld)
+            {
                 if (m_System == null)
                     return;
 
-                VividParticleGpuDataLayout layout = GetCurrentGpuDataLayout();
-                Matrix4x4 localToWorld = GetRendererLocalToWorldMatrix();
                 ParticleRenderEntry renderIdentity = m_CachedRenderIdentity;
                 Color rendererColor = renderIdentity.RendererColor;
                 float sizeScale = renderIdentity.SizeScale;
@@ -9618,6 +9739,7 @@ namespace VividRP.Runtime.Particle
                 if (!renderStateChanged && !activeCountChanged)
                     return;
 
+                VividParticleGpuDataLayout layout = renderIdentity.GpuLayout;
                 if (renderStateChanged)
                 {
                     bool hasPositionInfo =
@@ -9758,7 +9880,7 @@ namespace VividRP.Runtime.Particle
             private void MarkSharedDataDirty()
             {
                 MarkSharedDataDirty(
-                    GetCurrentGpuDataLayout().DataPerSharpBits,
+                    GetRenderGpuDataLayout().DataPerSharpBits,
                     SharedDataAllFloat4Mask);
             }
 
@@ -9766,7 +9888,7 @@ namespace VividRP.Runtime.Particle
                 uint dataBits,
                 uint sharedDataFloat4Mask = SharedDataAllFloat4Mask)
             {
-                VividParticleGpuDataLayout layout = GetCurrentGpuDataLayout();
+                VividParticleGpuDataLayout layout = GetRenderGpuDataLayout();
                 dataBits &= layout.DataPerSharpBits;
                 if (dataBits == 0u)
                     return;
@@ -9785,13 +9907,13 @@ namespace VividRP.Runtime.Particle
                 out int columnMask,
                 out bool spanDataDirty)
             {
-                int active = Mathf.Min(activeCount, m_Capacity);
+                int active = GetRenderActiveCount();
                 spanDataDirty = forceFullUpload || active != m_LastCompletedUploadActiveCount;
                 if (forceFullUpload)
                 {
                     startIndex = 0;
                     count = active;
-                    columnMask = GetCurrentGpuDataLayout().PerInstanceUploadColumnMask;
+                    columnMask = GetRenderGpuDataLayout().PerInstanceUploadColumnMask;
                     return count > 0;
                 }
 
@@ -9802,6 +9924,31 @@ namespace VividRP.Runtime.Particle
                 bool forceFullUpload,
                 out ParticlePendingUploadRequest request)
             {
+                return TryCapturePendingUploadRequest(
+                    forceFullUpload,
+                    default,
+                    usePreparedColumnView: false,
+                    out request);
+            }
+
+            internal unsafe bool TryCapturePendingUploadRequest(
+                bool forceFullUpload,
+                VividParticleEcsColumnView columnView,
+                out ParticlePendingUploadRequest request)
+            {
+                return TryCapturePendingUploadRequest(
+                    forceFullUpload,
+                    columnView,
+                    usePreparedColumnView: columnView.IsValid,
+                    out request);
+            }
+
+            private unsafe bool TryCapturePendingUploadRequest(
+                bool forceFullUpload,
+                VividParticleEcsColumnView columnView,
+                bool usePreparedColumnView,
+                out ParticlePendingUploadRequest request)
+            {
                 request = default;
                 bool hasInstanceRange = TryGetUploadRange(
                     forceFullUpload,
@@ -9809,7 +9956,7 @@ namespace VividRP.Runtime.Particle
                     out int count,
                     out int columnMask,
                     out bool spanDataDirty);
-                VividParticleGpuDataLayout layout = GetCurrentGpuDataLayout();
+                VividParticleGpuDataLayout layout = GetRenderGpuDataLayout();
                 uint sharedDataBits = forceFullUpload
                     ? layout.DataPerSharpBits
                     : GetPendingSharedDataBits();
@@ -9822,12 +9969,20 @@ namespace VividRP.Runtime.Particle
                     return true;
 
                 ParticleRenderUploadSource uploadSource = default;
-                if (hasInstanceRange
-                    && !TryCreateRenderUploadSource(
-                        batchBaseIndex: 0,
-                        batchDataOffset: 0,
-                        bufferBase: null,
-                        out uploadSource))
+                bool hasUploadSource = !hasInstanceRange
+                    || (usePreparedColumnView
+                        ? TryCreateRenderUploadSource(
+                            batchBaseIndex: 0,
+                            batchDataOffset: 0,
+                            bufferBase: null,
+                            columnView,
+                            out uploadSource)
+                        : TryCreateRenderUploadSource(
+                            batchBaseIndex: 0,
+                            batchDataOffset: 0,
+                            bufferBase: null,
+                            out uploadSource));
+                if (!hasUploadSource)
                 {
                     return false;
                 }
@@ -9868,14 +10023,14 @@ namespace VividRP.Runtime.Particle
 
             private bool HasPendingSpanData()
             {
-                return GetCurrentGpuDataLayout().SpanSharedDataBlockBits != 0u
-                    && Mathf.Min(activeCount, m_Capacity) != m_LastCompletedUploadActiveCount;
+                return GetRenderGpuDataLayout().SpanSharedDataBlockBits != 0u
+                    && GetRenderActiveCount() != m_LastCompletedUploadActiveCount;
             }
 
             internal void MarkEditorSelectionSharedDataDirty()
             {
                 MarkSharedDataDirty(
-                    GetCurrentGpuDataLayout().SharedDataBlockBits,
+                    GetRenderGpuDataLayout().SharedDataBlockBits,
                     SharedDataPickingFloat4Mask);
             }
 
@@ -10007,43 +10162,57 @@ namespace VividRP.Runtime.Particle
                 if (!m_Storage.TryGetColumnView(out VividParticleEcsColumnView columnView))
                     return false;
 
-                TryGetNativeLifetimeModuleData(
+                return TryCreateRenderUploadSource(
+                    batchBaseIndex,
+                    batchDataOffset,
+                    bufferBase,
+                    columnView,
+                    out source);
+            }
+
+            private unsafe bool TryCreateRenderUploadSource(
+                int batchBaseIndex,
+                int batchDataOffset,
+                byte* bufferBase,
+                VividParticleEcsColumnView columnView,
+                out ParticleRenderUploadSource source)
+            {
+                source = default;
+                if (m_System == null || !columnView.IsValid)
+                    return false;
+
+                TryGetNativeRenderModuleConfig(
                     m_NativeSimulationConfigSlot,
-                    out float4* colorOverLifetimeLut,
-                    out float* sizeOverLifetimeLut,
-                    out float* rotationOverLifetimeLut,
-                    out _,
-                    out _,
-                    out _,
-                    out _,
-                    out _,
-                    out _,
-                    out _);
-                TryGetNativeTextureSheetAnimationData(
-                    m_NativeSimulationConfigSlot,
-                    out float* textureSheetFrameOverTimeLut,
-                    out int textureSheetAnimationEnabled,
-                    out int textureSheetTilesX,
-                    out int textureSheetTilesY,
-                    out int textureSheetAnimationType,
-                    out int textureSheetRowIndex,
-                    out float textureSheetStartFrame,
-                    out float textureSheetCycleCount);
-                TryGetNativeSpeedModuleData(
-                    m_NativeSimulationConfigSlot,
-                    out float4* colorBySpeedLut,
-                    out float* sizeBySpeedLut,
-                    out int colorBySpeedEnabled,
-                    out int sizeBySpeedEnabled,
-                    out float2 colorBySpeedRange,
-                    out float2 sizeBySpeedRange,
-                    out _);
-                TryGetNativeCustomData(
-                    m_NativeSimulationConfigSlot,
-                    out float4* customData1Lut,
-                    out float4* customData2Lut,
-                    out int customData1Mode,
-                    out int customData2Mode);
+                    out VividParticleNativeRenderModuleConfig* config);
+                float4* colorOverLifetimeLut = config != null
+                    ? (float4*)config->ColorOverLifetimeLut
+                    : null;
+                float* sizeOverLifetimeLut = config != null
+                    ? config->SizeOverLifetimeLut
+                    : null;
+                float* rotationOverLifetimeLut = config != null
+                    ? config->RotationOverLifetimeLut
+                    : null;
+                float* textureSheetFrameOverTimeLut = config != null
+                    ? config->TextureSheetFrameOverTimeLut
+                    : null;
+                float4* colorBySpeedLut = config != null
+                    ? (float4*)config->ColorBySpeedLut
+                    : null;
+                float* sizeBySpeedLut = config != null
+                    ? config->SizeBySpeedLut
+                    : null;
+                float4* customData1Lut = config != null
+                    ? (float4*)config->CustomData1Lut
+                    : null;
+                float4* customData2Lut = config != null
+                    ? (float4*)config->CustomData2Lut
+                    : null;
+                bool hasCachedRenderIdentity = m_HasCachedRenderIdentity
+                    && !m_RenderIdentityDirty
+                    && !m_ResourcesDirty;
+                ParticleRenderEntry renderIdentity = m_CachedRenderIdentity;
+                VividParticleRendererModule rendererModule = m_System.rendererModule;
 
                 source = new ParticleRenderUploadSource
                 {
@@ -10057,13 +10226,19 @@ namespace VividRP.Runtime.Particle
                     MeshIndices = columnView.MeshIndices,
                     AccumulatedRotations = columnView.AccumulatedRotations,
                     NoiseSizeMultipliers = columnView.NoiseSizeMultipliers,
-                    ActiveCount = activeCount,
+                    ActiveCount = GetRenderActiveCount(),
                     ArchetypeLineId = columnView.ArchetypeLineId,
                     BatchBaseIndex = batchBaseIndex,
                     BatchDataOffset = batchDataOffset,
-                    SizeScale = m_System.rendererModule.sizeScale,
-                    MeshCount = Mathf.Max(0, m_System.rendererModule.meshCount),
-                    RendererColor = ToFloat4(m_System.rendererModule.color),
+                    SizeScale = hasCachedRenderIdentity
+                        ? renderIdentity.SizeScale
+                        : rendererModule.sizeScale,
+                    MeshCount = hasCachedRenderIdentity
+                        ? renderIdentity.MeshCount
+                        : Mathf.Max(0, rendererModule.meshCount),
+                    RendererColor = ToFloat4(hasCachedRenderIdentity
+                        ? renderIdentity.RendererColor
+                        : rendererModule.color),
                     ColorOverLifetimeLut = colorOverLifetimeLut,
                     ColorBySpeedLut = colorBySpeedLut,
                     SizeOverLifetimeLut = sizeOverLifetimeLut,
@@ -10073,19 +10248,33 @@ namespace VividRP.Runtime.Particle
                     CustomData1Lut = customData1Lut,
                     CustomData2Lut = customData2Lut,
                     RenderKernelFlags = (uint)m_Storage.renderKernelSharedKey.EnabledFlags,
-                    ColorBySpeedEnabled = colorBySpeedEnabled,
-                    SizeBySpeedEnabled = sizeBySpeedEnabled,
-                    ColorBySpeedRange = colorBySpeedRange,
-                    SizeBySpeedRange = sizeBySpeedRange,
-                    TextureSheetAnimationEnabled = textureSheetAnimationEnabled,
-                    TextureSheetTilesX = textureSheetTilesX,
-                    TextureSheetTilesY = textureSheetTilesY,
-                    TextureSheetAnimationType = textureSheetAnimationType,
-                    TextureSheetRowIndex = textureSheetRowIndex,
-                    TextureSheetStartFrame = textureSheetStartFrame,
-                    TextureSheetCycleCount = textureSheetCycleCount,
-                    CustomData1Mode = customData1Mode,
-                    CustomData2Mode = customData2Mode,
+                    ColorBySpeedEnabled = config != null ? config->ColorBySpeedEnabled : 0,
+                    SizeBySpeedEnabled = config != null ? config->SizeBySpeedEnabled : 0,
+                    ColorBySpeedRange = config != null
+                        ? config->ColorBySpeedRange
+                        : new float2(0.0f, 1.0f),
+                    SizeBySpeedRange = config != null
+                        ? config->SizeBySpeedRange
+                        : new float2(0.0f, 1.0f),
+                    TextureSheetAnimationEnabled = config != null
+                        ? config->TextureSheetAnimationEnabled
+                        : 0,
+                    TextureSheetTilesX = config != null ? math.max(1, config->TextureSheetTilesX) : 1,
+                    TextureSheetTilesY = config != null ? math.max(1, config->TextureSheetTilesY) : 1,
+                    TextureSheetAnimationType = config != null ? config->TextureSheetAnimationType : 0,
+                    TextureSheetRowIndex = config != null
+                        ? math.clamp(config->TextureSheetRowIndex, 0, math.max(1, config->TextureSheetTilesY) - 1)
+                        : 0,
+                    TextureSheetStartFrame = config != null ? config->TextureSheetStartFrame : 0.0f,
+                    TextureSheetCycleCount = config != null
+                        ? math.max(0.0f, config->TextureSheetCycleCount)
+                        : 1.0f,
+                    CustomData1Mode = config != null
+                        ? config->CustomData1Mode
+                        : (int)VividParticleCustomDataMode.Disabled,
+                    CustomData2Mode = config != null
+                        ? config->CustomData2Mode
+                        : (int)VividParticleCustomDataMode.Disabled,
                     BufferBase = bufferBase,
                 };
                 return true;
@@ -14346,13 +14535,20 @@ namespace VividRP.Runtime.Particle
                         record.RecordSlot,
                         record.RecordVersion,
                         out ParticleRendererDynamicRecord cachedDynamicRecord)
-                    && state.TryPrepareCachedRenderDynamicUpdate(forceUpload))
+                    && state.TryPrepareCachedRenderDynamicUpdate(
+                        forceUpload,
+                        out int activeCount,
+                        out Matrix4x4 localToWorldMatrix))
                 {
                     record.State = state;
-                    state.RefreshRendererDynamicBoundsData(ref cachedDynamicRecord);
+                    state.RefreshRendererDynamicBoundsData(
+                        ref cachedDynamicRecord,
+                        activeCount,
+                        localToWorldMatrix,
+                        out VividParticleEcsColumnView columnView);
                     m_NativeRendererRecords[record.RecordSlot] = cachedDynamicRecord;
                     if (state.HasPendingUploadData())
-                        QueueUploadDirty(record);
+                        QueueUploadDirty(record, columnView);
                     updatedRecordSlot = record.RecordSlot;
                     updatedDynamicRecord = cachedDynamicRecord;
                     return true;
@@ -14415,30 +14611,60 @@ namespace VividRP.Runtime.Particle
 
             public void QueueUploadDirty(ParticleSystemState state)
             {
-                if (state == null || !state.rendererHandle.IsValid)
+                if (state == null)
                     return;
 
                 VividParticleRendererHandle handle = state.rendererHandle;
-                if (!TryGetNativeRendererRecord(
+                if (!handle.IsValid
+                    || !TryGetNativeRendererRecord(
                         handle.RecordSlot,
                         handle.RecordVersion,
-                        out _)
-                    || !TryGetNativePendingUploadState(
-                        handle.RecordSlot,
-                        handle.RecordVersion,
-                        out ParticlePendingUploadState pendingState)
-                    || !state.TryCapturePendingUploadRequest(
-                        forceFullUpload: false,
-                        out ParticlePendingUploadRequest request))
+                        out _))
                 {
                     return;
                 }
+
+                QueueUploadDirtyCore(
+                    state,
+                    handle.RecordSlot,
+                    handle.RecordVersion,
+                    default,
+                    usePreparedColumnView: false);
+            }
+
+            private void QueueUploadDirtyCore(
+                ParticleSystemState state,
+                int recordSlot,
+                int recordVersion,
+                VividParticleEcsColumnView columnView,
+                bool usePreparedColumnView)
+            {
+                if (state == null
+                    || !TryGetNativePendingUploadState(
+                        recordSlot,
+                        recordVersion,
+                        out ParticlePendingUploadState pendingState))
+                {
+                    return;
+                }
+
+                ParticlePendingUploadRequest request;
+                bool capturedRequest = usePreparedColumnView
+                    ? state.TryCapturePendingUploadRequest(
+                        forceFullUpload: false,
+                        columnView,
+                        out request)
+                    : state.TryCapturePendingUploadRequest(
+                        forceFullUpload: false,
+                        out request);
+                if (!capturedRequest)
+                    return;
 
                 if (!request.HasData)
                 {
                     state.ClearUploadDirty();
                     pendingState.Request = default;
-                    m_NativePendingUploadStates[handle.RecordSlot] = pendingState;
+                    m_NativePendingUploadStates[recordSlot] = pendingState;
                     return;
                 }
 
@@ -14449,13 +14675,13 @@ namespace VividRP.Runtime.Particle
                     EnsureNativeUploadQueues();
                     m_DirtyUploadRecords.Add(new ParticleUploadRecordRef
                     {
-                        RecordSlot = handle.RecordSlot,
-                        RecordVersion = handle.RecordVersion,
+                        RecordSlot = recordSlot,
+                        RecordVersion = recordVersion,
                     });
                     pendingState.IsQueued = 1;
                 }
 
-                m_NativePendingUploadStates[handle.RecordSlot] = pendingState;
+                m_NativePendingUploadStates[recordSlot] = pendingState;
             }
 
             public bool MarkFirstBatchZeroBlockDirtyForTests()
@@ -14741,7 +14967,29 @@ namespace VividRP.Runtime.Particle
             private void QueueUploadDirty(ParticleRenderRecord record)
             {
                 if (record?.State != null)
-                    QueueUploadDirty(record.State);
+                {
+                    QueueUploadDirtyCore(
+                        record.State,
+                        record.RecordSlot,
+                        record.RecordVersion,
+                        default,
+                        usePreparedColumnView: false);
+                }
+            }
+
+            private void QueueUploadDirty(
+                ParticleRenderRecord record,
+                VividParticleEcsColumnView columnView)
+            {
+                if (record?.State != null)
+                {
+                    QueueUploadDirtyCore(
+                        record.State,
+                        record.RecordSlot,
+                        record.RecordVersion,
+                        columnView,
+                        columnView.IsValid);
+                }
             }
 
             private static int NextUploadRevision(int revision)

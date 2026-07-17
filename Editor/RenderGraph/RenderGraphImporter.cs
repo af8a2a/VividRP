@@ -10,7 +10,7 @@ using VividRP.Runtime;
 
 namespace VividRP.Editor.RenderGraph
 {
-    [ScriptedImporter(4, RenderGraphEditorGraph.AssetExtension)]
+    [ScriptedImporter(5, RenderGraphEditorGraph.AssetExtension)]
     internal sealed class RenderGraphImporter : ScriptedImporter
     {
         public override void OnImportAsset(AssetImportContext ctx)
@@ -21,6 +21,9 @@ namespace VividRP.Editor.RenderGraph
                 Debug.LogError($"Failed to load Render Graph asset: {ctx.assetPath}");
                 return;
             }
+
+            if (RenderGraphDrawObjectPassMigration.Migrate(graph, ctx.assetPath))
+                RenderGraphDrawObjectPassMigration.SchedulePersistence(ctx.assetPath);
 
             var runtimeAsset = ScriptableObject.CreateInstance<VividRP.Runtime.RenderGraphData>();
             runtimeAsset.ImportVersion = DateTime.UtcNow.Ticks;
@@ -170,9 +173,11 @@ namespace VividRP.Editor.RenderGraph
                 var passDefinition = new RenderGraphPassDefinition
                 {
                     PassType = $"{passType.FullName}, {passType.Assembly.GetName().Name}",
+                    PassName = GetPassDisplayName(passNode, passType.Name),
                     EnableAsyncCompute = ResolveAsyncComputeSetting(passType, passNode.GetEnableAsyncCompute()),
                 };
 
+                passNode.PopulateRenderListDescParameters(passDefinition);
                 passNode.PopulateFloatParameters(passDefinition);
                 passNode.PopulateEnumParameters(passDefinition);
 

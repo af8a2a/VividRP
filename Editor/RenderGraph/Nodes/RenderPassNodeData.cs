@@ -45,6 +45,7 @@ namespace VividRP.Editor.RenderGraph
             if (!UsesPassScriptSelection)
             {
                 AddPassOwnedOverrideOptions(context, passType);
+                AddRenderListDescParameterOptions(context, passType);
                 AddFloatParameterOptions(context, passType);
                 AddEnumParameterOptions(context, passType);
                 if (ShouldDefineAsyncComputeOption(passType))
@@ -58,6 +59,7 @@ namespace VividRP.Editor.RenderGraph
                 .Delayed();
 
             AddPassOwnedOverrideOptions(context, passType);
+            AddRenderListDescParameterOptions(context, passType);
             AddFloatParameterOptions(context, passType);
             AddEnumParameterOptions(context, passType);
 
@@ -291,6 +293,29 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
+        internal void PopulateRenderListDescParameters(RenderGraphPassDefinition passDefinition)
+        {
+            if (passDefinition == null)
+                return;
+
+            var passType = GetPassType();
+            if (passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassRenderListDescParameterUtility.EnumerateSerializableFields(passType))
+            {
+                var option = GetNodeOptionByName(RenderGraphPassRenderListDescParameterUtility.GetOptionName(field.Name));
+                if (option == null || !option.TryGetValue<RenderGraphRenderListDesc>(out var value))
+                    continue;
+
+                passDefinition.RenderListDescParameters.Add(new RenderGraphPassRenderListDescParameter
+                {
+                    FieldName = field.Name,
+                    Value = value != null ? value.Clone() : new RenderGraphRenderListDesc(),
+                });
+            }
+        }
+
         internal bool TryGetFloatParameterValue(string fieldName, out float value)
         {
             value = default;
@@ -435,6 +460,20 @@ namespace VividRP.Editor.RenderGraph
             }
         }
 
+        private static void AddRenderListDescParameterOptions(IOptionDefinitionContext context, Type passType)
+        {
+            if (context == null || passType == null)
+                return;
+
+            foreach (var field in RenderGraphPassRenderListDescParameterUtility.EnumerateSerializableFields(passType))
+            {
+                context.AddOption<RenderGraphRenderListDesc>(RenderGraphPassRenderListDescParameterUtility.GetOptionName(field.Name))
+                    .WithDisplayName(BuildRenderListDescParameterDisplayName(field))
+                    .WithDefaultValue(RenderGraphPassRenderListDescParameterUtility.GetDefaultValue(passType, field))
+                    .ShowInInspectorOnly();
+            }
+        }
+
         private static void AddEnumParameterOptions(IOptionDefinitionContext context, Type passType)
         {
             if (context == null || passType == null)
@@ -503,6 +542,14 @@ namespace VividRP.Editor.RenderGraph
         private static string BuildEnumParameterDisplayName(FieldInfo field)
         {
             return BuildFloatParameterDisplayName(field);
+        }
+
+        private static string BuildRenderListDescParameterDisplayName(FieldInfo field)
+        {
+            var displayName = BuildFloatParameterDisplayName(field);
+            return displayName.EndsWith(" Desc", StringComparison.Ordinal)
+                ? $"{displayName.Substring(0, displayName.Length - " Desc".Length)} Descriptor"
+                : displayName;
         }
 
         private static object AddEnumOption(IOptionDefinitionContext context, FieldInfo field)

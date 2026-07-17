@@ -13,12 +13,22 @@ namespace VividRP.Editor.RenderGraph
     [Graph(AssetExtension, GraphOptions.SupportsSubgraphs)]
     internal class RenderGraphEditorGraph : Graph
     {
+        internal const int CurrentSchemaVersion = 1;
         internal const string AssetExtension = "vrdg";
         internal const string StandardGraphTemplateMenuPath = "Assets/Create/VividRP/Standard Render Graph";
         internal const string StandardGraphTemplateRelativePath = "Editor/RenderGraph/Templates/StandardRenderGraph.vrdg.txt";
         private const string StandardGraphTemplateFileName = "StandardRenderGraph.vrdg.txt";
         private const string DefaultGraphName = "Vivid Render Graph";
         private const string DefaultStandardGraphName = "Standard Vivid Render Graph";
+
+        [SerializeField]
+        private int m_SchemaVersion;
+
+        internal int SchemaVersion
+        {
+            get => m_SchemaVersion;
+            set => m_SchemaVersion = value;
+        }
 
         [MenuItem("Assets/Create/VividRP/Render Graph", false)]
         private static void CreateAssetFile()

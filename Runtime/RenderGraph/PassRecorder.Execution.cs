@@ -288,12 +288,24 @@ namespace VividRP.Runtime
                 : -1;
         }
 
+        private static RenderPassProfilerMarkers GetPassMarkers(IRenderPass pass, string displayName = null)
+        {
+            var passIndex = ResolvePassIndex(pass);
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                var passDefinition = GetRuntimePassDefinition(s_RuntimePassDefinitions, passIndex);
+                displayName = passDefinition?.PassName;
+            }
+
+            return RenderPassProfilingUtility.GetMarkers(pass, displayName, passIndex);
+        }
+
         private static void CreateRenderPass(IRenderPass pass, string displayName = null)
         {
             if (pass == null)
                 return;
 
-            var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+            var markers = GetPassMarkers(pass, displayName);
             using (markers.Create.Auto())
             {
                 pass.Create();
@@ -305,7 +317,7 @@ namespace VividRP.Runtime
             if (pass == null)
                 return;
 
-            var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+            var markers = GetPassMarkers(pass, displayName);
             using (markers.Prepare.Auto())
             {
                 pass.Prepare(s_FrameData);
@@ -323,7 +335,7 @@ namespace VividRP.Runtime
             if (pass == null)
                 return;
 
-            var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+            var markers = GetPassMarkers(pass, displayName);
             using (markers.Dispose.Auto())
             {
                 pass.Dispose();
@@ -919,6 +931,10 @@ namespace VividRP.Runtime
 
                     RenderGraphPassFloatParameterUtility.ApplyFloatParameters(pass, passType, passDef?.FloatParameters);
                     RenderGraphPassEnumParameterUtility.ApplyEnumParameters(pass, passType, passDef?.EnumParameters);
+                    RenderGraphPassRenderListDescParameterUtility.ApplyParameters(
+                        pass,
+                        passType,
+                        passDef?.RenderListDescParameters);
 
                     ApplyResourceBindings(
                         pass,
@@ -1635,7 +1651,7 @@ namespace VividRP.Runtime
                 for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
                 {
                     var pass = s_RenderPasses[passIndex];
-                    var markers = RenderPassProfilingUtility.GetMarkers(pass, null, ResolvePassIndex(pass));
+                    var markers = GetPassMarkers(pass);
                     PassResource resources;
                     using (RenderPassProfilingUtility.RecordRenderGraphPrepareAllResolveResourcesMarker.Auto())
                     using (markers.RecordGraphResolveResources.Auto())
@@ -1700,7 +1716,7 @@ namespace VividRP.Runtime
                 for (var passIndex = 0; passIndex < s_RenderPasses.Count; passIndex++)
                 {
                     var pass = s_RenderPasses[passIndex];
-                    var markers = RenderPassProfilingUtility.GetMarkers(pass, null, ResolvePassIndex(pass));
+                    var markers = GetPassMarkers(pass);
                     using (markers.RecordGraphPrepareRenderGraph.Auto())
                     {
                         PrepareRenderGraphPass(pass);
@@ -2168,7 +2184,7 @@ namespace VividRP.Runtime
 
             if (!hasResources || needsRefresh)
             {
-                var markers = RenderPassProfilingUtility.GetMarkers(pass, displayName, ResolvePassIndex(pass));
+                var markers = GetPassMarkers(pass, displayName);
                 using (markers.Initialize.Auto())
                 {
                     resources = pass.Initialize();

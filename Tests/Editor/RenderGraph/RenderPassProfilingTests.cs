@@ -1,7 +1,11 @@
+using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -10,6 +14,7 @@ namespace VividRP.Editor.Tests
         [TearDown]
         public void TearDown()
         {
+            PassRecorder.Dispose();
             RenderPassProfilingUtility.Clear();
         }
 
@@ -57,6 +62,54 @@ namespace VividRP.Editor.Tests
             var injectedMarkers = RenderPassProfilingUtility.GetMarkers(pass, "ProfilingTestPass (Injected)", 3);
 
             Assert.That(injectedMarkers, Is.Not.SameAs(defaultMarkers));
+        }
+
+        [Test]
+        public void PassRecorder_UsesPassDefinitionName_ForGraphAndLifecycleMarkers()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<DrawObjectPass>(),
+                PassName = "Transparent Characters",
+            });
+
+            try
+            {
+                Compile(graphAsset);
+                var pass = GetCompiledPasses()[0];
+                var markers = GetPassMarkers(pass);
+
+                Assert.That(markers.GraphName, Is.EqualTo("Transparent Characters"));
+                Assert.That(markers.DisplayName, Is.EqualTo("0:Transparent Characters"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
+        public void PassRecorder_FallsBackToPassTypeName_WhenLegacyPassNameIsMissing()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<DrawObjectPass>(),
+            });
+
+            try
+            {
+                Compile(graphAsset);
+                var markers = GetPassMarkers(GetCompiledPasses()[0]);
+
+                Assert.That(markers.GraphName, Is.EqualTo(nameof(DrawObjectPass)));
+                Assert.That(markers.DisplayName, Is.EqualTo($"0:{nameof(DrawObjectPass)}"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
         }
 
         [Test]
@@ -298,6 +351,33 @@ namespace VividRP.Editor.Tests
                 path = Path.Combine(path, part);
 
             return path;
+        }
+
+        private static void Compile(RenderGraphData graphAsset)
+        {
+            var method = typeof(PassRecorder).GetMethod("Compile", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+            method.Invoke(null, new object[] { graphAsset });
+        }
+
+        private static IList<IRenderPass> GetCompiledPasses()
+        {
+            var field = typeof(PassRecorder).GetField("s_RenderPasses", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(field, Is.Not.Null);
+            return (IList<IRenderPass>)field.GetValue(null);
+        }
+
+        private static RenderPassProfilerMarkers GetPassMarkers(IRenderPass pass)
+        {
+            var method = typeof(PassRecorder).GetMethod("GetPassMarkers", BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(method, Is.Not.Null);
+            return (RenderPassProfilerMarkers)method.Invoke(null, new object[] { pass, null });
+        }
+
+        private static string GetPassTypeName<T>()
+        {
+            var type = typeof(T);
+            return $"{type.FullName}, {type.Assembly.GetName().Name}";
         }
 
         private sealed class ProfilingTestPass : RasterPass

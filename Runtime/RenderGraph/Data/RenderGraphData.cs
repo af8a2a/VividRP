@@ -61,6 +61,13 @@ namespace VividRP.Runtime
         public int Value;
     }
 
+    [Serializable]
+    public sealed class RenderGraphPassRenderListDescParameter
+    {
+        public string FieldName;
+        public RenderGraphRenderListDesc Value;
+    }
+
     internal static class RenderGraphPassBindingUtility
     {
         internal static bool UsesInputConnection(RenderGraphPassBindingConnectionKind connectionKind)
@@ -108,10 +115,12 @@ namespace VividRP.Runtime
     public sealed class RenderGraphPassDefinition
     {
         public string PassType;
+        public string PassName;
         public bool EnableAsyncCompute;
         public List<RenderGraphPassResourceBinding> ResourceBindings = new();
         public List<RenderGraphPassFloatParameter> FloatParameters = new();
         public List<RenderGraphPassEnumParameter> EnumParameters = new();
+        public List<RenderGraphPassRenderListDescParameter> RenderListDescParameters = new();
     }
 
     public sealed class RenderGraphData : ScriptableObject

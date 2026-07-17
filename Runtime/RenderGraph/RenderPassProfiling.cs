@@ -32,6 +32,7 @@ namespace VividRP.Runtime
             RecordGraphSetRenderFunc = new ProfilerMarker($"{MarkerRoot}.RecordGraph.SetRenderFunc/{displayName}");
             Record = new ProfilerMarker($"{MarkerRoot}.Record/{displayName}");
             Dispose = new ProfilerMarker($"{MarkerRoot}.Dispose/{displayName}");
+            DisplayName = displayName;
             GraphName = graphName;
         }
 
@@ -49,6 +50,7 @@ namespace VividRP.Runtime
         public ProfilerMarker RecordGraphSetRenderFunc { get; }
         public ProfilerMarker Record { get; }
         public ProfilerMarker Dispose { get; }
+        public string DisplayName { get; }
         public string GraphName { get; }
     }
 

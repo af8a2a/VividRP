@@ -183,6 +183,53 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void OrderPassDefinitions_PreservesPassNameAndRenderListDescriptorParameters_WhenPassesAreReordered()
+        {
+            var descriptor = RenderGraphRenderListDesc.CreateTransparent("TransparentCharacter");
+            var passDefinitions = new List<RenderGraphPassDefinition>
+            {
+                new()
+                {
+                    PassType = GetPassTypeName<FinalBlitPass>(),
+                    ResourceBindings =
+                    {
+                        new RenderGraphPassResourceBinding
+                        {
+                            FieldName = "source",
+                            ResourceKind = RenderGraphResourceKind.Texture,
+                            SourceKind = RenderGraphPassBindingSourceKind.PassField,
+                            SourcePassIndex = 1,
+                            SourceFieldName = "m_ColorTarget",
+                        }
+                    }
+                },
+                new()
+                {
+                    PassType = GetPassTypeName<DrawObjectPass>(),
+                    PassName = "Transparent Characters",
+                    RenderListDescParameters =
+                    {
+                        new RenderGraphPassRenderListDescParameter
+                        {
+                            FieldName = "m_RenderListDesc",
+                            Value = descriptor,
+                        }
+                    }
+                }
+            };
+
+            var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
+
+            Assert.That(ordered[0].PassName, Is.EqualTo("Transparent Characters"));
+            Assert.That(ordered[0].RenderListDescParameters, Has.Count.EqualTo(1));
+            Assert.That(ordered[0].RenderListDescParameters[0].Value, Is.Not.SameAs(descriptor));
+            Assert.That(
+                ordered[0].RenderListDescParameters[0].Value.ShaderTagNames,
+                Is.EqualTo(new[] { "TransparentCharacter" }));
+            Assert.That(ordered[1].ResourceBindings[0].SourcePassIndex, Is.EqualTo(0));
+        }
+
+        [Test]
         public void OrderPassDefinitions_SortsSharedResourceWriterBeforeWriteOnlyInputConsumer()
         {
             var passDefinitions = new List<RenderGraphPassDefinition>
@@ -413,6 +460,55 @@ namespace VividRP.Editor.Tests
                     GetPassTypeName<DrawObjectPass>(),
                     GetPassTypeName<FinalBlitPass>(),
                 }));
+                Assert.That(result.Passes.Select(pass => pass.PassName), Is.EqualTo(new[]
+                {
+                    nameof(DrawObjectPass),
+                    nameof(FinalBlitPass),
+                }));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_StoresCustomNodeTitleAndEmbeddedRenderListDescriptor()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var finalBlitNode = new FinalBlitPassNode();
+                var drawObjectNode = new DrawObjectPassNode
+                {
+                    Title = "Transparent Characters"
+                };
+                var descriptor = RenderGraphRenderListDesc.CreateTransparent("TransparentCharacter", "SpecialForward");
+                descriptor.LayerMask = 1 << 6;
+                var descriptorOption = drawObjectNode.GetNodeOptionByName(
+                    RenderGraphPassRenderListDescParameterUtility.GetOptionName("m_RenderListDesc"));
+
+                Assert.That(descriptorOption, Is.Not.Null);
+                Assert.That(descriptorOption.TrySetValue(descriptor), Is.True);
+
+                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+                graph.Connect(
+                    drawObjectNode.GetOutputPortByName("m_ColorTarget_Out"),
+                    finalBlitNode.GetInputPortByName("source"));
+
+                var result = RenderGraphCompiler.Compile(graph);
+                var passDefinition = result.Passes[0];
+
+                Assert.That(passDefinition.PassName, Is.EqualTo("Transparent Characters"));
+                Assert.That(result.ExecutionOrder[0].DisplayName, Is.EqualTo("Transparent Characters"));
+                Assert.That(passDefinition.RenderListDescParameters, Has.Count.EqualTo(1));
+                Assert.That(passDefinition.RenderListDescParameters[0].FieldName, Is.EqualTo("m_RenderListDesc"));
+                Assert.That(passDefinition.RenderListDescParameters[0].Value, Is.Not.SameAs(descriptor));
+                Assert.That(passDefinition.RenderListDescParameters[0].Value.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Transparent));
+                Assert.That(passDefinition.RenderListDescParameters[0].Value.LayerMask, Is.EqualTo(1 << 6));
+                Assert.That(passDefinition.RenderListDescParameters[0].Value.ShaderTagNames, Is.EqualTo(descriptor.ShaderTagNames));
             }
             finally
             {

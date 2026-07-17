@@ -260,8 +260,28 @@ namespace VividRP.Editor.RenderGraph
             var clone = new RenderGraphPassDefinition
             {
                 PassType = source?.PassType,
+                PassName = source?.PassName,
                 EnableAsyncCompute = source?.EnableAsyncCompute ?? false,
             };
+
+            if (source?.RenderListDescParameters != null)
+            {
+                for (var i = 0; i < source.RenderListDescParameters.Count; i++)
+                {
+                    var parameter = source.RenderListDescParameters[i];
+                    if (parameter == null)
+                    {
+                        clone.RenderListDescParameters.Add(null);
+                        continue;
+                    }
+
+                    clone.RenderListDescParameters.Add(new RenderGraphPassRenderListDescParameter
+                    {
+                        FieldName = parameter.FieldName,
+                        Value = parameter.Value != null ? parameter.Value.Clone() : null,
+                    });
+                }
+            }
 
             if (source?.FloatParameters != null)
             {

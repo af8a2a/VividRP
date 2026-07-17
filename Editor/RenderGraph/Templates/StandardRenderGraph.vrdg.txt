@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 12501, guid: 0000000000000000e000000000000000, type: 0}
-  m_Name: Standard Vivid Render Graph
+  m_Name: StandardRenderGraph
   m_EditorClassIdentifier: UnityEditor.dll::Unity.GraphToolkit.Editor.Implementation.GraphObjectImp
   m_GraphModel:
     rid: 8515051663678505028
@@ -553,10 +553,12 @@ MonoBehaviour:
           - __option_DebugExport
           - m_DepthTexture
           - m_GlobalAtomicBuffer_In
+          - __option_AsyncCompute
           m_ValueList:
           - rid: 5491569314989342778
           - rid: 5491569314989342779
           - rid: 5491569314989342780
+          - rid: 5830558825008857706
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
@@ -3093,6 +3095,33 @@ MonoBehaviour:
           m_PortDirection: 1
           m_PortOrientation: 0
           m_Title: Depth (R)
+    - rid: 5830558825008857706
+      type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 0
+    - rid: 5830558825008857707
+      type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value: 0
+    - rid: 5830558825008857708
+      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphRenderListDesc, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
+      data:
+        m_Value:
+          ShaderTagNames:
+          - VividForward
+          - SRPDefaultUnlit
+          RenderQueueRange: 2
+          SortingCriteria: 55
+          LayerMask:
+            serializedVersion: 2
+            m_Bits: 4294967295
+          RenderingLayerMask: 4294967295
+          RendererConfiguration: 0
+          ExcludeObjectMotionVectors: 0
+          OverrideMaterial: {fileID: 0}
+          OverrideMaterialPassIndex: 0
+          OverrideShader: {fileID: 0}
+          OverrideShaderPassIndex: 0
     - rid: 8515051663678505028
       type: {class: GraphModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -3108,7 +3137,6 @@ MonoBehaviour:
         - rid: 8515051663678505382
         - rid: 8515051663678505384
         - rid: 8515051663678505387
-        - rid: 8515051663678505388
         - rid: 8515051663678505390
         - rid: 8515051663678505391
         - rid: 8515051663678505392
@@ -3130,7 +3158,6 @@ MonoBehaviour:
         - rid: 5491569450071621755
         - rid: 5491569460029161592
         m_GraphWireModels:
-        - rid: 8515051663678505396
         - rid: 8515051663678505411
         - rid: 8515051663678505412
         - rid: 8515051663678505419
@@ -3247,21 +3274,13 @@ MonoBehaviour:
           m_Category: 0
           m_Index: 3
         - m_Guid:
-            m_Value0: 7668370386094844581
-            m_Value1: 15915978518327414198
-          m_HashGuid:
-            serializedVersion: 2
-            Hash: a5ea4ec53c866b6ab64da7cd22eae0dc
-          m_Category: 0
-          m_Index: 4
-        - m_Guid:
             m_Value0: 2983821077163098419
             m_Value1: 3183091673710259982
           m_HashGuid:
             serializedVersion: 2
             Hash: 3341a1f175a968290eef0033039d2c2c
           m_Category: 0
-          m_Index: 5
+          m_Index: 4
         - m_Guid:
             m_Value0: 12641916380643770237
             m_Value1: 14247519975246076971
@@ -3269,7 +3288,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 7dbf76ecf71b71af2b1cd34eee5bb9c5
           m_Category: 0
-          m_Index: 6
+          m_Index: 5
         - m_Guid:
             m_Value0: 13447292285677884498
             m_Value1: 12964814316980864975
@@ -3277,7 +3296,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 5254ae4616619ebacf078b46ee45ecb3
           m_Category: 0
-          m_Index: 7
+          m_Index: 6
         - m_Guid:
             m_Value0: 15017966768999709624
             m_Value1: 12486112028095827440
@@ -3285,15 +3304,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: b83bd93235896ad0f04d623cbc9447ad
           m_Category: 0
-          m_Index: 8
-        - m_Guid:
-            m_Value0: 7262310277089958516
-            m_Value1: 8260615910973114908
-          m_HashGuid:
-            serializedVersion: 2
-            Hash: 749a9d3ab8e8c8641c0a7e87679aa372
-          m_Category: 2
-          m_Index: 0
+          m_Index: 7
         - m_Guid:
             m_Value0: 2751439900360258021
             m_Value1: 6172227919107321600
@@ -3301,7 +3312,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: e531cff902142f2600ef232f9728a855
           m_Category: 2
-          m_Index: 1
+          m_Index: 0
         - m_Guid:
             m_Value0: 15455880737514239508
             m_Value1: 15092948888704233111
@@ -3309,7 +3320,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 14b6565aa4517ed697ae57640ced74d1
           m_Category: 2
-          m_Index: 2
+          m_Index: 1
         - m_Guid:
             m_Value0: 13304589890085781313
             m_Value1: 3844119915947517527
@@ -3317,7 +3328,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 41ffd0a80366a3b857660e50b20e5935
           m_Category: 2
-          m_Index: 3
+          m_Index: 2
         - m_Guid:
             m_Value0: 13452917271151572255
             m_Value1: 5654668131305242374
@@ -3325,7 +3336,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 1ff5b443fb5cb2ba06bf2ba9b46a794e
           m_Category: 0
-          m_Index: 9
+          m_Index: 8
         - m_Guid:
             m_Value0: 10223257916636454421
             m_Value1: 12617774400816518758
@@ -3333,7 +3344,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 15de50f8e84ee08d6696af38f7561baf
           m_Category: 0
-          m_Index: 10
+          m_Index: 9
         - m_Guid:
             m_Value0: 21932932139074244
             m_Value1: 14656963000287715480
@@ -3341,7 +3352,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c44208b5e2eb4d009860315e31fe67cb
           m_Category: 2
-          m_Index: 4
+          m_Index: 3
         - m_Guid:
             m_Value0: 18200468159899169475
             m_Value1: 12389399382411580938
@@ -3349,7 +3360,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c3f298785c0d95fc0a1616b118fdefab
           m_Category: 2
-          m_Index: 5
+          m_Index: 4
         - m_Guid:
             m_Value0: 1224947385825656936
             m_Value1: 6845526926473991413
@@ -3357,7 +3368,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 6880ae4828e3ff10f594da707832005f
           m_Category: 0
-          m_Index: 11
+          m_Index: 10
         - m_Guid:
             m_Value0: 18017486346859053523
             m_Value1: 16702959047303313435
@@ -3365,7 +3376,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: d301fc295ff80afa1b3869e8c1d4cce7
           m_Category: 0
-          m_Index: 12
+          m_Index: 11
         - m_Guid:
             m_Value0: 11429808081567808696
             m_Value1: 4572677524601980425
@@ -3373,7 +3384,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: b8fcbc78e4d59e9e09465046fb69753f
           m_Category: 2
-          m_Index: 6
+          m_Index: 5
         - m_Guid:
             m_Value0: 16316606869240089566
             m_Value1: 9337805631891666258
@@ -3381,7 +3392,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: de0bc19c7f3b70e252758b96bf8c9681
           m_Category: 2
-          m_Index: 7
+          m_Index: 6
         - m_Guid:
             m_Value0: 4535342844884438037
             m_Value1: 14555642438304131739
@@ -3389,7 +3400,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 154cf2c349c6f03e9beab7b4ad0700ca
           m_Category: 0
-          m_Index: 13
+          m_Index: 12
         - m_Guid:
             m_Value0: 2594740603096511682
             m_Value1: 273098101407102178
@@ -3397,7 +3408,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c2b4d9bbd45e0224e23434bb463dca03
           m_Category: 2
-          m_Index: 8
+          m_Index: 7
         - m_Guid:
             m_Value0: 16912705090031542942
             m_Value1: 12883694126507583097
@@ -3405,7 +3416,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 9e62450aacffb5ea7966451d8c13ccb2
           m_Category: 0
-          m_Index: 14
+          m_Index: 13
         - m_Guid:
             m_Value0: 1848716744164423367
             m_Value1: 8597936806875377812
@@ -3413,7 +3424,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c7b63c7a15f6a719943010d7f8015277
           m_Category: 2
-          m_Index: 9
+          m_Index: 8
         - m_Guid:
             m_Value0: 17138362329558295555
             m_Value1: 5751321801288930233
@@ -3421,7 +3432,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 0324425dbcb1d7edb953c9dab4ccd04f
           m_Category: 2
-          m_Index: 10
+          m_Index: 9
         - m_Guid:
             m_Value0: 8282542651377706910
             m_Value1: 4652646176903046191
@@ -3429,7 +3440,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 9ee7639ca880f1722fa4e20f0c859140
           m_Category: 2
-          m_Index: 11
+          m_Index: 10
         - m_Guid:
             m_Value0: 8512993229183039822
             m_Value1: 16958543682229316661
@@ -3437,7 +3448,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 4eb9c2f83c3a2476352c39f7a0d958eb
           m_Category: 0
-          m_Index: 15
+          m_Index: 14
         - m_Guid:
             m_Value0: 4556788383247817223
             m_Value1: 10724511446881398069
@@ -3445,7 +3456,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 07da1c44e4f63c3f35edf90c571ed594
           m_Category: 0
-          m_Index: 16
+          m_Index: 15
         - m_Guid:
             m_Value0: 13972058880947427113
             m_Value1: 12521002393486084839
@@ -3453,7 +3464,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 2997b66b86b9e6c1e7ca8d775689c3ad
           m_Category: 2
-          m_Index: 12
+          m_Index: 11
         - m_Guid:
             m_Value0: 719723295659766465
             m_Value1: 18332339188081129987
@@ -3461,7 +3472,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c1b25f2e86f8fc09037a8cd75c8d69fe
           m_Category: 2
-          m_Index: 13
+          m_Index: 12
         - m_Guid:
             m_Value0: 1016925356667568421
             m_Value1: 15008750551496135711
@@ -3469,7 +3480,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 2501425739d81c0e1f1460581bcb49d0
           m_Category: 2
-          m_Index: 14
+          m_Index: 13
         - m_Guid:
             m_Value0: 15594552266025428461
             m_Value1: 13602046036980762944
@@ -3477,7 +3488,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: ed65b597a9fa6ad84089bfcccd2cc4bc
           m_Category: 2
-          m_Index: 15
+          m_Index: 14
         - m_Guid:
             m_Value0: 677099136952491952
             m_Value1: 10651087508778511884
@@ -3485,7 +3496,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: b0dfc6df138a65090cee5748a843d093
           m_Category: 2
-          m_Index: 16
+          m_Index: 15
         - m_Guid:
             m_Value0: 8824577581415732297
             m_Value1: 8590216095081166363
@@ -3493,7 +3504,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 491429418e32777a1bf6278b06943677
           m_Category: 2
-          m_Index: 17
+          m_Index: 16
         - m_Guid:
             m_Value0: 8373879636320580396
             m_Value1: 7921725354080867685
@@ -3501,7 +3512,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 2cf3c39a29ff35746515320a3d9fef6d
           m_Category: 2
-          m_Index: 18
+          m_Index: 17
         - m_Guid:
             m_Value0: 1566898436483509410
             m_Value1: 12482960164470940520
@@ -3509,7 +3520,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: a2ecb681d3bdbe156863a4cc21623cad
           m_Category: 2
-          m_Index: 19
+          m_Index: 18
         - m_Guid:
             m_Value0: 11331477318418094151
             m_Value1: 17700310929660608215
@@ -3517,7 +3528,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 47d8b498957e419dd77e62a00223a4f5
           m_Category: 2
-          m_Index: 20
+          m_Index: 19
         - m_Guid:
             m_Value0: 1475626657434025957
             m_Value1: 5520738251648740863
@@ -3525,7 +3536,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: e5bf7371a07a7a14ff2d6f93309a9d4c
           m_Category: 2
-          m_Index: 21
+          m_Index: 20
         - m_Guid:
             m_Value0: 8026428732675388000
             m_Value1: 10890029982505466088
@@ -3533,7 +3544,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 60f21a12689a636fe878973c92282197
           m_Category: 2
-          m_Index: 22
+          m_Index: 21
         - m_Guid:
             m_Value0: 17694839358355897745
             m_Value1: 18109220702586294897
@@ -3541,7 +3552,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 917d6728a5b290f57152ce4048e050fb
           m_Category: 2
-          m_Index: 23
+          m_Index: 22
         - m_Guid:
             m_Value0: 3961500844683563130
             m_Value1: 2258141341490262876
@@ -3549,7 +3560,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 7a10c6800714fa365cb326009687561f
           m_Category: 0
-          m_Index: 17
+          m_Index: 16
         - m_Guid:
             m_Value0: 10523833116117940986
             m_Value1: 15526028105106044382
@@ -3557,7 +3568,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: fabab321762a0c92deb593194d8877d7
           m_Category: 2
-          m_Index: 24
+          m_Index: 23
         - m_Guid:
             m_Value0: 8693721594870067084
             m_Value1: 15435247586493992608
@@ -3565,7 +3576,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 8c6f5faeba4da678a00e2e85e60335d6
           m_Category: 0
-          m_Index: 18
+          m_Index: 17
         - m_Guid:
             m_Value0: 15171852140251349709
             m_Value1: 15848300033047335909
@@ -3573,7 +3584,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: cd826e3c233f8dd2e5139983e978f0db
           m_Category: 2
-          m_Index: 25
+          m_Index: 24
         - m_Guid:
             m_Value0: 4181069906775956694
             m_Value1: 2980263660140904142
@@ -3581,7 +3592,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: d6dc748eed24063ace3eb43f02065c29
           m_Category: 2
-          m_Index: 26
+          m_Index: 25
         - m_Guid:
             m_Value0: 18433018651166961059
             m_Value1: 808921532106593000
@@ -3589,7 +3600,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: a3edf408cd3ccfffe8d260fcd8dd390b
           m_Category: 2
-          m_Index: 27
+          m_Index: 26
         - m_Guid:
             m_Value0: 5349476026120893352
             m_Value1: 11107087189368774828
@@ -3597,7 +3608,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: a873675f1a283d4aac209e6bf34c249a
           m_Category: 2
-          m_Index: 28
+          m_Index: 27
         - m_Guid:
             m_Value0: 12396301497860797125
             m_Value1: 14235987115263702704
@@ -3605,7 +3616,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c5b2a2ac888208acb0b65418db6290c5
           m_Category: 2
-          m_Index: 29
+          m_Index: 28
         - m_Guid:
             m_Value0: 8631869681867030350
             m_Value1: 8241349471701496693
@@ -3613,7 +3624,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 4eff25f7bd8fca7775f39e12ae275f72
           m_Category: 0
-          m_Index: 19
+          m_Index: 18
         - m_Guid:
             m_Value0: 6671207454317673123
             m_Value1: 11020523566463537070
@@ -3621,7 +3632,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: a3fa8a89d5e3945cae4fe161cbc3f098
           m_Category: 2
-          m_Index: 30
+          m_Index: 29
         - m_Guid:
             m_Value0: 7542735050623957377
             m_Value1: 14482084996676385496
@@ -3629,7 +3640,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 813954bf902dad68d8fae83993b3fac8
           m_Category: 2
-          m_Index: 31
+          m_Index: 30
         - m_Guid:
             m_Value0: 16217692952469770125
             m_Value1: 14882032183244481893
@@ -3637,7 +3648,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 8d0f51b4d0d110e165e5371a6c9987ce
           m_Category: 0
-          m_Index: 20
+          m_Index: 19
         - m_Guid:
             m_Value0: 14194567464211444800
             m_Value1: 18096627350143103004
@@ -3645,7 +3656,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 40f4a314e73bfdc41cf0e5e5b12224fb
           m_Category: 2
-          m_Index: 32
+          m_Index: 31
         - m_Guid:
             m_Value0: 14329740723693967068
             m_Value1: 14267706175185850773
@@ -3653,7 +3664,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: dc563a174477ddc69591993b2c1301c6
           m_Category: 2
-          m_Index: 33
+          m_Index: 32
         - m_Guid:
             m_Value0: 2047278322622808984
             m_Value1: 10354561750761685021
@@ -3661,7 +3672,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 98434a98c964691c1d40ff2e0dcbb28f
           m_Category: 0
-          m_Index: 21
+          m_Index: 20
         - m_Guid:
             m_Value0: 5466100394149484464
             m_Value1: 14976095208569276368
@@ -3669,7 +3680,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: b017e70b597ddb4bd08733d53ec7d5cf
           m_Category: 0
-          m_Index: 22
+          m_Index: 21
         - m_Guid:
             m_Value0: 15134534273451759914
             m_Value1: 1274928518432502901
@@ -3677,7 +3688,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 2a19114abcaa08d275342f8fbb74b111
           m_Category: 0
-          m_Index: 23
+          m_Index: 22
         - m_Guid:
             m_Value0: 14114245545497185852
             m_Value1: 14147263401857202229
@@ -3685,7 +3696,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 3cceff0b8bdfdfc3353895cb1b2d55c4
           m_Category: 2
-          m_Index: 34
+          m_Index: 33
         - m_Guid:
             m_Value0: 5761214090745727688
             m_Value1: 16051839649928200115
@@ -3693,7 +3704,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c8cadff9b0f1f34fb33f80851d97c3de
           m_Category: 0
-          m_Index: 22
+          m_Index: 21
         - m_Guid:
             m_Value0: 13863019461483813329
             m_Value1: 4587759030216488503
@@ -3701,7 +3712,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: d1d91134c05663c037f624ef87feaa3f
           m_Category: 2
-          m_Index: 35
+          m_Index: 34
         - m_Guid:
             m_Value0: 12997111912249570073
             m_Value1: 9025558258935088250
@@ -3709,7 +3720,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 1933a22b6c045fb47a446bc36a39417d
           m_Category: 0
-          m_Index: 22
+          m_Index: 21
         - m_Guid:
             m_Value0: 7103901594781726868
             m_Value1: 15435615809023407554
@@ -3717,7 +3728,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 94b84bc4dc209662c2753e02cc5236d6
           m_Category: 2
-          m_Index: 36
+          m_Index: 35
         - m_Guid:
             m_Value0: 13828411566591803382
             m_Value1: 2214349563898111600
@@ -3725,7 +3736,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: f67f9bc20d63e8bf7026b03c32f3ba1e
           m_Category: 2
-          m_Index: 37
+          m_Index: 36
         - m_Guid:
             m_Value0: 9084724512757956394
             m_Value1: 2982999162795772520
@@ -3733,7 +3744,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 2abf38b9cf6c137e68caba17efbd6529
           m_Category: 2
-          m_Index: 38
+          m_Index: 37
         - m_Guid:
             m_Value0: 3295342679560511599
             m_Value1: 11198519796079832623
@@ -3741,7 +3752,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 6f606324b568bb2d2fae84176c22699b
           m_Category: 2
-          m_Index: 39
+          m_Index: 38
         - m_Guid:
             m_Value0: 9754916122761024927
             m_Value1: 15269041147629002884
@@ -3749,7 +3760,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 9fd5e6a6876c608784e03f610688e6d3
           m_Category: 2
-          m_Index: 40
+          m_Index: 39
         - m_Guid:
             m_Value0: 15360667032221620881
             m_Value1: 12196759025560935823
@@ -3757,7 +3768,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 919a9f10480d2cd58f5d9969b69743a9
           m_Category: 2
-          m_Index: 41
+          m_Index: 40
         - m_Guid:
             m_Value0: 17147741874772882501
             m_Value1: 12882509760824915031
@@ -3765,7 +3776,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 45b4ede96104f9ed57b4787d5fdec7b2
           m_Category: 2
-          m_Index: 42
+          m_Index: 41
         - m_Guid:
             m_Value0: 13143685489594375498
             m_Value1: 16368090222409045643
@@ -3773,7 +3784,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 4a9dba8650c067b68b563cde552327e3
           m_Category: 2
-          m_Index: 43
+          m_Index: 42
         - m_Guid:
             m_Value0: 994663335365639786
             m_Value1: 18108923615725705760
@@ -3781,7 +3792,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 6afe929708c1cd0d205a035415d24ffb
           m_Category: 2
-          m_Index: 44
+          m_Index: 43
         - m_Guid:
             m_Value0: 7831980140739140507
             m_Value1: 11320226373633180816
@@ -3789,7 +3800,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 9b9bab4071c8b06c90046ae1e885199d
           m_Category: 2
-          m_Index: 45
+          m_Index: 44
         - m_Guid:
             m_Value0: 16652896762699455576
             m_Value1: 13337230349733972954
@@ -3797,7 +3808,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 581cf4f55ff91ae7dacb73e3565c17b9
           m_Category: 2
-          m_Index: 46
+          m_Index: 45
         - m_Guid:
             m_Value0: 7104212267120420165
             m_Value1: 15125534673598369179
@@ -3805,7 +3816,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 4565afce6a3b97629b4dafa9a5b1e8d1
           m_Category: 2
-          m_Index: 47
+          m_Index: 46
         - m_Guid:
             m_Value0: 4722468406940564699
             m_Value1: 4447765624653340346
@@ -3813,7 +3824,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: db7cb2d2fe938941badea73545a3b93d
           m_Category: 2
-          m_Index: 48
+          m_Index: 47
         - m_Guid:
             m_Value0: 6892908469486218826
             m_Value1: 7442145246950967041
@@ -3821,7 +3832,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 4aee0199bb87a85f01c75f03accf4767
           m_Category: 2
-          m_Index: 49
+          m_Index: 48
         - m_Guid:
             m_Value0: 16068882625841848715
             m_Value1: 10121440675514313315
@@ -3829,7 +3840,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 8be1bf929c2300df636a382fab94768c
           m_Category: 2
-          m_Index: 50
+          m_Index: 49
         - m_Guid:
             m_Value0: 13929318999019367875
             m_Value1: 6593415095461816745
@@ -3837,7 +3848,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: c32da633d4e14ec1a929b38d1884805b
           m_Category: 2
-          m_Index: 51
+          m_Index: 50
         - m_Guid:
             m_Value0: 1791440721147974653
             m_Value1: 6285678372645095835
@@ -3845,7 +3856,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: fdd3312cd879dc189bc9dd4d2d373b57
           m_Category: 2
-          m_Index: 52
+          m_Index: 51
         - m_Guid:
             m_Value0: 3003496541466732894
             m_Value1: 1712295706784648795
@@ -3853,7 +3864,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 5e293df63090ae295b4e5389df4bc317
           m_Category: 2
-          m_Index: 53
+          m_Index: 52
         - m_Guid:
             m_Value0: 18302816387602851599
             m_Value1: 1965357542802055807
@@ -3861,7 +3872,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 0f27443488aa00fe7fe259b3455a461b
           m_Category: 0
-          m_Index: 23
+          m_Index: 22
         - m_Guid:
             m_Value0: 10382748308408613023
             m_Value1: 11247599198864277415
@@ -3869,7 +3880,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 9fb8fb8a93ee1690a7ff4508e17f179c
           m_Category: 2
-          m_Index: 54
+          m_Index: 53
         - m_Guid:
             m_Value0: 12624291251231811569
             m_Value1: 10420404704930664827
@@ -3877,7 +3888,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: f167beb2017e32af7b913395deb69c90
           m_Category: 2
-          m_Index: 55
+          m_Index: 54
         - m_Guid:
             m_Value0: 12399231723697866257
             m_Value1: 12324849649692157581
@@ -3885,7 +3896,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 1106c40a8feb12ac8da6ffdf74a90aab
           m_Category: 2
-          m_Index: 56
+          m_Index: 55
         - m_Guid:
             m_Value0: 10060361712242911733
             m_Value1: 15172799308000444469
@@ -3893,7 +3904,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: f5e92ddaac959d8b35c0a8e9949c90d2
           m_Category: 2
-          m_Index: 57
+          m_Index: 56
         - m_Guid:
             m_Value0: 13628791638021175148
             m_Value1: 15610408835771374575
@@ -3901,7 +3912,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 6cf7104ec93123bdef9bc5ee2050a3d8
           m_Category: 2
-          m_Index: 58
+          m_Index: 57
         - m_Guid:
             m_Value0: 7830864870020187954
             m_Value1: 14926046460912352938
@@ -3909,7 +3920,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 3287a30d1cd2ac6caa3ea8b32cf823cf
           m_Category: 2
-          m_Index: 66
+          m_Index: 65
         - m_Guid:
             m_Value0: 5931263081537607768
             m_Value1: 12534255575992356256
@@ -3917,7 +3928,7 @@ MonoBehaviour:
             serializedVersion: 2
             Hash: 581870f458145052a0cdfb7a099ff2ad
           m_Category: 2
-          m_Index: 67
+          m_Index: 66
         m_EntryPoint:
           rid: 8515051663678505381
         m_Graph:
@@ -3936,7 +3947,8 @@ MonoBehaviour:
         m_Title: 
     - rid: 8515051663678505030
       type: {class: RenderGraphEditorGraph, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
-      data: 
+      data:
+        m_SchemaVersion: 1
     - rid: 8515051663678505381
       type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -4103,42 +4115,6 @@ MonoBehaviour:
           m_HasUserColor: 0
         m_Node:
           rid: 8515051663678505448
-    - rid: 8515051663678505388
-      type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 7668370386094844581
-          m_Value1: 15915978518327414198
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: a5ea4ec53c866b6ab64da7cd22eae0dc
-        m_Version: 2
-        m_Position: {x: 1868.1371, y: 960.28326}
-        m_Title: 
-        m_Tooltip: 
-        m_NodePreviewModel:
-          rid: -2
-        m_State: 0
-        m_InputConstantsById:
-          m_KeyList:
-          - __option_Descriptor
-          m_ValueList:
-          - rid: 8515051663678505449
-        m_InputPortInfos:
-          expandedPortsById:
-            m_KeyList: []
-            m_ValueList: {_typeName: UInt8, _data: }
-        m_OutputPortInfos:
-          expandedPortsById:
-            m_KeyList: []
-            m_ValueList: {_typeName: UInt8, _data: }
-        m_Collapsed: 0
-        m_CurrentModeIndex: 0
-        m_ElementColor:
-          m_Color: {r: 0, g: 0, b: 0, a: 0}
-          m_HasUserColor: 0
-        m_Node:
-          rid: 8515051663678505450
     - rid: 8515051663678505390
       type: {class: SubgraphNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -4379,38 +4355,6 @@ MonoBehaviour:
           m_HasUserColor: 0
         m_Node:
           rid: 8515051663678505473
-    - rid: 8515051663678505396
-      type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Guid:
-          m_Value0: 7262310277089958516
-          m_Value1: 8260615910973114908
-        m_HashGuid:
-          serializedVersion: 2
-          Hash: 749a9d3ab8e8c8641c0a7e87679aa372
-        m_Version: 2
-        m_FromPortReference:
-          m_NodeModelGuid:
-            m_Value0: 7668370386094844581
-            m_Value1: 15915978518327414198
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: a5ea4ec53c866b6ab64da7cd22eae0dc
-          m_UniqueId: RenderList
-          m_PortDirection: 2
-          m_PortOrientation: 0
-          m_Title: Out
-        m_ToPortReference:
-          m_NodeModelGuid:
-            m_Value0: 12641916380643770237
-            m_Value1: 14247519975246076971
-          m_NodeModelHashGuid:
-            serializedVersion: 2
-            Hash: 7dbf76ecf71b71af2b1cd34eee5bb9c5
-          m_UniqueId: 4a008f1b50a1c555f86389e32a62bd91
-          m_PortDirection: 1
-          m_PortOrientation: 0
-          m_Title: ForwardRenderList (R)
     - rid: 8515051663678505411
       type: {class: WireModel, ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -5789,28 +5733,6 @@ MonoBehaviour:
     - rid: 8515051663678505448
       type: {class: PreDepthPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}
       data: 
-    - rid: 8515051663678505449
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphRenderListDesc, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          ShaderTagNames:
-          - VividForward
-          - SRPDefaultUnlit
-          RenderQueueRange: 2
-          SortingCriteria: 55
-          LayerMask:
-            serializedVersion: 2
-            m_Bits: 4294967295
-          RenderingLayerMask: 4294967295
-          RendererConfiguration: 0
-          ExcludeObjectMotionVectors: 0
-          OverrideMaterial: {fileID: 0}
-          OverrideMaterialPassIndex: 0
-          OverrideShader: {fileID: 0}
-          OverrideShaderPassIndex: 0
-    - rid: 8515051663678505450
-      type: {class: RenderListResourceNodeData, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
-      data: 
     - rid: 8515051663678505456
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -6742,7 +6664,8 @@ MonoBehaviour:
         m_Title: 
     - rid: 8515051663678505533
       type: {class: RenderGraphSubSystemGraph, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
-      data: 
+      data:
+        m_SchemaVersion: 1
     - rid: 8515051663678505535
       type: {class: UserNodeModelImp, ns: Unity.GraphToolkit.Editor.Implementation, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -7176,14 +7099,16 @@ MonoBehaviour:
         m_InputConstantsById:
           m_KeyList:
           - __option_DebugExport
-          - m_RenderList
           - m_DepthTarget_In
           - m_ColorTarget_In
+          - __option_Override_m_RenderList
+          - __option_RenderListDescParameter:m_RenderListDesc
           m_ValueList:
           - rid: 8515051663678505661
-          - rid: 8515051663678505662
           - rid: 8515051663678505663
           - rid: 8515051663678505664
+          - rid: 5830558825008857707
+          - rid: 5830558825008857708
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []
@@ -8036,7 +7961,8 @@ MonoBehaviour:
         m_Title: 
     - rid: 8515051663678505591
       type: {class: RenderGraphSubSystemGraph, ns: VividRP.Editor.RenderGraph, asm: VividRP.Editor}
-      data: 
+      data:
+        m_SchemaVersion: 1
     - rid: 8515051663678505612
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -8733,26 +8659,6 @@ MonoBehaviour:
       type: {class: 'Constant`1[[System.Boolean, mscorlib]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
         m_Value: 0
-    - rid: 8515051663678505662
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphRenderList, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            ShaderTagNames:
-            - VividForward
-            - SRPDefaultUnlit
-            RenderQueueRange: 1
-            SortingCriteria: 59
-            LayerMask:
-              serializedVersion: 2
-              m_Bits: 4294967295
-            RenderingLayerMask: 4294967295
-            RendererConfiguration: 0
-            ExcludeObjectMotionVectors: 0
-            OverrideMaterial: {fileID: 0}
-            OverrideMaterialPassIndex: 0
-            OverrideShader: {fileID: 0}
-            OverrideShaderPassIndex: 0
     - rid: 8515051663678505663
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:

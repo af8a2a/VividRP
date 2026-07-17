@@ -13,10 +13,17 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private readonly RenderGraphTexture m_DefaultColorTarget;
         private readonly RenderGraphTexture m_DefaultDepthTarget;
+        private readonly RenderGraphRenderList m_DefaultRenderList;
         private bool m_IsPassResourceLayoutDirty;
 
-        [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
+        [RenderGraphResource(
+            Name = "RenderList",
+            Access = AccessFlags.Read,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphRenderList m_RenderList;
+
+        [SerializeField]
+        private RenderGraphRenderListDesc m_RenderListDesc = RenderGraphRenderListDesc.CreateOpaque();
 
         [RenderGraphResource(Name = "Color", Access = AccessFlags.Write, AttachmentIndex = 0, AllowWriteOnlyInput = true)]
         private RenderGraphTexture m_ColorTarget;
@@ -33,7 +40,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_RenderList = new RenderGraphRenderList
             {
-                desc = RenderGraphRenderListDesc.CreateOpaque()
+                desc = m_RenderListDesc.Clone()
             };
 
             m_ColorTarget = new RenderGraphTexture
@@ -48,6 +55,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_DefaultColorTarget = m_ColorTarget;
             m_DefaultDepthTarget = m_DepthTarget;
+            m_DefaultRenderList = m_RenderList;
         }
 
         public void ClearPassResourceLayoutDirty()
@@ -145,6 +153,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Create()
         {
+            if (ReferenceEquals(m_RenderList, m_DefaultRenderList))
+            {
+                m_RenderList.desc = m_RenderListDesc != null
+                    ? m_RenderListDesc.Clone()
+                    : RenderGraphRenderListDesc.CreateOpaque();
+            }
         }
 
         public override void Prepare(ContextContainer frameData)

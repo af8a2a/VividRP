@@ -26,6 +26,14 @@
 - Pass 节点会额外显示一个 `Override <ResourceName>` 选项；打开后重新暴露输入端口，允许用图上的资源节点覆盖
 - 仅建议对已经具备完整默认 descriptor 初始化逻辑的字段启用该模式；如果字段必须依赖外部资源才有意义，继续使用默认的 `External`
 
+`DrawObjectPass` 的 `RenderList` 使用该模式：默认在节点 Inspector 中直接配置 `Render List Descriptor`，图上不显示 RenderList 输入端口。打开 `Override RenderList` 后可以连接共享或动态的 `RenderGraphRenderList`；端口未连接时仍回退到节点内嵌 descriptor。
+
+### Pass 名称
+
+- RenderPass 节点标题会编译为运行时 Pass 名称，并用于 RenderGraph pass、Profiler 生命周期 marker 和编译预览
+- 空白标题回退到 Pass 类型名；允许多个节点使用相同标题
+- `IRenderGraphRecordingPass` 创建的内部子 pass 继续使用代码显式提供的名称，外层 authored pass marker 使用节点标题
+
 ### Pass 内部临时资源
 
 - `[TransientResource]` 适合仅在单个 Pass 内部使用、也不希望暴露到 RenderGraph 图上的 `RenderGraphTexture` / `RenderGraphBuffer`
@@ -59,7 +67,7 @@
 
 `PassRecorder` 会在第一次渲染或检测到 `ImportVersion` 变化时：
 
-- 从 `RenderGraphData` 读取 Pass 列表与资源绑定
+- 从 `RenderGraphData` 读取 Pass 列表、节点名称、序列化参数与资源绑定
 - 通过反射实例化 Pass，并把绑定的资源（运行时副本）写入对应字段
 - 调用 `Create()` / `Initialize()` 生成 `PassResource`
 - 每帧调用 `Prepare()`，并把 Pass 记录到 Unity RenderGraph

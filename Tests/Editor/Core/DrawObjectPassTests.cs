@@ -1,6 +1,7 @@
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
+using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -117,6 +118,69 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Create_AppliesSerializedRenderListDescriptor_ToDefaultRenderList()
+        {
+            var pass = new DrawObjectPass();
+            var descriptor = RenderGraphRenderListDesc.CreateTransparent("TransparentCharacter", "SpecialForward");
+            descriptor.LayerMask = 1 << 7;
+            descriptor.RenderingLayerMask = 0x15u;
+            descriptor.RendererConfiguration = PerObjectData.LightData | PerObjectData.ReflectionProbes;
+            descriptor.ExcludeObjectMotionVectors = true;
+
+            RenderGraphPassRenderListDescParameterUtility.ApplyParameters(
+                pass,
+                typeof(DrawObjectPass),
+                new[]
+                {
+                    new RenderGraphPassRenderListDescParameter
+                    {
+                        FieldName = "m_RenderListDesc",
+                        Value = descriptor,
+                    }
+                });
+
+            pass.Create();
+
+            var runtimeDescriptor = GetRenderListField(pass).desc;
+            Assert.That(runtimeDescriptor, Is.Not.SameAs(descriptor));
+            Assert.That(runtimeDescriptor.ShaderTagNames, Is.EqualTo(descriptor.ShaderTagNames));
+            Assert.That(runtimeDescriptor.ShaderTagNames, Is.Not.SameAs(descriptor.ShaderTagNames));
+            Assert.That(runtimeDescriptor.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Transparent));
+            Assert.That(runtimeDescriptor.SortingCriteria, Is.EqualTo(SortingCriteria.CommonTransparent));
+            Assert.That(runtimeDescriptor.LayerMask, Is.EqualTo(1 << 7));
+            Assert.That(runtimeDescriptor.RenderingLayerMask, Is.EqualTo(0x15u));
+            Assert.That(runtimeDescriptor.RendererConfiguration, Is.EqualTo(descriptor.RendererConfiguration));
+            Assert.That(runtimeDescriptor.ExcludeObjectMotionVectors, Is.True);
+        }
+
+        [Test]
+        public void Create_DoesNotOverwriteExternalRenderList_WhenOverrideIsBound()
+        {
+            var pass = new DrawObjectPass();
+            var externalDescriptor = RenderGraphRenderListDesc.CreateOpaque("ExternalForward");
+            var externalRenderList = new RenderGraphRenderList { desc = externalDescriptor };
+            SetRenderListField(pass, externalRenderList);
+
+            RenderGraphPassRenderListDescParameterUtility.ApplyParameters(
+                pass,
+                typeof(DrawObjectPass),
+                new[]
+                {
+                    new RenderGraphPassRenderListDescParameter
+                    {
+                        FieldName = "m_RenderListDesc",
+                        Value = RenderGraphRenderListDesc.CreateTransparent("EmbeddedTransparent"),
+                    }
+                });
+
+            pass.Create();
+
+            Assert.That(GetRenderListField(pass), Is.SameAs(externalRenderList));
+            Assert.That(externalRenderList.desc, Is.SameAs(externalDescriptor));
+            Assert.That(externalRenderList.desc.ShaderTagNames, Is.EqualTo(new[] { "ExternalForward" }));
+        }
+
+        [Test]
         public void Initialize_RegistersSequentialColorAttachments_WhenAdditionalTargetsAreAdded()
         {
             IRenderPass renderPass = new DrawObjectPass();
@@ -191,6 +255,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphRenderList)field.GetValue(pass);
+        }
+
+        private static void SetRenderListField(DrawObjectPass pass, RenderGraphRenderList value)
+        {
+            var field = typeof(DrawObjectPass).GetField("m_RenderList", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            field.SetValue(pass, value);
         }
     }
 }

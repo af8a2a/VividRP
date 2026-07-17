@@ -108,7 +108,7 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
-            var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
+            var markers = GetPassMarkers(pass, passName);
             using var recordGraphScope = markers.RecordGraph.Auto();
             using (markers.RecordGraphBuild.Auto())
             {
@@ -163,7 +163,7 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
-            var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
+            var markers = GetPassMarkers(pass, passName);
             using var recordGraphScope = markers.RecordGraph.Auto();
             using (markers.RecordGraphBuild.Auto())
             {
@@ -218,7 +218,7 @@ namespace VividRP.Runtime
             Dictionary<RenderGraphAccelerationStructure, RayTracingAccelerationStructureHandle> accelerationStructureCache,
             string passName = null)
         {
-            var markers = RenderPassProfilingUtility.GetMarkers(pass, passName, ResolvePassIndex(pass));
+            var markers = GetPassMarkers(pass, passName);
             using var recordGraphScope = markers.RecordGraph.Auto();
             using (markers.RecordGraphBuild.Auto())
             {

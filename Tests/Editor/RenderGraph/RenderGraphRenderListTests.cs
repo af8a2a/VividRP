@@ -1,4 +1,5 @@
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
@@ -11,6 +12,39 @@ namespace VividRP.Editor.Tests
 {
     public class RenderGraphRenderListTests
     {
+        private sealed class RenderListParameterPass : RasterPass
+        {
+            public RenderGraphRenderListDesc PublicDescriptor = RenderGraphRenderListDesc.CreateOpaque("Public");
+
+            [SerializeField]
+            private RenderGraphRenderListDesc m_SerializedDescriptor =
+                RenderGraphRenderListDesc.CreateTransparent("Serialized");
+
+            private RenderGraphRenderListDesc m_PrivateDescriptor =
+                RenderGraphRenderListDesc.CreateOpaque("Private");
+
+            public override void Create() { }
+            public override void Prepare(ContextContainer frameData) { }
+            public override void Record(RasterPassContext context) { }
+            public override void Dispose() { }
+        }
+
+        [Test]
+        public void RenderListDescParameterReflection_IncludesPublicAndSerializedFieldsOnly()
+        {
+            var fieldNames = RenderGraphPassRenderListDescParameterUtility
+                .EnumerateSerializableFields(typeof(RenderListParameterPass))
+                .Select(field => field.Name)
+                .ToArray();
+
+            Assert.That(fieldNames, Is.EquivalentTo(new[]
+            {
+                nameof(RenderListParameterPass.PublicDescriptor),
+                "m_SerializedDescriptor",
+            }));
+            Assert.That(fieldNames, Does.Not.Contain("m_PrivateDescriptor"));
+        }
+
         [Test]
         public void Clone_CopiesShaderTagNames_WhenDescriptorIsCloned()
         {

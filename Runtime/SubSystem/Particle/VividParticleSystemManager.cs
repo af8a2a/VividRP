@@ -14029,6 +14029,7 @@ namespace VividRP.Runtime.Particle
             private NativeList<ParticleBoundsRecordReduceWork> m_BoundsRecordWorks;
             private NativeArray<ParticleBoundsData> m_BoundsPageResults;
             private NativeArray<ParticleBoundsRecordResult> m_BoundsRecordResults;
+            private NativeArray<int> m_BoundsNativeCollectResult;
             private NativeArray<ParticleRenderUploadPageWork> m_PendingTransformUploadPageWorks;
             private NativeArray<ParticleRenderUploadPageWork> m_PendingColorUploadPageWorks;
             private NativeArray<ParticleRenderUploadPageWork> m_PendingVelocityStretchUploadPageWorks;
@@ -14044,6 +14045,7 @@ namespace VividRP.Runtime.Particle
             private JobHandle m_PendingUploadHandle;
             private JobHandle m_PendingUploadPageBuildHandle;
             private JobHandle m_PendingBoundsHandle;
+            private JobHandle m_PendingBoundsCollectHandle;
             private int m_PendingBoundsResultCount;
             private JobHandle m_ParticleDataDependency;
             private BatchRendererGroup m_BRG;
@@ -14056,6 +14058,7 @@ namespace VividRP.Runtime.Particle
             private bool m_HasPendingUploadPageBuild;
             private bool m_HasPendingSharedDataWorkGroupBuild;
             private bool m_HasPendingBounds;
+            private bool m_PendingBoundsUsesNativeCollect;
             private bool m_HasParticleDataDependency;
             private bool m_HasCollectedBoundsForManagerGraph;
             private bool m_LayoutDirty = true;
@@ -14515,15 +14518,7 @@ namespace VividRP.Runtime.Particle
                                 continue;
                             }
 
-                            if (UpdateRecord(
-                                    state,
-                                    forceUpload,
-                                    out int recordSlot,
-                                    out ParticleRendererDynamicRecord dynamicRecord)
-                                && !m_LayoutDirty)
-                            {
-                                CollectBoundsState(recordSlot, dynamicRecord);
-                            }
+                            UpdateRecord(state, forceUpload);
                         }
                     }
                 }
@@ -14540,8 +14535,6 @@ namespace VividRP.Runtime.Particle
                 {
                     m_HasCollectedBoundsForManagerGraph = true;
                 }
-
-                ScheduleCollectedBounds();
             }
 
             public void Update(ParticleSystemState state, bool forceUpload)
@@ -14549,6 +14542,7 @@ namespace VividRP.Runtime.Particle
                 if (state == null)
                     return;
 
+                CompletePendingRendererRecordReaders();
                 m_ParticleDataDependency = default;
                 m_HasParticleDataDependency = false;
                 m_HasCollectedBoundsForManagerGraph = false;
@@ -14558,7 +14552,7 @@ namespace VividRP.Runtime.Particle
                     ResetRenderRecordPoolStats();
                     ResetRecordLookupStats();
                     m_LastCombinedUpdateBoundsLineCount = 0;
-                    UpdateRecord(state, forceUpload, out _, out _);
+                    UpdateRecord(state, forceUpload);
                 }
 
                 Commit();
@@ -14752,14 +14746,8 @@ namespace VividRP.Runtime.Particle
                 m_UploadCopyWorksAreSorted = true;
             }
 
-            private bool UpdateRecord(
-                ParticleSystemState state,
-                bool forceUpload,
-                out int updatedRecordSlot,
-                out ParticleRendererDynamicRecord updatedDynamicRecord)
+            private void UpdateRecord(ParticleSystemState state, bool forceUpload)
             {
-                updatedRecordSlot = -1;
-                updatedDynamicRecord = default;
                 bool foundByHandle = TryGetRecordFromHandle(state, out ParticleRenderRecord record);
                 if (!foundByHandle)
                 {
@@ -14795,15 +14783,13 @@ namespace VividRP.Runtime.Particle
                     m_NativeRendererRecords[record.RecordSlot] = cachedDynamicRecord;
                     if (state.HasPendingUploadData())
                         QueueUploadDirty(record, columnView);
-                    updatedRecordSlot = record.RecordSlot;
-                    updatedDynamicRecord = cachedDynamicRecord;
-                    return true;
+                    return;
                 }
 
                 if (!state.PrepareRenderEntry(forceUpload, out ParticleRenderEntry entry))
                 {
                     RemoveRecord(state);
-                    return false;
+                    return;
                 }
 
                 if (record == null)
@@ -14811,19 +14797,17 @@ namespace VividRP.Runtime.Particle
                     record = AcquireRenderRecord();
                     record.State = state;
                     AllocateRecordSlot(record);
-                    bool synced = SyncNativeRendererRecord(
+                    SyncNativeRendererRecord(
                         record,
                         entry,
-                        out ParticleRendererDynamicRecord dynamicRecord);
+                        out _);
                     state.SetRendererBatchSeed(new ParticleRendererBatchSeed(entry));
                     AssignRendererHandle(
                         state,
                         new VividParticleRendererHandle(record.RecordSlot, record.RecordVersion));
                     QueueUploadDirty(record);
                     m_LayoutDirty = true;
-                    updatedRecordSlot = record.RecordSlot;
-                    updatedDynamicRecord = dynamicRecord;
-                    return synced;
+                    return;
                 }
 
                 bool hasDynamicRecord = TryGetNativeRendererRecord(
@@ -14841,18 +14825,15 @@ namespace VividRP.Runtime.Particle
                 if (identityChanged)
                     state.SetRendererBatchSeed(new ParticleRendererBatchSeed(entry));
                 record.State = state;
-                bool recordSynced = SyncNativeRendererRecord(
+                SyncNativeRendererRecord(
                     record,
                     entry,
-                    out ParticleRendererDynamicRecord currentDynamicRecord);
+                    out _);
                 if (layoutChanged)
                     m_LayoutDirty = true;
 
                 if (forceUpload || state.HasPendingUploadData())
                     QueueUploadDirty(record);
-                updatedRecordSlot = record.RecordSlot;
-                updatedDynamicRecord = currentDynamicRecord;
-                return recordSynced;
             }
 
             public void QueueUploadDirty(ParticleSystemState state)
@@ -15931,7 +15912,9 @@ namespace VividRP.Runtime.Particle
                 using (s_ManagerJobGraphScheduleMarker.Auto())
                 {
                     ScheduleRenderUploadGraph();
-                    if (!m_HasPendingBounds && !m_HasCollectedBoundsForManagerGraph)
+                    if (m_HasCollectedBoundsForManagerGraph)
+                        ScheduleCollectedBoundsFromNativeRecords();
+                    else if (!m_HasPendingBounds)
                         ScheduleBoundsUpdatesFromRecords();
                     m_HasCollectedBoundsForManagerGraph = false;
                     ScheduleMeshVisibleCountGraph();
@@ -15940,7 +15923,7 @@ namespace VividRP.Runtime.Particle
 
             private void BeginBoundsCollection()
             {
-                CompletePendingBoundsUpdates();
+                CompletePendingRendererRecordReaders();
                 EnsureNativeBoundsLayout();
                 m_BoundsWorkBuildInputs.Clear();
                 m_BoundsPageWorks.Clear();
@@ -16059,6 +16042,89 @@ namespace VividRP.Runtime.Particle
                 });
             }
 
+            private void ScheduleCollectedBoundsFromNativeRecords()
+            {
+                int recordRefCount = m_RendererRecordRefs.IsCreated
+                    ? m_RendererRecordRefs.Length
+                    : 0;
+                if (recordRefCount <= 0 || !m_NativeRendererRecords.IsCreated)
+                {
+                    m_LastBoundsPageWorkCount = 0;
+                    m_LastBoundsRecordWorkCount = 0;
+                    return;
+                }
+
+                int pageCapacity = Mathf.Max(0, m_CullingPageBoundsCount);
+                if (m_BoundsPageWorks.Capacity < pageCapacity)
+                    m_BoundsPageWorks.Capacity = pageCapacity;
+                m_BoundsPageWorks.Clear();
+                m_BoundsRecordWorks.ResizeUninitialized(recordRefCount);
+                EnsureBoundsResultCapacity(pageCapacity, recordRefCount);
+                if (!m_BoundsNativeCollectResult.IsCreated)
+                {
+                    m_BoundsNativeCollectResult = new NativeArray<int>(
+                        2,
+                        Allocator.Persistent,
+                        NativeArrayOptions.ClearMemory);
+                }
+
+                m_BoundsNativeCollectResult[0] = 0;
+                m_BoundsNativeCollectResult[1] = 0;
+                m_LastBoundsPageWorkCount = 0;
+                m_LastBoundsRecordWorkCount = 0;
+
+                using (s_BoundsScheduleMarker.Auto())
+                {
+                    var collectJob = new ParticleBoundsNativeCollectJob
+                    {
+                        RecordRefs = m_RendererRecordRefs.AsArray(),
+                        RendererRecords = m_NativeRendererRecords.AsArray(),
+                        PageWorks = m_BoundsPageWorks,
+                        RecordWorks = m_BoundsRecordWorks.AsArray(),
+                        Result = m_BoundsNativeCollectResult,
+                    };
+                    JobHandle collectHandle = collectJob.Schedule();
+                    m_PendingBoundsCollectHandle = collectHandle;
+                    JobHandle pageDependency = collectHandle;
+                    if (m_HasPendingCullingRecordBuild)
+                    {
+                        pageDependency = JobHandle.CombineDependencies(
+                            pageDependency,
+                            m_PendingCullingRecordBuildHandle);
+                    }
+                    if (m_HasParticleDataDependency)
+                    {
+                        pageDependency = JobHandle.CombineDependencies(
+                            pageDependency,
+                            m_ParticleDataDependency);
+                    }
+
+                    var pageJob = new ParticleBoundsBatchPageDeferredJob
+                    {
+                        Works = m_BoundsPageWorks.AsDeferredJobArray(),
+                        PageBounds = m_BoundsPageResults,
+                    };
+                    JobHandle pageHandle = pageJob.Schedule(
+                        m_BoundsPageWorks,
+                        innerloopBatchCount: 1,
+                        dependsOn: pageDependency);
+                    var reduceJob = new ParticleBoundsBatchReduceJob
+                    {
+                        Works = m_BoundsRecordWorks.AsArray(),
+                        PageBounds = m_BoundsPageResults,
+                        RecordResults = m_BoundsRecordResults,
+                    };
+                    m_PendingBoundsHandle = reduceJob.Schedule(
+                        recordRefCount,
+                        innerloopBatchCount: 1,
+                        dependsOn: pageHandle);
+                    m_PendingBoundsResultCount = recordRefCount;
+                    m_PendingBoundsUsesNativeCollect = true;
+                    m_HasPendingBounds = true;
+                    JobHandle.ScheduleBatchedJobs();
+                }
+            }
+
             private void ScheduleCollectedBounds()
             {
                 int recordWorkCount = m_BoundsWorkBuildInputs.IsCreated
@@ -16140,7 +16206,16 @@ namespace VividRP.Runtime.Particle
                 {
                     m_PendingBoundsHandle.Complete();
                     m_PendingBoundsHandle = default;
+                    m_PendingBoundsCollectHandle = default;
                     m_HasPendingBounds = false;
+
+                    if (m_PendingBoundsUsesNativeCollect
+                        && m_BoundsNativeCollectResult.IsCreated)
+                    {
+                        m_LastBoundsPageWorkCount = m_BoundsNativeCollectResult[0];
+                        m_LastBoundsRecordWorkCount = m_BoundsNativeCollectResult[1];
+                    }
+                    m_PendingBoundsUsesNativeCollect = false;
 
                     // The culling layout collect job reads the native renderer records while
                     // the record build job consumes the bounds results. Keep the bounds apply
@@ -16233,10 +16308,18 @@ namespace VividRP.Runtime.Particle
                     NativeArray<ParticleBatchDrawBuildWork> batchDrawBuildWorks;
                     using (s_CullingLayoutCollectMarker.Auto())
                     {
+                        JobHandle collectDependency = m_HasPendingMeshVisibleCount
+                            ? m_PendingMeshVisibleCountHandle
+                            : default;
+                        if (m_PendingBoundsUsesNativeCollect)
+                        {
+                            collectDependency = JobHandle.CombineDependencies(
+                                collectDependency,
+                                m_PendingBoundsCollectHandle);
+                        }
+
                         cullingCollectHandle = CollectCullingRecordsAndMeshCountWorks(
-                            m_HasPendingMeshVisibleCount
-                                ? m_PendingMeshVisibleCountHandle
-                                : default,
+                            collectDependency,
                             m_MeshVisibleRendererRecordRefsView,
                             m_MeshVisibleRendererRecordsView,
                             m_MeshVisibleDrawBatchesView,
@@ -16623,6 +16706,17 @@ namespace VividRP.Runtime.Particle
                 }
 
                 ApplyCompletedMeshVisibleCountGraph();
+            }
+
+            private void CompletePendingRendererRecordReaders()
+            {
+                // RendererRecords is written directly by the main-thread update paths. Drain
+                // every graph that can still read or write it before starting those updates.
+                // In the normal Commit path the mesh-visible collect has already completed as
+                // part of draw-command collection, so this is normally only a state cleanup.
+                CompletePendingMeshVisibleCountGraph();
+                CompletePendingBoundsUpdates();
+                CompletePendingCullingRecordBuild();
             }
 
             private void ApplyCompletedMeshVisibleCountGraph()
@@ -18360,6 +18454,14 @@ namespace VividRP.Runtime.Particle
 
                 if (!m_BoundsRecordWorks.IsCreated)
                     m_BoundsRecordWorks = new NativeList<ParticleBoundsRecordReduceWork>(16, Allocator.Persistent);
+
+                if (!m_BoundsNativeCollectResult.IsCreated)
+                {
+                    m_BoundsNativeCollectResult = new NativeArray<int>(
+                        2,
+                        Allocator.Persistent,
+                        NativeArrayOptions.ClearMemory);
+                }
             }
 
             private void EnsureBoundsResultCapacity(int pageCount, int recordCount)
@@ -18409,11 +18511,17 @@ namespace VividRP.Runtime.Particle
                 if (m_BoundsRecordResults.IsCreated)
                     m_BoundsRecordResults.Dispose();
 
+                if (m_BoundsNativeCollectResult.IsCreated)
+                    m_BoundsNativeCollectResult.Dispose();
+
                 m_BoundsPageWorks = default;
                 m_BoundsWorkBuildInputs = default;
                 m_BoundsRecordWorks = default;
                 m_BoundsPageResults = default;
                 m_BoundsRecordResults = default;
+                m_BoundsNativeCollectResult = default;
+                m_PendingBoundsCollectHandle = default;
+                m_PendingBoundsUsesNativeCollect = false;
             }
 
             private void EnsureNativeCullingLayout()
@@ -20658,6 +20766,106 @@ namespace VividRP.Runtime.Particle
         }
 
         [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+        private unsafe struct ParticleBoundsNativeCollectJob : IJob
+        {
+            [ReadOnly]
+            public NativeArray<ParticleRendererRecordRef> RecordRefs;
+            [ReadOnly]
+            public NativeArray<ParticleRendererDynamicRecord> RendererRecords;
+
+            public NativeList<ParticleBoundsPageWork> PageWorks;
+
+            [WriteOnly]
+            public NativeArray<ParticleBoundsRecordReduceWork> RecordWorks;
+
+            [WriteOnly]
+            public NativeArray<int> Result;
+
+            public void Execute()
+            {
+                int recordWorkCount = 0;
+                int recordCount = math.min(RecordRefs.Length, RecordWorks.Length);
+                for (int recordIndex = 0; recordIndex < recordCount; recordIndex++)
+                {
+                    RecordWorks[recordIndex] = default;
+                    ParticleRendererRecordRef recordRef = RecordRefs[recordIndex];
+                    int recordSlot = recordRef.RecordSlot;
+                    if ((uint)recordSlot >= (uint)RendererRecords.Length)
+                        continue;
+
+                    ParticleRendererDynamicRecord dynamicRecord = RendererRecords[recordSlot];
+                    if (dynamicRecord.IsValid == 0
+                        || dynamicRecord.RecordVersion != recordRef.RecordVersion
+                        || dynamicRecord.IsRenderable == 0)
+                    {
+                        continue;
+                    }
+
+                    int count = math.clamp(
+                        dynamicRecord.ActiveCount,
+                        0,
+                        math.max(0, dynamicRecord.StorageCapacity));
+                    if (dynamicRecord.HasCachedWorldBounds != 0
+                        && dynamicRecord.CompletedBoundsVersion == dynamicRecord.BoundsVersion
+                        && dynamicRecord.CachedBoundsActiveCount == count)
+                    {
+                        continue;
+                    }
+
+                    ParticleBoundsSource source = dynamicRecord.BoundsSource;
+                    int pageCount = count > 0 && source.Positions != null
+                        ? math.max(1, GetCullingRecordCount(count))
+                        : 0;
+                    int pageStart = dynamicRecord.CullingPageBoundsOffset;
+                    if (pageCount > 0
+                        && (pageStart < 0
+                            || dynamicRecord.CullingPageBoundsCapacity < pageCount
+                            || PageWorks.Length > PageWorks.Capacity - pageCount))
+                    {
+                        continue;
+                    }
+
+                    for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+                    {
+                        int particleStart = pageIndex * BillboardPageSize;
+                        PageWorks.AddNoResize(new ParticleBoundsPageWork
+                        {
+                            Page = new VividEcsPageInfo(
+                                dynamicRecord.EcsLineId,
+                                pageIndex,
+                                particleStart,
+                                math.clamp(
+                                    count - particleStart,
+                                    0,
+                                    BillboardPageSize)),
+                            Source = source,
+                            ResultIndex = pageStart + pageIndex,
+                        });
+                    }
+
+                    RecordWorks[recordIndex] = new ParticleBoundsRecordReduceWork
+                    {
+                        RecordSlot = recordSlot,
+                        RecordVersion = dynamicRecord.RecordVersion,
+                        BoundsVersion = dynamicRecord.BoundsVersion,
+                        PageStart = math.max(0, pageStart),
+                        PageCount = pageCount,
+                        ActiveCount = count,
+                        UsesPageBillboard = UsesPageBillboardRenderMode(
+                            (VividParticleRenderMode)dynamicRecord.RenderMode) ? 1 : 0,
+                    };
+                    recordWorkCount++;
+                }
+
+                if (Result.Length >= 2)
+                {
+                    Result[0] = PageWorks.Length;
+                    Result[1] = recordWorkCount;
+                }
+            }
+        }
+
+        [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
         private struct ParticleBoundsWorkBuildJob : IJobParallelFor
         {
             [ReadOnly]
@@ -20732,6 +20940,28 @@ namespace VividRP.Runtime.Particle
         }
 
         [BurstCompile(DisableSafetyChecks = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
+        private struct ParticleBoundsBatchPageDeferredJob : IJobParallelForDefer
+        {
+            [ReadOnly]
+            public NativeArray<ParticleBoundsPageWork> Works;
+
+            [NativeDisableParallelForRestriction]
+            public NativeArray<ParticleBoundsData> PageBounds;
+
+            public void Execute(int index)
+            {
+                ParticleBoundsPageWork work = Works[index];
+                if ((uint)work.ResultIndex >= (uint)PageBounds.Length)
+                    return;
+
+                PageBounds[work.ResultIndex] = CalculateParticleBoundsPage(
+                    work.Source,
+                    work.Page.StartIndex,
+                    work.Page.EntryCount);
+            }
+        }
+
+        [BurstCompile(DisableSafetyChecks = true, FloatMode = FloatMode.Fast, OptimizeFor = OptimizeFor.Performance)]
         private struct ParticleBoundsBatchReduceJob : IJobParallelFor
         {
             [ReadOnly]
@@ -20744,6 +20974,12 @@ namespace VividRP.Runtime.Particle
             public void Execute(int index)
             {
                 ParticleBoundsRecordReduceWork work = Works[index];
+                if (work.RecordVersion <= 0)
+                {
+                    RecordResults[index] = default;
+                    return;
+                }
+
                 float3 min = new(float.MaxValue, float.MaxValue, float.MaxValue);
                 float3 max = new(float.MinValue, float.MinValue, float.MinValue);
                 bool hasBounds = false;

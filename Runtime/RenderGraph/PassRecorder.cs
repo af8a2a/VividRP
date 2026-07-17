@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -372,7 +373,7 @@ namespace VividRP.Runtime
             bufferCache.Add(buffer, handle);
             return handle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static TextureHandle CreateTransientTextureHandle(
             IBaseRenderGraphBuilder builder,
             RenderGraphTexture texture)
@@ -390,7 +391,7 @@ namespace VividRP.Runtime
             texture.innerHandle = handle;
             return handle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static BufferHandle CreateTransientBufferHandle(
             IBaseRenderGraphBuilder builder,
             RenderGraphBuffer buffer)
@@ -408,7 +409,7 @@ namespace VividRP.Runtime
             buffer.innerHandle = handle;
             return handle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RendererListHandle GetOrCreateRenderListHandle(
             RenderGraph renderGraph,
             RenderGraphRenderList renderList,
@@ -433,7 +434,7 @@ namespace VividRP.Runtime
             renderListCache.Add(renderList, handle);
             return handle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static RayTracingAccelerationStructureHandle GetOrCreateAccelerationStructureHandle(
             RenderGraph renderGraph,
             RenderGraphAccelerationStructure accelerationStructure,
@@ -463,7 +464,7 @@ namespace VividRP.Runtime
             accelerationStructureCache.Add(accelerationStructure, handle);
             return handle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void SetupRenderLists(
             RenderGraph renderGraph,
             IBaseRenderGraphBuilder builder,
@@ -493,7 +494,7 @@ namespace VividRP.Runtime
             if (usesRendererList)
                 builder.UseAllGlobalTextures(true);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void SetupAccelerationStructures(
             RenderGraph renderGraph,
             IBaseRenderGraphBuilder builder,

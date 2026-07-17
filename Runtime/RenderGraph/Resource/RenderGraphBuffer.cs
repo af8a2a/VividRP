@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -112,12 +113,12 @@ namespace VividRP.Runtime
             desc = new RenderGraphBufferDesc();
             innerHandle = BufferHandle.nullHandle;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static RenderGraphBuffer CreateStructured(string name, int stride)
         {
             return CreateStructured(name, 1, stride);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static RenderGraphBuffer CreateStructured(
             string name,
             int count,
@@ -187,12 +188,12 @@ namespace VividRP.Runtime
         {
             EnsureImportedBuffer()?.SetData(data, managedBufferStartIndex, graphicsBufferStartIndex, count);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void SetData<T>(NativeArray<T> data) where T : struct
         {
             EnsureImportedBuffer()?.SetData(data);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void SetData<T>(
             NativeArray<T> data,
             int nativeBufferStartIndex,
@@ -211,14 +212,15 @@ namespace VividRP.Runtime
             m_ImportedGraphicsBuffer = null;
             m_OwnsImportedGraphicsBuffer = false;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public bool IsValid() => innerHandle.IsValid();
-
+       
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static implicit operator BufferHandle(RenderGraphBuffer buffer)
         {
             return buffer.innerHandle;
         }
-        
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static implicit operator GraphicsBuffer(RenderGraphBuffer buffer)
         {
             return buffer.innerHandle;

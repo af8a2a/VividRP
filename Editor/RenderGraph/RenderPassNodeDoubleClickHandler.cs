@@ -56,6 +56,7 @@ namespace VividRP.Editor.RenderGraph
                     continue;
 
                 graphView.RegisterCallback<MouseDownEvent>(OnGraphViewMouseDown, TrickleDown.TrickleDown);
+                graphView.RegisterCallback<ContextualMenuPopulateEvent>(OnContextualMenuPopulate, TrickleDown.TrickleDown);
                 graphView.RegisterCallback<DetachFromPanelEvent>(OnGraphViewDetached);
             }
         }
@@ -73,10 +74,37 @@ namespace VividRP.Editor.RenderGraph
                 return;
 
             var nodeModel = RenderGraphEditorWindowReflectionUtility.GetNodeModel(nodeView);
+            if (RenderPassNodeNavigationUtility.TryGetRenderPassNode(nodeModel, out var renderPassNode)
+                && RenderPassNodeRenameUtility.IsTitleTarget(target, nodeView)
+                && RenderPassNodeRenameUtility.BeginRename(nodeView, renderPassNode))
+            {
+                evt.StopImmediatePropagation();
+                return;
+            }
+
             if (!RenderPassNodeNavigationUtility.TryOpenPassScript(nodeModel))
                 return;
 
             evt.StopImmediatePropagation();
+        }
+
+        private static void OnContextualMenuPopulate(ContextualMenuPopulateEvent evt)
+        {
+            if (evt.target is not VisualElement target)
+                return;
+
+            var nodeView = FindAncestorNodeView(target);
+            if (nodeView == null)
+                return;
+
+            var nodeModel = RenderGraphEditorWindowReflectionUtility.GetNodeModel(nodeView);
+            if (!RenderPassNodeNavigationUtility.TryGetRenderPassNode(nodeModel, out var renderPassNode))
+                return;
+
+            evt.menu.AppendAction(
+                "Rename",
+                _ => RenderPassNodeRenameUtility.BeginRename(nodeView, renderPassNode),
+                DropdownMenuAction.AlwaysEnabled);
         }
 
         private static void OnGraphViewDetached(DetachFromPanelEvent evt)
@@ -109,6 +137,161 @@ namespace VividRP.Editor.RenderGraph
             {
                 return RuntimeHelpers.GetHashCode(obj);
             }
+        }
+    }
+
+    internal static class RenderPassNodeRenameUtility
+    {
+        private const string TitleElementName = "title";
+        private const string TitleContainerElementName = "title-container";
+        private const string TitleEditorName = "vivid-render-pass-title-editor";
+        private const string UndoActionName = "Rename Render Pass";
+
+        internal static bool Rename(RenderPassNodeData node, string requestedTitle)
+        {
+            if (node == null)
+                return false;
+
+            var title = ResolveTitle(node, requestedTitle);
+            if (string.Equals(node.Title, title, StringComparison.Ordinal))
+                return false;
+
+            var graph = node.Graph;
+            if (graph == null)
+            {
+                node.Title = title;
+                return true;
+            }
+
+            graph.UndoBeginRecordGraph(UndoActionName);
+            try
+            {
+                node.Title = title;
+            }
+            finally
+            {
+                graph.UndoEndRecordGraph();
+            }
+
+            return true;
+        }
+
+        internal static bool BeginRename(VisualElement nodeView, RenderPassNodeData node)
+        {
+            if (nodeView == null || node == null)
+                return false;
+
+            var existingEditor = nodeView.Q<TextField>(TitleEditorName);
+            if (existingEditor != null)
+            {
+                existingEditor.Focus();
+                existingEditor.SelectAll();
+                return true;
+            }
+
+            var titleElement = nodeView.Q<VisualElement>(TitleElementName);
+            var titleParent = titleElement?.parent;
+            if (titleElement == null || titleParent == null)
+                return false;
+
+            var previousDisplay = titleElement.style.display;
+            var editor = new TextField
+            {
+                name = TitleEditorName,
+                value = node.Title ?? string.Empty,
+                isDelayed = false,
+            };
+
+            editor.style.flexGrow = 1f;
+            editor.style.minWidth = GetEditorMinWidth(titleElement);
+
+            var finished = false;
+            Action<bool> finish = null;
+            finish = commit =>
+            {
+                if (finished)
+                    return;
+
+                finished = true;
+                var requestedTitle = editor.value;
+
+                titleElement.style.display = previousDisplay;
+                editor.RemoveFromHierarchy();
+
+                if (commit)
+                    Rename(node, requestedTitle);
+
+                if (titleElement is TextElement titleText)
+                    titleText.text = node.Title ?? string.Empty;
+            };
+
+            editor.RegisterCallback<KeyDownEvent>(evt =>
+            {
+                if (evt.keyCode == KeyCode.Return || evt.keyCode == KeyCode.KeypadEnter)
+                {
+                    finish(true);
+                    evt.StopImmediatePropagation();
+                }
+                else if (evt.keyCode == KeyCode.Escape)
+                {
+                    finish(false);
+                    evt.StopImmediatePropagation();
+                }
+            });
+            editor.RegisterCallback<FocusOutEvent>(_ => finish(true));
+            editor.RegisterCallback<DetachFromPanelEvent>(_ => finish(false));
+
+            var titleIndex = titleParent.IndexOf(titleElement);
+            if (titleIndex >= 0)
+                titleParent.Insert(titleIndex, editor);
+            else
+                titleParent.Add(editor);
+
+            titleElement.style.display = DisplayStyle.None;
+            editor.schedule.Execute(() =>
+            {
+                if (editor.panel == null)
+                    return;
+
+                editor.Focus();
+                editor.SelectAll();
+            });
+
+            return true;
+        }
+
+        internal static bool IsTitleTarget(VisualElement target, VisualElement nodeView)
+        {
+            for (var current = target; current != null && current != nodeView; current = current.parent)
+            {
+                if (string.Equals(current.name, TitleEditorName, StringComparison.Ordinal))
+                    return false;
+
+                if (string.Equals(current.name, TitleElementName, StringComparison.Ordinal)
+                    || string.Equals(current.name, TitleContainerElementName, StringComparison.Ordinal))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static string ResolveTitle(RenderPassNodeData node, string requestedTitle)
+        {
+            if (!string.IsNullOrWhiteSpace(requestedTitle))
+                return requestedTitle.Trim();
+
+            return node.GetPassType()?.Name ?? node.GetType().Name;
+        }
+
+        private static float GetEditorMinWidth(VisualElement titleElement)
+        {
+            const float defaultWidth = 120f;
+            var resolvedWidth = titleElement.resolvedStyle.width;
+            return float.IsNaN(resolvedWidth) || resolvedWidth <= 0f
+                ? defaultWidth
+                : Mathf.Max(defaultWidth, resolvedWidth);
         }
     }
 

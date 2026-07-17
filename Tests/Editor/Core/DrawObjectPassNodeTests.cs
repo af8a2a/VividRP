@@ -100,5 +100,47 @@ namespace VividRP.Editor.Tests
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
         }
+
+        [Test]
+        public void DrawObjectPassNode_Rename_UpdatesAuthoredPassTitle()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+            var node = new AutoRegisteredDrawObjectPassNode();
+            RenderGraphTestUtility.AddTestNode(graph, node);
+
+            try
+            {
+                var renamed = RenderPassNodeRenameUtility.Rename(node, "Transparent Characters");
+
+                Assert.That(renamed, Is.True);
+                Assert.That(node.Title, Is.EqualTo("Transparent Characters"));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void DrawObjectPassNode_Rename_ResetsBlankTitleToPassTypeName()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+            var node = new AutoRegisteredDrawObjectPassNode();
+            RenderGraphTestUtility.AddTestNode(graph, node);
+
+            try
+            {
+                RenderPassNodeRenameUtility.Rename(node, "Transparent Characters");
+
+                var renamed = RenderPassNodeRenameUtility.Rename(node, "   ");
+
+                Assert.That(renamed, Is.True);
+                Assert.That(node.Title, Is.EqualTo(nameof(DrawObjectPass)));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
     }
 }

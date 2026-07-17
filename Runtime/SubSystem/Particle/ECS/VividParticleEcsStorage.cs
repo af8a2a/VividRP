@@ -1039,6 +1039,56 @@ namespace VividRP.Runtime.Particle.ECS
         public unsafe bool AddIntegratePageWorks(
             float deltaTime,
             Vector3 gravity,
+            NativeList<VividParticleEcsIntegratePageWork> lineWorks,
+            NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+            NativeList<VividParticleEcsCompactWork> compactWorks)
+        {
+            return AddIntegratePageWorks(
+                deltaTime,
+                gravity,
+                default,
+                default,
+                default,
+                null,
+                0,
+                default,
+                null,
+                0,
+                (int)VividParticleInheritVelocityMode.Initial,
+                default,
+                null,
+                null,
+                0,
+                0,
+                0.0f,
+                0,
+                0,
+                default,
+                null,
+                0,
+                new float2(0.0f, 1.0f),
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                (int)VividParticleNoiseQuality.High,
+                0,
+                0.0f,
+                0,
+                1,
+                0.5f,
+                2.0f,
+                lineWorks,
+                pageDispatches,
+                compactWorks);
+        }
+
+        public unsafe bool AddIntegratePageWorks(
+            float deltaTime,
+            Vector3 gravity,
             VividParticleCollisionJobConfig collision,
             VividParticleTriggerJobConfig trigger,
             VividParticleExternalForcesJobConfig externalForces,
@@ -1173,7 +1223,7 @@ namespace VividRP.Runtime.Particle.ECS
                 });
             }
 
-            compactWorks.Add(CreateCompactWork(count));
+            compactWorks.Add(CreateCompactWork(count, columnView));
             return true;
         }
 
@@ -1664,6 +1714,16 @@ namespace VividRP.Runtime.Particle.ECS
         private unsafe VividParticleEcsCompactWork CreateCompactWork(int count)
         {
             if (!TryGetColumnView(out VividParticleEcsColumnView columnView))
+                return default;
+
+            return CreateCompactWork(count, columnView);
+        }
+
+        private unsafe VividParticleEcsCompactWork CreateCompactWork(
+            int count,
+            VividParticleEcsColumnView columnView)
+        {
+            if (!columnView.IsValid)
                 return default;
 
             if (m_CaptureDeathEvents)

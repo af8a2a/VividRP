@@ -167,6 +167,7 @@ namespace VividRP.Runtime.Particle
         private static NativeList<VividParticleSimulationPrepareOutput> s_SimulationPrepareOutputs;
         private static readonly List<ParticleSystemState> s_SimulationPrepareStates = new(64);
         private static NativeList<VividParticleEmissionPlanInput> s_EmissionPlanInputs;
+        private static NativeList<VividParticleEcsInitializeParticlesWork> s_EmissionInitializeTemplates;
         private static NativeList<VividParticleEmissionPlanOutput> s_EmissionPlanOutputs;
         private static NativeList<VividParticleSystemHandle> s_PendingSimulationHandles;
         private static NativeList<VividParticleSubEmitterCommand> s_SubEmitterCommands;
@@ -204,8 +205,12 @@ namespace VividRP.Runtime.Particle
         private static bool s_HasPendingSubEmitterInitialization;
         private static NativeList<VividParticleEcsIntegratePageWork> s_SimulationLineWorks;
         private static NativeList<VividParticleEcsIntegratePageDispatch> s_SimulationPageDispatches;
+        private static NativeList<VividParticleEcsIntegratePageDispatchBuildWork>
+            s_SimulationPageDispatchBuildWorks;
         private static NativeList<VividParticleEcsIntegratePageWork> s_VelocitySimulationLineWorks;
         private static NativeList<VividParticleEcsIntegratePageDispatch> s_VelocitySimulationPageDispatches;
+        private static NativeList<VividParticleEcsIntegratePageDispatchBuildWork>
+            s_VelocitySimulationPageDispatchBuildWorks;
         private static NativeList<VividParticleEcsCompactWork> s_SimulationCompactWorks;
         private static NativeList<VividParticleEcsInitializeParticlesWork> s_EmissionInitializeWorks;
         private static NativeList<VividParticleEcsInitializeParticlesWork> s_PendingEmissionInitializeWorks;
@@ -1193,6 +1198,8 @@ namespace VividRP.Runtime.Particle
                 s_SimulationPrepareOutputs.Dispose();
             if (s_EmissionPlanInputs.IsCreated)
                 s_EmissionPlanInputs.Dispose();
+            if (s_EmissionInitializeTemplates.IsCreated)
+                s_EmissionInitializeTemplates.Dispose();
             if (s_EmissionPlanOutputs.IsCreated)
                 s_EmissionPlanOutputs.Dispose();
             s_NativeSimulationConfigs = default;
@@ -1202,6 +1209,7 @@ namespace VividRP.Runtime.Particle
             s_SimulationPrepareOutputs = default;
             s_SimulationPrepareStates.Clear();
             s_EmissionPlanInputs = default;
+            s_EmissionInitializeTemplates = default;
             s_EmissionPlanOutputs = default;
             if (s_PendingSimulationHandles.IsCreated)
                 s_PendingSimulationHandles.Dispose();
@@ -1209,10 +1217,14 @@ namespace VividRP.Runtime.Particle
                 s_SimulationLineWorks.Dispose();
             if (s_SimulationPageDispatches.IsCreated)
                 s_SimulationPageDispatches.Dispose();
+            if (s_SimulationPageDispatchBuildWorks.IsCreated)
+                s_SimulationPageDispatchBuildWorks.Dispose();
             if (s_VelocitySimulationLineWorks.IsCreated)
                 s_VelocitySimulationLineWorks.Dispose();
             if (s_VelocitySimulationPageDispatches.IsCreated)
                 s_VelocitySimulationPageDispatches.Dispose();
+            if (s_VelocitySimulationPageDispatchBuildWorks.IsCreated)
+                s_VelocitySimulationPageDispatchBuildWorks.Dispose();
             s_PendingSimulationHandles = default;
             if (s_SimulationCompactWorks.IsCreated)
                 s_SimulationCompactWorks.Dispose();
@@ -1240,8 +1252,10 @@ namespace VividRP.Runtime.Particle
                 s_PendingSubEmitterInitializeCommands.Dispose();
             s_SimulationLineWorks = default;
             s_SimulationPageDispatches = default;
+            s_SimulationPageDispatchBuildWorks = default;
             s_VelocitySimulationLineWorks = default;
             s_VelocitySimulationPageDispatches = default;
+            s_VelocitySimulationPageDispatchBuildWorks = default;
             s_SimulationCompactWorks = default;
             s_EmissionInitializeWorks = default;
             s_PendingEmissionInitializeWorks = default;
@@ -3867,10 +3881,13 @@ namespace VividRP.Runtime.Particle
                 s_PendingSimulationHandles.Clear();
                 s_SimulationLineWorks.Clear();
                 s_SimulationPageDispatches.Clear();
+                s_SimulationPageDispatchBuildWorks.Clear();
                 s_VelocitySimulationLineWorks.Clear();
                 s_VelocitySimulationPageDispatches.Clear();
+                s_VelocitySimulationPageDispatchBuildWorks.Clear();
                 s_SimulationCompactWorks.Clear();
                 s_EmissionPlanInputs.Clear();
+                s_EmissionInitializeTemplates.Clear();
                 s_EmissionPlanOutputs.Clear();
                 s_EmissionInitializeLineWorks.Clear();
                 s_EmissionInitializePageDispatches.Clear();
@@ -3901,9 +3918,14 @@ namespace VividRP.Runtime.Particle
                             usesModuleKernel
                                 ? s_VelocitySimulationPageDispatches
                                 : s_SimulationPageDispatches;
+                        NativeList<VividParticleEcsIntegratePageDispatchBuildWork>
+                            pageDispatchBuildWorks = usesModuleKernel
+                                ? s_VelocitySimulationPageDispatchBuildWorks
+                                : s_SimulationPageDispatchBuildWorks;
                         if (!state.SchedulePreparedAutomaticBatch(
                                 lineWorks,
                                 pageDispatches,
+                                pageDispatchBuildWorks,
                                 s_SimulationCompactWorks))
                         {
                             continue;
@@ -3911,11 +3933,17 @@ namespace VividRP.Runtime.Particle
 
                         s_PendingSimulationHandles.Add(state.systemHandle);
                         VividParticleEmissionPlanInput emissionPlanInput =
-                            state.CreatePreparedEmissionPlanInput();
+                            state.CreatePreparedEmissionPlanInput(
+                                out VividParticleEcsInitializeParticlesWork initializeTemplate);
+                        int particleCapacity = 0;
+                        if (emissionPlanInput.CanReserveNative != 0)
+                        {
+                            emissionPlanInput.InitializeTemplateIndex =
+                                s_EmissionInitializeTemplates.Length;
+                            s_EmissionInitializeTemplates.Add(initializeTemplate);
+                            particleCapacity = math.max(0, initializeTemplate.Capacity);
+                        }
                         s_EmissionPlanInputs.Add(emissionPlanInput);
-                        int particleCapacity = math.max(
-                            0,
-                            emissionPlanInput.InitializeTemplate.Capacity);
                         int pageCapacity = particleCapacity <= 0
                             ? 0
                             : (particleCapacity - 1) / VividEcsConstants.PageEntryCount + 1;
@@ -3941,6 +3969,20 @@ namespace VividRP.Runtime.Particle
                     s_LastVelocitySimulationLineWorkCount = s_VelocitySimulationLineWorks.Length;
                     if (s_SimulationPageDispatches.Length > 0)
                     {
+                        var buildDispatchesJob =
+                            new VividParticleEcsBuildIntegratePageDispatchesJob
+                            {
+                                Works = s_SimulationPageDispatchBuildWorks.AsArray(),
+                                Dispatches = s_SimulationPageDispatches.AsArray(),
+                            };
+                        JobHandle buildDispatchesHandle = buildDispatchesJob.Schedule(
+                            s_SimulationPageDispatchBuildWorks.Length,
+                            innerloopBatchCount: 16);
+                        JobHandle baseIntegrateDependency = hasRendererReadDependency
+                            ? JobHandle.CombineDependencies(
+                                rendererReadDependency,
+                                buildDispatchesHandle)
+                            : buildDispatchesHandle;
                         var integrateJob = new VividParticleEcsIntegrateLinePagesJob
                         {
                             LineWorks = s_SimulationLineWorks.AsArray(),
@@ -3949,9 +3991,7 @@ namespace VividRP.Runtime.Particle
                         integrateHandle = integrateJob.ScheduleParallelEmbedded(
                             s_SimulationPageDispatches.AsArray(),
                             pageInfoByteOffset: 0,
-                            dependency: hasRendererReadDependency
-                                ? rendererReadDependency
-                                : default,
+                            dependency: baseIntegrateDependency,
                             innerloopBatchCount: 1,
                             dispatchMode: VividEcsPageDispatchMode.Average);
                         hasIntegrateHandle = true;
@@ -3959,6 +3999,21 @@ namespace VividRP.Runtime.Particle
 
                     if (s_VelocitySimulationPageDispatches.Length > 0)
                     {
+                        var buildVelocityDispatchesJob =
+                            new VividParticleEcsBuildIntegratePageDispatchesJob
+                            {
+                                Works = s_VelocitySimulationPageDispatchBuildWorks.AsArray(),
+                                Dispatches = s_VelocitySimulationPageDispatches.AsArray(),
+                            };
+                        JobHandle buildVelocityDispatchesHandle =
+                            buildVelocityDispatchesJob.Schedule(
+                                s_VelocitySimulationPageDispatchBuildWorks.Length,
+                                innerloopBatchCount: 16);
+                        JobHandle velocityIntegrateDependency = hasRendererReadDependency
+                            ? JobHandle.CombineDependencies(
+                                rendererReadDependency,
+                                buildVelocityDispatchesHandle)
+                            : buildVelocityDispatchesHandle;
                         var velocityIntegrateJob = new VividParticleEcsIntegrateLinePagesJob
                         {
                             LineWorks = s_VelocitySimulationLineWorks.AsArray(),
@@ -3968,9 +4023,7 @@ namespace VividRP.Runtime.Particle
                             velocityIntegrateJob.ScheduleParallelEmbedded(
                                 s_VelocitySimulationPageDispatches.AsArray(),
                                 pageInfoByteOffset: 0,
-                                dependency: hasRendererReadDependency
-                                    ? rendererReadDependency
-                                    : default,
+                                dependency: velocityIntegrateDependency,
                                 innerloopBatchCount: 1,
                                 dispatchMode: VividEcsPageDispatchMode.Average);
                         integrateHandle = hasIntegrateHandle
@@ -4016,6 +4069,7 @@ namespace VividRP.Runtime.Particle
                             Configs = s_NativeSimulationConfigs.AsArray(),
                             Bursts = s_NativeSimulationBursts.AsArray(),
                             Inputs = s_EmissionPlanInputs.AsArray(),
+                            InitializeTemplates = s_EmissionInitializeTemplates.AsArray(),
                             Outputs = s_EmissionPlanOutputs.AsArray(),
                             MinimumSimulationStep = MinimumSimulationStep,
                             EmissionAccumulatorTolerance = EmissionAccumulatorTolerance,
@@ -4099,12 +4153,22 @@ namespace VividRP.Runtime.Particle
             if (!s_SimulationPageDispatches.IsCreated)
                 s_SimulationPageDispatches =
                     new NativeList<VividParticleEcsIntegratePageDispatch>(64, Allocator.Persistent);
+            if (!s_SimulationPageDispatchBuildWorks.IsCreated)
+            {
+                s_SimulationPageDispatchBuildWorks =
+                    new NativeList<VividParticleEcsIntegratePageDispatchBuildWork>(64, Allocator.Persistent);
+            }
             if (!s_VelocitySimulationLineWorks.IsCreated)
                 s_VelocitySimulationLineWorks =
                     new NativeList<VividParticleEcsIntegratePageWork>(32, Allocator.Persistent);
             if (!s_VelocitySimulationPageDispatches.IsCreated)
                 s_VelocitySimulationPageDispatches =
                     new NativeList<VividParticleEcsIntegratePageDispatch>(32, Allocator.Persistent);
+            if (!s_VelocitySimulationPageDispatchBuildWorks.IsCreated)
+            {
+                s_VelocitySimulationPageDispatchBuildWorks =
+                    new NativeList<VividParticleEcsIntegratePageDispatchBuildWork>(32, Allocator.Persistent);
+            }
             if (!s_SimulationCompactWorks.IsCreated)
                 s_SimulationCompactWorks = new NativeList<VividParticleEcsCompactWork>(32, Allocator.Persistent);
             if (!s_EmissionInitializeWorks.IsCreated)
@@ -4187,10 +4251,14 @@ namespace VividRP.Runtime.Particle
                     s_SimulationLineWorks.Clear();
                 if (s_SimulationPageDispatches.IsCreated)
                     s_SimulationPageDispatches.Clear();
+                if (s_SimulationPageDispatchBuildWorks.IsCreated)
+                    s_SimulationPageDispatchBuildWorks.Clear();
                 if (s_VelocitySimulationLineWorks.IsCreated)
                     s_VelocitySimulationLineWorks.Clear();
                 if (s_VelocitySimulationPageDispatches.IsCreated)
                     s_VelocitySimulationPageDispatches.Clear();
+                if (s_VelocitySimulationPageDispatchBuildWorks.IsCreated)
+                    s_VelocitySimulationPageDispatchBuildWorks.Clear();
                 if (s_SimulationCompactWorks.IsCreated)
                     s_SimulationCompactWorks.Clear();
                 EnsureSimulationPageWorkList();
@@ -4257,6 +4325,8 @@ namespace VividRP.Runtime.Particle
 
                 if (s_EmissionPlanInputs.IsCreated)
                     s_EmissionPlanInputs.Clear();
+                if (s_EmissionInitializeTemplates.IsCreated)
+                    s_EmissionInitializeTemplates.Clear();
                 if (s_EmissionPlanOutputs.IsCreated)
                     s_EmissionPlanOutputs.Clear();
 
@@ -4418,6 +4488,11 @@ namespace VividRP.Runtime.Particle
                 s_SimulationPrepareOutputs = new NativeList<VividParticleSimulationPrepareOutput>(64, Allocator.Persistent);
             if (!s_EmissionPlanInputs.IsCreated)
                 s_EmissionPlanInputs = new NativeList<VividParticleEmissionPlanInput>(64, Allocator.Persistent);
+            if (!s_EmissionInitializeTemplates.IsCreated)
+            {
+                s_EmissionInitializeTemplates =
+                    new NativeList<VividParticleEcsInitializeParticlesWork>(64, Allocator.Persistent);
+            }
             if (!s_EmissionPlanOutputs.IsCreated)
                 s_EmissionPlanOutputs = new NativeList<VividParticleEmissionPlanOutput>(64, Allocator.Persistent);
         }
@@ -6569,6 +6644,7 @@ namespace VividRP.Runtime.Particle
             public bool SchedulePreparedAutomaticBatch(
                 NativeList<VividParticleEcsIntegratePageWork> lineWorks,
                 NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+                NativeList<VividParticleEcsIntegratePageDispatchBuildWork> pageDispatchBuildWorks,
                 NativeList<VividParticleEcsCompactWork> compactWorks)
             {
                 if (!m_HasPreparedAutomaticSimulation)
@@ -6581,6 +6657,7 @@ namespace VividRP.Runtime.Particle
                     m_PreparedAutomaticGravity,
                     lineWorks,
                     pageDispatches,
+                    pageDispatchBuildWorks,
                     compactWorks);
             }
 
@@ -6602,6 +6679,7 @@ namespace VividRP.Runtime.Particle
                 VividParticleSimulationTimeStep timeStep,
                 NativeList<VividParticleEcsIntegratePageWork> lineWorks,
                 NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+                NativeList<VividParticleEcsIntegratePageDispatchBuildWork> pageDispatchBuildWorks,
                 NativeList<VividParticleEcsCompactWork> compactWorks)
             {
                 return ScheduleAutomaticBatch(
@@ -6610,6 +6688,7 @@ namespace VividRP.Runtime.Particle
                     ToFloat3(ResolveSimulationAcceleration(snapshot)),
                     lineWorks,
                     pageDispatches,
+                    pageDispatchBuildWorks,
                     compactWorks);
             }
 
@@ -6619,6 +6698,7 @@ namespace VividRP.Runtime.Particle
                 float3 gravity,
                 NativeList<VividParticleEcsIntegratePageWork> lineWorks,
                 NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+                NativeList<VividParticleEcsIntegratePageDispatchBuildWork> pageDispatchBuildWorks,
                 NativeList<VividParticleEcsCompactWork> compactWorks)
             {
                 if (!RequiresAutomaticUpdate(timeStep, requireActive: true))
@@ -6630,6 +6710,7 @@ namespace VividRP.Runtime.Particle
                     gravity,
                     lineWorks,
                     pageDispatches,
+                    pageDispatchBuildWorks,
                     compactWorks);
             }
 
@@ -6826,7 +6907,8 @@ namespace VividRP.Runtime.Particle
                     VividParticleSystemManager.RefreshActiveRendererState(this);
             }
 
-            public unsafe VividParticleEmissionPlanInput CreatePreparedEmissionPlanInput()
+            public unsafe VividParticleEmissionPlanInput CreatePreparedEmissionPlanInput(
+                out VividParticleEcsInitializeParticlesWork initializeTemplate)
             {
                 EnsureBurstState(m_PreparedAutomaticSnapshot.Bursts);
                 EnsureAutomaticRandomState(m_PreparedAutomaticSnapshot);
@@ -6834,7 +6916,7 @@ namespace VividRP.Runtime.Particle
                     && m_PreparedAutomaticSnapshot.EmissionEnabled
                     && (m_PreparedAutomaticSnapshot.RateOverTime > 0.0f
                         || (m_PreparedAutomaticSnapshot.Bursts?.Length ?? 0) > 0);
-                VividParticleEcsInitializeParticlesWork initializeTemplate = default;
+                initializeTemplate = default;
                 int* activeCountOutput = null;
                 bool canReserveNative = canEmit
                     && m_Storage.TryCreateInitializeParticlesTemplate(
@@ -6854,8 +6936,8 @@ namespace VividRP.Runtime.Particle
                     BurstTriggeredMask = m_BurstTriggeredMask,
                     RandomState = m_AutomaticRandomState,
                     CanReserveNative = canReserveNative ? 1 : 0,
+                    InitializeTemplateIndex = -1,
                     ActiveCountOutput = activeCountOutput,
-                    InitializeTemplate = initializeTemplate,
                 };
             }
 
@@ -8425,6 +8507,7 @@ namespace VividRP.Runtime.Particle
                 float3 gravity,
                 NativeList<VividParticleEcsIntegratePageWork> lineWorks,
                 NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+                NativeList<VividParticleEcsIntegratePageDispatchBuildWork> pageDispatchBuildWorks,
                 NativeList<VividParticleEcsCompactWork> compactWorks)
             {
                 EnsureStorageCapacity(
@@ -8451,6 +8534,7 @@ namespace VividRP.Runtime.Particle
                         new Vector3(gravity.x, gravity.y, gravity.z),
                         lineWorks,
                         pageDispatches,
+                        pageDispatchBuildWorks,
                         compactWorks))
                     {
                         m_HasPendingJob = true;
@@ -8603,6 +8687,7 @@ namespace VividRP.Runtime.Particle
                     noiseOctaveScale,
                     lineWorks,
                     pageDispatches,
+                    pageDispatchBuildWorks,
                     compactWorks))
                 {
                     m_HasPendingJob = true;

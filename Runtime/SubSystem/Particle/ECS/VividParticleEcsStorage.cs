@@ -1041,6 +1041,7 @@ namespace VividRP.Runtime.Particle.ECS
             Vector3 gravity,
             NativeList<VividParticleEcsIntegratePageWork> lineWorks,
             NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+            NativeList<VividParticleEcsIntegratePageDispatchBuildWork> pageDispatchBuildWorks,
             NativeList<VividParticleEcsCompactWork> compactWorks)
         {
             return AddIntegratePageWorks(
@@ -1083,6 +1084,7 @@ namespace VividRP.Runtime.Particle.ECS
                 2.0f,
                 lineWorks,
                 pageDispatches,
+                pageDispatchBuildWorks,
                 compactWorks);
         }
 
@@ -1126,6 +1128,7 @@ namespace VividRP.Runtime.Particle.ECS
             float noiseOctaveScale,
             NativeList<VividParticleEcsIntegratePageWork> lineWorks,
             NativeList<VividParticleEcsIntegratePageDispatch> pageDispatches,
+            NativeList<VividParticleEcsIntegratePageDispatchBuildWork> pageDispatchBuildWorks,
             NativeList<VividParticleEcsCompactWork> compactWorks)
         {
             int count = activeCount;
@@ -1134,6 +1137,7 @@ namespace VividRP.Runtime.Particle.ECS
                 || deltaTime <= 0.0f
                 || !lineWorks.IsCreated
                 || !pageDispatches.IsCreated
+                || !pageDispatchBuildWorks.IsCreated
                 || !compactWorks.IsCreated)
             {
                 return false;
@@ -1214,14 +1218,16 @@ namespace VividRP.Runtime.Particle.ECS
                 KeepMask = columnView.KeepMask,
             });
 
-            for (int pageIndex = 0; pageIndex < livePageCount; pageIndex++)
+            int dispatchStartIndex = pageDispatches.Length;
+            pageDispatches.ResizeUninitialized(dispatchStartIndex + livePageCount);
+            pageDispatchBuildWorks.Add(new VividParticleEcsIntegratePageDispatchBuildWork
             {
-                pageDispatches.Add(new VividParticleEcsIntegratePageDispatch
-                {
-                    Page = m_Line.GetPageInfo(pageIndex),
-                    LineWorkIndex = lineWorkIndex,
-                });
-            }
+                ArchetypeLineId = m_Line.ArchetypeLineId,
+                ActiveCount = count,
+                PageCount = livePageCount,
+                DispatchStartIndex = dispatchStartIndex,
+                LineWorkIndex = lineWorkIndex,
+            });
 
             compactWorks.Add(CreateCompactWork(count, columnView));
             return true;

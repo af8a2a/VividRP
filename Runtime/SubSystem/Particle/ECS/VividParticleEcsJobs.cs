@@ -227,6 +227,50 @@ namespace VividRP.Runtime.Particle.ECS
         public int LineWorkIndex;
     }
 
+    internal struct VividParticleEcsIntegratePageDispatchBuildWork
+    {
+        public int ArchetypeLineId;
+        public int ActiveCount;
+        public int PageCount;
+        public int DispatchStartIndex;
+        public int LineWorkIndex;
+    }
+
+    [BurstCompile(DisableSafetyChecks = true, OptimizeFor = OptimizeFor.Performance)]
+    internal struct VividParticleEcsBuildIntegratePageDispatchesJob : IJobParallelFor
+    {
+        [ReadOnly]
+        public NativeArray<VividParticleEcsIntegratePageDispatchBuildWork> Works;
+
+        [WriteOnly]
+        [NativeDisableParallelForRestriction]
+        public NativeArray<VividParticleEcsIntegratePageDispatch> Dispatches;
+
+        public void Execute(int workIndex)
+        {
+            VividParticleEcsIntegratePageDispatchBuildWork work = Works[workIndex];
+            int activeCount = math.max(0, work.ActiveCount);
+            int pageCount = math.max(0, work.PageCount);
+            for (int pageIndex = 0; pageIndex < pageCount; pageIndex++)
+            {
+                int startIndex = pageIndex * VividEcsConstants.PageEntryCount;
+                int entryCount = math.min(
+                    VividEcsConstants.PageEntryCount,
+                    math.max(0, activeCount - startIndex));
+                int dispatchIndex = work.DispatchStartIndex + pageIndex;
+                Dispatches[dispatchIndex] = new VividParticleEcsIntegratePageDispatch
+                {
+                    Page = new VividEcsPageInfo(
+                        work.ArchetypeLineId,
+                        pageIndex,
+                        startIndex,
+                        entryCount),
+                    LineWorkIndex = work.LineWorkIndex,
+                };
+            }
+        }
+    }
+
     internal unsafe struct VividParticleEcsCompactWork
     {
         public int ActiveCount;
@@ -469,6 +513,9 @@ namespace VividRP.Runtime.Particle.ECS
         [ReadOnly]
         public NativeArray<VividParticleEmissionPlanInput> Inputs;
 
+        [ReadOnly]
+        public NativeArray<VividParticleEcsInitializeParticlesWork> InitializeTemplates;
+
         [WriteOnly]
         public NativeArray<VividParticleEmissionPlanOutput> Outputs;
 
@@ -540,21 +587,25 @@ namespace VividRP.Runtime.Particle.ECS
 
             if (output.EmitCount > 0)
             {
-                if (input.CanReserveNative == 0 || input.ActiveCountOutput == null)
+                if (input.CanReserveNative == 0
+                    || input.ActiveCountOutput == null
+                    || (uint)input.InitializeTemplateIndex >= (uint)InitializeTemplates.Length)
                 {
                     output.RequiresManagedFallback = 1;
                     Outputs[index] = output;
                     return;
                 }
 
+                VividParticleEcsInitializeParticlesWork initializeTemplate =
+                    InitializeTemplates[input.InitializeTemplateIndex];
                 int activeCount = math.max(0, *input.ActiveCountOutput);
                 int maxParticles = math.min(
                     math.max(0, config.MaxParticles),
-                    math.max(0, input.InitializeTemplate.Capacity));
+                    math.max(0, initializeTemplate.Capacity));
                 int reservedCount = math.min(output.EmitCount, math.max(0, maxParticles - activeCount));
                 if (reservedCount > 0)
                 {
-                    VividParticleEcsInitializeParticlesWork initializeWork = input.InitializeTemplate;
+                    VividParticleEcsInitializeParticlesWork initializeWork = initializeTemplate;
                     initializeWork.StartIndex = activeCount;
                     initializeWork.Count = reservedCount;
                     initializeWork.RandomSeed = NextRandomState(ref output.RandomState);

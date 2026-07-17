@@ -215,7 +215,12 @@ namespace VividRP.Runtime.ECS
             if (pageInfoByteOffset < 0 || pageInfoByteOffset + pageInfoSize > workStride)
                 throw new ArgumentOutOfRangeException(nameof(pageInfoByteOffset));
 
-            byte* pageData = (byte*)pageWorks.GetUnsafeReadOnlyPtr() + pageInfoByteOffset;
+            // Creating the strided alias does not read the underlying elements. Avoid the
+            // immediate main-thread read check here so callers can chain this page job after a
+            // writer through dependency. The copied AtomicSafetyHandle below still lets the job
+            // scheduler validate that dependency and protects later slice access.
+            byte* pageData = (byte*)NativeArrayUnsafeUtility.GetUnsafeBufferPointerWithoutChecks(
+                pageWorks) + pageInfoByteOffset;
             NativeSlice<VividEcsPageInfo> pages = NativeSliceUnsafeUtility.ConvertExistingDataToNativeSlice<VividEcsPageInfo>(
                 pageData,
                 workStride,

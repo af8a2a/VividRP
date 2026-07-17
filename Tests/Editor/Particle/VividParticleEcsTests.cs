@@ -74,6 +74,10 @@ namespace VividRP.Editor.Tests
                 1,
                 Allocator.TempJob,
                 NativeArrayOptions.ClearMemory);
+            var initializeTemplates = new NativeArray<VividParticleEcsInitializeParticlesWork>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.ClearMemory);
             var outputs = new NativeArray<VividParticleEmissionPlanOutput>(
                 1,
                 Allocator.TempJob,
@@ -92,6 +96,7 @@ namespace VividRP.Editor.Tests
                     Configs = configs,
                     Bursts = bursts,
                     Inputs = inputs,
+                    InitializeTemplates = initializeTemplates,
                     Outputs = outputs,
                     MinimumSimulationStep = 0.000001f,
                     EmissionAccumulatorTolerance = 0.0001f,
@@ -104,9 +109,124 @@ namespace VividRP.Editor.Tests
             finally
             {
                 outputs.Dispose();
+                initializeTemplates.Dispose();
                 inputs.Dispose();
                 bursts.Dispose();
                 configs.Dispose();
+            }
+        }
+
+        [Test]
+        public void BuildIntegratePageDispatchesJob_WritesRangesAndPartialLastPage()
+        {
+            var works = new NativeArray<VividParticleEcsIntegratePageDispatchBuildWork>(
+                2,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var dispatches = new NativeArray<VividParticleEcsIntegratePageDispatch>(
+                3,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            try
+            {
+                works[0] = new VividParticleEcsIntegratePageDispatchBuildWork
+                {
+                    ArchetypeLineId = 7,
+                    ActiveCount = VividEcsConstants.PageEntryCount + 44,
+                    PageCount = 2,
+                    DispatchStartIndex = 0,
+                    LineWorkIndex = 5,
+                };
+                works[1] = new VividParticleEcsIntegratePageDispatchBuildWork
+                {
+                    ArchetypeLineId = 11,
+                    ActiveCount = 17,
+                    PageCount = 1,
+                    DispatchStartIndex = 2,
+                    LineWorkIndex = 9,
+                };
+
+                new VividParticleEcsBuildIntegratePageDispatchesJob
+                {
+                    Works = works,
+                    Dispatches = dispatches,
+                }.Run(works.Length);
+
+                Assert.That(dispatches[0].Page.ArchetypeLineId, Is.EqualTo(7));
+                Assert.That(dispatches[0].Page.PageIndex, Is.Zero);
+                Assert.That(dispatches[0].Page.StartIndex, Is.Zero);
+                Assert.That(
+                    dispatches[0].Page.EntryCount,
+                    Is.EqualTo(VividEcsConstants.PageEntryCount));
+                Assert.That(dispatches[0].LineWorkIndex, Is.EqualTo(5));
+
+                Assert.That(dispatches[1].Page.PageIndex, Is.EqualTo(1));
+                Assert.That(
+                    dispatches[1].Page.StartIndex,
+                    Is.EqualTo(VividEcsConstants.PageEntryCount));
+                Assert.That(dispatches[1].Page.EntryCount, Is.EqualTo(44));
+                Assert.That(dispatches[1].LineWorkIndex, Is.EqualTo(5));
+
+                Assert.That(dispatches[2].Page.ArchetypeLineId, Is.EqualTo(11));
+                Assert.That(dispatches[2].Page.PageIndex, Is.Zero);
+                Assert.That(dispatches[2].Page.EntryCount, Is.EqualTo(17));
+                Assert.That(dispatches[2].LineWorkIndex, Is.EqualTo(9));
+            }
+            finally
+            {
+                dispatches.Dispose();
+                works.Dispose();
+            }
+        }
+
+        [Test]
+        public void IntegratePageJob_SchedulesFromDispatchWriterDependency_WithoutMainThreadRead()
+        {
+            var buildWorks = new NativeArray<VividParticleEcsIntegratePageDispatchBuildWork>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var dispatches = new NativeArray<VividParticleEcsIntegratePageDispatch>(
+                1,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            var lineWorks = new NativeArray<VividParticleEcsIntegratePageWork>(
+                0,
+                Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            try
+            {
+                buildWorks[0] = new VividParticleEcsIntegratePageDispatchBuildWork
+                {
+                    ArchetypeLineId = 3,
+                    ActiveCount = 1,
+                    PageCount = 1,
+                    DispatchStartIndex = 0,
+                    LineWorkIndex = 0,
+                };
+                JobHandle buildHandle = new VividParticleEcsBuildIntegratePageDispatchesJob
+                {
+                    Works = buildWorks,
+                    Dispatches = dispatches,
+                }.Schedule(buildWorks.Length, innerloopBatchCount: 1);
+
+                JobHandle integrateHandle = new VividParticleEcsIntegrateLinePagesJob
+                {
+                    LineWorks = lineWorks,
+                    PageDispatches = dispatches,
+                }.ScheduleParallelEmbedded(
+                    dispatches,
+                    pageInfoByteOffset: 0,
+                    dependency: buildHandle);
+
+                integrateHandle.Complete();
+                Assert.That(dispatches[0].Page.EntryCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                lineWorks.Dispose();
+                dispatches.Dispose();
+                buildWorks.Dispose();
             }
         }
 

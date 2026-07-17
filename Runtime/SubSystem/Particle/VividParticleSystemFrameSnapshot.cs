@@ -167,11 +167,10 @@ namespace VividRP.Runtime.Particle
         public ulong BurstTriggeredMask;
         public uint RandomState;
         public int CanReserveNative;
+        public int InitializeTemplateIndex;
 
         [NativeDisableUnsafePtrRestriction]
         public int* ActiveCountOutput;
-
-        public VividParticleEcsInitializeParticlesWork InitializeTemplate;
     }
 
     internal unsafe struct VividParticleEmissionPlanOutput

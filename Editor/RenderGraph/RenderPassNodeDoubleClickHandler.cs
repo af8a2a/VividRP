@@ -152,28 +152,19 @@ namespace VividRP.Editor.RenderGraph
             if (node == null)
                 return false;
 
-            var title = ResolveTitle(node, requestedTitle);
-            if (string.Equals(node.Title, title, StringComparison.Ordinal))
-                return false;
-
             var graph = node.Graph;
             if (graph == null)
-            {
-                node.Title = title;
-                return true;
-            }
+                return node.SetAuthoredPassName(requestedTitle);
 
             graph.UndoBeginRecordGraph(UndoActionName);
             try
             {
-                node.Title = title;
+                return node.SetAuthoredPassName(requestedTitle);
             }
             finally
             {
                 graph.UndoEndRecordGraph();
             }
-
-            return true;
         }
 
         internal static bool BeginRename(VisualElement nodeView, RenderPassNodeData node)
@@ -275,14 +266,6 @@ namespace VividRP.Editor.RenderGraph
             }
 
             return false;
-        }
-
-        private static string ResolveTitle(RenderPassNodeData node, string requestedTitle)
-        {
-            if (!string.IsNullOrWhiteSpace(requestedTitle))
-                return requestedTitle.Trim();
-
-            return node.GetPassType()?.Name ?? node.GetType().Name;
         }
 
         private static float GetEditorMinWidth(VisualElement titleElement)

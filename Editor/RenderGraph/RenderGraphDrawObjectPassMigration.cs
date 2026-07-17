@@ -174,9 +174,9 @@ namespace VividRP.Editor.RenderGraph
             string message)
         {
             var graphPath = string.IsNullOrEmpty(assetPath) ? "<unknown asset>" : assetPath;
-            var passName = string.IsNullOrWhiteSpace(passNode?.Title)
-                ? passNode?.GetPassType()?.Name ?? nameof(DrawObjectPass)
-                : passNode.Title;
+            var passName = passNode?.GetAuthoredPassName(
+                passNode.GetPassType()?.Name ?? nameof(DrawObjectPass))
+                ?? nameof(DrawObjectPass);
             Debug.LogWarning($"[VividRP] RenderGraph migration: '{graphPath}', pass '{passName}' ({passNode?.Guid}) {message}.");
         }
     }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime;
 
@@ -12,6 +13,9 @@ namespace VividRP.Editor.RenderGraph
     [Serializable]
     internal class RenderPassNodeData : RenderGraphNodeData
     {
+        [SerializeField]
+        private string m_PassName;
+
         private const string PassScriptOptionName = "PassScript";
         private const string AsyncComputeOptionName = "AsyncCompute";
         private const string DebugExportOptionName = "DebugExport";
@@ -33,6 +37,37 @@ namespace VividRP.Editor.RenderGraph
 
         internal bool UsesPassScriptSelection => GetRegisteredPassType() == null;
 
+        public override void OnEnable()
+        {
+            base.OnEnable();
+            SynchronizeAuthoredPassNameToTitle();
+        }
+
+        internal string GetAuthoredPassName(string fallbackName)
+        {
+            if (!string.IsNullOrWhiteSpace(m_PassName))
+                return m_PassName;
+
+            return string.IsNullOrWhiteSpace(Title) ? fallbackName : Title;
+        }
+
+        internal bool SetAuthoredPassName(string requestedName)
+        {
+            var isReset = string.IsNullOrWhiteSpace(requestedName);
+            var serializedName = isReset ? string.Empty : requestedName.Trim();
+            var displayName = isReset
+                ? GetPassType()?.Name ?? GetType().Name
+                : serializedName;
+            var changed = !string.Equals(m_PassName, serializedName, StringComparison.Ordinal)
+                || !string.Equals(Title, displayName, StringComparison.Ordinal);
+
+            m_PassName = serializedName;
+            if (!string.Equals(Title, displayName, StringComparison.Ordinal))
+                Title = displayName;
+
+            return changed;
+        }
+
         internal virtual Type GetRegisteredPassType()
         {
             return RenderPassNodeRegistry.GetPassType(GetType());
@@ -40,6 +75,7 @@ namespace VividRP.Editor.RenderGraph
 
         protected override void OnDefineOptions(IOptionDefinitionContext context)
         {
+            SynchronizeAuthoredPassNameToTitle();
             var passType = ResolvePassTypeForOptions();
 
             if (!UsesPassScriptSelection)
@@ -577,6 +613,15 @@ namespace VividRP.Editor.RenderGraph
                     return parameters.Length == 1 && parameters[0].ParameterType.IsInstanceOfType(value);
                 });
             method?.Invoke(optionBuilder, new[] { value });
+        }
+
+        private void SynchronizeAuthoredPassNameToTitle()
+        {
+            if (!string.IsNullOrWhiteSpace(m_PassName)
+                && !string.Equals(Title, m_PassName, StringComparison.Ordinal))
+            {
+                Title = m_PassName;
+            }
         }
 
     }

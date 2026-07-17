@@ -1,5 +1,8 @@
 using System;
+using System.Linq;
 using NUnit.Framework;
+using Unity.GraphToolkit.Editor;
+using UnityEditor;
 using VividRP.Runtime;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime.RenderPass.Core;
@@ -136,6 +139,50 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(renamed, Is.True);
                 Assert.That(node.Title, Is.EqualTo(nameof(DrawObjectPass)));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void DrawObjectPassNode_Rename_PersistsAndCompilesAfterFreshLoad()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+            var assetPath = GraphDatabase.GetGraphAssetPath(graph);
+            var node = new VividRP.Editor.RenderGraph.Generated.DrawObjectPass();
+            var finalBlitNode = new VividRP.Editor.RenderGraph.Generated.FinalBlitPass();
+            RenderGraphTestUtility.AddTestNode(graph, node);
+            RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+
+            try
+            {
+                RenderPassNodeRenameUtility.Rename(node, "DrawTransparentPass");
+                graph.Connect(
+                    node.GetOutputPortByName("m_ColorTarget_Out"),
+                    finalBlitNode.GetInputPortByName("source"));
+                GraphDatabase.SaveGraph(graph);
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+                var runtimeAsset = AssetDatabase.LoadAssetAtPath<RenderGraphData>(assetPath);
+                Assert.That(runtimeAsset, Is.Not.Null);
+                var importedPass = runtimeAsset.Passes.Single(pass =>
+                    pass.PassType.StartsWith(typeof(DrawObjectPass).FullName, StringComparison.Ordinal));
+                var freshGraph = GraphDatabase.LoadGraphForImporter<RenderGraphEditorGraph>(assetPath);
+                Assert.That(freshGraph, Is.Not.Null);
+                var freshNode = freshGraph.GetNodes()
+                    .OfType<VividRP.Editor.RenderGraph.Generated.DrawObjectPass>()
+                    .Single();
+                var compiledPass = RenderGraphCompiler.Compile(freshGraph).Passes.Single(pass =>
+                    pass.PassType.StartsWith(typeof(DrawObjectPass).FullName, StringComparison.Ordinal));
+
+                Assert.That(freshNode.Title, Is.EqualTo("DrawTransparentPass"));
+                Assert.That(freshNode.GetAuthoredPassName(null), Is.EqualTo("DrawTransparentPass"));
+                Assert.That(importedPass.PassName, Is.EqualTo("DrawTransparentPass"));
+                Assert.That(compiledPass.PassName, Is.EqualTo("DrawTransparentPass"));
             }
             finally
             {

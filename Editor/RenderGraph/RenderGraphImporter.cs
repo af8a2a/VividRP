@@ -429,8 +429,7 @@ namespace VividRP.Editor.RenderGraph
 
         private static string GetPassDisplayName(RenderPassNodeData passNode, string fallbackName)
         {
-            var title = passNode?.Title;
-            return string.IsNullOrWhiteSpace(title) ? fallbackName : title;
+            return passNode?.GetAuthoredPassName(fallbackName) ?? fallbackName;
         }
 
         private static bool TryAddHistoryTextureBinding(

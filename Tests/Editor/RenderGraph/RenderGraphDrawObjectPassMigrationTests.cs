@@ -1,9 +1,12 @@
 using System;
+using System.Collections;
 using System.Linq;
 using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
+using UnityEditor;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.TestTools;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core;
@@ -21,6 +24,7 @@ namespace VividRP.Editor.Tests
             {
                 var resourceNode = AddRenderListResource(graph, CreateTransparentDescriptor());
                 var drawNode = AddDrawObjectNode(graph);
+                var sourceShaderTagNames = resourceNode.GetDescriptor().ShaderTagNames;
                 Assert.That(graph.Connect(GetResourceOutput(resourceNode), GetRenderListInput(drawNode)), Is.True);
 
                 var changed = RenderGraphDrawObjectPassMigration.Migrate(graph, "Assets/Test.vrdg");
@@ -32,7 +36,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(graph.GetNodes().Contains(resourceNode), Is.False);
                 Assert.That(embeddedDescriptor.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Transparent));
                 Assert.That(embeddedDescriptor.ShaderTagNames, Is.EqualTo(new[] { "TransparentCharacter", "SpecialForward" }));
-                Assert.That(embeddedDescriptor.ShaderTagNames, Is.Not.SameAs(resourceNode.GetDescriptor().ShaderTagNames));
+                Assert.That(embeddedDescriptor.ShaderTagNames, Is.Not.SameAs(sourceShaderTagNames));
             }
             finally
             {
@@ -177,27 +181,73 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [UnityTest]
+        public IEnumerator Importer_PersistsLegacyDirectResourceMigration_AndReimportIsIdempotent()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+            var assetPath = GraphDatabase.GetGraphAssetPath(graph);
+
+            try
+            {
+                var resourceNode = AddRenderListResource(graph, CreateTransparentDescriptor());
+                var drawNode = AddDrawObjectNode(graph);
+                Assert.That(graph.Connect(GetResourceOutput(resourceNode), GetRenderListInput(drawNode)), Is.True);
+                graph.SchemaVersion = 0;
+                GraphDatabase.SaveGraph(graph);
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+
+                var runtimeAsset = AssetDatabase.LoadAssetAtPath<RenderGraphData>(assetPath);
+                Assert.That(runtimeAsset, Is.Not.Null);
+                var runtimePass = runtimeAsset.Passes.Single(
+                    pass => pass.PassType.StartsWith(typeof(MigrationDrawObjectPass).FullName));
+                Assert.That(runtimeAsset.RenderListDescriptors, Is.Empty);
+                Assert.That(runtimePass.ResourceBindings.Any(binding => binding.FieldName == "m_RenderList"), Is.False);
+                Assert.That(runtimePass.RenderListDescParameters, Has.Count.EqualTo(1));
+                Assert.That(
+                    runtimePass.RenderListDescParameters[0].Value.RenderQueueRange,
+                    Is.EqualTo(RenderGraphRenderQueueRange.Transparent));
+
+                yield return null;
+                yield return null;
+
+                AssetDatabase.ImportAsset(
+                    assetPath,
+                    ImportAssetOptions.ForceSynchronousImport | ImportAssetOptions.ForceUpdate);
+                var persistedGraph = GraphDatabase.LoadGraph<RenderGraphEditorGraph>(assetPath);
+                Assert.That(persistedGraph, Is.Not.Null);
+                Assert.That(persistedGraph.SchemaVersion, Is.EqualTo(RenderGraphEditorGraph.CurrentSchemaVersion));
+                Assert.That(persistedGraph.GetNodes().OfType<RenderListResourceNodeData>(), Is.Empty);
+                Assert.That(RenderGraphDrawObjectPassMigration.Migrate(persistedGraph, assetPath), Is.False);
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
         private static RenderListResourceNodeData AddRenderListResource(
             RenderGraphEditorGraph graph,
             RenderGraphRenderListDesc descriptor)
         {
             var resourceNode = new RenderListResourceNodeData();
+            RenderGraphTestUtility.AddTestNode(graph, resourceNode);
             var descriptorOption = resourceNode.GetNodeOptionByName("Descriptor");
             Assert.That(descriptorOption, Is.Not.Null);
             Assert.That(descriptorOption.TrySetValue(descriptor), Is.True);
-            RenderGraphTestUtility.AddTestNode(graph, resourceNode);
             return resourceNode;
         }
 
         private static MigrationDrawObjectNode AddDrawObjectNode(RenderGraphEditorGraph graph)
         {
             var drawNode = new MigrationDrawObjectNode();
+            RenderGraphTestUtility.AddTestNode(graph, drawNode);
             var overrideOption = drawNode.GetNodeOptionByName(
                 RenderPassPortUtility.GetOverrideOptionName(MigrationDrawObjectPass.RenderListFieldName));
             Assert.That(overrideOption, Is.Not.Null);
             Assert.That(overrideOption.TrySetValue(true), Is.True);
             drawNode.DefineNode();
-            RenderGraphTestUtility.AddTestNode(graph, drawNode);
             return drawNode;
         }
 
@@ -235,7 +285,7 @@ namespace VividRP.Editor.Tests
         }
     }
 
-    internal sealed class MigrationDrawObjectPass : DrawObjectPass
+    internal sealed class MigrationDrawObjectPass : DrawObjectPass, IRenderGraphSideEffectPass
     {
         internal const string RenderListFieldName = "m_RenderList";
         internal const string RenderListDescFieldName = "m_RenderListDesc";

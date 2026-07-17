@@ -444,6 +444,8 @@ namespace VividRP.Editor.Tests
 
                 RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
                 RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+                drawObjectNode.Title = string.Empty;
+                finalBlitNode.Title = string.Empty;
                 graph.Connect(
                     drawObjectNode.GetOutputPortByName("m_ColorTarget_Out"),
                     finalBlitNode.GetInputPortByName("source"));
@@ -462,8 +464,8 @@ namespace VividRP.Editor.Tests
                 }));
                 Assert.That(result.Passes.Select(pass => pass.PassName), Is.EqualTo(new[]
                 {
-                    nameof(DrawObjectPass),
-                    nameof(FinalBlitPass),
+                    drawObjectNode.Title,
+                    finalBlitNode.Title,
                 }));
             }
             finally
@@ -480,20 +482,18 @@ namespace VividRP.Editor.Tests
             try
             {
                 var finalBlitNode = new FinalBlitPassNode();
-                var drawObjectNode = new DrawObjectPassNode
-                {
-                    Title = "Transparent Characters"
-                };
+                var drawObjectNode = new DrawObjectPassNode();
                 var descriptor = RenderGraphRenderListDesc.CreateTransparent("TransparentCharacter", "SpecialForward");
                 descriptor.LayerMask = 1 << 6;
+
+                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+                drawObjectNode.Title = "Transparent Characters";
                 var descriptorOption = drawObjectNode.GetNodeOptionByName(
                     RenderGraphPassRenderListDescParameterUtility.GetOptionName("m_RenderListDesc"));
 
                 Assert.That(descriptorOption, Is.Not.Null);
                 Assert.That(descriptorOption.TrySetValue(descriptor), Is.True);
-
-                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
-                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
                 graph.Connect(
                     drawObjectNode.GetOutputPortByName("m_ColorTarget_Out"),
                     finalBlitNode.GetInputPortByName("source"));
@@ -507,8 +507,89 @@ namespace VividRP.Editor.Tests
                 Assert.That(passDefinition.RenderListDescParameters[0].FieldName, Is.EqualTo("m_RenderListDesc"));
                 Assert.That(passDefinition.RenderListDescParameters[0].Value, Is.Not.SameAs(descriptor));
                 Assert.That(passDefinition.RenderListDescParameters[0].Value.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Transparent));
-                Assert.That(passDefinition.RenderListDescParameters[0].Value.LayerMask, Is.EqualTo(1 << 6));
+                Assert.That(passDefinition.RenderListDescParameters[0].Value.LayerMask.value, Is.EqualTo(1 << 6));
                 Assert.That(passDefinition.RenderListDescParameters[0].Value.ShaderTagNames, Is.EqualTo(descriptor.ShaderTagNames));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_CreatesRenderListBinding_WhenDrawObjectOverrideIsConnected()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var finalBlitNode = new FinalBlitPassNode();
+                var drawObjectNode = new DrawObjectPassNode();
+                var renderListNode = new RenderListResourceNodeData();
+                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+                RenderGraphTestUtility.AddTestNode(graph, renderListNode);
+
+                var overrideOption = drawObjectNode.GetNodeOptionByName(
+                    RenderPassPortUtility.GetOverrideOptionName("m_RenderList"));
+                Assert.That(overrideOption, Is.Not.Null);
+                Assert.That(overrideOption.TrySetValue(true), Is.True);
+                drawObjectNode.DefineNode();
+
+                Assert.That(
+                    graph.Connect(
+                        renderListNode.GetOutputPortByName(RenderListResourceNodeData.OutputPortName),
+                        drawObjectNode.GetInputPortByName("m_RenderList")),
+                    Is.True);
+                Assert.That(
+                    graph.Connect(
+                        drawObjectNode.GetOutputPortByName("m_ColorTarget_Out"),
+                        finalBlitNode.GetInputPortByName("source")),
+                    Is.True);
+
+                var result = RenderGraphCompiler.Compile(graph);
+                var drawPass = result.Passes.Single(pass => pass.PassType.StartsWith(typeof(DrawObjectPass).FullName));
+                var renderListBinding = drawPass.ResourceBindings.Single(binding => binding.FieldName == "m_RenderList");
+
+                Assert.That(result.RenderListDescriptors, Has.Count.EqualTo(1));
+                Assert.That(renderListBinding.ResourceKind, Is.EqualTo(RenderGraphResourceKind.RenderList));
+                Assert.That(renderListBinding.SourceKind, Is.EqualTo(RenderGraphPassBindingSourceKind.Resource));
+                Assert.That(renderListBinding.ResourceIndex, Is.EqualTo(0));
+            }
+            finally
+            {
+                RenderGraphTestUtility.DeleteGraph(graph);
+            }
+        }
+
+        [Test]
+        public void Compile_KeepsEmbeddedDescriptorWithoutBinding_WhenDrawObjectOverrideIsUnconnected()
+        {
+            var graph = RenderGraphTestUtility.CreateGraph();
+
+            try
+            {
+                var finalBlitNode = new FinalBlitPassNode();
+                var drawObjectNode = new DrawObjectPassNode();
+                RenderGraphTestUtility.AddTestNode(graph, finalBlitNode);
+                RenderGraphTestUtility.AddTestNode(graph, drawObjectNode);
+
+                var overrideOption = drawObjectNode.GetNodeOptionByName(
+                    RenderPassPortUtility.GetOverrideOptionName("m_RenderList"));
+                Assert.That(overrideOption, Is.Not.Null);
+                Assert.That(overrideOption.TrySetValue(true), Is.True);
+                drawObjectNode.DefineNode();
+                Assert.That(
+                    graph.Connect(
+                        drawObjectNode.GetOutputPortByName("m_ColorTarget_Out"),
+                        finalBlitNode.GetInputPortByName("source")),
+                    Is.True);
+
+                var result = RenderGraphCompiler.Compile(graph);
+                var drawPass = result.Passes.Single(pass => pass.PassType.StartsWith(typeof(DrawObjectPass).FullName));
+
+                Assert.That(drawPass.ResourceBindings.Any(binding => binding.FieldName == "m_RenderList"), Is.False);
+                Assert.That(drawPass.RenderListDescParameters, Has.Count.EqualTo(1));
             }
             finally
             {

@@ -147,7 +147,7 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeDescriptor.ShaderTagNames, Is.Not.SameAs(descriptor.ShaderTagNames));
             Assert.That(runtimeDescriptor.RenderQueueRange, Is.EqualTo(RenderGraphRenderQueueRange.Transparent));
             Assert.That(runtimeDescriptor.SortingCriteria, Is.EqualTo(SortingCriteria.CommonTransparent));
-            Assert.That(runtimeDescriptor.LayerMask, Is.EqualTo(1 << 7));
+            Assert.That(runtimeDescriptor.LayerMask.value, Is.EqualTo(1 << 7));
             Assert.That(runtimeDescriptor.RenderingLayerMask, Is.EqualTo(0x15u));
             Assert.That(runtimeDescriptor.RendererConfiguration, Is.EqualTo(descriptor.RendererConfiguration));
             Assert.That(runtimeDescriptor.ExcludeObjectMotionVectors, Is.True);

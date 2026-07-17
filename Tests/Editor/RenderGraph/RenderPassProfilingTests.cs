@@ -113,6 +113,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PassRecorder_ExplicitChildPassName_OverridesAuthoredPassName()
+        {
+            var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();
+            graphAsset.Passes.Add(new RenderGraphPassDefinition
+            {
+                PassType = GetPassTypeName<DrawObjectPass>(),
+                PassName = "Authored Outer Pass",
+            });
+
+            try
+            {
+                Compile(graphAsset);
+                var pass = GetCompiledPasses()[0];
+                var markers = GetPassMarkers(pass, "Explicit Child Pass");
+
+                Assert.That(markers.GraphName, Is.EqualTo("Explicit Child Pass"));
+                Assert.That(markers.DisplayName, Is.EqualTo("0:Explicit Child Pass"));
+            }
+            finally
+            {
+                Object.DestroyImmediate(graphAsset);
+            }
+        }
+
+        [Test]
         public void PassRecorder_WrapsRenderPassRecord_WithCpuProfilingOnly()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "PassRecorder.cs"))
@@ -367,11 +392,11 @@ namespace VividRP.Editor.Tests
             return (IList<IRenderPass>)field.GetValue(null);
         }
 
-        private static RenderPassProfilerMarkers GetPassMarkers(IRenderPass pass)
+        private static RenderPassProfilerMarkers GetPassMarkers(IRenderPass pass, string displayName = null)
         {
             var method = typeof(PassRecorder).GetMethod("GetPassMarkers", BindingFlags.NonPublic | BindingFlags.Static);
             Assert.That(method, Is.Not.Null);
-            return (RenderPassProfilerMarkers)method.Invoke(null, new object[] { pass, null });
+            return (RenderPassProfilerMarkers)method.Invoke(null, new object[] { pass, displayName });
         }
 
         private static string GetPassTypeName<T>()

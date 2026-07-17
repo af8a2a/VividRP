@@ -1747,6 +1747,11 @@ namespace VividRP.Runtime.Particle
             return s_RendererManager.hasPendingUpload;
         }
 
+        internal static bool HasPendingRendererBoundsForTests()
+        {
+            return s_RendererManager.hasPendingBounds;
+        }
+
         internal static void GetRendererUploadCollectPathCounts(
             out int nativeRequestCount,
             out int managedFallbackCount)
@@ -5466,9 +5471,19 @@ namespace VividRP.Runtime.Particle
         {
             JobHandle dependency = default;
             hasDependency = false;
+            if (s_RendererManager.hasPendingBounds)
+            {
+                dependency = s_RendererManager.pendingBounds;
+                hasDependency = true;
+            }
+
             if (s_RendererManager.hasPendingUpload)
             {
-                dependency = s_RendererManager.pendingUpload;
+                dependency = hasDependency
+                    ? JobHandle.CombineDependencies(
+                        dependency,
+                        s_RendererManager.pendingUpload)
+                    : s_RendererManager.pendingUpload;
                 hasDependency = true;
             }
 
@@ -14179,6 +14194,10 @@ namespace VividRP.Runtime.Particle
 
             public JobHandle pendingUpload => m_PendingUploadHandle;
 
+            public bool hasPendingBounds => m_HasPendingBounds;
+
+            public JobHandle pendingBounds => m_PendingBoundsHandle;
+
             public int nativeRecordCopyDescriptorCount =>
                 m_NativeRecordCopyDescriptors.IsCreated
                     ? m_NativeRecordCopyDescriptors.Length
@@ -15896,7 +15915,6 @@ namespace VividRP.Runtime.Particle
                             RebuildBatches();
                         }
 
-                        CompletePendingBoundsUpdates();
                         ScheduleManagerJobGraph();
                         RebuildNativeCullingLayout();
                     }
@@ -15916,7 +15934,6 @@ namespace VividRP.Runtime.Particle
                     if (!m_HasPendingBounds && !m_HasCollectedBoundsForManagerGraph)
                         ScheduleBoundsUpdatesFromRecords();
                     m_HasCollectedBoundsForManagerGraph = false;
-                    CompletePendingBoundsUpdates();
                     ScheduleMeshVisibleCountGraph();
                 }
             }
@@ -16124,6 +16141,11 @@ namespace VividRP.Runtime.Particle
                     m_PendingBoundsHandle.Complete();
                     m_PendingBoundsHandle = default;
                     m_HasPendingBounds = false;
+
+                    // The culling layout collect job reads the native renderer records while
+                    // the record build job consumes the bounds results. Keep the bounds apply
+                    // on the main thread until both readers have left those arrays.
+                    CompletePendingCullingRecordBuild();
 
                     int resultCount = Mathf.Min(
                         m_PendingBoundsResultCount,
@@ -16344,6 +16366,14 @@ namespace VividRP.Runtime.Particle
                 {
                     using (s_CullingLayoutRecordBuildScheduleMarker.Auto())
                     {
+                        JobHandle recordBuildDependency = collectHandle;
+                        if (m_HasPendingBounds)
+                        {
+                            recordBuildDependency = JobHandle.CombineDependencies(
+                                recordBuildDependency,
+                                m_PendingBoundsHandle);
+                        }
+
                         m_PendingCullingRecordBuildHandle = new ParticleCullingRecordBuildJob
                         {
                             Works = cullingRecordBuildWorks,
@@ -16352,7 +16382,7 @@ namespace VividRP.Runtime.Particle
                         }.Schedule(
                             rendererRecordRefCount,
                             innerloopBatchCount: 1,
-                            collectHandle);
+                            recordBuildDependency);
                         m_HasPendingCullingRecordBuild = true;
                         JobHandle.ScheduleBatchedJobs();
                     }

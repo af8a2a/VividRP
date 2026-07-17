@@ -1779,6 +1779,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Manager_RendererBoundsRemainScheduled_UntilRenderingBoundary()
+        {
+            VividParticleSystem system = CreateActiveSystem();
+            system.main.maxParticles = 4;
+            system.main.startLifetime = 10.0f;
+            system.main.startSpeed = 0.0f;
+            system.emission.enabled = false;
+            system.shape.enabled = false;
+
+            system.Emit(1);
+            system.Play(withChildren: false);
+            VividParticleSystemManager.CompletePendingRendererUploadForTests();
+
+            VividParticleSystemManager.RunPlayerLoopForTests(0.25f);
+
+            Assert.That(VividParticleSystemManager.HasPendingRendererBoundsForTests(), Is.True);
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.True);
+
+            VividParticleSystemManager.CompletePendingRendererUploadForTests();
+
+            Assert.That(VividParticleSystemManager.HasPendingRendererBoundsForTests(), Is.False);
+            Assert.That(VividParticleSystemManager.HasPendingCullingRecordBuildForTests(), Is.False);
+
+            VividParticleSystemManager.CompleteAndUploadForTests();
+        }
+
+        [Test]
         public void Manager_RendererUpdateCompletesCurrentSimulation_WhenCollisionCallbacksAreEnabled()
         {
             VividParticleSystem system = CreateActiveSystem();

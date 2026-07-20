@@ -101,6 +101,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 09dbe8037a2fc9a4f9129f9f21253064, type: 3}
   - ResourceName: Shaders/Core/Private/GenerateViewZ
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracing.raytrace
+    ResourceObject: {fileID: 4807578003741378534, guid: 09f018db93d2e534ab32ce82ece5e884, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ReGIRGridBuild.compute

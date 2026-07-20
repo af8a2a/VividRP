@@ -120,6 +120,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class ReGIRGridBuildPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class ReferencedPathTracingPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class ReflectionProbeAtlasDebugPass : RenderPassNodeData { }
 
     [Serializable]

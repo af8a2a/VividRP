@@ -1,0 +1,51 @@
+#pragma max_recursion_depth 1
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
+
+RaytracingAccelerationStructure _AccelerationStructure;
+RWTexture2D<float4> _WorldPositionTexture;
+
+float4 _CameraPositionWS;
+float4x4 _PixelCoordToViewDirWS;
+float _RayMinDistance;
+float _RayMaxDistance;
+
+float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
+{
+    float4 viewDirectionWS = mul(float4(pixelCoord, 1.0, 1.0), _PixelCoordToViewDirWS);
+    return -normalize(viewDirectionWS.xyz);
+}
+
+[shader("raygeneration")]
+void RayGenReferencedPathtracing()
+{
+    uint2 launchIndex = DispatchRaysIndex().xy;
+    uint2 launchDimensions = DispatchRaysDimensions().xy;
+    uint2 pixelCoord = uint2(launchIndex.x, launchDimensions.y - launchIndex.y - 1u);
+
+    RayDesc ray;
+    ray.Origin = _CameraPositionWS.xyz;
+    ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS((float2)pixelCoord + 0.5);
+    ray.TMin = _RayMinDistance;
+    ray.TMax = _RayMaxDistance;
+
+    ReferencedPathtracingPayload payload;
+    InitializeReferencedPathtracingPayload(payload);
+    TraceRay(
+        _AccelerationStructure,
+        RAY_FLAG_NONE,
+        0xFF,
+        0,
+        1,
+        0,
+        ray,
+        payload);
+
+    _WorldPositionTexture[pixelCoord] = float4(payload.positionWS, payload.hit != 0u ? 1.0 : 0.0);
+}
+
+[shader("miss")]
+void MissReferencedPathtracing(inout ReferencedPathtracingPayload payload : SV_RayPayload)
+{
+    InitializeReferencedPathtracingPayload(payload);
+}

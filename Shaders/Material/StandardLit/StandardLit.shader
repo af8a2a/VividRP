@@ -326,6 +326,20 @@ Shader "VividRP/Material/StandardLit"
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "ReferencedPathtracingDXR"
+            Tags { "LightMode" = "ReferencedPathtracingDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracing.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "VividRP.Editor.StandardLitShaderGUI"

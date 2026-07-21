@@ -7,6 +7,7 @@ struct ReferencedPathtracingPayload
     float3 normalWS;
     float3 faceNormalWS;
     float3 diffuse;
+    float rayConeSpreadAngle;
     uint hit;
 };
 
@@ -16,6 +17,7 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.normalWS = 0.0;
     payload.faceNormalWS = 0.0;
     payload.diffuse = 0.0;
+    payload.rayConeSpreadAngle = 0.0;
     payload.hit = 0u;
 }
 

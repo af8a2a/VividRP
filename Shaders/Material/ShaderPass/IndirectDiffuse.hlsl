@@ -134,13 +134,18 @@ float2 VividIndirectDiffuseTransformUV(float2 uv)
     return uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
 }
 
-float4 SampleBase(float2 uv)
+float4 SampleBase(float2 uv, float textureLod)
 {
-    float4 baseSample = SAMPLE_TEXTURE2D_LOD(_BaseMap, sampler_BaseMap, uv, 0.0) * _BaseColor;
+    float4 baseSample = SAMPLE_TEXTURE2D_LOD(_BaseMap, sampler_BaseMap, uv, textureLod) * _BaseColor;
 #if defined(_OPACITYMAP)
-    baseSample.a *= SAMPLE_TEXTURE2D_LOD(_OpacityMap, sampler_OpacityMap, uv, 0.0).r;
+    baseSample.a *= SAMPLE_TEXTURE2D_LOD(_OpacityMap, sampler_OpacityMap, uv, textureLod).r;
 #endif
     return baseSample;
+}
+
+float4 SampleBase(float2 uv)
+{
+    return SampleBase(uv, 0.0);
 }
 
 bool VividIndirectDiffuseIsAlphaClipped(float alpha)
@@ -254,7 +259,7 @@ VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeDa
     return geometry;
 }
 
-float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry)
+float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry, float textureLod)
 {
     float3 normalWS = SafeNormalize(geometry.normalWS);
 
@@ -264,12 +269,18 @@ float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geomet
     {
         float3 tangentWS = geometry.tangentWS * rsqrt(tangentLengthSquared);
         float3 bitangentWS = SafeNormalize(cross(normalWS, tangentWS) * geometry.tangentSign);
-        float3 normalTS = UnpackVividNormalScale(SAMPLE_TEXTURE2D_LOD(_BumpMap, sampler_BumpMap, geometry.uv, 0.0), _BumpScale);
+        float3 normalTS = UnpackVividNormalScale(
+            SAMPLE_TEXTURE2D_LOD(_BumpMap, sampler_BumpMap, geometry.uv, textureLod), _BumpScale);
         normalWS = SafeNormalize(normalTS.x * tangentWS + normalTS.y * bitangentWS + normalTS.z * normalWS);
     }
 #endif
 
     return normalWS;
+}
+
+float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry)
+{
+    return VividIndirectDiffuseSampleNormalWS(geometry, 0.0);
 }
 
 float3 SampleStandardLitIndirectDiffuseBakedGI(VividIndirectDiffuseHitGeometry geometry, float3 normalWS)

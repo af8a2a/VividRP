@@ -64,12 +64,18 @@ void RayGenReferencedPathtracing()
 
     RayDesc ray;
     ray.Origin = _CameraPositionWS.xyz;
-    ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS((float2)pixelCoord + 0.5);
+    float2 pixelCenter = (float2)pixelCoord + 0.5;
+    ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter);
     ray.TMin = _RayMinDistance;
     ray.TMax = _RayMaxDistance;
 
     ReferencedPathtracingPayload payload;
     InitializeReferencedPathtracingPayload(payload);
+    float3 rayDirectionDx = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter + float2(1.0, 0.0));
+    float3 rayDirectionDy = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter + float2(0.0, 1.0));
+    payload.rayConeSpreadAngle = max(
+        length(rayDirectionDx - ray.Direction),
+        length(rayDirectionDy - ray.Direction));
     TraceRay(
         _AccelerationStructure,
         RAY_FLAG_NONE,

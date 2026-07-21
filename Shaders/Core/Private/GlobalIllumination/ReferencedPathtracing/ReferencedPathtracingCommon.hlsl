@@ -4,17 +4,18 @@
 struct ReferencedPathtracingPayload
 {
     float3 positionWS;
+    float3 normalWS;
+    float3 faceNormalWS;
+    float3 diffuse;
     uint hit;
-};
-
-struct ReferencedPathtracingAttributeData
-{
-    float2 barycentrics;
 };
 
 void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload payload)
 {
     payload.positionWS = 0.0;
+    payload.normalWS = 0.0;
+    payload.faceNormalWS = 0.0;
+    payload.diffuse = 0.0;
     payload.hit = 0u;
 }
 

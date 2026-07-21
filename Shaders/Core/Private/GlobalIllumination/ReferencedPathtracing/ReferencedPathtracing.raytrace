@@ -9,11 +9,50 @@ float4 _CameraPositionWS;
 float4x4 _PixelCoordToViewDirWS;
 float _RayMinDistance;
 float _RayMaxDistance;
+float4 _ReferencedMainLightDirectionWS;
+float4 _ReferencedMainLightColor;
+
+static const float kReferencedPathtracingInvPi = 0.31830988618;
+static const float kReferencedPathtracingShadowMinBias = 0.001;
+static const float kReferencedPathtracingShadowMaxDistance = 100000.0;
 
 float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
 {
     float4 viewDirectionWS = mul(float4(pixelCoord, 1.0, 1.0), _PixelCoordToViewDirWS);
     return -normalize(viewDirectionWS.xyz);
+}
+
+float TraceReferencedPathtracingMainLightVisibility(
+    float3 positionWS,
+    float3 faceNormalWS,
+    float3 lightDirectionWS)
+{
+    float positionScale = max(max(abs(positionWS.x), abs(positionWS.y)), abs(positionWS.z));
+    float shadowBias = max(kReferencedPathtracingShadowMinBias, positionScale * 0.00001);
+
+    RayDesc shadowRay;
+    shadowRay.Origin = positionWS + faceNormalWS * shadowBias;
+    shadowRay.Direction = lightDirectionWS;
+    shadowRay.TMin = shadowBias;
+    shadowRay.TMax = max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance);
+
+    ReferencedPathtracingPayload visibilityPayload;
+    InitializeReferencedPathtracingPayload(visibilityPayload);
+    // With the closest-hit shader skipped, this value survives any hit; the miss shader clears it.
+    visibilityPayload.hit = 1u;
+    TraceRay(
+        _AccelerationStructure,
+        RAY_FLAG_FORCE_OPAQUE
+            | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
+            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+        0xFF,
+        0,
+        1,
+        0,
+        shadowRay,
+        visibilityPayload);
+
+    return visibilityPayload.hit == 0u ? 1.0 : 0.0;
 }
 
 [shader("raygeneration")]
@@ -41,7 +80,26 @@ void RayGenReferencedPathtracing()
         ray,
         payload);
 
-    _WorldPositionTexture[pixelCoord] = float4(payload.positionWS, payload.hit != 0u ? 1.0 : 0.0);
+    float3 radiance = 0.0;
+    if (payload.hit != 0u)
+    {
+        float3 normalWS = normalize(payload.normalWS);
+        float3 lightDirectionWS = normalize(_ReferencedMainLightDirectionWS.xyz);
+        float3 mainLightColor = max(_ReferencedMainLightColor.rgb, 0.0);
+        float nDotL = saturate(dot(normalWS, lightDirectionWS));
+        if (nDotL > 0.0 && any(mainLightColor > 0.0))
+        {
+            float visibility = TraceReferencedPathtracingMainLightVisibility(
+                payload.positionWS,
+                normalize(payload.faceNormalWS),
+                lightDirectionWS);
+            radiance = payload.diffuse
+                * (kReferencedPathtracingInvPi * nDotL * visibility)
+                * mainLightColor;
+        }
+    }
+
+    _WorldPositionTexture[pixelCoord] = float4(radiance, payload.hit != 0u ? 1.0 : 0.0);
 }
 
 [shader("miss")]

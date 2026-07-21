@@ -6,8 +6,9 @@ using UnityEngine.Rendering.RenderGraphModule;
 namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
-    /// Minimal reference path-tracing prototype. It traces one primary ray per pixel and writes
-    /// the hit position in world space. RGB stores the position and A is one for a hit or zero for a miss.
+    /// Minimal reference path-tracing prototype. It traces one primary ray per pixel, samples the
+    /// StandardLit diffuse and world-space normal, then evaluates the main directional Lambert light.
+    /// RGB stores radiance and A is one for a hit or zero for a miss.
     /// </summary>
     public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
     {
@@ -21,6 +22,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int RayMinDistanceId = Shader.PropertyToID("_RayMinDistance");
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
+        private static readonly int MainLightDirectionWSId = Shader.PropertyToID("_ReferencedMainLightDirectionWS");
+        private static readonly int MainLightColorId = Shader.PropertyToID("_ReferencedMainLightColor");
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
@@ -56,6 +59,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_PixelCoordToViewDirWS = Matrix4x4.identity;
         private float m_RayMinDistance = 0.01f;
         private float m_RayMaxDistance = 1000.0f;
+        private Vector4 m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+        private Vector4 m_MainLightColor = Vector4.zero;
 
         public ReferencedPathTracingPass()
         {
@@ -106,6 +111,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 Screen.height);
 
             ConfigureWorldPositionTexture(m_Width, m_Height);
+            PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
 
             var camera = cameraData?.camera;
             m_ShouldSkipExecution = camera == null || camera.orthographic;
@@ -131,7 +137,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_SupportsRayTracing
                 || m_RayTracingShader == null
                 || m_SceneAccelerationStructure == null
-                || !HasValidReGIRResources()
                 || m_WorldPositionTexture?.innerHandle.IsValid() != true)
             {
                 return;
@@ -160,7 +165,13 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PixelCoordToViewDirWS);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMinDistanceId, m_RayMinDistance);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
-                BindReGIRGlobals(cmd);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    MainLightDirectionWSId,
+                    m_MainLightDirectionWS);
+                cmd.SetRayTracingVectorParam(m_RayTracingShader, MainLightColorId, m_MainLightColor);
+                if (HasValidReGIRResources())
+                    BindReGIRGlobals(cmd);
                 cmd.DispatchRays(
                     m_RayTracingShader,
                     RayGenerationShaderName,
@@ -182,6 +193,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PixelCoordToViewDirWS = Matrix4x4.identity;
             m_RayMinDistance = 0.01f;
             m_RayMaxDistance = 1000.0f;
+            m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+            m_MainLightColor = Vector4.zero;
         }
 
         private void ConfigureWorldPositionTexture(int width, int height)
@@ -211,6 +224,32 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = RenderGraphAccelerationStructureDesc.Create("SceneRTAS")
             };
+        }
+
+        private void PrepareMainDirectionalLight(VividLightData lightData)
+        {
+            m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+            m_MainLightColor = Vector4.zero;
+
+            if (lightData == null)
+                return;
+
+            lightData.CompleteLightGridPrepare();
+            if (!lightData.hasMainDirectionalLight)
+                return;
+
+            var mainLight = lightData.mainDirectionalLight;
+            var directionWS = mainLight.directionWS;
+            if (directionWS.sqrMagnitude <= 1e-8f)
+                return;
+
+            directionWS.Normalize();
+            m_MainLightDirectionWS = new Vector4(directionWS.x, directionWS.y, directionWS.z, 0.0f);
+            m_MainLightColor = new Vector4(
+                Mathf.Max(mainLight.color.x, 0.0f),
+                Mathf.Max(mainLight.color.y, 0.0f),
+                Mathf.Max(mainLight.color.z, 0.0f),
+                1.0f);
         }
 
         private bool HasValidReGIRResources()

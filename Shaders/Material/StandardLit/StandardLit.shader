@@ -312,7 +312,6 @@ Shader "VividRP/Material/StandardLit"
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
                 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
-                #pragma shader_feature_local_raytracing _OPACITYMAP
                 #pragma shader_feature_local_raytracing _NORMALMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP
@@ -336,6 +335,8 @@ Shader "VividRP/Material/StandardLit"
                 #pragma only_renderers d3d11 xboxseries ps5 switch2
                 #pragma raytracing surface_shader
                 #pragma multi_compile _ INSTANCING_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
 
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracing.hlsl"
             ENDHLSL

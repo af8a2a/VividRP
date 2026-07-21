@@ -104,6 +104,33 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Prepare_CachesMainDirectionalLightForLambertEvaluation()
+        {
+            var pass = new ReferencedPathTracingPass();
+            var frameData = new ContextContainer();
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            lightData.directionalLights = new[]
+            {
+                new VividLightData.DirectionalLightData
+                {
+                    directionWS = new Vector3(0.0f, 2.0f, 0.0f),
+                    color = new Vector3(3.0f, 2.0f, 1.0f),
+                }
+            };
+            lightData.directionalLightCount = 1;
+            lightData.mainDirectionalLightIndex = 0;
+
+            pass.Prepare(frameData);
+
+            Assert.That(
+                GetField<Vector4>(pass, "m_MainLightDirectionWS"),
+                Is.EqualTo(new Vector4(0.0f, 1.0f, 0.0f, 0.0f)));
+            Assert.That(
+                GetField<Vector4>(pass, "m_MainLightColor"),
+                Is.EqualTo(new Vector4(3.0f, 2.0f, 1.0f, 1.0f)));
+        }
+
+        [Test]
         public void RenderGraphNode_DefinesSceneRtasReGIRInputsAndWorldPositionOutput()
         {
             var graph = RenderGraphTestUtility.CreateGraph();

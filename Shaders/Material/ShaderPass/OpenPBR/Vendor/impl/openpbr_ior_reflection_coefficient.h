@@ -35,13 +35,13 @@ struct OpenPBR_IorReflectionCoefficient
 vec3 openpbr_reflection_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_IorReflectionCoefficient) refl_trans_coeff,
                                     const float idoth)
 {
-    return vec3(openpbr_fresnel(refl_trans_coeff.eta_t_over_eta_i, idoth));
+    return OPENPBR_MAKE_VEC3_SPLAT(openpbr_fresnel(refl_trans_coeff.eta_t_over_eta_i, idoth));
 }
 
 vec3 openpbr_transmission_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_IorReflectionCoefficient) refl_trans_coeff,
                                       const float idoth)
 {
-    return vec3(0.0f);
+    return OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 }
 
 // The default implementations of the reflection and transmission probabilities use both coefficients.
@@ -49,7 +49,7 @@ vec3 openpbr_transmission_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST
 OpenPBR_AllCoefficients openpbr_all_coefficients(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_IorReflectionCoefficient) refl_trans_coeff,
                                                  const float idoth)
 {
-    return OPENPBR_MAKE_STRUCT_2(OpenPBR_AllCoefficients, openpbr_reflection_coefficient(refl_trans_coeff, idoth), vec3(0.0f));
+    return OPENPBR_MAKE_STRUCT_2(OpenPBR_AllCoefficients, openpbr_reflection_coefficient(refl_trans_coeff, idoth), OPENPBR_MAKE_VEC3_SPLAT(0.0f));
 }
 
 float openpbr_reflection_probability(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_IorReflectionCoefficient) refl_trans_coeff,
@@ -72,7 +72,7 @@ openpbr_all_coefficients_and_probabilities(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_
                                            const float idoth)
 {
     return OPENPBR_MAKE_STRUCT_4(
-        OpenPBR_AllCoefficientsAndProbabilities, openpbr_reflection_coefficient(refl_trans_coeff, idoth), vec3(0.0f), 1.0f, 0.0f);
+        OpenPBR_AllCoefficientsAndProbabilities, openpbr_reflection_coefficient(refl_trans_coeff, idoth), OPENPBR_MAKE_VEC3_SPLAT(0.0f), 1.0f, 0.0f);
 }
 
 float openpbr_estimate_weight(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_IorReflectionCoefficient) refl_trans_coeff,
@@ -94,7 +94,7 @@ float openpbr_estimate_weight_when_applied_to_ggx_microfacet_distribution(
     // use the CoatingLobe's compute_rough_dielectric_energy_reflected function.
     const float average_reflectivity =
         1.0f - openpbr_look_up_opaque_dielectric_energy_complement(refl_trans_coeff.eta_t_over_eta_i, isotropic_alpha, idotn);
-    return openpbr_max_component_of_throughput_weighted_color(path_throughput, vec3(average_reflectivity));
+    return openpbr_max_component_of_throughput_weighted_color(path_throughput, OPENPBR_MAKE_VEC3_SPLAT(average_reflectivity));
 }
 
 #endif  // !OPENPBR_IOR_REFLECTION_COEFFICIENT_H

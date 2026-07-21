@@ -67,8 +67,8 @@ vec3 openpbr_reflection_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_R
                                         refl_trans_coeff,
                                     const float idoth)
 {
-    vec3 standard_refl_coeff = vec3(0.0f);
-    vec3 thin_film_refl_coeff = vec3(0.0f);
+    vec3 standard_refl_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 thin_film_refl_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     const float thin_film_presence = openpbr_compute_thin_film_presence(refl_trans_coeff, idoth);
 
@@ -102,8 +102,8 @@ vec3 openpbr_reflection_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_R
             refl_trans_coeff.f0_for_metal,
             refl_trans_coeff.f82_tint_for_metal,
             (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableTranslucency) &&
-             any(greaterThan(refl_trans_coeff.scale_for_reflection_for_transparent_part, vec3(0.0f)))) ||
-                any(greaterThan(refl_trans_coeff.scale_for_reflection_for_opaque_part, vec3(0.0f))),      // dielectric part
+             any(greaterThan(refl_trans_coeff.scale_for_reflection_for_transparent_part, OPENPBR_MAKE_VEC3_SPLAT(0.0f)))) ||
+                any(greaterThan(refl_trans_coeff.scale_for_reflection_for_opaque_part, OPENPBR_MAKE_VEC3_SPLAT(0.0f))),      // dielectric part
             OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableMetallic) && refl_trans_coeff.metal_amount > 0.0f,  // metal part
             refl_trans_coeff.thin_film_thickness_nm,
             refl_trans_coeff.rgb_wavelengths_nm);
@@ -137,8 +137,8 @@ vec3 openpbr_transmission_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST
                                           refl_trans_coeff,
                                       const float idoth)
 {
-    vec3 standard_trans_coeff = vec3(0.0f);
-    vec3 thin_film_trans_coeff = vec3(0.0f);
+    vec3 standard_trans_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 thin_film_trans_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     const float thin_film_presence = openpbr_compute_thin_film_presence(refl_trans_coeff, idoth);
 
@@ -147,7 +147,7 @@ vec3 openpbr_transmission_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST
     {
         if (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableTranslucency))
             standard_trans_coeff +=
-                refl_trans_coeff.transmission * (vec3(1.0f) - openpbr_fresnel_rgb(refl_trans_coeff.eta_t_over_eta_i_for_transparent_part,
+                refl_trans_coeff.transmission * (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - openpbr_fresnel_rgb(refl_trans_coeff.eta_t_over_eta_i_for_transparent_part,
                                                                                   idoth,
                                                                                   OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableDispersion)));
     }
@@ -164,13 +164,13 @@ vec3 openpbr_transmission_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST
             refl_trans_coeff.f0_for_metal,
             refl_trans_coeff.f82_tint_for_metal,
             OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableTranslucency) &&
-                any(greaterThan(refl_trans_coeff.scale_for_reflection_for_transparent_part, vec3(0.0f))),  // dielectric part
+                any(greaterThan(refl_trans_coeff.scale_for_reflection_for_transparent_part, OPENPBR_MAKE_VEC3_SPLAT(0.0f))),  // dielectric part
             false,                                                                                         // metal part
             refl_trans_coeff.thin_film_thickness_nm,
             refl_trans_coeff.rgb_wavelengths_nm);
 
         if (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableTranslucency))
-            thin_film_trans_coeff += refl_trans_coeff.transmission * (vec3(1.0f) - thin_film_results.reflectance_dielectric);
+            thin_film_trans_coeff += refl_trans_coeff.transmission * (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - thin_film_results.reflectance_dielectric);
     }
 
     const vec3 trans_coeff = mix(standard_trans_coeff, thin_film_trans_coeff, thin_film_presence);
@@ -184,10 +184,10 @@ OpenPBR_AllCoefficients
 openpbr_all_coefficients(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_ComprehensiveReflectionTransmissionCoefficient) refl_trans_coeff,
                          const float idoth)
 {
-    vec3 standard_refl_coeff = vec3(0.0f);
-    vec3 standard_trans_coeff = vec3(0.0f);
-    vec3 thin_film_refl_coeff = vec3(0.0f);
-    vec3 thin_film_trans_coeff = vec3(0.0f);
+    vec3 standard_refl_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 standard_trans_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 thin_film_refl_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 thin_film_trans_coeff = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     const float thin_film_presence = openpbr_compute_thin_film_presence(refl_trans_coeff, idoth);
 
@@ -199,7 +199,7 @@ openpbr_all_coefficients(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_
             const vec3 fresnel_for_transparent_part = openpbr_fresnel_rgb(
                 refl_trans_coeff.eta_t_over_eta_i_for_transparent_part, idoth, OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableDispersion));
             standard_refl_coeff += refl_trans_coeff.scale_for_reflection_for_transparent_part * fresnel_for_transparent_part;
-            standard_trans_coeff += refl_trans_coeff.transmission * (vec3(1.0f) - fresnel_for_transparent_part);
+            standard_trans_coeff += refl_trans_coeff.transmission * (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - fresnel_for_transparent_part);
         }
 
         standard_refl_coeff +=
@@ -223,8 +223,8 @@ openpbr_all_coefficients(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_
             refl_trans_coeff.f0_for_metal,
             refl_trans_coeff.f82_tint_for_metal,
             (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableTranslucency) &&
-             any(greaterThan(refl_trans_coeff.scale_for_reflection_for_transparent_part, vec3(0.0f)))) ||
-                any(greaterThan(refl_trans_coeff.scale_for_reflection_for_opaque_part, vec3(0.0f))),      // dielectric part
+             any(greaterThan(refl_trans_coeff.scale_for_reflection_for_transparent_part, OPENPBR_MAKE_VEC3_SPLAT(0.0f)))) ||
+                any(greaterThan(refl_trans_coeff.scale_for_reflection_for_opaque_part, OPENPBR_MAKE_VEC3_SPLAT(0.0f))),      // dielectric part
             OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableMetallic) && refl_trans_coeff.metal_amount > 0.0f,  // metal part
             refl_trans_coeff.thin_film_thickness_nm,
             refl_trans_coeff.rgb_wavelengths_nm);
@@ -232,7 +232,7 @@ openpbr_all_coefficients(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_
         if (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableTranslucency))
         {
             thin_film_refl_coeff += refl_trans_coeff.scale_for_reflection_for_transparent_part * thin_film_results.reflectance_dielectric;
-            thin_film_trans_coeff += refl_trans_coeff.transmission * (vec3(1.0f) - thin_film_results.reflectance_dielectric);
+            thin_film_trans_coeff += refl_trans_coeff.transmission * (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - thin_film_results.reflectance_dielectric);
         }
 
         thin_film_refl_coeff += refl_trans_coeff.scale_for_reflection_for_opaque_part * thin_film_results.reflectance_dielectric;

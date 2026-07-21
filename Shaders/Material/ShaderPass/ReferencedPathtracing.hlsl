@@ -5,6 +5,7 @@
 
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
 
 static const float kReferencedPathtracingTextureLodBias = 0.5;
 
@@ -15,7 +16,9 @@ float3 ReferencedPathtracingTransformPositionToWorld(float3 positionOS)
 
 float ComputeReferencedPathtracingTextureBaseLambda(
     VividIndirectDiffuseHitGeometry geometry,
-    float rayConeSpreadAngle)
+    float rayConeWidth,
+    float rayConeSpreadAngle,
+    out float hitConeWidth)
 {
     uint3 triangleIndices = UnityRayTracingFetchTriangleIndices(PrimitiveIndex());
 
@@ -37,13 +40,23 @@ float ComputeReferencedPathtracingTextureBaseLambda(
     float2 uvEdge2 = uv2 - uv0;
     float triangleAreaUV = abs(uvEdge1.x * uvEdge2.y - uvEdge1.y * uvEdge2.x);
 
-    float coneWidth = max(geometry.hitDistance * rayConeSpreadAngle, 0.000001);
+    hitConeWidth = max(rayConeWidth + geometry.hitDistance * rayConeSpreadAngle, 0.000001);
     return computeBaseTextureLOD(
         WorldRayDirection(),
         geometry.faceNormalWS,
-        coneWidth,
+        hitConeWidth,
         max(triangleAreaUV, 0.000000000001),
         max(triangleAreaWS, 0.000000000001));
+}
+
+bool VividReferencedPathtracingIsFinite(float value)
+{
+    return !isnan(value) && !isinf(value);
+}
+
+bool VividReferencedPathtracingIsFinite(float3 value)
+{
+    return !any(isnan(value)) && !any(isinf(value));
 }
 
 [shader("closesthit")]
@@ -52,9 +65,12 @@ void StandardLitReferencedPathtracingClosestHit(
     AttributeData attributeData : SV_IntersectionAttributes)
 {
     VividIndirectDiffuseHitGeometry geometry = VividIndirectDiffuseBuildHitGeometry(attributeData);
+    float hitConeWidth;
     float textureBaseLambda = ComputeReferencedPathtracingTextureBaseLambda(
         geometry,
-        payload.rayConeSpreadAngle);
+        payload.rayConeWidth,
+        payload.rayConeSpreadAngle,
+        hitConeWidth);
     float baseTextureLod = max(
         computeTargetTextureLOD(_BaseMap, textureBaseLambda) + kReferencedPathtracingTextureLodBias,
         0.0);
@@ -64,13 +80,87 @@ void StandardLitReferencedPathtracingClosestHit(
         computeTargetTextureLOD(_BumpMap, textureBaseLambda) + kReferencedPathtracingTextureLodBias,
         0.0);
 #endif
-    float4 baseSample = SampleBase(geometry.uv, baseTextureLod);
+    VividReferencedPathtracingMaterial material = VividReferencedPathtracingResolveStandardLitOpenPBR(
+        geometry,
+        textureBaseLambda,
+        baseTextureLod,
+        normalTextureLod);
+
+    float3 viewDirectionWS = normalize(-WorldRayDirection());
+    OpenPBR_PreparedBsdf preparedBsdf = openpbr_prepare(
+        material.openPbrInputs,
+        max(payload.pathThroughput, 0.0),
+        OpenPBR_BaseRgbWavelengths_nm,
+        OpenPBR_VacuumIor,
+        viewDirectionWS);
 
     payload.positionWS = geometry.positionWS;
-    payload.normalWS = VividIndirectDiffuseSampleNormalWS(geometry, normalTextureLod);
     payload.faceNormalWS = geometry.faceNormalWS;
-    payload.diffuse = saturate(baseSample.rgb);
+    payload.rayConeWidth = hitConeWidth;
+    payload.emission = VividReferencedPathtracingIsFinite(preparedBsdf.emission)
+        ? max(preparedBsdf.emission, 0.0)
+        : 0.0;
+    payload.mainLightBsdf = 0.0;
+    payload.nextDirectionWS = 0.0;
+    payload.nextThroughputWeight = 0.0;
+    payload.nextPdf = 0.0;
+
+    float3 mainLightDirectionWS = normalize(_ReferencedMainLightDirectionWS.xyz);
+    if (dot(mainLightDirectionWS, geometry.faceNormalWS) > 0.0
+        && any(_ReferencedMainLightColor.rgb > 0.0))
+    {
+        OpenPBR_DiffuseSpecular mainLightResponse = openpbr_eval(
+            preparedBsdf,
+            mainLightDirectionWS);
+        float mainLightBsdfPdf = openpbr_pdf(preparedBsdf, mainLightDirectionWS);
+        float3 mainLightBsdf = openpbr_get_sum_of_diffuse_specular(mainLightResponse);
+        if (VividReferencedPathtracingIsFinite(mainLightBsdf)
+            && VividReferencedPathtracingIsFinite(mainLightBsdfPdf)
+            && mainLightBsdfPdf >= 0.0)
+        {
+            payload.mainLightBsdf = max(mainLightBsdf, 0.0);
+        }
+    }
+
+    float3 sampledDirectionWS;
+    OpenPBR_DiffuseSpecular sampledWeight;
+    float sampledPdf;
+    OpenPBR_BsdfLobeType sampledLobeType;
+    openpbr_sample(
+        preparedBsdf,
+        saturate(payload.bsdfRandom),
+        sampledDirectionWS,
+        sampledWeight,
+        sampledPdf,
+        sampledLobeType);
+
+    if (sampledPdf > 0.0
+        && VividReferencedPathtracingIsFinite(sampledPdf)
+        && VividReferencedPathtracingIsFinite(sampledDirectionWS))
+    {
+        float3 nextThroughputWeight = openpbr_get_sum_of_diffuse_specular(sampledWeight);
+        if (VividReferencedPathtracingIsFinite(nextThroughputWeight)
+            && dot(sampledDirectionWS, geometry.faceNormalWS) > 0.000001)
+        {
+            payload.nextDirectionWS = normalize(sampledDirectionWS);
+            payload.nextThroughputWeight = max(nextThroughputWeight, 0.0);
+            payload.nextPdf = sampledPdf;
+        }
+    }
+
     payload.hit = 1u;
+}
+
+[shader("anyhit")]
+void StandardLitReferencedPathtracingAnyHit(
+    inout ReferencedPathtracingPayload payload : SV_RayPayload,
+    AttributeData attributeData : SV_IntersectionAttributes)
+{
+#if defined(_ALPHATEST_ON)
+    float2 uv = VividIndirectDiffuseFetchUV(attributeData);
+    if (VividIndirectDiffuseIsAlphaClipped(SampleBase(uv).a))
+        IgnoreHit();
+#endif
 }
 
 #endif

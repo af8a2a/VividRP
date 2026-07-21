@@ -263,7 +263,7 @@ vec3 openpbr_disney_sheen_f(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
     const float cos_theta_o = openpbr_get_cos_theta_local(wo_local);
     const float cos_theta_i = openpbr_get_cos_theta_local(wi_local);
     if (cos_theta_o <= 0.0f || cos_theta_i <= 0.0f)
-        return vec3(0.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     // Rotate coordinate frame to align with incident direction wo_local.
     const float phi_std = openpbr_disney_sheen_phi(wo_local);
@@ -271,7 +271,7 @@ vec3 openpbr_disney_sheen_f(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
 
     // Evaluate LTC distribution in aligned coordinates.
     const vec3 ltc_coeffs = openpbr_disney_sheen_fetch_coeffs(lobe, wo_local);
-    vec3 value = vec3(openpbr_disney_sheen_eval_ltc(wi_std_local, ltc_coeffs));
+    vec3 value = OPENPBR_MAKE_VEC3_SPLAT(openpbr_disney_sheen_eval_ltc(wi_std_local, ltc_coeffs));
 
     // Also consider the presence (surface coverage), overall reflectance ("R" in the paper),
     // and artist-specified sheen tint ("Csheen" in the paper).
@@ -287,7 +287,7 @@ vec3 openpbr_disney_sheen_f(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
     // If the cosine foreshortening factor were handled in the integrator instead of the BSDF,
     // we would need to cancel it out here like this:
     //
-    // return cos_theta_i > 0.0f ? value / cos_theta_i : vec3(0.0f);
+    // return cos_theta_i > 0.0f ? value / cos_theta_i : OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     return value;
 }
@@ -303,7 +303,7 @@ bool openpbr_disney_sheen_sample_f(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_RE
     const float cos_theta_o = openpbr_get_cos_theta_local(wo_local);
     if (cos_theta_o <= 0.0f)
     {
-        wi_local = vec3(0.0f);
+        wi_local = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
         return false;
     }
 
@@ -389,7 +389,7 @@ float openpbr_sheen_probability(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(O
 
     // TODO: Take the real path throughput into account (for both standalone lobes),
     //       either by saving it in the lobe struct or by passing it in.
-    OPENPBR_CONSTEXPR_LOCAL vec3 PlaceholderPathThroughput = vec3(1.0f);
+    OPENPBR_CONSTEXPR_LOCAL vec3 PlaceholderPathThroughput = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
 
     // lobe.view_reflected is already weighted by lobe.presence; see openpbr_proportion_reflected().
     const float sheen_contribution = lobe.view_reflected * openpbr_max3(lobe.tint);

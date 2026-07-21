@@ -6,9 +6,9 @@ using UnityEngine.Rendering.RenderGraphModule;
 namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
-    /// Minimal reference path-tracing prototype. It traces one primary ray per pixel, samples the
-    /// StandardLit diffuse and world-space normal, then evaluates the main directional Lambert light.
-    /// RGB stores radiance and A is one for a hit or zero for a miss.
+    /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
+    /// path and performs next-event estimation against the main directional light at every hit.
+    /// RGB stores sample radiance and A is one for a primary hit or zero for a miss.
     /// </summary>
     public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
     {
@@ -16,6 +16,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string RayGenerationShaderName = "RayGenReferencedPathtracing";
 
         private const string AccelerationStructureName = "_AccelerationStructure";
+        private const int MaxBounceCount = 4;
+        private const int RussianRouletteStartBounce = 3;
 
         private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
         private static readonly int CameraPositionId = Shader.PropertyToID("_CameraPositionWS");
@@ -24,6 +26,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
         private static readonly int MainLightDirectionWSId = Shader.PropertyToID("_ReferencedMainLightDirectionWS");
         private static readonly int MainLightColorId = Shader.PropertyToID("_ReferencedMainLightColor");
+        private static readonly int MaxBounceCountId = Shader.PropertyToID("_ReferencedMaxBounceCount");
+        private static readonly int RussianRouletteStartBounceId =
+            Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
@@ -170,6 +175,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     MainLightDirectionWSId,
                     m_MainLightDirectionWS);
                 cmd.SetRayTracingVectorParam(m_RayTracingShader, MainLightColorId, m_MainLightColor);
+                cmd.SetRayTracingIntParam(m_RayTracingShader, MaxBounceCountId, MaxBounceCount);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    RussianRouletteStartBounceId,
+                    RussianRouletteStartBounce);
                 if (HasValidReGIRResources())
                     BindReGIRGlobals(cmd);
                 cmd.DispatchRays(

@@ -78,12 +78,12 @@ vec3 openpbr_coat_passage_color_multiplier(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_
             0.0f,
             1.0f - (1.0f - openpbr_square(cosine)) / openpbr_square(lobe.coat_reflection_lobe.refl_trans_coeff.eta_t_over_eta_i)));  // Snell's law
         const float distance_scale = 1.0f / refracted_cosine;  // passage distance relative to coat thickness in normal direction
-        const vec3 coat_transmission_along_refracted_ray = openpbr_safe_pow(coat_transmission_at_normal_incidence, vec3(distance_scale));
-        return mix(vec3(1.0f), coat_transmission_along_refracted_ray, lobe.presence);  // account for fractional coat coverage
+        const vec3 coat_transmission_along_refracted_ray = openpbr_safe_pow(coat_transmission_at_normal_incidence, OPENPBR_MAKE_VEC3_SPLAT(distance_scale));
+        return mix(OPENPBR_MAKE_VEC3_SPLAT(1.0f), coat_transmission_along_refracted_ray, lobe.presence);  // account for fractional coat coverage
     }
     else  // inside or no tint
     {
-        return vec3(1.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     }
 }
 
@@ -140,7 +140,7 @@ float openpbr_coat_reflection_probability(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_C
 
     // TODO: Take the real path throughput into account (for both standalone lobes),
     //       either by saving it in the lobe struct or by passing it in.
-    OPENPBR_CONSTEXPR_LOCAL vec3 PlaceholderPathThroughput = vec3(1.0f);
+    OPENPBR_CONSTEXPR_LOCAL vec3 PlaceholderPathThroughput = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
 
     // Here we can use lobe.in_reflected instead of calling estimate_lobe_contribution
     // because we know the inner details of the coat reflection lobe.

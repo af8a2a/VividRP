@@ -41,7 +41,7 @@ vec3 openpbr_reflection_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_R
 vec3 openpbr_transmission_coefficient(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_ConstantReflectionCoefficient) refl_trans_coeff,
                                       const float idoth)
 {
-    return vec3(0.0f);
+    return OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 }
 
 // The default implementations of the reflection and transmission probabilities use both coefficients.
@@ -50,7 +50,7 @@ OpenPBR_AllCoefficients openpbr_all_coefficients(OPENPBR_ADDRESS_SPACE_THREAD OP
                                                      refl_trans_coeff,
                                                  const float idoth)
 {
-    return OPENPBR_MAKE_STRUCT_2(OpenPBR_AllCoefficients, refl_trans_coeff.color, vec3(0.0f));
+    return OPENPBR_MAKE_STRUCT_2(OpenPBR_AllCoefficients, refl_trans_coeff.color, OPENPBR_MAKE_VEC3_SPLAT(0.0f));
 }
 
 float openpbr_reflection_probability(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_ConstantReflectionCoefficient) refl_trans_coeff,
@@ -72,7 +72,7 @@ openpbr_all_coefficients_and_probabilities(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_
                                            const vec3 path_throughput,
                                            const float idoth)
 {
-    return OPENPBR_MAKE_STRUCT_4(OpenPBR_AllCoefficientsAndProbabilities, refl_trans_coeff.color, vec3(0.0f), 1.0f, 0.0f);
+    return OPENPBR_MAKE_STRUCT_4(OpenPBR_AllCoefficientsAndProbabilities, refl_trans_coeff.color, OPENPBR_MAKE_VEC3_SPLAT(0.0f), 1.0f, 0.0f);
 }
 
 float openpbr_estimate_weight(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_ConstantReflectionCoefficient) refl_trans_coeff,

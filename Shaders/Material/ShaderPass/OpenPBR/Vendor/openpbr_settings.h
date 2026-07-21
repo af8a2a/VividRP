@@ -185,6 +185,24 @@
 #define OPENPBR_USE_CUSTOM_VEC_TYPES 0
 #endif
 
+// Scalar-to-vector construction hooks. HLSL requires an explicit cast for
+// scalar splats, while the other supported backends accept vecN(value).
+#ifndef OPENPBR_MAKE_VEC2_SPLAT
+#define OPENPBR_MAKE_VEC2_SPLAT(value) vec2(value)
+#endif
+#ifndef OPENPBR_MAKE_VEC3_SPLAT
+#define OPENPBR_MAKE_VEC3_SPLAT(value) vec3(value)
+#endif
+#ifndef OPENPBR_MAKE_VEC4_SPLAT
+#define OPENPBR_MAKE_VEC4_SPLAT(value) vec4(value)
+#endif
+
+// Optional host-language field used to preserve nominal wrapper types on
+// compilers that otherwise compare user-defined structs by flattened layout.
+#ifndef OPENPBR_LEGACY_HLSL_WRAPPER_TYPE_TAG
+#define OPENPBR_LEGACY_HLSL_WRAPPER_TYPE_TAG
+#endif
+
 // ==========================================
 // Custom Interop Override (Advanced)
 // ==========================================

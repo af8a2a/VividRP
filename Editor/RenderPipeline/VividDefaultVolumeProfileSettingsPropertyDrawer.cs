@@ -23,6 +23,8 @@ namespace VividRP.Editor.RenderPipeline
             var root = new VisualElement();
             var profileField = new PropertyField(m_VolumeProfileSerializedProperty, s_ProfileLabel.text);
             profileField.RegisterValueChangeCallback(_ => RefreshProfileEditor());
+            root.RegisterCallback<DetachFromPanelEvent>(_ =>
+                RenderPipelineManager.activeRenderPipelineCreated -= RefreshProfileEditorAfterPipelineCreated);
             root.Add(profileField);
             return root;
         }
@@ -32,11 +34,28 @@ namespace VividRP.Editor.RenderPipeline
             m_SettingsSerializedObject.ApplyModifiedProperties();
             DestroyDefaultVolumeProfileEditor();
 
+            if (!RenderPipelineManager.pipelineSwitchCompleted || !VolumeManager.instance.isInitialized)
+            {
+                RenderPipelineManager.activeRenderPipelineCreated -= RefreshProfileEditorAfterPipelineCreated;
+                RenderPipelineManager.activeRenderPipelineCreated += RefreshProfileEditorAfterPipelineCreated;
+                return;
+            }
+
             var profile = m_VolumeProfileSerializedProperty.objectReferenceValue as VolumeProfile;
             if (profile != null)
                 VolumeProfileUtils.UpdateGlobalDefaultVolumeProfile<VividRenderPipeline>(profile);
 
             CreateDefaultVolumeProfileEditor();
+        }
+
+        private void RefreshProfileEditorAfterPipelineCreated()
+        {
+            RenderPipelineManager.activeRenderPipelineCreated -= RefreshProfileEditorAfterPipelineCreated;
+
+            if (m_EditorContainer?.panel == null)
+                return;
+
+            RefreshProfileEditor();
         }
     }
 

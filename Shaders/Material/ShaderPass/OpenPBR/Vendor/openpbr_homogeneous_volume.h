@@ -59,26 +59,26 @@ OPENPBR_INLINE_FUNCTION OpenPBR_HomogeneousVolume openpbr_make_volume_from_extin
 // Initializes an empty volume (vacuum).
 OPENPBR_INLINE_FUNCTION OpenPBR_HomogeneousVolume openpbr_make_empty_volume()
 {
-    return openpbr_make_volume_from_extinction_coefficient_and_albedo_and_anisotropy(vec3(0.0f), vec3(0.0f), 0.0f);
+    return openpbr_make_volume_from_extinction_coefficient_and_albedo_and_anisotropy(OPENPBR_MAKE_VEC3_SPLAT(0.0f), OPENPBR_MAKE_VEC3_SPLAT(0.0f), 0.0f);
 }
 
 // Initializes a default ambient volume.
 OPENPBR_INLINE_FUNCTION OpenPBR_HomogeneousVolume openpbr_make_ambient_volume()
 {
     return openpbr_make_volume_from_extinction_coefficient_and_albedo_and_anisotropy(
-        vec3(OpenPBR_AmbientVolumeExtinctionCoefficient), vec3(OpenPBR_AmbientVolumeAlbedo), OpenPBR_AmbientVolumeAnisotropy);
+        OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_AmbientVolumeExtinctionCoefficient), OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_AmbientVolumeAlbedo), OpenPBR_AmbientVolumeAnisotropy);
 }
 
 // Initializes a volume from extinction, creating an ambient volume if necessary.
 OPENPBR_INLINE_FUNCTION OpenPBR_HomogeneousVolume openpbr_make_volume_from_extinction_coefficient(vec3 extinction_coefficient)
 {
-    if (all(equal(extinction_coefficient, vec3(OpenPBR_AmbientVolumeExtinctionCoefficient))))
+    if (all(equal(extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_AmbientVolumeExtinctionCoefficient))))
     {
         return openpbr_make_ambient_volume();
     }
     else
     {
-        return openpbr_make_volume_from_extinction_coefficient_and_albedo(extinction_coefficient, vec3(0.0f));
+        return openpbr_make_volume_from_extinction_coefficient_and_albedo(extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(0.0f));
     }
 }
 
@@ -90,7 +90,7 @@ openpbr_make_volume_from_absorption_and_scattering_coefficients_and_anisotropy(v
 {
     OpenPBR_HomogeneousVolume volume;
     volume.extinction_coefficient = absorption_coefficient + scattering_coefficient;
-    if (all(greaterThan(volume.extinction_coefficient, vec3(0.0f))))
+    if (all(greaterThan(volume.extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(0.0f))))
     {
         volume.albedo = scattering_coefficient / volume.extinction_coefficient;
     }
@@ -117,27 +117,27 @@ OPENPBR_INLINE_FUNCTION OpenPBR_HomogeneousVolume openpbr_make_volume_from_absor
 // Initializes a purely absorbing volume from an absorption coefficient alone.
 OPENPBR_INLINE_FUNCTION OpenPBR_HomogeneousVolume openpbr_make_volume_from_absorption_coefficient(vec3 absorption_coefficient)
 {
-    return openpbr_make_volume_from_extinction_coefficient_and_albedo(absorption_coefficient, vec3(0.0f));
+    return openpbr_make_volume_from_extinction_coefficient_and_albedo(absorption_coefficient, OPENPBR_MAKE_VEC3_SPLAT(0.0f));
 }
 
 // Checks if a volume is empty (vacuum).
 OPENPBR_INLINE_FUNCTION bool openpbr_is_empty_volume(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_HomogeneousVolume) volume)
 {
-    return all(equal(volume.extinction_coefficient, vec3(0.0f)));
+    return all(equal(volume.extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(0.0f)));
 }
 
 // Checks if a volume is an ambient volume.
 OPENPBR_INLINE_FUNCTION bool openpbr_is_ambient_volume(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_HomogeneousVolume) volume)
 {
-    return all(equal(volume.extinction_coefficient, vec3(OpenPBR_AmbientVolumeExtinctionCoefficient))) &&
-           all(equal(volume.albedo, vec3(OpenPBR_AmbientVolumeAlbedo))) && volume.anisotropy == OpenPBR_AmbientVolumeAnisotropy;
+    return all(equal(volume.extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_AmbientVolumeExtinctionCoefficient))) &&
+           all(equal(volume.albedo, OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_AmbientVolumeAlbedo))) && volume.anisotropy == OpenPBR_AmbientVolumeAnisotropy;
 }
 
 // Special version of function above with alternative interface
 // for use when only the extinction coefficient is known.
 OPENPBR_INLINE_FUNCTION bool openpbr_is_ambient_volume(const vec3 extinction_coefficient)
 {
-    return all(equal(extinction_coefficient, vec3(OpenPBR_AmbientVolumeExtinctionCoefficient)));
+    return all(equal(extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_AmbientVolumeExtinctionCoefficient)));
 }
 
 // Checks if a volume is a non-empty non-ambient volume.
@@ -187,7 +187,7 @@ OPENPBR_INLINE_FUNCTION vec3 openpbr_calculate_transmittance_at_distance(const v
     // Special case to support ambient volumes and speed up transmittance calculation for empty volumes.
     if (!openpbr_is_homogeneous_volume(volume))
     {
-        return vec3(1.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     }
 
     return openpbr_calculate_transmittance_at_distance(volume, distance);
@@ -197,7 +197,7 @@ OPENPBR_INLINE_FUNCTION vec3 openpbr_calculate_transmittance_at_distance(const v
 OPENPBR_INLINE_FUNCTION vec3 openpbr_calculate_transmittance_at_infinity(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_HomogeneousVolume)
                                                                              volume)
 {
-    return vec3(equal(volume.extinction_coefficient, vec3(0.0f)));
+    return OPENPBR_MAKE_VEC3_SPLAT(equal(volume.extinction_coefficient, OPENPBR_MAKE_VEC3_SPLAT(0.0f)));
 }
 
 // Calculates probabilities of sampling a distance based on each color channel.
@@ -216,7 +216,7 @@ OPENPBR_INLINE_FUNCTION vec3 openpbr_calculate_color_channel_probability(OPENPBR
     }
     else
     {
-        return vec3(1.0f / 3.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(1.0f / 3.0f);
     }
 }
 
@@ -312,7 +312,7 @@ OPENPBR_INLINE_FUNCTION vec3 openpbr_calculate_weight_for_surface_at_distance(OP
     // Special case for non-interaction with an empty volume.
     if (!openpbr_is_homogeneous_volume(volume))
     {
-        return vec3(1.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     }
 
     const vec3 color_channel_probability = openpbr_calculate_color_channel_probability(volume, throughput);

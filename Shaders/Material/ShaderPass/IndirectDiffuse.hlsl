@@ -157,17 +157,17 @@ bool VividIndirectDiffuseIsAlphaClipped(float alpha)
 #endif
 }
 
-float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
+float2 SampleMetallicSmoothness(float2 uv, float baseAlpha, float textureLod)
 {
     float metallic = saturate(_Metallic);
     float smoothness = saturate(_Smoothness);
 
 #if defined(_METALLICSPECGLOSSMAP)
-    float4 metallicGlossSample = SAMPLE_TEXTURE2D_LOD(_MetallicGlossMap, sampler_MetallicGlossMap, uv, 0.0);
+    float4 metallicGlossSample = SAMPLE_TEXTURE2D_LOD(_MetallicGlossMap, sampler_MetallicGlossMap, uv, textureLod);
     metallic = saturate(metallicGlossSample.r * _Metallic);
 
     #if defined(_ROUGHNESSMAP)
-        float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, 0.0).r;
+        float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, textureLod).r;
         smoothness = (1.0 - roughness) * _Smoothness;
     #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
         smoothness = baseAlpha * _Smoothness;
@@ -175,13 +175,18 @@ float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
         smoothness = metallicGlossSample.a * _Smoothness;
     #endif
 #elif defined(_ROUGHNESSMAP)
-    float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, 0.0).r;
+    float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, textureLod).r;
     smoothness = (1.0 - roughness) * _Smoothness;
 #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
     smoothness = baseAlpha * _Smoothness;
 #endif
 
     return float2(metallic, saturate(smoothness));
+}
+
+float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
+{
+    return SampleMetallicSmoothness(uv, baseAlpha, 0.0);
 }
 
 float SampleAmbientOcclusion(float2 uv)
@@ -194,13 +199,18 @@ float SampleAmbientOcclusion(float2 uv)
 #endif
 }
 
-float3 SampleEmission(float2 uv)
+float3 SampleEmission(float2 uv, float textureLod)
 {
 #if defined(_EMISSION)
-    return max(SAMPLE_TEXTURE2D_LOD(_EmissionMap, sampler_EmissionMap, uv, 0.0).rgb * _EmissionColor.rgb, 0.0);
+    return max(SAMPLE_TEXTURE2D_LOD(_EmissionMap, sampler_EmissionMap, uv, textureLod).rgb * _EmissionColor.rgb, 0.0);
 #else
     return float3(0.0, 0.0, 0.0);
 #endif
+}
+
+float3 SampleEmission(float2 uv)
+{
+    return SampleEmission(uv, 0.0);
 }
 
 float3 VividIndirectDiffuseTransformNormalToWorld(float3 normalOS)

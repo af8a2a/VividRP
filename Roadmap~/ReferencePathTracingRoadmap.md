@@ -30,14 +30,19 @@ VividRP 计划在推进实时 GI 功能前，先建立一条参考路径追踪�
 - RenderGraph history registry 已支持按 camera 和 graph 管理历史纹理与 buffer。
 - `VividLightData` 已准备 directional、punctual 和 area light 数据。
 
-当前 OpenPBR 状态仍属于“vendor 源码已移植，renderer integration 未完成”：
+### 2026-07-21 V1 Implementation Checkpoint
 
-- `Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl` 当前只包含 interop bridge，没有包含完整 `Vendor/openpbr.h`。
-- `OpenPBRMaterial.cs` 尚未定义材质数据或 authoring contract。
-- 尚无 Unity shader import、DXR material pass 或 GPU 数值验证覆盖。
-- 默认 array LUT 模式在 Unity DXC 下的编译时间、DXIL 大小、16-bit 常量支持和运行时寄存器压力尚未验证。
+当前已从最小 Lambert 闭环推进到 OpenPBR 单主光源路径积分器原型：
 
-因此，完整 OpenPBR 在 Unity DXR 中的可编译性是本 roadmap 的第一道技术闸门。
+- `OpenPBR.hlsl` 已包含完整 `Vendor/openpbr.h`，V1 暂选自包含的 array LUT 路径。
+- 增加 Unity HLSL/DXC renderer-owned interop：处理 GLSL-style vector splat、OpenPBR struct factory、32-bit LUT element fallback，以及 legacy HLSL wrapper nominal-type tag；`Vendor/` 的窄幅可移植性补丁包括对应 hook，以及一处 HLSL struct-return 三目表达式修正。
+- `StandardLitOpenPBRAdapter.hlsl` 已映射 base color、metalness、smoothness/roughness、normal map、clear coat、opacity/alpha test 和 emission；transmission、subsurface、fuzz、dispersion 与 thin film 保持关闭。
+- Closest-hit 已实际调用 `openpbr_prepare`、`openpbr_eval`、`openpbr_sample` 和 `openpbr_pdf`，并在 geometric-normal hemisphere 与 finite-value guard 后返回下一跳状态。
+- Raygen 已实现 iterative 4-bounce path loop、每次命中的主方向光 NEE、阴影 visibility ray、throughput 更新，以及从第 3 次反弹开始的 Russian roulette；DXR recursion depth 仍为 1。
+- 方向光属于 delta light，当前单灯阶段使用离散选择 PDF 1，不施加与 BSDF PDF 的 MIS 权重。ReGIR 数据不参与 radiance integration。
+- 独立 DXC SM 6.6 动态材质编译闸门已覆盖完整 `prepare/eval/sample/pdf` 调用并通过；本机约 3.5 秒、DXIL 约 220 KiB。仍需在 Unity shader importer 与实际 DX12/DXR 画面中完成最终 variant/runtime 验证。
+
+该 checkpoint 仍是单帧、每像素 1 sample 的原型：尚无 progressive accumulation、sample-index 驱动的低差异序列、环境光、其他灯型、AOV 拆分或 EXR capture，因此还不能标记为正式 ground truth V1。
 
 ## Scope Definition
 
@@ -197,7 +202,7 @@ V1 light sampling按以下顺序扩展：
 
 ### Renderer-owned Bridge
 
-保持 `Vendor/` 不变，并增加 renderer-owned 层：
+保持 `Vendor/` 的 BSDF 算法与接口语义不变；Unity HLSL 所需的 scalar-to-vector 构造 hook、legacy wrapper type tag 和 struct-return 修正作为可审计的窄幅移植补丁，其余配置与材质映射放在 renderer-owned 层：
 
 ```text
 Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl
@@ -569,7 +574,7 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 
 ### OpenPBR shader complexity
 
-完整 uber-BSDF 可能带来较长 shader import、较大 DXIL、较高寄存器和 stack pressure。Mitigation：P0 测试 LUT 模式、feature specialization 和 material variant，保持 Vendor 源码不变。
+完整 uber-BSDF 可能带来较长 shader import、较大 DXIL、较高寄存器和 stack pressure。Mitigation：P0 测试 LUT 模式、feature specialization 和 material variant；Vendor 修改仅限已记录的跨编译器可移植性补丁。
 
 ### Material parity
 

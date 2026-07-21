@@ -84,7 +84,7 @@ vec3 openpbr_f_EON(const vec3 rho, const float roughness, const vec3 wi_local, c
     const float EFi = exact ? openpbr_E_FON_exact(mu_i, roughness) :              // FON w_i albedo (exact)
                           openpbr_E_FON_approx(mu_i, roughness);                  // FON w_i albedo (approx)
     const float avgEF = AF * (1.0f + OpenPBR_FONConstantB * roughness);           // avg. albedo
-    const vec3 rho_ms = (rho * rho) * avgEF / (vec3(1.0f) - rho * (1.0f - avgEF));
+    const vec3 rho_ms = (rho * rho) * avgEF / (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - rho * (1.0f - avgEF));
     OPENPBR_CONSTEXPR_LOCAL float Eps = 1.0e-7f;
     const vec3 f_ms = (rho_ms * OpenPBR_RcpPi) * max(Eps, 1.0f - EFo)  // multi-scatter lobe
                       * max(Eps, 1.0f - EFi) / max(Eps, 1.0f - avgEF);

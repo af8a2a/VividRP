@@ -475,12 +475,20 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 
 - 已实现独立 `ReferencedPathTracingAccumulationPass`，通过 RenderGraph history pair 保存
   `R32G32B32A32_SFloat` 的逐像素算术均值。
-- `PTGraph.vrdg` 已接成 `ReferencedPathTracingPass -> ReferencedPathTracingAccumulationPass -> FinalBlitPass`，
-  raw per-frame radiance 不再直接进入最终输出。
+- `PTGraph.vrdg` 已接成 `ReferencedPathTracingPass -> ReferencedPathTracingAccumulationPass ->
+  ReferencedPathTracingDenoisingPass -> FinalBlitPass`，raw per-frame radiance 不再直接进入最终输出。
 - 累积采用 `mean_n = mean_(n-1) + (sample_n - mean_(n-1)) / n`，没有固定 history window、
   重投影、邻域裁剪或亮度 clamp，保持静态 reference accumulation 的无偏性质。
 - 样本计数按 camera 隔离；分辨率、view/projection matrix、主方向光方向或颜色变化时自动从 1 spp 重置。
 - ray generation 已把帧序号混入 RNG，并加入逐帧 sub-pixel jitter，避免重复累积完全相同的路径样本。
+- 已通过 `com.unity.rendering.denoising` 的 `CommandBufferDenoiser` 接入 Intel Open Image Denoise color-only
+  preview。OIDN 使用异步 readback/CPU worker，不在 RenderGraph pass 内 flush 或 submit command buffer；结果未就绪、
+  package 宏不可用、非 64 位桌面平台或 native backend 不支持时，输出稳定回退到 raw accumulation。
+- OIDN 结果按 camera 隔离；分辨率、view/projection matrix 或主方向光变化时废弃旧请求结果。
+- package API 被隔离在 `IReferencedPathTracingDenoiserBackend` 适配边界之后；Unity 6.7+ 切换为预编译 package
+  时不需要把实现迁入 VividRP，只需维护 adapter 和程序集引用。
+- 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised
+  output 替代数值基线。
 - 当前尚未覆盖 scene/material mutation、手动 reset、target SPP、variance AOV 与 capture；这些仍属于本 milestone 后续范围。
 
 ### Scope

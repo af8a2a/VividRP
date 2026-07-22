@@ -8,9 +8,17 @@
         "Unity.Mathematics",
         "Unity.Collections",
         "Unity.RenderPipelines.GPUDriven.Runtime",
-        "Unity.Burst"
+        "Unity.Burst",
+        "Unity.Rendering.Denoising.Runtime"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
-    "allowUnsafeCode": true
+    "allowUnsafeCode": true,
+    "versionDefines": [
+        {
+            "name": "com.unity.rendering.denoising",
+            "expression": "1.0.0",
+            "define": "VIVIDRP_HAS_UNITY_DENOISING"
+        }
+    ]
 }

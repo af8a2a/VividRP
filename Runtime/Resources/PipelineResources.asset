@@ -131,6 +131,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 2d4e728e43193eb4c893414774ac9106, type: 3}
   - ResourceName: Shaders/Core/Private/ObjectMotionVectorFallback
     ResourceObject: {fileID: 4800000, guid: 050cc193933fca74a87ed5fc32a98f21, type: 3}
+  - ResourceName: Shaders/Core/Private/PerObjectBufferUpload.compute
+    ResourceObject: {fileID: 7200000, guid: 946976a342382ee40b5b48bcfe1907c3, type: 3}
   - ResourceName: Shaders/Core/Private/PostProcessing/Diffusion
     ResourceObject: {fileID: 4800000, guid: 43aa82b7ee88aa1478a73dc7cc6b1d81, type: 3}
   - ResourceName: Shaders/Core/Private/PostProcessing/LensFlare/LensFlareDataDriven

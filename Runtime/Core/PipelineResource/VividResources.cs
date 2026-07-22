@@ -16,6 +16,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/FinalBlit")]
         public Shader FinalBlitShader;
 
+        [VividResourcePath("Shaders/Core/Private/PerObjectBufferUpload.compute")]
+        public ComputeShader PerObjectBufferUploadCompute;
+
         [VividResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 

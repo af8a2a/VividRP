@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 
 namespace VividRP.Runtime
@@ -13,45 +14,9 @@ namespace VividRP.Runtime
         Matrix,
     }
 
-    [Serializable]
     public sealed class VividPerObjectPropertyDefinition
     {
-        [SerializeField]
-        private string m_Name = "_Property";
-
-        [SerializeField]
-        private VividPerObjectPropertyType m_Type;
-
-        [SerializeField]
-        private int m_IntDefault;
-
-        [SerializeField]
-        private float m_FloatDefault;
-
-        [SerializeField]
-        private Vector4 m_VectorDefault;
-
-        [SerializeField]
-        private Color m_ColorDefault = Color.white;
-
-        [SerializeField]
-        private Matrix4x4 m_MatrixDefault = Matrix4x4.identity;
-
-        public string Name => m_Name;
-
-        public VividPerObjectPropertyType Type => m_Type;
-
-        public int IntDefault => m_IntDefault;
-
-        public float FloatDefault => m_FloatDefault;
-
-        public Vector4 VectorDefault => m_VectorDefault;
-
-        public Color ColorDefault => m_ColorDefault;
-
-        public Matrix4x4 MatrixDefault => m_MatrixDefault;
-
-        internal void Configure(
+        internal VividPerObjectPropertyDefinition(
             string name,
             VividPerObjectPropertyType type,
             int intDefault = 0,
@@ -60,13 +25,98 @@ namespace VividRP.Runtime
             Color colorDefault = default,
             Matrix4x4 matrixDefault = default)
         {
-            m_Name = name;
-            m_Type = type;
-            m_IntDefault = intDefault;
-            m_FloatDefault = floatDefault;
-            m_VectorDefault = vectorDefault;
-            m_ColorDefault = colorDefault;
-            m_MatrixDefault = matrixDefault;
+            Name = name;
+            Type = type;
+            IntDefault = intDefault;
+            FloatDefault = floatDefault;
+            VectorDefault = vectorDefault;
+            ColorDefault = colorDefault;
+            MatrixDefault = matrixDefault;
+        }
+
+        public string Name { get; }
+
+        public VividPerObjectPropertyType Type { get; }
+
+        public int IntDefault { get; }
+
+        public float FloatDefault { get; }
+
+        public Vector4 VectorDefault { get; }
+
+        public Color ColorDefault { get; }
+
+        public Matrix4x4 MatrixDefault { get; }
+    }
+
+    /// <summary>
+    /// Collects an immutable per-object record declaration from a layout type.
+    /// Properties retain declaration order and are packed at four-byte granularity.
+    /// </summary>
+    public sealed class VividPerObjectLayoutBuilder
+    {
+        private readonly List<VividPerObjectPropertyDefinition> m_Properties = new();
+        private bool m_IsSealed;
+
+        public void AddInt(string name, int defaultValue = 0)
+        {
+            Add(new VividPerObjectPropertyDefinition(
+                name,
+                VividPerObjectPropertyType.Int,
+                intDefault: defaultValue));
+        }
+
+        public void AddFloat(string name, float defaultValue = 0.0f)
+        {
+            Add(new VividPerObjectPropertyDefinition(
+                name,
+                VividPerObjectPropertyType.Float,
+                floatDefault: defaultValue));
+        }
+
+        public void AddVector(string name, Vector4 defaultValue = default)
+        {
+            Add(new VividPerObjectPropertyDefinition(
+                name,
+                VividPerObjectPropertyType.Vector,
+                vectorDefault: defaultValue));
+        }
+
+        public void AddColor(string name, Color defaultValue = default)
+        {
+            Add(new VividPerObjectPropertyDefinition(
+                name,
+                VividPerObjectPropertyType.Color,
+                colorDefault: defaultValue));
+        }
+
+        public void AddMatrix(string name)
+        {
+            AddMatrix(name, Matrix4x4.identity);
+        }
+
+        public void AddMatrix(string name, Matrix4x4 defaultValue)
+        {
+            Add(new VividPerObjectPropertyDefinition(
+                name,
+                VividPerObjectPropertyType.Matrix,
+                matrixDefault: defaultValue));
+        }
+
+        internal List<VividPerObjectPropertyDefinition> SealAndTakeProperties()
+        {
+            if (m_IsSealed)
+                throw new InvalidOperationException("The per-object layout builder has already been consumed.");
+
+            m_IsSealed = true;
+            return m_Properties;
+        }
+
+        private void Add(VividPerObjectPropertyDefinition property)
+        {
+            if (m_IsSealed)
+                throw new InvalidOperationException("A per-object layout cannot be modified after declaration.");
+            m_Properties.Add(property);
         }
     }
 
@@ -116,7 +166,7 @@ namespace VividRP.Runtime
         {
             unchecked
             {
-                int hash = Layout != null ? Layout.GetEntityId().GetHashCode() : 0;
+                int hash = Layout != null ? RuntimeHelpers.GetHashCode(Layout) : 0;
                 hash = (hash * 397) ^ NameId;
                 hash = (hash * 397) ^ Offset;
                 hash = (hash * 397) ^ (int)Type;
@@ -136,27 +186,29 @@ namespace VividRP.Runtime
         }
     }
 
-    [CreateAssetMenu(menuName = "VividRP/Per Object Buffer Layout", fileName = "PerObjectLayout")]
-    public sealed class VividPerObjectLayout : ScriptableObject
+    /// <summary>
+    /// Base class for code-declared per-object buffer layouts.
+    /// </summary>
+    public abstract class VividPerObjectLayout
     {
         internal const int HeaderSize = sizeof(uint);
         internal const int RecordAlignment = 16;
 
-        [SerializeField]
-        private string m_ShaderIdentifier = "PerObject";
+        private static readonly object s_SharedLayoutLock = new();
+        private static readonly Dictionary<Type, VividPerObjectLayout> s_SharedLayouts = new();
 
-        [SerializeField]
-        private List<VividPerObjectPropertyDefinition> m_Properties = new();
-
-        [SerializeField, HideInInspector]
-        private string m_GeneratedIncludePath;
-
-        [NonSerialized]
         private LayoutCache m_Cache;
 
-        public string ShaderIdentifier => m_ShaderIdentifier;
+        public abstract string ShaderIdentifier { get; }
 
-        public IReadOnlyList<VividPerObjectPropertyDefinition> Properties => m_Properties;
+        public IReadOnlyList<VividPerObjectPropertyDefinition> Properties
+        {
+            get
+            {
+                EnsureCache();
+                return m_Cache.Definitions;
+            }
+        }
 
         public uint Signature
         {
@@ -176,7 +228,7 @@ namespace VividRP.Runtime
             }
         }
 
-        public string GeneratedIncludePath => m_GeneratedIncludePath;
+        protected abstract void Define(VividPerObjectLayoutBuilder builder);
 
         public VividPerObjectPropertyHandle GetProperty(string propertyName)
         {
@@ -189,8 +241,12 @@ namespace VividRP.Runtime
         public VividPerObjectPropertyHandle GetProperty(int propertyNameId)
         {
             EnsureCache();
-            if (!m_Cache.PropertiesById.TryGetValue(propertyNameId, out var property))
-                throw new ArgumentException($"Layout '{name}' does not contain property ID {propertyNameId}.", nameof(propertyNameId));
+            if (!m_Cache.PropertiesById.TryGetValue(propertyNameId, out PackedProperty property))
+            {
+                throw new ArgumentException(
+                    $"Layout '{ShaderIdentifier}' does not contain property ID {propertyNameId}.",
+                    nameof(propertyNameId));
+            }
 
             return property.Handle;
         }
@@ -198,7 +254,7 @@ namespace VividRP.Runtime
         public bool TryGetProperty(int propertyNameId, out VividPerObjectPropertyHandle propertyHandle)
         {
             EnsureCache();
-            if (m_Cache.PropertiesById.TryGetValue(propertyNameId, out var property))
+            if (m_Cache.PropertiesById.TryGetValue(propertyNameId, out PackedProperty property))
             {
                 propertyHandle = property.Handle;
                 return true;
@@ -208,6 +264,58 @@ namespace VividRP.Runtime
             return false;
         }
 
+        public static TLayout GetShared<TLayout>()
+            where TLayout : VividPerObjectLayout, new()
+        {
+            Type layoutType = typeof(TLayout);
+            lock (s_SharedLayoutLock)
+            {
+                if (s_SharedLayouts.TryGetValue(layoutType, out VividPerObjectLayout existing))
+                    return (TLayout)existing;
+
+                var layout = new TLayout();
+                layout.EnsureCache();
+                s_SharedLayouts.Add(layoutType, layout);
+                return layout;
+            }
+        }
+
+        internal static VividPerObjectLayout GetShared(Type layoutType)
+        {
+            if (layoutType == null)
+                throw new ArgumentNullException(nameof(layoutType));
+            if (layoutType.IsAbstract
+                || layoutType.ContainsGenericParameters
+                || !typeof(VividPerObjectLayout).IsAssignableFrom(layoutType))
+            {
+                throw new ArgumentException(
+                    $"Type '{layoutType.FullName}' is not a concrete VividPerObjectLayout.",
+                    nameof(layoutType));
+            }
+
+            lock (s_SharedLayoutLock)
+            {
+                if (s_SharedLayouts.TryGetValue(layoutType, out VividPerObjectLayout existing))
+                    return existing;
+
+                VividPerObjectLayout layout;
+                try
+                {
+                    layout = (VividPerObjectLayout)Activator.CreateInstance(layoutType, nonPublic: true);
+                }
+                catch (Exception exception)
+                {
+                    throw new InvalidOperationException(
+                        $"Layout '{layoutType.FullName}' must have a parameterless constructor.",
+                        exception);
+                }
+
+                layout.EnsureCache();
+                s_SharedLayouts.Add(layoutType, layout);
+                return layout;
+            }
+        }
+
         internal IReadOnlyList<PackedProperty> PackedProperties
         {
             get
@@ -215,6 +323,18 @@ namespace VividRP.Runtime
                 EnsureCache();
                 return m_Cache.PackedProperties;
             }
+        }
+
+        internal bool IsEquivalentTo(VividPerObjectLayout other)
+        {
+            return other != null
+                && GetType() == other.GetType()
+                && Signature == other.Signature;
+        }
+
+        internal void Validate()
+        {
+            EnsureCache();
         }
 
         internal void InitializeRecord(byte[] destination, int baseAddress)
@@ -246,7 +366,7 @@ namespace VividRP.Runtime
                         WriteStruct(destination, offset, definition.VectorDefault);
                         break;
                     case VividPerObjectPropertyType.Color:
-                        var color = definition.ColorDefault;
+                        Color color = definition.ColorDefault;
                         WriteStruct(destination, offset, new Vector4(color.r, color.g, color.b, color.a));
                         break;
                     case VividPerObjectPropertyType.Matrix:
@@ -256,102 +376,6 @@ namespace VividRP.Runtime
                         throw new ArgumentOutOfRangeException();
                 }
             }
-        }
-
-        internal void SetGeneratedIncludePath(string assetPath)
-        {
-            m_GeneratedIncludePath = assetPath ?? string.Empty;
-        }
-
-        internal void ConfigureForTests(
-            string shaderIdentifier,
-            IEnumerable<VividPerObjectPropertyDefinition> properties)
-        {
-            m_ShaderIdentifier = shaderIdentifier;
-            m_Properties = properties != null
-                ? new List<VividPerObjectPropertyDefinition>(properties)
-                : new List<VividPerObjectPropertyDefinition>();
-            InvalidateCache();
-        }
-
-        internal void ValidateAndRebuild()
-        {
-            InvalidateCache();
-            EnsureCache();
-        }
-
-        private void OnValidate()
-        {
-            InvalidateCache();
-        }
-
-        private void InvalidateCache()
-        {
-            m_Cache = null;
-        }
-
-        private void EnsureCache()
-        {
-            if (m_Cache != null)
-                return;
-
-            ValidateIdentifier(m_ShaderIdentifier, nameof(m_ShaderIdentifier));
-
-            var packedProperties = new List<PackedProperty>(m_Properties?.Count ?? 0);
-            var propertiesById = new Dictionary<int, PackedProperty>(m_Properties?.Count ?? 0);
-            var propertyNames = new HashSet<string>(StringComparer.Ordinal);
-            int currentOffset = HeaderSize;
-
-            if (m_Properties != null)
-            {
-                for (int i = 0; i < m_Properties.Count; i++)
-                {
-                    VividPerObjectPropertyDefinition definition = m_Properties[i]
-                        ?? throw new InvalidOperationException($"Layout '{name}' contains a null property at index {i}.");
-                    ValidateIdentifier(definition.Name, $"property[{i}]");
-                    if (!propertyNames.Add(definition.Name))
-                        throw new InvalidOperationException($"Layout '{name}' contains duplicate property '{definition.Name}'.");
-
-                    int propertyId = Shader.PropertyToID(definition.Name);
-                    if (propertiesById.ContainsKey(propertyId))
-                    {
-                        throw new InvalidOperationException(
-                            $"Layout '{name}' contains Shader.PropertyToID collision for '{definition.Name}'.");
-                    }
-
-                    int propertySize = GetPropertySize(definition.Type);
-                    var property = new PackedProperty(
-                        definition,
-                        propertyId,
-                        currentOffset,
-                        propertySize,
-                        definition.Type);
-                    property.Handle = new VividPerObjectPropertyHandle(
-                        this,
-                        propertyId,
-                        currentOffset,
-                        definition.Type,
-                        0u);
-                    packedProperties.Add(property);
-                    propertiesById.Add(propertyId, property);
-                    currentOffset += propertySize;
-                }
-            }
-
-            int recordStride = AlignUp(currentOffset, RecordAlignment);
-            uint signature = ComputeSignature(m_ShaderIdentifier, packedProperties, recordStride);
-            for (int i = 0; i < packedProperties.Count; i++)
-            {
-                PackedProperty property = packedProperties[i];
-                property.Handle = new VividPerObjectPropertyHandle(
-                    this,
-                    property.NameId,
-                    property.Offset,
-                    property.Type,
-                    signature);
-            }
-
-            m_Cache = new LayoutCache(signature, recordStride, packedProperties, propertiesById);
         }
 
         internal static int GetPropertySize(VividPerObjectPropertyType type)
@@ -384,6 +408,72 @@ namespace VividRP.Runtime
             }
 
             return true;
+        }
+
+        private void EnsureCache()
+        {
+            if (m_Cache != null)
+                return;
+
+            ValidateIdentifier(ShaderIdentifier, nameof(ShaderIdentifier));
+            var builder = new VividPerObjectLayoutBuilder();
+            Define(builder);
+            List<VividPerObjectPropertyDefinition> definitions = builder.SealAndTakeProperties();
+            var packedProperties = new List<PackedProperty>(definitions.Count);
+            var propertiesById = new Dictionary<int, PackedProperty>(definitions.Count);
+            var propertyNames = new HashSet<string>(StringComparer.Ordinal);
+            int currentOffset = HeaderSize;
+
+            for (int i = 0; i < definitions.Count; i++)
+            {
+                VividPerObjectPropertyDefinition definition = definitions[i]
+                    ?? throw new InvalidOperationException(
+                        $"Layout '{ShaderIdentifier}' contains a null property at index {i}.");
+                ValidateIdentifier(definition.Name, $"property[{i}]");
+                if (!propertyNames.Add(definition.Name))
+                {
+                    throw new InvalidOperationException(
+                        $"Layout '{ShaderIdentifier}' contains duplicate property '{definition.Name}'.");
+                }
+
+                int propertyId = Shader.PropertyToID(definition.Name);
+                if (propertiesById.ContainsKey(propertyId))
+                {
+                    throw new InvalidOperationException(
+                        $"Layout '{ShaderIdentifier}' contains Shader.PropertyToID collision for '{definition.Name}'.");
+                }
+
+                int propertySize = GetPropertySize(definition.Type);
+                var property = new PackedProperty(
+                    definition,
+                    propertyId,
+                    currentOffset,
+                    propertySize,
+                    definition.Type);
+                packedProperties.Add(property);
+                propertiesById.Add(propertyId, property);
+                currentOffset += propertySize;
+            }
+
+            int recordStride = AlignUp(currentOffset, RecordAlignment);
+            uint signature = ComputeSignature(ShaderIdentifier, packedProperties, recordStride);
+            for (int i = 0; i < packedProperties.Count; i++)
+            {
+                PackedProperty property = packedProperties[i];
+                property.Handle = new VividPerObjectPropertyHandle(
+                    this,
+                    property.NameId,
+                    property.Offset,
+                    property.Type,
+                    signature);
+            }
+
+            m_Cache = new LayoutCache(
+                signature,
+                recordStride,
+                definitions.AsReadOnly(),
+                packedProperties,
+                propertiesById);
         }
 
         private static bool IsAsciiLetter(char character)
@@ -555,11 +645,13 @@ namespace VividRP.Runtime
             internal LayoutCache(
                 uint signature,
                 int recordStride,
+                IReadOnlyList<VividPerObjectPropertyDefinition> definitions,
                 List<PackedProperty> packedProperties,
                 Dictionary<int, PackedProperty> propertiesById)
             {
                 Signature = signature;
                 RecordStride = recordStride;
+                Definitions = definitions;
                 PackedProperties = packedProperties;
                 PropertiesById = propertiesById;
             }
@@ -568,9 +660,20 @@ namespace VividRP.Runtime
 
             internal int RecordStride { get; }
 
+            internal IReadOnlyList<VividPerObjectPropertyDefinition> Definitions { get; }
+
             internal List<PackedProperty> PackedProperties { get; }
 
             internal Dictionary<int, PackedProperty> PropertiesById { get; }
         }
+    }
+
+    /// <summary>
+    /// Adds a shared singleton instance to a code-declared layout type.
+    /// </summary>
+    public abstract class VividPerObjectLayout<TLayout> : VividPerObjectLayout
+        where TLayout : VividPerObjectLayout<TLayout>, new()
+    {
+        public static TLayout Instance => GetShared<TLayout>();
     }
 }

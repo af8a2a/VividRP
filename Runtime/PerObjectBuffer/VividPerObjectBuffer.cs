@@ -174,6 +174,12 @@ namespace VividRP.Runtime
 
     public static class VividPerObjectBuffer
     {
+        public static VividPerObjectBlock Bind<TLayout>(Renderer renderer)
+            where TLayout : VividPerObjectLayout<TLayout>, new()
+        {
+            return Bind(renderer, VividPerObjectLayout<TLayout>.Instance);
+        }
+
         public static VividPerObjectBlock Bind(Renderer renderer, VividPerObjectLayout layout)
         {
             return VividPerObjectBufferSystem.Bind(renderer, layout);

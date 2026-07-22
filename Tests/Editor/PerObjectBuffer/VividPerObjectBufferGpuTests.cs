@@ -91,7 +91,6 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(defaultObject);
                 Object.DestroyImmediate(material);
                 Object.DestroyImmediate(mesh);
-                Object.DestroyImmediate(layout);
             }
         }
 
@@ -146,25 +145,12 @@ namespace VividRP.Editor.Tests
 
         private static VividPerObjectLayout CreateGpuLayout()
         {
-            VividPerObjectLayout layout = ScriptableObject.CreateInstance<VividPerObjectLayout>();
-            layout.ConfigureForTests("GpuTest", new[]
+            VividPerObjectLayout layout = VividPerObjectLayoutTests.CreateLayout("GpuTest", builder =>
             {
-                VividPerObjectLayoutTests.CreateProperty(
-                    "_Scalar",
-                    VividPerObjectPropertyType.Float,
-                    floatDefault: 0.25f),
-                VividPerObjectLayoutTests.CreateProperty(
-                    "_Vector",
-                    VividPerObjectPropertyType.Vector,
-                    vectorDefault: new Vector4(0.5f, 0, 0, 0)),
-                VividPerObjectLayoutTests.CreateProperty(
-                    "_Color",
-                    VividPerObjectPropertyType.Color,
-                    colorDefault: new Color(0, 0, 0.75f, 0)),
-                VividPerObjectLayoutTests.CreateProperty(
-                    "_Matrix",
-                    VividPerObjectPropertyType.Matrix,
-                    matrixDefault: Matrix4x4.identity),
+                builder.AddFloat("_Scalar", 0.25f);
+                builder.AddVector("_Vector", new Vector4(0.5f, 0, 0, 0));
+                builder.AddColor("_Color", new Color(0, 0, 0.75f, 0));
+                builder.AddMatrix("_Matrix", Matrix4x4.identity);
             });
             Assert.That(layout.GetProperty("_Scalar").Offset, Is.EqualTo(4));
             Assert.That(layout.GetProperty("_Vector").Offset, Is.EqualTo(8));

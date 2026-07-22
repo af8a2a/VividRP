@@ -90,7 +90,7 @@ namespace VividRP.Runtime
                     "Only MeshRenderer and SkinnedMeshRenderer are supported.");
             }
 
-            layout.ValidateAndRebuild();
+            layout.Validate();
             EnsureAllocator();
             EntityId rendererId = renderer.GetEntityId();
             if (s_Bindings.TryGetValue(rendererId, out Binding existing))
@@ -100,7 +100,8 @@ namespace VividRP.Runtime
                     ReleaseBinding(existing, restoreRendererValue: false);
                     s_Bindings.Remove(rendererId);
                 }
-                else if (ReferenceEquals(existing.Layout, layout) && existing.LayoutSignature == layout.Signature)
+                else if (existing.Layout.IsEquivalentTo(layout)
+                    && existing.LayoutSignature == layout.Signature)
                 {
                     return new VividPerObjectBlock(rendererId, existing.Generation);
                 }
@@ -344,7 +345,7 @@ namespace VividRP.Runtime
             if (binding.LayoutSignature != binding.Layout.Signature)
             {
                 throw new InvalidOperationException(
-                    $"Per-object layout '{binding.Layout.name}' changed after binding. Bind the Renderer again.");
+                    $"Per-object layout '{binding.Layout.ShaderIdentifier}' changed after binding. Bind the Renderer again.");
             }
             return binding;
         }
@@ -363,7 +364,7 @@ namespace VividRP.Runtime
             int valueSize)
         {
             if (!property.IsValid
-                || !ReferenceEquals(property.Layout, binding.Layout)
+                || !property.Layout.IsEquivalentTo(binding.Layout)
                 || property.LayoutSignature != binding.LayoutSignature)
             {
                 throw new ArgumentException("The property handle does not belong to the bound layout.", nameof(property));

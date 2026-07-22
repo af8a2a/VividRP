@@ -21,48 +21,33 @@ namespace VividRP.Editor.Tests
         {
             VividPerObjectLayout layout = CreateFullLayout();
             VividPerObjectLayout secondLayout = CreateFullLayout();
-            try
-            {
-                Assert.That(layout.GetProperty("_Count").Offset, Is.EqualTo(4));
-                Assert.That(layout.GetProperty("_Dissolve").Offset, Is.EqualTo(8));
-                Assert.That(layout.GetProperty("_Direction").Offset, Is.EqualTo(12));
-                Assert.That(layout.GetProperty("_Tint").Offset, Is.EqualTo(28));
-                Assert.That(layout.GetProperty("_Deformation").Offset, Is.EqualTo(44));
-                Assert.That(layout.RecordStride, Is.EqualTo(112));
-                Assert.That(layout.Signature, Is.EqualTo(secondLayout.Signature));
-            }
-            finally
-            {
-                Object.DestroyImmediate(layout);
-                Object.DestroyImmediate(secondLayout);
-            }
+            Assert.That(layout.GetProperty("_Count").Offset, Is.EqualTo(4));
+            Assert.That(layout.GetProperty("_Dissolve").Offset, Is.EqualTo(8));
+            Assert.That(layout.GetProperty("_Direction").Offset, Is.EqualTo(12));
+            Assert.That(layout.GetProperty("_Tint").Offset, Is.EqualTo(28));
+            Assert.That(layout.GetProperty("_Deformation").Offset, Is.EqualTo(44));
+            Assert.That(layout.RecordStride, Is.EqualTo(112));
+            Assert.That(layout.Signature, Is.EqualTo(secondLayout.Signature));
         }
 
         [Test]
         public void InitializeRecord_WritesSignatureDefaultsAndColumnMajorMatrix()
         {
             VividPerObjectLayout layout = CreateFullLayout();
-            try
-            {
-                var data = new byte[layout.RecordStride + 16];
-                layout.InitializeRecord(data, 16);
+            var data = new byte[layout.RecordStride + 16];
+            layout.InitializeRecord(data, 16);
 
-                Assert.That(ReadUInt(data, 16), Is.EqualTo(layout.Signature));
-                Assert.That(ReadInt(data, 20), Is.EqualTo(7));
-                Assert.That(ReadFloat(data, 24), Is.EqualTo(0.25f));
-                Assert.That(ReadFloat(data, 28), Is.EqualTo(1.0f));
-                Assert.That(ReadFloat(data, 44), Is.EqualTo(0.1f).Within(0.0001f));
+            Assert.That(ReadUInt(data, 16), Is.EqualTo(layout.Signature));
+            Assert.That(ReadInt(data, 20), Is.EqualTo(7));
+            Assert.That(ReadFloat(data, 24), Is.EqualTo(0.25f));
+            Assert.That(ReadFloat(data, 28), Is.EqualTo(1.0f));
+            Assert.That(ReadFloat(data, 44), Is.EqualTo(0.1f).Within(0.0001f));
 
-                int matrixAddress = 16 + layout.GetProperty("_Deformation").Offset;
-                Assert.That(ReadFloat(data, matrixAddress), Is.EqualTo(1.0f));
-                Assert.That(ReadFloat(data, matrixAddress + 4), Is.EqualTo(5.0f));
-                Assert.That(ReadFloat(data, matrixAddress + 16), Is.EqualTo(2.0f));
-                Assert.That(ReadFloat(data, matrixAddress + 60), Is.EqualTo(16.0f));
-            }
-            finally
-            {
-                Object.DestroyImmediate(layout);
-            }
+            int matrixAddress = 16 + layout.GetProperty("_Deformation").Offset;
+            Assert.That(ReadFloat(data, matrixAddress), Is.EqualTo(1.0f));
+            Assert.That(ReadFloat(data, matrixAddress + 4), Is.EqualTo(5.0f));
+            Assert.That(ReadFloat(data, matrixAddress + 16), Is.EqualTo(2.0f));
+            Assert.That(ReadFloat(data, matrixAddress + 60), Is.EqualTo(16.0f));
         }
 
         [TestCase("9Invalid")]
@@ -70,34 +55,84 @@ namespace VividRP.Editor.Tests
         [TestCase("名字")]
         public void Validation_Throws_ForInvalidShaderIdentifier(string identifier)
         {
-            VividPerObjectLayout layout = ScriptableObject.CreateInstance<VividPerObjectLayout>();
-            layout.ConfigureForTests(identifier, Array.Empty<VividPerObjectPropertyDefinition>());
-            try
-            {
-                Assert.Throws<InvalidOperationException>(() => layout.ValidateAndRebuild());
-            }
-            finally
-            {
-                Object.DestroyImmediate(layout);
-            }
+            VividPerObjectLayout layout = new TestLayout(identifier, _ => { });
+            Assert.Throws<InvalidOperationException>(() => layout.Validate());
         }
 
         [Test]
         public void Validation_Throws_ForDuplicatePropertyName()
         {
-            VividPerObjectLayout layout = ScriptableObject.CreateInstance<VividPerObjectLayout>();
-            layout.ConfigureForTests("Duplicate", new[]
+            VividPerObjectLayout layout = new TestLayout("Duplicate", builder =>
             {
-                CreateProperty("_Value", VividPerObjectPropertyType.Float),
-                CreateProperty("_Value", VividPerObjectPropertyType.Int),
+                builder.AddFloat("_Value");
+                builder.AddInt("_Value");
             });
+            Assert.Throws<InvalidOperationException>(() => layout.Validate());
+        }
+
+        [Test]
+        public void CodeLayout_SharedInstanceAndGenericBindUseDeclaredLayout()
+        {
+            Assert.That(CodeFloatLayout.Instance, Is.SameAs(CodeFloatLayout.Instance));
+            Assert.That(CodeFloatLayout.Instance.RecordStride, Is.EqualTo(16));
+
+            var gameObject = new GameObject("Generic Per Object Renderer");
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
             try
             {
-                Assert.Throws<InvalidOperationException>(() => layout.ValidateAndRebuild());
+                VividPerObjectBlock block = VividPerObjectBuffer.Bind<CodeFloatLayout>(renderer);
+                block.SetFloat(CodeFloatLayout.Instance.Value, 2.5f);
+
+                int address = VividPerObjectBufferSystem.GetRecordAddressForTests(block);
+                Assert.That(
+                    ReadFloat(VividPerObjectBufferSystem.GetDataForTests(), address + 4),
+                    Is.EqualTo(2.5f));
             }
             finally
             {
-                Object.DestroyImmediate(layout);
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void DifferentCodeLayouts_ShareAllocatorWithIndependentStrides()
+        {
+            VividPerObjectLayout character = CreateFullLayout();
+            VividPerObjectLayout decal = CreateLayout("Decal", builder =>
+            {
+                builder.AddVector("_DecalSlot0");
+                builder.AddVector("_DecalSlot1");
+            });
+            Assert.That(character.RecordStride, Is.EqualTo(112));
+            Assert.That(decal.RecordStride, Is.EqualTo(48));
+
+            var characterObject = new GameObject("Character Per Object Renderer");
+            var decalObject = new GameObject("Decal Per Object Renderer");
+            MeshRenderer characterRenderer = characterObject.AddComponent<MeshRenderer>();
+            MeshRenderer decalRenderer = decalObject.AddComponent<MeshRenderer>();
+            try
+            {
+                VividPerObjectBlock characterBlock = VividPerObjectBuffer.Bind(characterRenderer, character);
+                VividPerObjectBlock decalBlock = VividPerObjectBuffer.Bind(decalRenderer, decal);
+                characterBlock.SetFloat("_Dissolve", 0.75f);
+                decalBlock.SetVector("_DecalSlot1", new Vector4(1, 2, 3, 4));
+
+                int characterAddress = VividPerObjectBufferSystem.GetRecordAddressForTests(characterBlock);
+                int decalAddress = VividPerObjectBufferSystem.GetRecordAddressForTests(decalBlock);
+                byte[] data = VividPerObjectBufferSystem.GetDataForTests();
+                Assert.That(characterAddress, Is.Not.EqualTo(decalAddress));
+                Assert.That(ReadFloat(data, characterAddress + 8), Is.EqualTo(0.75f));
+                Assert.That(
+                    ReadFloat(data, decalAddress + decal.GetProperty("_DecalSlot1").Offset),
+                    Is.EqualTo(1.0f));
+                Assert.That(
+                    VividPerObjectBuffer.GetStats().UsedBytes,
+                    Is.EqualTo(VividPerObjectRecordAllocator.ReservedBytes + 112 + 48));
+            }
+            finally
+            {
+                Object.DestroyImmediate(characterObject);
+                Object.DestroyImmediate(decalObject);
             }
         }
 
@@ -179,7 +214,6 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(layout);
             }
         }
 
@@ -206,7 +240,6 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(layout);
             }
         }
 
@@ -232,8 +265,6 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(firstLayout);
-                Object.DestroyImmediate(secondLayout);
             }
         }
 
@@ -254,8 +285,6 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(layout);
-                Object.DestroyImmediate(foreignLayout);
             }
         }
 
@@ -272,7 +301,6 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(layout);
             }
         }
 
@@ -289,7 +317,6 @@ namespace VividRP.Editor.Tests
             Assert.That(VividPerObjectBuffer.GetStats().ActiveRendererCount, Is.Zero);
             Assert.That(VividPerObjectBuffer.GetStats().UsedBytes,
                 Is.EqualTo(VividPerObjectRecordAllocator.ReservedBytes));
-            Object.DestroyImmediate(layout);
         }
 
         [Test]
@@ -343,7 +370,6 @@ namespace VividRP.Editor.Tests
                 firstCommandBuffer.Dispose();
                 secondCommandBuffer.Dispose();
                 Object.DestroyImmediate(gameObject);
-                Object.DestroyImmediate(layout);
             }
         }
 
@@ -398,13 +424,11 @@ namespace VividRP.Editor.Tests
                     if (gameObjects[i] != null)
                         Object.DestroyImmediate(gameObjects[i]);
                 }
-                Object.DestroyImmediate(layout);
             }
         }
 
         internal static VividPerObjectLayout CreateFullLayout()
         {
-            VividPerObjectLayout layout = ScriptableObject.CreateInstance<VividPerObjectLayout>();
             var matrix = new Matrix4x4();
             int next = 1;
             for (int row = 0; row < 4; row++)
@@ -413,17 +437,14 @@ namespace VividRP.Editor.Tests
                     matrix[row, column] = next++;
             }
 
-            layout.ConfigureForTests("Character", new[]
+            return new TestLayout("Character", builder =>
             {
-                CreateProperty("_Count", VividPerObjectPropertyType.Int, intDefault: 7),
-                CreateProperty("_Dissolve", VividPerObjectPropertyType.Float, floatDefault: 0.25f),
-                CreateProperty("_Direction", VividPerObjectPropertyType.Vector,
-                    vectorDefault: new Vector4(1, 2, 3, 4)),
-                CreateProperty("_Tint", VividPerObjectPropertyType.Color,
-                    colorDefault: new Color(0.1f, 0.2f, 0.3f, 0.4f)),
-                CreateProperty("_Deformation", VividPerObjectPropertyType.Matrix, matrixDefault: matrix),
+                builder.AddInt("_Count", 7);
+                builder.AddFloat("_Dissolve", 0.25f);
+                builder.AddVector("_Direction", new Vector4(1, 2, 3, 4));
+                builder.AddColor("_Tint", new Color(0.1f, 0.2f, 0.3f, 0.4f));
+                builder.AddMatrix("_Deformation", matrix);
             });
-            return layout;
         }
 
         internal static VividPerObjectLayout CreateFloatLayout(
@@ -431,26 +452,52 @@ namespace VividRP.Editor.Tests
             string propertyName,
             float defaultValue)
         {
-            VividPerObjectLayout layout = ScriptableObject.CreateInstance<VividPerObjectLayout>();
-            layout.ConfigureForTests(identifier, new[]
+            return new TestLayout(identifier, builder =>
             {
-                CreateProperty(propertyName, VividPerObjectPropertyType.Float, floatDefault: defaultValue),
+                builder.AddFloat(propertyName, defaultValue);
             });
-            return layout;
         }
 
-        internal static VividPerObjectPropertyDefinition CreateProperty(
-            string name,
-            VividPerObjectPropertyType type,
-            int intDefault = 0,
-            float floatDefault = 0.0f,
-            Vector4 vectorDefault = default,
-            Color colorDefault = default,
-            Matrix4x4 matrixDefault = default)
+        internal static VividPerObjectLayout CreateLayout(
+            string identifier,
+            Action<VividPerObjectLayoutBuilder> define)
         {
-            var property = new VividPerObjectPropertyDefinition();
-            property.Configure(name, type, intDefault, floatDefault, vectorDefault, colorDefault, matrixDefault);
-            return property;
+            return new TestLayout(identifier, define);
+        }
+
+        private sealed class TestLayout : VividPerObjectLayout
+        {
+            private readonly string m_ShaderIdentifier;
+            private readonly Action<VividPerObjectLayoutBuilder> m_Define;
+
+            internal TestLayout(string shaderIdentifier, Action<VividPerObjectLayoutBuilder> define)
+            {
+                m_ShaderIdentifier = shaderIdentifier;
+                m_Define = define;
+            }
+
+            public override string ShaderIdentifier => m_ShaderIdentifier;
+
+            protected override void Define(VividPerObjectLayoutBuilder builder)
+            {
+                m_Define(builder);
+            }
+        }
+
+        private sealed class CodeFloatLayout : VividPerObjectLayout<CodeFloatLayout>
+        {
+            public CodeFloatLayout()
+            {
+            }
+
+            public override string ShaderIdentifier => "CodeFloat";
+
+            internal VividPerObjectPropertyHandle Value => GetProperty("_Value");
+
+            protected override void Define(VividPerObjectLayoutBuilder builder)
+            {
+                builder.AddFloat("_Value", 1.0f);
+            }
         }
 
         private static uint ReadUInt(byte[] data, int offset)

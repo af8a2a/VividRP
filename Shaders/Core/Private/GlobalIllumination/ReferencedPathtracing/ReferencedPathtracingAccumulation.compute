@@ -1,0 +1,34 @@
+#pragma kernel ReferencedPathTracingAccumulation
+#pragma target 5.0
+
+Texture2D<float4> _ReferencedPathTracingSampleRadiance;
+Texture2D<float4> _ReferencedPathTracingHistoryRadiance;
+RWTexture2D<float4> _ReferencedPathTracingHistoryWrite;
+RWTexture2D<float4> _ReferencedPathTracingResolvedColor;
+
+// x = 1 / accumulated sample count, y = history is valid.
+float4 _ReferencedPathTracingAccumulationParameters;
+// xy = render dimensions, zw = inverse render dimensions.
+float4 _ReferencedPathTracingScreenSize;
+
+[numthreads(8, 8, 1)]
+void ReferencedPathTracingAccumulation(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 dimensions = (uint2)_ReferencedPathTracingScreenSize.xy;
+    if (any(pixelCoord >= dimensions))
+        return;
+
+    float4 currentSample = _ReferencedPathTracingSampleRadiance[pixelCoord];
+    float3 accumulatedRadiance = currentSample.rgb;
+    if (_ReferencedPathTracingAccumulationParameters.y > 0.5)
+    {
+        float3 previousRadiance = _ReferencedPathTracingHistoryRadiance[pixelCoord].rgb;
+        accumulatedRadiance = previousRadiance
+            + (currentSample.rgb - previousRadiance) * _ReferencedPathTracingAccumulationParameters.x;
+    }
+
+    float4 result = float4(accumulatedRadiance, currentSample.a);
+    _ReferencedPathTracingHistoryWrite[pixelCoord] = result;
+    _ReferencedPathTracingResolvedColor[pixelCoord] = result;
+}

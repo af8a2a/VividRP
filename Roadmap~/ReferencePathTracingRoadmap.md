@@ -471,6 +471,18 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 
 把 integrator 变成可重复、可导出的 reference baseline 工具。
 
+### Current implementation status (2026-07-22)
+
+- 已实现独立 `ReferencedPathTracingAccumulationPass`，通过 RenderGraph history pair 保存
+  `R32G32B32A32_SFloat` 的逐像素算术均值。
+- `PTGraph.vrdg` 已接成 `ReferencedPathTracingPass -> ReferencedPathTracingAccumulationPass -> FinalBlitPass`，
+  raw per-frame radiance 不再直接进入最终输出。
+- 累积采用 `mean_n = mean_(n-1) + (sample_n - mean_(n-1)) / n`，没有固定 history window、
+  重投影、邻域裁剪或亮度 clamp，保持静态 reference accumulation 的无偏性质。
+- 样本计数按 camera 隔离；分辨率、view/projection matrix、主方向光方向或颜色变化时自动从 1 spp 重置。
+- ray generation 已把帧序号混入 RNG，并加入逐帧 sub-pixel jitter，避免重复累积完全相同的路径样本。
+- 当前尚未覆盖 scene/material mutation、手动 reset、target SPP、variance AOV 与 capture；这些仍属于本 milestone 后续范围。
+
 ### Scope
 
 - FP32 RenderGraph history accumulation。

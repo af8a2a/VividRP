@@ -29,6 +29,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int MaxBounceCountId = Shader.PropertyToID("_ReferencedMaxBounceCount");
         private static readonly int RussianRouletteStartBounceId =
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
+        private static readonly int FrameIndexId = Shader.PropertyToID("_ReferencedFrameIndex");
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
@@ -66,6 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_RayMaxDistance = 1000.0f;
         private Vector4 m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
         private Vector4 m_MainLightColor = Vector4.zero;
+        private int m_FrameIndex;
 
         public ReferencedPathTracingPass()
         {
@@ -117,6 +119,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureWorldPositionTexture(m_Width, m_Height);
             PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
+            m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
 
             var camera = cameraData?.camera;
             m_ShouldSkipExecution = camera == null || camera.orthographic;
@@ -170,6 +175,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_PixelCoordToViewDirWS);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMinDistanceId, m_RayMinDistance);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
+                cmd.SetGlobalVector(MainLightDirectionWSId, m_MainLightDirectionWS);
+                cmd.SetGlobalVector(MainLightColorId, m_MainLightColor);
                 cmd.SetRayTracingVectorParam(
                     m_RayTracingShader,
                     MainLightDirectionWSId,
@@ -180,6 +187,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     RussianRouletteStartBounceId,
                     RussianRouletteStartBounce);
+                cmd.SetRayTracingIntParam(m_RayTracingShader, FrameIndexId, m_FrameIndex);
                 if (HasValidReGIRResources())
                     BindReGIRGlobals(cmd);
                 cmd.DispatchRays(
@@ -205,6 +213,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RayMaxDistance = 1000.0f;
             m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
             m_MainLightColor = Vector4.zero;
+            m_FrameIndex = 0;
         }
 
         private void ConfigureWorldPositionTexture(int width, int height)

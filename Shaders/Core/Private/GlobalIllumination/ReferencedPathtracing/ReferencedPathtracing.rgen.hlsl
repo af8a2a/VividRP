@@ -11,6 +11,7 @@ float _RayMinDistance;
 float _RayMaxDistance;
 int _ReferencedMaxBounceCount;
 int _ReferencedRussianRouletteStartBounce;
+int _ReferencedFrameIndex;
 
 static const float kReferencedPathtracingShadowMinBias = 0.001;
 static const float kReferencedPathtracingShadowMaxDistance = 100000.0;
@@ -108,9 +109,15 @@ void RayGenReferencedPathtracing()
     uint2 launchDimensions = DispatchRaysDimensions().xy;
     uint2 pixelCoord = uint2(launchIndex.x, launchDimensions.y - launchIndex.y - 1u);
 
+    uint pixelIndex = pixelCoord.x + pixelCoord.y * launchDimensions.x;
+    uint frameHash = HashReferencedPathtracingRng((uint)_ReferencedFrameIndex ^ 0xa511e9b3u);
+    uint rngState = HashReferencedPathtracingRng(pixelIndex ^ frameHash);
+
     RayDesc ray;
     ray.Origin = _CameraPositionWS.xyz;
-    float2 pixelCenter = (float2)pixelCoord + 0.5;
+    float2 pixelCenter = (float2)pixelCoord + float2(
+        NextReferencedPathtracingRngFloat(rngState),
+        NextReferencedPathtracingRngFloat(rngState));
     ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter);
     ray.TMin = _RayMinDistance;
     ray.TMax = _RayMaxDistance;
@@ -125,8 +132,6 @@ void RayGenReferencedPathtracing()
     float3 throughput = 1.0;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
-    uint pixelIndex = pixelCoord.x + pixelCoord.y * launchDimensions.x;
-    uint rngState = HashReferencedPathtracingRng(pixelIndex ^ 0x9e3779b9u);
     uint maxBounceCount = min(
         (uint)max(_ReferencedMaxBounceCount, 1),
         kReferencedPathtracingMaxSupportedBounceCount);

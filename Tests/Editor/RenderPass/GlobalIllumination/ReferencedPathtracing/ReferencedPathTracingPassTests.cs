@@ -89,12 +89,14 @@ namespace VividRP.Editor.Tests
                 cameraData.SetCamera(camera);
                 cameraData.actualWidth = 320;
                 cameraData.actualHeight = 180;
+                cameraData.frameIndex = 37;
 
                 pass.Prepare(frameData);
 
                 Assert.That(GetField<bool>(pass, "m_ShouldSkipExecution"), Is.False);
                 Assert.That(GetField<float>(pass, "m_RayMinDistance"), Is.EqualTo(0.25f));
                 Assert.That(GetField<float>(pass, "m_RayMaxDistance"), Is.EqualTo(750.0f));
+                Assert.That(GetField<int>(pass, "m_FrameIndex"), Is.EqualTo(37));
                 Assert.That(GetField<Vector4>(pass, "m_CameraPositionWS"), Is.EqualTo(new Vector4(1.0f, 2.0f, 3.0f, 1.0f)));
             }
             finally

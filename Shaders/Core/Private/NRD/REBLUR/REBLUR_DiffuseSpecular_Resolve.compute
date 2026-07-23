@@ -1,10 +1,26 @@
-#pragma kernel main
+#pragma kernel Prepare
+#pragma kernel Resolve
+#pragma kernel ResolveRaw
+#pragma use_dxc
 
+Texture2D<float4> _ReblurDiffuse;
+Texture2D<float4> _ReblurSpecular;
 Texture2D<float4> _ReblurResolvedDiffuse;
 Texture2D<float4> _ReblurResolvedSpecular;
+Texture2D<float4> _ReblurDiffuseMaterialFactor;
+Texture2D<float4> _ReblurSpecularMaterialFactor;
+Texture2D<float4> _ReblurDirectLighting;
 Texture2D<float4> _ReblurEmission;
+RWTexture2D<float4> _ReblurPreparedDiffuse;
+RWTexture2D<float4> _ReblurPreparedSpecular;
 RWTexture2D<float4> _ReblurResolvedColor;
 float2 _ReblurResolveScreenSize;
+
+float3 ReblurLinearToYCoCg(float3 color)
+{
+    float t = 0.25 * (color.r + color.b);
+    return float3(t + 0.5 * color.g, 0.5 * (color.r - color.b), t - 0.5 * color.g);
+}
 
 float3 ReblurYCoCgToLinear(float3 color)
 {
@@ -12,8 +28,42 @@ float3 ReblurYCoCgToLinear(float3 color)
     return max(float3(t + color.y, color.x + color.z, t - color.y), 0.0);
 }
 
+float3 ReblurSanitizeRadiance(float3 radiance)
+{
+    if (any(isnan(radiance)) || any(isinf(radiance)))
+        return 0.0;
+
+    return clamp(radiance, 0.0, 65504.0);
+}
+
 [numthreads(8, 8, 1)]
-void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+void Prepare(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (any(pixelCoord >= (uint2)_ReblurResolveScreenSize))
+        return;
+
+    float4 diffuse = _ReblurDiffuse.Load(int3(pixelCoord, 0));
+    float4 specular = _ReblurSpecular.Load(int3(pixelCoord, 0));
+    float3 diffuseFactor = max(
+        _ReblurDiffuseMaterialFactor.Load(int3(pixelCoord, 0)).xyz,
+        0.02);
+    float3 specularFactor = max(
+        _ReblurSpecularMaterialFactor.Load(int3(pixelCoord, 0)).xyz,
+        0.02);
+    float3 diffuseRadiance = ReblurSanitizeRadiance(
+        ReblurYCoCgToLinear(diffuse.xyz) / diffuseFactor);
+    float3 specularRadiance = ReblurSanitizeRadiance(
+        ReblurYCoCgToLinear(specular.xyz) / specularFactor);
+
+    _ReblurPreparedDiffuse[pixelCoord] =
+        float4(ReblurLinearToYCoCg(diffuseRadiance), diffuse.w);
+    _ReblurPreparedSpecular[pixelCoord] =
+        float4(ReblurLinearToYCoCg(specularRadiance), specular.w);
+}
+
+[numthreads(8, 8, 1)]
+void Resolve(uint3 dispatchThreadId : SV_DispatchThreadID)
 {
     uint2 pixelCoord = dispatchThreadId.xy;
     if (any(pixelCoord >= (uint2)_ReblurResolveScreenSize))
@@ -21,9 +71,35 @@ void main(uint3 dispatchThreadId : SV_DispatchThreadID)
 
     float4 diffuse = _ReblurResolvedDiffuse.Load(int3(pixelCoord, 0));
     float4 specular = _ReblurResolvedSpecular.Load(int3(pixelCoord, 0));
+    float3 diffuseFactor =
+        _ReblurDiffuseMaterialFactor.Load(int3(pixelCoord, 0)).xyz;
+    float3 specularFactor =
+        _ReblurSpecularMaterialFactor.Load(int3(pixelCoord, 0)).xyz;
+    float4 directLighting = _ReblurDirectLighting.Load(int3(pixelCoord, 0));
+    float4 emission = _ReblurEmission.Load(int3(pixelCoord, 0));
+    float3 color = ReblurYCoCgToLinear(diffuse.xyz) * max(diffuseFactor, 0.0)
+        + ReblurYCoCgToLinear(specular.xyz) * max(specularFactor, 0.0)
+        + max(directLighting.xyz, 0.0)
+        + max(emission.xyz, 0.0);
+    _ReblurResolvedColor[pixelCoord] =
+        float4(ReblurSanitizeRadiance(color), max(directLighting.w, emission.w));
+}
+
+[numthreads(8, 8, 1)]
+void ResolveRaw(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (any(pixelCoord >= (uint2)_ReblurResolveScreenSize))
+        return;
+
+    float4 diffuse = _ReblurDiffuse.Load(int3(pixelCoord, 0));
+    float4 specular = _ReblurSpecular.Load(int3(pixelCoord, 0));
+    float4 directLighting = _ReblurDirectLighting.Load(int3(pixelCoord, 0));
     float4 emission = _ReblurEmission.Load(int3(pixelCoord, 0));
     float3 color = ReblurYCoCgToLinear(diffuse.xyz)
         + ReblurYCoCgToLinear(specular.xyz)
+        + max(directLighting.xyz, 0.0)
         + max(emission.xyz, 0.0);
-    _ReblurResolvedColor[pixelCoord] = float4(color, emission.w);
+    _ReblurResolvedColor[pixelCoord] =
+        float4(ReblurSanitizeRadiance(color), max(directLighting.w, emission.w));
 }

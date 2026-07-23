@@ -24,6 +24,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedDiffuseRadianceHitDistance");
         private static readonly int SpecularRadianceHitDistanceId =
             Shader.PropertyToID("_ReferencedSpecularRadianceHitDistance");
+        private static readonly int DirectLightingId =
+            Shader.PropertyToID("_ReferencedPathTracingDirectLighting");
         private static readonly int EmissionId = Shader.PropertyToID("_ReferencedPathTracingEmission");
         private static readonly int DiffuseRayDirectionHitDistanceId =
             Shader.PropertyToID("_ReferencedDiffuseRayDirectionHitDistance");
@@ -40,6 +42,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RussianRouletteStartBounceId =
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
         private static readonly int FrameIndexId = Shader.PropertyToID("_ReferencedFrameIndex");
+        private static readonly int ReblurHitDistanceParametersId =
+            Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
@@ -79,6 +83,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_SpecularRadianceHitDistance;
 
         [RenderGraphResource(
+            Name = "PathTracingDirectLighting",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_DirectLighting;
+
+        [RenderGraphResource(
             Name = "PathTracingEmission",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
@@ -108,6 +118,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_RayMaxDistance = 1000.0f;
         private Vector4 m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
         private Vector4 m_MainLightColor = Vector4.zero;
+        private Vector4 m_ReblurHitDistanceParameters =
+            ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
         private int m_FrameIndex;
 
         public ReferencedPathTracingPass()
@@ -134,6 +146,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_SpecularRadianceHitDistance = RenderGraphTexture.CreateOutput(
                 "SpecularRadianceHitDistance",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_DirectLighting = RenderGraphTexture.CreateOutput(
+                "PathTracingDirectLighting",
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_Emission = RenderGraphTexture.CreateOutput(
                 "PathTracingEmission",
@@ -175,6 +190,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureOutputs(m_Width, m_Height);
             PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
+            m_ReblurHitDistanceParameters =
+                ReferencedPathTracingReblurSettingsResolver.Resolve().hitDistanceParameters;
             m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
                 ? cameraData.frameIndex
                 : Time.frameCount;
@@ -228,6 +245,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_WorldPositionTexture.innerHandle);
                 BindOutput(cmd, DiffuseRadianceHitDistanceId, m_DiffuseRadianceHitDistance);
                 BindOutput(cmd, SpecularRadianceHitDistanceId, m_SpecularRadianceHitDistance);
+                BindOutput(cmd, DirectLightingId, m_DirectLighting);
                 BindOutput(cmd, EmissionId, m_Emission);
                 BindOutput(cmd, DiffuseRayDirectionHitDistanceId, m_DiffuseRayDirectionHitDistance);
                 BindOutput(cmd, SpecularRayDirectionHitDistanceId, m_SpecularRayDirectionHitDistance);
@@ -252,6 +270,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     RussianRouletteStartBounceId,
                     RussianRouletteStartBounce);
                 cmd.SetRayTracingIntParam(m_RayTracingShader, FrameIndexId, m_FrameIndex);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    ReblurHitDistanceParametersId,
+                    m_ReblurHitDistanceParameters);
                 if (HasValidReGIRResources())
                     BindReGIRGlobals(cmd);
                 cmd.DispatchRays(
@@ -278,6 +300,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RayMaxDistance = 1000.0f;
             m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
             m_MainLightColor = Vector4.zero;
+            m_ReblurHitDistanceParameters =
+                ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
             m_FrameIndex = 0;
         }
 
@@ -301,6 +325,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 height,
                 GraphicsFormat.R16G16B16A16_SFloat,
                 "SpecularRadianceHitDistance");
+            ConfigureOutput(
+                m_DirectLighting,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "PathTracingDirectLighting");
             ConfigureOutput(
                 m_Emission,
                 width,
@@ -352,6 +382,7 @@ namespace VividRP.Runtime.RenderPass.Core
             return IsValid(m_WorldPositionTexture)
                 && IsValid(m_DiffuseRadianceHitDistance)
                 && IsValid(m_SpecularRadianceHitDistance)
+                && IsValid(m_DirectLighting)
                 && IsValid(m_Emission)
                 && IsValid(m_DiffuseRayDirectionHitDistance)
                 && IsValid(m_SpecularRayDirectionHitDistance);

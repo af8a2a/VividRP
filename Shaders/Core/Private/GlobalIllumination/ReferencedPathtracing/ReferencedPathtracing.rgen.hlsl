@@ -6,6 +6,7 @@ RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _WorldPositionTexture;
 RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
+RWTexture2D<float4> _ReferencedPathTracingDirectLighting;
 RWTexture2D<float4> _ReferencedPathTracingEmission;
 RWTexture2D<float4> _ReferencedDiffuseRayDirectionHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRayDirectionHitDistance;
@@ -18,12 +19,11 @@ float _RayMaxDistance;
 int _ReferencedMaxBounceCount;
 int _ReferencedRussianRouletteStartBounce;
 int _ReferencedFrameIndex;
+float4 _ReferencedReblurHitDistanceParameters;
 
 static const float kReferencedPathtracingShadowMinBias = 0.001;
 static const float kReferencedPathtracingShadowMaxDistance = 100000.0;
 static const uint kReferencedPathtracingMaxSupportedBounceCount = 8u;
-static const float4 kReferencedPathtracingReblurHitDistanceParameters =
-    float4(3.0, 0.1, 20.0, -25.0);
 
 float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
 {
@@ -76,7 +76,7 @@ float GetReferencedPathtracingReblurNormHitDistance(
     float viewZ,
     float linearRoughness)
 {
-    float4 parameters = kReferencedPathtracingReblurHitDistanceParameters;
+    float4 parameters = _ReferencedReblurHitDistanceParameters;
     float normalization = (parameters.x + abs(viewZ) * parameters.y)
         * lerp(
             1.0,
@@ -171,6 +171,7 @@ void RayGenReferencedPathtracing()
 
     float3 diffuseRadiance = 0.0;
     float3 specularRadiance = 0.0;
+    float3 directLightingRadiance = 0.0;
     float3 emissionRadiance = 0.0;
     float3 throughput = 1.0;
     float rayConeWidth = 0.0;
@@ -256,8 +257,10 @@ void RayGenReferencedPathtracing()
 
             if (bounceIndex == 0u)
             {
-                diffuseRadiance += directDiffuse;
-                specularRadiance += directSpecular;
+                // Primary NEE is deterministic for the current directional-light prototype.
+                // Keep it out of REBLUR: filtering it with the indirect signal destroys hard
+                // visibility boundaries because a directional shadow has no finite hit distance.
+                directLightingRadiance += directDiffuse + directSpecular;
             }
             else if (primaryLobeClass == 1u)
             {
@@ -315,6 +318,8 @@ void RayGenReferencedPathtracing()
         diffuseRadiance = 0.0;
     if (!IsFiniteReferencedPathtracingRadiance(specularRadiance))
         specularRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(directLightingRadiance))
+        directLightingRadiance = 0.0;
     if (!IsFiniteReferencedPathtracingRadiance(emissionRadiance))
         emissionRadiance = 0.0;
 
@@ -330,13 +335,16 @@ void RayGenReferencedPathtracing()
             primaryViewZ,
             primaryLinearRoughness)
         : 0.0;
-    float3 radiance = diffuseRadiance + specularRadiance + emissionRadiance;
+    float3 radiance =
+        diffuseRadiance + specularRadiance + directLightingRadiance + emissionRadiance;
 
     _WorldPositionTexture[pixelCoord] = float4(radiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedDiffuseRadianceHitDistance[pixelCoord] =
         PackReferencedPathtracingReblurSignal(diffuseRadiance, diffuseNormHitDistance);
     _ReferencedSpecularRadianceHitDistance[pixelCoord] =
         PackReferencedPathtracingReblurSignal(specularRadiance, specularNormHitDistance);
+    _ReferencedPathTracingDirectLighting[pixelCoord] =
+        float4(directLightingRadiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingEmission[pixelCoord] = float4(emissionRadiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] = float4(
         diffuseRayDirectionWS,

@@ -12,6 +12,8 @@ RWTexture2D<float4> _RaytracingGBufferBaseColorMetalness;
 RWTexture2D<float4> _RaytracingGBufferDlssNormalRoughness;
 RWTexture2D<float4> _RaytracingGBufferDiffuseAlbedo;
 RWTexture2D<float4> _RaytracingGBufferSpecularAlbedo;
+RWTexture2D<float4> _RaytracingGBufferNrdDiffuseMaterialFactor;
+RWTexture2D<float4> _RaytracingGBufferNrdSpecularMaterialFactor;
 RWTexture2D<float> _RaytracingGBufferDlssDepth;
 
 float4 _RaytracingGBufferCameraPositionWS;
@@ -117,6 +119,8 @@ void RayGenRaytracingGBuffer()
         _RaytracingGBufferDlssNormalRoughness[pixelCoord] = 0.0;
         _RaytracingGBufferDiffuseAlbedo[pixelCoord] = 0.0;
         _RaytracingGBufferSpecularAlbedo[pixelCoord] = 0.0;
+        _RaytracingGBufferNrdDiffuseMaterialFactor[pixelCoord] = 1.0;
+        _RaytracingGBufferNrdSpecularMaterialFactor[pixelCoord] = 1.0;
         _RaytracingGBufferDlssDepth[pixelCoord] = 0.0;
         return;
     }
@@ -162,6 +166,10 @@ void RayGenRaytracingGBuffer()
         float4(normalWS, linearRoughness);
     _RaytracingGBufferDiffuseAlbedo[pixelCoord] = float4(diffuseAlbedo, 1.0);
     _RaytracingGBufferSpecularAlbedo[pixelCoord] = float4(specularAlbedo, 1.0);
+    _RaytracingGBufferNrdDiffuseMaterialFactor[pixelCoord] =
+        float4(payload.nrdDiffuseMaterialFactor, 1.0);
+    _RaytracingGBufferNrdSpecularMaterialFactor[pixelCoord] =
+        float4(payload.nrdSpecularMaterialFactor, 1.0);
     _RaytracingGBufferDlssDepth[pixelCoord] = hardwareDepth;
 }
 

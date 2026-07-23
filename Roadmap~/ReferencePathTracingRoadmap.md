@@ -498,16 +498,30 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - `ReferencedPathTracingPass` 现在输出 NRD front-end 约定的 diffuse/specular
   `RGBA16F radiance + normalized hit distance`（YCoCg packing），并将 emission 单独保留，最终 resolve
   时再合成，避免 emission 进入时域滤波。
+- 2026-07-23 的正确性修正进一步把 primary-bounce 主方向光 NEE 拆为
+  `PathTracingDirectLighting`：确定性的硬阴影不再进入 REBLUR 的空间滤波，只在降噪完成后与
+  indirect diffuse/specular 和 emission 合成；secondary-bounce NEE 仍属于需要降噪的随机路径信号。
 - 新增专用 `RaytracingGBufferPass`，使用稳定的 primary visibility ray 输出 NRD guide：positive linear
   viewZ、2.5D pixel motion、`R10G10B10A2_UNorm` oct normal + linear roughness；同时预留
   DLSS Ray Reconstruction guide：RG16F screen-space motion、hardware depth、world normal + perceptual
   roughness、diffuse/specular albedo 和 base-color/metalness。
+- Raytracing GBuffer 现在使用 NRD 官方 `NRD_MaterialFactors` 生成 primary-surface diffuse/specular
+  material factor。REBLUR 前先把 OpenPBR 的材质调制信号解调为 radiance，降噪后再重调制，避免
+  base-color、metalness 和高频纹理边界被当作 lighting noise 跨表面扩散。
 - REBLUR history 由 RenderGraph history registry 按 camera 隔离，包含 previous viewZ、normal/roughness、
   internal data、diffuse/specular main/fast history 和 specular hit-distance tracking；当完整 REBLUR
   dispatch 不可用时，resolve 会回退到未降噪的 diffuse/specular 输入，而不是输出黑屏。
+- 已参考 NRD Sample 增加 `VividRP/Path Tracing/REBLUR Denoiser` VolumeComponent，开放当前调度链实际
+  支持的 accumulation、history fix、anti-lag、prepass/spatial radius、normal/roughness rejection、
+  anti-firefly、responsive accumulation、hit-distance normalization 和 debug 参数。已开放参数的
+  默认值及约束与 NRD v4.16 `ReblurSettings` 对齐。
+- hit-distance normalization 参数同时驱动 path-tracing front-end 的 hitT 编码与 REBLUR backend 常量，
+  避免只调整 denoiser 一侧造成信号契约失配；任意有效 REBLUR Volume 设置变化都会按 camera 使历史失效。
+- 当前调度链尚未实现 checkerboard、hit-distance reconstruction 和 temporal stabilization，因此暂不暴露
+  对应开关；Volume Inspector 会明确显示这些固定关闭的能力边界。
 - 当前 Raytracing GBuffer 只覆盖 StandardLit，motion vector 只包含 camera motion；skinned/deformed
-  object previous position、material de-modulation/re-modulation、checkerboard、confidence、动态分辨率、
-  hit-distance reconstruction 与 temporal stabilization 列为后续质量项。
+  object previous position、checkerboard、confidence、动态分辨率、hit-distance reconstruction 与
+  temporal stabilization 列为后续质量项。
 - 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised
   output 替代数值基线。
 - 当前尚未覆盖 scene/material mutation、手动 reset、target SPP、variance AOV 与 capture；这些仍属于本 milestone 后续范围。

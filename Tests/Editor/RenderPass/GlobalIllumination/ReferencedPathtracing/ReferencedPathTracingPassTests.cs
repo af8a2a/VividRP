@@ -42,6 +42,8 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "DiffuseRadianceHitDistance");
             var specular = resources.Textures.Single(
                 resource => resource.Name == "SpecularRadianceHitDistance");
+            var directLighting = resources.Textures.Single(
+                resource => resource.Name == "PathTracingDirectLighting");
             var emission = resources.Textures.Single(resource => resource.Name == "PathTracingEmission");
 
             Assert.That(accelerationStructure.Name, Is.EqualTo("SceneRTAS"));
@@ -59,9 +61,13 @@ namespace VividRP.Editor.Tests
             Assert.That(worldPosition.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(diffuse.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(specular.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(directLighting.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(emission.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(diffuse.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(specular.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                directLighting.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(emission.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
@@ -161,6 +167,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SpecularRadianceHitDistance"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_DirectLighting"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_Emission"), Is.Not.Null);
             }
             finally

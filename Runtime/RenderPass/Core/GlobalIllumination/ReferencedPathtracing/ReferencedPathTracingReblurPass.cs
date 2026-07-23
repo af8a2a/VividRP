@@ -13,6 +13,18 @@ namespace VividRP.Runtime.RenderPass.Core
     /// </summary>
     public sealed class ReferencedPathTracingReblurPass : UnsafePass, IRenderGraphSideEffectPass
     {
+        private sealed class ReblurCameraState : CameraRelativeState
+        {
+            public bool hasSettings;
+            public ReferencedPathTracingReblurSettings settings;
+
+            public override void Dispose()
+            {
+                hasSettings = false;
+                settings = default;
+            }
+        }
+
         private const string ViewZHistoryKey = "ReferencedPathTracingReblur.ViewZ";
         private const string NormalRoughnessHistoryKey = "ReferencedPathTracingReblur.NormalRoughness";
         private const string InternalDataHistoryKey = "ReferencedPathTracingReblur.InternalData";
@@ -74,9 +86,21 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OutDiffuseCopyId = Shader.PropertyToID("gOut_DiffCopy");
         private static readonly int OutSpecularCopyId = Shader.PropertyToID("gOut_SpecCopy");
 
+        private static readonly int ResolveInputDiffuseId = Shader.PropertyToID("_ReblurDiffuse");
+        private static readonly int ResolveInputSpecularId = Shader.PropertyToID("_ReblurSpecular");
         private static readonly int ResolveDiffuseId = Shader.PropertyToID("_ReblurResolvedDiffuse");
         private static readonly int ResolveSpecularId = Shader.PropertyToID("_ReblurResolvedSpecular");
+        private static readonly int ResolveDiffuseMaterialFactorId =
+            Shader.PropertyToID("_ReblurDiffuseMaterialFactor");
+        private static readonly int ResolveSpecularMaterialFactorId =
+            Shader.PropertyToID("_ReblurSpecularMaterialFactor");
+        private static readonly int ResolveDirectLightingId =
+            Shader.PropertyToID("_ReblurDirectLighting");
         private static readonly int ResolveEmissionId = Shader.PropertyToID("_ReblurEmission");
+        private static readonly int ResolvePreparedDiffuseId =
+            Shader.PropertyToID("_ReblurPreparedDiffuse");
+        private static readonly int ResolvePreparedSpecularId =
+            Shader.PropertyToID("_ReblurPreparedSpecular");
         private static readonly int ResolveColorId = Shader.PropertyToID("_ReblurResolvedColor");
         private static readonly int ResolveScreenSizeId = Shader.PropertyToID("_ReblurResolveScreenSize");
 
@@ -86,8 +110,17 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "SpecularRadianceHitDistance", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SpecularInput;
 
+        [RenderGraphResource(Name = "PathTracingDirectLighting", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DirectLightingInput;
+
         [RenderGraphResource(Name = "PathTracingEmission", Access = AccessFlags.Read)]
         private RenderGraphTexture m_EmissionInput;
+
+        [RenderGraphResource(Name = "NrdDiffuseMaterialFactor", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_DiffuseMaterialFactorInput;
+
+        [RenderGraphResource(Name = "NrdSpecularMaterialFactor", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_SpecularMaterialFactorInput;
 
         [RenderGraphResource(Name = "NrdViewZ", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ViewZInput;
@@ -204,6 +237,14 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private RenderGraphTexture m_SpecularFast;
 
+        [RenderGraphResource(Name = "ReblurPreparedDiffuse", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphTexture m_PreparedDiffuse;
+
+        [RenderGraphResource(Name = "ReblurPreparedSpecular", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphTexture m_PreparedSpecular;
+
         private ComputeShader m_ClassifyTiles;
         private ComputeShader m_PrePass;
         private ComputeShader m_TemporalAccumulation;
@@ -211,10 +252,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_Blur;
         private ComputeShader m_PostBlur;
         private ComputeShader m_Resolve;
+        private readonly CameraRelativeSystem<ReblurCameraState> m_CameraStates = new();
+        private int m_PrepareKernel = -1;
+        private int m_ResolveKernel = -1;
+        private int m_ResolveRawKernel = -1;
         private ReblurSharedConstants m_Constants;
         private int m_Width = 1;
         private int m_Height = 1;
         private bool m_HasValidHistory;
+        private ReferencedPathTracingReblurSettings m_Settings =
+            ReferencedPathTracingReblurSettings.CreateDefault();
 
         public ReferencedPathTracingReblurPass()
         {
@@ -226,8 +273,17 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SpecularInput = RenderGraphTexture.CreateInput(
                 "SpecularRadianceHitDistance",
                 GraphicsFormat.R16G16B16A16_SFloat);
+            m_DirectLightingInput = RenderGraphTexture.CreateInput(
+                "PathTracingDirectLighting",
+                GraphicsFormat.R16G16B16A16_SFloat);
             m_EmissionInput = RenderGraphTexture.CreateInput(
                 "PathTracingEmission",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_DiffuseMaterialFactorInput = RenderGraphTexture.CreateInput(
+                "NrdDiffuseMaterialFactor",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_SpecularMaterialFactorInput = RenderGraphTexture.CreateInput(
+                "NrdSpecularMaterialFactor",
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_ViewZInput = RenderGraphTexture.CreateInput("NrdViewZ", GraphicsFormat.R32_SFloat);
             m_MotionVectorsInput = RenderGraphTexture.CreateInput(
@@ -292,6 +348,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SpecularTemp2 = CreateTexture("ReblurSpecularTemp2", GraphicsFormat.R16G16B16A16_SFloat);
             m_DiffuseFast = CreateTexture("ReblurDiffuseFast", GraphicsFormat.R16_SFloat);
             m_SpecularFast = CreateTexture("ReblurSpecularFast", GraphicsFormat.R16_SFloat);
+            m_PreparedDiffuse = CreateTexture(
+                "ReblurPreparedDiffuse",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_PreparedSpecular = CreateTexture(
+                "ReblurPreparedSpecular",
+                GraphicsFormat.R16G16B16A16_SFloat);
         }
 
         public override void Create()
@@ -307,6 +369,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Blur = resources.REBLURDiffuseSpecularBlurCompute;
             m_PostBlur = resources.REBLURDiffuseSpecularPostBlurCompute;
             m_Resolve = resources.REBLURDiffuseSpecularResolveCompute;
+            if (m_Resolve != null)
+            {
+                m_PrepareKernel = FindKernel(m_Resolve, "Prepare");
+                m_ResolveKernel = FindKernel(m_Resolve, "Resolve");
+                m_ResolveRawKernel = FindKernel(m_Resolve, "ResolveRaw");
+            }
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -321,6 +389,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData?.actualHeight ?? 0,
                 cameraData?.pixelHeight ?? 0,
                 Screen.height);
+            m_Settings = ReferencedPathTracingReblurSettingsResolver.Resolve();
 
             ResizeFullResolutionTextures();
             ResizeTexture(m_Tiles, CoreUtils.DivRoundUp(m_Width, 16), CoreUtils.DivRoundUp(m_Height, 16));
@@ -366,8 +435,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CurrentSpecularHitDistance,
                 GraphicsFormat.R16_SFloat);
 
-            m_HasValidHistory = temporalData != null
+            bool settingsMatch = UpdateCameraSettings(cameraData?.camera, m_Settings);
+            m_HasValidHistory = m_Settings.enabled
+                && temporalData != null
                 && !temporalData.isFirstFrame
+                && settingsMatch
                 && hasViewZ
                 && hasNormalRoughness
                 && hasInternalData
@@ -381,12 +453,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 temporalData,
                 m_Width,
                 m_Height,
-                m_HasValidHistory);
+                m_HasValidHistory,
+                m_Settings);
+            m_CameraStates.PurgeDestroyedCameras();
         }
 
         public override void Record(UnsafePassContext context)
         {
-            if (!CanResolve())
+            if (!CanResolveRaw())
                 return;
 
             var cmd = context.GetNativeCommandBuffer();
@@ -397,11 +471,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                if (!CanExecute())
+                if (!m_Settings.enabled || !CanExecute())
                 {
-                    DispatchResolve(cmd, m_DiffuseInput, m_SpecularInput);
+                    DispatchResolveRaw(cmd);
                     return;
                 }
+
+                DispatchPrepare(cmd);
 
                 ConstantBuffer.Push(cmd, m_Constants, m_ClassifyTiles, ClassifyTilesConstantsId);
                 Bind(cmd, m_ClassifyTiles, InViewZId, m_ViewZInput);
@@ -411,8 +487,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 ConstantBuffer.Push(cmd, m_Constants, m_PrePass, PrePassConstantsId);
                 BindCommonGuides(cmd, m_PrePass);
                 Bind(cmd, m_PrePass, InTilesId, m_Tiles);
-                Bind(cmd, m_PrePass, InDiffuseId, m_DiffuseInput);
-                Bind(cmd, m_PrePass, InSpecularId, m_SpecularInput);
+                Bind(cmd, m_PrePass, InDiffuseId, m_PreparedDiffuse);
+                Bind(cmd, m_PrePass, InSpecularId, m_PreparedSpecular);
                 Bind(cmd, m_PrePass, OutDiffuseId, m_DiffuseTemp1);
                 Bind(cmd, m_PrePass, OutSpecularId, m_SpecularTemp1);
                 Bind(cmd, m_PrePass, OutSpecularHitDistanceId, m_SpecularHitDistance);
@@ -502,12 +578,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 Bind(cmd, m_PostBlur, OutSpecularCopyId, m_SpecularOutput);
                 cmd.DispatchCompute(m_PostBlur, 0, dispatchX, dispatchY, 1);
 
-                DispatchResolve(cmd, m_DiffuseOutput, m_SpecularOutput);
+                DispatchResolve(cmd);
             }
         }
 
         public override void Dispose()
         {
+            m_CameraStates.Dispose();
             m_ClassifyTiles = null;
             m_PrePass = null;
             m_TemporalAccumulation = null;
@@ -515,9 +592,27 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Blur = null;
             m_PostBlur = null;
             m_Resolve = null;
+            m_PrepareKernel = -1;
+            m_ResolveKernel = -1;
+            m_ResolveRawKernel = -1;
             m_HasValidHistory = false;
             m_Width = 1;
             m_Height = 1;
+            m_Settings = ReferencedPathTracingReblurSettings.CreateDefault();
+        }
+
+        private bool UpdateCameraSettings(
+            Camera camera,
+            ReferencedPathTracingReblurSettings settings)
+        {
+            if (camera == null)
+                return false;
+
+            var state = m_CameraStates.GetOrCreateBase(camera);
+            bool matches = state.hasSettings && state.settings.Equals(settings);
+            state.hasSettings = true;
+            state.settings = settings;
+            return matches;
         }
 
         private bool AllocateHistory(
@@ -561,7 +656,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SpecularTemp1,
                 m_SpecularTemp2,
                 m_DiffuseFast,
-                m_SpecularFast
+                m_SpecularFast,
+                m_PreparedDiffuse,
+                m_PreparedSpecular
             };
 
             foreach (var texture in textures)
@@ -577,9 +674,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_Blur != null
                 && m_PostBlur != null
                 && m_Resolve != null
+                && m_PrepareKernel >= 0
+                && m_ResolveKernel >= 0
                 && IsValid(m_DiffuseInput)
                 && IsValid(m_SpecularInput)
+                && IsValid(m_DirectLightingInput)
                 && IsValid(m_EmissionInput)
+                && IsValid(m_DiffuseMaterialFactorInput)
+                && IsValid(m_SpecularMaterialFactorInput)
                 && IsValid(m_ViewZInput)
                 && IsValid(m_MotionVectorsInput)
                 && IsValid(m_NormalRoughnessInput)
@@ -611,34 +713,94 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsValid(m_SpecularTemp1)
                 && IsValid(m_SpecularTemp2)
                 && IsValid(m_DiffuseFast)
-                && IsValid(m_SpecularFast);
+                && IsValid(m_SpecularFast)
+                && IsValid(m_PreparedDiffuse)
+                && IsValid(m_PreparedSpecular);
         }
 
-        private bool CanResolve()
+        private bool CanResolveRaw()
         {
             return m_Resolve != null
+                && m_ResolveRawKernel >= 0
                 && IsValid(m_DiffuseInput)
                 && IsValid(m_SpecularInput)
+                && IsValid(m_DirectLightingInput)
                 && IsValid(m_EmissionInput)
                 && IsValid(m_ResolvedColor);
         }
 
-        private void DispatchResolve(
-            CommandBuffer cmd,
-            RenderGraphTexture diffuse,
-            RenderGraphTexture specular)
+        private void DispatchPrepare(CommandBuffer cmd)
         {
-            Bind(cmd, m_Resolve, ResolveDiffuseId, diffuse);
-            Bind(cmd, m_Resolve, ResolveSpecularId, specular);
-            Bind(cmd, m_Resolve, ResolveEmissionId, m_EmissionInput);
-            Bind(cmd, m_Resolve, ResolveColorId, m_ResolvedColor);
+            Bind(cmd, m_Resolve, m_PrepareKernel, ResolveInputDiffuseId, m_DiffuseInput);
+            Bind(cmd, m_Resolve, m_PrepareKernel, ResolveInputSpecularId, m_SpecularInput);
+            Bind(
+                cmd,
+                m_Resolve,
+                m_PrepareKernel,
+                ResolveDiffuseMaterialFactorId,
+                m_DiffuseMaterialFactorInput);
+            Bind(
+                cmd,
+                m_Resolve,
+                m_PrepareKernel,
+                ResolveSpecularMaterialFactorId,
+                m_SpecularMaterialFactorInput);
+            Bind(cmd, m_Resolve, m_PrepareKernel, ResolvePreparedDiffuseId, m_PreparedDiffuse);
+            Bind(cmd, m_Resolve, m_PrepareKernel, ResolvePreparedSpecularId, m_PreparedSpecular);
+            DispatchResolveKernel(cmd, m_PrepareKernel);
+        }
+
+        private void DispatchResolve(CommandBuffer cmd)
+        {
+            Bind(cmd, m_Resolve, m_ResolveKernel, ResolveDiffuseId, m_DiffuseOutput);
+            Bind(cmd, m_Resolve, m_ResolveKernel, ResolveSpecularId, m_SpecularOutput);
+            Bind(
+                cmd,
+                m_Resolve,
+                m_ResolveKernel,
+                ResolveDiffuseMaterialFactorId,
+                m_DiffuseMaterialFactorInput);
+            Bind(
+                cmd,
+                m_Resolve,
+                m_ResolveKernel,
+                ResolveSpecularMaterialFactorId,
+                m_SpecularMaterialFactorInput);
+            Bind(
+                cmd,
+                m_Resolve,
+                m_ResolveKernel,
+                ResolveDirectLightingId,
+                m_DirectLightingInput);
+            Bind(cmd, m_Resolve, m_ResolveKernel, ResolveEmissionId, m_EmissionInput);
+            Bind(cmd, m_Resolve, m_ResolveKernel, ResolveColorId, m_ResolvedColor);
+            DispatchResolveKernel(cmd, m_ResolveKernel);
+        }
+
+        private void DispatchResolveRaw(CommandBuffer cmd)
+        {
+            Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveInputDiffuseId, m_DiffuseInput);
+            Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveInputSpecularId, m_SpecularInput);
+            Bind(
+                cmd,
+                m_Resolve,
+                m_ResolveRawKernel,
+                ResolveDirectLightingId,
+                m_DirectLightingInput);
+            Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveEmissionId, m_EmissionInput);
+            Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveColorId, m_ResolvedColor);
+            DispatchResolveKernel(cmd, m_ResolveRawKernel);
+        }
+
+        private void DispatchResolveKernel(CommandBuffer cmd, int kernel)
+        {
             cmd.SetComputeVectorParam(
                 m_Resolve,
                 ResolveScreenSizeId,
                 new Vector4(m_Width, m_Height, 1.0f / m_Width, 1.0f / m_Height));
             cmd.DispatchCompute(
                 m_Resolve,
-                0,
+                kernel,
                 CoreUtils.DivRoundUp(m_Width, 8),
                 CoreUtils.DivRoundUp(m_Height, 8),
                 1);
@@ -656,12 +818,29 @@ namespace VividRP.Runtime.RenderPass.Core
             int propertyId,
             RenderGraphTexture texture)
         {
-            cmd.SetComputeTextureParam(shader, 0, propertyId, texture.innerHandle);
+            Bind(cmd, shader, 0, propertyId, texture);
+        }
+
+        private static void Bind(
+            CommandBuffer cmd,
+            ComputeShader shader,
+            int kernel,
+            int propertyId,
+            RenderGraphTexture texture)
+        {
+            cmd.SetComputeTextureParam(shader, kernel, propertyId, texture.innerHandle);
         }
 
         private static bool IsValid(RenderGraphTexture texture)
         {
             return texture?.innerHandle.IsValid() == true;
+        }
+
+        private static int FindKernel(ComputeShader shader, string name)
+        {
+            return shader != null && shader.HasKernel(name)
+                ? shader.FindKernel(name)
+                : -1;
         }
 
         private static RenderGraphTexture CreateTexture(string name, GraphicsFormat format)

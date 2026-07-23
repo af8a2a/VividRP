@@ -41,6 +41,8 @@ namespace VividRP.Editor.Tests
                     "DlssNormalRoughness",
                     "DiffuseAlbedo",
                     "SpecularAlbedo",
+                    "NrdDiffuseMaterialFactor",
+                    "NrdSpecularMaterialFactor",
                     "DlssDepth"
                 }));
             AssertFormat(resources, "NrdViewZ", GraphicsFormat.R32_SFloat);
@@ -57,6 +59,14 @@ namespace VividRP.Editor.Tests
                 GraphicsFormat.R16G16B16A16_SFloat);
             AssertFormat(resources, "DiffuseAlbedo", GraphicsFormat.A2B10G10R10_UNormPack32);
             AssertFormat(resources, "SpecularAlbedo", GraphicsFormat.A2B10G10R10_UNormPack32);
+            AssertFormat(
+                resources,
+                "NrdDiffuseMaterialFactor",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            AssertFormat(
+                resources,
+                "NrdSpecularMaterialFactor",
+                GraphicsFormat.R16G16B16A16_SFloat);
             AssertFormat(resources, "DlssDepth", GraphicsFormat.R32_SFloat);
             Assert.That(resources.Textures.All(resource => resource.Access == AccessFlags.Write), Is.True);
         }
@@ -90,6 +100,8 @@ namespace VividRP.Editor.Tests
                     "m_DlssNormalRoughness",
                     "m_DiffuseAlbedo",
                     "m_SpecularAlbedo",
+                    "m_NrdDiffuseMaterialFactor",
+                    "m_NrdSpecularMaterialFactor",
                     "m_DlssDepth"
                 })
                 {
@@ -123,6 +135,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetOutputPortByName("m_DlssNormalRoughness"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseAlbedo"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SpecularAlbedo"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_NrdDiffuseMaterialFactor"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_NrdSpecularMaterialFactor"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DlssDepth"), Is.Not.Null);
             }
             finally

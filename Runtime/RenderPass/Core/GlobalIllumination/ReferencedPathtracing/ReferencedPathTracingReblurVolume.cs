@@ -11,6 +11,25 @@ namespace VividRP.Runtime
         Area5x5
     }
 
+    public enum ReferencedPathTracingReblurCheckerboardMode
+    {
+        Off,
+        Black,
+        White
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingReblurCheckerboardModeParameter
+        : VolumeParameter<ReferencedPathTracingReblurCheckerboardMode>
+    {
+        public ReferencedPathTracingReblurCheckerboardModeParameter(
+            ReferencedPathTracingReblurCheckerboardMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
     [Serializable]
     public sealed class ReferencedPathTracingReblurHitDistanceReconstructionModeParameter
         : VolumeParameter<ReferencedPathTracingReblurHitDistanceReconstructionMode>
@@ -60,9 +79,16 @@ namespace VividRP.Runtime
         public ClampedFloatParameter specularPrepassBlurRadius = new(50.0f, 0.0f, 75.0f);
 
         [Tooltip(
+            "Interleaves diffuse and specular path-tracing signals at half horizontal rate. " +
+            "Black or White selects the diffuse phase on even frames; specular uses the opposite phase.")]
+        public ReferencedPathTracingReblurCheckerboardModeParameter checkerboardMode =
+            new(ReferencedPathTracingReblurCheckerboardMode.Off);
+
+        [Tooltip(
             "Reconstructs missing normalized hit distance before the pre-pass. " +
             "3x3 is the recommended starting point for probabilistically sampled path-tracing signals; " +
-            "5x5 fills larger gaps but can spread hit distance farther.")]
+            "5x5 fills larger gaps but can spread hit distance farther. " +
+            "REBLUR automatically skips this stage while checkerboard is enabled.")]
         public ReferencedPathTracingReblurHitDistanceReconstructionModeParameter
             hitDistanceReconstructionMode =
                 new(ReferencedPathTracingReblurHitDistanceReconstructionMode.Off);

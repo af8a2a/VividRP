@@ -8,8 +8,8 @@ namespace VividRP.Runtime.RenderPass.Core
     /// <summary>
     /// NRD REBLUR DIFFUSE_SPECULAR integration for the reference path tracer. V1 uses the canonical
     /// pre-pass, temporal accumulation, history fix, blur, post-blur and optional temporal
-    /// stabilization sequence. Hit-distance reconstruction and stabilization follow the matching
-    /// NRD v4.16 permutations; checkerboard remains disabled.
+    /// stabilization sequence. Hit-distance reconstruction, checkerboard and stabilization follow
+    /// the matching NRD v4.16 permutations.
     /// </summary>
     public sealed class ReferencedPathTracingReblurPass : UnsafePass, IRenderGraphSideEffectPass
     {
@@ -123,6 +123,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReblurPreparedSpecular");
         private static readonly int ResolveColorId = Shader.PropertyToID("_ReblurResolvedColor");
         private static readonly int ResolveScreenSizeId = Shader.PropertyToID("_ReblurResolveScreenSize");
+        private static readonly int ResolveCheckerboardModesId =
+            Shader.PropertyToID("_ReblurCheckerboardModes");
+        private static readonly int ResolveFrameIndexId = Shader.PropertyToID("_ReblurFrameIndex");
 
         [RenderGraphResource(Name = "DiffuseRadianceHitDistance", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DiffuseInput;
@@ -315,10 +318,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_DirectLightingInput = RenderGraphTexture.CreateInput(
                 "PathTracingDirectLighting",
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R32G32B32A32_SFloat);
             m_EmissionInput = RenderGraphTexture.CreateInput(
                 "PathTracingEmission",
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R32G32B32A32_SFloat);
             m_DiffuseMaterialFactorInput = RenderGraphTexture.CreateInput(
                 "NrdDiffuseMaterialFactor",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -929,6 +932,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool CanExecuteHitDistanceReconstruction()
         {
+            if (m_Settings.checkerboardMode != ReferencedPathTracingReblurCheckerboardMode.Off)
+                return true;
+
             switch (m_Settings.hitDistanceReconstructionMode)
             {
                 case ReferencedPathTracingReblurHitDistanceReconstructionMode.Off:
@@ -944,6 +950,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ComputeShader GetHitDistanceReconstructionShader()
         {
+            if (m_Settings.checkerboardMode != ReferencedPathTracingReblurCheckerboardMode.Off)
+                return null;
+
             switch (m_Settings.hitDistanceReconstructionMode)
             {
                 case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area3x3:
@@ -968,6 +977,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void DispatchPrepare(CommandBuffer cmd)
         {
+            SetResolveCheckerboardConstants(cmd);
             Bind(cmd, m_Resolve, m_PrepareKernel, ResolveInputDiffuseId, m_DiffuseInput);
             Bind(cmd, m_Resolve, m_PrepareKernel, ResolveInputSpecularId, m_SpecularInput);
             Bind(
@@ -1016,6 +1026,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void DispatchResolveRaw(CommandBuffer cmd)
         {
+            SetResolveCheckerboardConstants(cmd);
             Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveInputDiffuseId, m_DiffuseInput);
             Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveInputSpecularId, m_SpecularInput);
             Bind(
@@ -1027,6 +1038,22 @@ namespace VividRP.Runtime.RenderPass.Core
             Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveEmissionId, m_EmissionInput);
             Bind(cmd, m_Resolve, m_ResolveRawKernel, ResolveColorId, m_ResolvedColor);
             DispatchResolveKernel(cmd, m_ResolveRawKernel);
+        }
+
+        private void SetResolveCheckerboardConstants(CommandBuffer cmd)
+        {
+            cmd.SetComputeVectorParam(
+                m_Resolve,
+                ResolveCheckerboardModesId,
+                new Vector4(
+                    m_Constants.gDiffCheckerboard,
+                    m_Constants.gSpecCheckerboard,
+                    0.0f,
+                    0.0f));
+            cmd.SetComputeIntParam(
+                m_Resolve,
+                ResolveFrameIndexId,
+                unchecked((int)m_Constants.gFrameIndex));
         }
 
         private void DispatchResolveKernel(CommandBuffer cmd, int kernel)

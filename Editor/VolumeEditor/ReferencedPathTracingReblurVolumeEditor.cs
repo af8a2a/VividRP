@@ -18,6 +18,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_FastHistoryClampingSigmaScale;
         private SerializedDataParameter m_DiffusePrepassBlurRadius;
         private SerializedDataParameter m_SpecularPrepassBlurRadius;
+        private SerializedDataParameter m_CheckerboardMode;
         private SerializedDataParameter m_HitDistanceReconstructionMode;
         private SerializedDataParameter m_MinBlurRadius;
         private SerializedDataParameter m_MaxBlurRadius;
@@ -51,6 +52,7 @@ namespace VividRP.Editor
                 Unpack(fetcher.Find(x => x.fastHistoryClampingSigmaScale));
             m_DiffusePrepassBlurRadius = Unpack(fetcher.Find(x => x.diffusePrepassBlurRadius));
             m_SpecularPrepassBlurRadius = Unpack(fetcher.Find(x => x.specularPrepassBlurRadius));
+            m_CheckerboardMode = Unpack(fetcher.Find(x => x.checkerboardMode));
             m_HitDistanceReconstructionMode =
                 Unpack(fetcher.Find(x => x.hitDistanceReconstructionMode));
             m_MinBlurRadius = Unpack(fetcher.Find(x => x.minBlurRadius));
@@ -101,6 +103,7 @@ namespace VividRP.Editor
             DrawSectionHeader("Spatial filtering");
             PropertyField(m_DiffusePrepassBlurRadius);
             PropertyField(m_SpecularPrepassBlurRadius);
+            PropertyField(m_CheckerboardMode);
             PropertyField(m_HitDistanceReconstructionMode);
             PropertyField(m_MinBlurRadius);
             PropertyField(m_MaxBlurRadius);
@@ -123,7 +126,8 @@ namespace VividRP.Editor
             DrawSectionHeader("Debug");
             PropertyField(m_ReturnHistoryLengthInsteadOfOcclusion);
             EditorGUILayout.HelpBox(
-                "Checkerboard remains disabled in the current full-resolution integration.",
+                "Checkerboard packs diffuse and specular into opposite phases of the signal " +
+                "textures. GBuffer guides and final outputs remain full resolution.",
                 MessageType.Info);
         }
 

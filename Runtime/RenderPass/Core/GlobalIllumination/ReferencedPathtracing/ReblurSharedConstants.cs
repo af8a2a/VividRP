@@ -142,6 +142,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 settings.maxStabilizedFrameNum,
                 0,
                 settings.maxAccumulatedFrameNum);
+            ResolveCheckerboardPhases(
+                settings.enabled
+                    ? settings.checkerboardMode
+                    : ReferencedPathTracingReblurCheckerboardMode.Off,
+                out uint diffuseCheckerboard,
+                out uint specularCheckerboard);
 
             return new ReblurSharedConstants
             {
@@ -238,14 +244,36 @@ namespace VividRP.Runtime.RenderPass.Core
                     (uint)settings.responsiveAccumulationMinFrameNum,
                 gHasHistoryConfidence = 0u,
                 gHasDisocclusionThresholdMix = 0u,
-                gDiffCheckerboard = 2u,
-                gSpecCheckerboard = 2u,
+                gDiffCheckerboard = diffuseCheckerboard,
+                gSpecCheckerboard = specularCheckerboard,
                 gFrameIndex = frameIndex,
                 gIsRectChanged = hasValidHistory ? 0u : 1u,
                 gResetHistory = hasValidHistory ? 0u : 1u,
                 gReturnHistoryLengthInsteadOfOcclusion =
                     settings.returnHistoryLengthInsteadOfOcclusion ? 1u : 0u
             };
+        }
+
+        internal static void ResolveCheckerboardPhases(
+            ReferencedPathTracingReblurCheckerboardMode mode,
+            out uint diffuseCheckerboard,
+            out uint specularCheckerboard)
+        {
+            switch (mode)
+            {
+                case ReferencedPathTracingReblurCheckerboardMode.Black:
+                    diffuseCheckerboard = 0u;
+                    specularCheckerboard = 1u;
+                    break;
+                case ReferencedPathTracingReblurCheckerboardMode.White:
+                    diffuseCheckerboard = 1u;
+                    specularCheckerboard = 0u;
+                    break;
+                default:
+                    diffuseCheckerboard = 2u;
+                    specularCheckerboard = 2u;
+                    break;
+            }
         }
 
         private static Vector3 GetTranslation(Matrix4x4 matrix)

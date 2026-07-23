@@ -40,8 +40,8 @@ namespace VividRP.Editor.Tests
 
             AssertRead(resources, "DiffuseRadianceHitDistance", GraphicsFormat.R16G16B16A16_SFloat);
             AssertRead(resources, "SpecularRadianceHitDistance", GraphicsFormat.R16G16B16A16_SFloat);
-            AssertRead(resources, "PathTracingDirectLighting", GraphicsFormat.R16G16B16A16_SFloat);
-            AssertRead(resources, "PathTracingEmission", GraphicsFormat.R16G16B16A16_SFloat);
+            AssertRead(resources, "PathTracingDirectLighting", GraphicsFormat.R32G32B32A32_SFloat);
+            AssertRead(resources, "PathTracingEmission", GraphicsFormat.R32G32B32A32_SFloat);
             AssertRead(resources, "NrdDiffuseMaterialFactor", GraphicsFormat.R16G16B16A16_SFloat);
             AssertRead(resources, "NrdSpecularMaterialFactor", GraphicsFormat.R16G16B16A16_SFloat);
             AssertRead(resources, "NrdViewZ", GraphicsFormat.R32_SFloat);
@@ -78,6 +78,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(volume.historyFixFrameNum.value, Is.EqualTo(3));
                 Assert.That(volume.diffusePrepassBlurRadius.value, Is.EqualTo(30.0f));
                 Assert.That(volume.specularPrepassBlurRadius.value, Is.EqualTo(50.0f));
+                Assert.That(
+                    volume.checkerboardMode.value,
+                    Is.EqualTo(ReferencedPathTracingReblurCheckerboardMode.Off));
                 Assert.That(
                     volume.hitDistanceReconstructionMode.value,
                     Is.EqualTo(
@@ -119,6 +122,8 @@ namespace VividRP.Editor.Tests
             volume.enableAntiFirefly.value = true;
             volume.hitDistanceReconstructionMode.value =
                 ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5;
+            volume.checkerboardMode.value =
+                ReferencedPathTracingReblurCheckerboardMode.White;
 
             try
             {
@@ -145,6 +150,9 @@ namespace VividRP.Editor.Tests
                     settings.hitDistanceReconstructionMode,
                     Is.EqualTo(
                         ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5));
+                Assert.That(
+                    settings.checkerboardMode,
+                    Is.EqualTo(ReferencedPathTracingReblurCheckerboardMode.White));
 
                 var pass = new ReferencedPathTracingPass();
                 var frameData = new ContextContainer();
@@ -158,6 +166,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     (Vector4)hitDistanceField.GetValue(pass),
                     Is.EqualTo(settings.hitDistanceParameters));
+                var checkerboardField = typeof(ReferencedPathTracingPass).GetField(
+                    "m_ReblurCheckerboardMode",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(checkerboardField, Is.Not.Null);
+                Assert.That(
+                    (ReferencedPathTracingReblurCheckerboardMode)checkerboardField.GetValue(pass),
+                    Is.EqualTo(ReferencedPathTracingReblurCheckerboardMode.White));
             }
             finally
             {
@@ -186,6 +201,7 @@ namespace VividRP.Editor.Tests
             settings.responsiveAccumulationRoughnessThreshold = 0.25f;
             settings.responsiveAccumulationMinFrameNum = 2;
             settings.returnHistoryLengthInsteadOfOcclusion = true;
+            settings.checkerboardMode = ReferencedPathTracingReblurCheckerboardMode.Black;
 
             var constants = ReblurSharedConstants.Compute(
                 null,
@@ -207,6 +223,8 @@ namespace VividRP.Editor.Tests
             Assert.That(constants.gResponsiveAccumulationInvRoughnessThreshold, Is.EqualTo(4.0f));
             Assert.That(constants.gResponsiveAccumulationMinAccumulatedFrameNum, Is.EqualTo(2u));
             Assert.That(constants.gReturnHistoryLengthInsteadOfOcclusion, Is.EqualTo(1u));
+            Assert.That(constants.gDiffCheckerboard, Is.EqualTo(0u));
+            Assert.That(constants.gSpecCheckerboard, Is.EqualTo(1u));
 
             constants = ReblurSharedConstants.Compute(
                 null,
@@ -240,6 +258,64 @@ namespace VividRP.Editor.Tests
                 ReferencedPathTracingReblurHitDistanceReconstructionMode.Area3x3;
 
             Assert.That(settings.Equals(reconstructedSettings), Is.False);
+        }
+
+        [Test]
+        public void SettingsEquality_ChangesWhenCheckerboardModeChanges()
+        {
+            var settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            var checkerboardSettings = settings;
+            checkerboardSettings.checkerboardMode =
+                ReferencedPathTracingReblurCheckerboardMode.Black;
+
+            Assert.That(settings.Equals(checkerboardSettings), Is.False);
+        }
+
+        [Test]
+        public void SharedConstants_DisableCheckerboardWhenReblurIsDisabled()
+        {
+            var settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            settings.enabled = false;
+            settings.checkerboardMode = ReferencedPathTracingReblurCheckerboardMode.White;
+
+            var constants = ReblurSharedConstants.Compute(
+                null,
+                null,
+                320,
+                180,
+                false,
+                settings);
+
+            Assert.That(constants.gDiffCheckerboard, Is.EqualTo(2u));
+            Assert.That(constants.gSpecCheckerboard, Is.EqualTo(2u));
+        }
+
+        [Test]
+        public void Checkerboard_SkipsHitDistanceReconstructionDependency()
+        {
+            var pass = new ReferencedPathTracingReblurPass();
+            var settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            settings.checkerboardMode = ReferencedPathTracingReblurCheckerboardMode.White;
+            settings.hitDistanceReconstructionMode =
+                ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5;
+
+            var settingsField = typeof(ReferencedPathTracingReblurPass).GetField(
+                "m_Settings",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var canExecuteMethod = typeof(ReferencedPathTracingReblurPass).GetMethod(
+                "CanExecuteHitDistanceReconstruction",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            var getShaderMethod = typeof(ReferencedPathTracingReblurPass).GetMethod(
+                "GetHitDistanceReconstructionShader",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(settingsField, Is.Not.Null);
+            Assert.That(canExecuteMethod, Is.Not.Null);
+            Assert.That(getShaderMethod, Is.Not.Null);
+            settingsField.SetValue(pass, settings);
+
+            Assert.That((bool)canExecuteMethod.Invoke(pass, null), Is.True);
+            Assert.That(getShaderMethod.Invoke(pass, null), Is.Null);
         }
 
         [Test]

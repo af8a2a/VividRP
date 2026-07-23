@@ -44,6 +44,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int FrameIndexId = Shader.PropertyToID("_ReferencedFrameIndex");
         private static readonly int ReblurHitDistanceParametersId =
             Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
+        private static readonly int ReblurCheckerboardModeId =
+            Shader.PropertyToID("_ReferencedReblurCheckerboardMode");
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
@@ -120,6 +122,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_MainLightColor = Vector4.zero;
         private Vector4 m_ReblurHitDistanceParameters =
             ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
+        private ReferencedPathTracingReblurCheckerboardMode m_ReblurCheckerboardMode =
+            ReferencedPathTracingReblurCheckerboardMode.Off;
         private int m_FrameIndex;
 
         public ReferencedPathTracingPass()
@@ -149,10 +153,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_DirectLighting = RenderGraphTexture.CreateOutput(
                 "PathTracingDirectLighting",
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R32G32B32A32_SFloat);
             m_Emission = RenderGraphTexture.CreateOutput(
                 "PathTracingEmission",
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R32G32B32A32_SFloat);
             m_DiffuseRayDirectionHitDistance = RenderGraphTexture.CreateOutput(
                 "DiffuseRayDirectionHitDistance",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -190,8 +194,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureOutputs(m_Width, m_Height);
             PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
-            m_ReblurHitDistanceParameters =
-                ReferencedPathTracingReblurSettingsResolver.Resolve().hitDistanceParameters;
+            var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
+            m_ReblurHitDistanceParameters = reblurSettings.hitDistanceParameters;
+            m_ReblurCheckerboardMode = reblurSettings.enabled
+                ? reblurSettings.checkerboardMode
+                : ReferencedPathTracingReblurCheckerboardMode.Off;
             m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
                 ? cameraData.frameIndex
                 : Time.frameCount;
@@ -274,6 +281,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     ReblurHitDistanceParametersId,
                     m_ReblurHitDistanceParameters);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    ReblurCheckerboardModeId,
+                    (int)m_ReblurCheckerboardMode);
                 if (HasValidReGIRResources())
                     BindReGIRGlobals(cmd);
                 cmd.DispatchRays(
@@ -302,6 +313,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_MainLightColor = Vector4.zero;
             m_ReblurHitDistanceParameters =
                 ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
+            m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
             m_FrameIndex = 0;
         }
 
@@ -329,13 +341,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DirectLighting,
                 width,
                 height,
-                GraphicsFormat.R16G16B16A16_SFloat,
+                GraphicsFormat.R32G32B32A32_SFloat,
                 "PathTracingDirectLighting");
             ConfigureOutput(
                 m_Emission,
                 width,
                 height,
-                GraphicsFormat.R16G16B16A16_SFloat,
+                GraphicsFormat.R32G32B32A32_SFloat,
                 "PathTracingEmission");
             ConfigureOutput(
                 m_DiffuseRayDirectionHitDistance,
@@ -425,6 +437,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             directionWS.Normalize();
             m_MainLightDirectionWS = new Vector4(directionWS.x, directionWS.y, directionWS.z, 0.0f);
+            // DirectionalLightData.color is RGB illuminance in lux. Preserve that physical scale:
+            // OpenPBR eval already returns BSDF * NdotL, so raygen can multiply it directly by
+            // illuminance to obtain outgoing scene-linear radiance without another cosine or PI.
             m_MainLightColor = new Vector4(
                 Mathf.Max(mainLight.color.x, 0.0f),
                 Mathf.Max(mainLight.color.y, 0.0f),

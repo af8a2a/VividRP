@@ -3,6 +3,8 @@
 #pragma kernel ResolveRaw
 #pragma use_dxc
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+
 Texture2D<float4> _ReblurDiffuse;
 Texture2D<float4> _ReblurSpecular;
 Texture2D<float4> _ReblurResolvedDiffuse;
@@ -15,6 +17,8 @@ RWTexture2D<float4> _ReblurPreparedDiffuse;
 RWTexture2D<float4> _ReblurPreparedSpecular;
 RWTexture2D<float4> _ReblurResolvedColor;
 float2 _ReblurResolveScreenSize;
+float2 _ReblurCheckerboardModes;
+int _ReblurFrameIndex;
 
 float3 ReblurLinearToYCoCg(float3 color)
 {
@@ -28,12 +32,42 @@ float3 ReblurYCoCgToLinear(float3 color)
     return max(float3(t + color.y, color.x + color.z, t - color.y), 0.0);
 }
 
-float3 ReblurSanitizeRadiance(float3 radiance)
+float3 ReblurSanitizeHalfRadiance(float3 radiance)
 {
     if (any(isnan(radiance)) || any(isinf(radiance)))
         return 0.0;
 
     return clamp(radiance, 0.0, 65504.0);
+}
+
+float3 ReblurPreparePresentationRadiance(float3 sceneRadiance)
+{
+    if (any(isnan(sceneRadiance)) || any(isinf(sceneRadiance)))
+        return 0.0;
+
+    // REBLUR history and all path-tracing AOVs remain in absolute scene-linear radiance.
+    // Only the final presentation color is converted to VividRP's pre-exposed lighting space.
+    float3 preExposedRadiance = VividApplyPreExposure(max(sceneRadiance, 0.0));
+    return any(isnan(preExposedRadiance)) || any(isinf(preExposedRadiance))
+        ? 0.0
+        : max(preExposedRadiance, 0.0);
+}
+
+uint ReblurCheckerboard(uint2 pixelCoord)
+{
+    return (pixelCoord.x ^ pixelCoord.y ^ (uint)_ReblurFrameIndex) & 1u;
+}
+
+uint2 ReblurGetMaterialFactorPixel(uint2 packedPixelCoord, uint checkerboardMode)
+{
+    if (checkerboardMode == 2u)
+        return packedPixelCoord;
+
+    uint2 pixelCoord = uint2(packedPixelCoord.x << 1u, packedPixelCoord.y);
+    if (ReblurCheckerboard(pixelCoord) != checkerboardMode)
+        pixelCoord.x++;
+
+    return min(pixelCoord, (uint2)_ReblurResolveScreenSize - 1u);
 }
 
 [numthreads(8, 8, 1)]
@@ -43,17 +77,31 @@ void Prepare(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (any(pixelCoord >= (uint2)_ReblurResolveScreenSize))
         return;
 
+    uint diffuseCheckerboard = (uint)_ReblurCheckerboardModes.x;
+    uint specularCheckerboard = (uint)_ReblurCheckerboardModes.y;
+    uint packedWidth = ((uint)_ReblurResolveScreenSize.x + 1u) >> 1u;
+    if (diffuseCheckerboard != 2u && pixelCoord.x >= packedWidth)
+    {
+        _ReblurPreparedDiffuse[pixelCoord] = 0.0;
+        _ReblurPreparedSpecular[pixelCoord] = 0.0;
+        return;
+    }
+
+    uint2 diffuseMaterialPixel =
+        ReblurGetMaterialFactorPixel(pixelCoord, diffuseCheckerboard);
+    uint2 specularMaterialPixel =
+        ReblurGetMaterialFactorPixel(pixelCoord, specularCheckerboard);
     float4 diffuse = _ReblurDiffuse.Load(int3(pixelCoord, 0));
     float4 specular = _ReblurSpecular.Load(int3(pixelCoord, 0));
     float3 diffuseFactor = max(
-        _ReblurDiffuseMaterialFactor.Load(int3(pixelCoord, 0)).xyz,
+        _ReblurDiffuseMaterialFactor.Load(int3(diffuseMaterialPixel, 0)).xyz,
         0.02);
     float3 specularFactor = max(
-        _ReblurSpecularMaterialFactor.Load(int3(pixelCoord, 0)).xyz,
+        _ReblurSpecularMaterialFactor.Load(int3(specularMaterialPixel, 0)).xyz,
         0.02);
-    float3 diffuseRadiance = ReblurSanitizeRadiance(
+    float3 diffuseRadiance = ReblurSanitizeHalfRadiance(
         ReblurYCoCgToLinear(diffuse.xyz) / diffuseFactor);
-    float3 specularRadiance = ReblurSanitizeRadiance(
+    float3 specularRadiance = ReblurSanitizeHalfRadiance(
         ReblurYCoCgToLinear(specular.xyz) / specularFactor);
 
     _ReblurPreparedDiffuse[pixelCoord] =
@@ -82,7 +130,7 @@ void Resolve(uint3 dispatchThreadId : SV_DispatchThreadID)
         + max(directLighting.xyz, 0.0)
         + max(emission.xyz, 0.0);
     _ReblurResolvedColor[pixelCoord] =
-        float4(ReblurSanitizeRadiance(color), max(directLighting.w, emission.w));
+        float4(ReblurPreparePresentationRadiance(color), max(directLighting.w, emission.w));
 }
 
 [numthreads(8, 8, 1)]
@@ -92,8 +140,18 @@ void ResolveRaw(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (any(pixelCoord >= (uint2)_ReblurResolveScreenSize))
         return;
 
-    float4 diffuse = _ReblurDiffuse.Load(int3(pixelCoord, 0));
-    float4 specular = _ReblurSpecular.Load(int3(pixelCoord, 0));
+    uint diffuseCheckerboard = (uint)_ReblurCheckerboardModes.x;
+    uint specularCheckerboard = (uint)_ReblurCheckerboardModes.y;
+    uint2 signalPixelCoord = diffuseCheckerboard == 2u
+        ? pixelCoord
+        : uint2(pixelCoord.x >> 1u, pixelCoord.y);
+    uint checkerboard = ReblurCheckerboard(pixelCoord);
+    float4 diffuse = diffuseCheckerboard == 2u || checkerboard == diffuseCheckerboard
+        ? _ReblurDiffuse.Load(int3(signalPixelCoord, 0))
+        : 0.0;
+    float4 specular = specularCheckerboard == 2u || checkerboard == specularCheckerboard
+        ? _ReblurSpecular.Load(int3(signalPixelCoord, 0))
+        : 0.0;
     float4 directLighting = _ReblurDirectLighting.Load(int3(pixelCoord, 0));
     float4 emission = _ReblurEmission.Load(int3(pixelCoord, 0));
     float3 color = ReblurYCoCgToLinear(diffuse.xyz)
@@ -101,5 +159,5 @@ void ResolveRaw(uint3 dispatchThreadId : SV_DispatchThreadID)
         + max(directLighting.xyz, 0.0)
         + max(emission.xyz, 0.0);
     _ReblurResolvedColor[pixelCoord] =
-        float4(ReblurSanitizeRadiance(color), max(directLighting.w, emission.w));
+        float4(ReblurPreparePresentationRadiance(color), max(directLighting.w, emission.w));
 }

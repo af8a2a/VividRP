@@ -17,6 +17,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public float fastHistoryClampingSigmaScale;
         public float diffusePrepassBlurRadius;
         public float specularPrepassBlurRadius;
+        public ReferencedPathTracingReblurCheckerboardMode checkerboardMode;
         public ReferencedPathTracingReblurHitDistanceReconstructionMode
             hitDistanceReconstructionMode;
         public float minBlurRadius;
@@ -47,6 +48,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 fastHistoryClampingSigmaScale = 2.0f,
                 diffusePrepassBlurRadius = 30.0f,
                 specularPrepassBlurRadius = 50.0f,
+                checkerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off,
                 hitDistanceReconstructionMode =
                     ReferencedPathTracingReblurHitDistanceReconstructionMode.Off,
                 minBlurRadius = 1.0f,
@@ -77,6 +79,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && fastHistoryClampingSigmaScale.Equals(other.fastHistoryClampingSigmaScale)
                 && diffusePrepassBlurRadius.Equals(other.diffusePrepassBlurRadius)
                 && specularPrepassBlurRadius.Equals(other.specularPrepassBlurRadius)
+                && checkerboardMode == other.checkerboardMode
                 && hitDistanceReconstructionMode == other.hitDistanceReconstructionMode
                 && minBlurRadius.Equals(other.minBlurRadius)
                 && maxBlurRadius.Equals(other.maxBlurRadius)
@@ -115,6 +118,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 hash = (hash * 397) ^ fastHistoryClampingSigmaScale.GetHashCode();
                 hash = (hash * 397) ^ diffusePrepassBlurRadius.GetHashCode();
                 hash = (hash * 397) ^ specularPrepassBlurRadius.GetHashCode();
+                hash = (hash * 397) ^ (int)checkerboardMode;
                 hash = (hash * 397) ^ (int)hitDistanceReconstructionMode;
                 hash = (hash * 397) ^ minBlurRadius.GetHashCode();
                 hash = (hash * 397) ^ maxBlurRadius.GetHashCode();
@@ -190,6 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 volume.specularPrepassBlurRadius.value,
                 0.0f,
                 75.0f);
+            settings.checkerboardMode = SanitizeCheckerboardMode(volume.checkerboardMode.value);
             settings.hitDistanceReconstructionMode =
                 SanitizeHitDistanceReconstructionMode(
                     volume.hitDistanceReconstructionMode.value);
@@ -221,6 +226,19 @@ namespace VividRP.Runtime.RenderPass.Core
             settings.returnHistoryLengthInsteadOfOcclusion =
                 volume.returnHistoryLengthInsteadOfOcclusion.value;
             return settings;
+        }
+
+        private static ReferencedPathTracingReblurCheckerboardMode SanitizeCheckerboardMode(
+            ReferencedPathTracingReblurCheckerboardMode mode)
+        {
+            switch (mode)
+            {
+                case ReferencedPathTracingReblurCheckerboardMode.Black:
+                case ReferencedPathTracingReblurCheckerboardMode.White:
+                    return mode;
+                default:
+                    return ReferencedPathTracingReblurCheckerboardMode.Off;
+            }
         }
 
         private static ReferencedPathTracingReblurHitDistanceReconstructionMode

@@ -65,10 +65,12 @@ namespace VividRP.Editor.Tests
             Assert.That(emission.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(diffuse.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(specular.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(diffuse.Texture.desc.ClearBuffer, Is.True);
+            Assert.That(specular.Texture.desc.ClearBuffer, Is.True);
             Assert.That(
                 directLighting.Texture.desc.ColorFormat,
-                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
-            Assert.That(emission.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+            Assert.That(emission.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
         }
 
         [Test]
@@ -123,7 +125,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_CachesMainDirectionalLightForLambertEvaluation()
+        public void Prepare_PreservesMainDirectionalLightPhysicalIlluminance()
         {
             var pass = new ReferencedPathTracingPass();
             var frameData = new ContextContainer();
@@ -133,7 +135,7 @@ namespace VividRP.Editor.Tests
                 new VividLightData.DirectionalLightData
                 {
                     directionWS = new Vector3(0.0f, 2.0f, 0.0f),
-                    color = new Vector3(3.0f, 2.0f, 1.0f),
+                    color = new Vector3(130000.0f, 65000.0f, 32500.0f),
                 }
             };
             lightData.directionalLightCount = 1;
@@ -146,7 +148,7 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(new Vector4(0.0f, 1.0f, 0.0f, 0.0f)));
             Assert.That(
                 GetField<Vector4>(pass, "m_MainLightColor"),
-                Is.EqualTo(new Vector4(3.0f, 2.0f, 1.0f, 1.0f)));
+                Is.EqualTo(new Vector4(130000.0f, 65000.0f, 32500.0f, 1.0f)));
         }
 
         [Test]

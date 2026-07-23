@@ -473,7 +473,7 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 
 把 integrator 变成可重复、可导出的 reference baseline 工具。
 
-### Current implementation status (2026-07-22)
+### Current implementation status (2026-07-23)
 
 - 已实现独立 `ReferencedPathTracingAccumulationPass`，通过 RenderGraph history pair 保存
   `R32G32B32A32_SFloat` 的逐像素算术均值。
@@ -521,10 +521,22 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - hit-distance normalization 参数同时驱动 path-tracing front-end 的 hitT 编码与 REBLUR backend 常量，
   避免只调整 denoiser 一侧造成信号契约失配；任意有效 REBLUR Volume 设置变化都会按 camera 使历史失效。
 - Volume 已开放 `maxStabilizedFrameNum`，默认沿用 NRD v4.16 的 63，并在运行时按
-  `maxAccumulatedFrameNum` 截断；0 显式关闭稳定化。checkerboard 仍未实现，Volume Inspector
-  会明确显示该能力边界。
+  `maxAccumulatedFrameNum` 截断；0 显式关闭稳定化。
+- Volume 已开放 `checkerboardMode` 的 Off/Black/White 模式。启用后 path-tracing front-end 按
+  `(pixel.x ^ pixel.y ^ frameIndex)` 将 diffuse/specular 以相反相位紧凑写入 signal texture 左半区，
+  REBLUR PrePass 负责恢复全分辨率；GBuffer guide、direct lighting、emission 与最终输出仍保持全分辨率。
+  Resolve Prepare 会按各自相位读取对应 full-resolution material factor，避免解调坐标错位；raw fallback
+  也会按相位解包。遵循 NRD v4.16 约束，checkerboard 启用时自动跳过 hit-distance reconstruction。
+- 主方向光已明确采用 VividRP 的 photometric contract：`DirectionalLightData.color` 保存 RGB illuminance
+  （lux），OpenPBR `openpbr_eval` 返回 `BSDF * NdotL`，两者直接相乘得到物理尺度的直射光结果，不再施加
+  重复的 cosine 或 `1 / PI`。全分辨率 direct-lighting/emission AOV 升级为 RGBA32F，避免日光照度与高光
+  超过 FP16 动态范围。
+- REBLUR resolve/raw fallback 与无限累积的 presentation 输出已接入 VividRP pre-exposure；REBLUR history、
+  raw AOV 和 FP32 accumulation history 仍保持未曝光的 scene-linear 数据。这样 AutoExposurePass 可以先
+  去除上一帧 pre-exposure 后计量场景亮度，FinalBlit 再应用 current/pre-exposure 比值，同时曝光适应不会
+  污染时域历史或 ground-truth capture。
 - 当前 Raytracing GBuffer 只覆盖 StandardLit，motion vector 只包含 camera motion；skinned/deformed
-  object previous position、checkerboard、confidence 与动态分辨率列为后续质量项。
+  object previous position、confidence 与动态分辨率列为后续质量项。
 - 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised
   output 替代数值基线。
 - 当前尚未覆盖 scene/material mutation、手动 reset、target SPP、variance AOV 与 capture；这些仍属于本 milestone 后续范围。

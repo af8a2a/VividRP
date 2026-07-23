@@ -39,7 +39,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void ResolveAsyncComputeSetting_ReturnsTrue_ForSupportedPassWhenEnabled()
         {
-            var enableAsyncCompute = RenderGraphImporter.ResolveAsyncComputeSetting(typeof(ClassificationPass), true);
+            var enableAsyncCompute = RenderGraphImporter.ResolveAsyncComputeSetting(typeof(MaterialClassificationPass), true);
 
             Assert.That(enableAsyncCompute, Is.True);
         }

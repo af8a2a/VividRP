@@ -5,7 +5,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public class ClassificationPass : ComputePass, IAsyncComputeSupportedPass
+    public class MaterialClassificationPass : ComputePass, IAsyncComputeSupportedPass
     {
         private const int MaterialFeatureVariantCount = 7;
         private const int IndirectArgsElementCount = 4;
@@ -69,7 +69,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private GraphicsBuffer m_MaterialFeatureTileListBuffer;
         private GraphicsBuffer m_MaterialFeatureIndirectArgsBuffer;
 
-        public ClassificationPass()
+        public MaterialClassificationPass()
         {
             m_GBuffer0 = RenderGraphTexture.CreateInput("GBuffer0", GraphicsFormat.R8G8B8A8_UNorm);
             m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);

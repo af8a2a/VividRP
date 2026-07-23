@@ -16,10 +16,14 @@ struct ReferencedPathtracingPayload
     float3 positionWS;
     float3 faceNormalWS;
     float3 emission;
-    float3 mainLightBsdf;
+    float3 mainLightDiffuseBsdf;
+    float3 mainLightSpecularBsdf;
     float3 nextDirectionWS;
     float3 nextThroughputWeight;
     float nextPdf;
+    float linearRoughness;
+    float hitDistance;
+    uint nextLobeClass;
     uint hit;
 };
 
@@ -32,10 +36,14 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.positionWS = 0.0;
     payload.faceNormalWS = 0.0;
     payload.emission = 0.0;
-    payload.mainLightBsdf = 0.0;
+    payload.mainLightDiffuseBsdf = 0.0;
+    payload.mainLightSpecularBsdf = 0.0;
     payload.nextDirectionWS = 0.0;
     payload.nextThroughputWeight = 0.0;
     payload.nextPdf = 0.0;
+    payload.linearRoughness = 1.0;
+    payload.hitDistance = 0.0;
+    payload.nextLobeClass = 0u;
     payload.hit = 0u;
 }
 

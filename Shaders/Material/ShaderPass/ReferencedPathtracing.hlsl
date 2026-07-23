@@ -100,10 +100,14 @@ void StandardLitReferencedPathtracingClosestHit(
     payload.emission = VividReferencedPathtracingIsFinite(preparedBsdf.emission)
         ? max(preparedBsdf.emission, 0.0)
         : 0.0;
-    payload.mainLightBsdf = 0.0;
+    payload.mainLightDiffuseBsdf = 0.0;
+    payload.mainLightSpecularBsdf = 0.0;
     payload.nextDirectionWS = 0.0;
     payload.nextThroughputWeight = 0.0;
     payload.nextPdf = 0.0;
+    payload.linearRoughness = material.openPbrInputs.specular_roughness;
+    payload.hitDistance = geometry.hitDistance;
+    payload.nextLobeClass = 0u;
 
     float3 mainLightDirectionWS = normalize(_ReferencedMainLightDirectionWS.xyz);
     if (dot(mainLightDirectionWS, geometry.faceNormalWS) > 0.0
@@ -113,12 +117,15 @@ void StandardLitReferencedPathtracingClosestHit(
             preparedBsdf,
             mainLightDirectionWS);
         float mainLightBsdfPdf = openpbr_pdf(preparedBsdf, mainLightDirectionWS);
-        float3 mainLightBsdf = openpbr_get_sum_of_diffuse_specular(mainLightResponse);
-        if (VividReferencedPathtracingIsFinite(mainLightBsdf)
+        float3 mainLightDiffuseBsdf = openpbr_extract_diffuse_from_diffuse_specular(mainLightResponse);
+        float3 mainLightSpecularBsdf = openpbr_extract_specular_from_diffuse_specular(mainLightResponse);
+        if (VividReferencedPathtracingIsFinite(mainLightDiffuseBsdf)
+            && VividReferencedPathtracingIsFinite(mainLightSpecularBsdf)
             && VividReferencedPathtracingIsFinite(mainLightBsdfPdf)
             && mainLightBsdfPdf >= 0.0)
         {
-            payload.mainLightBsdf = max(mainLightBsdf, 0.0);
+            payload.mainLightDiffuseBsdf = max(mainLightDiffuseBsdf, 0.0);
+            payload.mainLightSpecularBsdf = max(mainLightSpecularBsdf, 0.0);
         }
     }
 
@@ -145,6 +152,9 @@ void StandardLitReferencedPathtracingClosestHit(
             payload.nextDirectionWS = normalize(sampledDirectionWS);
             payload.nextThroughputWeight = max(nextThroughputWeight, 0.0);
             payload.nextPdf = sampledPdf;
+            payload.nextLobeClass = (sampledLobeType & OpenPBR_BsdfLobeTypeDiffuse) != 0u
+                ? 1u
+                : 2u;
         }
     }
 

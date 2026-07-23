@@ -236,7 +236,9 @@ V1 从现有 StandardLit 解析：
 - `_EmissionColor`、`_EmissionMap` -> emission color/luminance contract。
 - `_ALPHATEST_ON`、`_Cutoff` -> any-hit rejection。
 
-需要明确验证 smoothness-to-roughness 的转换。OpenPBR 期望的 `specular_roughness` 与当前 GBuffer `linearRoughness` 不能凭字段名直接等同。
+当前 StandardLit V1 已明确采用 `specular_roughness = 1 - perceptualSmoothness`。该值直接作为
+NRD 的 linear roughness 与 DLSS-RR 的 `sqrt(alphaRoughness)`；计算 specular albedo 的环境 BRDF
+时再使用 `alphaRoughness = specular_roughness²`，避免在不同接口之间重复平方或开平方。
 
 OpenPBR 要求 view/light direction 和 geometry basis 位于同一坐标空间且方向均指向表面外侧。Normal mapping 后的 shading normal 必须和 geometric normal 保持一致半球；ray offset 使用 oriented geometric normal，而不是直接使用 shading normal。
 
@@ -475,8 +477,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 
 - 已实现独立 `ReferencedPathTracingAccumulationPass`，通过 RenderGraph history pair 保存
   `R32G32B32A32_SFloat` 的逐像素算术均值。
-- `PTGraph.vrdg` 已接成 `ReferencedPathTracingPass -> ReferencedPathTracingAccumulationPass ->
-  ReferencedPathTracingDenoisingPass -> FinalBlitPass`，raw per-frame radiance 不再直接进入最终输出。
+- `PTGraph.vrdg` 的当前交互预览路径已切换为
+  `RTAS -> {ReferencedPathTracingPass, RaytracingGBufferPass} ->
+  ReferencedPathTracingReblurPass -> FinalBlitPass`。无限累积和 OIDN pass 仍保留为可选的
+  reference/capture 支线，但不再与 REBLUR 同时执行，避免重复维护两套时域历史。
 - 累积采用 `mean_n = mean_(n-1) + (sample_n - mean_(n-1)) / n`，没有固定 history window、
   重投影、邻域裁剪或亮度 clamp，保持静态 reference accumulation 的无偏性质。
 - 样本计数按 camera 隔离；分辨率、view/projection matrix、主方向光方向或颜色变化时自动从 1 spp 重置。
@@ -487,6 +491,23 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - OIDN 结果按 camera 隔离；分辨率、view/projection matrix 或主方向光变化时废弃旧请求结果。
 - package API 被隔离在 `IReferencedPathTracingDenoiserBackend` 适配边界之后；Unity 6.7+ 切换为预编译 package
   时不需要把实现迁入 VividRP，只需维护 adapter 和程序集引用。
+- 已参考 `E:\NRD-Sample_simplex`（NRD v4.16，revision
+  `a805a0d2f9464f41790f4ad6ea952cc8fbf47917`）接入 shader-side
+  `REBLUR_DIFFUSE_SPECULAR`。当前调度序列为 ClassifyTiles、PrePass、TemporalAccumulation、
+  HistoryFix、Blur、PostBlur；未启用 hit-distance reconstruction 和 temporal stabilization。
+- `ReferencedPathTracingPass` 现在输出 NRD front-end 约定的 diffuse/specular
+  `RGBA16F radiance + normalized hit distance`（YCoCg packing），并将 emission 单独保留，最终 resolve
+  时再合成，避免 emission 进入时域滤波。
+- 新增专用 `RaytracingGBufferPass`，使用稳定的 primary visibility ray 输出 NRD guide：positive linear
+  viewZ、2.5D pixel motion、`R10G10B10A2_UNorm` oct normal + linear roughness；同时预留
+  DLSS Ray Reconstruction guide：RG16F screen-space motion、hardware depth、world normal + perceptual
+  roughness、diffuse/specular albedo 和 base-color/metalness。
+- REBLUR history 由 RenderGraph history registry 按 camera 隔离，包含 previous viewZ、normal/roughness、
+  internal data、diffuse/specular main/fast history 和 specular hit-distance tracking；当完整 REBLUR
+  dispatch 不可用时，resolve 会回退到未降噪的 diffuse/specular 输入，而不是输出黑屏。
+- 当前 Raytracing GBuffer 只覆盖 StandardLit，motion vector 只包含 camera motion；skinned/deformed
+  object previous position、material de-modulation/re-modulation、checkerboard、confidence、动态分辨率、
+  hit-distance reconstruction 与 temporal stabilization 列为后续质量项。
 - 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised
   output 替代数值基线。
 - 当前尚未覆盖 scene/material mutation、手动 reset、target SPP、variance AOV 与 capture；这些仍属于本 milestone 后续范围。

@@ -347,6 +347,28 @@ Shader "VividRP/Material/StandardLit"
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracing.hlsl"
             ENDHLSL
         }
+
+        Pass
+        {
+            Name "RaytracingGBufferDXR"
+            Tags { "LightMode" = "RaytracingGBufferDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/RaytracingGBuffer.hlsl"
+            ENDHLSL
+        }
     }
 
     CustomEditor "VividRP.Editor.StandardLitShaderGUI"

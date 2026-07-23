@@ -20,8 +20,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int RussianRouletteStartBounce = 3;
 
         private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
+        private static readonly int DiffuseRadianceHitDistanceId =
+            Shader.PropertyToID("_ReferencedDiffuseRadianceHitDistance");
+        private static readonly int SpecularRadianceHitDistanceId =
+            Shader.PropertyToID("_ReferencedSpecularRadianceHitDistance");
+        private static readonly int EmissionId = Shader.PropertyToID("_ReferencedPathTracingEmission");
+        private static readonly int DiffuseRayDirectionHitDistanceId =
+            Shader.PropertyToID("_ReferencedDiffuseRayDirectionHitDistance");
+        private static readonly int SpecularRayDirectionHitDistanceId =
+            Shader.PropertyToID("_ReferencedSpecularRayDirectionHitDistance");
         private static readonly int CameraPositionId = Shader.PropertyToID("_CameraPositionWS");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
+        private static readonly int WorldToViewId = Shader.PropertyToID("_ReferencedWorldToView");
         private static readonly int RayMinDistanceId = Shader.PropertyToID("_RayMinDistance");
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
         private static readonly int MainLightDirectionWSId = Shader.PropertyToID("_ReferencedMainLightDirectionWS");
@@ -56,6 +66,36 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_WorldPositionTexture;
 
+        [RenderGraphResource(
+            Name = "DiffuseRadianceHitDistance",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_DiffuseRadianceHitDistance;
+
+        [RenderGraphResource(
+            Name = "SpecularRadianceHitDistance",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_SpecularRadianceHitDistance;
+
+        [RenderGraphResource(
+            Name = "PathTracingEmission",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_Emission;
+
+        [RenderGraphResource(
+            Name = "DiffuseRayDirectionHitDistance",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_DiffuseRayDirectionHitDistance;
+
+        [RenderGraphResource(
+            Name = "SpecularRayDirectionHitDistance",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_SpecularRayDirectionHitDistance;
+
         private RayTracingShader m_RayTracingShader;
         private bool m_SupportsRayTracing;
         private bool m_ShouldSkipExecution;
@@ -63,6 +103,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_Height = 1;
         private Vector4 m_CameraPositionWS;
         private Matrix4x4 m_PixelCoordToViewDirWS = Matrix4x4.identity;
+        private Matrix4x4 m_WorldToView = Matrix4x4.identity;
         private float m_RayMinDistance = 0.01f;
         private float m_RayMaxDistance = 1000.0f;
         private Vector4 m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
@@ -88,7 +129,22 @@ namespace VividRP.Runtime.RenderPass.Core
             m_WorldPositionTexture = RenderGraphTexture.CreateOutput(
                 "WorldPosition",
                 GraphicsFormat.R32G32B32A32_SFloat);
-            ConfigureWorldPositionTexture(1, 1);
+            m_DiffuseRadianceHitDistance = RenderGraphTexture.CreateOutput(
+                "DiffuseRadianceHitDistance",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_SpecularRadianceHitDistance = RenderGraphTexture.CreateOutput(
+                "SpecularRadianceHitDistance",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_Emission = RenderGraphTexture.CreateOutput(
+                "PathTracingEmission",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_DiffuseRayDirectionHitDistance = RenderGraphTexture.CreateOutput(
+                "DiffuseRayDirectionHitDistance",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_SpecularRayDirectionHitDistance = RenderGraphTexture.CreateOutput(
+                "SpecularRayDirectionHitDistance",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            ConfigureOutputs(1, 1);
         }
 
         public override void Create()
@@ -117,7 +173,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData?.pixelHeight ?? 0,
                 Screen.height);
 
-            ConfigureWorldPositionTexture(m_Width, m_Height);
+            ConfigureOutputs(m_Width, m_Height);
             PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
             m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
                 ? cameraData.frameIndex
@@ -129,6 +185,7 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 m_CameraPositionWS = Vector4.zero;
                 m_PixelCoordToViewDirWS = Matrix4x4.identity;
+                m_WorldToView = Matrix4x4.identity;
                 m_RayMinDistance = 0.01f;
                 m_RayMaxDistance = 1000.0f;
                 return;
@@ -137,6 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraPosition = camera.transform.position;
             m_CameraPositionWS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
+            m_WorldToView = cameraData.GetViewMatrix();
             m_RayMinDistance = Mathf.Max(camera.nearClipPlane, 0.0001f);
             m_RayMaxDistance = Mathf.Max(camera.farClipPlane, m_RayMinDistance + 0.0001f);
         }
@@ -147,7 +205,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 || !m_SupportsRayTracing
                 || m_RayTracingShader == null
                 || m_SceneAccelerationStructure == null
-                || m_WorldPositionTexture?.innerHandle.IsValid() != true)
+                || !HaveValidOutputs())
             {
                 return;
             }
@@ -168,11 +226,17 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     WorldPositionTextureId,
                     m_WorldPositionTexture.innerHandle);
+                BindOutput(cmd, DiffuseRadianceHitDistanceId, m_DiffuseRadianceHitDistance);
+                BindOutput(cmd, SpecularRadianceHitDistanceId, m_SpecularRadianceHitDistance);
+                BindOutput(cmd, EmissionId, m_Emission);
+                BindOutput(cmd, DiffuseRayDirectionHitDistanceId, m_DiffuseRayDirectionHitDistance);
+                BindOutput(cmd, SpecularRayDirectionHitDistanceId, m_SpecularRayDirectionHitDistance);
                 cmd.SetRayTracingVectorParam(m_RayTracingShader, CameraPositionId, m_CameraPositionWS);
                 cmd.SetRayTracingMatrixParam(
                     m_RayTracingShader,
                     PixelCoordToViewDirWSId,
                     m_PixelCoordToViewDirWS);
+                cmd.SetRayTracingMatrixParam(m_RayTracingShader, WorldToViewId, m_WorldToView);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMinDistanceId, m_RayMinDistance);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
                 cmd.SetGlobalVector(MainLightDirectionWSId, m_MainLightDirectionWS);
@@ -209,6 +273,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Height = 1;
             m_CameraPositionWS = Vector4.zero;
             m_PixelCoordToViewDirWS = Matrix4x4.identity;
+            m_WorldToView = Matrix4x4.identity;
             m_RayMinDistance = 0.01f;
             m_RayMaxDistance = 1000.0f;
             m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
@@ -216,25 +281,90 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameIndex = 0;
         }
 
-        private void ConfigureWorldPositionTexture(int width, int height)
+        private void ConfigureOutputs(int width, int height)
         {
-            if (m_WorldPositionTexture?.desc == null)
+            ConfigureOutput(
+                m_WorldPositionTexture,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "WorldPosition");
+            ConfigureOutput(
+                m_DiffuseRadianceHitDistance,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "DiffuseRadianceHitDistance");
+            ConfigureOutput(
+                m_SpecularRadianceHitDistance,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "SpecularRadianceHitDistance");
+            ConfigureOutput(
+                m_Emission,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "PathTracingEmission");
+            ConfigureOutput(
+                m_DiffuseRayDirectionHitDistance,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "DiffuseRayDirectionHitDistance");
+            ConfigureOutput(
+                m_SpecularRayDirectionHitDistance,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "SpecularRayDirectionHitDistance");
+        }
+
+        private static void ConfigureOutput(
+            RenderGraphTexture texture,
+            int width,
+            int height,
+            GraphicsFormat format,
+            string name)
+        {
+            if (texture?.desc == null)
                 return;
 
-            m_WorldPositionTexture.Resize(width, height);
-            m_WorldPositionTexture.desc.ColorFormat = GraphicsFormat.R32G32B32A32_SFloat;
-            m_WorldPositionTexture.desc.DepthBufferBits = DepthBits.None;
-            m_WorldPositionTexture.desc.MsaaSamples = MSAASamples.None;
-            m_WorldPositionTexture.desc.FilterMode = FilterMode.Point;
-            m_WorldPositionTexture.desc.WrapMode = TextureWrapMode.Clamp;
-            m_WorldPositionTexture.desc.ClearBuffer = true;
-            m_WorldPositionTexture.desc.ClearColor = Color.clear;
-            m_WorldPositionTexture.desc.UseMipMap = false;
-            m_WorldPositionTexture.desc.AutoGenerateMips = false;
-            m_WorldPositionTexture.desc.MipCount = 1;
-            m_WorldPositionTexture.desc.EnableRandomWrite = true;
-            m_WorldPositionTexture.desc.BindTextureMS = false;
-            m_WorldPositionTexture.desc.Name = "WorldPosition";
+            texture.Resize(width, height);
+            texture.desc.ColorFormat = format;
+            texture.desc.DepthBufferBits = DepthBits.None;
+            texture.desc.MsaaSamples = MSAASamples.None;
+            texture.desc.FilterMode = FilterMode.Point;
+            texture.desc.WrapMode = TextureWrapMode.Clamp;
+            texture.desc.ClearBuffer = true;
+            texture.desc.ClearColor = Color.clear;
+            texture.desc.UseMipMap = false;
+            texture.desc.AutoGenerateMips = false;
+            texture.desc.MipCount = 1;
+            texture.desc.EnableRandomWrite = true;
+            texture.desc.BindTextureMS = false;
+            texture.desc.Name = name;
+        }
+
+        private bool HaveValidOutputs()
+        {
+            return IsValid(m_WorldPositionTexture)
+                && IsValid(m_DiffuseRadianceHitDistance)
+                && IsValid(m_SpecularRadianceHitDistance)
+                && IsValid(m_Emission)
+                && IsValid(m_DiffuseRayDirectionHitDistance)
+                && IsValid(m_SpecularRayDirectionHitDistance);
+        }
+
+        private static bool IsValid(RenderGraphTexture texture)
+        {
+            return texture?.innerHandle.IsValid() == true;
+        }
+
+        private void BindOutput(CommandBuffer cmd, int propertyId, RenderGraphTexture texture)
+        {
+            cmd.SetRayTracingTextureParam(m_RayTracingShader, propertyId, texture.innerHandle);
         }
 
         private static RenderGraphAccelerationStructure CreateSceneAccelerationStructure()

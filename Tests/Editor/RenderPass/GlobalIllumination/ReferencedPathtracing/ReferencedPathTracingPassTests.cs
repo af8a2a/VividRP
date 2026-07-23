@@ -30,7 +30,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersSceneRtasReGIRInputsAndWorldPositionOutput()
+        public void Initialize_RegistersSceneRtasReGIRInputsAndReblurOutputs()
         {
             IRenderPass renderPass = new ReferencedPathTracingPass();
 
@@ -38,6 +38,11 @@ namespace VividRP.Editor.Tests
             var accelerationStructure = resources.AccelerationStructures.Single();
             var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
             var lightPdfTexture = resources.Textures.Single(resource => resource.Name == "ReGIRLightPdfTexture");
+            var diffuse = resources.Textures.Single(
+                resource => resource.Name == "DiffuseRadianceHitDistance");
+            var specular = resources.Textures.Single(
+                resource => resource.Name == "SpecularRadianceHitDistance");
+            var emission = resources.Textures.Single(resource => resource.Name == "PathTracingEmission");
 
             Assert.That(accelerationStructure.Name, Is.EqualTo("SceneRTAS"));
             Assert.That(accelerationStructure.Access, Is.EqualTo(AccessFlags.Read));
@@ -52,6 +57,12 @@ namespace VividRP.Editor.Tests
             Assert.That(worldPosition.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(worldPosition.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(worldPosition.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(diffuse.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(specular.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(emission.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(diffuse.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(specular.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(emission.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
         }
 
         [Test]
@@ -133,7 +144,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RenderGraphNode_DefinesSceneRtasReGIRInputsAndWorldPositionOutput()
+        public void RenderGraphNode_DefinesSceneRtasReGIRInputsAndReblurOutputs()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -148,6 +159,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_ReGIRReservoirBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_ReGIRLightPdfTexture"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_SpecularRadianceHitDistance"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_Emission"), Is.Not.Null);
             }
             finally
             {

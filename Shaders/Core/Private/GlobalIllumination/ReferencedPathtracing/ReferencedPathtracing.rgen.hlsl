@@ -4,9 +4,15 @@
 
 RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _WorldPositionTexture;
+RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
+RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
+RWTexture2D<float4> _ReferencedPathTracingEmission;
+RWTexture2D<float4> _ReferencedDiffuseRayDirectionHitDistance;
+RWTexture2D<float4> _ReferencedSpecularRayDirectionHitDistance;
 
 float4 _CameraPositionWS;
 float4x4 _PixelCoordToViewDirWS;
+float4x4 _ReferencedWorldToView;
 float _RayMinDistance;
 float _RayMaxDistance;
 int _ReferencedMaxBounceCount;
@@ -16,6 +22,8 @@ int _ReferencedFrameIndex;
 static const float kReferencedPathtracingShadowMinBias = 0.001;
 static const float kReferencedPathtracingShadowMaxDistance = 100000.0;
 static const uint kReferencedPathtracingMaxSupportedBounceCount = 8u;
+static const float4 kReferencedPathtracingReblurHitDistanceParameters =
+    float4(3.0, 0.1, 20.0, -25.0);
 
 float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
 {
@@ -53,6 +61,39 @@ bool IsFiniteReferencedPathtracingRadiance(float3 value)
 float MaxReferencedPathtracingComponent(float3 value)
 {
     return max(value.x, max(value.y, value.z));
+}
+
+float3 ReferencedPathtracingLinearToYCoCg(float3 color)
+{
+    float y = dot(color, float3(0.25, 0.5, 0.25));
+    float co = dot(color, float3(0.5, 0.0, -0.5));
+    float cg = dot(color, float3(-0.25, 0.5, -0.25));
+    return float3(y, co, cg);
+}
+
+float GetReferencedPathtracingReblurNormHitDistance(
+    float hitDistance,
+    float viewZ,
+    float linearRoughness)
+{
+    float4 parameters = kReferencedPathtracingReblurHitDistanceParameters;
+    float normalization = (parameters.x + abs(viewZ) * parameters.y)
+        * lerp(
+            1.0,
+            parameters.z,
+            saturate(exp2(parameters.w * linearRoughness * linearRoughness)));
+    return saturate(hitDistance / max(normalization, 1e-6));
+}
+
+float4 PackReferencedPathtracingReblurSignal(float3 radiance, float normalizedHitDistance)
+{
+    radiance = IsFiniteReferencedPathtracingRadiance(radiance)
+        ? clamp(radiance, 0.0, 65504.0)
+        : 0.0;
+    normalizedHitDistance = !isnan(normalizedHitDistance) && !isinf(normalizedHitDistance)
+        ? saturate(normalizedHitDistance)
+        : 0.0;
+    return float4(ReferencedPathtracingLinearToYCoCg(radiance), normalizedHitDistance);
 }
 
 float3 OffsetReferencedPathtracingRayOrigin(
@@ -128,10 +169,19 @@ void RayGenReferencedPathtracing()
         length(rayDirectionDx - ray.Direction),
         length(rayDirectionDy - ray.Direction));
 
-    float3 radiance = 0.0;
+    float3 diffuseRadiance = 0.0;
+    float3 specularRadiance = 0.0;
+    float3 emissionRadiance = 0.0;
     float3 throughput = 1.0;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
+    uint primaryLobeClass = 0u;
+    float primaryViewZ = 1.0;
+    float primaryLinearRoughness = 1.0;
+    float diffuseHitDistance = _RayMaxDistance;
+    float specularHitDistance = _RayMaxDistance;
+    float3 diffuseRayDirectionWS = 0.0;
+    float3 specularRayDirectionWS = 0.0;
     uint maxBounceCount = min(
         (uint)max(_ReferencedMaxBounceCount, 1),
         kReferencedPathtracingMaxSupportedBounceCount);
@@ -161,22 +211,75 @@ void RayGenReferencedPathtracing()
             break;
 
         if (bounceIndex == 0u)
+        {
             primaryHit = 1u;
+            primaryViewZ = abs(mul(
+                _ReferencedWorldToView,
+                float4(payload.positionWS, 1.0)).z);
+            primaryLinearRoughness = saturate(payload.linearRoughness);
+            emissionRadiance += throughput * payload.emission;
+        }
+        else
+        {
+            float3 bouncedEmission = throughput * payload.emission;
+            if (primaryLobeClass == 1u)
+                diffuseRadiance += bouncedEmission;
+            else if (primaryLobeClass == 2u)
+                specularRadiance += bouncedEmission;
 
-        radiance += throughput * payload.emission;
+            if (bounceIndex == 1u)
+            {
+                if (primaryLobeClass == 1u)
+                    diffuseHitDistance = payload.hitDistance;
+                else if (primaryLobeClass == 2u)
+                    specularHitDistance = payload.hitDistance;
+            }
+        }
 
         float3 mainLightColor = max(_ReferencedMainLightColor.rgb, 0.0);
-        if (any(mainLightColor > 0.0) && any(payload.mainLightBsdf > 0.0))
+        if (any(mainLightColor > 0.0)
+            && (any(payload.mainLightDiffuseBsdf > 0.0)
+                || any(payload.mainLightSpecularBsdf > 0.0)))
         {
             float visibility = TraceReferencedPathtracingMainLightVisibility(
                 payload.positionWS,
                 normalize(payload.faceNormalWS),
                 normalize(_ReferencedMainLightDirectionWS.xyz));
-            radiance += throughput * payload.mainLightBsdf * mainLightColor * visibility;
+            float3 directDiffuse = throughput
+                * payload.mainLightDiffuseBsdf
+                * mainLightColor
+                * visibility;
+            float3 directSpecular = throughput
+                * payload.mainLightSpecularBsdf
+                * mainLightColor
+                * visibility;
+
+            if (bounceIndex == 0u)
+            {
+                diffuseRadiance += directDiffuse;
+                specularRadiance += directSpecular;
+            }
+            else if (primaryLobeClass == 1u)
+            {
+                diffuseRadiance += directDiffuse + directSpecular;
+            }
+            else if (primaryLobeClass == 2u)
+            {
+                specularRadiance += directDiffuse + directSpecular;
+            }
         }
 
         if (payload.nextPdf <= 0.0)
             break;
+
+        if (bounceIndex == 0u)
+        {
+            primaryLobeClass = payload.nextLobeClass;
+            if (primaryLobeClass == 1u)
+                diffuseRayDirectionWS = normalize(payload.nextDirectionWS);
+            else if (primaryLobeClass == 2u)
+                specularRayDirectionWS = normalize(payload.nextDirectionWS);
+        }
 
         throughput *= payload.nextThroughputWeight;
         if (!IsFiniteReferencedPathtracingRadiance(throughput)
@@ -208,9 +311,39 @@ void RayGenReferencedPathtracing()
         ray.TMax = _RayMaxDistance;
     }
 
-    if (!IsFiniteReferencedPathtracingRadiance(radiance))
-        radiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(diffuseRadiance))
+        diffuseRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(specularRadiance))
+        specularRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(emissionRadiance))
+        emissionRadiance = 0.0;
+
+    float diffuseNormHitDistance = primaryHit != 0u
+        ? GetReferencedPathtracingReblurNormHitDistance(
+            diffuseHitDistance,
+            primaryViewZ,
+            primaryLinearRoughness)
+        : 0.0;
+    float specularNormHitDistance = primaryHit != 0u
+        ? GetReferencedPathtracingReblurNormHitDistance(
+            specularHitDistance,
+            primaryViewZ,
+            primaryLinearRoughness)
+        : 0.0;
+    float3 radiance = diffuseRadiance + specularRadiance + emissionRadiance;
+
     _WorldPositionTexture[pixelCoord] = float4(radiance, primaryHit != 0u ? 1.0 : 0.0);
+    _ReferencedDiffuseRadianceHitDistance[pixelCoord] =
+        PackReferencedPathtracingReblurSignal(diffuseRadiance, diffuseNormHitDistance);
+    _ReferencedSpecularRadianceHitDistance[pixelCoord] =
+        PackReferencedPathtracingReblurSignal(specularRadiance, specularNormHitDistance);
+    _ReferencedPathTracingEmission[pixelCoord] = float4(emissionRadiance, primaryHit != 0u ? 1.0 : 0.0);
+    _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] = float4(
+        diffuseRayDirectionWS,
+        primaryHit != 0u ? diffuseHitDistance : 0.0);
+    _ReferencedSpecularRayDirectionHitDistance[pixelCoord] = float4(
+        specularRayDirectionWS,
+        primaryHit != 0u ? specularHitDistance : 0.0);
 }
 
 [shader("miss")]

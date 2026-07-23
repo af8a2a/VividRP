@@ -227,7 +227,7 @@ namespace VividRP.Runtime
                 return m_Cache.RecordStride;
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         protected abstract void Define(VividPerObjectLayoutBuilder builder);
 
         public VividPerObjectPropertyHandle GetProperty(string propertyName)
@@ -237,7 +237,7 @@ namespace VividRP.Runtime
 
             return GetProperty(Shader.PropertyToID(propertyName));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public VividPerObjectPropertyHandle GetProperty(int propertyNameId)
         {
             EnsureCache();
@@ -331,12 +331,12 @@ namespace VividRP.Runtime
                 && GetType() == other.GetType()
                 && Signature == other.Signature;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void Validate()
         {
             EnsureCache();
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void InitializeRecord(byte[] destination, int baseAddress)
         {
             if (destination == null)
@@ -475,12 +475,12 @@ namespace VividRP.Runtime
                 packedProperties,
                 propertiesById);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool IsAsciiLetter(char character)
         {
             return character is >= 'A' and <= 'Z' or >= 'a' and <= 'z';
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ValidateIdentifier(string value, string fieldName)
         {
             if (!IsValidIdentifier(value))
@@ -489,7 +489,7 @@ namespace VividRP.Runtime
                     $"Per-object layout {fieldName} '{value}' is not a valid ASCII HLSL identifier.");
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static uint ComputeSignature(
             string shaderIdentifier,
             List<PackedProperty> properties,
@@ -547,7 +547,7 @@ namespace VividRP.Runtime
             AddSingle(ref hash, value.z);
             AddSingle(ref hash, value.w);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddString(ref uint hash, string value)
         {
             for (int i = 0; i < value.Length; i++)
@@ -558,12 +558,12 @@ namespace VividRP.Runtime
             }
             AddByte(ref hash, 0xff);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddSingle(ref uint hash, float value)
         {
             AddInt32(ref hash, BitConverter.SingleToInt32Bits(value));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddInt32(ref uint hash, int value)
         {
             unchecked
@@ -574,18 +574,18 @@ namespace VividRP.Runtime
                 AddByte(ref hash, (byte)(value >> 24));
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddByte(ref uint hash, byte value)
         {
             hash ^= value;
             hash *= 16777619u;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int AlignUp(int value, int alignment)
         {
             return (value + alignment - 1) & ~(alignment - 1);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void WriteUInt32(byte[] destination, int offset, uint value)
         {
             destination[offset] = (byte)value;
@@ -593,17 +593,17 @@ namespace VividRP.Runtime
             destination[offset + 2] = (byte)(value >> 16);
             destination[offset + 3] = (byte)(value >> 24);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void WriteInt32(byte[] destination, int offset, int value)
         {
             WriteUInt32(destination, offset, unchecked((uint)value));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void WriteSingle(byte[] destination, int offset, float value)
         {
             WriteInt32(destination, offset, BitConverter.SingleToInt32Bits(value));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static unsafe void WriteStruct<T>(byte[] destination, int offset, T value)
             where T : unmanaged
         {

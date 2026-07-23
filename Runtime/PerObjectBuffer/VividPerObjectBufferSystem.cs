@@ -76,11 +76,11 @@ namespace VividRP.Runtime
             DisposeAllCore(restoreRendererValues: true);
         }
 #endif
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static VividPerObjectBlock Bind(Renderer renderer, VividPerObjectLayout layout)
         {
             EnsureMainThread();
-            if (renderer == null)
+            if (!renderer)
                 throw new ArgumentNullException(nameof(renderer));
             if (layout == null)
                 throw new ArgumentNullException(nameof(layout));
@@ -185,7 +185,7 @@ namespace VividRP.Runtime
                 s_LastUploadBytes,
                 s_LastUploadRangeCount);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void SetValue<T>(
             VividPerObjectBlock block,
             int propertyNameId,
@@ -197,7 +197,7 @@ namespace VividRP.Runtime
             VividPerObjectPropertyHandle property = binding.Layout.GetProperty(propertyNameId);
             SetValue(block, property, expectedType, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void SetValue<T>(
             VividPerObjectBlock block,
             VividPerObjectPropertyHandle property,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace VividRP.Runtime
 {
@@ -49,7 +50,7 @@ namespace VividRP.Runtime
                 return largest;
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal int Allocate(int size, out bool capacityChanged)
         {
             size = AlignUp(size, VividPerObjectLayout.RecordAlignment);
@@ -82,7 +83,7 @@ namespace VividRP.Runtime
             m_UsedBytes += size;
             return address;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal void Free(int address, int size)
         {
             size = AlignUp(size, VividPerObjectLayout.RecordAlignment);
@@ -108,7 +109,7 @@ namespace VividRP.Runtime
             CoalesceAt(insertionIndex);
             m_UsedBytes -= size;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private int FindBestFit(int size)
         {
             int bestIndex = -1;
@@ -127,7 +128,7 @@ namespace VividRP.Runtime
 
             return bestIndex;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void Grow(int requiredContiguousBytes)
         {
             int oldCapacity = Capacity;
@@ -145,7 +146,7 @@ namespace VividRP.Runtime
             Array.Resize(ref m_Data, (int)newCapacity);
             InsertFreeRange(new FreeRange(oldCapacity, (int)newCapacity - oldCapacity));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void InsertFreeRange(FreeRange range)
         {
             int index = 0;
@@ -154,7 +155,7 @@ namespace VividRP.Runtime
             m_FreeRanges.Insert(index, range);
             CoalesceAt(index);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private void CoalesceAt(int index)
         {
             if (index > 0 && m_FreeRanges[index - 1].End == m_FreeRanges[index].Start)
@@ -174,7 +175,7 @@ namespace VividRP.Runtime
                 m_FreeRanges.RemoveAt(index + 1);
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int AlignUp(int value, int alignment)
         {
             checked
@@ -182,7 +183,7 @@ namespace VividRP.Runtime
                 return (value + alignment - 1) & ~(alignment - 1);
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int AlignDown(int value, int alignment)
         {
             return value & ~(alignment - 1);

@@ -1,4 +1,5 @@
 using System;
+using System.Runtime.CompilerServices;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -52,57 +53,57 @@ namespace VividRP.Runtime
         internal uint Generation { get; }
 
         public bool IsValid => VividPerObjectBufferSystem.IsBlockValid(this);
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetInt(string propertyName, int value)
         {
             SetInt(Shader.PropertyToID(ValidatePropertyName(propertyName)), value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetInt(int propertyNameId, int value)
         {
             VividPerObjectBufferSystem.SetValue(this, propertyNameId, VividPerObjectPropertyType.Int, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetInt(VividPerObjectPropertyHandle property, int value)
         {
             VividPerObjectBufferSystem.SetValue(this, property, VividPerObjectPropertyType.Int, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetFloat(string propertyName, float value)
         {
             SetFloat(Shader.PropertyToID(ValidatePropertyName(propertyName)), value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetFloat(int propertyNameId, float value)
         {
             VividPerObjectBufferSystem.SetValue(this, propertyNameId, VividPerObjectPropertyType.Float, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetFloat(VividPerObjectPropertyHandle property, float value)
         {
             VividPerObjectBufferSystem.SetValue(this, property, VividPerObjectPropertyType.Float, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetVector(string propertyName, Vector4 value)
         {
             SetVector(Shader.PropertyToID(ValidatePropertyName(propertyName)), value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetVector(int propertyNameId, Vector4 value)
         {
             VividPerObjectBufferSystem.SetValue(this, propertyNameId, VividPerObjectPropertyType.Vector, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetVector(VividPerObjectPropertyHandle property, Vector4 value)
         {
             VividPerObjectBufferSystem.SetValue(this, property, VividPerObjectPropertyType.Vector, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetColor(string propertyName, Color value)
         {
             SetColor(Shader.PropertyToID(ValidatePropertyName(propertyName)), value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetColor(int propertyNameId, Color value)
         {
             VividPerObjectBufferSystem.SetValue(
@@ -111,7 +112,7 @@ namespace VividRP.Runtime
                 VividPerObjectPropertyType.Color,
                 new Vector4(value.r, value.g, value.b, value.a));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetColor(VividPerObjectPropertyHandle property, Color value)
         {
             VividPerObjectBufferSystem.SetValue(
@@ -120,17 +121,17 @@ namespace VividRP.Runtime
                 VividPerObjectPropertyType.Color,
                 new Vector4(value.r, value.g, value.b, value.a));
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetMatrix(string propertyName, Matrix4x4 value)
         {
             SetMatrix(Shader.PropertyToID(ValidatePropertyName(propertyName)), value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetMatrix(int propertyNameId, Matrix4x4 value)
         {
             VividPerObjectBufferSystem.SetValue(this, propertyNameId, VividPerObjectPropertyType.Matrix, value);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public void SetMatrix(VividPerObjectPropertyHandle property, Matrix4x4 value)
         {
             VividPerObjectBufferSystem.SetValue(this, property, VividPerObjectPropertyType.Matrix, value);
@@ -179,7 +180,7 @@ namespace VividRP.Runtime
         {
             return Bind(renderer, VividPerObjectLayout<TLayout>.Instance);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static VividPerObjectBlock Bind(Renderer renderer, VividPerObjectLayout layout)
         {
             return VividPerObjectBufferSystem.Bind(renderer, layout);

@@ -130,6 +130,26 @@ Per-Object 属性不得同时作为同名成员出现在 `UnityPerMaterial` CBUF
 上添加 `VividPerObjectColorExampleController`。关闭 `Animate Color` 可直接在 Inspector 中指定
 固定颜色。整个示例不会创建或写入 `MaterialPropertyBlock`。
 
+## MPB CPU 对比基准
+
+在一组专用测试 Renderer 的父物体上添加 `VividPerObjectCpuBenchmarkController`，然后从组件菜单
+执行 `Run MPB vs Per-Object CPU Benchmark`。Renderer 列表为空时默认收集所有子物体 Renderer。
+测试会输出：
+
+- MPB 与 PerObjectBuffer 在数值变化和数值不变时的每 Renderer 写入耗时。
+- 每个操作的当前线程托管分配字节数。
+- SSBO 每个模拟帧的 `PrepareAndBind + Graphics.ExecuteCommandBuffer` 独立耗时。
+- MPB/SSBO 写入路径的倍速比。
+
+MPB 路径复用单个 `MaterialPropertyBlock` 并使用 property ID；PerObjectBuffer 可选择 Cached Handle、
+Property ID 或 Property Name。首次绑定、GameObject 创建和颜色计算都在计时区间之外。每个模拟帧
+后都会提交 SSBO 脏区，避免连续循环造成脏区列表不符合真实帧行为。
+
+基准要求使用未被其他 PerObject Layout 绑定的专用 Renderer。已有 MPB 会在测试前保存，结束后
+恢复。更大的手动基准位于 `VividPerObjectCpuBenchmarkTests.CompareThousandRenderers_PrintsOptimizationBaseline`，
+该测试标记为 `Explicit`，不会进入常规测试套件。分析实际渲染帧时，可同时查看 Unity Profiler 中的
+`VividRP.PerObjectBuffer.PrepareAndBind` 与 `VividRP.PerObjectBuffer.Upload` 标记。
+
 ## 上传与生命周期
 
 - CPU 保存完整 buffer 镜像，相同位表示不会产生脏区。

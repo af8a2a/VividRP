@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using VividRP.Runtime;
+using VividRP.Runtime.Examples;
 
 namespace VividRP.Editor.Tests
 {
@@ -75,6 +77,17 @@ namespace VividRP.Editor.Tests
             Assert.That(VividPerObjectLayoutGenerator.GeneratedPath, Is.EqualTo(expectedPath));
             Assert.That(VividPerObjectLayoutGenerator.GeneratedPath, Does.EndWith(
                 "/Shaders/Core/Public/PerObjectBufferLayouts.generated.hlsl"));
+        }
+
+        [Test]
+        public void DiscoverLayouts_IncludesConcreteRuntimeLayouts()
+        {
+            IReadOnlyList<VividPerObjectLayout> layouts =
+                VividPerObjectLayoutGenerator.DiscoverLayouts();
+
+            Assert.That(
+                layouts,
+                Has.Some.TypeOf<VividPerObjectColorExampleLayout>());
         }
 
         [Test]

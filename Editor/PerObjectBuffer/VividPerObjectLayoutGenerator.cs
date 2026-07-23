@@ -93,7 +93,9 @@ namespace VividRP.Editor
         internal static IReadOnlyList<VividPerObjectLayout> DiscoverLayouts()
         {
             var playerAssemblyNames = new HashSet<string>(
-                CompilationPipeline.GetAssemblies(AssembliesType.Player).Select(assembly => assembly.name),
+                CompilationPipeline.GetAssemblies()
+                    .Where(assembly => (assembly.flags & AssemblyFlags.EditorAssembly) == 0)
+                    .Select(assembly => assembly.name),
                 StringComparer.Ordinal);
             var layoutTypes = new List<Type>();
             foreach (Type type in TypeCache.GetTypesDerivedFrom<VividPerObjectLayout>())

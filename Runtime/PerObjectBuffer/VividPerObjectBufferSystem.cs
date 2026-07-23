@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Threading;
 using Unity.Collections;
@@ -295,7 +296,7 @@ namespace VividRP.Runtime
             s_ForceFallbackForTests = forceFallback;
         }
 #endif
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static VividPerObjectBlock Rebind(Binding binding, VividPerObjectLayout layout)
         {
             int address = AllocateAndInitialize(layout);
@@ -314,7 +315,7 @@ namespace VividRP.Runtime
             MarkDirty(previousAddress, previousSize);
             return new VividPerObjectBlock(binding.Renderer.GetEntityId(), binding.Generation);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int AllocateAndInitialize(VividPerObjectLayout layout)
         {
             int address = s_Allocator.Allocate(layout.RecordStride, out bool capacityChanged);
@@ -324,7 +325,7 @@ namespace VividRP.Runtime
             MarkDirty(address, layout.RecordStride);
             return address;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ReleaseBinding(Binding binding, bool restoreRendererValue)
         {
             if (restoreRendererValue && binding.Renderer != null)
@@ -336,7 +337,7 @@ namespace VividRP.Runtime
                 MarkDirty(binding.Address, binding.RecordSize);
             }
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Binding GetBinding(VividPerObjectBlock block)
         {
             EnsureMainThread();
@@ -349,14 +350,14 @@ namespace VividRP.Runtime
             }
             return binding;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool TryGetBinding(VividPerObjectBlock block, out Binding binding)
         {
             return s_Bindings.TryGetValue(block.RendererEntityId, out binding)
                 && binding.Generation == block.Generation
                 && binding.Renderer != null;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ValidateProperty(
             Binding binding,
             VividPerObjectPropertyHandle property,
@@ -378,7 +379,7 @@ namespace VividRP.Runtime
             if (VividPerObjectLayout.GetPropertySize(expectedType) != valueSize)
                 throw new InvalidOperationException("Per-object property storage size does not match the supplied value type.");
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void EnsureAllocator()
         {
             if (s_Allocator != null)
@@ -402,7 +403,7 @@ namespace VividRP.Runtime
                 (int)resolvedLimit);
             s_FullUploadRequired = true;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void EnsureRenderBuffer()
         {
             int requiredBytes = s_Allocator?.Capacity ?? VividPerObjectRecordAllocator.ReservedBytes;
@@ -590,7 +591,7 @@ namespace VividRP.Runtime
             }
             s_CoalescedRanges.Add(current);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void MarkDirty(int start, int length)
         {
             if (length <= 0)
@@ -666,7 +667,7 @@ namespace VividRP.Runtime
             s_ForceFallbackForTests = false;
 #endif
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static uint EncodeAddress(int byteAddress)
         {
             if (byteAddress < VividPerObjectRecordAllocator.ReservedBytes
@@ -680,7 +681,7 @@ namespace VividRP.Runtime
                 throw new InvalidOperationException("Per-object buffer address exceeds the ShaderUserValue encoding range.");
             return ShaderUserValueMagic | encodedAddress;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static uint GetRendererShaderUserValue(Renderer renderer)
         {
             return renderer switch
@@ -690,7 +691,7 @@ namespace VividRP.Runtime
                 _ => throw new NotSupportedException(renderer.GetType().Name),
             };
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void SetRendererShaderUserValue(Renderer renderer, uint value)
         {
             switch (renderer)

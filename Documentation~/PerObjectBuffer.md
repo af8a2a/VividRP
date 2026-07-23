@@ -116,6 +116,20 @@ float dissolve = VividPerObject_Character_Get__Dissolve();
 一个 Shader program 最多只能选择一个 `VIVID_PER_OBJECT_LAYOUT_<Identifier>` 来启用别名。
 Per-Object 属性不得同时作为同名成员出现在 `UnityPerMaterial` CBUFFER 中。
 
+## 内置颜色示例
+
+包内提供了一个最小可运行示例：
+
+- `VividPerObjectColorExampleLayout` 用代码声明 `_PerObjectColor`。
+- `VividPerObjectColorExampleController` 每帧绑定 Renderer 并推送颜色；Inspector 中可以切换
+  Cached Handle、Property ID 和 Property Name 三种寻址方式。
+- `VividRP/Examples/Per-Object Color` Shader 将材质 `_BaseColor` 与逐物体
+  `_PerObjectColor` 相乘后直接输出。
+
+使用时创建该 Shader 的 Material，赋给 `MeshRenderer` 或 `SkinnedMeshRenderer`，然后在同一物体
+上添加 `VividPerObjectColorExampleController`。关闭 `Animate Color` 可直接在 Inspector 中指定
+固定颜色。整个示例不会创建或写入 `MaterialPropertyBlock`。
+
 ## 上传与生命周期
 
 - CPU 保存完整 buffer 镜像，相同位表示不会产生脏区。

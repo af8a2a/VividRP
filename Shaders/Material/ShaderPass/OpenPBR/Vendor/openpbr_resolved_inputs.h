@@ -99,20 +99,20 @@ OPENPBR_INLINE_FUNCTION OpenPBR_ResolvedInputs openpbr_make_default_resolved_inp
 
     // Base layer
     inputs.base_weight = 1.0f;
-    inputs.base_color = vec3(0.8f);
+    inputs.base_color = OPENPBR_MAKE_VEC3_SPLAT(0.8f);
     inputs.base_diffuse_roughness = 0.0f;
     inputs.base_metalness = 0.0f;
 
     // Subsurface
     inputs.subsurface_weight = 0.0f;
-    inputs.subsurface_color = vec3(0.8f);
+    inputs.subsurface_color = OPENPBR_MAKE_VEC3_SPLAT(0.8f);
     inputs.subsurface_radius = 1.0f;
     inputs.subsurface_radius_scale = vec3(1.0f, 0.5f, 0.25f);
     inputs.subsurface_scatter_anisotropy = 0.0f;
 
     // Specular
     inputs.specular_weight = 1.0f;
-    inputs.specular_color = vec3(1.0f);
+    inputs.specular_color = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     inputs.specular_roughness = 0.3f;
     inputs.specular_roughness_anisotropy = 0.0f;
     inputs.specular_ior = 1.5f;
@@ -120,7 +120,7 @@ OPENPBR_INLINE_FUNCTION OpenPBR_ResolvedInputs openpbr_make_default_resolved_inp
 
     // Coat
     inputs.coat_weight = 0.0f;
-    inputs.coat_color = vec3(1.0f);
+    inputs.coat_color = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     inputs.coat_roughness = 0.0f;
     inputs.coat_roughness_anisotropy = 0.0f;
     inputs.coat_ior = 1.6f;
@@ -129,14 +129,14 @@ OPENPBR_INLINE_FUNCTION OpenPBR_ResolvedInputs openpbr_make_default_resolved_inp
 
     // Fuzz
     inputs.fuzz_weight = 0.0f;
-    inputs.fuzz_color = vec3(1.0f);
+    inputs.fuzz_color = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     inputs.fuzz_roughness = 0.5f;
 
     // Transmission / volume
     inputs.transmission_weight = 0.0f;
-    inputs.transmission_color = vec3(1.0f);
+    inputs.transmission_color = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     inputs.transmission_depth = 0.0f;
-    inputs.transmission_scatter = vec3(0.0f);
+    inputs.transmission_scatter = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
     inputs.transmission_scatter_anisotropy = 0.0f;
     inputs.transmission_dispersion_scale = 0.0f;
     inputs.transmission_dispersion_abbe_number = 20.0f;
@@ -148,7 +148,7 @@ OPENPBR_INLINE_FUNCTION OpenPBR_ResolvedInputs openpbr_make_default_resolved_inp
 
     // Emission
     inputs.emission_luminance = 0.0f;
-    inputs.emission_color = vec3(1.0f);
+    inputs.emission_color = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
 
     // Geometry
     inputs.geometry_opacity = 1.0f;

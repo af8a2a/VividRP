@@ -33,28 +33,28 @@ OPENPBR_INLINE_FUNCTION OpenPBR_DiffuseSpecular openpbr_make_diffuse_specular(co
 
 OPENPBR_INLINE_FUNCTION OpenPBR_DiffuseSpecular openpbr_make_zero_diffuse_specular()
 {
-    return openpbr_make_diffuse_specular(vec3(0.0f), vec3(0.0f));
+    return openpbr_make_diffuse_specular(OPENPBR_MAKE_VEC3_SPLAT(0.0f), OPENPBR_MAKE_VEC3_SPLAT(0.0f));
 }
 
 OPENPBR_INLINE_FUNCTION OpenPBR_DiffuseSpecular openpbr_make_one_diffuse_specular()
 {
-    return openpbr_make_diffuse_specular(vec3(1.0f), vec3(1.0f));
+    return openpbr_make_diffuse_specular(OPENPBR_MAKE_VEC3_SPLAT(1.0f), OPENPBR_MAKE_VEC3_SPLAT(1.0f));
 }
 
 OPENPBR_INLINE_FUNCTION OpenPBR_DiffuseSpecular openpbr_make_diffuse_specular_from_diffuse(const vec3 diffuse)
 {
-    return openpbr_make_diffuse_specular(diffuse, vec3(0.0f));
+    return openpbr_make_diffuse_specular(diffuse, OPENPBR_MAKE_VEC3_SPLAT(0.0f));
 }
 
 OPENPBR_INLINE_FUNCTION OpenPBR_DiffuseSpecular openpbr_make_diffuse_specular_from_specular(const vec3 specular)
 {
-    return openpbr_make_diffuse_specular(vec3(0.0f), specular);
+    return openpbr_make_diffuse_specular(OPENPBR_MAKE_VEC3_SPLAT(0.0f), specular);
 }
 
 OPENPBR_INLINE_FUNCTION bool openpbr_is_nonzero_diffuse_specular(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_DiffuseSpecular)
                                                                      diffuse_specular)
 {
-    return any(notEqual(diffuse_specular.diffuse, vec3(0.0f))) || any(notEqual(diffuse_specular.specular, vec3(0.0f)));
+    return any(notEqual(diffuse_specular.diffuse, OPENPBR_MAKE_VEC3_SPLAT(0.0f))) || any(notEqual(diffuse_specular.specular, OPENPBR_MAKE_VEC3_SPLAT(0.0f)));
 }
 
 OPENPBR_INLINE_FUNCTION OpenPBR_DiffuseSpecular openpbr_scale_diffuse_specular(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_DiffuseSpecular)

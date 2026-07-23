@@ -33,12 +33,12 @@ OPENPBR_CONSTEXPR_GLOBAL float OpenPBR_MaxAbsAnisotropy = 0.999f;
 
 vec3 openpbr_clamp_input_color(const vec3 color)
 {
-    return max(color, vec3(OpenPBR_MinColor));
+    return max(color, OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_MinColor));
 }
 
 vec3 openpbr_clamp_input_distance(const vec3 distance)
 {
-    return max(distance, vec3(OpenPBR_MinDistance));
+    return max(distance, OPENPBR_MAKE_VEC3_SPLAT(OpenPBR_MinDistance));
 }
 
 float openpbr_clamp_input_distance(const float distance)
@@ -69,7 +69,7 @@ OpenPBR_HomogeneousVolume openpbr_create_subsurface_volume_from_openpbr_params(c
 
     const vec3 extinction_mean_free_path = openpbr_clamp_input_distance(subsurface_radius * subsurface_radius_scale);
 
-    const vec3 extinction_coefficient = vec3(1.0f) / extinction_mean_free_path;
+    const vec3 extinction_coefficient = OPENPBR_MAKE_VEC3_SPLAT(1.0f) / extinction_mean_free_path;
 
     // Calculate the single-scattering albedo from the multiple-scattering albedo.
     // This is using the van de Hulst formulas mentioned in the OpenPBR spec.
@@ -80,9 +80,9 @@ OpenPBR_HomogeneousVolume openpbr_create_subsurface_volume_from_openpbr_params(c
     const float clamped_subsurface_anisotropy = openpbr_clamp_input_anisotropy(subsurface_scatter_anisotropy);
 
     // This is the van de Hulst mapping:
-    const vec3 s = vec3(4.09712f) + vec3(4.20863f) * subsurface_color -
-                   sqrt(vec3(9.59217f) + vec3(41.6808f) * subsurface_color + vec3(17.7126f) * openpbr_square(subsurface_color));
-    const vec3 single_scattering_albedo = (vec3(1.0f) - openpbr_square(s)) / (vec3(1.0f) - clamped_subsurface_anisotropy * openpbr_square(s));
+    const vec3 s = OPENPBR_MAKE_VEC3_SPLAT(4.09712f) + OPENPBR_MAKE_VEC3_SPLAT(4.20863f) * subsurface_color -
+                   sqrt(OPENPBR_MAKE_VEC3_SPLAT(9.59217f) + OPENPBR_MAKE_VEC3_SPLAT(41.6808f) * subsurface_color + OPENPBR_MAKE_VEC3_SPLAT(17.7126f) * openpbr_square(subsurface_color));
+    const vec3 single_scattering_albedo = (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - openpbr_square(s)) / (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - clamped_subsurface_anisotropy * openpbr_square(s));
 
     // This is the Hyperion mapping:
     //         const vec3 A = subsurface_color;
@@ -93,7 +93,7 @@ OpenPBR_HomogeneousVolume openpbr_create_subsurface_volume_from_openpbr_params(c
     // TODO(sss): The anisotropy would need to be taken into account if this were to be used.
 
     // Rounding error occurs in the mapping above; clamp to ensure valid albedo.
-    const vec3 clamped_single_scattering_albedo = clamp(single_scattering_albedo, vec3(0.0f), vec3(1.0f));
+    const vec3 clamped_single_scattering_albedo = clamp(single_scattering_albedo, OPENPBR_MAKE_VEC3_SPLAT(0.0f), OPENPBR_MAKE_VEC3_SPLAT(1.0f));
 
     // Initialize and return the final homogeneous volume.
     return openpbr_make_volume_from_extinction_coefficient_and_albedo_and_anisotropy(

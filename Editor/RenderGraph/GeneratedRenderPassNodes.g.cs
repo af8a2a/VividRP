@@ -24,9 +24,6 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class CSMShadowResolvePass : RenderPassNodeData { }
 
     [Serializable]
-    internal sealed class ClassificationPass : RenderPassNodeData { }
-
-    [Serializable]
     internal sealed class ClusterDebugPass : RenderPassNodeData { }
 
     [Serializable]
@@ -93,6 +90,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class LocalExposurePass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class MaterialClassificationPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class MaterialDebugPass : RenderPassNodeData { }
 
     [Serializable]
@@ -114,10 +114,25 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class RTASInstanceDebugPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class RaytracingGBufferPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class ReGIRDebugPass : RenderPassNodeData { }
 
     [Serializable]
     internal sealed class ReGIRGridBuildPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ReferencedPathTracingAccumulationPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ReferencedPathTracingDenoisingPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ReferencedPathTracingPass : RenderPassNodeData { }
+
+    [Serializable]
+    internal sealed class ReferencedPathTracingReblurPass : RenderPassNodeData { }
 
     [Serializable]
     internal sealed class ReflectionProbeAtlasDebugPass : RenderPassNodeData { }

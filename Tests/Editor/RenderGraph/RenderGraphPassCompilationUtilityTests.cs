@@ -311,14 +311,14 @@ namespace VividRP.Editor.Tests
                 },
                 new()
                 {
-                    PassType = GetPassTypeName<ClassificationPass>(),
+                    PassType = GetPassTypeName<MaterialClassificationPass>(),
                     EnableAsyncCompute = true,
                 }
             };
 
             var ordered = RenderGraphPassCompilationUtility.OrderPassDefinitions(passDefinitions);
 
-            Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<ClassificationPass>()));
+            Assert.That(ordered[0].PassType, Is.EqualTo(GetPassTypeName<MaterialClassificationPass>()));
             Assert.That(ordered[0].EnableAsyncCompute, Is.True);
             Assert.That(ordered[1].EnableAsyncCompute, Is.False);
         }
@@ -330,7 +330,7 @@ namespace VividRP.Editor.Tests
             {
                 new()
                 {
-                    PassType = GetPassTypeName<ClassificationPass>(),
+                    PassType = GetPassTypeName<MaterialClassificationPass>(),
                     EnableAsyncCompute = true,
                 }
             };

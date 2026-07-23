@@ -249,7 +249,7 @@ float openpbr_compute_airy_reflectance(const float r12,            // Amplitude 
     // This line completes the evaluation of Equation 3 from the Belcour and Barla paper
     // If division by zero occurs, the complex_divide function returns zero and only r12 contributes
     const openpbr_complex r_total =
-        openpbr_complex_add(openpbr_complex(r12, 0.0f), openpbr_complex_divide(numerator, denominator, OpenPBR_MinDenomMag, openpbr_complex(0.0f)));
+        openpbr_complex_add(openpbr_complex(r12, 0.0f), openpbr_complex_divide(numerator, denominator, OpenPBR_MinDenomMag, openpbr_complex(0.0f, 0.0f)));
 
     // Reflectance (power coefficient) is the magnitude squared of the total reflection coefficient
     return openpbr_complex_magnitude_squared(r_total);
@@ -393,8 +393,8 @@ openpbr_thin_film_and_base_reflectance(const float cos_theta_i,       // Cosine 
 
     // Default the results to zero in case some base components are disabled
     OpenPBR_ThinFilmResults results;
-    results.reflectance_dielectric = vec3(0.0f);
-    results.reflectance_metal = vec3(0.0f);
+    results.reflectance_dielectric = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    results.reflectance_metal = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     // Return if all base components are disabled
     // If the caller were to check this, this early exit could be replaced with an assertion
@@ -412,9 +412,9 @@ openpbr_thin_film_and_base_reflectance(const float cos_theta_i,       // Cosine 
     {
         // Total internal reflection occurs on the outside of the film, so set all reflectances to one and return
         if (enable_dielectric)
-            results.reflectance_dielectric = vec3(1.0f);
+            results.reflectance_dielectric = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
         if (enable_metal)
-            results.reflectance_metal = vec3(1.0f);
+            results.reflectance_metal = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
         return results;
     }
 
@@ -486,8 +486,8 @@ OpenPBR_ThinFilmResults openpbr_desaturate_thin_film_reflectance(const vec3 diel
     const float thin_film_desaturation_scale = min(sqrt(thin_film_thickness_nm * 0.001f * idoth), 1.0f);
 
     desaturated_reflectance.reflectance_dielectric =
-        mix(dielectric_reflectance, vec3(openpbr_average(dielectric_reflectance)), thin_film_desaturation_scale);
-    desaturated_reflectance.reflectance_metal = mix(metal_reflectance, vec3(openpbr_average(metal_reflectance)), thin_film_desaturation_scale);
+        mix(dielectric_reflectance, OPENPBR_MAKE_VEC3_SPLAT(openpbr_average(dielectric_reflectance)), thin_film_desaturation_scale);
+    desaturated_reflectance.reflectance_metal = mix(metal_reflectance, OPENPBR_MAKE_VEC3_SPLAT(openpbr_average(metal_reflectance)), thin_film_desaturation_scale);
 
     return desaturated_reflectance;
 }

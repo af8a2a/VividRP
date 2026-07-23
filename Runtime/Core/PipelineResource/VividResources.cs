@@ -206,6 +206,15 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/ScreenSpaceReflection/ScreenSpaceReflectionHybrid.raytrace")]
         public RayTracingShader ScreenSpaceReflectionHybridTraceRayTracing;
 
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracing.raytrace")]
+        public RayTracingShader ReferencedPathtracingRayTracing;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/RaytracingGBuffer.raytrace")]
+        public RayTracingShader RaytracingGBufferRayTracing;
+
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAccumulation.compute")]
+        public ComputeShader ReferencedPathTracingAccumulationCompute;
+
         [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 
@@ -287,6 +296,27 @@ namespace VividRP.Runtime
 
         [VividResourcePath("Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_TemporalStabilization")]
         public ComputeShader SIGMATemporalStabilizationCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_ClassifyTiles")]
+        public ComputeShader REBLURDiffuseSpecularClassifyTilesCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PrePass")]
+        public ComputeShader REBLURDiffuseSpecularPrePassCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_TemporalAccumulation")]
+        public ComputeShader REBLURDiffuseSpecularTemporalAccumulationCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HistoryFix")]
+        public ComputeShader REBLURDiffuseSpecularHistoryFixCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_Blur")]
+        public ComputeShader REBLURDiffuseSpecularBlurCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlur")]
+        public ComputeShader REBLURDiffuseSpecularPostBlurCompute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_Resolve")]
+        public ComputeShader REBLURDiffuseSpecularResolveCompute;
 
         [VividResourcePath("Shaders/Core/Private/GPUDriven/GPUInstanceCulling")]
         public ComputeShader GPUInstanceCullingCompute;

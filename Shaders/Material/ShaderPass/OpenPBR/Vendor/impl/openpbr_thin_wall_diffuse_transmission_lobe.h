@@ -30,6 +30,7 @@
 struct OpenPBR_ThinWallDiffuseTransmissionLobe
 {
     OpenPBR_EnergyConservingRoughDiffuseLobe flipped_lobe;
+    OPENPBR_LEGACY_HLSL_WRAPPER_TYPE_TAG
 };
 
 // Initialize the inner diffuse lobe with flipped normal and reflected view direction.

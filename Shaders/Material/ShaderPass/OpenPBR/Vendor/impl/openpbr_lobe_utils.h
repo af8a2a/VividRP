@@ -53,7 +53,7 @@ vec2 openpbr_compute_anisotropic_alpha(const float isotropic_alpha,
     }
     else  // isotropic
     {
-        anisotropic_alpha = vec2(isotropic_alpha);
+        anisotropic_alpha = OPENPBR_MAKE_VEC2_SPLAT(isotropic_alpha);
     }
 
     // Unlike in the isotropic case where we could switch to delta lobes at low roughnesses,
@@ -65,7 +65,7 @@ vec2 openpbr_compute_anisotropic_alpha(const float isotropic_alpha,
     // use the delta specular lobe to handle the case where the alpha is too small.)
     if (openpbr_anisotropy > 0.0f || !delta_specular_supported)
     {
-        anisotropic_alpha = max(anisotropic_alpha, vec2(min_microfacet_alpha));
+        anisotropic_alpha = max(anisotropic_alpha, OPENPBR_MAKE_VEC2_SPLAT(min_microfacet_alpha));
     }
 
     return anisotropic_alpha;
@@ -158,7 +158,7 @@ float openpbr_eval_aniso_smith_g2(const vec3 v1, const vec3 v2, const vec2 alpha
 // Used for estimating the average contribution of a BSDF lobe, which is used for lobe selection.
 float openpbr_max_component_of_throughput_weighted_color(const vec3 path_throughput, const vec3 x)
 {
-    OPENPBR_ASSERT(all(greaterThanEqual(path_throughput, vec3(0.0f))), "Throughput is expected to be non-negative");
+    OPENPBR_ASSERT(all(greaterThanEqual(path_throughput, OPENPBR_MAKE_VEC3_SPLAT(0.0f))), "Throughput is expected to be non-negative");
     const vec3 throughput_weighted_color = path_throughput * x;
     return openpbr_max3(throughput_weighted_color);
 }
@@ -194,7 +194,7 @@ float openpbr_apply_specular_weight_to_ior(const float eta_t_over_eta_i, const f
 // Calculates Schlick Fresnel reflectivity given color F0.
 vec3 openpbr_schlick(const float cos_theta, const vec3 f0)
 {
-    return f0 + (vec3(1.0f) - f0) * openpbr_fifth_power(1.0f - abs(cos_theta));
+    return f0 + (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - f0) * openpbr_fifth_power(1.0f - abs(cos_theta));
 }
 
 // Calculates Schlick Fresnel reflectivity given scalar F0.
@@ -230,7 +230,7 @@ vec3 openpbr_fresnel_rgb(const vec3 eta_t_over_eta_i, const float cos_theta_i, c
                     openpbr_fresnel(eta_t_over_eta_i.g, cos_theta_i),
                     openpbr_fresnel(eta_t_over_eta_i.b, cos_theta_i));
     else
-        return vec3(openpbr_fresnel(eta_t_over_eta_i.r, cos_theta_i));
+        return OPENPBR_MAKE_VEC3_SPLAT(openpbr_fresnel(eta_t_over_eta_i.r, cos_theta_i));
 }
 
 // Approximates the cosine-weighted average of the Fresnel reflection coefficient over the hemisphere.
@@ -272,8 +272,8 @@ vec3 openpbr_compute_metal_schlick_b_factor(const vec3 f0, const vec3 f82_tint)
     OPENPBR_CONSTEXPR_LOCAL float OneMinusCosThetaMaxToTheSixth = openpbr_sixth_power(OneMinusCosThetaMax);
     const vec3 r = f0;        // switch to terminology from the "Fresnel Equations Considered Harmful" slides
     const vec3 t = f82_tint;  // custom terminology: "t" (for "tint") = h / (r + (1 - r) * (1 - CosThetaMax)^5)
-    const vec3 white_minus_r = vec3(1.0f) - r;
-    const vec3 white_minus_t = vec3(1.0f) - t;
+    const vec3 white_minus_r = OPENPBR_MAKE_VEC3_SPLAT(1.0f) - r;
+    const vec3 white_minus_t = OPENPBR_MAKE_VEC3_SPLAT(1.0f) - t;
     const vec3 b_numerator = (r + white_minus_r * OneMinusCosThetaMaxToTheFifth) * white_minus_t;
     OPENPBR_CONSTEXPR_LOCAL float BDenominator = CosThetaMax * OneMinusCosThetaMaxToTheSixth;
     OPENPBR_CONSTEXPR_LOCAL float BDenominatorReciprocal = 1.0f / BDenominator;
@@ -284,7 +284,7 @@ vec3 openpbr_metal_schlick_with_f82_tint(const vec3 f0, const vec3 f82_tint, con
 {
     OPENPBR_ASSERT(cos_theta >= 0.0f, "F82-tint input cosine must be non-negative");
     const vec3 r = f0;  // switch to terminology from the "Fresnel Equations Considered Harmful" slides
-    const vec3 white_minus_r = vec3(1.0f) - r;
+    const vec3 white_minus_r = OPENPBR_MAKE_VEC3_SPLAT(1.0f) - r;
     const vec3 b = openpbr_compute_metal_schlick_b_factor(f0, f82_tint);
     const float one_minus_cos_theta = 1.0f - cos_theta;
     const vec3 offset_from_r = (white_minus_r - b * cos_theta * one_minus_cos_theta) * openpbr_fifth_power(one_minus_cos_theta);
@@ -296,7 +296,7 @@ vec3 openpbr_metal_schlick_with_f82_tint(const vec3 f0, const vec3 f82_tint, con
 vec3 openpbr_metal_average_fresnel_with_f82_tint(const vec3 f0, const vec3 f82_tint)
 {
     const vec3 r = f0;  // switch to terminology from the "Fresnel Equations Considered Harmful" slides
-    const vec3 white_minus_r = vec3(1.0f) - r;
+    const vec3 white_minus_r = OPENPBR_MAKE_VEC3_SPLAT(1.0f) - r;
     const vec3 b = openpbr_compute_metal_schlick_b_factor(f0, f82_tint);
     const vec3 average_albedo = r + white_minus_r * (1.0f / 21.0f) - b * (1.0f / 126.0f);
     return saturate(average_albedo);
@@ -318,7 +318,7 @@ bool openpbr_refract(const vec3 wi,
     // Handle total internal reflection for transmission.
     if (sin2_theta_t >= 1.0f)
     {
-        wt = vec3(0.0f);
+        wt = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
         return false;
     }
 
@@ -349,7 +349,7 @@ void openpbr_clear_lobe_sampling_output(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_OUT
                                         OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_OUT(float) pdf,
                                         OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_OUT(OpenPBR_BsdfLobeType) sampled_type)
 {
-    light_direction = vec3(0.0f);
+    light_direction = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
     weight = openpbr_make_zero_diffuse_specular();
     pdf = 0.0f;
     sampled_type = OpenPBR_BsdfLobeTypeNone;

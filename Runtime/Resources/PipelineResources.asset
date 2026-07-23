@@ -101,6 +101,12 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 09dbe8037a2fc9a4f9129f9f21253064, type: 3}
   - ResourceName: Shaders/Core/Private/GenerateViewZ
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/RaytracingGBuffer.raytrace
+    ResourceObject: {fileID: 4807578003741378534, guid: e7308e3e8d216f743b2ae2cb7762fc72, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracing.raytrace
+    ResourceObject: {fileID: 4807578003741378534, guid: 09f018db93d2e534ab32ce82ece5e884, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAccumulation.compute
+    ResourceObject: {fileID: 7200000, guid: 607475cf82417d740964e503423c2041, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ReGIRGridBuild.compute
@@ -117,6 +123,20 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: b3e6567bffa5efd4a86485412ba2b312, type: 3}
   - ResourceName: Shaders/Core/Private/LutBuilder3D.compute
     ResourceObject: {fileID: 7200000, guid: ec9fdcaf78354b1aa25c0158100aae1b, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_Blur
+    ResourceObject: {fileID: 7200000, guid: c9b7445bda8643f40a75f88ee8fdb7a9, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_ClassifyTiles
+    ResourceObject: {fileID: 7200000, guid: ada210e750e491a4caf84647478fef94, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HistoryFix
+    ResourceObject: {fileID: 7200000, guid: 2abac24554fd0f64ca0ce7b03b3e7a8b, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlur
+    ResourceObject: {fileID: 7200000, guid: 8fec823c9147cab4499ae974c08e0a98, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PrePass
+    ResourceObject: {fileID: 7200000, guid: 8f41f0a60ce91474680ebf1c7e493872, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_Resolve
+    ResourceObject: {fileID: 7200000, guid: 0ea7b0c4f335dbc44982ee4b3831f0b2, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_TemporalAccumulation
+    ResourceObject: {fileID: 7200000, guid: 8e83f44086201f14b86562cb2fa112a3, type: 3}
   - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Copy
     ResourceObject: {fileID: 7200000, guid: 0ac28da9973799d4c9d240757266ed45, type: 3}
   - ResourceName: Shaders/Core/Private/NRD/SIGMA/SIGMA_Shadow_Blur

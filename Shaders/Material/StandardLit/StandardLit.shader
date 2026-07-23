@@ -312,7 +312,6 @@ Shader "VividRP/Material/StandardLit"
                 #pragma multi_compile _ DIRLIGHTMAP_COMBINED
                 #pragma multi_compile _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
-                #pragma shader_feature_local_raytracing _OPACITYMAP
                 #pragma shader_feature_local_raytracing _NORMALMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP
@@ -324,6 +323,50 @@ Shader "VividRP/Material/StandardLit"
                 #define VIVIDRP_INDIRECT_DIFFUSE_CLOSEST_HIT_NAME StandardLitIndirectDiffuseClosestHit
                 #define VIVIDRP_INDIRECT_DIFFUSE_ANY_HIT_NAME StandardLitIndirectDiffuseAnyHit
                 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "ReferencedPathtracingDXR"
+            Tags { "LightMode" = "ReferencedPathtracingDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracing.hlsl"
+            ENDHLSL
+        }
+
+        Pass
+        {
+            Name "RaytracingGBufferDXR"
+            Tags { "LightMode" = "RaytracingGBufferDXR" }
+
+            HLSLPROGRAM
+                #pragma only_renderers d3d11 xboxseries ps5 switch2
+                #pragma raytracing surface_shader
+                #pragma multi_compile _ INSTANCING_ON
+                #pragma shader_feature_local_raytracing _ALPHATEST_ON
+                #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _NORMALMAP
+                #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
+                #pragma shader_feature_local_raytracing _ROUGHNESSMAP
+                #pragma shader_feature_local_raytracing _EMISSION
+                #pragma shader_feature_local_raytracing _CLEARCOAT
+                #pragma shader_feature_local_raytracing _SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A
+
+                #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/RaytracingGBuffer.hlsl"
             ENDHLSL
         }
     }

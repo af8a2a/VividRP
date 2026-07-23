@@ -97,7 +97,7 @@ void openpbr_prepare_volume(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
     {
         // Zero-initialize volume-derived local variables and thin-wall parameters to avoid unintended use of uninitialized data.
         OpenPBR_HomogeneousVolume subsurface_volume = openpbr_make_empty_volume();
-        volume_derived_props.thin_wall_subsurface_color = vec3(0.0f);
+        volume_derived_props.thin_wall_subsurface_color = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
         volume_derived_props.thin_wall_subsurface_anisotropy = 0.0f;
 
         // Calculate the volume that results from subsurface scattering.
@@ -122,7 +122,7 @@ void openpbr_prepare_volume(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
 
         // Default-initialize transmission-related parameters to avoid unintended use of uninitialized data.
         // These will be set properly below if transmission is enabled.
-        volume_derived_props.transmission_tint = vec3(1.0f);
+        volume_derived_props.transmission_tint = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
         OpenPBR_HomogeneousVolume transmission_volume = openpbr_make_empty_volume();
 
         // Set the properties of the interior volume and the transmission color.
@@ -178,7 +178,7 @@ void openpbr_prepare_volume(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
         if (!resolved_inputs.geometry_thin_walled)
         {
             // Zero-initialize the unneeded thin-wall subsurface parameters.
-            volume_derived_props.thin_wall_subsurface_color = vec3(0.0f);
+            volume_derived_props.thin_wall_subsurface_color = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
             volume_derived_props.thin_wall_subsurface_anisotropy = 0.0f;
         }
         else
@@ -210,7 +210,7 @@ void openpbr_prepare_volume(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenP
         }
         else  // regular case
         {
-            volume_derived_props.transmission_tint = vec3(1.0f);  // do not tint transmitted rays
+            volume_derived_props.transmission_tint = OPENPBR_MAKE_VEC3_SPLAT(1.0f);  // do not tint transmitted rays
         }
 
         // Initialize volume in case it's used in some code that doesn't take into
@@ -247,7 +247,7 @@ vec3 openpbr_compute_final_transmission_tint(const vec3 transmission_tint,
     // Total internal reflection: no transmission.
     if (sin2_t >= 1.0f)
     {
-        return vec3(0.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(0.0f);
     }
 
     // Compute cos(theta_t) without trig.
@@ -263,7 +263,7 @@ vec3 openpbr_compute_final_transmission_tint(const vec3 transmission_tint,
     //     transmission_tint = exp(-mu_t)
     //     transmission_tint^path_length = exp(-mu_t)^path_length
     //     transmission_tint^path_length = exp(-mu_t * path_length)
-    return pow(transmission_tint, vec3(path_length));
+    return pow(transmission_tint, OPENPBR_MAKE_VEC3_SPLAT(path_length));
 }
 
 // Applies an anisotropy rotation to an orthonormal basis.
@@ -272,7 +272,7 @@ vec3 openpbr_compute_final_transmission_tint(const vec3 transmission_tint,
 // Zero is treated as no rotation.
 OPENPBR_INLINE_FUNCTION void openpbr_apply_anisotropy_rotation(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_INOUT(OpenPBR_Basis) basis, const vec2 cos_sin)
 {
-    if (all(equal(cos_sin, vec2(0.0f))))
+    if (all(equal(cos_sin, OPENPBR_MAKE_VEC2_SPLAT(0.0f))))
         return;
 
     const vec2 normalized_cos_sin = openpbr_fast_normalize(cos_sin);
@@ -473,7 +473,7 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
 
     const float darkened_metal = resolved_inputs.base_metalness * resolved_inputs.specular_weight;
     const vec3 weighted_base_color = resolved_inputs.base_color * resolved_inputs.base_weight;
-    vec3 metal_average_fresnel = vec3(1.0f);
+    vec3 metal_average_fresnel = OPENPBR_MAKE_VEC3_SPLAT(1.0f);
     if (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableMetallic))
     {
         metal_average_fresnel = openpbr_metal_average_fresnel_with_f82_tint(weighted_base_color, resolved_inputs.specular_color);
@@ -514,16 +514,16 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
     // Estimate the base surface albedo.
 
     const vec3 base_albedo_from_metal = darkened_metal * metal_average_fresnel;
-    const vec3 base_albedo_from_opaque_dielectric = opaque_dielectric * mix(weighted_base_color, vec3(1.0f), specularity_opaque_dielectric);
+    const vec3 base_albedo_from_opaque_dielectric = opaque_dielectric * mix(weighted_base_color, OPENPBR_MAKE_VEC3_SPLAT(1.0f), specularity_opaque_dielectric);
     const vec3 base_albedo_from_sss = sss * resolved_inputs.subsurface_color;  // considering all internal bounces
-    const vec3 base_albedo_from_trans = vec3(trans);  // considering zero internal bounces (we don't know how dense the volume is)
+    const vec3 base_albedo_from_trans = OPENPBR_MAKE_VEC3_SPLAT(trans);  // considering zero internal bounces (we don't know how dense the volume is)
     const vec3 E_b = base_albedo_from_metal + base_albedo_from_opaque_dielectric + base_albedo_from_sss + base_albedo_from_trans;
 
     // Calculate the final coat darkening factor.
 
     // These formulas correspond to Equation 65 and Equation 71 from the OpenPRB spec (v1.1):
-    const vec3 Delta = vec3(1.0f - K) / (vec3(1.0f) - E_b * K);
-    const vec3 modulated_coat_darkening = mix(vec3(1.0f), Delta, resolved_inputs.coat_weight * resolved_inputs.coat_darkening);
+    const vec3 Delta = OPENPBR_MAKE_VEC3_SPLAT(1.0f - K) / (OPENPBR_MAKE_VEC3_SPLAT(1.0f) - E_b * K);
+    const vec3 modulated_coat_darkening = mix(OPENPBR_MAKE_VEC3_SPLAT(1.0f), Delta, resolved_inputs.coat_weight * resolved_inputs.coat_darkening);
 
     // Create specular and diffuse reflection lobes.
 
@@ -550,9 +550,9 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
     if (inside)
     {
         // Note that specular tint does not affect dielectric internal reflection.
-        scale_for_trans_reflection = vec3(trans_including_sss);
+        scale_for_trans_reflection = OPENPBR_MAKE_VEC3_SPLAT(trans_including_sss);
         thin_wall_aware_scale_for_trans_reflection = scale_for_trans_reflection;  // no difference (if inside, we must not be in thin-wall mode)
-        thin_wall_specular_transmission_albedo_scale = vec3(0.0f);  // no thin-wall contribution (if inside, we must not be in thin-wall mode)
+        thin_wall_specular_transmission_albedo_scale = OPENPBR_MAKE_VEC3_SPLAT(0.0f);  // no thin-wall contribution (if inside, we must not be in thin-wall mode)
         scale_for_opaque_reflection = resolved_inputs.specular_color * opaque_dielectric;
     }
     else  // entering
@@ -571,7 +571,7 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
         else
         {
             thin_wall_aware_scale_for_trans_reflection = scale_for_trans_reflection;  // no difference
-            thin_wall_specular_transmission_albedo_scale = vec3(0.0f);                // no thin-wall contribution
+            thin_wall_specular_transmission_albedo_scale = OPENPBR_MAKE_VEC3_SPLAT(0.0f);                // no thin-wall contribution
         }
         scale_for_opaque_reflection = resolved_inputs.specular_color * opaque_dielectric;
     }
@@ -617,9 +617,9 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
     {
         dispersion = 0.0f;  // dispersion disabled
 
-        relative_ior_for_refraction_with_dispersion = vec3(relative_ior_for_refraction);
-        relative_ior_for_trans_reflection_with_dispersion = vec3(relative_ior_for_trans_reflection);
-        relative_ior_for_opaque_reflection_with_dispersion = vec3(relative_ior_for_opaque_reflection);
+        relative_ior_for_refraction_with_dispersion = OPENPBR_MAKE_VEC3_SPLAT(relative_ior_for_refraction);
+        relative_ior_for_trans_reflection_with_dispersion = OPENPBR_MAKE_VEC3_SPLAT(relative_ior_for_trans_reflection);
+        relative_ior_for_opaque_reflection_with_dispersion = OPENPBR_MAKE_VEC3_SPLAT(relative_ior_for_opaque_reflection);
     }
 
     // Now, do some necessary calculations and adjustments to weights and IORs.
@@ -635,7 +635,7 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
     const vec3 final_transmission_tint = openpbr_compute_final_transmission_tint(
         volume_derived_props.transmission_tint, resolved_inputs.geometry_thin_walled, thin_wall_aware_cos_theta, relative_ior_for_refraction);
     const vec3 tinted_trans = trans * final_transmission_tint;
-    const vec3 tinted_trans_including_sss = tinted_trans + vec3(sss);
+    const vec3 tinted_trans_including_sss = tinted_trans + OPENPBR_MAKE_VEC3_SPLAT(sss);
     const vec3 thin_wall_aware_tinted_trans_including_sss = non_thin_wall_weight * tinted_trans_including_sss;
 
     // Set up the surrounding absolute IORs needed for the thin film.
@@ -652,12 +652,12 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
     if (inside)
     {
         thin_film_exterior_ior = weighted_specular_ior;
-        thin_film_interior_ior = vec3(weighted_coat_ior);
+        thin_film_interior_ior = OPENPBR_MAKE_VEC3_SPLAT(weighted_coat_ior);
     }
     else  // entering
     {
         thin_film_exterior_ior = weighted_coat_ior;
-        thin_film_interior_ior = vec3(weighted_specular_ior);
+        thin_film_interior_ior = OPENPBR_MAKE_VEC3_SPLAT(weighted_specular_ior);
 
         // Apply dispersion to the absolute IOR below the thin film.
         // TODO: Consider also supporting dispersion for the absolute IOR above the thin film,
@@ -685,8 +685,8 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
     // We calculate both the overall reflectance and transmittance here, though we use them in different places:
     // we add the reflectance to the existing specular and diffuse lobes, and we create separate lobes for the transmission.
 
-    vec3 thin_wall_specular_reflection_albedo = vec3(0.0f);
-    vec3 thin_wall_specular_transmission_albedo = vec3(0.0f);
+    vec3 thin_wall_specular_reflection_albedo = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 thin_wall_specular_transmission_albedo = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
     if (resolved_inputs.geometry_thin_walled)
     {
         const float window_reflectance = openpbr_thin_wall_fresnel(relative_ior_for_trans_reflection, thin_wall_aware_cos_theta);
@@ -705,8 +705,8 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
 
     // Calculate values needed for thin-wall subsurface, which is implemented as diffuse reflection + diffuse transmission.
 
-    vec3 thin_wall_subsurface_transmission_albedo = vec3(0.0f);
-    vec3 thin_wall_subsurface_reflection_albedo = vec3(0.0f);
+    vec3 thin_wall_subsurface_transmission_albedo = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
+    vec3 thin_wall_subsurface_reflection_albedo = OPENPBR_MAKE_VEC3_SPLAT(0.0f);
     if (resolved_inputs.geometry_thin_walled)
     {
         const float thin_wall_subsurface_transmission_proportion = (volume_derived_props.thin_wall_subsurface_anisotropy + 1.0f) * 0.5f;
@@ -855,8 +855,8 @@ void openpbr_prepare_lobes(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPB
 vec3 openpbr_compute_emission(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_ResolvedInputs) resolved_inputs,
                               OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_PreparedBsdf) prepared)
 {
-    if (resolved_inputs.emission_luminance == 0.0f || all(equal(resolved_inputs.emission_color, vec3(0.0f))))
-        return vec3(0.0f);
+    if (resolved_inputs.emission_luminance == 0.0f || all(equal(resolved_inputs.emission_color, OPENPBR_MAKE_VEC3_SPLAT(0.0f))))
+        return OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     // Suppress emission when hitting from inside the object.
     // Thin-walled surfaces always emit from both sides (they have no interior).
@@ -864,7 +864,7 @@ vec3 openpbr_compute_emission(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(Ope
     const bool back_facing = cos_theta < 0.0f;
     const bool inside = back_facing && !resolved_inputs.geometry_thin_walled;
     if (inside)
-        return vec3(0.0f);
+        return OPENPBR_MAKE_VEC3_SPLAT(0.0f);
 
     vec3 result = resolved_inputs.emission_luminance * resolved_inputs.emission_color;
     if (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableSheenAndCoat))
@@ -875,7 +875,7 @@ vec3 openpbr_compute_emission(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(Ope
 
         // Fuzz transmittance is achromatic; scale by the scalar fuzz transmittance.
         if (resolved_inputs.fuzz_weight > 0.0f)
-            result *= vec3(openpbr_base_layer_scale_incoming(prepared.fuzz_lobe));
+            result *= OPENPBR_MAKE_VEC3_SPLAT(openpbr_base_layer_scale_incoming(prepared.fuzz_lobe));
     }
     return result;
 }
@@ -927,9 +927,10 @@ OpenPBR_PreparedBsdf openpbr_prepare_impl(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_C
 // BSDF values returned include cosine term.
 OpenPBR_DiffuseSpecular openpbr_eval_impl(OPENPBR_ADDRESS_SPACE_THREAD OPENPBR_CONST_REF(OpenPBR_PreparedBsdf) prepared, const vec3 light_direction)
 {
-    return OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableSheenAndCoat)
-               ? openpbr_calculate_lobe_value(prepared.fuzz_lobe, prepared.view_direction, light_direction)
-               : openpbr_calculate_lobe_value(prepared.fuzz_lobe.coating_lobe.base_lobe, prepared.view_direction, light_direction);
+    // Unity's HLSL frontend does not support selecting a struct value with ?:.
+    if (OPENPBR_GET_SPECIALIZATION_CONSTANT(EnableSheenAndCoat))
+        return openpbr_calculate_lobe_value(prepared.fuzz_lobe, prepared.view_direction, light_direction);
+    return openpbr_calculate_lobe_value(prepared.fuzz_lobe.coating_lobe.base_lobe, prepared.view_direction, light_direction);
 }
 
 // The returned weight includes the cosine term; specifically it is the BSDF value
@@ -1017,7 +1018,7 @@ vec4 openpbr_translucent_shadow_weight_and_prob(OPENPBR_ADDRESS_SPACE_THREAD OPE
 
     const float prob = final_translucency;
     if (prob == 0.0f)
-        return vec4(0.0f);
+        return OPENPBR_MAKE_VEC4_SPLAT(0.0f);
 
     // Apply a Fresnel factor when entering an object to account for Fresnel reflectance
     // from both the front and the back surfaces.
@@ -1062,7 +1063,7 @@ vec4 openpbr_translucent_shadow_weight_and_prob(OPENPBR_ADDRESS_SPACE_THREAD OPE
     }
 
     // metal_weighted_translucency and specular_roughness are already accounted for in prob.
-    vec3 final_transmission = vec3(fresnel_factor);
+    vec3 final_transmission = OPENPBR_MAKE_VEC3_SPLAT(fresnel_factor);
 
     // Incorporate coat tint into transmission if applicable.
     // TODO: Should we apply this (and the transmission tint) twice in thin-wall mode?
@@ -1072,7 +1073,7 @@ vec4 openpbr_translucent_shadow_weight_and_prob(OPENPBR_ADDRESS_SPACE_THREAD OPE
         {
             // Incorporate the coat weight into the coat tint.
             const vec3 fractional_coat_color = (resolved_inputs.coat_weight < 1.0f)
-                                                   ? mix(vec3(1.0f), resolved_inputs.coat_color, resolved_inputs.coat_weight)
+                                                   ? mix(OPENPBR_MAKE_VEC3_SPLAT(1.0f), resolved_inputs.coat_color, resolved_inputs.coat_weight)
                                                    : resolved_inputs.coat_color;
 
             // The square root of the coat tint is applied upon each passage through the coat,
@@ -1085,7 +1086,7 @@ vec4 openpbr_translucent_shadow_weight_and_prob(OPENPBR_ADDRESS_SPACE_THREAD OPE
     // Incorporate transmission tint (instantaneous absorption) into the trans component if applicable.
     const vec3 final_transmission_tint = openpbr_compute_final_transmission_tint(
         volume_derived_props.transmission_tint, resolved_inputs.geometry_thin_walled, thin_wall_aware_cos_theta, external_ior);
-    final_transmission *= mix(vec3(1.0f), final_transmission_tint, resolved_inputs.transmission_weight / unweighted_translucency);
+    final_transmission *= mix(OPENPBR_MAKE_VEC3_SPLAT(1.0f), final_transmission_tint, resolved_inputs.transmission_weight / unweighted_translucency);
 
     // Pack the vec3 transmission and float probability into a vec4 (legacy behavior).
     return vec4(final_transmission, prob);

@@ -6,6 +6,8 @@ using UnityEditor;
 namespace VividRP.Runtime
 {
     [ExecuteInEditMode]
+    [DefaultExecutionOrder(10000)]
+    [RequireComponent(typeof(Camera))]
     public class VividDebugCameraController : MonoBehaviour
     {
         #region Configuration
@@ -40,7 +42,7 @@ namespace VividRP.Runtime
         {
             _localCamera = GetComponent<Camera>();
 #if UNITY_EDITOR
-            if (!Application.isPlaying) InitEditorResources();
+            InitEditorResources();
 #endif
         }
 
@@ -65,10 +67,23 @@ namespace VividRP.Runtime
         {
             if (Application.isPlaying && !_emergencyStop)
             {
+#if UNITY_EDITOR
+                if (_sceneSync) return;
+#endif
                 HandleKeyboardInput();
                 HandleMouseRotation();
             }
         }
+
+#if UNITY_EDITOR
+        private void LateUpdate()
+        {
+            if (Application.isPlaying)
+            {
+                SynchronizeWithSceneCamera();
+            }
+        }
+#endif
 
         #endregion
 
@@ -119,14 +134,26 @@ namespace VividRP.Runtime
 
         private void EditorUpdate()
         {
-            if (Application.isPlaying || _emergencyStop) return;
+            if (Application.isPlaying) return;
+            SynchronizeWithSceneCamera();
+        }
+
+        private void SynchronizeWithSceneCamera()
+        {
+            if (!_sceneSync || _emergencyStop) return;
 
             try
             {
+                if (_targetCamera == null)
+                {
+                    InitEditorResources();
+                }
+
                 if (_targetCamera != null)
                 {
-                    SmoothSync();
-                    if (_syncFOV) SyncFOV();
+                    float deltaTime = GetEditorDeltaTime();
+                    SmoothSync(deltaTime);
+                    if (_syncFOV) SyncFOV(deltaTime);
                 }
             }
             catch (System.Exception ex)
@@ -145,9 +172,9 @@ namespace VividRP.Runtime
             return Mathf.Clamp(delta, 0.0001f, 0.1f);
         }
 
-        private void SmoothSync()
+        private void SmoothSync(float deltaTime)
         {
-            float delta = GetEditorDeltaTime() * 0.95f;
+            float delta = deltaTime * 0.95f;
 
             transform.position = Vector3.Lerp(
                 transform.position,
@@ -162,7 +189,7 @@ namespace VividRP.Runtime
             );
         }
 
-        private void SyncFOV()
+        private void SyncFOV(float deltaTime)
         {
             if (_localCamera != null &&
                 _targetCamera.TryGetComponent<Camera>(out var targetCam))
@@ -170,7 +197,7 @@ namespace VividRP.Runtime
                 _localCamera.fieldOfView = Mathf.Lerp(
                     _localCamera.fieldOfView,
                     targetCam.fieldOfView,
-                    _lerpSpeed * GetEditorDeltaTime()
+                    _lerpSpeed * deltaTime
                 );
             }
         }

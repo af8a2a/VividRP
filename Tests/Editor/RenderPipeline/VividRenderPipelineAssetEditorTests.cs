@@ -166,7 +166,7 @@ namespace VividRP.Tests
                 EnableAsyncCompute = true,
             };
 
-            var enabled = PassRecorder.ShouldEnableAsyncCompute(false, new ClassificationPass(), passDefinition);
+            var enabled = PassRecorder.ShouldEnableAsyncCompute(false, new MaterialClassificationPass(), passDefinition);
 
             Assert.That(enabled, Is.False);
         }

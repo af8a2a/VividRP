@@ -9,12 +9,12 @@ using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
-    public class ClassificationPassTests
+    public class MaterialClassificationPassTests
     {
         [Test]
         public void Initialize_RegistersGBufferInputsAndClassificationBuffers_WhenPassIsCreated()
         {
-            IRenderPass renderPass = new ClassificationPass();
+            IRenderPass renderPass = new MaterialClassificationPass();
 
             var resources = renderPass.Initialize();
             var textureEntries = resources.Textures.OrderBy(entry => entry.Name).ToArray();
@@ -32,7 +32,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Prepare_ResizesClassificationBuffers_WhenCameraSizeChanges()
         {
-            var pass = new ClassificationPass();
+            var pass = new MaterialClassificationPass();
             try
             {
                 var frameData = new ContextContainer();
@@ -65,22 +65,22 @@ namespace VividRP.Editor.Tests
         [Test]
         public void SupportsAsyncCompute_ReturnsTrue_ForClassificationPass()
         {
-            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(ClassificationPass)), Is.True);
+            Assert.That(RenderGraphPassExecutionUtility.SupportsAsyncCompute(typeof(MaterialClassificationPass)), Is.True);
         }
 
         [Test]
         public void ResolveMaterialClassificationWaveSize_SelectsSupportedWavePath_FromComputeSubGroupSize()
         {
-            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(64), Is.EqualTo(64));
-            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(32), Is.EqualTo(32));
-            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(16), Is.Zero);
-            Assert.That(ClassificationPass.ResolveMaterialClassificationWaveSize(0), Is.Zero);
+            Assert.That(MaterialClassificationPass.ResolveMaterialClassificationWaveSize(64), Is.EqualTo(64));
+            Assert.That(MaterialClassificationPass.ResolveMaterialClassificationWaveSize(32), Is.EqualTo(32));
+            Assert.That(MaterialClassificationPass.ResolveMaterialClassificationWaveSize(16), Is.Zero);
+            Assert.That(MaterialClassificationPass.ResolveMaterialClassificationWaveSize(0), Is.Zero);
         }
 
         [Test]
         public void SelectMaterialClassificationKernels_UsesWaveKernels_WhenComputeSubGroupSizeMatches()
         {
-            var pass = new ClassificationPass();
+            var pass = new MaterialClassificationPass();
             SetFieldValue(pass, "m_ClassifyMaterialFeaturesKernel", 10);
             SetFieldValue(pass, "m_BuildMaterialFeatureIndirectArgsKernel", 20);
             SetFieldValue(pass, "m_ClassifyMaterialFeaturesWave32Kernel", 32);
@@ -107,7 +107,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void Prepare_ComputesBuildIndirectDispatchGroups_WhenTileCountExceedsSingleWave()
         {
-            var pass = new ClassificationPass();
+            var pass = new MaterialClassificationPass();
             try
             {
                 var frameData = new ContextContainer();
@@ -117,7 +117,7 @@ namespace VividRP.Editor.Tests
 
                 pass.Prepare(frameData);
 
-                var field = typeof(ClassificationPass).GetField("m_BuildIndirectDispatchGroupCountX", BindingFlags.Instance | BindingFlags.NonPublic);
+                var field = typeof(MaterialClassificationPass).GetField("m_BuildIndirectDispatchGroupCountX", BindingFlags.Instance | BindingFlags.NonPublic);
 
                 Assert.That(field, Is.Not.Null);
                 Assert.That(field.GetValue(pass), Is.EqualTo(15));
@@ -128,9 +128,9 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        private static void AssertTextureSize(ClassificationPass pass, string fieldName, int expectedWidth, int expectedHeight)
+        private static void AssertTextureSize(MaterialClassificationPass pass, string fieldName, int expectedWidth, int expectedHeight)
         {
-            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(MaterialClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null);
 
@@ -140,9 +140,9 @@ namespace VividRP.Editor.Tests
             Assert.That(texture.desc.Height, Is.EqualTo(expectedHeight));
         }
 
-        private static void AssertStructuredBuffer(ClassificationPass pass, string fieldName, int expectedCount, int expectedStride, GraphicsBuffer.Target expectedTarget)
+        private static void AssertStructuredBuffer(MaterialClassificationPass pass, string fieldName, int expectedCount, int expectedStride, GraphicsBuffer.Target expectedTarget)
         {
-            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(MaterialClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null);
 
@@ -153,9 +153,9 @@ namespace VividRP.Editor.Tests
             Assert.That(buffer.desc.Target, Is.EqualTo(expectedTarget));
         }
 
-        private static void AssertImportedBuffer(ClassificationPass pass, string fieldName, int expectedCount, int expectedStride)
+        private static void AssertImportedBuffer(MaterialClassificationPass pass, string fieldName, int expectedCount, int expectedStride)
         {
-            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(MaterialClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
 
             Assert.That(field, Is.Not.Null);
 
@@ -174,23 +174,23 @@ namespace VividRP.Editor.Tests
             Assert.That(importedGraphicsBuffer.stride, Is.EqualTo(expectedStride));
         }
 
-        private static T GetFieldValue<T>(ClassificationPass pass, string fieldName)
+        private static T GetFieldValue<T>(MaterialClassificationPass pass, string fieldName)
         {
-            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(MaterialClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null, fieldName);
             return (T)field.GetValue(pass);
         }
 
-        private static void SetFieldValue<T>(ClassificationPass pass, string fieldName, T value)
+        private static void SetFieldValue<T>(MaterialClassificationPass pass, string fieldName, T value)
         {
-            var field = typeof(ClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
+            var field = typeof(MaterialClassificationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(field, Is.Not.Null, fieldName);
             field.SetValue(pass, value);
         }
 
-        private static void InvokeSelectMaterialClassificationKernels(ClassificationPass pass, int computeSubGroupSize)
+        private static void InvokeSelectMaterialClassificationKernels(MaterialClassificationPass pass, int computeSubGroupSize)
         {
-            var method = typeof(ClassificationPass).GetMethod(
+            var method = typeof(MaterialClassificationPass).GetMethod(
                 "SelectMaterialClassificationKernels",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(method, Is.Not.Null);

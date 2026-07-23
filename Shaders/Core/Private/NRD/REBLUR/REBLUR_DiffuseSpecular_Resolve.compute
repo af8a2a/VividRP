@@ -1,0 +1,29 @@
+#pragma kernel main
+
+Texture2D<float4> _ReblurResolvedDiffuse;
+Texture2D<float4> _ReblurResolvedSpecular;
+Texture2D<float4> _ReblurEmission;
+RWTexture2D<float4> _ReblurResolvedColor;
+float2 _ReblurResolveScreenSize;
+
+float3 ReblurYCoCgToLinear(float3 color)
+{
+    float t = color.x - color.z;
+    return max(float3(t + color.y, color.x + color.z, t - color.y), 0.0);
+}
+
+[numthreads(8, 8, 1)]
+void main(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    if (any(pixelCoord >= (uint2)_ReblurResolveScreenSize))
+        return;
+
+    float4 diffuse = _ReblurResolvedDiffuse.Load(int3(pixelCoord, 0));
+    float4 specular = _ReblurResolvedSpecular.Load(int3(pixelCoord, 0));
+    float4 emission = _ReblurEmission.Load(int3(pixelCoord, 0));
+    float3 color = ReblurYCoCgToLinear(diffuse.xyz)
+        + ReblurYCoCgToLinear(specular.xyz)
+        + max(emission.xyz, 0.0);
+    _ReblurResolvedColor[pixelCoord] = float4(color, emission.w);
+}

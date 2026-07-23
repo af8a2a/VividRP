@@ -134,13 +134,18 @@ float2 VividIndirectDiffuseTransformUV(float2 uv)
     return uv * _BaseMap_ST.xy + _BaseMap_ST.zw;
 }
 
-float4 SampleBase(float2 uv)
+float4 SampleBase(float2 uv, float textureLod)
 {
-    float4 baseSample = SAMPLE_TEXTURE2D_LOD(_BaseMap, sampler_BaseMap, uv, 0.0) * _BaseColor;
+    float4 baseSample = SAMPLE_TEXTURE2D_LOD(_BaseMap, sampler_BaseMap, uv, textureLod) * _BaseColor;
 #if defined(_OPACITYMAP)
-    baseSample.a *= SAMPLE_TEXTURE2D_LOD(_OpacityMap, sampler_OpacityMap, uv, 0.0).r;
+    baseSample.a *= SAMPLE_TEXTURE2D_LOD(_OpacityMap, sampler_OpacityMap, uv, textureLod).r;
 #endif
     return baseSample;
+}
+
+float4 SampleBase(float2 uv)
+{
+    return SampleBase(uv, 0.0);
 }
 
 bool VividIndirectDiffuseIsAlphaClipped(float alpha)
@@ -152,17 +157,17 @@ bool VividIndirectDiffuseIsAlphaClipped(float alpha)
 #endif
 }
 
-float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
+float2 SampleMetallicSmoothness(float2 uv, float baseAlpha, float textureLod)
 {
     float metallic = saturate(_Metallic);
     float smoothness = saturate(_Smoothness);
 
 #if defined(_METALLICSPECGLOSSMAP)
-    float4 metallicGlossSample = SAMPLE_TEXTURE2D_LOD(_MetallicGlossMap, sampler_MetallicGlossMap, uv, 0.0);
+    float4 metallicGlossSample = SAMPLE_TEXTURE2D_LOD(_MetallicGlossMap, sampler_MetallicGlossMap, uv, textureLod);
     metallic = saturate(metallicGlossSample.r * _Metallic);
 
     #if defined(_ROUGHNESSMAP)
-        float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, 0.0).r;
+        float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, textureLod).r;
         smoothness = (1.0 - roughness) * _Smoothness;
     #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
         smoothness = baseAlpha * _Smoothness;
@@ -170,13 +175,18 @@ float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
         smoothness = metallicGlossSample.a * _Smoothness;
     #endif
 #elif defined(_ROUGHNESSMAP)
-    float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, 0.0).r;
+    float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, textureLod).r;
     smoothness = (1.0 - roughness) * _Smoothness;
 #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
     smoothness = baseAlpha * _Smoothness;
 #endif
 
     return float2(metallic, saturate(smoothness));
+}
+
+float2 SampleMetallicSmoothness(float2 uv, float baseAlpha)
+{
+    return SampleMetallicSmoothness(uv, baseAlpha, 0.0);
 }
 
 float SampleAmbientOcclusion(float2 uv)
@@ -189,13 +199,18 @@ float SampleAmbientOcclusion(float2 uv)
 #endif
 }
 
-float3 SampleEmission(float2 uv)
+float3 SampleEmission(float2 uv, float textureLod)
 {
 #if defined(_EMISSION)
-    return max(SAMPLE_TEXTURE2D_LOD(_EmissionMap, sampler_EmissionMap, uv, 0.0).rgb * _EmissionColor.rgb, 0.0);
+    return max(SAMPLE_TEXTURE2D_LOD(_EmissionMap, sampler_EmissionMap, uv, textureLod).rgb * _EmissionColor.rgb, 0.0);
 #else
     return float3(0.0, 0.0, 0.0);
 #endif
+}
+
+float3 SampleEmission(float2 uv)
+{
+    return SampleEmission(uv, 0.0);
 }
 
 float3 VividIndirectDiffuseTransformNormalToWorld(float3 normalOS)
@@ -254,7 +269,7 @@ VividIndirectDiffuseHitGeometry VividIndirectDiffuseBuildHitGeometry(AttributeDa
     return geometry;
 }
 
-float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry)
+float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry, float textureLod)
 {
     float3 normalWS = SafeNormalize(geometry.normalWS);
 
@@ -264,12 +279,18 @@ float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geomet
     {
         float3 tangentWS = geometry.tangentWS * rsqrt(tangentLengthSquared);
         float3 bitangentWS = SafeNormalize(cross(normalWS, tangentWS) * geometry.tangentSign);
-        float3 normalTS = UnpackVividNormalScale(SAMPLE_TEXTURE2D_LOD(_BumpMap, sampler_BumpMap, geometry.uv, 0.0), _BumpScale);
+        float3 normalTS = UnpackVividNormalScale(
+            SAMPLE_TEXTURE2D_LOD(_BumpMap, sampler_BumpMap, geometry.uv, textureLod), _BumpScale);
         normalWS = SafeNormalize(normalTS.x * tangentWS + normalTS.y * bitangentWS + normalTS.z * normalWS);
     }
 #endif
 
     return normalWS;
+}
+
+float3 VividIndirectDiffuseSampleNormalWS(VividIndirectDiffuseHitGeometry geometry)
+{
+    return VividIndirectDiffuseSampleNormalWS(geometry, 0.0);
 }
 
 float3 SampleStandardLitIndirectDiffuseBakedGI(VividIndirectDiffuseHitGeometry geometry, float3 normalWS)

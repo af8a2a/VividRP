@@ -1,0 +1,8 @@
+#pragma use_dxc
+#pragma kernel main
+
+#define NRD_INTERNAL
+#define NRD_SIGNAL BOTH
+#define NRD_MODE RADIANCE
+
+#include "Private/REBLUR_TemporalAccumulation.cs.hlsl"

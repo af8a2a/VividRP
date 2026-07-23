@@ -6,10 +6,10 @@ This directory contains the shader-side subset of NVIDIA Real-time Denoisers
 - Reference checkout: `E:\NRD-Sample_simplex`
 - Reference revision: `a805a0d2f9464f41790f4ad6ea952cc8fbf47917`
 - Upstream subtree: `External/NRD/Shaders`
-- Included dispatches: ClassifyTiles, PrePass, TemporalAccumulation, HistoryFix,
-  Blur and PostBlur
-- Deliberately deferred: hit-distance reconstruction, temporal stabilization,
-  checkerboard permutations, SH/occlusion variants and validation dispatches
+- Included dispatches: ClassifyTiles, HitDistReconstruction (3x3/5x5), PrePass,
+  TemporalAccumulation, HistoryFix, Blur and PostBlur
+- Deliberately deferred: temporal stabilization, checkerboard permutations,
+  SH/occlusion variants and validation dispatches
 
 The Unity `.compute` files in the parent directory are VividRP wrappers that
 select `NRD_SIGNAL=BOTH`, `NRD_MODE=RADIANCE` and the no-temporal-stabilization

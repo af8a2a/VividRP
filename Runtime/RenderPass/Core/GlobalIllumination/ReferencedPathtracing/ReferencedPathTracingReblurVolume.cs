@@ -4,6 +4,25 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum ReferencedPathTracingReblurHitDistanceReconstructionMode
+    {
+        Off,
+        Area3x3,
+        Area5x5
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingReblurHitDistanceReconstructionModeParameter
+        : VolumeParameter<ReferencedPathTracingReblurHitDistanceReconstructionMode>
+    {
+        public ReferencedPathTracingReblurHitDistanceReconstructionModeParameter(
+            ReferencedPathTracingReblurHitDistanceReconstructionMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
     [Serializable]
     [VolumeComponentMenu("VividRP/Path Tracing/REBLUR Denoiser")]
     public sealed class ReferencedPathTracingReblurVolume : VolumeComponent
@@ -33,6 +52,14 @@ namespace VividRP.Runtime
 
         [Tooltip("Specular pre-accumulation spatial reuse radius in pixels. Zero disables it.")]
         public ClampedFloatParameter specularPrepassBlurRadius = new(50.0f, 0.0f, 75.0f);
+
+        [Tooltip(
+            "Reconstructs missing normalized hit distance before the pre-pass. " +
+            "3x3 is the recommended starting point for probabilistically sampled path-tracing signals; " +
+            "5x5 fills larger gaps but can spread hit distance farther.")]
+        public ReferencedPathTracingReblurHitDistanceReconstructionModeParameter
+            hitDistanceReconstructionMode =
+                new(ReferencedPathTracingReblurHitDistanceReconstructionMode.Off);
 
         [Tooltip("Minimum spatial denoising radius in pixels.")]
         public ClampedFloatParameter minBlurRadius = new(1.0f, 0.0f, 10.0f);

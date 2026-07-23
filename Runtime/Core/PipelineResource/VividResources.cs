@@ -300,6 +300,12 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_ClassifyTiles")]
         public ComputeShader REBLURDiffuseSpecularClassifyTilesCompute;
 
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HitDistanceReconstruction3x3")]
+        public ComputeShader REBLURDiffuseSpecularHitDistanceReconstruction3x3Compute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HitDistanceReconstruction5x5")]
+        public ComputeShader REBLURDiffuseSpecularHitDistanceReconstruction5x5Compute;
+
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PrePass")]
         public ComputeShader REBLURDiffuseSpecularPrePassCompute;
 

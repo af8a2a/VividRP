@@ -37,6 +37,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private static readonly int ClassifyTilesConstantsId =
             Shader.PropertyToID("REBLUR_ClassifyTilesConstants");
+        private static readonly int HitDistanceReconstructionConstantsId =
+            Shader.PropertyToID("REBLUR_HitDistReconstructionConstants");
         private static readonly int PrePassConstantsId =
             Shader.PropertyToID("REBLUR_PrePassConstants");
         private static readonly int TemporalAccumulationConstantsId =
@@ -246,6 +248,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_PreparedSpecular;
 
         private ComputeShader m_ClassifyTiles;
+        private ComputeShader m_HitDistanceReconstruction3x3;
+        private ComputeShader m_HitDistanceReconstruction5x5;
         private ComputeShader m_PrePass;
         private ComputeShader m_TemporalAccumulation;
         private ComputeShader m_HistoryFix;
@@ -363,6 +367,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_ClassifyTiles = resources.REBLURDiffuseSpecularClassifyTilesCompute;
+            m_HitDistanceReconstruction3x3 =
+                resources.REBLURDiffuseSpecularHitDistanceReconstruction3x3Compute;
+            m_HitDistanceReconstruction5x5 =
+                resources.REBLURDiffuseSpecularHitDistanceReconstruction5x5Compute;
             m_PrePass = resources.REBLURDiffuseSpecularPrePassCompute;
             m_TemporalAccumulation = resources.REBLURDiffuseSpecularTemporalAccumulationCompute;
             m_HistoryFix = resources.REBLURDiffuseSpecularHistoryFixCompute;
@@ -484,11 +492,38 @@ namespace VividRP.Runtime.RenderPass.Core
                 Bind(cmd, m_ClassifyTiles, OutTilesId, m_Tiles);
                 cmd.DispatchCompute(m_ClassifyTiles, 0, tileX, tileY, 1);
 
+                var prePassDiffuse = m_PreparedDiffuse;
+                var prePassSpecular = m_PreparedSpecular;
+                var hitDistanceReconstruction = GetHitDistanceReconstructionShader();
+                if (hitDistanceReconstruction != null)
+                {
+                    ConstantBuffer.Push(
+                        cmd,
+                        m_Constants,
+                        hitDistanceReconstruction,
+                        HitDistanceReconstructionConstantsId);
+                    BindCommonGuides(cmd, hitDistanceReconstruction);
+                    Bind(cmd, hitDistanceReconstruction, InTilesId, m_Tiles);
+                    Bind(cmd, hitDistanceReconstruction, InDiffuseId, m_PreparedDiffuse);
+                    Bind(cmd, hitDistanceReconstruction, InSpecularId, m_PreparedSpecular);
+                    Bind(cmd, hitDistanceReconstruction, OutDiffuseId, m_DiffuseTemp2);
+                    Bind(cmd, hitDistanceReconstruction, OutSpecularId, m_SpecularTemp2);
+                    cmd.DispatchCompute(
+                        hitDistanceReconstruction,
+                        0,
+                        dispatchX,
+                        dispatchY,
+                        1);
+
+                    prePassDiffuse = m_DiffuseTemp2;
+                    prePassSpecular = m_SpecularTemp2;
+                }
+
                 ConstantBuffer.Push(cmd, m_Constants, m_PrePass, PrePassConstantsId);
                 BindCommonGuides(cmd, m_PrePass);
                 Bind(cmd, m_PrePass, InTilesId, m_Tiles);
-                Bind(cmd, m_PrePass, InDiffuseId, m_PreparedDiffuse);
-                Bind(cmd, m_PrePass, InSpecularId, m_PreparedSpecular);
+                Bind(cmd, m_PrePass, InDiffuseId, prePassDiffuse);
+                Bind(cmd, m_PrePass, InSpecularId, prePassSpecular);
                 Bind(cmd, m_PrePass, OutDiffuseId, m_DiffuseTemp1);
                 Bind(cmd, m_PrePass, OutSpecularId, m_SpecularTemp1);
                 Bind(cmd, m_PrePass, OutSpecularHitDistanceId, m_SpecularHitDistance);
@@ -586,6 +621,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_CameraStates.Dispose();
             m_ClassifyTiles = null;
+            m_HitDistanceReconstruction3x3 = null;
+            m_HitDistanceReconstruction5x5 = null;
             m_PrePass = null;
             m_TemporalAccumulation = null;
             m_HistoryFix = null;
@@ -668,6 +705,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanExecute()
         {
             return m_ClassifyTiles != null
+                && CanExecuteHitDistanceReconstruction()
                 && m_PrePass != null
                 && m_TemporalAccumulation != null
                 && m_HistoryFix != null
@@ -716,6 +754,34 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsValid(m_SpecularFast)
                 && IsValid(m_PreparedDiffuse)
                 && IsValid(m_PreparedSpecular);
+        }
+
+        private bool CanExecuteHitDistanceReconstruction()
+        {
+            switch (m_Settings.hitDistanceReconstructionMode)
+            {
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Off:
+                    return true;
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area3x3:
+                    return m_HitDistanceReconstruction3x3 != null;
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5:
+                    return m_HitDistanceReconstruction5x5 != null;
+                default:
+                    return false;
+            }
+        }
+
+        private ComputeShader GetHitDistanceReconstructionShader()
+        {
+            switch (m_Settings.hitDistanceReconstructionMode)
+            {
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area3x3:
+                    return m_HitDistanceReconstruction3x3;
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5:
+                    return m_HitDistanceReconstruction5x5;
+                default:
+                    return null;
+            }
         }
 
         private bool CanResolveRaw()

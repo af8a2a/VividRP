@@ -129,6 +129,10 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: ada210e750e491a4caf84647478fef94, type: 3}
   - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HistoryFix
     ResourceObject: {fileID: 7200000, guid: 2abac24554fd0f64ca0ce7b03b3e7a8b, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HitDistanceReconstruction3x3
+    ResourceObject: {fileID: 7200000, guid: 93eb8f03e4bc26345b9715a253ee0ac7, type: 3}
+  - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HitDistanceReconstruction5x5
+    ResourceObject: {fileID: 7200000, guid: 4c7219d83e8df0b4d8965c294bbdf23b, type: 3}
   - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlur
     ResourceObject: {fileID: 7200000, guid: 8fec823c9147cab4499ae974c08e0a98, type: 3}
   - ResourceName: Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PrePass

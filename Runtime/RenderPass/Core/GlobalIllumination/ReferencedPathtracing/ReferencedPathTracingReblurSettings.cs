@@ -16,6 +16,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public float fastHistoryClampingSigmaScale;
         public float diffusePrepassBlurRadius;
         public float specularPrepassBlurRadius;
+        public ReferencedPathTracingReblurHitDistanceReconstructionMode
+            hitDistanceReconstructionMode;
         public float minBlurRadius;
         public float maxBlurRadius;
         public float lobeAngleFraction;
@@ -43,6 +45,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 fastHistoryClampingSigmaScale = 2.0f,
                 diffusePrepassBlurRadius = 30.0f,
                 specularPrepassBlurRadius = 50.0f,
+                hitDistanceReconstructionMode =
+                    ReferencedPathTracingReblurHitDistanceReconstructionMode.Off,
                 minBlurRadius = 1.0f,
                 maxBlurRadius = 30.0f,
                 lobeAngleFraction = 0.15f,
@@ -70,6 +74,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && fastHistoryClampingSigmaScale.Equals(other.fastHistoryClampingSigmaScale)
                 && diffusePrepassBlurRadius.Equals(other.diffusePrepassBlurRadius)
                 && specularPrepassBlurRadius.Equals(other.specularPrepassBlurRadius)
+                && hitDistanceReconstructionMode == other.hitDistanceReconstructionMode
                 && minBlurRadius.Equals(other.minBlurRadius)
                 && maxBlurRadius.Equals(other.maxBlurRadius)
                 && lobeAngleFraction.Equals(other.lobeAngleFraction)
@@ -106,6 +111,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 hash = (hash * 397) ^ fastHistoryClampingSigmaScale.GetHashCode();
                 hash = (hash * 397) ^ diffusePrepassBlurRadius.GetHashCode();
                 hash = (hash * 397) ^ specularPrepassBlurRadius.GetHashCode();
+                hash = (hash * 397) ^ (int)hitDistanceReconstructionMode;
                 hash = (hash * 397) ^ minBlurRadius.GetHashCode();
                 hash = (hash * 397) ^ maxBlurRadius.GetHashCode();
                 hash = (hash * 397) ^ lobeAngleFraction.GetHashCode();
@@ -176,6 +182,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 volume.specularPrepassBlurRadius.value,
                 0.0f,
                 75.0f);
+            settings.hitDistanceReconstructionMode =
+                SanitizeHitDistanceReconstructionMode(
+                    volume.hitDistanceReconstructionMode.value);
             settings.maxBlurRadius = Mathf.Clamp(volume.maxBlurRadius.value, 0.0f, 60.0f);
             settings.minBlurRadius = Mathf.Min(
                 Mathf.Clamp(volume.minBlurRadius.value, 0.0f, 10.0f),
@@ -204,6 +213,20 @@ namespace VividRP.Runtime.RenderPass.Core
             settings.returnHistoryLengthInsteadOfOcclusion =
                 volume.returnHistoryLengthInsteadOfOcclusion.value;
             return settings;
+        }
+
+        private static ReferencedPathTracingReblurHitDistanceReconstructionMode
+            SanitizeHitDistanceReconstructionMode(
+                ReferencedPathTracingReblurHitDistanceReconstructionMode mode)
+        {
+            switch (mode)
+            {
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area3x3:
+                case ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5:
+                    return mode;
+                default:
+                    return ReferencedPathTracingReblurHitDistanceReconstructionMode.Off;
+            }
         }
     }
 }

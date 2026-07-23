@@ -17,6 +17,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_FastHistoryClampingSigmaScale;
         private SerializedDataParameter m_DiffusePrepassBlurRadius;
         private SerializedDataParameter m_SpecularPrepassBlurRadius;
+        private SerializedDataParameter m_HitDistanceReconstructionMode;
         private SerializedDataParameter m_MinBlurRadius;
         private SerializedDataParameter m_MaxBlurRadius;
         private SerializedDataParameter m_LobeAngleFraction;
@@ -48,6 +49,8 @@ namespace VividRP.Editor
                 Unpack(fetcher.Find(x => x.fastHistoryClampingSigmaScale));
             m_DiffusePrepassBlurRadius = Unpack(fetcher.Find(x => x.diffusePrepassBlurRadius));
             m_SpecularPrepassBlurRadius = Unpack(fetcher.Find(x => x.specularPrepassBlurRadius));
+            m_HitDistanceReconstructionMode =
+                Unpack(fetcher.Find(x => x.hitDistanceReconstructionMode));
             m_MinBlurRadius = Unpack(fetcher.Find(x => x.minBlurRadius));
             m_MaxBlurRadius = Unpack(fetcher.Find(x => x.maxBlurRadius));
             m_LobeAngleFraction = Unpack(fetcher.Find(x => x.lobeAngleFraction));
@@ -95,6 +98,7 @@ namespace VividRP.Editor
             DrawSectionHeader("Spatial filtering");
             PropertyField(m_DiffusePrepassBlurRadius);
             PropertyField(m_SpecularPrepassBlurRadius);
+            PropertyField(m_HitDistanceReconstructionMode);
             PropertyField(m_MinBlurRadius);
             PropertyField(m_MaxBlurRadius);
             PropertyField(m_LobeAngleFraction);
@@ -116,7 +120,7 @@ namespace VividRP.Editor
             DrawSectionHeader("Debug");
             PropertyField(m_ReturnHistoryLengthInsteadOfOcclusion);
             EditorGUILayout.HelpBox(
-                "Checkerboard, hit-distance reconstruction and temporal stabilization remain disabled in the current full-resolution integration.",
+                "Checkerboard and temporal stabilization remain disabled in the current full-resolution integration.",
                 MessageType.Info);
         }
 

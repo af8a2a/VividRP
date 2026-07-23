@@ -75,6 +75,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(volume.historyFixFrameNum.value, Is.EqualTo(3));
                 Assert.That(volume.diffusePrepassBlurRadius.value, Is.EqualTo(30.0f));
                 Assert.That(volume.specularPrepassBlurRadius.value, Is.EqualTo(50.0f));
+                Assert.That(
+                    volume.hitDistanceReconstructionMode.value,
+                    Is.EqualTo(
+                        ReferencedPathTracingReblurHitDistanceReconstructionMode.Off));
                 Assert.That(volume.minBlurRadius.value, Is.EqualTo(1.0f));
                 Assert.That(volume.maxBlurRadius.value, Is.EqualTo(30.0f));
                 Assert.That(volume.lobeAngleFraction.value, Is.EqualTo(0.15f));
@@ -109,6 +113,8 @@ namespace VividRP.Editor.Tests
             volume.hitDistanceC.value = 10.0f;
             volume.hitDistanceD.value = -12.0f;
             volume.enableAntiFirefly.value = true;
+            volume.hitDistanceReconstructionMode.value =
+                ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5;
 
             try
             {
@@ -130,6 +136,10 @@ namespace VividRP.Editor.Tests
                     settings.hitDistanceParameters,
                     Is.EqualTo(new Vector4(4.0f, 0.2f, 10.0f, -12.0f)));
                 Assert.That(settings.enableAntiFirefly, Is.True);
+                Assert.That(
+                    settings.hitDistanceReconstructionMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingReblurHitDistanceReconstructionMode.Area5x5));
 
                 var pass = new ReferencedPathTracingPass();
                 var frameData = new ContextContainer();
@@ -201,6 +211,17 @@ namespace VividRP.Editor.Tests
             Assert.That(constants.gMaxAccumulatedFrameNum, Is.Zero);
             Assert.That(constants.gMaxFastAccumulatedFrameNum, Is.Zero);
             Assert.That(constants.gResetHistory, Is.EqualTo(1u));
+        }
+
+        [Test]
+        public void SettingsEquality_ChangesWhenHitDistanceReconstructionModeChanges()
+        {
+            var settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            var reconstructedSettings = settings;
+            reconstructedSettings.hitDistanceReconstructionMode =
+                ReferencedPathTracingReblurHitDistanceReconstructionMode.Area3x3;
+
+            Assert.That(settings.Equals(reconstructedSettings), Is.False);
         }
 
         [Test]

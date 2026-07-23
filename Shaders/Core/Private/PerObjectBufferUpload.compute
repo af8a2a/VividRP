@@ -1,0 +1,23 @@
+#pragma kernel CopyPerObjectBufferRanges
+#pragma use_dxc
+
+ByteAddressBuffer _VividPerObjectUploadSource;
+RWByteAddressBuffer _VividPerObjectUploadDestination;
+StructuredBuffer<uint3> _VividPerObjectUploadOperations;
+uint _VividPerObjectUploadOperationCount;
+uint _VividPerObjectUploadOperationBase;
+
+[numthreads(64, 1, 1)]
+void CopyPerObjectBufferRanges(uint3 groupId : SV_GroupID, uint3 groupThreadId : SV_GroupThreadID)
+{
+    const uint operationIndex = _VividPerObjectUploadOperationBase + groupId.x;
+    if (operationIndex >= _VividPerObjectUploadOperationCount)
+        return;
+
+    const uint3 operation = _VividPerObjectUploadOperations[operationIndex];
+    for (uint byteOffset = groupThreadId.x * 4u; byteOffset < operation.z; byteOffset += 64u * 4u)
+    {
+        const uint value = _VividPerObjectUploadSource.Load(operation.x + byteOffset);
+        _VividPerObjectUploadDestination.Store(operation.y + byteOffset, value);
+    }
+}

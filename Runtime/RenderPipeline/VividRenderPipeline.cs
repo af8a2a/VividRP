@@ -177,6 +177,8 @@ namespace VividRP.Runtime
                     cmdBuffer = CommandBufferPool.Get("VividRP");
                 }
 
+                VividPerObjectBuffer.PrepareAndBind(cmdBuffer);
+
                 if (ShouldUsePreviewCameraRenderPath(camera.cameraType))
                 {
                     using (s_PreviewCameraMarker.Auto())
@@ -794,6 +796,7 @@ namespace VividRP.Runtime
             BlueNoise.Cleanup();
             LensFlareCommonSRP.Dispose();
             Blitter.Cleanup();
+            VividPerObjectBuffer.DisposeAll();
             PipelineResourceManager.Cleanup();
             VividAdaptiveProbeVolumeUtility.Cleanup(m_Asset);
             ReleaseConstantBuffersForShutdown();

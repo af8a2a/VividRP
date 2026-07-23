@@ -7,9 +7,9 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
     /// NRD REBLUR DIFFUSE_SPECULAR integration for the reference path tracer. V1 uses the canonical
-    /// pre-pass, temporal accumulation, history fix, blur and post-blur sequence. Optional hit-distance
-    /// reconstruction and temporal stabilization remain disabled until checkerboard/base-color modes
-    /// are exposed as pipeline settings.
+    /// pre-pass, temporal accumulation, history fix, blur, post-blur and optional temporal
+    /// stabilization sequence. Hit-distance reconstruction and stabilization follow the matching
+    /// NRD v4.16 permutations; checkerboard remains disabled.
     /// </summary>
     public sealed class ReferencedPathTracingReblurPass : UnsafePass, IRenderGraphSideEffectPass
     {
@@ -30,8 +30,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string InternalDataHistoryKey = "ReferencedPathTracingReblur.InternalData";
         private const string DiffuseHistoryKey = "ReferencedPathTracingReblur.Diffuse";
         private const string DiffuseFastHistoryKey = "ReferencedPathTracingReblur.DiffuseFast";
+        private const string DiffuseStabilizedLumaHistoryKey =
+            "ReferencedPathTracingReblur.DiffuseStabilizedLuma";
         private const string SpecularHistoryKey = "ReferencedPathTracingReblur.Specular";
         private const string SpecularFastHistoryKey = "ReferencedPathTracingReblur.SpecularFast";
+        private const string SpecularStabilizedLumaHistoryKey =
+            "ReferencedPathTracingReblur.SpecularStabilizedLuma";
         private const string SpecularHitDistanceHistoryKey =
             "ReferencedPathTracingReblur.SpecularHitDistance";
 
@@ -47,6 +51,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("REBLUR_HistoryFixConstants");
         private static readonly int BlurConstantsId = Shader.PropertyToID("REBLUR_BlurConstants");
         private static readonly int PostBlurConstantsId = Shader.PropertyToID("REBLUR_PostBlurConstants");
+        private static readonly int TemporalStabilizationConstantsId =
+            Shader.PropertyToID("REBLUR_TemporalStabilizationConstants");
 
         private static readonly int InViewZId = Shader.PropertyToID("gIn_ViewZ");
         private static readonly int InMotionVectorsId = Shader.PropertyToID("gIn_Mv");
@@ -58,6 +64,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OutDiffuseId = Shader.PropertyToID("gOut_Diff");
         private static readonly int OutSpecularId = Shader.PropertyToID("gOut_Spec");
         private static readonly int InData1Id = Shader.PropertyToID("gIn_Data1");
+        private static readonly int InData2Id = Shader.PropertyToID("gIn_Data2");
         private static readonly int OutData1Id = Shader.PropertyToID("gOut_Data1");
         private static readonly int OutData2Id = Shader.PropertyToID("gOut_Data2");
         private static readonly int InDiffuseFastId = Shader.PropertyToID("gIn_DiffFast");
@@ -87,6 +94,17 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OutInternalDataId = Shader.PropertyToID("gOut_InternalData");
         private static readonly int OutDiffuseCopyId = Shader.PropertyToID("gOut_DiffCopy");
         private static readonly int OutSpecularCopyId = Shader.PropertyToID("gOut_SpecCopy");
+        private static readonly int InBaseColorMetalnessId =
+            Shader.PropertyToID("gIn_BaseColor_Metalness");
+        private static readonly int InOutMotionVectorsId = Shader.PropertyToID("gInOut_Mv");
+        private static readonly int HistoryDiffuseLumaStabilizedId =
+            Shader.PropertyToID("gHistory_DiffLumaStabilized");
+        private static readonly int HistorySpecularLumaStabilizedId =
+            Shader.PropertyToID("gHistory_SpecLumaStabilized");
+        private static readonly int OutDiffuseLumaStabilizedId =
+            Shader.PropertyToID("gOut_DiffLumaStabilized");
+        private static readonly int OutSpecularLumaStabilizedId =
+            Shader.PropertyToID("gOut_SpecLumaStabilized");
 
         private static readonly int ResolveInputDiffuseId = Shader.PropertyToID("_ReblurDiffuse");
         private static readonly int ResolveInputSpecularId = Shader.PropertyToID("_ReblurSpecular");
@@ -181,6 +199,12 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "ReblurCurrentDiffuseFast", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentDiffuseFast;
 
+        [RenderGraphResource(Name = "ReblurPreviousDiffuseStabilizedLuma", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_PreviousDiffuseStabilizedLuma;
+
+        [RenderGraphResource(Name = "ReblurCurrentDiffuseStabilizedLuma", Access = AccessFlags.ReadWrite)]
+        private RenderGraphTexture m_CurrentDiffuseStabilizedLuma;
+
         [RenderGraphResource(Name = "ReblurPreviousSpecular", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousSpecular;
 
@@ -192,6 +216,12 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "ReblurCurrentSpecularFast", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentSpecularFast;
+
+        [RenderGraphResource(Name = "ReblurPreviousSpecularStabilizedLuma", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_PreviousSpecularStabilizedLuma;
+
+        [RenderGraphResource(Name = "ReblurCurrentSpecularStabilizedLuma", Access = AccessFlags.ReadWrite)]
+        private RenderGraphTexture m_CurrentSpecularStabilizedLuma;
 
         [RenderGraphResource(Name = "ReblurPreviousSpecularHitDistance", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousSpecularHitDistance;
@@ -239,6 +269,10 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private RenderGraphTexture m_SpecularFast;
 
+        [RenderGraphResource(Name = "ReblurTemporalStabilizationMotionVectors", Access = AccessFlags.ReadWrite)]
+        [TransientResource]
+        private RenderGraphTexture m_TemporalStabilizationMotionVectors;
+
         [RenderGraphResource(Name = "ReblurPreparedDiffuse", Access = AccessFlags.ReadWrite)]
         [TransientResource]
         private RenderGraphTexture m_PreparedDiffuse;
@@ -255,6 +289,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_HistoryFix;
         private ComputeShader m_Blur;
         private ComputeShader m_PostBlur;
+        private ComputeShader m_PostBlurTemporalStabilization;
+        private ComputeShader m_TemporalStabilization;
         private ComputeShader m_Resolve;
         private readonly CameraRelativeSystem<ReblurCameraState> m_CameraStates = new();
         private int m_PrepareKernel = -1;
@@ -327,6 +363,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 "ReblurPreviousDiffuseFast",
                 GraphicsFormat.R16_SFloat);
             m_CurrentDiffuseFast = CreateTexture("ReblurCurrentDiffuseFast", GraphicsFormat.R16_SFloat);
+            m_PreviousDiffuseStabilizedLuma = RenderGraphTexture.CreateInput(
+                "ReblurPreviousDiffuseStabilizedLuma",
+                GraphicsFormat.R16_SFloat);
+            m_CurrentDiffuseStabilizedLuma = CreateTexture(
+                "ReblurCurrentDiffuseStabilizedLuma",
+                GraphicsFormat.R16_SFloat);
             m_PreviousSpecular = RenderGraphTexture.CreateInput(
                 "ReblurPreviousSpecular",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -335,6 +377,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 "ReblurPreviousSpecularFast",
                 GraphicsFormat.R16_SFloat);
             m_CurrentSpecularFast = CreateTexture("ReblurCurrentSpecularFast", GraphicsFormat.R16_SFloat);
+            m_PreviousSpecularStabilizedLuma = RenderGraphTexture.CreateInput(
+                "ReblurPreviousSpecularStabilizedLuma",
+                GraphicsFormat.R16_SFloat);
+            m_CurrentSpecularStabilizedLuma = CreateTexture(
+                "ReblurCurrentSpecularStabilizedLuma",
+                GraphicsFormat.R16_SFloat);
             m_PreviousSpecularHitDistance = RenderGraphTexture.CreateInput(
                 "ReblurPreviousSpecularHitDistance",
                 GraphicsFormat.R16_SFloat);
@@ -352,6 +400,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SpecularTemp2 = CreateTexture("ReblurSpecularTemp2", GraphicsFormat.R16G16B16A16_SFloat);
             m_DiffuseFast = CreateTexture("ReblurDiffuseFast", GraphicsFormat.R16_SFloat);
             m_SpecularFast = CreateTexture("ReblurSpecularFast", GraphicsFormat.R16_SFloat);
+            m_TemporalStabilizationMotionVectors = CreateTexture(
+                "ReblurTemporalStabilizationMotionVectors",
+                GraphicsFormat.R16G16B16A16_SFloat);
             m_PreparedDiffuse = CreateTexture(
                 "ReblurPreparedDiffuse",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -376,6 +427,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HistoryFix = resources.REBLURDiffuseSpecularHistoryFixCompute;
             m_Blur = resources.REBLURDiffuseSpecularBlurCompute;
             m_PostBlur = resources.REBLURDiffuseSpecularPostBlurCompute;
+            m_PostBlurTemporalStabilization =
+                resources.REBLURDiffuseSpecularPostBlurTemporalStabilizationCompute;
+            m_TemporalStabilization =
+                resources.REBLURDiffuseSpecularTemporalStabilizationCompute;
             m_Resolve = resources.REBLURDiffuseSpecularResolveCompute;
             if (m_Resolve != null)
             {
@@ -427,6 +482,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_PreviousDiffuseFast,
                 m_CurrentDiffuseFast,
                 GraphicsFormat.R16_SFloat);
+            bool hasDiffuseStabilizedLuma = AllocateHistory(
+                DiffuseStabilizedLumaHistoryKey,
+                m_PreviousDiffuseStabilizedLuma,
+                m_CurrentDiffuseStabilizedLuma,
+                GraphicsFormat.R16_SFloat);
             bool hasSpecular = AllocateHistory(
                 SpecularHistoryKey,
                 m_PreviousSpecular,
@@ -436,6 +496,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 SpecularFastHistoryKey,
                 m_PreviousSpecularFast,
                 m_CurrentSpecularFast,
+                GraphicsFormat.R16_SFloat);
+            bool hasSpecularStabilizedLuma = AllocateHistory(
+                SpecularStabilizedLumaHistoryKey,
+                m_PreviousSpecularStabilizedLuma,
+                m_CurrentSpecularStabilizedLuma,
                 GraphicsFormat.R16_SFloat);
             bool hasSpecularHitDistance = AllocateHistory(
                 SpecularHitDistanceHistoryKey,
@@ -453,8 +518,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && hasInternalData
                 && hasDiffuse
                 && hasDiffuseFast
+                && hasDiffuseStabilizedLuma
                 && hasSpecular
                 && hasSpecularFast
+                && hasSpecularStabilizedLuma
                 && hasSpecularHitDistance;
             m_Constants = ReblurSharedConstants.Compute(
                 cameraData,
@@ -598,23 +665,110 @@ namespace VividRP.Runtime.RenderPass.Core
                 Bind(cmd, m_Blur, OutSpecularId, m_SpecularTemp2);
                 cmd.DispatchCompute(m_Blur, 0, dispatchX, dispatchY, 1);
 
-                ConstantBuffer.Push(cmd, m_Constants, m_PostBlur, PostBlurConstantsId);
-                Bind(cmd, m_PostBlur, InTilesId, m_Tiles);
-                Bind(cmd, m_PostBlur, InNormalRoughnessId, m_NormalRoughnessInput);
-                Bind(cmd, m_PostBlur, InData1Id, m_Data1);
-                Bind(cmd, m_PostBlur, InViewZId, m_CurrentViewZ);
-                Bind(cmd, m_PostBlur, InDiffuseId, m_DiffuseTemp2);
-                Bind(cmd, m_PostBlur, InSpecularId, m_SpecularTemp2);
-                Bind(cmd, m_PostBlur, OutNormalRoughnessId, m_CurrentNormalRoughness);
-                Bind(cmd, m_PostBlur, OutDiffuseId, m_CurrentDiffuse);
-                Bind(cmd, m_PostBlur, OutSpecularId, m_CurrentSpecular);
-                Bind(cmd, m_PostBlur, OutInternalDataId, m_CurrentInternalData);
-                Bind(cmd, m_PostBlur, OutDiffuseCopyId, m_DiffuseOutput);
-                Bind(cmd, m_PostBlur, OutSpecularCopyId, m_SpecularOutput);
-                cmd.DispatchCompute(m_PostBlur, 0, dispatchX, dispatchY, 1);
+                bool useTemporalStabilization = m_Settings.maxStabilizedFrameNum > 0;
+                var postBlur = useTemporalStabilization
+                    ? m_PostBlurTemporalStabilization
+                    : m_PostBlur;
+                ConstantBuffer.Push(cmd, m_Constants, postBlur, PostBlurConstantsId);
+                Bind(cmd, postBlur, InTilesId, m_Tiles);
+                Bind(cmd, postBlur, InNormalRoughnessId, m_NormalRoughnessInput);
+                Bind(cmd, postBlur, InData1Id, m_Data1);
+                Bind(cmd, postBlur, InViewZId, m_CurrentViewZ);
+                Bind(cmd, postBlur, InDiffuseId, m_DiffuseTemp2);
+                Bind(cmd, postBlur, InSpecularId, m_SpecularTemp2);
+                Bind(cmd, postBlur, OutNormalRoughnessId, m_CurrentNormalRoughness);
+                Bind(cmd, postBlur, OutDiffuseId, m_CurrentDiffuse);
+                Bind(cmd, postBlur, OutSpecularId, m_CurrentSpecular);
+
+                if (!useTemporalStabilization)
+                {
+                    Bind(cmd, postBlur, OutInternalDataId, m_CurrentInternalData);
+                    Bind(cmd, postBlur, OutDiffuseCopyId, m_DiffuseOutput);
+                    Bind(cmd, postBlur, OutSpecularCopyId, m_SpecularOutput);
+                }
+
+                cmd.DispatchCompute(postBlur, 0, dispatchX, dispatchY, 1);
+
+                if (useTemporalStabilization)
+                    DispatchTemporalStabilization(cmd, dispatchX, dispatchY);
 
                 DispatchResolve(cmd);
             }
+        }
+
+        private void DispatchTemporalStabilization(
+            CommandBuffer cmd,
+            int dispatchX,
+            int dispatchY)
+        {
+            cmd.CopyTexture(
+                m_MotionVectorsInput.innerHandle,
+                m_TemporalStabilizationMotionVectors.innerHandle);
+
+            ConstantBuffer.Push(
+                cmd,
+                m_Constants,
+                m_TemporalStabilization,
+                TemporalStabilizationConstantsId);
+            Bind(cmd, m_TemporalStabilization, InTilesId, m_Tiles);
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                InNormalRoughnessId,
+                m_NormalRoughnessInput);
+            Bind(cmd, m_TemporalStabilization, InViewZId, m_CurrentViewZ);
+            Bind(cmd, m_TemporalStabilization, InData1Id, m_Data1);
+            Bind(cmd, m_TemporalStabilization, InData2Id, m_Data2);
+            // This permutation keeps NRD's base-color slot bound, but MV modification is disabled by
+            // gSpecProbabilityThresholdsForMvModification=(2,3), so the dummy value is never sampled.
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                InBaseColorMetalnessId,
+                m_DiffuseMaterialFactorInput);
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                InSpecularHitDistanceId,
+                m_CurrentSpecularHitDistance);
+            Bind(cmd, m_TemporalStabilization, InDiffuseId, m_CurrentDiffuse);
+            Bind(cmd, m_TemporalStabilization, InSpecularId, m_CurrentSpecular);
+            BindStabilizedLumaHistory(
+                cmd,
+                HistoryDiffuseLumaStabilizedId,
+                m_PreviousDiffuseStabilizedLuma);
+            BindStabilizedLumaHistory(
+                cmd,
+                HistorySpecularLumaStabilizedId,
+                m_PreviousSpecularStabilizedLuma);
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                InOutMotionVectorsId,
+                m_TemporalStabilizationMotionVectors);
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                OutInternalDataId,
+                m_CurrentInternalData);
+            Bind(cmd, m_TemporalStabilization, OutDiffuseId, m_DiffuseOutput);
+            Bind(cmd, m_TemporalStabilization, OutSpecularId, m_SpecularOutput);
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                OutDiffuseLumaStabilizedId,
+                m_CurrentDiffuseStabilizedLuma);
+            Bind(
+                cmd,
+                m_TemporalStabilization,
+                OutSpecularLumaStabilizedId,
+                m_CurrentSpecularStabilizedLuma);
+            cmd.DispatchCompute(
+                m_TemporalStabilization,
+                0,
+                dispatchX,
+                dispatchY,
+                1);
         }
 
         public override void Dispose()
@@ -628,6 +782,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HistoryFix = null;
             m_Blur = null;
             m_PostBlur = null;
+            m_PostBlurTemporalStabilization = null;
+            m_TemporalStabilization = null;
             m_Resolve = null;
             m_PrepareKernel = -1;
             m_ResolveKernel = -1;
@@ -682,8 +838,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CurrentInternalData,
                 m_CurrentDiffuse,
                 m_CurrentDiffuseFast,
+                m_CurrentDiffuseStabilizedLuma,
                 m_CurrentSpecular,
                 m_CurrentSpecularFast,
+                m_CurrentSpecularStabilizedLuma,
                 m_CurrentSpecularHitDistance,
                 m_Data1,
                 m_Data2,
@@ -694,6 +852,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_SpecularTemp2,
                 m_DiffuseFast,
                 m_SpecularFast,
+                m_TemporalStabilizationMotionVectors,
                 m_PreparedDiffuse,
                 m_PreparedSpecular
             };
@@ -710,7 +869,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_TemporalAccumulation != null
                 && m_HistoryFix != null
                 && m_Blur != null
-                && m_PostBlur != null
+                && CanExecuteTemporalStabilization()
                 && m_Resolve != null
                 && m_PrepareKernel >= 0
                 && m_ResolveKernel >= 0
@@ -736,10 +895,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsValid(m_CurrentDiffuse)
                 && IsValid(m_PreviousDiffuseFast)
                 && IsValid(m_CurrentDiffuseFast)
+                && IsValid(m_PreviousDiffuseStabilizedLuma)
+                && IsValid(m_CurrentDiffuseStabilizedLuma)
                 && IsValid(m_PreviousSpecular)
                 && IsValid(m_CurrentSpecular)
                 && IsValid(m_PreviousSpecularFast)
                 && IsValid(m_CurrentSpecularFast)
+                && IsValid(m_PreviousSpecularStabilizedLuma)
+                && IsValid(m_CurrentSpecularStabilizedLuma)
                 && IsValid(m_PreviousSpecularHitDistance)
                 && IsValid(m_CurrentSpecularHitDistance)
                 && IsValid(m_Tiles)
@@ -752,8 +915,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsValid(m_SpecularTemp2)
                 && IsValid(m_DiffuseFast)
                 && IsValid(m_SpecularFast)
+                && IsValid(m_TemporalStabilizationMotionVectors)
                 && IsValid(m_PreparedDiffuse)
                 && IsValid(m_PreparedSpecular);
+        }
+
+        private bool CanExecuteTemporalStabilization()
+        {
+            return m_Settings.maxStabilizedFrameNum > 0
+                ? m_PostBlurTemporalStabilization != null && m_TemporalStabilization != null
+                : m_PostBlur != null;
         }
 
         private bool CanExecuteHitDistanceReconstruction()
@@ -876,6 +1047,27 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             Bind(cmd, shader, InViewZId, m_ViewZInput);
             Bind(cmd, shader, InNormalRoughnessId, m_NormalRoughnessInput);
+        }
+
+        private void BindStabilizedLumaHistory(
+            CommandBuffer cmd,
+            int propertyId,
+            RenderGraphTexture history)
+        {
+            if (m_HasValidHistory)
+            {
+                Bind(cmd, m_TemporalStabilization, propertyId, history);
+                return;
+            }
+
+            // The stabilization weight is zero on reset, but the official shader still evaluates
+            // anti-lag from history before applying that weight. A deterministic black SRV prevents
+            // uninitialized history from producing NaNs during the first stabilized frame.
+            cmd.SetComputeTextureParam(
+                m_TemporalStabilization,
+                0,
+                propertyId,
+                Texture2D.blackTexture);
         }
 
         private static void Bind(

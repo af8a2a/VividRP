@@ -72,6 +72,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(volume.enabled.value, Is.True);
                 Assert.That(volume.maxAccumulatedFrameNum.value, Is.EqualTo(30));
                 Assert.That(volume.maxFastAccumulatedFrameNum.value, Is.EqualTo(6));
+                Assert.That(
+                    volume.maxStabilizedFrameNum.value,
+                    Is.EqualTo(ReferencedPathTracingReblurVolume.MaxHistoryFrameNum));
                 Assert.That(volume.historyFixFrameNum.value, Is.EqualTo(3));
                 Assert.That(volume.diffusePrepassBlurRadius.value, Is.EqualTo(30.0f));
                 Assert.That(volume.specularPrepassBlurRadius.value, Is.EqualTo(50.0f));
@@ -104,6 +107,7 @@ namespace VividRP.Editor.Tests
             var volume = profile.Add<ReferencedPathTracingReblurVolume>(true);
             volume.maxAccumulatedFrameNum.value = 12;
             volume.maxFastAccumulatedFrameNum.value = 1;
+            volume.maxStabilizedFrameNum.value = 20;
             volume.historyFixFrameNum.value = 3;
             volume.responsiveAccumulationMinFrameNum.value = 3;
             volume.minBlurRadius.value = 5.0f;
@@ -128,6 +132,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(settings.maxAccumulatedFrameNum, Is.EqualTo(12));
                 Assert.That(settings.maxFastAccumulatedFrameNum, Is.EqualTo(1));
+                Assert.That(settings.maxStabilizedFrameNum, Is.EqualTo(12));
                 Assert.That(settings.historyFixFrameNum, Is.Zero);
                 Assert.That(settings.responsiveAccumulationMinFrameNum, Is.Zero);
                 Assert.That(settings.minBlurRadius, Is.EqualTo(2.0f));
@@ -172,6 +177,7 @@ namespace VividRP.Editor.Tests
             settings.antilagParameters = new Vector2(2.0f, 1.5f);
             settings.maxAccumulatedFrameNum = 12;
             settings.maxFastAccumulatedFrameNum = 4;
+            settings.maxStabilizedFrameNum = 8;
             settings.maxBlurRadius = 5.0f;
             settings.fastHistoryClampingSigmaScale = 1.5f;
             settings.lobeAngleFraction = 0.5f;
@@ -193,6 +199,7 @@ namespace VividRP.Editor.Tests
             Assert.That(constants.gAntilagParams, Is.EqualTo(settings.antilagParameters));
             Assert.That(constants.gMaxAccumulatedFrameNum, Is.EqualTo(12.0f));
             Assert.That(constants.gMaxFastAccumulatedFrameNum, Is.EqualTo(4.0f));
+            Assert.That(constants.gStabilizationStrength, Is.EqualTo(8.0f / 9.0f));
             Assert.That(constants.gFastHistoryClampingSigmaScale, Is.EqualTo(1.5f));
             Assert.That(constants.gLobeAngleFraction, Is.EqualTo(0.25f));
             Assert.That(constants.gAntiFirefly, Is.EqualTo(1.0f));
@@ -210,7 +217,18 @@ namespace VividRP.Editor.Tests
                 settings);
             Assert.That(constants.gMaxAccumulatedFrameNum, Is.Zero);
             Assert.That(constants.gMaxFastAccumulatedFrameNum, Is.Zero);
+            Assert.That(constants.gStabilizationStrength, Is.Zero);
             Assert.That(constants.gResetHistory, Is.EqualTo(1u));
+        }
+
+        [Test]
+        public void SettingsEquality_ChangesWhenTemporalStabilizationWindowChanges()
+        {
+            var settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            var changedSettings = settings;
+            changedSettings.maxStabilizedFrameNum = 0;
+
+            Assert.That(settings.Equals(changedSettings), Is.False);
         }
 
         [Test]
@@ -250,6 +268,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetOutputPortByName("m_Tiles"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_PreparedDiffuse"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_PreparedDiffuse"), Is.Null);
+                Assert.That(
+                    node.GetInputPortByName("m_TemporalStabilizationMotionVectors"),
+                    Is.Null);
+                Assert.That(
+                    node.GetOutputPortByName("m_TemporalStabilizationMotionVectors"),
+                    Is.Null);
             }
             finally
             {

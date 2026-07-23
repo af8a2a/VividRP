@@ -138,6 +138,10 @@ namespace VividRP.Runtime.RenderPass.Core
             float deltaTimeMs = Mathf.Max(Time.deltaTime * 1000.0f, 0.001f);
             float framerateScale = Mathf.Max(33.333f / deltaTimeMs, 1.0f);
             float denoisingRange = Mathf.Max(camera?.farClipPlane ?? 1000.0f, 1.0f);
+            int maxStabilizedFrameNum = Mathf.Clamp(
+                settings.maxStabilizedFrameNum,
+                0,
+                settings.maxAccumulatedFrameNum);
 
             return new ReblurSharedConstants
             {
@@ -184,7 +188,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 gCameraAttachedReflectionMaterialID = 999.0f,
                 gStrandMaterialID = 999.0f,
                 gStrandThickness = 80e-6f,
-                gStabilizationStrength = 0.0f,
+                gStabilizationStrength = hasValidHistory
+                    ? maxStabilizedFrameNum / (1.0f + maxStabilizedFrameNum)
+                    : 0.0f,
                 gDebug = 0.0f,
                 gOrthoMode = sigma.gOrthoMode,
                 gUnproject = sigma.gUnproject,

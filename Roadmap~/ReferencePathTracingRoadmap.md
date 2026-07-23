@@ -494,8 +494,9 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - 已参考 `E:\NRD-Sample_simplex`（NRD v4.16，revision
   `a805a0d2f9464f41790f4ad6ea952cc8fbf47917`）接入 shader-side
   `REBLUR_DIFFUSE_SPECULAR`。当前调度序列为 ClassifyTiles、PrePass、TemporalAccumulation、
-  HistoryFix、Blur、PostBlur，并可在 ClassifyTiles 与 PrePass 之间选择执行 3x3/5x5
-  hit-distance reconstruction；temporal stabilization 仍未启用。
+  HistoryFix、Blur、PostBlur、TemporalStabilization，并可在 ClassifyTiles 与 PrePass 之间选择执行
+  3x3/5x5 hit-distance reconstruction；当 `maxStabilizedFrameNum` 为 0 时使用无稳定化的
+  PostBlur permutation 并跳过 TemporalStabilization。
 - `ReferencedPathTracingPass` 现在输出 NRD front-end 约定的 diffuse/specular
   `RGBA16F radiance + normalized hit distance`（YCoCg packing），并将 emission 单独保留，最终 resolve
   时再合成，避免 emission 进入时域滤波。
@@ -510,18 +511,20 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   material factor。REBLUR 前先把 OpenPBR 的材质调制信号解调为 radiance，降噪后再重调制，避免
   base-color、metalness 和高频纹理边界被当作 lighting noise 跨表面扩散。
 - REBLUR history 由 RenderGraph history registry 按 camera 隔离，包含 previous viewZ、normal/roughness、
-  internal data、diffuse/specular main/fast history 和 specular hit-distance tracking；当完整 REBLUR
-  dispatch 不可用时，resolve 会回退到未降噪的 diffuse/specular 输入，而不是输出黑屏。
+  internal data、diffuse/specular main/fast history、diffuse/specular stabilized luma 和 specular
+  hit-distance tracking；当完整 REBLUR dispatch 不可用时，resolve 会回退到未降噪的
+  diffuse/specular 输入，而不是输出黑屏。
 - 已参考 NRD Sample 增加 `VividRP/Path Tracing/REBLUR Denoiser` VolumeComponent，开放当前调度链实际
   支持的 accumulation、history fix、anti-lag、prepass/spatial radius、normal/roughness rejection、
   anti-firefly、responsive accumulation、hit-distance normalization 和 debug 参数。已开放参数的
   默认值及约束与 NRD v4.16 `ReblurSettings` 对齐。
 - hit-distance normalization 参数同时驱动 path-tracing front-end 的 hitT 编码与 REBLUR backend 常量，
   避免只调整 denoiser 一侧造成信号契约失配；任意有效 REBLUR Volume 设置变化都会按 camera 使历史失效。
-- 当前调度链尚未实现 checkerboard 和 temporal stabilization，因此暂不暴露对应开关；Volume Inspector
-  会明确显示这些固定关闭的能力边界。
+- Volume 已开放 `maxStabilizedFrameNum`，默认沿用 NRD v4.16 的 63，并在运行时按
+  `maxAccumulatedFrameNum` 截断；0 显式关闭稳定化。checkerboard 仍未实现，Volume Inspector
+  会明确显示该能力边界。
 - 当前 Raytracing GBuffer 只覆盖 StandardLit，motion vector 只包含 camera motion；skinned/deformed
-  object previous position、checkerboard、confidence、动态分辨率与 temporal stabilization 列为后续质量项。
+  object previous position、checkerboard、confidence 与动态分辨率列为后续质量项。
 - 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised
   output 替代数值基线。
 - 当前尚未覆盖 scene/material mutation、手动 reset、target SPP、variance AOV 与 capture；这些仍属于本 milestone 后续范围。

@@ -11,6 +11,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public Vector2 antilagParameters;
         public int maxAccumulatedFrameNum;
         public int maxFastAccumulatedFrameNum;
+        public int maxStabilizedFrameNum;
         public int historyFixFrameNum;
         public int historyFixBasePixelStride;
         public float fastHistoryClampingSigmaScale;
@@ -40,6 +41,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 antilagParameters = new Vector2(4.0f, 3.0f),
                 maxAccumulatedFrameNum = 30,
                 maxFastAccumulatedFrameNum = 6,
+                maxStabilizedFrameNum = ReferencedPathTracingReblurVolume.MaxHistoryFrameNum,
                 historyFixFrameNum = 3,
                 historyFixBasePixelStride = 14,
                 fastHistoryClampingSigmaScale = 2.0f,
@@ -69,6 +71,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && antilagParameters.Equals(other.antilagParameters)
                 && maxAccumulatedFrameNum == other.maxAccumulatedFrameNum
                 && maxFastAccumulatedFrameNum == other.maxFastAccumulatedFrameNum
+                && maxStabilizedFrameNum == other.maxStabilizedFrameNum
                 && historyFixFrameNum == other.historyFixFrameNum
                 && historyFixBasePixelStride == other.historyFixBasePixelStride
                 && fastHistoryClampingSigmaScale.Equals(other.fastHistoryClampingSigmaScale)
@@ -106,6 +109,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 hash = (hash * 397) ^ antilagParameters.GetHashCode();
                 hash = (hash * 397) ^ maxAccumulatedFrameNum;
                 hash = (hash * 397) ^ maxFastAccumulatedFrameNum;
+                hash = (hash * 397) ^ maxStabilizedFrameNum;
                 hash = (hash * 397) ^ historyFixFrameNum;
                 hash = (hash * 397) ^ historyFixBasePixelStride;
                 hash = (hash * 397) ^ fastHistoryClampingSigmaScale.GetHashCode();
@@ -159,6 +163,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 volume.maxFastAccumulatedFrameNum.value,
                 0,
                 ReferencedPathTracingReblurVolume.MaxHistoryFrameNum);
+            settings.maxStabilizedFrameNum = Mathf.Clamp(
+                volume.maxStabilizedFrameNum.value,
+                0,
+                settings.maxAccumulatedFrameNum);
             int maximumHistoryFixFrameNum = Mathf.Max(
                 0,
                 Mathf.Min(3, settings.maxFastAccumulatedFrameNum - 1));

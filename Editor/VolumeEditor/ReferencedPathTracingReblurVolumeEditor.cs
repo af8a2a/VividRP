@@ -12,6 +12,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_Enabled;
         private SerializedDataParameter m_MaxAccumulatedFrameNum;
         private SerializedDataParameter m_MaxFastAccumulatedFrameNum;
+        private SerializedDataParameter m_MaxStabilizedFrameNum;
         private SerializedDataParameter m_HistoryFixFrameNum;
         private SerializedDataParameter m_HistoryFixBasePixelStride;
         private SerializedDataParameter m_FastHistoryClampingSigmaScale;
@@ -43,6 +44,7 @@ namespace VividRP.Editor
             m_Enabled = Unpack(fetcher.Find(x => x.enabled));
             m_MaxAccumulatedFrameNum = Unpack(fetcher.Find(x => x.maxAccumulatedFrameNum));
             m_MaxFastAccumulatedFrameNum = Unpack(fetcher.Find(x => x.maxFastAccumulatedFrameNum));
+            m_MaxStabilizedFrameNum = Unpack(fetcher.Find(x => x.maxStabilizedFrameNum));
             m_HistoryFixFrameNum = Unpack(fetcher.Find(x => x.historyFixFrameNum));
             m_HistoryFixBasePixelStride = Unpack(fetcher.Find(x => x.historyFixBasePixelStride));
             m_FastHistoryClampingSigmaScale =
@@ -85,6 +87,7 @@ namespace VividRP.Editor
             DrawSectionHeader("Accumulation");
             PropertyField(m_MaxAccumulatedFrameNum);
             PropertyField(m_MaxFastAccumulatedFrameNum);
+            PropertyField(m_MaxStabilizedFrameNum);
             PropertyField(m_HistoryFixFrameNum);
             PropertyField(m_HistoryFixBasePixelStride);
             PropertyField(m_FastHistoryClampingSigmaScale);
@@ -120,7 +123,7 @@ namespace VividRP.Editor
             DrawSectionHeader("Debug");
             PropertyField(m_ReturnHistoryLengthInsteadOfOcclusion);
             EditorGUILayout.HelpBox(
-                "Checkerboard and temporal stabilization remain disabled in the current full-resolution integration.",
+                "Checkerboard remains disabled in the current full-resolution integration.",
                 MessageType.Info);
         }
 

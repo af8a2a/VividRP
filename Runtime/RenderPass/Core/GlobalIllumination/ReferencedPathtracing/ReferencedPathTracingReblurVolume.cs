@@ -38,6 +38,12 @@ namespace VividRP.Runtime
         [Tooltip("Maximum number of frames accumulated by responsive fast history.")]
         public ClampedIntParameter maxFastAccumulatedFrameNum = new(6, 0, MaxHistoryFrameNum);
 
+        [Tooltip(
+            "Maximum number of frames accumulated by temporal stabilization. " +
+            "Zero disables the stabilization dispatch.")]
+        public ClampedIntParameter maxStabilizedFrameNum =
+            new(MaxHistoryFrameNum, 0, MaxHistoryFrameNum);
+
         [Tooltip("Number of frames reconstructed after a history reset.")]
         public ClampedIntParameter historyFixFrameNum = new(3, 0, 3);
 

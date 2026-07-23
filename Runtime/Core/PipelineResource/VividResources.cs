@@ -321,6 +321,14 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlur")]
         public ComputeShader REBLURDiffuseSpecularPostBlurCompute;
 
+        [VividResourcePath(
+            "Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlurTemporalStabilization")]
+        public ComputeShader REBLURDiffuseSpecularPostBlurTemporalStabilizationCompute;
+
+        [VividResourcePath(
+            "Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_TemporalStabilization")]
+        public ComputeShader REBLURDiffuseSpecularTemporalStabilizationCompute;
+
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_Resolve")]
         public ComputeShader REBLURDiffuseSpecularResolveCompute;
 

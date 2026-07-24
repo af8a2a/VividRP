@@ -2,7 +2,7 @@
   "name": "com.vivid.render-pipelines",
   "displayName": "Vivid Render Pipeline",
   "version": "0.1.0",
-  "unity": "6000.6",
+  "unity": "6000.7",
   "unityRelease": "0a3",
   "description": "VividRP is Unity's High-End-platform rendering solution, built on the Scriptable Render Pipeline (SRP) architecture. It is designed to deliver optimized graphics for a wide range of hardware, from mobile devices to high-end PCs and consoles.",
   "dependencies": {
@@ -11,7 +11,8 @@
     "com.unity.graphtoolkit": "0.5.0-exp.1",
     "com.unity.timeline": "1.8.12",
     "com.unity.shadergraph": "17.6.0",
-    "com.unity.rendering.denoising": "1.0.5"
+    "com.unity.rendering.denoising": "1.0.5",
+    "com.unity.performance.profile-analyzer": "1.4.0"
   },
   "author": {
     "name": "af8a2a",

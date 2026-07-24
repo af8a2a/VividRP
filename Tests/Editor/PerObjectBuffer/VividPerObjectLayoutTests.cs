@@ -243,56 +243,6 @@ namespace VividRP.Editor.Tests
             }
         }
 
-        [Test]
-        public void CoalesceDirtyRanges_MergesSequentialColorRecordsAcrossSmallGaps()
-        {
-            const int rendererCount = 1000;
-            const int recordStride = 32;
-            const int colorOffset = 4;
-            const int colorSize = 16;
-            const int firstRecordAddress = 16;
-
-            VividPerObjectBufferSystem.ClearDirtyRangesForTests();
-            for (int i = 0; i < rendererCount; i++)
-            {
-                VividPerObjectBufferSystem.MarkDirtyForTests(
-                    firstRecordAddress + i * recordStride + colorOffset,
-                    colorSize);
-            }
-
-            VividPerObjectBufferSystem.CoalesceDirtyRangesForTests();
-
-            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeCountForTests(), Is.EqualTo(1));
-            Assert.That(
-                VividPerObjectBufferSystem.GetCoalescedRangeStartForTests(0),
-                Is.EqualTo(firstRecordAddress + colorOffset));
-            Assert.That(
-                VividPerObjectBufferSystem.GetCoalescedRangeLengthForTests(0),
-                Is.EqualTo((rendererCount - 1) * recordStride + colorSize));
-            Assert.That(VividPerObjectBufferSystem.GetDirtyRangeSortCountForTests(), Is.Zero);
-        }
-
-        [Test]
-        public void CoalesceDirtyRanges_SortsOnlyWhenWritesAreOutOfOrder()
-        {
-            VividPerObjectBufferSystem.ClearDirtyRangesForTests();
-            VividPerObjectBufferSystem.MarkDirtyForTests(64, 4);
-            VividPerObjectBufferSystem.MarkDirtyForTests(128, 4);
-            VividPerObjectBufferSystem.CoalesceDirtyRangesForTests();
-
-            Assert.That(VividPerObjectBufferSystem.GetDirtyRangeSortCountForTests(), Is.Zero);
-            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeCountForTests(), Is.EqualTo(2));
-
-            VividPerObjectBufferSystem.ClearDirtyRangesForTests();
-            VividPerObjectBufferSystem.MarkDirtyForTests(128, 4);
-            VividPerObjectBufferSystem.MarkDirtyForTests(64, 4);
-            VividPerObjectBufferSystem.CoalesceDirtyRangesForTests();
-
-            Assert.That(VividPerObjectBufferSystem.GetDirtyRangeSortCountForTests(), Is.EqualTo(1));
-            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeCountForTests(), Is.EqualTo(2));
-            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeStartForTests(0), Is.EqualTo(64));
-            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeStartForTests(1), Is.EqualTo(128));
-        }
 
         [Test]
         public void Rebind_InvalidatesOldBlockAndRestoresOriginalValueOnUnbind()

@@ -243,6 +243,37 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void SetValue_DoesNotDirtyRecord_ForUnchangedVectorColorAndMatrix()
+        {
+            VividPerObjectLayout layout = CreateFullLayout();
+            var gameObject = new GameObject("Per Object Unchanged Values Renderer");
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
+            try
+            {
+                VividPerObjectBlock block = VividPerObjectBuffer.Bind(renderer, layout);
+                VividPerObjectBufferSystem.ClearDirtyRangesForTests();
+
+                block.SetVector("_Direction", new Vector4(1, 2, 3, 4));
+                block.SetColor("_Tint", new Color(0.1f, 0.2f, 0.3f, 0.4f));
+
+                var matrix = new Matrix4x4();
+                int next = 1;
+                for (int row = 0; row < 4; row++)
+                {
+                    for (int column = 0; column < 4; column++)
+                        matrix[row, column] = next++;
+                }
+                block.SetMatrix("_Deformation", matrix);
+
+                Assert.That(VividPerObjectBuffer.GetStats().DirtyRangeCount, Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
 
         [Test]
         public void Rebind_InvalidatesOldBlockAndRestoresOriginalValueOnUnbind()
@@ -317,6 +348,29 @@ namespace VividRP.Editor.Tests
             VividPerObjectBufferSystem.SweepDestroyedRenderersForTests();
             Assert.That(VividPerObjectBuffer.GetStats().ActiveRendererCount, Is.Zero);
             Assert.That(VividPerObjectBuffer.GetStats().UsedBytes,
+                Is.EqualTo(VividPerObjectRecordAllocator.ReservedBytes));
+        }
+
+        [Test]
+        public void DestroyedRenderer_PeriodicSweepDelaysFullScanUntilInterval()
+        {
+            VividPerObjectLayout layout = CreateFullLayout();
+            var gameObject = new GameObject("Periodically Swept Per Object Renderer");
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
+            VividPerObjectBuffer.Bind(renderer, layout);
+
+            VividPerObjectBufferSystem.SweepDestroyedRenderersIfNeededForTests();
+            Object.DestroyImmediate(gameObject);
+
+            for (int i = 0; i < 15; i++)
+                VividPerObjectBufferSystem.SweepDestroyedRenderersIfNeededForTests();
+
+            Assert.That(VividPerObjectBuffer.GetStats().ActiveRendererCount, Is.EqualTo(1));
+
+            VividPerObjectBufferSystem.SweepDestroyedRenderersIfNeededForTests();
+            Assert.That(VividPerObjectBuffer.GetStats().ActiveRendererCount, Is.Zero);
+            Assert.That(
+                VividPerObjectBuffer.GetStats().UsedBytes,
                 Is.EqualTo(VividPerObjectRecordAllocator.ReservedBytes));
         }
 

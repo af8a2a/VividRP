@@ -21,6 +21,7 @@ namespace VividRP.Runtime
         private const int RawBufferStride = sizeof(uint);
         private const int MaxThreadGroupsPerDispatch = 65535;
         private const int DirtyRangeMergeGapThreshold = 32;
+        private const int DestroyedRendererSweepPrepareInterval = 16;
         private const string UploadKernelName = "CopyPerObjectBufferRanges";
 
         private static readonly int s_PerObjectBufferId = Shader.PropertyToID("_VividPerObjectBuffer");
@@ -51,6 +52,7 @@ namespace VividRP.Runtime
         private static bool s_FullUploadRequired = true;
         private static bool s_DirtyRangesAreSorted = true;
         private static int s_LastDirtyRangeStart = int.MinValue;
+        private static int s_PreparesUntilDestroyedRendererSweep;
         private static int s_LastPreparedFrame = -1;
         private static int s_LastUploadBytes;
         private static int s_LastUploadRangeCount;
@@ -108,7 +110,7 @@ namespace VividRP.Runtime
                 else if (existing.Layout.IsEquivalentTo(layout)
                     && existing.LayoutSignature == layout.Signature)
                 {
-                    return new VividPerObjectBlock(rendererId, existing.Generation);
+                    return new VividPerObjectBlock(rendererId, existing.Generation, existing);
                 }
                 else
                 {
@@ -138,7 +140,7 @@ namespace VividRP.Runtime
                 assignedValue,
                 NextGeneration());
             s_Bindings.Add(rendererId, binding);
-            return new VividPerObjectBlock(rendererId, binding.Generation);
+            return new VividPerObjectBlock(rendererId, binding.Generation, binding);
         }
 
         internal static void Unbind(Renderer renderer)
@@ -199,7 +201,7 @@ namespace VividRP.Runtime
         {
             Binding binding = GetBinding(block);
             VividPerObjectPropertyHandle property = binding.Layout.GetProperty(propertyNameId);
-            SetValue(block, property, expectedType, value);
+            SetValue(binding, property, expectedType, value);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static void SetValue<T>(
@@ -210,15 +212,23 @@ namespace VividRP.Runtime
             where T : unmanaged
         {
             Binding binding = GetBinding(block);
+            SetValue(binding, property, expectedType, value);
+        }
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void SetValue<T>(
+            Binding binding,
+            VividPerObjectPropertyHandle property,
+            VividPerObjectPropertyType expectedType,
+            T value)
+            where T : unmanaged
+        {
             ValidateProperty(binding, property, expectedType, sizeof(T));
             int destinationOffset = binding.Address + property.Offset;
             byte[] data = s_Allocator.Data;
             fixed (byte* destination = &data[destinationOffset])
             {
-                T* source = &value;
-                if (UnsafeUtility.MemCmp(destination, source, sizeof(T)) == 0)
+                if (!WriteValueIfChanged(destination, value))
                     return;
-                UnsafeUtility.MemCpy(destination, source, sizeof(T));
             }
 
             MarkDirty(destinationOffset, sizeof(T));
@@ -232,7 +242,7 @@ namespace VividRP.Runtime
 
             using var prepareScope = s_PrepareMarker.Auto();
             ResetFrameUploadStatsIfNeeded();
-            SweepDestroyedRenderers();
+            SweepDestroyedRenderersIfNeeded();
             EnsureRenderBuffer();
 
             if (s_FullUploadRequired)
@@ -331,6 +341,12 @@ namespace VividRP.Runtime
             SweepDestroyedRenderers();
         }
 
+        internal static void SweepDestroyedRenderersIfNeededForTests()
+        {
+            EnsureMainThread();
+            SweepDestroyedRenderersIfNeeded();
+        }
+
         internal static void SetForceFallbackForTests(bool forceFallback)
         {
             EnsureMainThread();
@@ -354,7 +370,10 @@ namespace VividRP.Runtime
             binding.Generation = NextGeneration();
             s_Allocator.Free(previousAddress, previousSize);
             MarkDirty(previousAddress, previousSize);
-            return new VividPerObjectBlock(binding.Renderer.GetEntityId(), binding.Generation);
+            return new VividPerObjectBlock(
+                binding.Renderer.GetEntityId(),
+                binding.Generation,
+                binding);
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static int AllocateAndInitialize(VividPerObjectLayout layout)
@@ -377,6 +396,8 @@ namespace VividRP.Runtime
                 s_Allocator.Free(binding.Address, binding.RecordSize);
                 MarkDirty(binding.Address, binding.RecordSize);
             }
+
+            binding.Renderer = null;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static Binding GetBinding(VividPerObjectBlock block)
@@ -384,17 +405,13 @@ namespace VividRP.Runtime
             EnsureMainThread();
             if (!TryGetBinding(block, out Binding binding))
                 throw new InvalidOperationException("The VividPerObjectBlock is stale or no longer bound.");
-            if (binding.LayoutSignature != binding.Layout.Signature)
-            {
-                throw new InvalidOperationException(
-                    $"Per-object layout '{binding.Layout.ShaderIdentifier}' changed after binding. Bind the Renderer again.");
-            }
             return binding;
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static bool TryGetBinding(VividPerObjectBlock block, out Binding binding)
         {
-            return s_Bindings.TryGetValue(block.RendererEntityId, out binding)
+            binding = block.Binding;
+            return binding != null
                 && binding.Generation == block.Generation
                 && binding.Renderer != null;
         }
@@ -406,8 +423,9 @@ namespace VividRP.Runtime
             int valueSize)
         {
             if (!property.IsValid
-                || !property.Layout.IsEquivalentTo(binding.Layout)
-                || property.LayoutSignature != binding.LayoutSignature)
+                || property.LayoutSignature != binding.LayoutSignature
+                || (!ReferenceEquals(property.Layout, binding.Layout)
+                    && !property.Layout.IsEquivalentTo(binding.Layout)))
             {
                 throw new ArgumentException("The property handle does not belong to the bound layout.", nameof(property));
             }
@@ -641,6 +659,52 @@ namespace VividRP.Runtime
             }
             s_CoalescedRanges.Add(current);
         }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool WriteValueIfChanged<T>(byte* destination, T value)
+            where T : unmanaged
+        {
+            uint* source = (uint*)&value;
+            uint* target = (uint*)destination;
+            switch (sizeof(T))
+            {
+                case sizeof(uint):
+                    if (target[0] == source[0])
+                        return false;
+                    target[0] = source[0];
+                    return true;
+                case sizeof(uint) * 4:
+                    if (target[0] == source[0]
+                        && target[1] == source[1]
+                        && target[2] == source[2]
+                        && target[3] == source[3])
+                    {
+                        return false;
+                    }
+
+                    target[0] = source[0];
+                    target[1] = source[1];
+                    target[2] = source[2];
+                    target[3] = source[3];
+                    return true;
+                case sizeof(uint) * 16:
+                    for (int i = 0; i < 16; i++)
+                    {
+                        if (target[i] != source[i])
+                        {
+                            UnsafeUtility.MemCpy(destination, source, sizeof(T));
+                            return true;
+                        }
+                    }
+                    return false;
+                default:
+                    if (UnsafeUtility.MemCmp(destination, source, sizeof(T)) == 0)
+                        return false;
+                    UnsafeUtility.MemCpy(destination, source, sizeof(T));
+                    return true;
+            }
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void MarkDirty(int start, int length)
         {
@@ -660,6 +724,20 @@ namespace VividRP.Runtime
             s_DirtyRanges.Clear();
             s_DirtyRangesAreSorted = true;
             s_LastDirtyRangeStart = int.MinValue;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void SweepDestroyedRenderersIfNeeded()
+        {
+            if (s_PreparesUntilDestroyedRendererSweep > 0)
+            {
+                s_PreparesUntilDestroyedRendererSweep--;
+                return;
+            }
+
+            SweepDestroyedRenderers();
+            s_PreparesUntilDestroyedRendererSweep =
+                DestroyedRendererSweepPrepareInterval - 1;
         }
 
         private static void SweepDestroyedRenderers()
@@ -698,7 +776,13 @@ namespace VividRP.Runtime
                 {
                     if (binding.Renderer != null)
                         SetRendererShaderUserValue(binding.Renderer, binding.OriginalValue);
+                    binding.Renderer = null;
                 }
+            }
+            else
+            {
+                foreach (Binding binding in s_Bindings.Values)
+                    binding.Renderer = null;
             }
 
             s_Bindings.Clear();
@@ -721,6 +805,7 @@ namespace VividRP.Runtime
             s_UploadKernel = -1;
             s_StagingBufferIndex = -1;
             s_FullUploadRequired = true;
+            s_PreparesUntilDestroyedRendererSweep = 0;
             s_LastPreparedFrame = -1;
             s_LastUploadBytes = 0;
             s_LastUploadRangeCount = 0;
@@ -832,7 +917,7 @@ namespace VividRP.Runtime
             internal int End => Start + Length;
         }
 
-        private sealed class Binding
+        internal sealed class Binding
         {
             internal Binding(
                 Renderer renderer,

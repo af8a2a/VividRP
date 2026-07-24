@@ -42,15 +42,21 @@ namespace VividRP.Runtime
 
     public readonly struct VividPerObjectBlock : IEquatable<VividPerObjectBlock>
     {
-        internal VividPerObjectBlock(EntityId rendererEntityId, uint generation)
+        internal VividPerObjectBlock(
+            EntityId rendererEntityId,
+            uint generation,
+            VividPerObjectBufferSystem.Binding binding)
         {
             RendererEntityId = rendererEntityId;
             Generation = generation;
+            Binding = binding;
         }
 
         internal EntityId RendererEntityId { get; }
 
         internal uint Generation { get; }
+
+        internal VividPerObjectBufferSystem.Binding Binding { get; }
 
         public bool IsValid => VividPerObjectBufferSystem.IsBlockValid(this);
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

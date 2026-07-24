@@ -336,6 +336,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SubsystemLifecycle_DeinitializeRestoresRendererAndInvalidatesBlock()
+        {
+            VividPerObjectLayout layout = CreateFullLayout();
+            var gameObject = new GameObject("Per Object Subsystem Renderer");
+            MeshRenderer renderer = gameObject.AddComponent<MeshRenderer>();
+            const uint originalValue = 73u;
+            renderer.SetShaderUserValue(originalValue);
+            try
+            {
+                VividPerObjectBlock block = VividPerObjectBuffer.Bind(renderer, layout);
+                Assert.That(VividPerObjectBufferSystem.IsInitialized, Is.True);
+                Assert.That(block.IsValid, Is.True);
+
+                VividPerObjectBufferSystem.Deinitialize();
+
+                Assert.That(VividPerObjectBufferSystem.IsInitialized, Is.False);
+                Assert.That(block.IsValid, Is.False);
+                Assert.That(renderer.GetShaderUserValue(), Is.EqualTo(originalValue));
+
+                VividPerObjectBlock rebound = VividPerObjectBuffer.Bind(renderer, layout);
+                Assert.That(VividPerObjectBufferSystem.IsInitialized, Is.True);
+                Assert.That(rebound.IsValid, Is.True);
+            }
+            finally
+            {
+                Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
         public void SetValue_Throws_ForWrongTypeAndForeignHandle()
         {
             VividPerObjectLayout layout = CreateFullLayout();

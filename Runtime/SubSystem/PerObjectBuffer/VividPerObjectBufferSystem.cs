@@ -11,7 +11,8 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal static unsafe class VividPerObjectBufferSystem
+    internal sealed unsafe class VividPerObjectBufferSystem
+        : VividSubsystem<VividPerObjectBufferSystem>
     {
         internal const uint ShaderUserValueMagic = 0xa0000000u;
         internal const uint ShaderUserValueMagicMask = 0xf0000000u;
@@ -65,27 +66,52 @@ namespace VividRP.Runtime
         private static void ResetOnSubsystemRegistration()
         {
             s_MainThreadId = Thread.CurrentThread.ManagedThreadId;
-            DisposeAllCore(restoreRendererValues: true);
+            DisposeAll();
+            Initialize();
         }
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
-        private static void RegisterEditorReloadCleanup()
+        private static void AutoInitialize()
         {
-            s_MainThreadId = Thread.CurrentThread.ManagedThreadId;
-            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload -= DisposeBeforeAssemblyReload;
-            UnityEditor.AssemblyReloadEvents.beforeAssemblyReload += DisposeBeforeAssemblyReload;
-        }
-
-        private static void DisposeBeforeAssemblyReload()
-        {
-            DisposeAllCore(restoreRendererValues: true);
+            Initialize();
         }
 #endif
+
+        protected override void OnInitialize()
+        {
+            s_MainThreadId = Thread.CurrentThread.ManagedThreadId;
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            FrameContextSystem.SubsystemDispose += OnSubsystemDispose;
+        }
+
+        protected override void OnDeinitialize()
+        {
+            FrameContextSystem.SubsystemDispose -= OnSubsystemDispose;
+            DisposeAllCore(restoreRendererValues: true);
+        }
+
+        protected override void OnUpdate(ContextContainer frameData, CommandBuffer cmd)
+        {
+            if (cmd != null)
+            {
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemPerObjectBufferMarker.Auto())
+                {
+                    PrepareAndBindCore(cmd);
+                }
+            }
+        }
+
+        private static void OnSubsystemDispose()
+        {
+            Deinitialize();
+        }
+
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static VividPerObjectBlock Bind(Renderer renderer, VividPerObjectLayout layout)
         {
             EnsureMainThread();
+            EnsureSubsystemInitialized();
             if (!renderer)
                 throw new ArgumentNullException(nameof(renderer));
             if (layout == null)
@@ -237,9 +263,15 @@ namespace VividRP.Runtime
         internal static void PrepareAndBind(CommandBuffer cmd)
         {
             EnsureMainThread();
+            EnsureSubsystemInitialized();
             if (cmd == null)
                 throw new ArgumentNullException(nameof(cmd));
 
+            Instance.PrepareAndBindCore(cmd);
+        }
+
+        private void PrepareAndBindCore(CommandBuffer cmd)
+        {
             using var prepareScope = s_PrepareMarker.Auto();
             ResetFrameUploadStatsIfNeeded();
             SweepDestroyedRenderersIfNeeded();
@@ -276,7 +308,10 @@ namespace VividRP.Runtime
         internal static void DisposeAll()
         {
             EnsureMainThread();
-            DisposeAllCore(restoreRendererValues: true);
+            if (IsInitialized)
+                Deinitialize();
+            else
+                DisposeAllCore(restoreRendererValues: true);
         }
 
 #if UNITY_INCLUDE_TESTS
@@ -906,6 +941,13 @@ namespace VividRP.Runtime
                 s_MainThreadId = currentThreadId;
             if (currentThreadId != s_MainThreadId)
                 throw new InvalidOperationException("VividPerObjectBuffer APIs may only be called from the Unity main thread.");
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void EnsureSubsystemInitialized()
+        {
+            if (!IsInitialized)
+                Initialize();
         }
 
         [StructLayout(LayoutKind.Sequential)]

@@ -158,6 +158,7 @@ namespace VividRP.Runtime
         public static readonly ProfilerMarker PrepareFrameContextSetShaderGlobalsBlueNoiseMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SetShaderGlobals/BlueNoise");
         public static readonly ProfilerMarker PrepareFrameContextAdaptiveProbeVolumeMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.AdaptiveProbeVolume");
         public static readonly ProfilerMarker PrepareFrameContextSubsystemPreRenderMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender");
+        public static readonly ProfilerMarker PrepareFrameSubsystemPerObjectBufferMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividPerObjectBufferSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemAutoExposureMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividAutoExposureSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemLTCAreaLightMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/LTCAreaLightSystem");
         public static readonly ProfilerMarker PrepareFrameSubsystemPreIntegratedFGDMarker = new("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/VividPreIntegratedFGDSystem");

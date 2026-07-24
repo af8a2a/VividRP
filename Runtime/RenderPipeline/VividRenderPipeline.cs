@@ -177,10 +177,11 @@ namespace VividRP.Runtime
                     cmdBuffer = CommandBufferPool.Get("VividRP");
                 }
 
-                VividPerObjectBuffer.PrepareAndBind(cmdBuffer);
-
                 if (ShouldUsePreviewCameraRenderPath(camera.cameraType))
                 {
+                    // Preview cameras bypass FrameContextSystem, so invoke the
+                    // subsystem entry point explicitly for this path.
+                    VividPerObjectBuffer.PrepareAndBind(cmdBuffer);
                     using (s_PreviewCameraMarker.Auto())
                     {
                         RenderPreviewCamera(context, camera, cullingResults, cmdBuffer);
@@ -340,6 +341,7 @@ namespace VividRP.Runtime
             RTHandles.Initialize(Screen.width, Screen.height);
             LensFlareCommonSRP.Initialize();
             VividAdaptiveProbeVolumeUtility.Initialize(m_Asset);
+            VividPerObjectBufferSystem.Initialize();
             VividPreIntegratedFGDSystem.Initialize();
             VividReflectionProbeAtlasSystem.Initialize();
             VividGPUDrivenSystem.Initialize();
@@ -796,7 +798,7 @@ namespace VividRP.Runtime
             BlueNoise.Cleanup();
             LensFlareCommonSRP.Dispose();
             Blitter.Cleanup();
-            VividPerObjectBuffer.DisposeAll();
+            VividPerObjectBufferSystem.Deinitialize();
             PipelineResourceManager.Cleanup();
             VividAdaptiveProbeVolumeUtility.Cleanup(m_Asset);
             ReleaseConstantBuffersForShutdown();

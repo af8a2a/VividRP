@@ -20,6 +20,7 @@ namespace VividRP.Runtime
         private const int StagingBufferCount = 3;
         private const int RawBufferStride = sizeof(uint);
         private const int MaxThreadGroupsPerDispatch = 65535;
+        private const int DirtyRangeMergeGapThreshold = 32;
         private const string UploadKernelName = "CopyPerObjectBufferRanges";
 
         private static readonly int s_PerObjectBufferId = Shader.PropertyToID("_VividPerObjectBuffer");
@@ -48,11 +49,14 @@ namespace VividRP.Runtime
         private static int s_MainThreadId;
         private static uint s_NextGeneration = 1u;
         private static bool s_FullUploadRequired = true;
+        private static bool s_DirtyRangesAreSorted = true;
+        private static int s_LastDirtyRangeStart = int.MinValue;
         private static int s_LastPreparedFrame = -1;
         private static int s_LastUploadBytes;
         private static int s_LastUploadRangeCount;
 #if UNITY_INCLUDE_TESTS
         private static bool s_ForceFallbackForTests;
+        private static int s_DirtyRangeSortCount;
 #endif
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
@@ -233,7 +237,7 @@ namespace VividRP.Runtime
 
             if (s_FullUploadRequired)
             {
-                s_DirtyRanges.Clear();
+                ClearDirtyRanges();
                 int byteCount = s_Allocator?.Capacity ?? VividPerObjectRecordAllocator.ReservedBytes;
                 MarkDirty(0, byteCount);
                 s_FullUploadRequired = false;
@@ -252,7 +256,7 @@ namespace VividRP.Runtime
                     s_LastUploadRangeCount++;
                 }
 
-                s_DirtyRanges.Clear();
+                ClearDirtyRanges();
                 s_CoalescedRanges.Clear();
             }
 
@@ -280,8 +284,45 @@ namespace VividRP.Runtime
         internal static void ClearDirtyRangesForTests()
         {
             EnsureMainThread();
-            s_DirtyRanges.Clear();
+            ClearDirtyRanges();
             s_CoalescedRanges.Clear();
+            s_DirtyRangeSortCount = 0;
+        }
+
+        internal static void MarkDirtyForTests(int start, int length)
+        {
+            EnsureMainThread();
+            MarkDirty(start, length);
+        }
+
+        internal static void CoalesceDirtyRangesForTests()
+        {
+            EnsureMainThread();
+            CoalesceDirtyRanges();
+        }
+
+        internal static int GetCoalescedRangeCountForTests()
+        {
+            EnsureMainThread();
+            return s_CoalescedRanges.Count;
+        }
+
+        internal static int GetCoalescedRangeStartForTests(int index)
+        {
+            EnsureMainThread();
+            return s_CoalescedRanges[index].Start;
+        }
+
+        internal static int GetCoalescedRangeLengthForTests(int index)
+        {
+            EnsureMainThread();
+            return s_CoalescedRanges[index].Length;
+        }
+
+        internal static int GetDirtyRangeSortCountForTests()
+        {
+            EnsureMainThread();
+            return s_DirtyRangeSortCount;
         }
 
         internal static void SweepDestroyedRenderersForTests()
@@ -574,13 +615,22 @@ namespace VividRP.Runtime
 
         private static void CoalesceDirtyRanges()
         {
-            s_DirtyRanges.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+            if (!s_DirtyRangesAreSorted)
+            {
+                s_DirtyRanges.Sort(static (left, right) => left.Start.CompareTo(right.Start));
+                s_DirtyRangesAreSorted = true;
+                s_LastDirtyRangeStart = s_DirtyRanges[^1].Start;
+#if UNITY_INCLUDE_TESTS
+                s_DirtyRangeSortCount++;
+#endif
+            }
+
             s_CoalescedRanges.Clear();
             DirtyRange current = s_DirtyRanges[0];
             for (int i = 1; i < s_DirtyRanges.Count; i++)
             {
                 DirtyRange next = s_DirtyRanges[i];
-                if (next.Start <= current.End)
+                if ((long)next.Start <= (long)current.End + DirtyRangeMergeGapThreshold)
                 {
                     current = new DirtyRange(current.Start, Math.Max(current.End, next.End) - current.Start);
                     continue;
@@ -598,7 +648,18 @@ namespace VividRP.Runtime
                 return;
             if ((start & 3) != 0 || (length & 3) != 0)
                 throw new InvalidOperationException("Per-object dirty ranges must be aligned to four bytes.");
+            if (s_DirtyRanges.Count > 0 && start < s_LastDirtyRangeStart)
+                s_DirtyRangesAreSorted = false;
+            s_LastDirtyRangeStart = start;
             s_DirtyRanges.Add(new DirtyRange(start, length));
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void ClearDirtyRanges()
+        {
+            s_DirtyRanges.Clear();
+            s_DirtyRangesAreSorted = true;
+            s_LastDirtyRangeStart = int.MinValue;
         }
 
         private static void SweepDestroyedRenderers()
@@ -642,7 +703,7 @@ namespace VividRP.Runtime
 
             s_Bindings.Clear();
             s_DestroyedRendererIds.Clear();
-            s_DirtyRanges.Clear();
+            ClearDirtyRanges();
             s_CoalescedRanges.Clear();
             s_Allocator = null;
             s_RenderBuffer?.Dispose();
@@ -665,6 +726,7 @@ namespace VividRP.Runtime
             s_LastUploadRangeCount = 0;
 #if UNITY_INCLUDE_TESTS
             s_ForceFallbackForTests = false;
+            s_DirtyRangeSortCount = 0;
 #endif
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

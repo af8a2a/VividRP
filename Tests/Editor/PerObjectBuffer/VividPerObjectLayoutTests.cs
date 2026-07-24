@@ -243,6 +243,7 @@ namespace VividRP.Editor.Tests
             }
         }
 
+
         [Test]
         public void Rebind_InvalidatesOldBlockAndRestoresOriginalValueOnUnbind()
         {

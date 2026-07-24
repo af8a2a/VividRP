@@ -177,7 +177,7 @@ namespace VividRP.Editor.RenderGraph
             var passName = passNode?.GetAuthoredPassName(
                 passNode.GetPassType()?.Name ?? nameof(DrawObjectPass))
                 ?? nameof(DrawObjectPass);
-            Debug.LogWarning($"[VividRP] RenderGraph migration: '{graphPath}', pass '{passName}' ({passNode?.Guid}) {message}.");
+            Debug.LogWarning($"[VividRP] RenderGraph migration: '{graphPath}', pass '{passName}' ({passNode?.ID}) {message}.");
         }
     }
 }

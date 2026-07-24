@@ -56,9 +56,13 @@ namespace VividRP.Runtime.Examples
             VividPerObjectColorExampleController.PropertyAccessMode perObjectAccessMode,
             VividPerObjectCpuBenchmarkCase materialPropertyBlockChanging,
             VividPerObjectCpuBenchmarkCase perObjectBufferChanging,
+            VividPerObjectCpuBenchmarkCase perObjectBufferChangingPrepareAndBind,
+            VividPerObjectCpuBenchmarkCase perObjectBufferChangingExecuteCommandBuffer,
             VividPerObjectCpuBenchmarkCase perObjectBufferChangingSubmit,
             VividPerObjectCpuBenchmarkCase materialPropertyBlockUnchanged,
             VividPerObjectCpuBenchmarkCase perObjectBufferUnchanged,
+            VividPerObjectCpuBenchmarkCase perObjectBufferUnchangedPrepareAndBind,
+            VividPerObjectCpuBenchmarkCase perObjectBufferUnchangedExecuteCommandBuffer,
             VividPerObjectCpuBenchmarkCase perObjectBufferUnchangedSubmit)
         {
             RendererCount = rendererCount;
@@ -67,9 +71,15 @@ namespace VividRP.Runtime.Examples
             PerObjectAccessMode = perObjectAccessMode;
             MaterialPropertyBlockChanging = materialPropertyBlockChanging;
             PerObjectBufferChanging = perObjectBufferChanging;
+            PerObjectBufferChangingPrepareAndBind = perObjectBufferChangingPrepareAndBind;
+            PerObjectBufferChangingExecuteCommandBuffer =
+                perObjectBufferChangingExecuteCommandBuffer;
             PerObjectBufferChangingSubmit = perObjectBufferChangingSubmit;
             MaterialPropertyBlockUnchanged = materialPropertyBlockUnchanged;
             PerObjectBufferUnchanged = perObjectBufferUnchanged;
+            PerObjectBufferUnchangedPrepareAndBind = perObjectBufferUnchangedPrepareAndBind;
+            PerObjectBufferUnchangedExecuteCommandBuffer =
+                perObjectBufferUnchangedExecuteCommandBuffer;
             PerObjectBufferUnchangedSubmit = perObjectBufferUnchangedSubmit;
         }
 
@@ -85,11 +95,19 @@ namespace VividRP.Runtime.Examples
 
         public VividPerObjectCpuBenchmarkCase PerObjectBufferChanging { get; }
 
+        public VividPerObjectCpuBenchmarkCase PerObjectBufferChangingPrepareAndBind { get; }
+
+        public VividPerObjectCpuBenchmarkCase PerObjectBufferChangingExecuteCommandBuffer { get; }
+
         public VividPerObjectCpuBenchmarkCase PerObjectBufferChangingSubmit { get; }
 
         public VividPerObjectCpuBenchmarkCase MaterialPropertyBlockUnchanged { get; }
 
         public VividPerObjectCpuBenchmarkCase PerObjectBufferUnchanged { get; }
+
+        public VividPerObjectCpuBenchmarkCase PerObjectBufferUnchangedPrepareAndBind { get; }
+
+        public VividPerObjectCpuBenchmarkCase PerObjectBufferUnchangedExecuteCommandBuffer { get; }
 
         public VividPerObjectCpuBenchmarkCase PerObjectBufferUnchangedSubmit { get; }
 
@@ -112,13 +130,15 @@ namespace VividRP.Runtime.Examples
                 .Append(", measured frames: ").Append(MeasurementIterations)
                 .Append(", SSBO access: ").AppendLine(PerObjectAccessMode.ToString());
             builder.AppendLine();
-            builder.AppendLine("Case                                      Total ms    ns/unit    B/unit   Unit");
+            builder.AppendLine("Case                                              Total ms    ns/unit    B/unit   Unit");
             AppendCase(builder, MaterialPropertyBlockChanging);
             AppendCase(builder, PerObjectBufferChanging);
-            AppendCase(builder, PerObjectBufferChangingSubmit);
+            AppendCase(builder, PerObjectBufferChangingPrepareAndBind);
+            AppendCase(builder, PerObjectBufferChangingExecuteCommandBuffer);
             AppendCase(builder, MaterialPropertyBlockUnchanged);
             AppendCase(builder, PerObjectBufferUnchanged);
-            AppendCase(builder, PerObjectBufferUnchangedSubmit);
+            AppendCase(builder, PerObjectBufferUnchangedPrepareAndBind);
+            AppendCase(builder, PerObjectBufferUnchangedExecuteCommandBuffer);
             builder.AppendLine();
             builder.Append("Changing write speedup (MPB / SSBO): ")
                 .Append(ChangingWriteSpeedup.ToString("F2", CultureInfo.InvariantCulture))
@@ -127,8 +147,9 @@ namespace VividRP.Runtime.Examples
                 .Append(UnchangedWriteSpeedup.ToString("F2", CultureInfo.InvariantCulture))
                 .AppendLine("x");
             builder.AppendLine(
-                "Write rows measure only the per-Renderer API calls. SSBO submit rows separately " +
-                "measure PrepareAndBind plus Graphics.ExecuteCommandBuffer once per simulated frame.");
+                "Write rows measure only the per-Renderer API calls. PrepareAndBind and " +
+                "Graphics.ExecuteCommandBuffer are timed separately around the same submission; " +
+                "exactly one command buffer is executed per simulated frame.");
             builder.AppendLine(
                 "Use the Unity Profiler markers VividRP.PerObjectBuffer.PrepareAndBind and " +
                 "VividRP.PerObjectBuffer.Upload to inspect the upload path in a real rendered frame.");
@@ -139,7 +160,7 @@ namespace VividRP.Runtime.Examples
             StringBuilder builder,
             VividPerObjectCpuBenchmarkCase result)
         {
-            builder.Append(result.Name.PadRight(40))
+            builder.Append(result.Name.PadRight(48))
                 .Append(result.TotalMilliseconds.ToString("F3", CultureInfo.InvariantCulture).PadLeft(10))
                 .Append(result.NanosecondsPerOperation.ToString("F2", CultureInfo.InvariantCulture).PadLeft(11))
                 .Append(result.AllocatedBytesPerOperation.ToString("F3", CultureInfo.InvariantCulture).PadLeft(10))
@@ -157,13 +178,17 @@ namespace VividRP.Runtime.Examples
     {
         private const string RendererOperationUnit = "renderer write";
         private const string FrameOperationUnit = "frame submit";
+        private const string FramePrepareOperationUnit = "frame prepare";
+        private const string FrameExecuteOperationUnit = "frame execute";
 
         private static readonly ProfilerMarker s_MaterialPropertyBlockMarker =
             new("VividRP.PerObjectBenchmark.MaterialPropertyBlock");
         private static readonly ProfilerMarker s_PerObjectBufferMarker =
             new("VividRP.PerObjectBenchmark.PerObjectBuffer");
-        private static readonly ProfilerMarker s_PerObjectBufferSubmitMarker =
-            new("VividRP.PerObjectBenchmark.PerObjectBufferSubmit");
+        private static readonly ProfilerMarker s_PerObjectBufferPrepareMarker =
+            new("VividRP.PerObjectBenchmark.PrepareAndBind");
+        private static readonly ProfilerMarker s_PerObjectBufferExecuteMarker =
+            new("VividRP.PerObjectBenchmark.ExecuteCommandBuffer");
 
         public static VividPerObjectCpuBenchmarkReport Run(
             IReadOnlyList<Renderer> renderers,
@@ -297,9 +322,13 @@ namespace VividRP.Runtime.Examples
                     perObjectAccessMode,
                     materialPropertyBlockChanging,
                     changingMeasurement.Write,
+                    changingMeasurement.PrepareAndBind,
+                    changingMeasurement.ExecuteCommandBuffer,
                     changingMeasurement.Submit,
                     materialPropertyBlockUnchanged,
                     unchangedMeasurement.Write,
+                    unchangedMeasurement.PrepareAndBind,
+                    unchangedMeasurement.ExecuteCommandBuffer,
                     unchangedMeasurement.Submit);
             }
             finally
@@ -530,8 +559,10 @@ namespace VividRP.Runtime.Examples
         {
             long writeTicks = 0;
             long writeAllocatedBytes = 0;
-            long submitTicks = 0;
-            long submitAllocatedBytes = 0;
+            long prepareTicks = 0;
+            long prepareAllocatedBytes = 0;
+            long executeTicks = 0;
+            long executeAllocatedBytes = 0;
 
             for (int iteration = 0; iteration < iterations; iteration++)
             {
@@ -546,15 +577,27 @@ namespace VividRP.Runtime.Examples
                         GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
                 }
 
-                using (s_PerObjectBufferSubmitMarker.Auto())
+                commandBuffer.Clear();
+                using (s_PerObjectBufferPrepareMarker.Auto())
                 {
                     long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
                     long start = Stopwatch.GetTimestamp();
-                    SubmitPendingChanges(commandBuffer);
-                    submitTicks += Stopwatch.GetTimestamp() - start;
-                    submitAllocatedBytes +=
+                    VividPerObjectBuffer.PrepareAndBind(commandBuffer);
+                    prepareTicks += Stopwatch.GetTimestamp() - start;
+                    prepareAllocatedBytes +=
                         GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
                 }
+
+                using (s_PerObjectBufferExecuteMarker.Auto())
+                {
+                    long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+                    long start = Stopwatch.GetTimestamp();
+                    Graphics.ExecuteCommandBuffer(commandBuffer);
+                    executeTicks += Stopwatch.GetTimestamp() - start;
+                    executeAllocatedBytes +=
+                        GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+                }
+                commandBuffer.Clear();
             }
 
             string changeLabel = changing ? "changing" : "unchanged";
@@ -566,11 +609,23 @@ namespace VividRP.Runtime.Examples
                     writeTicks,
                     writeAllocatedBytes),
                 new VividPerObjectCpuBenchmarkCase(
-                    $"PerObjectBuffer submit / {changeLabel}",
+                    $"PerObjectBuffer PrepareAndBind / {changeLabel}",
+                    FramePrepareOperationUnit,
+                    iterations,
+                    prepareTicks,
+                    prepareAllocatedBytes),
+                new VividPerObjectCpuBenchmarkCase(
+                    $"PerObjectBuffer ExecuteCommandBuffer / {changeLabel}",
+                    FrameExecuteOperationUnit,
+                    iterations,
+                    executeTicks,
+                    executeAllocatedBytes),
+                new VividPerObjectCpuBenchmarkCase(
+                    $"PerObjectBuffer submit total / {changeLabel}",
                     FrameOperationUnit,
                     iterations,
-                    submitTicks,
-                    submitAllocatedBytes));
+                    prepareTicks + executeTicks,
+                    prepareAllocatedBytes + executeAllocatedBytes));
         }
 
         private static void PushPerObjectBuffer(
@@ -637,13 +692,21 @@ namespace VividRP.Runtime.Examples
         {
             internal PerObjectMeasurement(
                 VividPerObjectCpuBenchmarkCase write,
+                VividPerObjectCpuBenchmarkCase prepareAndBind,
+                VividPerObjectCpuBenchmarkCase executeCommandBuffer,
                 VividPerObjectCpuBenchmarkCase submit)
             {
                 Write = write;
+                PrepareAndBind = prepareAndBind;
+                ExecuteCommandBuffer = executeCommandBuffer;
                 Submit = submit;
             }
 
             internal VividPerObjectCpuBenchmarkCase Write { get; }
+
+            internal VividPerObjectCpuBenchmarkCase PrepareAndBind { get; }
+
+            internal VividPerObjectCpuBenchmarkCase ExecuteCommandBuffer { get; }
 
             internal VividPerObjectCpuBenchmarkCase Submit { get; }
         }

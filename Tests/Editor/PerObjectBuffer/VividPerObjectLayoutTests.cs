@@ -274,6 +274,41 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void MarkDirty_OnlineMergesOrderedRangesWithinThreshold()
+        {
+            VividPerObjectBufferSystem.ClearDirtyRangesForTests();
+
+            VividPerObjectBufferSystem.MarkDirtyForTests(16, 16);
+            VividPerObjectBufferSystem.MarkDirtyForTests(64, 16);
+            VividPerObjectBufferSystem.MarkDirtyForTests(96, 16);
+
+            Assert.That(VividPerObjectBuffer.GetStats().DirtyRangeCount, Is.EqualTo(1));
+
+            VividPerObjectBufferSystem.CoalesceDirtyRangesForTests();
+            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeCountForTests(), Is.EqualTo(1));
+            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeStartForTests(0), Is.EqualTo(16));
+            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeLengthForTests(0), Is.EqualTo(96));
+            Assert.That(VividPerObjectBufferSystem.GetDirtyRangeSortCountForTests(), Is.Zero);
+        }
+
+        [Test]
+        public void MarkDirty_OnlineMergeFallsBackToSortForOutOfOrderRanges()
+        {
+            VividPerObjectBufferSystem.ClearDirtyRangesForTests();
+
+            VividPerObjectBufferSystem.MarkDirtyForTests(96, 16);
+            VividPerObjectBufferSystem.MarkDirtyForTests(16, 16);
+
+            Assert.That(VividPerObjectBuffer.GetStats().DirtyRangeCount, Is.EqualTo(2));
+
+            VividPerObjectBufferSystem.CoalesceDirtyRangesForTests();
+            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeCountForTests(), Is.EqualTo(2));
+            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeStartForTests(0), Is.EqualTo(16));
+            Assert.That(VividPerObjectBufferSystem.GetCoalescedRangeStartForTests(1), Is.EqualTo(96));
+            Assert.That(VividPerObjectBufferSystem.GetDirtyRangeSortCountForTests(), Is.EqualTo(1));
+        }
+
 
         [Test]
         public void Rebind_InvalidatesOldBlockAndRestoresOriginalValueOnUnbind()

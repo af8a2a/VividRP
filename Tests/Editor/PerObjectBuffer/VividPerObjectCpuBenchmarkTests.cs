@@ -32,11 +32,29 @@ namespace VividRP.Editor.Tests
                 Assert.That(report.RendererCount, Is.EqualTo(4));
                 Assert.That(report.MaterialPropertyBlockChanging.OperationCount, Is.EqualTo(8));
                 Assert.That(report.PerObjectBufferChanging.OperationCount, Is.EqualTo(8));
+                Assert.That(
+                    report.PerObjectBufferChangingPrepareAndBind.OperationCount,
+                    Is.EqualTo(2));
+                Assert.That(
+                    report.PerObjectBufferChangingExecuteCommandBuffer.OperationCount,
+                    Is.EqualTo(2));
                 Assert.That(report.PerObjectBufferChangingSubmit.OperationCount, Is.EqualTo(2));
                 Assert.That(report.MaterialPropertyBlockUnchanged.OperationCount, Is.EqualTo(8));
                 Assert.That(report.PerObjectBufferUnchanged.OperationCount, Is.EqualTo(8));
+                Assert.That(
+                    report.PerObjectBufferUnchangedPrepareAndBind.OperationCount,
+                    Is.EqualTo(2));
+                Assert.That(
+                    report.PerObjectBufferUnchangedExecuteCommandBuffer.OperationCount,
+                    Is.EqualTo(2));
                 Assert.That(report.PerObjectBufferUnchangedSubmit.OperationCount, Is.EqualTo(2));
-                Assert.That(report.ToString(), Does.Contain("Changing write speedup"));
+                string reportText = report.ToString();
+                Assert.That(reportText, Does.Contain("Changing write speedup"));
+                Assert.That(reportText, Does.Contain("PerObjectBuffer PrepareAndBind / changing"));
+                Assert.That(reportText, Does.Contain("PerObjectBuffer ExecuteCommandBuffer / changing"));
+                Assert.That(
+                    reportText,
+                    Does.Contain("exactly one command buffer is executed per simulated frame"));
 
                 for (int i = 0; i < renderers.Length; i++)
                 {

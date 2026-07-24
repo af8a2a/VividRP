@@ -712,8 +712,29 @@ namespace VividRP.Runtime
                 return;
             if ((start & 3) != 0 || (length & 3) != 0)
                 throw new InvalidOperationException("Per-object dirty ranges must be aligned to four bytes.");
-            if (s_DirtyRanges.Count > 0 && start < s_LastDirtyRangeStart)
-                s_DirtyRangesAreSorted = false;
+
+            int rangeCount = s_DirtyRanges.Count;
+            if (rangeCount > 0)
+            {
+                if (s_DirtyRangesAreSorted)
+                {
+                    int lastIndex = rangeCount - 1;
+                    DirtyRange last = s_DirtyRanges[lastIndex];
+                    if (start >= last.Start
+                        && (long)start <= (long)last.End + DirtyRangeMergeGapThreshold)
+                    {
+                        int mergedEnd = Math.Max(last.End, start + length);
+                        s_DirtyRanges[lastIndex] =
+                            new DirtyRange(last.Start, mergedEnd - last.Start);
+                        s_LastDirtyRangeStart = start;
+                        return;
+                    }
+                }
+
+                if (start < s_LastDirtyRangeStart)
+                    s_DirtyRangesAreSorted = false;
+            }
+
             s_LastDirtyRangeStart = start;
             s_DirtyRanges.Add(new DirtyRange(start, length));
         }

@@ -109,10 +109,11 @@ float3 OffsetReferencedPathtracingRayOrigin(
     return positionWS + faceNormalWS * (rayBias * offsetSign);
 }
 
-float TraceReferencedPathtracingMainLightVisibility(
+float TraceReferencedPathtracingVisibility(
     float3 positionWS,
     float3 faceNormalWS,
-    float3 lightDirectionWS)
+    float3 lightDirectionWS,
+    float maximumDistance)
 {
     RayDesc shadowRay;
     float shadowBias;
@@ -123,7 +124,9 @@ float TraceReferencedPathtracingMainLightVisibility(
         shadowBias);
     shadowRay.Direction = lightDirectionWS;
     shadowRay.TMin = shadowBias;
-    shadowRay.TMax = max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance);
+    shadowRay.TMax = max(maximumDistance - shadowBias, shadowBias);
+    if (shadowRay.TMax <= shadowRay.TMin)
+        return 1.0;
 
     ReferencedPathtracingPayload visibilityPayload;
     InitializeReferencedPathtracingPayload(visibilityPayload);
@@ -131,8 +134,7 @@ float TraceReferencedPathtracingMainLightVisibility(
     visibilityPayload.hit = 1u;
     TraceRay(
         _AccelerationStructure,
-        RAY_FLAG_FORCE_OPAQUE
-            | RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
             | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
         0xFF,
         0,
@@ -197,6 +199,12 @@ void RayGenReferencedPathtracing()
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
+        // Preserve the existing BSDF dimensions and append one discrete ReGIR dimension plus
+        // two continuous area-shape dimensions.
+        payload.directLightRandom = float3(
+            NextReferencedPathtracingRngFloat(rngState),
+            NextReferencedPathtracingRngFloat(rngState),
+            NextReferencedPathtracingRngFloat(rngState));
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
         TraceRay(
@@ -245,10 +253,11 @@ void RayGenReferencedPathtracing()
             && (any(payload.mainLightDiffuseBsdf > 0.0)
                 || any(payload.mainLightSpecularBsdf > 0.0)))
         {
-            float visibility = TraceReferencedPathtracingMainLightVisibility(
+            float visibility = TraceReferencedPathtracingVisibility(
                 payload.positionWS,
                 normalize(payload.faceNormalWS),
-                normalize(_ReferencedMainLightDirectionWS.xyz));
+                normalize(_ReferencedMainLightDirectionWS.xyz),
+                max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance));
             float3 directDiffuse = throughput
                 * payload.mainLightDiffuseBsdf
                 * mainLightIlluminance
@@ -264,6 +273,53 @@ void RayGenReferencedPathtracing()
                 // Keep it out of REBLUR: filtering it with the indirect signal destroys hard
                 // visibility boundaries because a directional shadow has no finite hit distance.
                 directLightingRadiance += directDiffuse + directSpecular;
+            }
+            else if (primaryLobeClass == 1u)
+            {
+                diffuseRadiance += directDiffuse + directSpecular;
+            }
+            else if (primaryLobeClass == 2u)
+            {
+                specularRadiance += directDiffuse + directSpecular;
+            }
+        }
+
+        if (payload.reGIRLocalDistance > 0.0
+            && (any(payload.reGIRLocalDiffuseRadiance > 0.0)
+                || any(payload.reGIRLocalSpecularRadiance > 0.0)))
+        {
+            float3 localLightDirectionWS = normalize(payload.reGIRLocalDirectionWS);
+            float visibility = TraceReferencedPathtracingVisibility(
+                payload.positionWS,
+                normalize(payload.faceNormalWS),
+                localLightDirectionWS,
+                payload.reGIRLocalDistance);
+            float3 directDiffuse = throughput
+                * payload.reGIRLocalDiffuseRadiance
+                * visibility;
+            float3 directSpecular = throughput
+                * payload.reGIRLocalSpecularRadiance
+                * visibility;
+
+            if (bounceIndex == 0u)
+            {
+                // ReGIR selects one corrected local-light estimator per pixel and frame. Keep its
+                // primary diffuse/specular components in the REBLUR signals instead of the
+                // deterministic direct-light AOV used by the main directional light.
+                diffuseRadiance += directDiffuse;
+                specularRadiance += directSpecular;
+
+                if (any(directDiffuse > 0.0))
+                {
+                    diffuseRayDirectionWS = localLightDirectionWS;
+                    diffuseHitDistance = payload.reGIRLocalDistance;
+                }
+
+                if (any(directSpecular > 0.0))
+                {
+                    specularRayDirectionWS = localLightDirectionWS;
+                    specularHitDistance = payload.reGIRLocalDistance;
+                }
             }
             else if (primaryLobeClass == 1u)
             {

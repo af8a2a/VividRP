@@ -37,6 +37,8 @@ namespace VividRP.Runtime
         public Vector2 areaSize;
         public float power;
         public uint renderingLayerMask;
+        public float cosBarnDoorAngle;
+        public float barnDoorLength;
 
         internal static int Stride => Marshal.SizeOf<VividReGIRLightData>();
     }
@@ -98,8 +100,7 @@ namespace VividRP.Runtime
 
         public uint lightIndex;
         public float weight;
-        public uint pad0;
-        public uint pad1;
+        public Vector2 shapeSample;
 
         internal static int Stride => Marshal.SizeOf<VividReGIRReservoir>();
     }

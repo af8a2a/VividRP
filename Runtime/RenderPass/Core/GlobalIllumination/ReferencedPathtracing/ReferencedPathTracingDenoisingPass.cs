@@ -32,6 +32,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public Matrix4x4 ProjectionMatrix;
             public Vector3 MainLightDirection;
             public Vector3 MainLightColor;
+            public ulong LocalLightSignature;
 
             public override void Dispose()
             {
@@ -149,10 +150,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var viewMatrix = cameraData.GetViewMatrix();
             var projectionMatrix = cameraData.GetProjectionMatrixNoJitter();
-            ResolveMainLightSignature(
+            ReferencedPathTracingLightSignatureUtility.Resolve(
                 frameData.GetOrCreate<VividLightData>(),
                 out var lightDirection,
-                out var lightColor);
+                out var lightColor,
+                out var localLightSignature);
 
             var signatureMatches = state.HasSignature
                 && state.Width == m_Width
@@ -160,7 +162,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && MatricesApproximatelyEqual(state.ViewMatrix, viewMatrix, MatrixResetEpsilon)
                 && MatricesApproximatelyEqual(state.ProjectionMatrix, projectionMatrix, MatrixResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightDirection, lightDirection, LightResetEpsilon)
-                && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon);
+                && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon)
+                && state.LocalLightSignature == localLightSignature;
 
             if (!signatureMatches)
                 state.Backend?.Invalidate();
@@ -172,6 +175,7 @@ namespace VividRP.Runtime.RenderPass.Core
             state.ProjectionMatrix = projectionMatrix;
             state.MainLightDirection = lightDirection;
             state.MainLightColor = lightColor;
+            state.LocalLightSignature = localLightSignature;
             m_CurrentState = state;
         }
 
@@ -189,30 +193,6 @@ namespace VividRP.Runtime.RenderPass.Core
             descriptor.AutoGenerateMips = false;
             descriptor.MipCount = 1;
             descriptor.Name = "PathTracingDenoisedColor";
-        }
-
-        private static void ResolveMainLightSignature(
-            VividLightData lightData,
-            out Vector3 direction,
-            out Vector3 color)
-        {
-            direction = Vector3.zero;
-            color = Vector3.zero;
-            if (lightData == null)
-                return;
-
-            lightData.CompleteLightGridPrepare();
-            if (!lightData.hasMainDirectionalLight)
-                return;
-
-            var mainLight = lightData.mainDirectionalLight;
-            direction = mainLight.directionWS.sqrMagnitude > 1e-8f
-                ? mainLight.directionWS.normalized
-                : Vector3.zero;
-            color = new Vector3(
-                Mathf.Max(mainLight.color.x, 0.0f),
-                Mathf.Max(mainLight.color.y, 0.0f),
-                Mathf.Max(mainLight.color.z, 0.0f));
         }
 
         private static bool MatricesApproximatelyEqual(Matrix4x4 lhs, Matrix4x4 rhs, float epsilon)

@@ -13,6 +13,10 @@
 #define VIVID_REGIR_ONION_MAX_LAYER_GROUPS 8
 #define VIVID_REGIR_ONION_MAX_RINGS 52
 #define VIVID_REGIR_PI 3.14159265358979323846
+// ReGIR target weights are proposal probabilities, not radiance. Keeping a small positive
+// support wherever a light volume overlaps a cell allows downstream RIS estimators to remain
+// unbiased after applying VividReGIRReservoir.weight.
+#define VIVID_REGIR_TARGET_SUPPORT_FLOOR 1e-4
 
 struct VividReGIRLightData
 {
@@ -29,6 +33,8 @@ struct VividReGIRLightData
     float2 areaSize;
     float power;
     uint renderingLayerMask;
+    float cosBarnDoorAngle;
+    float barnDoorLength;
 };
 
 struct VividReGIRParameters
@@ -79,8 +85,7 @@ struct VividReGIRReservoir
 {
     uint lightIndex;
     float weight;
-    uint pad0;
-    uint pad1;
+    float2 shapeSample;
 };
 
 uint VividReGIRGetCellCount(VividReGIRParameters parameters)
@@ -350,12 +355,24 @@ bool VividReGIRCellIndexToWorldPos(VividReGIRParameters parameters, uint cellInd
 float VividReGIREvaluateRangeWeight(VividReGIRLightData light, float3 volumeCenter, float volumeRadius)
 {
     float distanceToCenter = length(volumeCenter - light.positionWS);
-    if (distanceToCenter > light.range + volumeRadius)
+    float sourceRadius = 0.0;
+    if (light.lightType == VIVID_REGIR_LIGHT_TYPE_RECTANGLE)
+        sourceRadius = 0.5 * length(max(light.areaSize, 0.0));
+    else if (light.lightType == VIVID_REGIR_LIGHT_TYPE_TUBE)
+        sourceRadius = 0.5 * max(light.areaSize.x, 0.0);
+
+    float combinedRadius = volumeRadius + sourceRadius;
+    if (distanceToCenter > light.range + combinedRadius)
         return 0.0;
 
-    float averageDistance = VividReGIRAverageDistanceToVolume(distanceToCenter, volumeRadius);
+    // Area-light range is measured from the emitting shape rather than only its center.
+    // Expanding the proposal volume by the shape radius preserves support for large emitters.
+    float averageDistance = VividReGIRAverageDistanceToVolume(distanceToCenter, combinedRadius);
     float rangeFade = saturate(1.0 - averageDistance / max(light.range, 1e-4));
-    return light.power * rangeFade * rangeFade / max(averageDistance * averageDistance, 1e-4);
+    float rangeTarget = max(
+        rangeFade * rangeFade,
+        VIVID_REGIR_TARGET_SUPPORT_FLOOR);
+    return light.power * rangeTarget / max(averageDistance * averageDistance, 1e-4);
 }
 
 float VividReGIREvaluateSpotWeight(VividReGIRLightData light, float3 volumeCenter)
@@ -367,7 +384,9 @@ float VividReGIREvaluateSpotWeight(VividReGIRLightData light, float3 volumeCente
 
     float3 directionToVolume = lightToVolume * rsqrt(lengthSq);
     float angleAttenuation = saturate(dot(normalize(light.directionWS), directionToVolume) * light.angleScale + light.angleOffset);
-    return angleAttenuation * angleAttenuation;
+    return max(
+        angleAttenuation * angleAttenuation,
+        VIVID_REGIR_TARGET_SUPPORT_FLOOR);
 }
 
 float VividReGIREvaluateLightTargetWeight(VividReGIRLightData light, float3 volumeCenter, float volumeRadius)

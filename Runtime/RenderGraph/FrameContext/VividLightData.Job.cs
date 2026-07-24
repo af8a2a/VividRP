@@ -1,4 +1,4 @@
-﻿using Unity.Burst;
+using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -104,6 +104,9 @@ namespace VividRP.Runtime
         {
             var range = Mathf.Max(trackedLightData.range, 0.001f);
             GetSpotAngleParameters(trackedLightData.lightType, trackedLightData.innerSpotAngle, trackedLightData.spotAngle, out var angleScale, out var angleOffset);
+            var isRectangleLight = trackedLightData.lightType == LightType.Rectangle;
+            var barnDoorAngleRadians = Mathf.Deg2Rad
+                * Mathf.Clamp(trackedLightData.barnDoorAngle, 0.0f, 90.0f);
 
             return new VividReGIRLightData
             {
@@ -122,6 +125,12 @@ namespace VividRP.Runtime
                     trackedLightData.lightType == LightType.Tube ? 0.0f : Mathf.Max(trackedLightData.areaSize.y, 0.0f)),
                 power = ComputeReGIRPower(trackedLightData),
                 renderingLayerMask = trackedLightData.renderingLayerMask,
+                cosBarnDoorAngle = isRectangleLight
+                    ? Mathf.Cos(barnDoorAngleRadians)
+                    : 0.0f,
+                barnDoorLength = isRectangleLight
+                    ? Mathf.Max(trackedLightData.barnDoorLength, 0.0f)
+                    : 0.0f,
             };
         }
 

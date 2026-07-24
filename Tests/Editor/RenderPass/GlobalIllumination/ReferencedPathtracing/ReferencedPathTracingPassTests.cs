@@ -36,6 +36,11 @@ namespace VividRP.Editor.Tests
 
             var resources = renderPass.Initialize();
             var accelerationStructure = resources.AccelerationStructures.Single();
+            var reGIRLights = resources.Buffers.Single(resource => resource.Name == "ReGIRLights");
+            var reGIRParameters = resources.Buffers.Single(
+                resource => resource.Name == "ReGIRParameters");
+            var reGIRReservoirs = resources.Buffers.Single(
+                resource => resource.Name == "ReGIRReservoirs");
             var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
             var lightPdfTexture = resources.Textures.Single(resource => resource.Name == "ReGIRLightPdfTexture");
             var diffuse = resources.Textures.Single(
@@ -52,6 +57,9 @@ namespace VividRP.Editor.Tests
                 resources.Buffers.Select(resource => resource.Name),
                 Is.EquivalentTo(new[] { "ReGIRLights", "ReGIRParameters", "ReGIRReservoirs" }));
             Assert.That(resources.Buffers.All(resource => resource.Access == AccessFlags.Read), Is.True);
+            Assert.That(reGIRLights.Buffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
+            Assert.That(reGIRParameters.Buffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
+            Assert.That(reGIRReservoirs.Buffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
             Assert.That(lightPdfTexture.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(lightPdfTexture.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(worldPosition.Name, Is.EqualTo("WorldPosition"));

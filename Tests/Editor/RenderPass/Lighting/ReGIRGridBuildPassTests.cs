@@ -160,10 +160,12 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(lightBuffer.desc.Count, Is.EqualTo(2));
                 Assert.That(lightBuffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
+                Assert.That(VividReGIRLightData.Stride, Is.EqualTo(sizeof(uint) * 26));
                 Assert.That(parameterBuffer.desc.Count, Is.EqualTo(1));
                 Assert.That(parameterBuffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
                 Assert.That(reservoirBuffer.desc.Count, Is.EqualTo(ExpectedDefaultSlotCount()));
                 Assert.That(reservoirBuffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
+                Assert.That(VividReGIRReservoir.Stride, Is.EqualTo(sizeof(uint) * 4));
                 Assert.That(lightPdfTexture.desc.Width, Is.EqualTo(2));
                 Assert.That(lightPdfTexture.desc.Height, Is.EqualTo(2));
                 Assert.That(lightPdfTexture.desc.MipCount, Is.EqualTo(2));
@@ -171,7 +173,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightPdfTexture.desc.UseMipMap, Is.True);
                 Assert.That(lightPdfTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
                 Assert.That(presampledLightBuffer.count, Is.EqualTo(ExpectedDefaultPresampledLightCount()));
-                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
+                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 4));
                 Assert.That(parameters.mode, Is.EqualTo(VividReGIRMode.Grid));
                 Assert.That(parameters.sourceSamplingMode, Is.EqualTo(ReGIRGridBuildPass.DefaultSourceSamplingMode));
                 Assert.That(parameters.lightPdfTextureWidth, Is.EqualTo(2u));
@@ -210,7 +212,7 @@ namespace VividRP.Editor.Tests
                 var presampledLightBuffer = GetGraphicsBuffer(pass, "m_ReGIRPresampledLightBuffer");
 
                 Assert.That(presampledLightBuffer.count, Is.EqualTo(1));
-                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
+                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 4));
             }
             finally
             {
@@ -275,7 +277,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(lightPdfTexture.desc.Height, Is.EqualTo(1));
                 Assert.That(lightPdfTexture.desc.MipCount, Is.EqualTo(1));
                 Assert.That(presampledLightBuffer.count, Is.EqualTo(1));
-                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 2));
+                Assert.That(presampledLightBuffer.stride, Is.EqualTo(sizeof(uint) * 4));
                 AssertImportedBackingBuffer(lightBuffer);
                 AssertImportedBackingBuffer(parameterBuffer);
                 AssertImportedBackingBuffer(reservoirBuffer);

@@ -7,7 +7,8 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
     /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
-    /// path and performs next-event estimation against the main directional light at every hit.
+    /// path and performs next-event estimation against the main directional light plus ReGIR
+    /// point, spot, rectangle, and tube-light reservoirs at every hit.
     /// RGB stores sample radiance and A is one for a primary hit or zero for a miss.
     /// </summary>
     public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
@@ -50,6 +51,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
         private static readonly int ReGIRLightPdfTextureId = Shader.PropertyToID("_ReGIRLightPdfTexture");
+        private static readonly int ReGIREnabledId = Shader.PropertyToID("_ReferencedReGIREnabled");
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -285,7 +287,13 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     ReblurCheckerboardModeId,
                     (int)m_ReblurCheckerboardMode);
-                if (HasValidReGIRResources())
+                var hasValidReGIRResources = HasValidReGIRResources();
+                cmd.SetGlobalInt(ReGIREnabledId, hasValidReGIRResources ? 1 : 0);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    ReGIREnabledId,
+                    hasValidReGIRResources ? 1 : 0);
+                if (hasValidReGIRResources)
                     BindReGIRGlobals(cmd);
                 cmd.DispatchRays(
                     m_RayTracingShader,

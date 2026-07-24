@@ -1,0 +1,10 @@
+#pragma use_dxc
+#pragma kernel main
+
+#define NRD_INTERNAL
+#define NRD_SIGNAL BOTH
+#define NRD_MODE RADIANCE
+// Unity resource adapter expands REBLUR_SHARED_CONSTANTS for FXC validation.
+#define MODE_5X5 0
+
+#include "Private/REBLUR_HitDistReconstruction.cs.hlsl"

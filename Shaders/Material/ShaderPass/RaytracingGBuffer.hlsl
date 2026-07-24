@@ -6,6 +6,7 @@
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/Private/NRD.hlsli"
 
 static const float kRaytracingGBufferTextureLodBias = 0.5;
 
@@ -85,6 +86,18 @@ void StandardLitRaytracingGBufferClosestHit(
     payload.emission = material.emission;
     payload.linearRoughness = material.openPbrInputs.specular_roughness;
     payload.metalness = material.openPbrInputs.base_metalness;
+    float3 baseColor = saturate(material.openPbrInputs.base_color);
+    float metalness = saturate(material.openPbrInputs.base_metalness);
+    float3 diffuseAlbedo = baseColor * (1.0 - metalness);
+    float3 reflectance0 = lerp(0.04.xxx, baseColor, metalness);
+    NRD_MaterialFactors(
+        normalize(material.shadingNormalWS),
+        normalize(-WorldRayDirection()),
+        diffuseAlbedo,
+        reflectance0,
+        saturate(material.openPbrInputs.specular_roughness),
+        payload.nrdDiffuseMaterialFactor,
+        payload.nrdSpecularMaterialFactor);
     payload.hitDistance = geometry.hitDistance;
     payload.hit = 1u;
 }

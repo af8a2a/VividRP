@@ -113,6 +113,8 @@ void StandardLitReferencedPathtracingClosestHit(
     if (dot(mainLightDirectionWS, geometry.faceNormalWS) > 0.0
         && any(_ReferencedMainLightColor.rgb > 0.0))
     {
+        // openpbr_eval returns f(wo, wi) * abs(NdotL). The ray-generation stage multiplies
+        // this response by _ReferencedMainLightColor, whose RGB value is illuminance in lux.
         OpenPBR_DiffuseSpecular mainLightResponse = openpbr_eval(
             preparedBsdf,
             mainLightDirectionWS);

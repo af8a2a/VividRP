@@ -93,7 +93,8 @@ namespace VividRP.Runtime.RenderPass.Core
             VividTemporalData temporalData,
             int width,
             int height,
-            bool hasValidHistory)
+            bool hasValidHistory,
+            ReferencedPathTracingReblurSettings settings)
         {
             var camera = cameraData?.camera;
             var worldToView = cameraData?.GetViewMatrix() ?? Matrix4x4.identity;
@@ -137,6 +138,16 @@ namespace VividRP.Runtime.RenderPass.Core
             float deltaTimeMs = Mathf.Max(Time.deltaTime * 1000.0f, 0.001f);
             float framerateScale = Mathf.Max(33.333f / deltaTimeMs, 1.0f);
             float denoisingRange = Mathf.Max(camera?.farClipPlane ?? 1000.0f, 1.0f);
+            int maxStabilizedFrameNum = Mathf.Clamp(
+                settings.maxStabilizedFrameNum,
+                0,
+                settings.maxAccumulatedFrameNum);
+            ResolveCheckerboardPhases(
+                settings.enabled
+                    ? settings.checkerboardMode
+                    : ReferencedPathTracingReblurCheckerboardMode.Off,
+                out uint diffuseCheckerboard,
+                out uint specularCheckerboard);
 
             return new ReblurSharedConstants
             {
@@ -152,7 +163,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 gFrustum = sigma.gFrustum,
                 gFrustumPrev = sigma.gFrustumPrev,
                 gCameraDelta = sigma.gCameraDelta,
-                gHitDistParams = new Vector4(3.0f, 0.1f, 20.0f, -25.0f),
+                gHitDistParams = settings.hitDistanceParameters,
                 gViewVectorWorld = sigma.gViewVectorWorld,
                 gViewVectorWorldPrev = new Vector4(
                     viewDirectionPrevious.x,
@@ -160,7 +171,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     viewDirectionPrevious.z,
                     0.0f),
                 gMvScale = new Vector4(1.0f / width, 1.0f / height, 1.0f, 0.0f),
-                gAntilagParams = new Vector2(4.0f, 3.0f),
+                gAntilagParams = settings.antilagParameters,
                 gResourceSize = new Vector2(width, height),
                 gResourceSizeInv = new Vector2(1.0f / width, 1.0f / height),
                 gResourceSizeInvPrev = new Vector2(1.0f / width, 1.0f / height),
@@ -183,48 +194,86 @@ namespace VividRP.Runtime.RenderPass.Core
                 gCameraAttachedReflectionMaterialID = 999.0f,
                 gStrandMaterialID = 999.0f,
                 gStrandThickness = 80e-6f,
-                gStabilizationStrength = 0.0f,
+                gStabilizationStrength = hasValidHistory
+                    ? maxStabilizedFrameNum / (1.0f + maxStabilizedFrameNum)
+                    : 0.0f,
                 gDebug = 0.0f,
                 gOrthoMode = sigma.gOrthoMode,
                 gUnproject = sigma.gUnproject,
                 gDenoisingRange = denoisingRange,
-                gPlaneDistSensitivity = 0.02f,
+                gPlaneDistSensitivity = settings.planeDistanceSensitivity,
                 gFramerateScale = framerateScale,
-                gMinBlurRadius = 1.0f,
-                gMaxBlurRadius = 30.0f,
-                gDiffPrepassBlurRadius = 30.0f,
-                gSpecPrepassBlurRadius = 50.0f,
-                gMaxAccumulatedFrameNum = hasValidHistory ? 30.0f : 0.0f,
-                gMaxFastAccumulatedFrameNum = hasValidHistory ? 6.0f : 0.0f,
-                gAntiFirefly = 0.0f,
-                gLobeAngleFraction = 0.15f * 0.15f,
-                gRoughnessFraction = 0.15f,
-                gHistoryFixFrameNum = 3.0f,
-                gHistoryFixBasePixelStride = 14.0f,
-                gHistoryFixAlternatePixelStride = 14.0f,
+                gMinBlurRadius = settings.minBlurRadius,
+                gMaxBlurRadius = Mathf.Max(settings.maxBlurRadius, settings.minBlurRadius),
+                gDiffPrepassBlurRadius = settings.diffusePrepassBlurRadius,
+                gSpecPrepassBlurRadius = settings.specularPrepassBlurRadius,
+                gMaxAccumulatedFrameNum = hasValidHistory
+                    ? settings.maxAccumulatedFrameNum
+                    : 0.0f,
+                gMaxFastAccumulatedFrameNum = hasValidHistory
+                    ? settings.maxFastAccumulatedFrameNum
+                    : 0.0f,
+                gAntiFirefly = settings.enableAntiFirefly ? 1.0f : 0.0f,
+                gLobeAngleFraction = settings.lobeAngleFraction * settings.lobeAngleFraction,
+                gRoughnessFraction = settings.roughnessFraction,
+                gHistoryFixFrameNum = settings.historyFixFrameNum,
+                gHistoryFixBasePixelStride = settings.historyFixBasePixelStride,
+                gHistoryFixAlternatePixelStride = settings.historyFixBasePixelStride,
                 gHistoryFixAlternatePixelStrideMaterialID = 999.0f,
-                gFastHistoryClampingSigmaScale = 2.0f,
+                gFastHistoryClampingSigmaScale = Mathf.Lerp(
+                    3.0f,
+                    settings.fastHistoryClampingSigmaScale,
+                    Mathf.Clamp01(
+                        Mathf.Max(settings.maxBlurRadius, settings.minBlurRadius) / 2.0f)),
                 gMinRectDimMulUnproject = Mathf.Min(width, height) * sigma.gUnproject,
-                gUsePrepassNotOnlyForSpecularMotionEstimation = 1.0f,
+                gUsePrepassNotOnlyForSpecularMotionEstimation =
+                    settings.usePrepassOnlyForSpecularMotionEstimation ? 0.0f : 1.0f,
                 gSplitScreen = 0.0f,
                 gSplitScreenPrev = 0.0f,
                 gCheckerboardResolveAccumSpeed = 0.5f,
                 gViewZScale = 1.0f,
-                gFireflySuppressorMinRelativeScale = 2.0f,
-                gMinHitDistanceWeight = 0.1f,
+                gFireflySuppressorMinRelativeScale =
+                    settings.fireflySuppressorMinRelativeScale,
+                gMinHitDistanceWeight = settings.minHitDistanceWeight,
                 gDiffMinMaterial = 4.0f,
                 gSpecMinMaterial = 4.0f,
-                gResponsiveAccumulationInvRoughnessThreshold = 1000.0f,
-                gResponsiveAccumulationMinAccumulatedFrameNum = 3u,
+                gResponsiveAccumulationInvRoughnessThreshold = 1.0f / Mathf.Max(
+                    settings.responsiveAccumulationRoughnessThreshold,
+                    0.001f),
+                gResponsiveAccumulationMinAccumulatedFrameNum =
+                    (uint)settings.responsiveAccumulationMinFrameNum,
                 gHasHistoryConfidence = 0u,
                 gHasDisocclusionThresholdMix = 0u,
-                gDiffCheckerboard = 2u,
-                gSpecCheckerboard = 2u,
+                gDiffCheckerboard = diffuseCheckerboard,
+                gSpecCheckerboard = specularCheckerboard,
                 gFrameIndex = frameIndex,
                 gIsRectChanged = hasValidHistory ? 0u : 1u,
                 gResetHistory = hasValidHistory ? 0u : 1u,
-                gReturnHistoryLengthInsteadOfOcclusion = 0u
+                gReturnHistoryLengthInsteadOfOcclusion =
+                    settings.returnHistoryLengthInsteadOfOcclusion ? 1u : 0u
             };
+        }
+
+        internal static void ResolveCheckerboardPhases(
+            ReferencedPathTracingReblurCheckerboardMode mode,
+            out uint diffuseCheckerboard,
+            out uint specularCheckerboard)
+        {
+            switch (mode)
+            {
+                case ReferencedPathTracingReblurCheckerboardMode.Black:
+                    diffuseCheckerboard = 0u;
+                    specularCheckerboard = 1u;
+                    break;
+                case ReferencedPathTracingReblurCheckerboardMode.White:
+                    diffuseCheckerboard = 1u;
+                    specularCheckerboard = 0u;
+                    break;
+                default:
+                    diffuseCheckerboard = 2u;
+                    specularCheckerboard = 2u;
+                    break;
+            }
         }
 
         private static Vector3 GetTranslation(Matrix4x4 matrix)

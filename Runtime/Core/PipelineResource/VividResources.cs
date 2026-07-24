@@ -300,6 +300,12 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_ClassifyTiles")]
         public ComputeShader REBLURDiffuseSpecularClassifyTilesCompute;
 
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HitDistanceReconstruction3x3")]
+        public ComputeShader REBLURDiffuseSpecularHitDistanceReconstruction3x3Compute;
+
+        [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_HitDistanceReconstruction5x5")]
+        public ComputeShader REBLURDiffuseSpecularHitDistanceReconstruction5x5Compute;
+
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PrePass")]
         public ComputeShader REBLURDiffuseSpecularPrePassCompute;
 
@@ -314,6 +320,14 @@ namespace VividRP.Runtime
 
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlur")]
         public ComputeShader REBLURDiffuseSpecularPostBlurCompute;
+
+        [VividResourcePath(
+            "Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_PostBlurTemporalStabilization")]
+        public ComputeShader REBLURDiffuseSpecularPostBlurTemporalStabilizationCompute;
+
+        [VividResourcePath(
+            "Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_TemporalStabilization")]
+        public ComputeShader REBLURDiffuseSpecularTemporalStabilizationCompute;
 
         [VividResourcePath("Shaders/Core/Private/NRD/REBLUR/REBLUR_DiffuseSpecular_Resolve")]
         public ComputeShader REBLURDiffuseSpecularResolveCompute;

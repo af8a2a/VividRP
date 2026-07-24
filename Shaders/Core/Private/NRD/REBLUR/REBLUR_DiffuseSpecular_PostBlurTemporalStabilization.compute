@@ -1,0 +1,9 @@
+#pragma use_dxc
+#pragma kernel main
+
+#define NRD_INTERNAL
+#define NRD_SIGNAL BOTH
+#define NRD_MODE RADIANCE
+#define TEMPORAL_STABILIZATION 1
+
+#include "Private/REBLUR_PostBlur.cs.hlsl"

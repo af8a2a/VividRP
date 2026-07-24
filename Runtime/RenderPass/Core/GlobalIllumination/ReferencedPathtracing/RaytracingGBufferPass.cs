@@ -30,6 +30,10 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_RaytracingGBufferDlssNormalRoughness");
         private static readonly int DiffuseAlbedoId = Shader.PropertyToID("_RaytracingGBufferDiffuseAlbedo");
         private static readonly int SpecularAlbedoId = Shader.PropertyToID("_RaytracingGBufferSpecularAlbedo");
+        private static readonly int NrdDiffuseMaterialFactorId =
+            Shader.PropertyToID("_RaytracingGBufferNrdDiffuseMaterialFactor");
+        private static readonly int NrdSpecularMaterialFactorId =
+            Shader.PropertyToID("_RaytracingGBufferNrdSpecularMaterialFactor");
         private static readonly int DlssDepthId = Shader.PropertyToID("_RaytracingGBufferDlssDepth");
         private static readonly int CameraPositionWSId =
             Shader.PropertyToID("_RaytracingGBufferCameraPositionWS");
@@ -99,6 +103,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_SpecularAlbedo;
 
         [RenderGraphResource(
+            Name = "NrdDiffuseMaterialFactor",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_NrdDiffuseMaterialFactor;
+
+        [RenderGraphResource(
+            Name = "NrdSpecularMaterialFactor",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_NrdSpecularMaterialFactor;
+
+        [RenderGraphResource(
             Name = "DlssDepth",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
@@ -137,6 +153,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16G16B16A16_SFloat);
             m_DiffuseAlbedo = CreateOutput("DiffuseAlbedo", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_SpecularAlbedo = CreateOutput("SpecularAlbedo", GraphicsFormat.A2B10G10R10_UNormPack32);
+            m_NrdDiffuseMaterialFactor = CreateOutput(
+                "NrdDiffuseMaterialFactor",
+                GraphicsFormat.R16G16B16A16_SFloat);
+            m_NrdSpecularMaterialFactor = CreateOutput(
+                "NrdSpecularMaterialFactor",
+                GraphicsFormat.R16G16B16A16_SFloat);
             m_DlssDepth = CreateOutput("DlssDepth", GraphicsFormat.R32_SFloat);
         }
 
@@ -226,6 +248,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 BindOutput(cmd, DlssNormalRoughnessId, m_DlssNormalRoughness);
                 BindOutput(cmd, DiffuseAlbedoId, m_DiffuseAlbedo);
                 BindOutput(cmd, SpecularAlbedoId, m_SpecularAlbedo);
+                BindOutput(cmd, NrdDiffuseMaterialFactorId, m_NrdDiffuseMaterialFactor);
+                BindOutput(cmd, NrdSpecularMaterialFactorId, m_NrdSpecularMaterialFactor);
                 BindOutput(cmd, DlssDepthId, m_DlssDepth);
 
                 cmd.SetRayTracingVectorParam(m_RayTracingShader, CameraPositionWSId, m_CameraPositionWS);
@@ -321,6 +345,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 height,
                 GraphicsFormat.A2B10G10R10_UNormPack32,
                 "SpecularAlbedo");
+            ConfigureTexture(
+                m_NrdDiffuseMaterialFactor,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "NrdDiffuseMaterialFactor");
+            ConfigureTexture(
+                m_NrdSpecularMaterialFactor,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                "NrdSpecularMaterialFactor");
             ConfigureTexture(m_DlssDepth, width, height, GraphicsFormat.R32_SFloat, "DlssDepth");
         }
 
@@ -362,6 +398,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsValid(m_DlssNormalRoughness)
                 && IsValid(m_DiffuseAlbedo)
                 && IsValid(m_SpecularAlbedo)
+                && IsValid(m_NrdDiffuseMaterialFactor)
+                && IsValid(m_NrdSpecularMaterialFactor)
                 && IsValid(m_DlssDepth);
         }
 

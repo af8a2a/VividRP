@@ -1,6 +1,8 @@
 #pragma kernel ReferencedPathTracingAccumulation
 #pragma target 5.0
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+
 Texture2D<float4> _ReferencedPathTracingSampleRadiance;
 Texture2D<float4> _ReferencedPathTracingHistoryRadiance;
 RWTexture2D<float4> _ReferencedPathTracingHistoryWrite;
@@ -28,7 +30,15 @@ void ReferencedPathTracingAccumulation(uint3 dispatchThreadId : SV_DispatchThrea
             + (currentSample.rgb - previousRadiance) * _ReferencedPathTracingAccumulationParameters.x;
     }
 
-    float4 result = float4(accumulatedRadiance, currentSample.a);
-    _ReferencedPathTracingHistoryWrite[pixelCoord] = result;
-    _ReferencedPathTracingResolvedColor[pixelCoord] = result;
+    // Accumulation stays in absolute scene-linear radiance. Applying camera exposure to history
+    // would invalidate convergence whenever automatic exposure adapts.
+    float4 sceneLinearResult = float4(accumulatedRadiance, currentSample.a);
+    _ReferencedPathTracingHistoryWrite[pixelCoord] = sceneLinearResult;
+
+    // VividRP lighting buffers are pre-exposed before auto-exposure metering and FinalBlit.
+    // FinalBlit subsequently applies currentExposure / preExposure, so this conversion belongs
+    // only on the presentation output.
+    _ReferencedPathTracingResolvedColor[pixelCoord] = float4(
+        VividApplyPreExposure(max(accumulatedRadiance, 0.0)),
+        currentSample.a);
 }

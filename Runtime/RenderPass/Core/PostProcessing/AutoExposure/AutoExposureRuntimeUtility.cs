@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
@@ -124,43 +125,17 @@ namespace VividRP.Runtime
 
     internal sealed class AutoExposureHistoryState : CameraRelativeState
     {
-        public GraphicsBuffer previousExposureBuffer;
-        public GraphicsBuffer currentExposureBuffer;
-        public RenderTexture previousExposureTexture;
-        public RenderTexture currentExposureTexture;
+        public CameraHistoryBuffer exposureBufferHistory;
+        public CameraHistoryTexture exposureTextureHistory;
         public bool hasValidHistory;
         public bool wasEnabledLastFrame;
         public AutoExposureMode lastMode;
         public AutoExposureImplementationPath lastImplementation;
 
-        public void SwapBuffers()
-        {
-            (previousExposureBuffer, currentExposureBuffer) = (currentExposureBuffer, previousExposureBuffer);
-            (previousExposureTexture, currentExposureTexture) = (currentExposureTexture, previousExposureTexture);
-        }
-
         public override void Dispose()
         {
-            previousExposureBuffer?.Dispose();
-            previousExposureBuffer = null;
-
-            currentExposureBuffer?.Dispose();
-            currentExposureBuffer = null;
-
-            if (previousExposureTexture != null)
-            {
-                previousExposureTexture.Release();
-                CoreUtils.Destroy(previousExposureTexture);
-                previousExposureTexture = null;
-            }
-
-            if (currentExposureTexture != null)
-            {
-                currentExposureTexture.Release();
-                CoreUtils.Destroy(currentExposureTexture);
-                currentExposureTexture = null;
-            }
-
+            exposureBufferHistory = null;
+            exposureTextureHistory = null;
             hasValidHistory = false;
             wasEnabledLastFrame = false;
             lastMode = AutoExposureMode.Histogram;
@@ -273,7 +248,7 @@ namespace VividRP.Runtime
             if (exposureEnabled)
             {
                 state = s_HistorySystem.GetOrCreateBase(camera);
-                EnsureAutoExposureHistoryState(state);
+                PrepareAutoExposureHistory(state, camera);
 
                 if (!state.wasEnabledLastFrame
                     || state.lastMode != settings.mode
@@ -283,13 +258,17 @@ namespace VividRP.Runtime
                     settings.forceTarget = 1f;
                 }
 
-                if (settings.mode == AutoExposureMode.Manual && state.currentExposureBuffer != null)
+                if (settings.mode == AutoExposureMode.Manual
+                    && state.exposureBufferHistory?.GetCurrent() != null)
                 {
                     WriteExposureBuffer(
-                        state.currentExposureBuffer,
+                        state.exposureBufferHistory.GetCurrent(),
                         settings.fixedExposureScale,
                         settings.manualAverageSceneLuminance,
                         settings.exposureCompensationAll);
+                    state.exposureBufferHistory.MarkWritten();
+                    state.hasValidHistory = true;
+                    state.wasEnabledLastFrame = true;
                 }
 
                 state.lastMode = settings.mode;
@@ -302,12 +281,20 @@ namespace VividRP.Runtime
             }
 
             var defaultExposureBuffer = s_DefaultExposureBuffer;
-            var hasValidHistory = exposureEnabled && state != null && state.hasValidHistory;
-            var previousExposureBuffer = exposureEnabled && state?.previousExposureBuffer != null
-                ? state.previousExposureBuffer
+            var bufferHistory = exposureEnabled ? state?.exposureBufferHistory : null;
+            var textureHistory = exposureEnabled ? state?.exposureTextureHistory : null;
+            var hasValidBufferHistory = bufferHistory?.IsValid() == true;
+            var hasValidTextureHistory = textureHistory?.IsValid() == true;
+            var hasValidHistory = exposureEnabled
+                && state != null
+                && state.hasValidHistory
+                && hasValidBufferHistory
+                && (implementation != AutoExposureImplementationPath.HDRP || hasValidTextureHistory);
+            var previousExposureBuffer = exposureEnabled && bufferHistory?.GetPrevious() != null
+                ? bufferHistory.GetPrevious()
                 : defaultExposureBuffer;
-            var currentExposureBuffer = exposureEnabled && state?.currentExposureBuffer != null
-                ? state.currentExposureBuffer
+            var currentExposureBuffer = exposureEnabled && bufferHistory?.GetCurrent() != null
+                ? bufferHistory.GetCurrent()
                 : defaultExposureBuffer;
             var frameExposureBuffer = exposureEnabled
                 ? settings.mode == AutoExposureMode.Manual
@@ -318,16 +305,16 @@ namespace VividRP.Runtime
                 : defaultExposureBuffer;
             var preExposureBuffer = exposureEnabled
                 && settings.mode == AutoExposureMode.Manual
-                && state?.currentExposureBuffer != null
-                ? state.currentExposureBuffer
-                : hasValidHistory && state?.previousExposureBuffer != null
-                    ? state.previousExposureBuffer
+                && bufferHistory?.GetCurrent() != null
+                ? bufferHistory.GetCurrent()
+                : hasValidHistory && bufferHistory?.GetPrevious() != null
+                    ? bufferHistory.GetPrevious()
                     : defaultExposureBuffer;
-            var previousExposureTexture = exposureEnabled && state?.previousExposureTexture != null
-                ? state.previousExposureTexture
+            var previousExposureTexture = exposureEnabled && textureHistory?.GetPrevious()?.rt != null
+                ? textureHistory.GetPrevious().rt
                 : null;
-            var currentExposureTexture = exposureEnabled && state?.currentExposureTexture != null
-                ? state.currentExposureTexture
+            var currentExposureTexture = exposureEnabled && textureHistory?.GetCurrent()?.rt != null
+                ? textureHistory.GetCurrent().rt
                 : null;
 
             exposureData.settings = settings;
@@ -350,7 +337,9 @@ namespace VividRP.Runtime
             if (!s_HistorySystem.TryGetBase(camera, out var state) || state == null)
                 return;
 
-            state.SwapBuffers();
+            state.exposureBufferHistory?.MarkWritten();
+            if (state.lastImplementation == AutoExposureImplementationPath.HDRP)
+                state.exposureTextureHistory?.MarkWritten();
             state.hasValidHistory = true;
             state.wasEnabledLastFrame = true;
         }
@@ -406,54 +395,54 @@ namespace VividRP.Runtime
             WriteExposureBuffer(s_DefaultExposureBuffer, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
         }
 
-        private static void EnsureAutoExposureHistoryState(AutoExposureHistoryState state)
+        private static void PrepareAutoExposureHistory(AutoExposureHistoryState state, Camera camera)
         {
-            if (state == null)
+            if (state == null || camera == null)
                 return;
 
-            EnsureAutoExposureBuffer(ref state.previousExposureBuffer, "VividRP Auto Exposure Previous");
-            EnsureAutoExposureBuffer(ref state.currentExposureBuffer, "VividRP Auto Exposure Current");
-            EnsureAutoExposureTexture(ref state.previousExposureTexture, "VividRP Auto Exposure Previous Texture");
-            EnsureAutoExposureTexture(ref state.currentExposureTexture, "VividRP Auto Exposure Current Texture");
-        }
-
-        private static void EnsureAutoExposureBuffer(ref GraphicsBuffer buffer, string name)
-        {
-            if (buffer != null && buffer.count == 1 && buffer.stride == AutoExposureVectorStride)
-                return;
-
-            buffer?.Dispose();
-            buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, 1, AutoExposureVectorStride);
-            buffer.name = name;
-            WriteExposureBuffer(buffer, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
-        }
-
-        private static void EnsureAutoExposureTexture(ref RenderTexture texture, string name)
-        {
-            if (texture != null
-                && texture.IsCreated()
-                && texture.width == 1
-                && texture.height == 1
-                && texture.enableRandomWrite)
+            var cameraHistory = camera.GetVividCameraHistory();
+            if (!cameraHistory.IsFrameActive)
             {
+                state.exposureBufferHistory = null;
+                state.exposureTextureHistory = null;
                 return;
             }
 
-            if (texture != null)
-            {
-                texture.Release();
-                CoreUtils.Destroy(texture);
-            }
+            state.exposureBufferHistory = cameraHistory.GetOrCreateBuffer(
+                CameraHistoryIds.AutoExposureBuffer,
+                2,
+                new CameraHistoryBufferDescriptor(
+                    1,
+                    AutoExposureVectorStride,
+                    GraphicsBuffer.Target.Structured),
+                AllocateAutoExposureBuffer);
+            state.exposureTextureHistory = cameraHistory.GetOrCreateTexture(
+                CameraHistoryIds.AutoExposureTexture,
+                2,
+                new CameraHistoryTextureDescriptor(
+                    1,
+                    1,
+                    GraphicsFormat.R32G32_SFloat,
+                    filterMode: FilterMode.Point,
+                    wrapMode: TextureWrapMode.Clamp,
+                    enableRandomWrite: true));
+        }
 
-            texture = new RenderTexture(1, 1, 0, RenderTextureFormat.RGFloat, RenderTextureReadWrite.Linear)
+        private static GraphicsBuffer AllocateAutoExposureBuffer(
+            in CameraHistoryBufferDescriptor descriptor,
+            string resourceName,
+            int resourceIndex)
+        {
+            var buffer = new GraphicsBuffer(
+                descriptor.Target,
+                descriptor.UsageFlags,
+                descriptor.Count,
+                descriptor.Stride)
             {
-                name = name,
-                enableRandomWrite = true,
-                filterMode = FilterMode.Point,
-                wrapMode = TextureWrapMode.Clamp,
-                hideFlags = HideFlags.HideAndDontSave
+                name = resourceName,
             };
-            texture.Create();
+            WriteExposureBuffer(buffer, 1f, AutoExposureSettingsResolver.MiddleGrey, 1f);
+            return buffer;
         }
 
         private static void WriteExposureBuffer(GraphicsBuffer buffer, float exposureScale, float averageSceneLuminance, float middleGreyCompensation)

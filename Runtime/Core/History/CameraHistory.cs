@@ -68,6 +68,102 @@ namespace VividRP.Runtime
 
         public static readonly CameraHistoryId ColorPyramid =
             CameraHistoryId.Create("ColorPyramid");
+
+        public static readonly CameraHistoryId TemporalAa =
+            CameraHistoryId.Create("TAAHistoryColor");
+
+        public static readonly CameraHistoryId DepthOfFieldCoC =
+            CameraHistoryId.Create("DepthOfFieldCoC");
+
+        public static readonly CameraHistoryId SigmaShadow =
+            CameraHistoryId.Create("SIGMAHistoryShadow");
+
+        public static readonly CameraHistoryId SigmaHistoryLength =
+            CameraHistoryId.Create("SIGMAHistoryLength");
+
+        public static readonly CameraHistoryId PathTracingAccumulation =
+            CameraHistoryId.Create("ReferencedPathTracingAccumulation");
+
+        public static readonly CameraHistoryId SsrAccumulation =
+            CameraHistoryId.Create("ScreenSpaceReflectionAccumulation");
+
+        public static readonly CameraHistoryId SsrAccumulationFrameCount =
+            CameraHistoryId.Create("ScreenSpaceReflectionAccumulationFrameCount");
+
+        public static readonly CameraHistoryId SsrHdrpAccumulation =
+            CameraHistoryId.Create("ScreenSpaceReflectionHDRPAccumulation");
+
+        public static readonly CameraHistoryId SsrReBlurLightingDistance =
+            CameraHistoryId.Create("ScreenSpaceReflectionReBlurLightingDistance");
+
+        public static readonly CameraHistoryId SsrReBlurAccumulation =
+            CameraHistoryId.Create("ScreenSpaceReflectionReBlurAccumulation");
+
+        public static readonly CameraHistoryId SsrReBlurStabilization =
+            CameraHistoryId.Create("ScreenSpaceReflectionReBlurStabilization");
+
+        public static readonly CameraHistoryId PathTracingReBlurViewZ =
+            CameraHistoryId.Create("PathTracingReBlurViewZ");
+
+        public static readonly CameraHistoryId PathTracingReBlurNormalRoughness =
+            CameraHistoryId.Create("PathTracingReBlurNormalRoughness");
+
+        public static readonly CameraHistoryId PathTracingReBlurInternalData =
+            CameraHistoryId.Create("PathTracingReBlurInternalData");
+
+        public static readonly CameraHistoryId PathTracingReBlurDiffuse =
+            CameraHistoryId.Create("PathTracingReBlurDiffuse");
+
+        public static readonly CameraHistoryId PathTracingReBlurDiffuseFast =
+            CameraHistoryId.Create("PathTracingReBlurDiffuseFast");
+
+        public static readonly CameraHistoryId PathTracingReBlurDiffuseStabilizedLuma =
+            CameraHistoryId.Create("PathTracingReBlurDiffuseStabilizedLuma");
+
+        public static readonly CameraHistoryId PathTracingReBlurSpecular =
+            CameraHistoryId.Create("PathTracingReBlurSpecular");
+
+        public static readonly CameraHistoryId PathTracingReBlurSpecularFast =
+            CameraHistoryId.Create("PathTracingReBlurSpecularFast");
+
+        public static readonly CameraHistoryId PathTracingReBlurSpecularStabilizedLuma =
+            CameraHistoryId.Create("PathTracingReBlurSpecularStabilizedLuma");
+
+        public static readonly CameraHistoryId PathTracingReBlurSpecularHitDistance =
+            CameraHistoryId.Create("PathTracingReBlurSpecularHitDistance");
+
+        public static readonly CameraHistoryId AutoExposureBuffer =
+            CameraHistoryId.Create("AutoExposureBuffer");
+
+        public static readonly CameraHistoryId AutoExposureTexture =
+            CameraHistoryId.Create("AutoExposureTexture");
+
+        public static readonly CameraHistoryId Fsr3Accumulation =
+            CameraHistoryId.Create("FSR3Accumulation");
+
+        public static readonly CameraHistoryId Fsr3InternalUpscaled =
+            CameraHistoryId.Create("FSR3InternalUpscaled");
+
+        public static readonly CameraHistoryId Fsr3LumaHistory =
+            CameraHistoryId.Create("FSR3LumaHistory");
+
+        public static readonly CameraHistoryId Fsr3Luma =
+            CameraHistoryId.Create("FSR3Luma");
+
+        public static readonly CameraHistoryId Fsr3FrameInfo =
+            CameraHistoryId.Create("FSR3FrameInfo");
+
+        public static readonly CameraHistoryId TsrHistoryColor =
+            CameraHistoryId.Create("TSRHistoryColor");
+
+        public static readonly CameraHistoryId TsrHistoryMeta =
+            CameraHistoryId.Create("TSRHistoryMeta");
+
+        public static readonly CameraHistoryId TsrResurrectionColor =
+            CameraHistoryId.Create("TSRResurrectionColor");
+
+        public static readonly CameraHistoryId TsrResurrectionMeta =
+            CameraHistoryId.Create("TSRResurrectionMeta");
     }
 
     /// <summary>
@@ -420,6 +516,15 @@ namespace VividRP.Runtime
                 texture.BeginFrame();
             foreach (var buffer in m_Buffers.Values)
                 buffer.BeginFrame();
+        }
+
+        internal void SetReferenceSize(int referenceWidth, int referenceHeight)
+        {
+            if (!m_IsFrameActive)
+                throw new InvalidOperationException("Camera history reference size can only be updated during an active frame.");
+
+            m_ReferenceWidth = Mathf.Max(1, referenceWidth);
+            m_ReferenceHeight = Mathf.Max(1, referenceHeight);
         }
 
         public CameraHistoryTexture GetOrCreateTexture(

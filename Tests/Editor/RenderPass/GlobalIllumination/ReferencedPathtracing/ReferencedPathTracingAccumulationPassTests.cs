@@ -42,8 +42,6 @@ namespace VividRP.Editor.Tests
                 Is.EquivalentTo(new[]
                 {
                     "PathTracingSampleRadiance",
-                    "PathTracingAccumulationPrevious",
-                    "PathTracingAccumulationCurrent",
                     "PathTracingResolvedColor"
                 }));
             Assert.That(
@@ -53,12 +51,6 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 resources.Textures.Single(resource => resource.Name == "PathTracingSampleRadiance").Access,
                 Is.EqualTo(AccessFlags.Read));
-            Assert.That(
-                resources.Textures.Single(resource => resource.Name == "PathTracingAccumulationPrevious").Access,
-                Is.EqualTo(AccessFlags.Read));
-            Assert.That(
-                resources.Textures.Single(resource => resource.Name == "PathTracingAccumulationCurrent").Access,
-                Is.EqualTo(AccessFlags.WriteAll));
             Assert.That(
                 resources.Textures.Single(resource => resource.Name == "PathTracingResolvedColor").Access,
                 Is.EqualTo(AccessFlags.WriteAll));

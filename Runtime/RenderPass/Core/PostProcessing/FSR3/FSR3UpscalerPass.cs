@@ -105,27 +105,6 @@ namespace VividRP.Runtime.RenderPass.Core
         };
         private static readonly int[] s_RcasConfigScratch = new int[4];
         private static readonly int[] s_ComputeInt2Scratch = new int[2];
-        private static readonly string[] s_AccumulationNames =
-        {
-            "FSR3_Accumulation1",
-            "FSR3_Accumulation2",
-        };
-        private static readonly string[] s_InternalUpscaledNames =
-        {
-            "FSR3_InternalUpscaled1",
-            "FSR3_InternalUpscaled2",
-        };
-        private static readonly string[] s_LumaHistoryNames =
-        {
-            "FSR3_LumaHistory1",
-            "FSR3_LumaHistory2",
-        };
-        private static readonly string[] s_LumaNames =
-        {
-            "FSR3_Luma1",
-            "FSR3_Luma2",
-        };
-
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
         private readonly List<EntityId> m_ExpiredCameraIds = new();
         private readonly RenderGraphTexture m_RecordOutputTexture = new();
@@ -192,6 +171,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ? additionalData.fsr3Quality
                 : VividFsr3QualityMode.Balanced;
             var resetHistory = cameraState.Prepare(
+                cameraData.camera,
                 renderSize,
                 outputSize,
                 quality,
@@ -353,12 +333,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.LumaInstability, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.SpdAtomicCounter, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.CurrentLuma, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousLuma, AccessFlags.Read);
-                builder.UseTexture(passData.PreviousAccumulation, AccessFlags.Read);
+                var previousAccess = passData.ResetHistory
+                    ? AccessFlags.ReadWrite
+                    : AccessFlags.Read;
+                builder.UseTexture(passData.PreviousLuma, previousAccess);
+                builder.UseTexture(passData.PreviousAccumulation, previousAccess);
                 builder.UseTexture(passData.CurrentAccumulation, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousInternalUpscaled, AccessFlags.Read);
+                builder.UseTexture(passData.PreviousInternalUpscaled, previousAccess);
                 builder.UseTexture(passData.CurrentInternalUpscaled, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousLumaHistory, AccessFlags.Read);
+                builder.UseTexture(passData.PreviousLumaHistory, previousAccess);
                 builder.UseTexture(passData.CurrentLumaHistory, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.FrameInfo, AccessFlags.ReadWrite);
                 builder.AllowPassCulling(false);
@@ -476,6 +459,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (data.EnableSharpening)
                 DispatchRcas(cmd, data);
+
+            data.State.MarkHistoryWritten();
         }
 
         private static void DispatchPrepareInputs(CommandBuffer cmd, PassData data)
@@ -1097,12 +1082,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal sealed class CameraState : IDisposable
         {
-            private readonly RTHandle[] m_Accumulation = new RTHandle[2];
-            private readonly RTHandle[] m_InternalUpscaled = new RTHandle[2];
-            private readonly RTHandle[] m_LumaHistory = new RTHandle[2];
-            private readonly RTHandle[] m_Luma = new RTHandle[2];
-            private RTHandle m_FrameInfo;
-            private int m_ResourceIndex;
+            private CameraHistoryTexture m_Accumulation;
+            private CameraHistoryTexture m_InternalUpscaled;
+            private CameraHistoryTexture m_LumaHistory;
+            private CameraHistoryTexture m_Luma;
+            private CameraHistoryTexture m_FrameInfo;
             private Vector2Int m_RenderSize;
             private Vector2Int m_OutputSize;
             private VividFsr3QualityMode m_Quality;
@@ -1115,23 +1099,28 @@ namespace VividRP.Runtime.RenderPass.Core
             public float AccumulatedFrameIndex { get; private set; }
 
             public bool Prepare(
+                Camera camera,
                 Vector2Int renderSize,
                 Vector2Int outputSize,
                 VividFsr3QualityMode quality,
                 int frameIndex,
                 bool forceResetHistory)
             {
+                EnsureTextures(camera, renderSize, outputSize);
+                var historyResourcesValid = m_Accumulation.IsValid()
+                    && m_InternalUpscaled.IsValid()
+                    && m_LumaHistory.IsValid()
+                    && m_Luma.IsValid()
+                    && m_FrameInfo.IsValid(0);
                 var resetHistory = forceResetHistory
                     || !m_HasValidHistory
+                    || !historyResourcesValid
                     || m_RenderSize != renderSize
                     || m_OutputSize != outputSize
                     || m_Quality != quality;
 
-                EnsureTextures(renderSize, outputSize);
-
                 if (resetHistory)
                 {
-                    m_ResourceIndex = 0;
                     AccumulatedFrameIndex = 0.0f;
                     PreviousRenderSize = renderSize;
                     PreviousOutputSize = outputSize;
@@ -1148,18 +1137,16 @@ namespace VividRP.Runtime.RenderPass.Core
 
             internal ImportedHandles Import(RenderGraph renderGraph)
             {
-                var readIndex = m_ResourceIndex;
-                var writeIndex = 1 - m_ResourceIndex;
                 return new ImportedHandles(
-                    renderGraph.ImportTexture(m_Accumulation[readIndex]),
-                    renderGraph.ImportTexture(m_Accumulation[writeIndex]),
-                    renderGraph.ImportTexture(m_InternalUpscaled[readIndex]),
-                    renderGraph.ImportTexture(m_InternalUpscaled[writeIndex]),
-                    renderGraph.ImportTexture(m_LumaHistory[readIndex]),
-                    renderGraph.ImportTexture(m_LumaHistory[writeIndex]),
-                    renderGraph.ImportTexture(m_Luma[readIndex]),
-                    renderGraph.ImportTexture(m_Luma[writeIndex]),
-                    renderGraph.ImportTexture(m_FrameInfo));
+                    renderGraph.ImportTexture(m_Accumulation.GetPrevious()),
+                    renderGraph.ImportTexture(m_Accumulation.GetCurrent()),
+                    renderGraph.ImportTexture(m_InternalUpscaled.GetPrevious()),
+                    renderGraph.ImportTexture(m_InternalUpscaled.GetCurrent()),
+                    renderGraph.ImportTexture(m_LumaHistory.GetPrevious()),
+                    renderGraph.ImportTexture(m_LumaHistory.GetCurrent()),
+                    renderGraph.ImportTexture(m_Luma.GetPrevious()),
+                    renderGraph.ImportTexture(m_Luma.GetCurrent()),
+                    renderGraph.ImportTexture(m_FrameInfo.GetCurrent()));
             }
 
             public void CommitFrame(Vector2Int renderSize, Vector2Int outputSize, Vector2 passDataJitter)
@@ -1168,7 +1155,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 PreviousOutputSize = outputSize;
                 PreviousJitter = passDataJitter;
                 AccumulatedFrameIndex += 1.0f;
-                m_ResourceIndex = 1 - m_ResourceIndex;
+            }
+
+            public void MarkHistoryWritten()
+            {
+                m_Accumulation?.MarkWritten();
+                m_InternalUpscaled?.MarkWritten();
+                m_LumaHistory?.MarkWritten();
+                m_Luma?.MarkWritten();
+                m_FrameInfo?.MarkWritten();
             }
 
             public void ClearHistory(CommandBuffer cmd)
@@ -1178,86 +1173,67 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 for (var i = 0; i < 2; i++)
                 {
-                    ClearRTHandle(cmd, m_Accumulation[i], Color.clear);
-                    ClearRTHandle(cmd, m_InternalUpscaled[i], Color.clear);
-                    ClearRTHandle(cmd, m_LumaHistory[i], Color.clear);
-                    ClearRTHandle(cmd, m_Luma[i], Color.clear);
+                    ClearRTHandle(cmd, m_Accumulation.GetFrame(i), Color.clear);
+                    ClearRTHandle(cmd, m_InternalUpscaled.GetFrame(i), Color.clear);
+                    ClearRTHandle(cmd, m_LumaHistory.GetFrame(i), Color.clear);
+                    ClearRTHandle(cmd, m_Luma.GetFrame(i), Color.clear);
                 }
 
-                ClearRTHandle(cmd, m_FrameInfo, new Color(-1.0f, 1.0f, 0.0f, 0.0f));
+                ClearRTHandle(
+                    cmd,
+                    m_FrameInfo.GetCurrent(),
+                    new Color(-1.0f, 1.0f, 0.0f, 0.0f));
             }
 
             public void Dispose()
             {
-                ReleaseArray(m_Accumulation);
-                ReleaseArray(m_InternalUpscaled);
-                ReleaseArray(m_LumaHistory);
-                ReleaseArray(m_Luma);
-                m_FrameInfo?.Release();
+                m_Accumulation = null;
+                m_InternalUpscaled = null;
+                m_LumaHistory = null;
+                m_Luma = null;
                 m_FrameInfo = null;
                 m_HasValidHistory = false;
             }
 
-            private void EnsureTextures(Vector2Int renderSize, Vector2Int outputSize)
+            private void EnsureTextures(
+                Camera camera,
+                Vector2Int renderSize,
+                Vector2Int outputSize)
             {
-                for (var i = 0; i < 2; i++)
-                {
-                    EnsureHandle(
-                        ref m_Accumulation[i],
-                        renderSize.x,
-                        renderSize.y,
-                        GraphicsFormat.R8_UNorm,
-                        s_AccumulationNames[i]);
-                    EnsureHandle(
-                        ref m_InternalUpscaled[i],
-                        outputSize.x,
-                        outputSize.y,
-                        GraphicsFormat.R16G16B16A16_SFloat,
-                        s_InternalUpscaledNames[i]);
-                    EnsureHandle(
-                        ref m_LumaHistory[i],
-                        renderSize.x,
-                        renderSize.y,
-                        GraphicsFormat.R16G16B16A16_SFloat,
-                        s_LumaHistoryNames[i]);
-                    EnsureHandle(
-                        ref m_Luma[i],
-                        renderSize.x,
-                        renderSize.y,
-                        GraphicsFormat.R16_SFloat,
-                        s_LumaNames[i]);
-                }
-
-                EnsureHandle(ref m_FrameInfo, 1, 1, GraphicsFormat.R32G32B32A32_SFloat, "FSR3_FrameInfo");
+                var history = camera.GetVividCameraHistory();
+                m_Accumulation = history.GetOrCreateTexture(
+                    CameraHistoryIds.Fsr3Accumulation,
+                    2,
+                    CreateHistoryDescriptor(renderSize, GraphicsFormat.R8_UNorm));
+                m_InternalUpscaled = history.GetOrCreateTexture(
+                    CameraHistoryIds.Fsr3InternalUpscaled,
+                    2,
+                    CreateHistoryDescriptor(outputSize, GraphicsFormat.R16G16B16A16_SFloat));
+                m_LumaHistory = history.GetOrCreateTexture(
+                    CameraHistoryIds.Fsr3LumaHistory,
+                    2,
+                    CreateHistoryDescriptor(renderSize, GraphicsFormat.R16G16B16A16_SFloat));
+                m_Luma = history.GetOrCreateTexture(
+                    CameraHistoryIds.Fsr3Luma,
+                    2,
+                    CreateHistoryDescriptor(renderSize, GraphicsFormat.R16_SFloat));
+                m_FrameInfo = history.GetOrCreateTexture(
+                    CameraHistoryIds.Fsr3FrameInfo,
+                    1,
+                    CreateHistoryDescriptor(Vector2Int.one, GraphicsFormat.R32G32B32A32_SFloat));
             }
 
-            private static void EnsureHandle(
-                ref RTHandle handle,
-                int width,
-                int height,
-                GraphicsFormat format,
-                string name)
+            private static CameraHistoryTextureDescriptor CreateHistoryDescriptor(
+                Vector2Int size,
+                GraphicsFormat format)
             {
-                width = Mathf.Max(1, width);
-                height = Mathf.Max(1, height);
-                if (handle != null
-                    && handle.rt != null
-                    && handle.rt.width == width
-                    && handle.rt.height == height
-                    && handle.rt.graphicsFormat == format)
-                {
-                    return;
-                }
-
-                handle?.Release();
-                handle = RTHandles.Alloc(
-                    width,
-                    height,
-                    colorFormat: format,
-                    enableRandomWrite: true,
+                return new CameraHistoryTextureDescriptor(
+                    size.x,
+                    size.y,
+                    format,
                     filterMode: FilterMode.Bilinear,
                     wrapMode: TextureWrapMode.Clamp,
-                    name: name);
+                    enableRandomWrite: true);
             }
 
             private static void ClearRTHandle(CommandBuffer cmd, RTHandle handle, Color clearColor)
@@ -1269,14 +1245,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.ClearRenderTarget(false, true, clearColor);
             }
 
-            private static void ReleaseArray(RTHandle[] handles)
-            {
-                for (var i = 0; i < handles.Length; i++)
-                {
-                    handles[i]?.Release();
-                    handles[i] = null;
-                }
-            }
         }
     }
 }

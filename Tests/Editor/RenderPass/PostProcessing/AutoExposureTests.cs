@@ -10,6 +10,43 @@ namespace VividRP.Editor.Tests
     public class AutoExposureTests
     {
         [Test]
+        public void AutoExposureHistory_UsesCameraHistoryBufferAndTexturePairs()
+        {
+            var cameraObject = new GameObject("AutoExposureCameraHistoryTests.Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var history = camera.GetVividCameraHistory();
+            var state = new AutoExposureHistoryState();
+
+            try
+            {
+                history.BeginFrame(1, 1);
+                var prepareHistory = typeof(VividAutoExposureSystem).GetMethod(
+                    "PrepareAutoExposureHistory",
+                    BindingFlags.Static | BindingFlags.NonPublic);
+
+                Assert.That(prepareHistory, Is.Not.Null);
+                prepareHistory.Invoke(null, new object[] { state, camera });
+
+                Assert.That(state.exposureBufferHistory, Is.Not.Null);
+                Assert.That(state.exposureTextureHistory, Is.Not.Null);
+                Assert.That(state.exposureBufferHistory.FrameCount, Is.EqualTo(2));
+                Assert.That(state.exposureTextureHistory.FrameCount, Is.EqualTo(2));
+                Assert.That(state.exposureBufferHistory.GetCurrent(), Is.Not.Null);
+                Assert.That(state.exposureBufferHistory.Descriptor.Count, Is.EqualTo(1));
+                Assert.That(
+                    state.exposureTextureHistory.GetCurrent().name,
+                    Does.EndWith("_AutoExposureCameraHistoryTests.Camera_0"));
+            }
+            finally
+            {
+                history.AbortFrame();
+                state.Dispose();
+                CameraHistorySystem.Dispose();
+                Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void AutoExposure_IsInactive_WhenDisabled()
         {
             var autoExposure = new AutoExposure();
@@ -654,8 +691,6 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("AutoExposureImplementationUtility.ResolveComputeShader("));
             Assert.That(runtimeSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
             Assert.That(runtimeSource, Does.Contain("var preExposureBuffer = exposureEnabled"));
-            Assert.That(runtimeSource, Does.Contain("? state.currentExposureBuffer"));
-            Assert.That(runtimeSource, Does.Contain("public RenderTexture previousExposureTexture;"));
             Assert.That(runtimeSource, Does.Contain("public AutoExposureImplementationPath implementation;"));
             Assert.That(implementationSource, Does.Contain("AutoExposureImplementationPath.HDRP"));
             Assert.That(implementationSource, Does.Contain("SupportsDispatch("));

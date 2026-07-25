@@ -57,27 +57,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int TSRParamsId = Shader.PropertyToID("_TSRParams");
         private static readonly int TSRRejectionParamsId = Shader.PropertyToID("_TSRRejectionParams");
 
-        private static readonly string[] s_HistoryColorNames =
-        {
-            "TSR_HistoryColor1",
-            "TSR_HistoryColor2",
-        };
-        private static readonly string[] s_HistoryMetaNames =
-        {
-            "TSR_HistoryMeta1",
-            "TSR_HistoryMeta2",
-        };
-        private static readonly string[] s_ResurrectionColorNames =
-        {
-            "TSR_ResurrectionColor1",
-            "TSR_ResurrectionColor2",
-        };
-        private static readonly string[] s_ResurrectionMetaNames =
-        {
-            "TSR_ResurrectionMeta1",
-            "TSR_ResurrectionMeta2",
-        };
-
         private readonly Dictionary<EntityId, CameraState> m_CameraStates = new();
         private readonly List<EntityId> m_ExpiredCameraIds = new();
         private readonly RenderGraphTextureDesc m_OutputDescriptor =
@@ -156,6 +135,7 @@ namespace VividRP.Runtime.RenderPass.Core
             CleanupExpiredCameraStates(cameraData.frameIndex);
 
             var resetHistory = cameraState.Prepare(
+                cameraData.camera,
                 renderSize,
                 outputSize,
                 quality,
@@ -331,13 +311,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 builder.UseTexture(passData.AcceptedHistoryColor, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.RejectionMask, AccessFlags.ReadWrite);
                 builder.UseTexture(passData.SpatialAntiAliasedColor, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousHistoryColor, AccessFlags.Read);
+                var previousAccess = passData.ResetHistory
+                    ? AccessFlags.ReadWrite
+                    : AccessFlags.Read;
+                builder.UseTexture(passData.PreviousHistoryColor, previousAccess);
                 builder.UseTexture(passData.CurrentHistoryColor, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousHistoryMeta, AccessFlags.Read);
+                builder.UseTexture(passData.PreviousHistoryMeta, previousAccess);
                 builder.UseTexture(passData.CurrentHistoryMeta, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousResurrectionColor, AccessFlags.Read);
+                builder.UseTexture(passData.PreviousResurrectionColor, previousAccess);
                 builder.UseTexture(passData.CurrentResurrectionColor, AccessFlags.ReadWrite);
-                builder.UseTexture(passData.PreviousResurrectionMeta, AccessFlags.Read);
+                builder.UseTexture(passData.PreviousResurrectionMeta, previousAccess);
                 builder.UseTexture(passData.CurrentResurrectionMeta, AccessFlags.ReadWrite);
                 if (passData.EnableSharpening)
                     builder.UseTexture(passData.ResolveOutput, AccessFlags.WriteAll);
@@ -436,6 +419,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (data.EnableSharpening)
                 DispatchSharpen(cmd, data);
+
+            data.State.MarkHistoryWritten();
         }
 
         private static void DispatchDilateVelocity(CommandBuffer cmd, PassData data)
@@ -898,11 +883,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal sealed class CameraState : IDisposable
         {
-            private readonly RTHandle[] m_HistoryColor = new RTHandle[2];
-            private readonly RTHandle[] m_HistoryMeta = new RTHandle[2];
-            private readonly RTHandle[] m_ResurrectionColor = new RTHandle[2];
-            private readonly RTHandle[] m_ResurrectionMeta = new RTHandle[2];
-            private int m_ResourceIndex;
+            private CameraHistoryTexture m_HistoryColor;
+            private CameraHistoryTexture m_HistoryMeta;
+            private CameraHistoryTexture m_ResurrectionColor;
+            private CameraHistoryTexture m_ResurrectionMeta;
             private Vector2Int m_RenderSize;
             private Vector2Int m_OutputSize;
             private VividTsrQualityMode m_Quality;
@@ -915,6 +899,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public Vector2 PreviousJitter { get; private set; }
 
             public bool Prepare(
+                Camera camera,
                 Vector2Int renderSize,
                 Vector2Int outputSize,
                 VividTsrQualityMode quality,
@@ -923,18 +908,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 bool forceResetHistory)
             {
                 historySampleCount = Mathf.Clamp(historySampleCount, 8, 32);
+                EnsureTextures(camera, outputSize);
+                var historyResourcesValid = m_HistoryColor.IsValid()
+                    && m_HistoryMeta.IsValid()
+                    && m_ResurrectionColor.IsValid()
+                    && m_ResurrectionMeta.IsValid();
                 var resetHistory = forceResetHistory
                     || !m_HasValidHistory
+                    || !historyResourcesValid
                     || m_RenderSize != renderSize
                     || m_OutputSize != outputSize
                     || m_Quality != quality
                     || m_HistorySampleCount != historySampleCount;
 
-                EnsureTextures(outputSize);
-
                 if (resetHistory)
                 {
-                    m_ResourceIndex = 0;
                     PreviousRenderSize = renderSize;
                     PreviousOutputSize = outputSize;
                     PreviousJitter = Vector2.zero;
@@ -951,17 +939,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
             internal ImportedHandles Import(RenderGraph renderGraph)
             {
-                var readIndex = m_ResourceIndex;
-                var writeIndex = 1 - m_ResourceIndex;
                 return new ImportedHandles(
-                    renderGraph.ImportTexture(m_HistoryColor[readIndex]),
-                    renderGraph.ImportTexture(m_HistoryColor[writeIndex]),
-                    renderGraph.ImportTexture(m_HistoryMeta[readIndex]),
-                    renderGraph.ImportTexture(m_HistoryMeta[writeIndex]),
-                    renderGraph.ImportTexture(m_ResurrectionColor[readIndex]),
-                    renderGraph.ImportTexture(m_ResurrectionColor[writeIndex]),
-                    renderGraph.ImportTexture(m_ResurrectionMeta[readIndex]),
-                    renderGraph.ImportTexture(m_ResurrectionMeta[writeIndex]));
+                    renderGraph.ImportTexture(m_HistoryColor.GetPrevious()),
+                    renderGraph.ImportTexture(m_HistoryColor.GetCurrent()),
+                    renderGraph.ImportTexture(m_HistoryMeta.GetPrevious()),
+                    renderGraph.ImportTexture(m_HistoryMeta.GetCurrent()),
+                    renderGraph.ImportTexture(m_ResurrectionColor.GetPrevious()),
+                    renderGraph.ImportTexture(m_ResurrectionColor.GetCurrent()),
+                    renderGraph.ImportTexture(m_ResurrectionMeta.GetPrevious()),
+                    renderGraph.ImportTexture(m_ResurrectionMeta.GetCurrent()));
             }
 
             public void CommitFrame(Vector2Int renderSize, Vector2Int outputSize, Vector2 jitter)
@@ -969,7 +955,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 PreviousRenderSize = renderSize;
                 PreviousOutputSize = outputSize;
                 PreviousJitter = jitter;
-                m_ResourceIndex = 1 - m_ResourceIndex;
+            }
+
+            public void MarkHistoryWritten()
+            {
+                m_HistoryColor?.MarkWritten();
+                m_HistoryMeta?.MarkWritten();
+                m_ResurrectionColor?.MarkWritten();
+                m_ResurrectionMeta?.MarkWritten();
             }
 
             public void ClearHistory(CommandBuffer cmd)
@@ -979,80 +972,54 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 for (var i = 0; i < 2; i++)
                 {
-                    ClearRTHandle(cmd, m_HistoryColor[i], Color.clear);
-                    ClearRTHandle(cmd, m_HistoryMeta[i], Color.clear);
-                    ClearRTHandle(cmd, m_ResurrectionColor[i], Color.clear);
-                    ClearRTHandle(cmd, m_ResurrectionMeta[i], Color.clear);
+                    ClearRTHandle(cmd, m_HistoryColor.GetFrame(i), Color.clear);
+                    ClearRTHandle(cmd, m_HistoryMeta.GetFrame(i), Color.clear);
+                    ClearRTHandle(cmd, m_ResurrectionColor.GetFrame(i), Color.clear);
+                    ClearRTHandle(cmd, m_ResurrectionMeta.GetFrame(i), Color.clear);
                 }
             }
 
             public void Dispose()
             {
-                ReleaseArray(m_HistoryColor);
-                ReleaseArray(m_HistoryMeta);
-                ReleaseArray(m_ResurrectionColor);
-                ReleaseArray(m_ResurrectionMeta);
+                m_HistoryColor = null;
+                m_HistoryMeta = null;
+                m_ResurrectionColor = null;
+                m_ResurrectionMeta = null;
                 m_HasValidHistory = false;
             }
 
-            private void EnsureTextures(Vector2Int outputSize)
+            private void EnsureTextures(Camera camera, Vector2Int outputSize)
             {
-                for (var i = 0; i < 2; i++)
-                {
-                    EnsureHandle(
-                        ref m_HistoryColor[i],
-                        outputSize.x,
-                        outputSize.y,
-                        GraphicsFormat.R16G16B16A16_SFloat,
-                        s_HistoryColorNames[i]);
-                    EnsureHandle(
-                        ref m_HistoryMeta[i],
-                        outputSize.x,
-                        outputSize.y,
-                        GraphicsFormat.R16G16_SFloat,
-                        s_HistoryMetaNames[i]);
-                    EnsureHandle(
-                        ref m_ResurrectionColor[i],
-                        outputSize.x,
-                        outputSize.y,
-                        GraphicsFormat.R16G16B16A16_SFloat,
-                        s_ResurrectionColorNames[i]);
-                    EnsureHandle(
-                        ref m_ResurrectionMeta[i],
-                        outputSize.x,
-                        outputSize.y,
-                        GraphicsFormat.R16G16_SFloat,
-                        s_ResurrectionMetaNames[i]);
-                }
+                var history = camera.GetVividCameraHistory();
+                m_HistoryColor = history.GetOrCreateTexture(
+                    CameraHistoryIds.TsrHistoryColor,
+                    2,
+                    CreateHistoryDescriptor(outputSize, GraphicsFormat.R16G16B16A16_SFloat));
+                m_HistoryMeta = history.GetOrCreateTexture(
+                    CameraHistoryIds.TsrHistoryMeta,
+                    2,
+                    CreateHistoryDescriptor(outputSize, GraphicsFormat.R16G16_SFloat));
+                m_ResurrectionColor = history.GetOrCreateTexture(
+                    CameraHistoryIds.TsrResurrectionColor,
+                    2,
+                    CreateHistoryDescriptor(outputSize, GraphicsFormat.R16G16B16A16_SFloat));
+                m_ResurrectionMeta = history.GetOrCreateTexture(
+                    CameraHistoryIds.TsrResurrectionMeta,
+                    2,
+                    CreateHistoryDescriptor(outputSize, GraphicsFormat.R16G16_SFloat));
             }
 
-            private static void EnsureHandle(
-                ref RTHandle handle,
-                int width,
-                int height,
-                GraphicsFormat format,
-                string name)
+            private static CameraHistoryTextureDescriptor CreateHistoryDescriptor(
+                Vector2Int size,
+                GraphicsFormat format)
             {
-                width = Mathf.Max(1, width);
-                height = Mathf.Max(1, height);
-                if (handle != null
-                    && handle.rt != null
-                    && handle.rt.width == width
-                    && handle.rt.height == height
-                    && handle.rt.graphicsFormat == format)
-                {
-                    return;
-                }
-
-                handle?.Release();
-                handle = RTHandles.Alloc(
-                    width,
-                    height,
-                    colorFormat: format,
-                    enableRandomWrite: true,
+                return new CameraHistoryTextureDescriptor(
+                    size.x,
+                    size.y,
+                    format,
                     filterMode: FilterMode.Bilinear,
                     wrapMode: TextureWrapMode.Clamp,
-                    name: name);
+                    enableRandomWrite: true);
             }
 
             private static void ClearRTHandle(CommandBuffer cmd, RTHandle handle, Color clearColor)
@@ -1064,14 +1031,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.ClearRenderTarget(false, true, clearColor);
             }
 
-            private static void ReleaseArray(RTHandle[] handles)
-            {
-                for (var i = 0; i < handles.Length; i++)
-                {
-                    handles[i]?.Release();
-                    handles[i] = null;
-                }
-            }
         }
     }
 }

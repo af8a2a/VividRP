@@ -33,7 +33,7 @@ namespace VividRP.Editor.Tests
 
             var resources = renderPass.Initialize();
 
-            Assert.That(resources.Textures, Has.Length.EqualTo(11));
+            Assert.That(resources.Textures, Has.Length.EqualTo(9));
             Assert.That(resources.Buffers, Is.Empty);
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "source" && texture.Access == AccessFlags.Read), Is.True);
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "LinearDepth" && texture.Access == AccessFlags.Read), Is.True);
@@ -41,6 +41,8 @@ namespace VividRP.Editor.Tests
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldCoC" && texture.Access == AccessFlags.ReadWrite), Is.True);
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldTileMinMaxPing" && texture.Access == AccessFlags.ReadWrite), Is.True);
             Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldOutput" && texture.Access == AccessFlags.Write), Is.True);
+            Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldCoCHistory"), Is.False);
+            Assert.That(Array.Exists(resources.Textures, texture => texture.Name == "DepthOfFieldCoCHistoryCurrent"), Is.False);
             Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
             Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("source"));
             Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("output"));

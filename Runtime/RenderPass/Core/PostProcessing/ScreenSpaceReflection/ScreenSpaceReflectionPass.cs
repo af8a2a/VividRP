@@ -65,13 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string SSRHDRPAccumulateProfilerTag = "SsrAccumulate";
         private const string HybridRayGenName = "RayGenScreenSpaceReflectionsHybridTrace";
         private const string RayTracingRayGenName = "RayGenIntegration";
-        private const string AccumulationHistoryKey = "SSRAccumulation";
-        private const string HDRPAccumulationHistoryKey = "SSRHDRPAccumulation";
-        private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
         private const float HDRPDefaultSpeedRejection = 0.5f;
-        private const string ReBlurLightingDistanceHistoryKey = "SSRReBlurLightingDistance";
-        private const string ReBlurAccumulationHistoryKey = "SSRReBlurAccumulation";
-        private const string ReBlurStabilizationHistoryKey = "SSRReBlurStabilization";
 
         private static readonly uint[] s_InitialDispatchIndirectArgsData = { 0u, 1u, 1u, 0u };
         private static readonly uint[] s_InitialRayDispatchIndirectArgsData = { 0u, 1u, 1u };
@@ -318,34 +312,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_HDRPHitPointTexture;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionHDRPAccumPrev",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_HDRPAccumHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionHDRPAccumTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_HDRPAccumHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionAccumPrev",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_AccumulationHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionAccumTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_AccumulationHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionPrevNumFramesAccum",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_NumFramesHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionNumFramesAccum",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_NumFramesHistoryCurrent;
 
         [RenderGraphResource(
@@ -372,34 +348,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_ReBlurAccumulationTexture;
 
-        [RenderGraphResource(
-            Name = "ReBlurLightingDistanceHistory",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_ReBlurLightingDistanceHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ReBlurLightingDistanceHistoryTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurLightingDistanceHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ReBlurAccumulationHistory",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_ReBlurAccumulationHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ReBlurAccumulationHistoryTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurAccumulationHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ReBlurStabilizationHistory",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_ReBlurStabilizationHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ReBlurStabilizationHistoryTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurStabilizationHistoryCurrent;
 
         private int m_SSRClearKernel = -1;
@@ -439,6 +397,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_HistoryInvalidated = true;
         private bool m_HDRPHistoryInvalidated = true;
         private bool m_SupportsRayTracing;
+        private CameraHistoryTexture m_AccumulationHistory;
+        private CameraHistoryTexture m_AccumulationFrameCountHistory;
+        private CameraHistoryTexture m_HDRPAccumulationHistory;
+        private CameraHistoryTexture m_ReBlurLightingDistanceHistory;
+        private CameraHistoryTexture m_ReBlurAccumulationHistory;
+        private CameraHistoryTexture m_ReBlurStabilizationHistory;
 
         private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;
 
@@ -735,6 +699,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
                         using (new ProfilingScope(cmd, s_SSRRayTracingDenoiseProfilingSampler))
                             DispatchRayTracingReBlur(cmd);
+
+                        MarkVividHistoryWritten();
+                        MarkReBlurHistoryWritten();
                     }
                     else
                     {
@@ -764,6 +731,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
                         using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))
                             DispatchAccumulate(cmd);
+
+                        MarkVividHistoryWritten();
                     }
 
                     executedPath = true;
@@ -772,12 +741,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (ShouldRunHDRPPath() && CanExecuteHDRPComparison())
                 {
                     DispatchHDRPComparison(cmd, context);
+                    m_HDRPAccumulationHistory?.MarkWritten();
                     executedPath = true;
                 }
 
                 if (!executedPath)
                     DispatchCopy(cmd);
             }
+        }
+
+        private void MarkVividHistoryWritten()
+        {
+            m_AccumulationHistory?.MarkWritten();
+            m_AccumulationFrameCountHistory?.MarkWritten();
+        }
+
+        private void MarkReBlurHistoryWritten()
+        {
+            m_ReBlurLightingDistanceHistory?.MarkWritten();
+            m_ReBlurAccumulationHistory?.MarkWritten();
+            m_ReBlurStabilizationHistory?.MarkWritten();
         }
 
         public override void Dispose()
@@ -805,6 +788,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HasValidAccumulationHistory = false;
             m_HasValidHDRPAccumulationHistory = false;
             m_HasValidReBlurHistory = false;
+            m_AccumulationHistory = null;
+            m_AccumulationFrameCountHistory = null;
+            m_HDRPAccumulationHistory = null;
+            m_ReBlurLightingDistanceHistory = null;
+            m_ReBlurAccumulationHistory = null;
+            m_ReBlurStabilizationHistory = null;
             m_HistoryInvalidated = true;
             m_HDRPHistoryInvalidated = true;
             m_SupportsRayTracing = false;
@@ -867,6 +856,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareAccumulationHistory(ContextContainer frameData)
         {
+            m_AccumulationHistory = null;
+            m_AccumulationFrameCountHistory = null;
             m_HasValidAccumulationHistory = false;
             m_ConstantBuffer.SsrUseAccumulationHistory = 0;
             m_ConstantBuffer.SsrAccumulationAmount = 1.0f;
@@ -905,16 +896,25 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            bool hasAccumulationHistory = AllocHistoryTexture(
-                AccumulationHistoryKey,
+            var camera = frameData.Get<VividCameraData>()?.camera;
+            bool hasAccumulationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrAccumulation,
                 m_AccumulationHistoryPrevious,
                 m_AccumulationHistoryCurrent,
-                m_AccumulationHistoryCurrent.desc);
-            bool hasFrameCountHistory = AllocHistoryTexture(
-                AccumulationFrameCountHistoryKey,
+                m_AccumulationHistoryCurrent.desc,
+                out m_AccumulationHistory,
+                AccessFlags.Write);
+            bool hasFrameCountHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrAccumulationFrameCount,
                 m_NumFramesHistoryPrevious,
                 m_NumFramesHistoryCurrent,
-                m_NumFramesHistoryCurrent.desc);
+                m_NumFramesHistoryCurrent.desc,
+                out m_AccumulationFrameCountHistory,
+                AccessFlags.Write);
 
             var temporalData = frameData.Get<VividTemporalData>();
             bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;
@@ -928,6 +928,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareHDRPAccumulationHistory(ContextContainer frameData)
         {
+            m_HDRPAccumulationHistory = null;
             m_HasValidHDRPAccumulationHistory = false;
             m_ConstantBuffer.SsrHDRPAccumulationHistorySize = BuildTextureSizeVector(m_Width, m_Height);
             m_ConstantBuffer.SsrHDRPAccumulationHistoryScale = Vector4.one;
@@ -949,17 +950,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            bool hasAccumulationHistory = AllocHistoryTexture(
-                HDRPAccumulationHistoryKey,
+            bool hasAccumulationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                frameData.Get<VividCameraData>()?.camera,
+                CameraHistoryIds.SsrHdrpAccumulation,
                 m_HDRPAccumHistoryPrevious,
                 m_HDRPAccumHistoryCurrent,
-                m_HDRPAccumHistoryCurrent.desc);
-            PassRecorder.TryGetHistoryTextureHandlesForPass(
-                this,
-                HDRPAccumulationHistoryKey,
-                out var previousHistoryHandle,
-                out var currentHistoryHandle,
-                out _);
+                m_HDRPAccumHistoryCurrent.desc,
+                out m_HDRPAccumulationHistory,
+                AccessFlags.Write);
+            var previousHistoryHandle = m_HDRPAccumulationHistory?.GetPrevious();
+            var currentHistoryHandle = m_HDRPAccumulationHistory?.GetCurrent();
 
             RTHandle historyPropertiesHandle = previousHistoryHandle ?? currentHistoryHandle;
             m_ConstantBuffer.SsrHDRPAccumulationHistorySize = ResolvePreviousHistoryTextureSize(
@@ -978,6 +979,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareReBlurHistory(ContextContainer frameData)
         {
+            m_ReBlurLightingDistanceHistory = null;
+            m_ReBlurAccumulationHistory = null;
+            m_ReBlurStabilizationHistory = null;
             m_HasValidReBlurHistory = false;
             m_ConstantBuffer.ReBlurHistoryValidity = 0.0f;
 
@@ -1015,21 +1019,34 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_ShouldApply || !ShouldRunRayTracingPath())
                 return;
 
-            bool hasLightingHistory = AllocHistoryTexture(
-                ReBlurLightingDistanceHistoryKey,
+            var camera = frameData.Get<VividCameraData>()?.camera;
+            bool hasLightingHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrReBlurLightingDistance,
                 m_ReBlurLightingDistanceHistoryPrevious,
                 m_ReBlurLightingDistanceHistoryCurrent,
-                m_ReBlurLightingDistanceHistoryCurrent.desc);
-            bool hasAccumulationHistory = AllocHistoryTexture(
-                ReBlurAccumulationHistoryKey,
+                m_ReBlurLightingDistanceHistoryCurrent.desc,
+                out m_ReBlurLightingDistanceHistory,
+                AccessFlags.Write);
+            bool hasAccumulationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrReBlurAccumulation,
                 m_ReBlurAccumulationHistoryPrevious,
                 m_ReBlurAccumulationHistoryCurrent,
-                m_ReBlurAccumulationHistoryCurrent.desc);
-            bool hasStabilizationHistory = AllocHistoryTexture(
-                ReBlurStabilizationHistoryKey,
+                m_ReBlurAccumulationHistoryCurrent.desc,
+                out m_ReBlurAccumulationHistory,
+                AccessFlags.Write);
+            bool hasStabilizationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrReBlurStabilization,
                 m_ReBlurStabilizationHistoryPrevious,
                 m_ReBlurStabilizationHistoryCurrent,
-                m_ReBlurStabilizationHistoryCurrent.desc);
+                m_ReBlurStabilizationHistoryCurrent.desc,
+                out m_ReBlurStabilizationHistory,
+                AccessFlags.Write);
 
             var temporalData = frameData.Get<VividTemporalData>();
             bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;

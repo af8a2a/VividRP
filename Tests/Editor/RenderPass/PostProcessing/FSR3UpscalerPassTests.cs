@@ -117,14 +117,67 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("GraphicsFormat.R16G16_SFloat"));
             Assert.That(passSource, Does.Contain("GraphicsFormat.R16G16B16A16_SFloat"));
             Assert.That(passSource, Does.Contain("GraphicsFormat.R32G32B32A32_SFloat"));
-            Assert.That(passSource, Does.Contain("m_Accumulation"));
-            Assert.That(passSource, Does.Contain("m_InternalUpscaled"));
-            Assert.That(passSource, Does.Contain("m_LumaHistory"));
-            Assert.That(passSource, Does.Contain("m_Luma"));
-            Assert.That(passSource, Does.Contain("renderGraph.ImportTexture(m_Luma[readIndex])"));
-            Assert.That(passSource, Does.Contain("renderGraph.ImportTexture(m_Luma[writeIndex])"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.Fsr3Accumulation"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.Fsr3InternalUpscaled"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.Fsr3LumaHistory"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.Fsr3Luma"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.Fsr3FrameInfo"));
+            Assert.That(passSource, Does.Contain("m_Luma.GetPrevious()"));
+            Assert.That(passSource, Does.Contain("m_Luma.GetCurrent()"));
             Assert.That(passSource, Does.Contain("temporalData != null && temporalData.IsFirstFrame"));
             Assert.That(passSource, Does.Contain("forceResetHistory"));
+        }
+
+        [Test]
+        public void CameraState_UsesCameraHistoryAndPreservesValidFrame()
+        {
+            var cameraObject = new GameObject("FSR3CameraHistoryTests.Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var history = camera.GetVividCameraHistory();
+            var state = new FSR3UpscalerPass.CameraState();
+
+            try
+            {
+                history.BeginFrame(8, 8);
+                Assert.That(
+                    state.Prepare(
+                        camera,
+                        new Vector2Int(8, 8),
+                        new Vector2Int(16, 16),
+                        VividFsr3QualityMode.Balanced,
+                        1,
+                        false),
+                    Is.True);
+                Assert.That(
+                    history.TryGetTexture(CameraHistoryIds.Fsr3Accumulation, out var accumulation),
+                    Is.True);
+                Assert.That(accumulation.FrameCount, Is.EqualTo(2));
+                Assert.That(
+                    history.TryGetTexture(CameraHistoryIds.Fsr3FrameInfo, out var frameInfo),
+                    Is.True);
+                Assert.That(frameInfo.FrameCount, Is.EqualTo(1));
+
+                state.MarkHistoryWritten();
+                history.CommitFrame();
+                history.BeginFrame(8, 8);
+
+                Assert.That(
+                    state.Prepare(
+                        camera,
+                        new Vector2Int(8, 8),
+                        new Vector2Int(16, 16),
+                        VividFsr3QualityMode.Balanced,
+                        2,
+                        false),
+                    Is.False);
+            }
+            finally
+            {
+                history.AbortFrame();
+                state.Dispose();
+                CameraHistorySystem.Dispose();
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]

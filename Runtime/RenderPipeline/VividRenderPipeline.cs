@@ -194,13 +194,16 @@ namespace VividRP.Runtime
                 }
 
                 var graphAsset = m_Asset.RenderGraphAsset;
-                PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
-                var cameraData = PassRecorder.GetFrameData().Get<VividCameraData>();
                 cameraHistory = camera.GetVividCameraHistory();
                 cameraHistory.BeginFrame(
+                    camera.scaledPixelWidth > 0 ? camera.scaledPixelWidth : camera.pixelWidth,
+                    camera.scaledPixelHeight > 0 ? camera.scaledPixelHeight : camera.pixelHeight);
+                cameraHistoryFrameActive = true;
+                PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
+                var cameraData = PassRecorder.GetFrameData().Get<VividCameraData>();
+                cameraHistory.SetReferenceSize(
                     cameraData?.actualWidth ?? camera.pixelWidth,
                     cameraData?.actualHeight ?? camera.pixelHeight);
-                cameraHistoryFrameActive = true;
                 using (s_SetupCameraPropertiesMarker.Auto())
                 {
                     context.SetupCameraProperties(camera);

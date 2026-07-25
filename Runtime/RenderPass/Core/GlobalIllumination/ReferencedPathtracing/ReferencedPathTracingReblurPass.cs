@@ -25,20 +25,6 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
-        private const string ViewZHistoryKey = "ReferencedPathTracingReblur.ViewZ";
-        private const string NormalRoughnessHistoryKey = "ReferencedPathTracingReblur.NormalRoughness";
-        private const string InternalDataHistoryKey = "ReferencedPathTracingReblur.InternalData";
-        private const string DiffuseHistoryKey = "ReferencedPathTracingReblur.Diffuse";
-        private const string DiffuseFastHistoryKey = "ReferencedPathTracingReblur.DiffuseFast";
-        private const string DiffuseStabilizedLumaHistoryKey =
-            "ReferencedPathTracingReblur.DiffuseStabilizedLuma";
-        private const string SpecularHistoryKey = "ReferencedPathTracingReblur.Specular";
-        private const string SpecularFastHistoryKey = "ReferencedPathTracingReblur.SpecularFast";
-        private const string SpecularStabilizedLumaHistoryKey =
-            "ReferencedPathTracingReblur.SpecularStabilizedLuma";
-        private const string SpecularHitDistanceHistoryKey =
-            "ReferencedPathTracingReblur.SpecularHitDistance";
-
         private static readonly int ClassifyTilesConstantsId =
             Shader.PropertyToID("REBLUR_ClassifyTilesConstants");
         private static readonly int HitDistanceReconstructionConstantsId =
@@ -172,64 +158,44 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_ResolvedColor;
 
-        [RenderGraphResource(Name = "ReblurPreviousViewZ", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousViewZ;
 
-        [RenderGraphResource(Name = "ReblurCurrentViewZ", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentViewZ;
 
-        [RenderGraphResource(Name = "ReblurPreviousNormalRoughness", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousNormalRoughness;
 
-        [RenderGraphResource(Name = "ReblurCurrentNormalRoughness", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentNormalRoughness;
 
-        [RenderGraphResource(Name = "ReblurPreviousInternalData", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousInternalData;
 
-        [RenderGraphResource(Name = "ReblurCurrentInternalData", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentInternalData;
 
-        [RenderGraphResource(Name = "ReblurPreviousDiffuse", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousDiffuse;
 
-        [RenderGraphResource(Name = "ReblurCurrentDiffuse", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentDiffuse;
 
-        [RenderGraphResource(Name = "ReblurPreviousDiffuseFast", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousDiffuseFast;
 
-        [RenderGraphResource(Name = "ReblurCurrentDiffuseFast", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentDiffuseFast;
 
-        [RenderGraphResource(Name = "ReblurPreviousDiffuseStabilizedLuma", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousDiffuseStabilizedLuma;
 
-        [RenderGraphResource(Name = "ReblurCurrentDiffuseStabilizedLuma", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentDiffuseStabilizedLuma;
 
-        [RenderGraphResource(Name = "ReblurPreviousSpecular", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousSpecular;
 
-        [RenderGraphResource(Name = "ReblurCurrentSpecular", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentSpecular;
 
-        [RenderGraphResource(Name = "ReblurPreviousSpecularFast", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousSpecularFast;
 
-        [RenderGraphResource(Name = "ReblurCurrentSpecularFast", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentSpecularFast;
 
-        [RenderGraphResource(Name = "ReblurPreviousSpecularStabilizedLuma", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousSpecularStabilizedLuma;
 
-        [RenderGraphResource(Name = "ReblurCurrentSpecularStabilizedLuma", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentSpecularStabilizedLuma;
 
-        [RenderGraphResource(Name = "ReblurPreviousSpecularHitDistance", Access = AccessFlags.Read)]
         private RenderGraphTexture m_PreviousSpecularHitDistance;
 
-        [RenderGraphResource(Name = "ReblurCurrentSpecularHitDistance", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CurrentSpecularHitDistance;
 
         [RenderGraphResource(Name = "ReblurTiles", Access = AccessFlags.ReadWrite)]
@@ -302,6 +268,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReblurSharedConstants m_Constants;
         private int m_Width = 1;
         private int m_Height = 1;
+        private readonly CameraHistoryTexture[] m_Histories = new CameraHistoryTexture[10];
         private bool m_HasValidHistory;
         private ReferencedPathTracingReblurSettings m_Settings =
             ReferencedPathTracingReblurSettings.CreateDefault();
@@ -459,57 +426,78 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ResizeFullResolutionTextures();
             ResizeTexture(m_Tiles, CoreUtils.DivRoundUp(m_Width, 16), CoreUtils.DivRoundUp(m_Height, 16));
+            System.Array.Clear(m_Histories, 0, m_Histories.Length);
 
             bool hasViewZ = AllocateHistory(
-                ViewZHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurViewZ,
                 m_PreviousViewZ,
                 m_CurrentViewZ,
-                GraphicsFormat.R32_SFloat);
+                GraphicsFormat.R32_SFloat,
+                0);
             bool hasNormalRoughness = AllocateHistory(
-                NormalRoughnessHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurNormalRoughness,
                 m_PreviousNormalRoughness,
                 m_CurrentNormalRoughness,
-                GraphicsFormat.A2B10G10R10_UNormPack32);
+                GraphicsFormat.A2B10G10R10_UNormPack32,
+                1);
             bool hasInternalData = AllocateHistory(
-                InternalDataHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurInternalData,
                 m_PreviousInternalData,
                 m_CurrentInternalData,
-                GraphicsFormat.R16_UInt);
+                GraphicsFormat.R16_UInt,
+                2);
             bool hasDiffuse = AllocateHistory(
-                DiffuseHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurDiffuse,
                 m_PreviousDiffuse,
                 m_CurrentDiffuse,
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R16G16B16A16_SFloat,
+                3);
             bool hasDiffuseFast = AllocateHistory(
-                DiffuseFastHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurDiffuseFast,
                 m_PreviousDiffuseFast,
                 m_CurrentDiffuseFast,
-                GraphicsFormat.R16_SFloat);
+                GraphicsFormat.R16_SFloat,
+                4);
             bool hasDiffuseStabilizedLuma = AllocateHistory(
-                DiffuseStabilizedLumaHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurDiffuseStabilizedLuma,
                 m_PreviousDiffuseStabilizedLuma,
                 m_CurrentDiffuseStabilizedLuma,
-                GraphicsFormat.R16_SFloat);
+                GraphicsFormat.R16_SFloat,
+                5);
             bool hasSpecular = AllocateHistory(
-                SpecularHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurSpecular,
                 m_PreviousSpecular,
                 m_CurrentSpecular,
-                GraphicsFormat.R16G16B16A16_SFloat);
+                GraphicsFormat.R16G16B16A16_SFloat,
+                6);
             bool hasSpecularFast = AllocateHistory(
-                SpecularFastHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurSpecularFast,
                 m_PreviousSpecularFast,
                 m_CurrentSpecularFast,
-                GraphicsFormat.R16_SFloat);
+                GraphicsFormat.R16_SFloat,
+                7);
             bool hasSpecularStabilizedLuma = AllocateHistory(
-                SpecularStabilizedLumaHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurSpecularStabilizedLuma,
                 m_PreviousSpecularStabilizedLuma,
                 m_CurrentSpecularStabilizedLuma,
-                GraphicsFormat.R16_SFloat);
+                GraphicsFormat.R16_SFloat,
+                8);
             bool hasSpecularHitDistance = AllocateHistory(
-                SpecularHitDistanceHistoryKey,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingReBlurSpecularHitDistance,
                 m_PreviousSpecularHitDistance,
                 m_CurrentSpecularHitDistance,
-                GraphicsFormat.R16_SFloat);
+                GraphicsFormat.R16_SFloat,
+                9);
 
             bool settingsMatch = UpdateCameraSettings(cameraData?.camera, m_Settings);
             m_HasValidHistory = m_Settings.enabled
@@ -696,6 +684,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     DispatchTemporalStabilization(cmd, dispatchX, dispatchY);
 
                 DispatchResolve(cmd);
+                MarkHistoryWritten(useTemporalStabilization);
             }
         }
 
@@ -791,6 +780,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PrepareKernel = -1;
             m_ResolveKernel = -1;
             m_ResolveRawKernel = -1;
+            System.Array.Clear(m_Histories, 0, m_Histories.Length);
             m_HasValidHistory = false;
             m_Width = 1;
             m_Height = 1;
@@ -812,13 +802,15 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         private bool AllocateHistory(
-            string key,
+            Camera camera,
+            CameraHistoryId id,
             RenderGraphTexture previous,
             RenderGraphTexture current,
-            GraphicsFormat format)
+            GraphicsFormat format,
+            int historyIndex)
         {
             var descriptor = RenderGraphTextureDesc.CreateColorTarget(m_Width, m_Height, format);
-            descriptor.Name = key;
+            descriptor.Name = id.Name;
             descriptor.EnableRandomWrite = true;
             // REBLUR's gResetHistory path ignores previous contents and every stage overwrites current
             // history. Avoid requiring RTV support for packed/UAV-only history formats.
@@ -826,7 +818,25 @@ namespace VividRP.Runtime.RenderPass.Core
             descriptor.ClearColor = Color.clear;
             descriptor.FilterMode = FilterMode.Point;
             descriptor.WrapMode = TextureWrapMode.Clamp;
-            return AllocHistoryTexture(key, previous, current, descriptor);
+            return CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                id,
+                previous,
+                current,
+                descriptor,
+                out m_Histories[historyIndex]);
+        }
+
+        private void MarkHistoryWritten(bool temporalStabilizationEnabled)
+        {
+            for (var i = 0; i < m_Histories.Length; i++)
+            {
+                if (!temporalStabilizationEnabled && (i == 5 || i == 8))
+                    continue;
+
+                m_Histories[i]?.MarkWritten();
+            }
         }
 
         private void ResizeFullResolutionTextures()

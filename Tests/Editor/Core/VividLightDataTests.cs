@@ -834,6 +834,8 @@ namespace VividRP.Editor.Tests
                 rightWS = Vector3.right,
                 upWS = Vector3.up,
                 areaSize = new Vector2(3.0f, 2.0f),
+                barnDoorAngle = 45.0f,
+                barnDoorLength = 0.35f,
                 renderingLayerMask = 11u,
             };
 
@@ -849,6 +851,10 @@ namespace VividRP.Editor.Tests
             Assert.That(reGIRLight.areaSize.y, Is.EqualTo(2.0f).Within(0.0001f));
             Assert.That(reGIRLight.power, Is.EqualTo(36.0f).Within(0.0001f));
             Assert.That(reGIRLight.renderingLayerMask, Is.EqualTo(11u));
+            Assert.That(
+                reGIRLight.cosBarnDoorAngle,
+                Is.EqualTo(Mathf.Cos(45.0f * Mathf.Deg2Rad)).Within(0.0001f));
+            Assert.That(reGIRLight.barnDoorLength, Is.EqualTo(0.35f).Within(0.0001f));
         }
 
         private static void AssertDirectionalLight(

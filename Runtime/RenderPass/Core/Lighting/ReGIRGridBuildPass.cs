@@ -29,7 +29,7 @@ namespace VividRP.Runtime
         private const string PresampleLocalLightsKernelName = "ReGIRPresampleLocalLights";
         private const int ThreadGroupSize = 256;
         private const int PdfReduceThreadGroupSize = 8;
-        private const int PresampledLightEntryStride = sizeof(uint) * 2;
+        private const int PresampledLightEntryStride = sizeof(uint) * 4;
         private const float Pi = Mathf.PI;
 
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");

@@ -7,8 +7,10 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
     /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
-    /// path and performs next-event estimation against the main directional light at every hit.
-    /// RGB stores sample radiance and A is one for a primary hit or zero for a miss.
+    /// path and performs next-event estimation against the main directional light plus ReGIR
+    /// point, spot, rectangle, and tube-light reservoirs at every hit.
+    /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
+    /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
     public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
     {
@@ -50,6 +52,29 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
         private static readonly int ReGIRLightPdfTextureId = Shader.PropertyToID("_ReGIRLightPdfTexture");
+        private static readonly int ReGIREnabledId = Shader.PropertyToID("_ReferencedReGIREnabled");
+        private static readonly int EnvironmentTextureId =
+            Shader.PropertyToID("_ReferencedEnvironmentTexture");
+        private static readonly int EnvironmentImportanceDistributionId =
+            Shader.PropertyToID("_ReferencedEnvironmentImportanceDistribution");
+        private static readonly int EnvironmentTintId =
+            Shader.PropertyToID("_ReferencedEnvironmentTint");
+        private static readonly int EnvironmentParametersId =
+            Shader.PropertyToID("_ReferencedEnvironmentParameters");
+        private static readonly int EnvironmentLightingEnabledId =
+            Shader.PropertyToID("_ReferencedEnvironmentLightingEnabled");
+        private static readonly int EnvironmentCameraVisibleId =
+            Shader.PropertyToID("_ReferencedEnvironmentCameraVisible");
+        private static readonly int EnvironmentImportanceSamplingEnabledId =
+            Shader.PropertyToID("_ReferencedEnvironmentImportanceSamplingEnabled");
+        private static readonly int EnvironmentSamplingModeId =
+            Shader.PropertyToID("_ReferencedEnvironmentSamplingMode");
+        private static readonly int EnvironmentDebugModeId =
+            Shader.PropertyToID("_ReferencedEnvironmentDebugMode");
+        private static readonly int CameraClearColorId =
+            Shader.PropertyToID("_ReferencedCameraClearColor");
+        private static readonly int CameraSkyEnabledId =
+            Shader.PropertyToID("_ReferencedCameraSkyEnabled");
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -65,6 +90,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "ReGIRLightPdfTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_ReGIRLightPdfTexture;
+
+        [RenderGraphResource(Name = "PathTracingEnvironment", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_EnvironmentTexture;
+
+        [RenderGraphResource(
+            Name = "EnvironmentImportanceDistribution",
+            Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_EnvironmentImportanceDistribution;
 
         [RenderGraphResource(
             Name = "WorldPosition",
@@ -124,6 +157,10 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
         private ReferencedPathTracingReblurCheckerboardMode m_ReblurCheckerboardMode =
             ReferencedPathTracingReblurCheckerboardMode.Off;
+        private ReferencedPathTracingEnvironmentState m_EnvironmentState;
+        private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
+        private readonly RenderGraphBuffer m_DefaultEnvironmentImportanceDistribution;
+        private bool m_DefaultEnvironmentImportanceDistributionInitialized;
         private int m_FrameIndex;
 
         public ReferencedPathTracingPass()
@@ -142,6 +179,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReGIRLightPdfTexture = RenderGraphTexture.CreateInput(
                 "ReGIRLightPdfTexture",
                 GraphicsFormat.R32_SFloat);
+            m_EnvironmentTexture = CreateEnvironmentTexture("PathTracingEnvironment");
+            m_DefaultEnvironmentImportanceDistribution =
+                RenderGraphBuffer.CreateStructured(
+                    "EnvironmentImportanceDistributionFallback",
+                    ReferencedPathTracingEnvironmentImportanceLayout.ElementCount,
+                    ReferencedPathTracingEnvironmentImportanceLayout.ElementStride);
+            m_EnvironmentImportanceDistribution =
+                m_DefaultEnvironmentImportanceDistribution;
             m_WorldPositionTexture = RenderGraphTexture.CreateOutput(
                 "WorldPosition",
                 GraphicsFormat.R32G32B32A32_SFloat);
@@ -168,6 +213,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Create()
         {
+            SkyManager.Initialize();
             m_SupportsRayTracing = SystemInfo.supportsRayTracing;
             m_RayTracingShader = PipelineResourceManager
                 .Get<VividRPCoreResources>()
@@ -193,7 +239,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 Screen.height);
 
             ConfigureOutputs(m_Width, m_Height);
+            PrepareEnvironmentImportanceDistributionFallback();
             PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
+            PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
             m_ReblurHitDistanceParameters = reblurSettings.hitDistanceParameters;
             m_ReblurCheckerboardMode = reblurSettings.enabled
@@ -285,7 +333,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     ReblurCheckerboardModeId,
                     (int)m_ReblurCheckerboardMode);
-                if (HasValidReGIRResources())
+                BindEnvironment(cmd);
+                var hasValidReGIRResources = HasValidReGIRResources();
+                cmd.SetGlobalInt(ReGIREnabledId, hasValidReGIRResources ? 1 : 0);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    ReGIREnabledId,
+                    hasValidReGIRResources ? 1 : 0);
+                if (hasValidReGIRResources)
                     BindReGIRGlobals(cmd);
                 cmd.DispatchRays(
                     m_RayTracingShader,
@@ -314,6 +369,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReblurHitDistanceParameters =
                 ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
+            m_EnvironmentState = default;
+            m_CameraBackgroundState = default;
+            m_DefaultEnvironmentImportanceDistribution?.ClearImportedBuffer();
+            m_DefaultEnvironmentImportanceDistributionInitialized = false;
             m_FrameIndex = 0;
         }
 
@@ -416,6 +475,155 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 desc = RenderGraphAccelerationStructureDesc.Create("SceneRTAS")
             };
+        }
+
+        private static RenderGraphTexture CreateEnvironmentTexture(string name)
+        {
+            return new RenderGraphTexture
+            {
+                desc = new RenderGraphTextureDesc
+                {
+                    Width = 1,
+                    Height = 1,
+                    Dimension = TextureDimension.Cube,
+                    ColorFormat = GraphicsFormat.R16G16B16A16_SFloat,
+                    DepthBufferBits = DepthBits.None,
+                    FilterMode = FilterMode.Trilinear,
+                    WrapMode = TextureWrapMode.Clamp,
+                    UseMipMap = true,
+                    AutoGenerateMips = false,
+                    Name = name
+                }
+            };
+        }
+
+        private void PrepareEnvironment(VividSkyData skyData, VividCameraData cameraData)
+        {
+            m_EnvironmentTexture.ClearImportedHandle();
+            m_EnvironmentState = ReferencedPathTracingEnvironmentState.Resolve(skyData);
+            m_CameraBackgroundState =
+                ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
+
+            // Reference Path Tracing V1 only accepts HDRI Sky. Passing null deliberately imports
+            // SkyManager's black cubemap for disabled, missing, or unsupported sky types.
+            SkyManager.ImportSpecularCubemap(
+                m_EnvironmentTexture,
+                m_EnvironmentState.hasHdri ? skyData : null);
+        }
+
+        private void BindEnvironment(CommandBuffer cmd)
+        {
+            var hasEnvironmentBinding =
+                m_EnvironmentTexture?.innerHandle.IsValid() == true;
+            if (hasEnvironmentBinding)
+            {
+                cmd.SetGlobalTexture(EnvironmentTextureId, m_EnvironmentTexture.innerHandle);
+                cmd.SetRayTracingTextureParam(
+                    m_RayTracingShader,
+                    EnvironmentTextureId,
+                    m_EnvironmentTexture.innerHandle);
+            }
+
+            if (m_EnvironmentImportanceDistribution?.innerHandle.IsValid() == true)
+            {
+                cmd.SetGlobalBuffer(
+                    EnvironmentImportanceDistributionId,
+                    m_EnvironmentImportanceDistribution.innerHandle);
+                cmd.SetRayTracingBufferParam(
+                    m_RayTracingShader,
+                    EnvironmentImportanceDistributionId,
+                    m_EnvironmentImportanceDistribution.innerHandle);
+            }
+
+            var tint = m_EnvironmentState.tint;
+            var environmentTint = new Vector4(tint.r, tint.g, tint.b, 1.0f);
+            var environmentParameters = new Vector4(
+                m_EnvironmentState.intensityMultiplier,
+                m_EnvironmentState.rotation,
+                m_EnvironmentState.maxMipLevel,
+                hasEnvironmentBinding && m_EnvironmentState.hasHdri ? 1.0f : 0.0f);
+            var lightingEnabled =
+                hasEnvironmentBinding && m_EnvironmentState.lightingEnabled ? 1 : 0;
+            var cameraVisible =
+                hasEnvironmentBinding && m_EnvironmentState.cameraVisible ? 1 : 0;
+            var importanceSamplingEnabled =
+                hasEnvironmentBinding && m_EnvironmentState.importanceSamplingEnabled ? 1 : 0;
+            var samplingMode = (int)m_EnvironmentState.samplingMode;
+            var debugMode = (int)m_EnvironmentState.debugMode;
+            var clearColor = m_CameraBackgroundState.clearColor;
+            var cameraClearColor = new Vector4(
+                clearColor.r,
+                clearColor.g,
+                clearColor.b,
+                clearColor.a);
+            var cameraSkyEnabled = m_CameraBackgroundState.skyRequested ? 1 : 0;
+
+            cmd.SetGlobalVector(EnvironmentTintId, environmentTint);
+            cmd.SetGlobalVector(EnvironmentParametersId, environmentParameters);
+            cmd.SetGlobalInt(EnvironmentLightingEnabledId, lightingEnabled);
+            cmd.SetGlobalInt(EnvironmentCameraVisibleId, cameraVisible);
+            cmd.SetGlobalInt(
+                EnvironmentImportanceSamplingEnabledId,
+                importanceSamplingEnabled);
+            cmd.SetGlobalInt(EnvironmentSamplingModeId, samplingMode);
+            cmd.SetGlobalInt(EnvironmentDebugModeId, debugMode);
+            cmd.SetGlobalVector(CameraClearColorId, cameraClearColor);
+            cmd.SetGlobalInt(CameraSkyEnabledId, cameraSkyEnabled);
+
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                EnvironmentTintId,
+                environmentTint);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                EnvironmentParametersId,
+                environmentParameters);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentLightingEnabledId,
+                lightingEnabled);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentCameraVisibleId,
+                cameraVisible);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentImportanceSamplingEnabledId,
+                importanceSamplingEnabled);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentSamplingModeId,
+                samplingMode);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentDebugModeId,
+                debugMode);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                CameraClearColorId,
+                cameraClearColor);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                CameraSkyEnabledId,
+                cameraSkyEnabled);
+        }
+
+        private void PrepareEnvironmentImportanceDistributionFallback()
+        {
+            if (!ReferenceEquals(
+                    m_EnvironmentImportanceDistribution,
+                    m_DefaultEnvironmentImportanceDistribution))
+            {
+                return;
+            }
+
+            m_DefaultEnvironmentImportanceDistribution.EnsureImportedBuffer();
+            if (m_DefaultEnvironmentImportanceDistributionInitialized)
+                return;
+
+            m_DefaultEnvironmentImportanceDistribution.SetData(
+                new float[ReferencedPathTracingEnvironmentImportanceLayout.ElementCount]);
+            m_DefaultEnvironmentImportanceDistributionInitialized = true;
         }
 
         private void PrepareMainDirectionalLight(VividLightData lightData)

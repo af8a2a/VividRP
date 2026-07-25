@@ -107,6 +107,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4807578003741378534, guid: 09f018db93d2e534ab32ce82ece5e884, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAccumulation.compute
     ResourceObject: {fileID: 7200000, guid: 607475cf82417d740964e503423c2041, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingEnvironmentSampling.compute
+    ResourceObject: {fileID: 7200000, guid: bcb75d6339176b94d809ad625c5695b7, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ClearLightLists
     ResourceObject: {fileID: 7200000, guid: cda67af71d0450540a483ad6d6c490e5, type: 3}
   - ResourceName: Shaders/Core/Private/Lighting/ReGIRGridBuild.compute

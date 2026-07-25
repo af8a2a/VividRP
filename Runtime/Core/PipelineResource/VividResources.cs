@@ -215,6 +215,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAccumulation.compute")]
         public ComputeShader ReferencedPathTracingAccumulationCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingEnvironmentSampling.compute")]
+        public ComputeShader ReferencedPathTracingEnvironmentSamplingCompute;
+
         [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 

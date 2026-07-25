@@ -43,6 +43,9 @@ namespace VividRP.Runtime.RenderPass.Core
             public Matrix4x4 ProjectionMatrix;
             public Vector3 MainLightDirection;
             public Vector3 MainLightColor;
+            public ulong LocalLightSignature;
+            public ulong EnvironmentSignature;
+            public ulong CameraBackgroundSignature;
             public ulong SampleCount;
 
             public override void Dispose()
@@ -202,7 +205,15 @@ namespace VividRP.Runtime.RenderPass.Core
             var state = m_AccumulationStates.GetOrCreateBase(camera);
             var viewMatrix = cameraData.GetViewMatrix();
             var projectionMatrix = cameraData.GetProjectionMatrixNoJitter();
-            ResolveMainLightSignature(frameData.GetOrCreate<VividLightData>(), out var lightDirection, out var lightColor);
+            ReferencedPathTracingLightSignatureUtility.Resolve(
+                frameData.GetOrCreate<VividLightData>(),
+                out var lightDirection,
+                out var lightColor,
+                out var localLightSignature);
+            var environmentState = ReferencedPathTracingEnvironmentState.Resolve(
+                frameData.GetOrCreate<VividSkyData>());
+            var cameraBackgroundState =
+                ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
 
             var temporalData = frameData.Get<VividTemporalData>();
             var signatureMatches = state.HasSignature
@@ -211,7 +222,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && MatricesApproximatelyEqual(state.ViewMatrix, viewMatrix, MatrixResetEpsilon)
                 && MatricesApproximatelyEqual(state.ProjectionMatrix, projectionMatrix, MatrixResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightDirection, lightDirection, LightResetEpsilon)
-                && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon);
+                && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon)
+                && state.LocalLightSignature == localLightSignature
+                && state.EnvironmentSignature == environmentState.signature
+                && state.CameraBackgroundSignature == cameraBackgroundState.signature;
 
             m_UseHistory = m_HasValidHistory
                 && signatureMatches
@@ -230,6 +244,9 @@ namespace VividRP.Runtime.RenderPass.Core
             state.ProjectionMatrix = projectionMatrix;
             state.MainLightDirection = lightDirection;
             state.MainLightColor = lightColor;
+            state.LocalLightSignature = localLightSignature;
+            state.EnvironmentSignature = environmentState.signature;
+            state.CameraBackgroundSignature = cameraBackgroundState.signature;
         }
 
         private void ConfigureHistoryDescriptor(int width, int height)
@@ -279,30 +296,6 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.WrapMode = TextureWrapMode.Clamp;
         }
 
-        private static void ResolveMainLightSignature(
-            VividLightData lightData,
-            out Vector3 direction,
-            out Vector3 color)
-        {
-            direction = Vector3.zero;
-            color = Vector3.zero;
-            if (lightData == null)
-                return;
-
-            lightData.CompleteLightGridPrepare();
-            if (!lightData.hasMainDirectionalLight)
-                return;
-
-            var mainLight = lightData.mainDirectionalLight;
-            direction = mainLight.directionWS.sqrMagnitude > 1e-8f
-                ? mainLight.directionWS.normalized
-                : Vector3.zero;
-            color = new Vector3(
-                Mathf.Max(mainLight.color.x, 0.0f),
-                Mathf.Max(mainLight.color.y, 0.0f),
-                Mathf.Max(mainLight.color.z, 0.0f));
-        }
-
         private static bool MatricesApproximatelyEqual(Matrix4x4 lhs, Matrix4x4 rhs, float epsilon)
         {
             for (var index = 0; index < 16; index++)
@@ -317,6 +310,135 @@ namespace VividRP.Runtime.RenderPass.Core
         private static bool VectorsApproximatelyEqual(Vector3 lhs, Vector3 rhs, float epsilon)
         {
             return (lhs - rhs).sqrMagnitude <= epsilon * epsilon;
+        }
+    }
+
+    internal static class ReferencedPathTracingLightSignatureUtility
+    {
+        private const ulong FnvOffsetBasis = 14695981039346656037ul;
+        private const ulong FnvPrime = 1099511628211ul;
+
+        internal static void Resolve(
+            VividLightData lightData,
+            out Vector3 mainLightDirection,
+            out Vector3 mainLightColor,
+            out ulong localLightSignature)
+        {
+            mainLightDirection = Vector3.zero;
+            mainLightColor = Vector3.zero;
+            localLightSignature = 0ul;
+            if (lightData == null)
+                return;
+
+            lightData.CompleteReGIRPrepare();
+            if (lightData.hasMainDirectionalLight)
+            {
+                var mainLight = lightData.mainDirectionalLight;
+                mainLightDirection = mainLight.directionWS.sqrMagnitude > 1e-8f
+                    ? mainLight.directionWS.normalized
+                    : Vector3.zero;
+                mainLightColor = new Vector3(
+                    Mathf.Max(mainLight.color.x, 0.0f),
+                    Mathf.Max(mainLight.color.y, 0.0f),
+                    Mathf.Max(mainLight.color.z, 0.0f));
+            }
+
+            var lightCount = Mathf.Clamp(
+                lightData.reGIRLightCount,
+                0,
+                lightData.reGIRLights?.Length ?? 0);
+            ulong signatureSum = 0ul;
+            ulong signatureXor = 0ul;
+            uint localLightCount = 0u;
+            for (var lightIndex = 0; lightIndex < lightCount; lightIndex++)
+            {
+                var light = lightData.reGIRLights[lightIndex];
+                var lightSignature = ComputeLocalLightSignature(light);
+                var mixedSignature = Mix(lightSignature);
+                signatureSum += mixedSignature;
+                signatureXor ^= RotateLeft(mixedSignature, (int)(mixedSignature & 63ul));
+                localLightCount++;
+            }
+
+            localLightSignature = Mix(
+                signatureSum
+                ^ signatureXor
+                ^ ((ulong)localLightCount * 0x9e3779b97f4a7c15ul));
+        }
+
+        private static ulong ComputeLocalLightSignature(VividReGIRLightData light)
+        {
+            var signature = FnvOffsetBasis;
+            Hash(ref signature, light.lightType);
+            Hash(ref signature, light.positionWS);
+            Hash(ref signature, light.range);
+            Hash(ref signature, light.color);
+            Hash(ref signature, light.shapeRadius);
+
+            if (light.lightType == VividReGIRLightData.TypeSpot)
+            {
+                Hash(ref signature, light.directionWS);
+                Hash(ref signature, light.angleScale);
+                Hash(ref signature, light.angleOffset);
+            }
+            else if (light.lightType == VividReGIRLightData.TypeRectangle)
+            {
+                Hash(ref signature, light.directionWS);
+                Hash(ref signature, light.rightWS);
+                Hash(ref signature, light.upWS);
+                Hash(ref signature, light.areaSize);
+                Hash(ref signature, light.cosBarnDoorAngle);
+                Hash(ref signature, light.barnDoorLength);
+            }
+            else if (light.lightType == VividReGIRLightData.TypeTube)
+            {
+                Hash(ref signature, light.rightWS);
+                Hash(ref signature, light.areaSize);
+            }
+
+            return signature;
+        }
+
+        private static void Hash(ref ulong signature, Vector3 value)
+        {
+            Hash(ref signature, value.x);
+            Hash(ref signature, value.y);
+            Hash(ref signature, value.z);
+        }
+
+        private static void Hash(ref ulong signature, Vector2 value)
+        {
+            Hash(ref signature, value.x);
+            Hash(ref signature, value.y);
+        }
+
+        private static void Hash(ref ulong signature, float value)
+        {
+            Hash(ref signature, unchecked((uint)value.GetHashCode()));
+        }
+
+        private static void Hash(ref ulong signature, uint value)
+        {
+            signature ^= value;
+            signature *= FnvPrime;
+        }
+
+        private static ulong Mix(ulong value)
+        {
+            value ^= value >> 30;
+            value *= 0xbf58476d1ce4e5b9ul;
+            value ^= value >> 27;
+            value *= 0x94d049bb133111ebul;
+            value ^= value >> 31;
+            return value;
+        }
+
+        private static ulong RotateLeft(ulong value, int bitCount)
+        {
+            if (bitCount == 0)
+                return value;
+
+            return (value << bitCount) | (value >> (64 - bitCount));
         }
     }
 }

@@ -397,7 +397,7 @@ namespace VividRP.Runtime
             s_AmbientProbeConvolution.BindGlobalBuffer(cmd, useDefaultAmbientProbe);
         }
 
-        private static bool HasValidSkyTexture(Texture texture)
+        internal static bool HasValidSkyTexture(Texture texture)
         {
             if (texture == null
                 || texture.dimension != TextureDimension.Cube

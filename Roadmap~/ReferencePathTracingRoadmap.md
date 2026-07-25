@@ -54,7 +54,7 @@ V1 以静态、受控 benchmark 场景为目标，支持：
 - Static MeshRenderer 和已被当前 RTAS 正确收集的实例。
 - StandardLit opaque 和 alpha-tested material。
 - Base color、metalness、roughness、normal map、coat、opacity 和 emission 到 OpenPBR 的映射。
-- Directional、point、spot、rectangle/area light 和 environment lighting。
+- Directional、point、spot、rectangle/area light 和 HDRI Sky environment lighting。
 - Multi-bounce transport、next-event estimation、shadow visibility、MIS 和 Russian roulette。
 - FP32 progressive accumulation。
 - Beauty、direct、indirect diffuse、indirect specular、emission、albedo、normal 和 depth AOV。
@@ -64,9 +64,11 @@ V1 不承诺：
 
 - Real-time performance。
 - Denoised result 作为 ground truth。
-- ReGIR、screen-space lighting、probe GI 或 raster lighting 参与 reference integration。
+- 未经 RIS correction 的 ReGIR reservoir、screen-space lighting、probe GI 或 raster lighting
+  参与 reference integration。
 - Animated scene 的跨帧 accumulation。
 - Transparent surface、thick transmission、subsurface random walk、participating media、dispersion 或 thin-film 的完整支持。
+- Physically Based Sky、Reference Atmosphere、volumetric cloud 或其他天空参与介质路径；V1 的环境光范围限定为 HDRI Sky。
 - Terrain、particle、decal 和所有自定义 shader 自动具备 path-tracing hit shader。
 - Emissive mesh importance sampling；未加入 light sampling distribution 前，emissive surface 只能通过 BSDF path 命中。
 
@@ -80,11 +82,17 @@ V1 不承诺：
 - 使用独立的 `ReferencePathTracingDXR` material pass，不复用 `IndirectDXR` 的 payload 或 lighting contract。
 - Ray generation shader 负责 path loop，material closest-hit 负责几何/材质解析和 OpenPBR evaluation/sampling。
 - 保持 DXR recursion depth 为 1；radiance ray 和 visibility ray 通过统一 payload 的 trace kind 区分。
-- Direct-light sampling 必须使用原始 light data 和可验证的 PDF，不使用 ReGIR reservoir 结果。
+- Direct-light sampling 必须使用原始 light data 和可验证的 PDF。ReGIR 只能作为 proposal：
+  必须使用 reservoir correction weight，并在 cell/reservoir 无效时提供具有完整 support 的 fallback；
+  不能把 reservoir 内容直接当作 radiance。
 - 默认关闭 radiance/firefly clamp；任何有偏稳定化选项都必须显式标记，且不能用于 canonical ground truth。
 - Accumulation 使用 FP32，并在无法证明历史有效时保守重置。
 - Reference 和 preview/denoised 输出分离；raw accumulation 始终可导出。
 - 随机数 dimension layout 必须稳定、文档化，新增 feature 不应静默改变已有 sample sequence。
+- V1 环境光遵循 HDRP 的职责分离：相机背景与参与路径积分的环境辐亮度共享同一天空语义，
+  但可以使用不同分辨率的表示、可见性和更新频率。
+- HDRI Sky 的 scene-linear radiance、sampling distribution 和 accumulation history 不包含 auto exposure
+  或 pre-exposure；曝光只作用于 presentation。
 
 ## RenderGraph Architecture
 
@@ -197,6 +205,292 @@ V1 light sampling按以下顺序扩展：
 - 与 BSDF PDF 的 MIS 规则。
 
 环境光同时通过 NEE 和 BSDF miss 可达时必须使用 MIS，避免 double counting。Emissive mesh 在尚无 light PDF 时不得同时通过 NEE 和 BSDF hit 重复计数。
+
+## Environment Lighting Roadmap
+
+环境光分为两个明确阶段。阶段一参考 HDRP，以 HDRI Sky 完成可验证的无限远环境光积分，并属于
+Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，将大气作为参与介质进行路径追踪，
+属于 V1 完成后的长期目标。
+
+阶段二不得与阶段一并行推进。只有 `E0`～`E6` 的 acceptance 全部满足，并且 HDRI canonical corpus
+已经冻结版本后，才能启动 `A0`。这样可以先用离散环境贴图验证 miss、NEE、PDF、MIS、曝光和历史失效，
+避免把基础积分器错误与大气体积传输错误混在一起。
+
+### Phase 1: HDRP-style HDRI Sky
+
+#### E0: Environment Contract and RenderGraph Wiring
+
+**Goal**
+
+建立独立于具体天空实现的环境光数据契约，并将其接入 reference RenderGraph。
+
+**Scope**
+
+- 从 `VividSkyData`/`SkyManager` 消费当前 HDRI cubemap、rotation、tint、scene-linear intensity 和 sky hash。
+- 明确区分 `cameraVisible`、`lightingEnabled` 和 `importanceSamplingEnabled`。
+- 为路径追踪绑定 lighting cubemap、camera background、sampling data 和 fallback black environment。
+- 在 `ReferencePathTracingSettingsVolume` 中增加环境光开关与 debug sampling mode。
+- 环境状态缺失时使用黑色无限远环境，不隐式回退到 raster color buffer。
+
+**Acceptance**
+
+- HDRI 可以只参与照明、只作为相机背景、同时启用或全部关闭。
+- Reference graph 不读取 Deferred Lighting、SSR、probe GI 或 raster sky color 作为环境积分结果。
+- 缺失 cubemap、无效资源和禁用 Sky 时不会输出 NaN/Inf。
+- 环境 texture、rotation、tint、intensity 或 enable state 进入 accumulation signature。
+
+**Implementation checkpoint (2026-07-25)**
+
+- 已增加 `ReferencedPathTracingEnvironmentState`，统一解析 `VividSkyData`、HDRI 有效性、scene-linear
+  intensity、rotation、tint、sky hash，以及 lighting/camera/sampling 三类独立开关。
+- 已增加 `ReferencedPathTracingSettingsVolume`，支持环境照明、相机可见性，以及
+  BSDF-only / importance sampling / uniform-sphere 调试采样模式。
+- `ReferencedPathTracingPass` 已通过显式 RenderGraph cube 资源消费 `SkyManager` 的 HDRI
+  specular cubemap；缺失、禁用或非 HDRI Sky 时导入 Sky 子系统的黑色 fallback cubemap。
+- 环境纹理和契约参数已在 dispatch 前同时绑定为 global 与 ray-tracing 参数，供 material
+  closest-hit 和 raygen/miss 路径共享。
+- 环境契约 signature 已接入无限累积历史判定；Sky 或环境 Volume 状态改变会重置累积。
+- E0 到此只建立资源与状态契约。实际 camera/BSDF miss 采样留在 E1，重要性分布纹理及 PDF
+  留在 E2。
+
+#### E1: Camera Background and BSDF Miss Evaluation
+
+**Goal**
+
+完成最小 HDRI Sky 可见性，让 primary ray 和间接 BSDF ray 使用正确的环境辐亮度。
+
+**Scope**
+
+- Primary miss 输出相机可见天空或 camera clear color，并维护正确 alpha。
+- 间接 miss 按世界空间方向、HDRI rotation、tint 和物理强度采样 lighting cubemap。
+- 允许 camera background 使用单独的全分辨率 raster sky，lighting 使用较低分辨率 cubemap。
+- 所有环境值保持未曝光的 scene-linear radiance；presentation 阶段再应用 VividRP pre-exposure。
+- 增加 environment-only、primary-background-only 和 indirect-miss debug mode。
+
+**Acceptance**
+
+- 旋转 HDRI 后，背景和反射/间接照明方向一致。
+- `cameraVisible = false` 时相机可以输出 clear color，但表面仍能接受环境照明。
+- 关闭 lighting environment 时，背景可见但不贡献路径能量。
+- Primary background 不施加 BSDF/light MIS 权重。
+- 恒定环境下 diffuse white sphere 的高 SPP 均值符合 Lambert/OpenPBR 解析预期。
+
+**Implementation checkpoint (2026-07-25)**
+
+- Primary miss 已按 camera clear flags 在 HDRI Sky 与 scene-linear camera clear color 之间选择；
+  Sky background 输出 alpha 1，clear color 保留 camera alpha，表面命中保持 alpha 1。
+- Secondary 及后续 BSDF miss 已按世界空间射线方向采样 lighting cubemap，并应用与相机背景共享的
+  HDRI rotation、tint 和物理强度。OpenPBR throughput 已包含 `f * cos(theta) / pdf`，因此 miss
+  不再重复除以 BSDF PDF；E2 之前也不施加 environment light PDF 或 MIS 权重。
+- Environment radiance、clear color 和累积 history 均保持未曝光 scene-linear；VividRP
+  pre-exposure 仍只在 presentation/resolve 阶段应用。
+- 已增加 Combined、Environment Only、Primary Background Only 和 Indirect Miss Only 调试输出。
+  debug mode、camera clear flags、scene-linear clear color 以及 E0 环境契约都进入 accumulation
+  signature，相关状态变化会清空历史。
+- Primary background 与 indirect miss 按相同方向旋转约定读取 cubemap；`cameraVisible` 与
+  `lightingEnabled` 可独立关闭，缺失 HDRI 时相机回退 clear color、间接路径回退黑环境。
+- 当前 camera background 与 lighting 共用 `SkyManager` cubemap 的 mip 0。单独的全分辨率
+  raster-sky background 仍保留为可选资源扩展，不允许回退读取已经合成场景几何的 raster color。
+- C# runtime 与 EditMode test assembly 已通过编译；恒定环境 white-sphere 的高 SPP GPU
+  解析验收仍需在 canonical validation scene 中完成。
+
+#### E2: Equiareal Importance Distribution
+
+**Goal**
+
+建立 HDRP 风格、可评估 PDF 的环境重要性采样数据。
+
+**Scope**
+
+- 将 cubemap 按 equiareal spherical mapping 投影为二维重要性域。
+- 使用 scene-linear luminance 构建 per-row conditional CDF 和 marginal CDF。
+- 保存环境积分归一化因子，并提供 `SampleEnvironment()` 与 `EvaluateEnvironmentPdf()`。
+- 采样表只在 sky hash、rotation、tint、intensity 或采样配置变化时重建。
+- 提供关闭重要性采样后的 uniform sphere/debug fallback。
+
+**Acceptance**
+
+- Equiareal 参数化下不额外乘 `sin(theta)`。
+- `SampleEnvironment()` 返回的 solid-angle PDF 与任意方向的 `EvaluateEnvironmentPdf()` 一致。
+- Constant、single-bright-texel、high-contrast HDRI 的采样 histogram 与声明 PDF 在统计容差内一致。
+- 全黑环境返回零 radiance/零可采样能量，并安全终止 NEE。
+- HDRI intensity 的纯全局缩放不会改变归一化后的方向分布。
+
+**Implementation checkpoint (2026-07-25)**
+
+- 已增加独立 `ReferencedPathTracingEnvironmentSamplingPass`，从 `SkyManager` 导入当前 HDRI
+  lighting cubemap，并构建固定 128×64 等面积域的 conditional/marginal CDF。
+- metadata、64 项 marginal CDF 和 64×128 项 per-row conditional CDF 打包在一个持久化
+  `EnvironmentImportanceDistribution` structured buffer 中；RenderGraph 只需将该输出连接到
+  `ReferencedPathTracingPass` 的同名输入即可建立构建到 ray dispatch 的显式依赖。
+- 分布权重使用已应用 rotation、tint 和 scene-linear physical intensity 的 HDRI luminance；
+  等面积映射的 Jacobian 为常数，因此构建阶段不额外乘 `sin(theta)`。
+- buffer metadata 保存 `meanLuminance`、`1 / (4 * PI * meanLuminance)`、valid flag 和 layout
+  version。全黑环境生成可安全二分搜索的 uniform CDF，但 valid 和 normalization 为 0，后续
+  NEE 会直接判定没有可采样能量，不产生除零或 NaN。
+- shader common contract 已提供世界空间 `direction <-> equiareal UV`、CDF 二分采样、
+  `ReferencedPathtracingSampleEnvironment()` 和
+  `ReferencedPathtracingEvaluateEnvironmentPdf()`。Importance 与 Uniform Sphere 返回
+  solid-angle PDF，BSDF Only 返回 0。
+- 分布使用独立 `samplingSignature` 缓存，仅追踪 HDRI identity/hash、rotation、tint、
+  intensity、lighting state 和 sampling mode；camera visibility 与 resolved debug mode
+  不会触发无关重建。
+- 未连接分布输入时，path-tracing pass 绑定全零 fallback buffer，importance sampling
+  安全失效而不会读取未初始化资源。
+- Runtime、Editor Tests 程序集以及 Unity ray-tracing/compute shader import 已通过。
+  Constant、single-bright-texel 和 high-contrast HDRI 的 GPU histogram 回归仍需加入
+  canonical validation corpus；E3 之前不会把该 proposal 加入路径能量。
+
+#### E3: Environment NEE and Visibility
+
+**Goal**
+
+把 HDRI Sky 作为 non-delta infinite light 接入 surface next-event estimation。
+
+**Scope**
+
+- 在每次有效 surface interaction 中允许选择 environment light。
+- 完整 light PDF 为 `p(select environment) * p_environment(omega)`。
+- NEE 使用 OpenPBR `eval/pdf`，并向采样方向投射 `TMax = infinity` 的 alpha-aware visibility ray。
+- 环境光参加 multiple-light distribution，但保持与 ReGIR local-light proposal 的 correction contract 分离。
+- 输出 environment direct diffuse/specular debug AOV。
+
+**Acceptance**
+
+- 遮挡物能正确阻挡 HDRI direct lighting，alpha-tested 几何遵循当前 visibility policy。
+- Environment-only 场景在 NEE 开启后显著降低亮区 HDRI 的收敛方差。
+- Light selection histogram、conditional environment PDF 和最终 combined PDF 一致。
+- 禁用 ReGIR 时环境结果不变；启用 ReGIR local-light proposal 时环境仍具有完整 support。
+
+#### E4: Bidirectional MIS and No-double-counting Gate
+
+**Goal**
+
+统一 environment NEE 与 BSDF miss 的估计器，消除 double counting 并保持无偏。
+
+**Scope**
+
+- Light-sampled environment 使用 power heuristic：
+  `w_light = PowerHeuristic(p_light, p_bsdf)`。
+- BSDF-sampled miss 使用相同的 combined environment light PDF：
+  `w_bsdf = PowerHeuristic(p_bsdf, p_light)`。
+- Delta BSDF event 命中环境时不错误应用不可达的 competing-technique PDF。
+- 关闭 environment importance sampling 时，移除 environment NEE，BSDF miss 权重固定为 1。
+- 增加 light-only、BSDF-only、MIS debug modes。
+
+**Acceptance**
+
+- Light-only、BSDF-only 和 MIS 在高 SPP 下均值位于统计误差内。
+- Rough diffuse、rough specular、near-mirror 和 metal sphere 均不出现系统性增亮或变暗。
+- Environment NEE 开关不会造成约两倍亮度的 double counting。
+- Combined light-pick probability 改变后均值保持稳定。
+- 通过 HDRI rotation/intensity matrix 和 bright-sun HDRI regression。
+
+#### E5: Background/Lighting Resolution, Cache and Exposure Integration
+
+**Goal**
+
+完成可长期使用的 HDRI environment 生命周期与 presentation 契约。
+
+**Scope**
+
+- 按 HDRP 模式允许高分辨率 camera background 与较低分辨率 lighting cubemap 分离。
+- 使用 sky content hash 缓存 environment CDF/marginal 数据。
+- 明确 cubemap 内容、rotation、tint、intensity、sampling mode 与 exposure 变化的失效边界。
+- Raw path radiance、REBLUR input、FP32 accumulation 和 capture 保持未曝光；仅 resolve/final blit 使用 pre-exposure。
+- 在 capture metadata 中记录 environment asset identity、hash、rotation、intensity、sampling mode 和 PDF version。
+
+**Acceptance**
+
+- Auto exposure 变化不会重建 environment distribution 或清空 raw accumulation。
+- HDRI 内容或物理强度变化会重建必要资源并清空 accumulation。
+- 相机分辨率变化只重建 background target，不无条件重建 lighting distribution。
+- 重复使用未变化 HDRI 时不发生逐帧 CDF dispatch 或资源分配。
+- Raw EXR 数值不随 display exposure 改变。
+
+#### E6: HDRI Validation and V1 Freeze Gate
+
+**Goal**
+
+冻结阶段一接口、验证场景和 canonical reference，作为启动 Reference Atmosphere 的前置条件。
+
+**Required Scenes**
+
+- Constant white/gray environment furnace。
+- HDRI rotation、tint 和 intensity matrix。
+- Bright localized emitter HDRI。
+- Diffuse/roughness/metalness/coat sphere grid。
+- Interior doorway/environment occlusion scene。
+- Alpha-tested foliage environment shadow scene。
+- Camera-hidden but lighting-enabled environment scene。
+
+**Acceptance**
+
+- E0～E5 的 CPU/API、shader import、PDF histogram 和 GPU image tests 全部通过。
+- HDRI reference capture 包含固定 seed、SPP、bounce、environment hash 和 sampling metadata。
+- Canonical raw result 不依赖 denoiser、pre-exposure、ReGIR reservoir 随机状态或 raster GI。
+- HDRI environment 的接口、PDF version 和 AOV decomposition 被标记为 V1 frozen。
+- 完成 E6 后，Milestone 3 的 environment lighting 条目才视为完成，并允许启动 Phase 2。
+
+### Phase 2: Unreal-style Reference Atmosphere (Long-term)
+
+Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而是把球形大气当作参与介质。天空颜色来自
+太阳方向光在 Rayleigh/Mie 介质中的透射与散射，外层空间本身可以保持黑色。该模式应与 HDRI skydome
+互斥，避免重复环境能量；混合 HDRI 与大气的艺术模式必须在 reference 模式之外单独定义。
+
+#### A0: Architecture and Mode Isolation
+
+- 增加 `HDRI` 与 `ReferenceAtmosphere` environment mode。
+- Reference Atmosphere 激活时禁用 HDRI infinite-light NEE 和 BSDF miss emission。
+- 定义 planet center、bottom/top radius、ground albedo、Rayleigh/Mie/ozone 参数和太阳灯引用。
+- 为 atmosphere/cloud/ground holdout 与 camera visibility 预留独立标志。
+
+**Gate:** 只有 E6 完成后才能开始；模式切换必须清空 accumulation 并写入 capture metadata。
+
+#### A1: Spherical Atmosphere Intersection and Transmittance
+
+- 使用高精度 camera-relative planet/atmosphere sphere intersection。
+- 建立 atmosphere interval 和可选 planet-ground virtual hit。
+- 实现 Rayleigh、Mie、ozone extinction/scattering density。
+- 构建 optical-depth LUT 加速解析 segment transmittance，并保留 reference ray-marched 对照模式。
+
+**Acceptance:** LUT 与高采样数 reference transmittance 在高度/天顶角测试矩阵中一致。
+
+#### A2: Participating-medium Path Integration
+
+- 在 path loop 中加入 atmosphere interval、free-flight/delta tracking 和 phase-function sampling。
+- 支持 Rayleigh phase 与 Mie Henyey-Greenstein phase。
+- 体积 scatter event 参加 throughput、Russian roulette、AOV 和 max-depth contract。
+- Camera、surface、shadow 和 BSDF miss ray 都应用一致的大气透射。
+
+**Acceptance:** 无太阳时大气无自发光；启用太阳后天空辐亮度随密度、相函数和观察高度合理变化。
+
+#### A3: Sun, Ground and Atmosphere MIS
+
+- 使用 VividRP directional light 的物理 illuminance/角直径契约表示太阳。
+- 支持从 atmosphere scatter event 对太阳执行 NEE 和 shadow visibility。
+- 明确太阳盘 camera visibility、directional delta/finite-angle classification 与 MIS。
+- Planet ground 使用 atmosphere ground albedo，并能参与对大气的多次散射贡献。
+
+**Acceptance:** 不与 HDRI 太阳盘或额外 skydome double count；太阳、天空和地面能量单位一致。
+
+#### A4: Reference Volumetric Clouds
+
+- 在 atmosphere 稳定后再加入 cloud shell intersection、density majorant 和 callable/material sampling 边界。
+- 支持 cloud transmittance、single scattering、可配置 multiple-scattering approximation 和 cloud shadow。
+- 建立 acceleration map/LUT，且任何近似都必须在 metadata 中显式标记。
+
+**Acceptance:** 关闭 clouds 时与 A3 完全一致；cloud shadow 对 surface 和 atmosphere scatter 使用同一透射契约。
+
+#### A5: Reference Atmosphere Validation and Optimization
+
+- 与高采样数 CPU/offline reference 或已验证的 Unreal reference scene 对照。
+- 覆盖海平面、高空、太空视角、日出/正午、ground on/off、cloud on/off。
+- 分离无偏 reference mode 与 analytic/LUT/multiple-scattering approximation mode。
+- 完成 GPU timeout、max ray-march steps、NaN/Inf 和极端尺度测试。
+
+Reference Atmosphere 在 A0～A5 完成前不进入 GI Baseline V1 的 Definition of Done，也不能替代 HDRI
+canonical corpus。它完成后应形成独立的 `Reference Atmosphere V2` baseline/version。
 
 ## OpenPBR Integration
 
@@ -454,7 +748,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - Directional、point、spot、area light sampling。
 - Shadow visibility rays。
 - BSDF/light MIS。
-- Environment evaluation 和 importance sampling。
+- 按 Environment Lighting Roadmap 完成 `E0`～`E6`：HDRI miss、importance sampling、NEE、
+  visibility、双向 MIS、cache/exposure contract 和 validation freeze。
 - Multiple-light selection distribution。
 - Direct、indirect 和 emission AOV。
 
@@ -463,7 +758,7 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - Cornell Box 能随 SPP 提升稳定收敛。
 - Direct-light-only、BSDF-only 和 MIS 三种 debug mode 可对照。
 - Delta lights 和 non-delta lights 不发生错误 MIS。
-- Environment 不 double count。
+- HDRI environment 通过 E4 no-double-counting gate，并完成 E6 V1 freeze。
 - 单灯采样频率与声明 PDF 一致。
 - Russian roulette 开启前后的高 SPP 均值在统计误差内一致。
 
@@ -473,7 +768,7 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 
 把 integrator 变成可重复、可导出的 reference baseline 工具。
 
-### Current implementation status (2026-07-23)
+### Current implementation status (2026-07-24)
 
 - 已实现独立 `ReferencedPathTracingAccumulationPass`，通过 RenderGraph history pair 保存
   `R32G32B32A32_SFloat` 的逐像素算术均值。
@@ -535,6 +830,33 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   raw AOV 和 FP32 accumulation history 仍保持未曝光的 scene-linear 数据。这样 AutoExposurePass 可以先
   去除上一帧 pre-exposure 后计量场景亮度，FinalBlit 再应用 current/pre-exposure 比值，同时曝光适应不会
   污染时域历史或 ground-truth capture。
+- Raygen/closest-hit 已消费 `ReGIRLights`、`ReGIRParameters` 与 `ReGIRReservoirs`，在每次表面命中随机选择
+  一个 cell slot，并直接使用 reservoir 中的 RIS correction weight。cell 外或 reservoir 无效时回退到
+  全局 uniform light estimator；无效 slot 会先把条件化随机数重映射回 slot 内 `[0, 1)`，保持 fallback
+  PDF 严格均匀，避免有限 ReGIR 覆盖范围造成漏光或偏差。ReGIR proposal target 对与 cell 相交的
+  range/spot support 保留非零下限；该下限只影响采样概率，不参与最终 radiance。
+- ReGIR presample entry 已从 `uint2(lightIndex, invSourcePdf)` 扩为
+  `uint4(lightIndex, invSourcePdf, shapeSample.xy)`，cell reservoir 在保持 16-byte stride 的同时用原 padding
+  保存 `float2 shapeSample`。离散 light RIS correction 与连续 shape PDF 分开处理：rectangle 使用 uniform
+  area sampling，估计器包含 `cosThetaLight * area / distance²`；tube 使用 uniform line sampling，并包含
+  Vivid/HDRP 零半径 tube 模型的 `2 * radialCosine * length / distance²`。大面积 emitter 的 ReGIR range
+  proposal 还会按 shape radius 扩张，避免中心落在 range 外时错误失去 support。
+- 当前 ReGIR NEE 支持 point、spot、rectangle 与 tube。point/spot 的 RGB candela 经 inverse-square、
+  range window、shape-radius 和 spot-cone attenuation 转为 illuminance；area-light RGB 作为 emitted
+  radiance，经 range window、geometry term 和 shape PDF correction 后与 OpenPBR `BSDF * NdotL` 相乘。
+  所有 local light 都使用 `TMax = lightDistance - bias` 的有限距离 alpha-aware visibility ray；primary
+  diffuse/specular 进入 REBLUR signal，secondary NEE 按 primary lobe AOV 分类。
+- Rectangle barn door 已进入 `VividReGIRLightData`。路径追踪按 HDRP/Vivid raster
+  契约为每个命中点解析 barn-door 可见子矩形，再把 reservoir 的 `shapeSample.xy` 映射到该子矩形；
+  连续 PDF 使用裁剪后面积。离散 ReGIR proposal 仍按完整 emitter power 构建，避免在每个 grid candidate
+  中运行高寄存器压力的点相关裁剪，并由 shading-point PDF correction 保持无偏。barn-door angle/length
+  变化也会使无限累积与 Unity Open Image Denoise 历史失效。
+- 无限累积与 Unity Open Image Denoise backend 现在会追踪与顺序无关的 ReGIR local-light signature；
+  point/spot/rectangle/tube 的实际积分参数变化时会自动清空旧历史，而 ReGIR frame index、reservoir 与
+  shape sample 的随机变化不会错误触发 reset。
+- Area-light V1 尚未把 cookie、IES、light/shadow rendering layers 与 shadow strength 编入
+  `VividReGIRLightData`；rectangle 当前为单面 emitter，tube 为无穷小半径线光模型。这些属于后续
+  light-record ABI 扩展，不影响当前无偏的 shape-sampling 基线。
 - 当前 Raytracing GBuffer 只覆盖 StandardLit，motion vector 只包含 camera motion；skinned/deformed
   object previous position、confidence 与动态分辨率列为后续质量项。
 - 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised
@@ -677,13 +999,14 @@ Raster StandardLit 与 OpenPBR 并非同一 BRDF。最终 beauty 差异可能同
 - 独立 `.vrdg` 和独立 pipeline asset，不依赖 raster GI/SSR/ReGIR output。
 - StandardLit opaque/alpha-tested OpenPBR mapping 稳定。
 - Multi-bounce、NEE、visibility、MIS 和 Russian roulette 完成。
-- Directional、point、spot、area 和 environment lighting 通过验证。
+- Directional、point、spot、area light 通过验证；HDRI environment 完成 `E0`～`E6` 并冻结 V1 contract。
 - FP32 deterministic accumulation 和可靠 history reset。
 - Beauty、direct、indirect diffuse/specular、emission 和 primary material AOV。
 - Raw linear EXR 和 metadata capture。
 - White furnace、Cornell Box、material sphere、light matrix 和 alpha-test regression scenes。
 - Unsupported feature/renderer/material 可见且可统计。
-- Canonical output 无 denoiser、无 ReGIR、默认无 radiance clamp。
+- Canonical output 无 denoiser、默认无 radiance clamp；启用 ReGIR proposal 时必须保留 correction weight、
+  support floor、uniform fallback 和对应 metadata，并能与禁用 ReGIR 的直接采样结果做统计回归。
 - 测试和文档明确区分 V1 ground truth 与尚未支持的 transmission/volume/emissive-mesh feature。
 
 完成 V1 后，实时 GI 功能应以这些 reference scene 的 indirect AOV 为主要质量基准，并将 performance、temporal stability 和 bias 分开评估。

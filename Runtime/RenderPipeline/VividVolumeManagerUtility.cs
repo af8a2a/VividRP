@@ -90,6 +90,11 @@ namespace VividRP.Runtime
             return VolumeManager.instance.stack?.GetComponent<RayTracingSettingsVolume>();
         }
 
+        internal static ReferencedPathTracingSettingsVolume GetReferencedPathTracingSettingsVolume()
+        {
+            return VolumeManager.instance.stack?.GetComponent<ReferencedPathTracingSettingsVolume>();
+        }
+
         internal static CascadedShadowSettingsVolume GetCascadedShadowSettingsVolume()
         {
             return VolumeManager.instance.stack?.GetComponent<CascadedShadowSettingsVolume>();

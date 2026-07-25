@@ -157,11 +157,15 @@ namespace VividRP.Editor.Tests
                 lightData,
                 out _,
                 out _,
+                out _,
+                out _,
                 out var originalSignature);
 
             lightData.reGIRLights = new[] { areaLight, secondLight, firstLight };
             ReferencedPathTracingLightSignatureUtility.Resolve(
                 lightData,
+                out _,
+                out _,
                 out _,
                 out _,
                 out var reorderedSignature);
@@ -172,10 +176,45 @@ namespace VividRP.Editor.Tests
                 lightData,
                 out _,
                 out _,
+                out _,
+                out _,
                 out var changedSignature);
 
             Assert.That(reorderedSignature, Is.EqualTo(originalSignature));
             Assert.That(changedSignature, Is.Not.EqualTo(originalSignature));
+        }
+
+        [Test]
+        public void LightSignature_TracksDirectionalAngularDiameterAndShadowStrength()
+        {
+            var lightData = new VividLightData
+            {
+                directionalLights = new[]
+                {
+                    new VividLightData.DirectionalLightData
+                    {
+                        directionWS = Vector3.up,
+                        color = new Vector3(100000.0f, 90000.0f, 80000.0f),
+                        angularDiameter = 1.25f * Mathf.Deg2Rad,
+                        shadowStrength = 0.4f,
+                    }
+                },
+                directionalLightCount = 1,
+                mainDirectionalLightIndex = 0,
+            };
+
+            ReferencedPathTracingLightSignatureUtility.Resolve(
+                lightData,
+                out _,
+                out _,
+                out var angularDiameter,
+                out var shadowStrength,
+                out _);
+
+            Assert.That(
+                angularDiameter,
+                Is.EqualTo(1.25f * Mathf.Deg2Rad).Within(0.000001f));
+            Assert.That(shadowStrength, Is.EqualTo(0.4f).Within(0.000001f));
         }
 
         private static T GetField<T>(ReferencedPathTracingAccumulationPass pass, string fieldName)

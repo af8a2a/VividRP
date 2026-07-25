@@ -48,6 +48,7 @@ namespace VividRP.Runtime
         public float intensity;
         public Vector3 color;
         public float shadowStrength;
+        public float angularDiameter;
         public float spotAngle;
         public float innerSpotAngle;
         public float rangeAttenuationScale;
@@ -493,6 +494,9 @@ namespace VividRP.Runtime
                 intensity = nativeIntensity,
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = light.shadows != LightShadows.None ? light.shadowStrength : 0.0f,
+                angularDiameter = light.type == LightType.Directional && additionalLightData != null
+                    ? additionalLightData.angularDiameter
+                    : 0.0f,
                 spotAngle = light.spotAngle,
                 innerSpotAngle = light.innerSpotAngle,
                 rangeAttenuationScale = rangeAttenuationScale,
@@ -569,6 +573,7 @@ namespace VividRP.Runtime
                    && Mathf.Approximately(lhs.intensity, rhs.intensity)
                    && Approximately(lhs.color, rhs.color)
                    && Mathf.Approximately(lhs.shadowStrength, rhs.shadowStrength)
+                   && Mathf.Approximately(lhs.angularDiameter, rhs.angularDiameter)
                    && Mathf.Approximately(lhs.spotAngle, rhs.spotAngle)
                    && Mathf.Approximately(lhs.innerSpotAngle, rhs.innerSpotAngle)
                    && Mathf.Approximately(lhs.rangeAttenuationScale, rhs.rangeAttenuationScale)

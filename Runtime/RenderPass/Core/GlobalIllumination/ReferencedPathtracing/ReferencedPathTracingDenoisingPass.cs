@@ -32,6 +32,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public Matrix4x4 ProjectionMatrix;
             public Vector3 MainLightDirection;
             public Vector3 MainLightColor;
+            public float MainLightAngularDiameter;
+            public float MainLightShadowStrength;
             public ulong LocalLightSignature;
 
             public override void Dispose()
@@ -154,6 +156,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 frameData.GetOrCreate<VividLightData>(),
                 out var lightDirection,
                 out var lightColor,
+                out var lightAngularDiameter,
+                out var lightShadowStrength,
                 out var localLightSignature);
 
             var signatureMatches = state.HasSignature
@@ -163,6 +167,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && MatricesApproximatelyEqual(state.ProjectionMatrix, projectionMatrix, MatrixResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightDirection, lightDirection, LightResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon)
+                && Mathf.Abs(state.MainLightAngularDiameter - lightAngularDiameter)
+                    <= LightResetEpsilon
+                && Mathf.Abs(state.MainLightShadowStrength - lightShadowStrength)
+                    <= LightResetEpsilon
                 && state.LocalLightSignature == localLightSignature;
 
             if (!signatureMatches)
@@ -175,6 +183,8 @@ namespace VividRP.Runtime.RenderPass.Core
             state.ProjectionMatrix = projectionMatrix;
             state.MainLightDirection = lightDirection;
             state.MainLightColor = lightColor;
+            state.MainLightAngularDiameter = lightAngularDiameter;
+            state.MainLightShadowStrength = lightShadowStrength;
             state.LocalLightSignature = localLightSignature;
             m_CurrentState = state;
         }

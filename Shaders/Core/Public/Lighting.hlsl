@@ -22,6 +22,8 @@ struct DirectionalLightData
     float volumetricShadowDimmer;
     float volumetricFadeDistance;
     uint affectVolumetric;
+    float angularDiameter;
+    float3 padding;
 };
 
 struct PunctualLightData
@@ -314,6 +316,8 @@ DirectionalLightData GetDirectionalLightDefault()
     light.volumetricShadowDimmer = 0.0;
     light.volumetricFadeDistance = 0.0;
     light.affectVolumetric = 0u;
+    light.angularDiameter = 0.0;
+    light.padding = 0.0;
     return light;
 }
 

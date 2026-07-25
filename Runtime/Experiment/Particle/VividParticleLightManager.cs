@@ -383,6 +383,7 @@ namespace VividRP.Runtime.Particle
                     intensity = math.max(0.0f, intensity),
                     color = new Vector3(color.x, color.y, color.z),
                     shadowStrength = 0.0f,
+                    angularDiameter = 0.0f,
                     spotAngle = source.SpotAngle,
                     innerSpotAngle = source.InnerSpotAngle,
                     rangeAttenuationScale = safeRange > 0.0f

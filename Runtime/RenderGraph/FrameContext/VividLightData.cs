@@ -43,6 +43,8 @@ namespace VividRP.Runtime
             public float volumetricShadowDimmer;
             public float volumetricFadeDistance;
             public uint affectVolumetric;
+            public float angularDiameter;
+            public Vector3 padding;
 
             internal static int Stride => Marshal.SizeOf<DirectionalLightData>();
         }
@@ -1223,6 +1225,7 @@ namespace VividRP.Runtime
                 intensity = GetLightIntensity(finalColor),
                 color = new Vector3(finalColor.r, finalColor.g, finalColor.b),
                 shadowStrength = 0.0f,
+                angularDiameter = 0.0f,
                 spotAngle = visibleLight.spotAngle,
                 innerSpotAngle = visibleLight.innerSpotAngle,
                 rangeAttenuationScale = range > 0.0f ? 1.0f / Mathf.Max(range * range, 1e-6f) : 0.0f,

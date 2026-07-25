@@ -3,6 +3,8 @@
 
 float4 _ReferencedMainLightDirectionWS;
 float4 _ReferencedMainLightColor;
+float _ReferencedMainLightAngularDiameter;
+float _ReferencedMainLightShadowStrength;
 int _ReferencedReGIREnabled;
 
 // Lower-resolution lighting cubemap shared by BSDF miss, distribution build, and NEE.
@@ -441,6 +443,7 @@ struct ReferencedPathtracingPayload
     // Raygen inputs consumed by closest-hit.
     float3 pathThroughput;
     float3 bsdfRandom;
+    float2 mainLightRandom;
     float3 directLightRandom;
     float2 environmentRandom;
     float rayConeWidth;
@@ -452,6 +455,11 @@ struct ReferencedPathtracingPayload
     float3 emission;
     float3 mainLightDiffuseBsdf;
     float3 mainLightSpecularBsdf;
+    float3 mainLightDirectionWS;
+    // Reserved for distant-light MIS; both PDFs use solid-angle measure.
+    float mainLightLightPdf;
+    float mainLightBsdfPdf;
+    uint mainLightIsDelta;
     float3 reGIRLocalDiffuseRadiance;
     float3 reGIRLocalSpecularRadiance;
     float3 reGIRLocalDirectionWS;
@@ -475,6 +483,7 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
 {
     payload.pathThroughput = 1.0;
     payload.bsdfRandom = 0.0;
+    payload.mainLightRandom = 0.0;
     payload.directLightRandom = 0.0;
     payload.environmentRandom = 0.0;
     payload.rayConeWidth = 0.0;
@@ -484,6 +493,10 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.emission = 0.0;
     payload.mainLightDiffuseBsdf = 0.0;
     payload.mainLightSpecularBsdf = 0.0;
+    payload.mainLightDirectionWS = 0.0;
+    payload.mainLightLightPdf = 0.0;
+    payload.mainLightBsdfPdf = 0.0;
+    payload.mainLightIsDelta = 1u;
     payload.reGIRLocalDiffuseRadiance = 0.0;
     payload.reGIRLocalSpecularRadiance = 0.0;
     payload.reGIRLocalDirectionWS = 0.0;

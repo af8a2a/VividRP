@@ -43,6 +43,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
         private static readonly int MainLightDirectionWSId = Shader.PropertyToID("_ReferencedMainLightDirectionWS");
         private static readonly int MainLightColorId = Shader.PropertyToID("_ReferencedMainLightColor");
+        private static readonly int MainLightAngularDiameterId =
+            Shader.PropertyToID("_ReferencedMainLightAngularDiameter");
+        private static readonly int MainLightShadowStrengthId =
+            Shader.PropertyToID("_ReferencedMainLightShadowStrength");
         private static readonly int MaxBounceCountId = Shader.PropertyToID("_ReferencedMaxBounceCount");
         private static readonly int RussianRouletteStartBounceId =
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
@@ -180,6 +184,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_RayMaxDistance = 1000.0f;
         private Vector4 m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
         private Vector4 m_MainLightColor = Vector4.zero;
+        private float m_MainLightAngularDiameter;
+        private float m_MainLightShadowStrength;
         private Vector4 m_ReblurHitDistanceParameters =
             ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
         private ReferencedPathTracingReblurCheckerboardMode m_ReblurCheckerboardMode =
@@ -375,11 +381,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
                 cmd.SetGlobalVector(MainLightDirectionWSId, m_MainLightDirectionWS);
                 cmd.SetGlobalVector(MainLightColorId, m_MainLightColor);
+                cmd.SetGlobalFloat(MainLightAngularDiameterId, m_MainLightAngularDiameter);
+                cmd.SetGlobalFloat(MainLightShadowStrengthId, m_MainLightShadowStrength);
                 cmd.SetRayTracingVectorParam(
                     m_RayTracingShader,
                     MainLightDirectionWSId,
                     m_MainLightDirectionWS);
                 cmd.SetRayTracingVectorParam(m_RayTracingShader, MainLightColorId, m_MainLightColor);
+                cmd.SetRayTracingFloatParam(
+                    m_RayTracingShader,
+                    MainLightAngularDiameterId,
+                    m_MainLightAngularDiameter);
+                cmd.SetRayTracingFloatParam(
+                    m_RayTracingShader,
+                    MainLightShadowStrengthId,
+                    m_MainLightShadowStrength);
                 cmd.SetRayTracingIntParam(
                     m_RayTracingShader,
                     MaxBounceCountId,
@@ -433,6 +449,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RayMaxDistance = 1000.0f;
             m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
             m_MainLightColor = Vector4.zero;
+            m_MainLightAngularDiameter = 0.0f;
+            m_MainLightShadowStrength = 0.0f;
             m_ReblurHitDistanceParameters =
                 ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
@@ -786,6 +804,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
             m_MainLightColor = Vector4.zero;
+            m_MainLightAngularDiameter = 0.0f;
+            m_MainLightShadowStrength = 0.0f;
 
             if (lightData == null)
                 return;
@@ -809,6 +829,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 Mathf.Max(mainLight.color.y, 0.0f),
                 Mathf.Max(mainLight.color.z, 0.0f),
                 1.0f);
+            m_MainLightAngularDiameter = Mathf.Clamp(
+                mainLight.angularDiameter,
+                0.0f,
+                0.5f * Mathf.PI);
+            m_MainLightShadowStrength = Mathf.Clamp01(mainLight.shadowStrength);
         }
 
         private bool HasValidReGIRResources()

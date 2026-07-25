@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
@@ -223,6 +224,8 @@ namespace VividRP.Editor.Tests
                 {
                     directionWS = new Vector3(0.0f, 2.0f, 0.0f),
                     color = new Vector3(130000.0f, 65000.0f, 32500.0f),
+                    angularDiameter = 1.25f * Mathf.Deg2Rad,
+                    shadowStrength = 0.4f,
                 }
             };
             lightData.directionalLightCount = 1;
@@ -236,6 +239,55 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 GetField<Vector4>(pass, "m_MainLightColor"),
                 Is.EqualTo(new Vector4(130000.0f, 65000.0f, 32500.0f, 1.0f)));
+            Assert.That(
+                GetField<float>(pass, "m_MainLightAngularDiameter"),
+                Is.EqualTo(1.25f * Mathf.Deg2Rad).Within(0.000001f));
+            Assert.That(
+                GetField<float>(pass, "m_MainLightShadowStrength"),
+                Is.EqualTo(0.4f).Within(0.000001f));
+        }
+
+        [Test]
+        public void DirectionalLightSampling_UsesUniformSolidAngleAndReservesMisPayload()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var closestHitSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(commonSource, Does.Contain("float mainLightLightPdf;"));
+            Assert.That(commonSource, Does.Contain("float mainLightBsdfPdf;"));
+            Assert.That(commonSource, Does.Contain("uint mainLightIsDelta;"));
+            Assert.That(
+                closestHitSource,
+                Does.Contain("VividReferencedPathtracingSampleMainDirectionalLight"));
+            Assert.That(
+                closestHitSource,
+                Does.Contain("rcp(2.0 * PI * oneMinusCosThetaMax)"));
+            Assert.That(
+                closestHitSource,
+                Does.Contain("openpbr_pdf(preparedBsdf, mainLightDirectionWS)"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("payload.mainLightDirectionWS"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain("normalize(_ReferencedMainLightDirectionWS.xyz)"));
         }
 
         [Test]
@@ -765,6 +817,15 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                typeof(ReferencedPathTracingPass).Assembly);
+
+            Assert.That(packageInfo, Is.Not.Null);
+            return Path.Combine(packageInfo.resolvedPath, Path.Combine(relativeParts));
         }
 
         private static ReferencedPathTracingCaptureMetadata

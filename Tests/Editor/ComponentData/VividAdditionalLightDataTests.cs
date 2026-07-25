@@ -1511,6 +1511,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void VividLightRenderDatabase_TracksDirectionalAngularDiameter()
+        {
+            var light = m_GameObject.AddComponent<Light>();
+            light.type = LightType.Directional;
+            var additionalData = light.GetVividAdditionalLightData();
+            additionalData.angularDiameter = 1.25f;
+
+            var trackedLightData =
+                VividLightRenderDatabase.instance.UpdateLightData(
+                    light,
+                    additionalData);
+
+            Assert.That(
+                trackedLightData.angularDiameter,
+                Is.EqualTo(1.25f).Within(0.000001f));
+        }
+
+        [Test]
         public void UpdateLightData_RefreshesTrackedSnapshot_WhenLightPropertiesChange()
         {
             var light = m_GameObject.AddComponent<Light>();

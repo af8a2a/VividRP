@@ -12,6 +12,9 @@ namespace VividRP.Editor.Tests
         private static readonly MethodInfo s_CreateAreaLightDataMethod =
             typeof(VividLightData).GetMethod("CreateAreaLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
+        private static readonly MethodInfo s_CreateDirectionalLightDataMethod =
+            typeof(VividLightData).GetMethod("CreateDirectionalLightData", BindingFlags.Static | BindingFlags.NonPublic);
+
         private static readonly MethodInfo s_CreateReGIRLightDataMethod =
             typeof(VividLightData).GetMethod("CreateReGIRLightData", BindingFlags.Static | BindingFlags.NonPublic);
 
@@ -819,6 +822,36 @@ namespace VividRP.Editor.Tests
                 trackedLightData.renderingLayerMask,
                 Mathf.Cos(45.0f * Mathf.Deg2Rad),
                 0.35f);
+        }
+
+        [Test]
+        public void CreateDirectionalLightData_ConvertsAngularDiameterToRadians()
+        {
+            var trackedLightData = new VividLightRenderData
+            {
+                lightType = LightType.Directional,
+                forwardWS = Vector3.forward,
+                color = new Vector3(4.0f, 5.0f, 6.0f),
+                shadowStrength = 0.65f,
+                angularDiameter = 1.5f,
+                renderingLayerMask = 11u,
+            };
+
+            Assert.That(s_CreateDirectionalLightDataMethod, Is.Not.Null);
+
+            var directionalLight =
+                (VividLightData.DirectionalLightData)s_CreateDirectionalLightDataMethod.Invoke(
+                    null,
+                    new object[] { trackedLightData });
+
+            AssertVector3(directionalLight.directionWS, Vector3.back);
+            Assert.That(
+                directionalLight.angularDiameter,
+                Is.EqualTo(1.5f * Mathf.Deg2Rad).Within(0.000001f));
+            Assert.That(
+                directionalLight.shadowStrength,
+                Is.EqualTo(0.65f).Within(0.000001f));
+            Assert.That(VividLightData.DirectionalLightData.Stride, Is.EqualTo(64));
         }
 
         [Test]

@@ -217,12 +217,17 @@ void RayGenReferencedPathtracing()
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
         // Keep proposal dimensions independent: ReGIR consumes one discrete-light dimension
-        // plus two area-shape dimensions. Environment NEE derives a separate stream below so it
-        // does not shift the existing BSDF/ReGIR or later-bounce sequence.
+        // plus two area-shape dimensions. Distant-light and environment NEE derive separate
+        // streams below so neither shifts the existing BSDF/ReGIR or later-bounce sequence.
         payload.directLightRandom = float3(
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
+        uint mainLightRngState = HashReferencedPathtracingRng(
+            rngState ^ (0x243f6a88u + bounceIndex * 0x9e3779b9u));
+        payload.mainLightRandom = float2(
+            NextReferencedPathtracingRngFloat(mainLightRngState),
+            NextReferencedPathtracingRngFloat(mainLightRngState));
         uint environmentRngState = HashReferencedPathtracingRng(
             rngState ^ (0x68bc21ebu + bounceIndex * 0x9e3779b9u));
         payload.environmentRandom = float2(
@@ -313,18 +318,35 @@ void RayGenReferencedPathtracing()
             }
         }
 
-        // Directional light RGB is photometric illuminance in lux. The closest-hit OpenPBR
-        // response already includes NdotL, so this product is the physical direct-light term.
+        // Directional light RGB is photometric illuminance in lux. For a uniform solid-angle
+        // proposal, distant radiance divided by the light PDF integrates back to illuminance.
+        // The closest-hit OpenPBR response already includes NdotL, so this phase-one estimator
+        // remains response * illuminance; the stored PDFs are reserved for the MIS phase.
         float3 mainLightIlluminance = max(_ReferencedMainLightColor.rgb, 0.0);
+        float mainLightDirectionLengthSquared = dot(
+            payload.mainLightDirectionWS,
+            payload.mainLightDirectionWS);
         if (any(mainLightIlluminance > 0.0)
+            && mainLightDirectionLengthSquared > 1e-8
             && (any(payload.mainLightDiffuseBsdf > 0.0)
                 || any(payload.mainLightSpecularBsdf > 0.0)))
         {
-            float visibility = TraceReferencedPathtracingVisibility(
-                payload.positionWS,
-                normalize(payload.faceNormalWS),
-                normalize(_ReferencedMainLightDirectionWS.xyz),
-                max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance));
+            float mainLightShadowStrength =
+                saturate(_ReferencedMainLightShadowStrength);
+            float visibility = 1.0;
+            if (mainLightShadowStrength > 0.0)
+            {
+                float tracedVisibility = TraceReferencedPathtracingVisibility(
+                    payload.positionWS,
+                    normalize(payload.faceNormalWS),
+                    payload.mainLightDirectionWS
+                        * rsqrt(mainLightDirectionLengthSquared),
+                    max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance));
+                visibility = lerp(
+                    1.0,
+                    tracedVisibility,
+                    mainLightShadowStrength);
+            }
             float3 directDiffuse = throughput
                 * payload.mainLightDiffuseBsdf
                 * mainLightIlluminance
@@ -336,9 +358,9 @@ void RayGenReferencedPathtracing()
 
             if (bounceIndex == 0u)
             {
-                // Primary NEE is deterministic for the current directional-light prototype.
-                // Keep it out of REBLUR: filtering it with the indirect signal destroys hard
-                // visibility boundaries because a directional shadow has no finite hit distance.
+                // A distant-light sample has no finite hit distance for REBLUR. Keep primary
+                // direct lighting in its dedicated AOV and let progressive accumulation converge
+                // the sampled penumbra instead of assigning an invalid indirect hit distance.
                 directLightingRadiance += directDiffuse + directSpecular;
             }
             else if (primaryLobeClass == 1u)

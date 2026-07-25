@@ -43,6 +43,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public Matrix4x4 ProjectionMatrix;
             public Vector3 MainLightDirection;
             public Vector3 MainLightColor;
+            public float MainLightAngularDiameter;
+            public float MainLightShadowStrength;
             public ulong LocalLightSignature;
             public ulong EnvironmentSignature;
             public ulong CameraBackgroundSignature;
@@ -215,6 +217,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 frameData.GetOrCreate<VividLightData>(),
                 out var lightDirection,
                 out var lightColor,
+                out var lightAngularDiameter,
+                out var lightShadowStrength,
                 out var localLightSignature);
             if (!integratorState.enableReGIR)
                 localLightSignature = 0ul;
@@ -233,6 +237,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 && MatricesApproximatelyEqual(state.ProjectionMatrix, projectionMatrix, MatrixResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightDirection, lightDirection, LightResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon)
+                && Mathf.Abs(state.MainLightAngularDiameter - lightAngularDiameter)
+                    <= LightResetEpsilon
+                && Mathf.Abs(state.MainLightShadowStrength - lightShadowStrength)
+                    <= LightResetEpsilon
                 && state.LocalLightSignature == localLightSignature
                 && state.EnvironmentSignature == environmentState.signature
                 && state.CameraBackgroundSignature == cameraBackgroundState.signature
@@ -277,6 +285,8 @@ namespace VividRP.Runtime.RenderPass.Core
             state.ProjectionMatrix = projectionMatrix;
             state.MainLightDirection = lightDirection;
             state.MainLightColor = lightColor;
+            state.MainLightAngularDiameter = lightAngularDiameter;
+            state.MainLightShadowStrength = lightShadowStrength;
             state.LocalLightSignature = localLightSignature;
             state.EnvironmentSignature = environmentState.signature;
             state.CameraBackgroundSignature = cameraBackgroundState.signature;
@@ -359,10 +369,14 @@ namespace VividRP.Runtime.RenderPass.Core
             VividLightData lightData,
             out Vector3 mainLightDirection,
             out Vector3 mainLightColor,
+            out float mainLightAngularDiameter,
+            out float mainLightShadowStrength,
             out ulong localLightSignature)
         {
             mainLightDirection = Vector3.zero;
             mainLightColor = Vector3.zero;
+            mainLightAngularDiameter = 0.0f;
+            mainLightShadowStrength = 0.0f;
             localLightSignature = 0ul;
             if (lightData == null)
                 return;
@@ -378,6 +392,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     Mathf.Max(mainLight.color.x, 0.0f),
                     Mathf.Max(mainLight.color.y, 0.0f),
                     Mathf.Max(mainLight.color.z, 0.0f));
+                mainLightAngularDiameter = Mathf.Clamp(
+                    mainLight.angularDiameter,
+                    0.0f,
+                    0.5f * Mathf.PI);
+                mainLightShadowStrength = Mathf.Clamp01(
+                    mainLight.shadowStrength);
             }
 
             var lightCount = Mathf.Clamp(

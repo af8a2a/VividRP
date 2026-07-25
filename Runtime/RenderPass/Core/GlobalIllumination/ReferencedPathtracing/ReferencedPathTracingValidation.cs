@@ -126,11 +126,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 frameData?.GetOrCreate<VividLightData>(),
                 out var mainLightDirection,
                 out var mainLightColor,
+                out var mainLightAngularDiameter,
+                out var mainLightShadowStrength,
                 out var localLightSignature);
             if (!integratorState.enableReGIR)
                 localLightSignature = 0ul;
             AddVector(ref hash, mainLightDirection);
             AddVector(ref hash, mainLightColor);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                mainLightAngularDiameter);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                mainLightShadowStrength);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 localLightSignature);

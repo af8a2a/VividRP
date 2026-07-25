@@ -20,6 +20,11 @@ namespace VividRP.Runtime
                 volumetricShadowDimmer = GetVolumetricShadowDimmer(trackedLightData),
                 volumetricFadeDistance = GetVolumetricFadeDistance(trackedLightData),
                 affectVolumetric = GetAffectVolumetric(trackedLightData),
+                angularDiameter = Mathf.Clamp(
+                    trackedLightData.angularDiameter,
+                    0.0f,
+                    90.0f) * Mathf.Deg2Rad,
+                padding = Vector3.zero,
             };
         }
 

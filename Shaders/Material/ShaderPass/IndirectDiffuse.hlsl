@@ -40,6 +40,12 @@ CBUFFER_START(UnityPerMaterial)
     float _Smoothness;
     float _SmoothnessTextureChannel;
     float _Metallic;
+    float _MetallicRemapMin;
+    float _MetallicRemapMax;
+    float _SmoothnessRemapMin;
+    float _SmoothnessRemapMax;
+    float _AORemapMin;
+    float _AORemapMax;
     float _BumpScale;
     float _OcclusionStrength;
     float _ClearCoatMask;
@@ -164,21 +170,21 @@ float2 SampleMetallicSmoothness(float2 uv, float baseAlpha, float textureLod)
 
 #if defined(_METALLICSPECGLOSSMAP)
     float4 metallicGlossSample = SAMPLE_TEXTURE2D_LOD(_MetallicGlossMap, sampler_MetallicGlossMap, uv, textureLod);
-    metallic = saturate(metallicGlossSample.r * _Metallic);
+    metallic = lerp(_MetallicRemapMin, _MetallicRemapMax, saturate(metallicGlossSample.r));
 
     #if defined(_ROUGHNESSMAP)
         float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, textureLod).r;
-        smoothness = (1.0 - roughness) * _Smoothness;
+        smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(1.0 - roughness));
     #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
-        smoothness = baseAlpha * _Smoothness;
+        smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(baseAlpha));
     #else
-        smoothness = metallicGlossSample.a * _Smoothness;
+        smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(metallicGlossSample.a));
     #endif
 #elif defined(_ROUGHNESSMAP)
     float roughness = SAMPLE_TEXTURE2D_LOD(_RoughnessMap, sampler_RoughnessMap, uv, textureLod).r;
-    smoothness = (1.0 - roughness) * _Smoothness;
+    smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(1.0 - roughness));
 #elif defined(_SMOOTHNESS_TEXTURE_ALBEDO_CHANNEL_A)
-    smoothness = baseAlpha * _Smoothness;
+    smoothness = lerp(_SmoothnessRemapMin, _SmoothnessRemapMax, saturate(baseAlpha));
 #endif
 
     return float2(metallic, saturate(smoothness));
@@ -193,7 +199,7 @@ float SampleAmbientOcclusion(float2 uv)
 {
 #if defined(_OCCLUSIONMAP)
     float occlusion = SAMPLE_TEXTURE2D_LOD(_OcclusionMap, sampler_OcclusionMap, uv, 0.0).g;
-    return saturate(lerp(1.0, occlusion, _OcclusionStrength));
+    return saturate(lerp(_AORemapMin, _AORemapMax, occlusion));
 #else
     return 1.0;
 #endif

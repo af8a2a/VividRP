@@ -15,11 +15,13 @@ It significantly shortens iteration cycles while improving collaboration between
 
 ![LWGUI](assets~/LWGUI.png)
 
-| ![image-20240716183800118](./assets~/image-20240716183800118.png)                                                                                                               | ![](assets~/Pasted%20image%2020250522183200.png)                         |
-| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| A more powerful Gradient editor than UE, with support for both Shader and C#                                                                                                  | **NEW: Use Ramp Atlas to include multiple Ramps in one Texture** |
-| ![image-20250314160119094](./assets~/image-20250314160119094.png)                                                                                                               | ![image-20220926025611208](./assets~/image-20220926025611208.png)        |
-| **NEW: When recording material parameter animations in Timeline, automatically capture changes to Toggle's Keywords to enable switching material Keywords at runtime.** | Feature-rich toolbar                                                   |
+| ![](assets~/Pasted%20image%2020260714225931.png)                                                                                                                                    | ![](assets~/Pasted%20image%2020260714230034.png)                  |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **NEW: Now supports visual editing of LWGUI Attributes in Amplify Shader Editor! <br/> You need to install ASE v1.9.9.10+ and enable `Project Settings > LWGUI > ASE Integration`** | The new `SampleAmplifyShader` can help you get started quickly!   |
+| ![image-20240716183800118](./assets~/image-20240716183800118.png)                                                                                                                   | ![](assets~/Pasted%20image%2020250522183200.png)                  |
+| A more powerful Gradient editor than UE, with support for both Shader and C#                                                                                                        | Use Ramp Atlas to include multiple Ramps in one Texture           |
+| ![image-20250314160119094](./assets~/image-20250314160119094.png)                                                                                                                   | ![image-20220926025611208](./assets~/image-20220926025611208.png) |
+| When recording material parameter animations in Timeline, automatically capture changes to Toggle's Keywords to enable switching material Keywords at runtime.                      | Feature-rich toolbar                                              |
 
 | With your sponsorship, I will update more actively. | 有你的赞助我会更加积极地更新                                                              |
 | --------------------------------------------------- | ----------------------------------------------------------------------------------------- |
@@ -29,52 +31,58 @@ It significantly shortens iteration cycles while improving collaboration between
 * [LWGUI (Light Weight Shader GUI)](#lwgui-light-weight-shader-gui)
    * [Installation](#installation)
    * [Getting Started](#getting-started)
+      * [NEW: Using in Amplify Shader Editor](#new-using-in-amplify-shader-editor)
+      * [Using in a Code Editor](#using-in-a-code-editor)
    * [Basic Drawers](#basic-drawers)
       * [Main &amp; Sub](#main--sub)
    * [Extra Drawers](#extra-drawers)
-      * [Numeric](#numeric)
-         * [SubToggle](#subtoggle)
-         * [SubPowerSlider](#subpowerslider)
-         * [SubIntRange](#subintrange)
-         * [MinMaxSlider](#minmaxslider)
+      * [Enum](#enum)
          * [KWEnum](#kwenum)
          * [SubEnum &amp; SubKeywordEnum](#subenum--subkeywordenum)
          * [Preset](#preset)
-         * [RampAtlasIndexer](#rampatlasindexer)
-      * [Texture](#texture)
-         * [Tex](#tex)
-         * [Ramp](#ramp)
+            * [Create Preset File](#create-preset-file)
+            * [Edit Preset](#edit-preset)
+      * [Numeric](#numeric)
+         * [BitMask](#bitmask)
+         * [MinMaxSlider](#minmaxslider)
+         * [SubIntRange](#subintrange)
+         * [SubPowerSlider](#subpowerslider)
+         * [SubToggle](#subtoggle)
+      * [Ramp](#ramp)
+         * [Ramp](#ramp-1)
             * [ShaderLab](#shaderlab)
             * [C#](#c)
             * [Gradient Editor](#gradient-editor)
          * [RampAtlas](#rampatlas)
             * [Ramp Atlas Scriptable Object](#ramp-atlas-scriptable-object)
+         * [RampAtlasIndexer](#rampatlasindexer)
+      * [Texture](#texture)
          * [Image](#image)
+         * [Tex](#tex)
       * [Vector](#vector)
-         * [Color](#color)
          * [Channel](#channel)
+         * [Color](#color)
       * [Other](#other)
          * [Button](#button)
    * [Extra Decorators](#extra-decorators)
       * [Appearance](#appearance)
-         * [Title &amp; SubTitle](#title--subtitle)
+         * [Title](#title)
          * [Tooltip &amp; Helpbox](#tooltip--helpbox)
-         * [ReadOnly](#readonly)
+         * [Hidden](#hidden)
          * [HelpURL](#helpurl)
-      * [Logic](#logic)
+         * [ReadOnly](#readonly)
+      * [Condition](#condition)
+         * [ActiveIf](#activeif)
+         * [ShowIf](#showif)
          * [PassSwitch](#passswitch)
       * [Structure](#structure)
          * [Advanced &amp; AdvancedHeaderProperty](#advanced--advancedheaderproperty)
-      * [Condition Display](#condition-display)
-         * [Hidden](#hidden)
-         * [ShowIf](#showif)
-         * [ActiveIf](#activeif)
    * [LWGUI Timeline Tracks](#lwgui-timeline-tracks)
       * [MaterialKeywordToggleTrack](#materialkeywordtoggletrack)
    * [Unity Builtin Drawers](#unity-builtin-drawers)
       * [Space](#space)
       * [Header](#header)
-      * [Enum](#enum)
+      * [Enum](#enum-1)
       * [IntRange](#intrange)
       * [KeywordEnum](#keywordenum)
       * [PowerSlider](#powerslider)
@@ -87,16 +95,8 @@ It significantly shortens iteration cycles while improving collaboration between
       * [Custom Drawer](#custom-drawer)
    * [Contribution](#contribution)
    * [Development Guide](#development-guide)
-      * [Project Positioning and Core Goal](#project-positioning-and-core-goal)
-      * [Architecture and Layering Principles](#architecture-and-layering-principles)
-      * [Code Structure and Responsibilities](#code-structure-and-responsibilities)
-      * [MetaData Deep Dive: Data Structures and Lifecycle](#metadata-deep-dive-data-structures-and-lifecycle)
-         * [1) PerInspectorData (inspector scope)](#1-perinspectordata-inspector-scope)
-         * [2) PerMaterialData (material scope)](#2-permaterialdata-material-scope)
-         * [3) PerShaderData (shader scope)](#3-pershaderdata-shader-scope)
-         * [Overall MetaData Lifecycle Flow (recommended mental model)](#overall-metadata-lifecycle-flow-recommended-mental-model)
-      * [ShaderGUI Key Events and Invocation Timing](#shadergui-key-events-and-invocation-timing)
-      * [Troubleshooting Tips (by event order)](#troubleshooting-tips-by-event-order)
+      * [Data Structure (Shader &gt; Material &gt; Inspector)](#data-structure-shader--material--inspector)
+      * [Lifecycle](#lifecycle)
 <!--te-->
 
 ## Installation
@@ -114,6 +114,20 @@ It significantly shortens iteration cycles while improving collaboration between
    - For Unity 2017, please extract the Zip directly to the Assets directory
 
 ## Getting Started
+
+### NEW: Using in Amplify Shader Editor
+
+1. Install ASE `v1.9.9.10 +`  
+2. Enable: `Project Settings > LWGUI > ASE Integration` (At this point, ASE's default Custom Editor will be replaced with `LWGUI.LWGUI`)  
+3. Create or open an Amplify Shader, create or select a Parameter node, and now you can edit LWGUI Drawers and Decorators:
+![](assets~/Pasted%20image%2020260714231511.png)
+- Each Parameter node can only have one Drawer, but can have multiple Decorators  
+- Detailed descriptions of all Drawers and Decorators can be found below  
+- You need to manually select the constructor, a constructor with fewer parameters means some parameters use default values  
+- Don't forget to adjust the order of parameters! Incorrect order can cause layout issues  
+- You can view the generated code to help solve problems
+
+### Using in a Code Editor
 
 1. Create a newer or use the existing Shader
 2. Open the Shader in the code editor
@@ -201,79 +215,7 @@ Then change values:
 
 ## Extra Drawers
 
-### Numeric
-
-#### SubToggle
-
-```c#
-/// Similar to builtin Toggle()
-/// 
-/// group: parent group name (Default: none)
-/// keyword: keyword used for toggle, "_" = ignore, none or "__" = Property Name +  "_ON", always Upper (Default: none)
-/// preset File Name: "Shader Property Preset" asset name, see Preset() for detail (Default: none)
-/// Target Property Type: Float
-public SubToggleDrawer() { }
-public SubToggleDrawer(string group) : this(group, String.Empty, String.Empty) { }
-public SubToggleDrawer(string group, string keyWord) : this(group, keyWord, String.Empty) { }
-public SubToggleDrawer(string group, string keyWord, string presetFileName)
-```
-
-#### SubPowerSlider
-
-```c#
-/// Similar to builtin PowerSlider()
-/// 
-/// group: parent group name (Default: none)
-/// power: power of slider (Default: 1)
-/// presetFileName: "Shader Property Preset" asset name, it rounds up the float to choose which Preset to use.  
-///    You can create new Preset by  
-///    "Right Click > Create > LWGUI > Shader Property Preset" in Project window,  
-///    *any Preset in the entire project cannot have the same name*
-/// Target Property Type: Range
-public SubPowerSliderDrawer(float power) : this("_", power) { }  
-public SubPowerSliderDrawer(string group, float power) : this(group, power, string.Empty) { }  
-public SubPowerSliderDrawer(string group, float power, string presetFileName)
-```
-
-#### SubIntRange
-
-```c#
-/// Similar to builtin IntRange()
-/// 
-/// group: parent group name (Default: none)
-/// Target Property Type: Range
-public SubIntRangeDrawer(string group)
-
-```
-
-#### MinMaxSlider
-
-```c#
-/// Draw a min max slider
-/// 
-/// group: parent group name (Default: none)
-/// minPropName: Output Min Property Name
-/// maxPropName: Output Max Property Name
-/// Target Property Type: Range, range limits express the MinMaxSlider value range
-/// Output Min/Max Property Type: Range, it's value is limited by it's range
-public MinMaxSliderDrawer(string minPropName, string maxPropName) : this("_", minPropName, maxPropName) { }
-public MinMaxSliderDrawer(string group, string minPropName, string maxPropName)
-
-```
-
-Example:
-
-```c#
-[Title(MinMaxSlider Samples)]
-[MinMaxSlider(_rangeStart, _rangeEnd)] _minMaxSlider("Min Max Slider (0 - 1)", Range(0.0, 1.0)) = 1.0
-/*[HideInInspector]*/_rangeStart("Range Start", Range(0.0, 0.5)) = 0.0
-/*[HideInInspector]*/[PowerSlider(10)] _rangeEnd("Range End PowerSlider", Range(0.5, 1.0)) = 1.0
-
-```
-
-Result:
-
-![image-20220828003810353](assets~/image-20220828003810353.png)
+### Enum
 
 #### KWEnum
 
@@ -349,8 +291,8 @@ Example:
 [Toggle(_)]_ZWrite("ZWrite ", Float) = 1
 [Enum(UnityEngine.Rendering.CompareFunction)]_ZTest("ZTest", Float) = 4 // 4 is LEqual
 [Enum(RGBA,15,RGB,14)]_ColorMask("ColorMask", Float) = 15 // 15 is RGBA (binary 1111)
-  
-``````
+
+......
   
 Cull [_Cull]
 ZWrite [_ZWrite]
@@ -371,6 +313,8 @@ The Property Value in the selected Preset will be the default value:
 ##### Edit Preset
 
 ![image-20221122232354623](assets~/image-20221122232354623.png)![image-20221122232415972](assets~/image-20221122232415972.png)![image-20221122232425194](assets~/image-20221122232425194.png)
+
+### Numeric
 
 #### BitMask
 
@@ -426,67 +370,79 @@ Result:
 > - Force disable SRP Batcher by setting the Material Property Block
 > - Place materials with the same Stencil Ref value in a separate Render Queue to ensure the Batch's Render State is correct
 
-#### RampAtlasIndexer
+#### MinMaxSlider
 
 ```c#
-/// Visually similar to Ramp(), but RampAtlasIndexer() must be used together with RampAtlas().  
-/// The actual stored value is the index of the current Ramp in the Ramp Atlas SO, used for sampling the Ramp Atlas Texture in the Shader.
-///  
-/// group: parent group name.  
-/// rampAtlasPropName: RampAtlas() property name.  
-/// defaultRampName: default ramp name. (Default: Ramp)  
-/// colorSpace: default ramp color space. (sRGB/Linear) (Default: sRGB)  
-/// viewChannelMask: editable channels. (Default: RGBA)  
-/// timeRange: the abscissa display range (1/24/2400), is used to optimize the editing experience when the abscissa is time of day. (Default: 1)  
-/// Target Property Type: Float
-public RampAtlasIndexerDrawer(string group, string rampAtlasPropName) : this(group, rampAtlasPropName, "Ramp") {}  
-public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName) : this(group, rampAtlasPropName, defaultRampName, "sRGB") {}  
-public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName, string colorSpace) : this(group, rampAtlasPropName, defaultRampName, colorSpace, "RGBA") {}  
-public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName, string colorSpace, string viewChannelMask) : this(group, rampAtlasPropName, defaultRampName, colorSpace, viewChannelMask, 1) {}  
-public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName, string colorSpace, string viewChannelMask, float timeRange)  
-```
-
-See details for usage: RampAtlas()
-
-### Texture
-
-#### Tex
-
-```c#
-/// Draw a Texture property in single line with a extra property
+/// Draw a min max slider
 /// 
 /// group: parent group name (Default: none)
-/// extraPropName: extra property name (Default: none)
-/// Target Property Type: Texture
-/// Extra Property Type: Color, Vector
-/// Target Property Type: Texture2D
-public TexDrawer() { }
-public TexDrawer(string group) : this(group, String.Empty) { }
-public TexDrawer(string group, string extraPropName)
+/// minPropName: Output Min Property Name
+/// maxPropName: Output Max Property Name
+/// Target Property Type: Range, range limits express the MinMaxSlider value range
+/// Output Min/Max Property Type: Range, it's value is limited by it's range
+public MinMaxSliderDrawer(string minPropName, string maxPropName) : this("_", minPropName, maxPropName) { }
+public MinMaxSliderDrawer(string group, string minPropName, string maxPropName)
 
 ```
 
 Example:
 
 ```c#
-[Main(Group3, _, on)] _group3 ("Group - Tex and Color Samples", float) = 0
-[Tex(Group3, _color)] _tex_color ("Tex with Color", 2D) = "white" { }
-[HideInInspector] _color (" ", Color) = (1, 0, 0, 1)
-[Tex(Group3, _textureChannelMask1)] _tex_channel ("Tex with Channel", 2D) = "white" { }
-[HideInInspector] _textureChannelMask1(" ", Vector) = (0,0,0,1)
-
-// Display up to 4 colors in a single line
-[Color(Group3, _mColor1, _mColor2, _mColor3)]
-_mColor ("Multi Color", Color) = (1, 1, 1, 1)
-[HideInInspector] _mColor1 (" ", Color) = (1, 0, 0, 1)
-[HideInInspector] _mColor2 (" ", Color) = (0, 1, 0, 1)
-[HideInInspector] [HDR] _mColor3 (" ", Color) = (0, 0, 1, 1)
+[Title(MinMaxSlider Samples)]
+[MinMaxSlider(_rangeStart, _rangeEnd)] _minMaxSlider("Min Max Slider (0 - 1)", Range(0.0, 1.0)) = 1.0
+/*[HideInInspector]*/_rangeStart("Range Start", Range(0.0, 0.5)) = 0.0
+/*[HideInInspector]*/[PowerSlider(10)] _rangeEnd("Range End PowerSlider", Range(0.5, 1.0)) = 1.0
 
 ```
 
 Result:
 
-![image-20220828003507825](assets~/image-20220828003507825.png)
+![image-20220828003810353](assets~/image-20220828003810353.png)
+
+#### SubIntRange
+
+```c#
+/// Similar to builtin IntRange()
+/// 
+/// group: parent group name (Default: none)
+/// Target Property Type: Range
+public SubIntRangeDrawer(string group)
+
+```
+
+#### SubPowerSlider
+
+```c#
+/// Similar to builtin PowerSlider()
+/// 
+/// group: parent group name (Default: none)
+/// power: power of slider (Default: 1)
+/// presetFileName: "Shader Property Preset" asset name, it rounds up the float to choose which Preset to use.  
+///    You can create new Preset by  
+///    "Right Click > Create > LWGUI > Shader Property Preset" in Project window,  
+///    *any Preset in the entire project cannot have the same name*
+/// Target Property Type: Range
+public SubPowerSliderDrawer(float power) : this("_", power) { }  
+public SubPowerSliderDrawer(string group, float power) : this(group, power, string.Empty) { }  
+public SubPowerSliderDrawer(string group, float power, string presetFileName)
+```
+
+#### SubToggle
+
+```c#
+/// Similar to builtin Toggle()
+/// 
+/// group: parent group name (Default: none)
+/// keyword: keyword used for toggle, "_" = ignore, none or "__" = Property Name +  "_ON", always Upper (Default: none)
+/// preset File Name: "Shader Property Preset" asset name, see Preset() for detail (Default: none)
+/// Target Property Type: Float
+public SubToggleDrawer() { }
+public SubToggleDrawer(string group) : this(group, String.Empty, String.Empty) { }
+public SubToggleDrawer(string group, string keyWord) : this(group, keyWord, String.Empty) { }
+public SubToggleDrawer(string group, string keyWord, string presetFileName)
+```
+
+### Ramp
 
 #### Ramp
 
@@ -654,6 +610,30 @@ The context menu in the upper right corner has a one-click color space conversio
 > - Only add Ramps
 > - Do not modify the Ramp order
 
+#### RampAtlasIndexer
+
+```c#
+/// Visually similar to Ramp(), but RampAtlasIndexer() must be used together with RampAtlas().  
+/// The actual stored value is the index of the current Ramp in the Ramp Atlas SO, used for sampling the Ramp Atlas Texture in the Shader.
+///  
+/// group: parent group name.  
+/// rampAtlasPropName: RampAtlas() property name.  
+/// defaultRampName: default ramp name. (Default: Ramp)  
+/// colorSpace: default ramp color space. (sRGB/Linear) (Default: sRGB)  
+/// viewChannelMask: editable channels. (Default: RGBA)  
+/// timeRange: the abscissa display range (1/24/2400), is used to optimize the editing experience when the abscissa is time of day. (Default: 1)  
+/// Target Property Type: Float
+public RampAtlasIndexerDrawer(string group, string rampAtlasPropName) : this(group, rampAtlasPropName, "Ramp") {}  
+public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName) : this(group, rampAtlasPropName, defaultRampName, "sRGB") {}  
+public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName, string colorSpace) : this(group, rampAtlasPropName, defaultRampName, colorSpace, "RGBA") {}  
+public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName, string colorSpace, string viewChannelMask) : this(group, rampAtlasPropName, defaultRampName, colorSpace, viewChannelMask, 1) {}  
+public RampAtlasIndexerDrawer(string group, string rampAtlasPropName, string defaultRampName, string colorSpace, string viewChannelMask, float timeRange)  
+```
+
+See details for usage: RampAtlas()
+
+### Texture
+
 #### Image
 
 ```c#
@@ -670,7 +650,76 @@ Result:
 
 ![image-20240416142736663](./assets~/image-20240416142736663.png)
 
+#### Tex
+
+```c#
+/// Draw a Texture property in single line with a extra property
+/// 
+/// group: parent group name (Default: none)
+/// extraPropName: extra property name (Default: none)
+/// Target Property Type: Texture
+/// Extra Property Type: Color, Vector
+/// Target Property Type: Texture2D
+public TexDrawer() { }
+public TexDrawer(string group) : this(group, String.Empty) { }
+public TexDrawer(string group, string extraPropName)
+
+```
+
+Example:
+
+```c#
+[Main(Group3, _, on)] _group3 ("Group - Tex and Color Samples", float) = 0
+[Tex(Group3, _color)] _tex_color ("Tex with Color", 2D) = "white" { }
+[HideInInspector] _color (" ", Color) = (1, 0, 0, 1)
+[Tex(Group3, _textureChannelMask1)] _tex_channel ("Tex with Channel", 2D) = "white" { }
+[HideInInspector] _textureChannelMask1(" ", Vector) = (0,0,0,1)
+
+// Display up to 4 colors in a single line
+[Color(Group3, _mColor1, _mColor2, _mColor3)]
+_mColor ("Multi Color", Color) = (1, 1, 1, 1)
+[HideInInspector] _mColor1 (" ", Color) = (1, 0, 0, 1)
+[HideInInspector] _mColor2 (" ", Color) = (0, 1, 0, 1)
+[HideInInspector] [HDR] _mColor3 (" ", Color) = (0, 0, 1, 1)
+
+```
+
+Result:
+
+![image-20220828003507825](assets~/image-20220828003507825.png)
+
 ### Vector
+
+#### Channel
+
+```c#
+/// Draw a R/G/B/A drop menu:
+/// 	R = (1, 0, 0, 0)
+/// 	G = (0, 1, 0, 0)
+/// 	B = (0, 0, 1, 0)
+/// 	A = (0, 0, 0, 1)
+/// 	RGB Average = (1f / 3f, 1f / 3f, 1f / 3f, 0)
+/// 	RGB Luminance = (0.2126f, 0.7152f, 0.0722f, 0)
+///		None = (0, 0, 0, 0)
+/// 
+/// group: parent group name (Default: none)
+/// Target Property Type: Vector, used to dot() with Texture Sample Value
+public ChannelDrawer() { }
+public ChannelDrawer(string group)
+```
+
+Example:
+
+```c#
+[Title(_, Channel Samples)]
+[Channel(_)]_textureChannelMask("Texture Channel Mask (Default G)", Vector) = (0,1,0,0)
+
+......
+
+float selectedChannelValue = dot(tex2D(_Tex, uv), _textureChannelMask);
+```
+
+![image-20220822010511978](assets~/image-20220822010511978.png)
 
 #### Color
 
@@ -707,37 +756,6 @@ _mColor ("Multi Color", Color) = (1, 1, 1, 1)
 Result:
 
 ![image-20220828003507825](assets~/image-20220828003507825.png)
-
-#### Channel
-
-```c#
-/// Draw a R/G/B/A drop menu:
-/// 	R = (1, 0, 0, 0)
-/// 	G = (0, 1, 0, 0)
-/// 	B = (0, 0, 1, 0)
-/// 	A = (0, 0, 0, 1)
-/// 	RGB Average = (1f / 3f, 1f / 3f, 1f / 3f, 0)
-/// 	RGB Luminance = (0.2126f, 0.7152f, 0.0722f, 0)
-///		None = (0, 0, 0, 0)
-/// 
-/// group: parent group name (Default: none)
-/// Target Property Type: Vector, used to dot() with Texture Sample Value
-public ChannelDrawer() { }
-public ChannelDrawer(string group)
-```
-
-Example:
-
-```c#
-[Title(_, Channel Samples)]
-[Channel(_)]_textureChannelMask("Texture Channel Mask (Default G)", Vector) = (0,1,0,0)
-
-......
-
-float selectedChannelValue = dot(tex2D(_Tex, uv), _textureChannelMask);
-```
-
-![image-20220822010511978](assets~/image-20220822010511978.png)
 
 ### Other
 
@@ -780,7 +798,7 @@ Example:
 
 ### Appearance
 
-#### Title & SubTitle
+#### Title
 
 ```c#
 /// <summary>
@@ -861,11 +879,11 @@ Tips:
 
 - Tooltip may disappear when the Editor is running. This is a feature of Unity itself (or a bug)
 
-#### ReadOnly
+#### Hidden
 
 ```c#
-/// Set the property to read-only.
-public ReadOnlyDecorator()
+/// Similar to HideInInspector(), the difference is that Hidden() can be unhidden through the Display Mode button.
+public HiddenDecorator()
 ```
 
 #### HelpURL
@@ -894,7 +912,79 @@ Example:
 [Main(GroupName2, _, on, off)] _group2 ("Group2", float) = 0
 ```
 
-### Logic
+#### ReadOnly
+
+```c#
+/// Set the property to read-only.
+public ReadOnlyDecorator()
+```
+
+### Condition
+
+#### ActiveIf
+
+```c#
+/// Control whether a single property or a group can be edited based on multiple conditions.
+/// 
+/// logicalOperator: And | Or (Default: And).
+/// propNameOrKeyword: Target Property Name or Keyword used for comparison. If no matching property is found, it falls back to checking material keywords (enabled = 1, disabled = 0).
+/// compareFunction: Less (L) | Equal (E) | LessEqual (LEqual / LE) | Greater (G) | NotEqual (NEqual / NE) | GreaterEqual (GEqual / GE).
+/// value: Target Property Value used for comparison.
+/// 
+/// When the condition is false, the property is read-only.
+public ActiveIfDecorator(string propNameOrKeyword, string comparisonMethod, float value) : this("And", propNameOrKeyword, comparisonMethod, value) { }
+public ActiveIfDecorator(string logicalOperator, string propNameOrKeyword, string compareFunction, float value)
+```
+
+Example:
+
+```c#
+[Main(GroupName)] _group ("Group", float) = 0
+[Sub(GroupName)][KWEnum(Key 1, _KEY1, key 2, _KEY2)] _enum ("KWEnum", float) = 0
+[Sub(GroupName)][ActiveIf(_enum, Equal, 0)] _float0 ("Editable only when key 1", float) = 0
+[Sub(GroupName)][ActiveIf(_enum, E, 1)] _float1 ("Editable only when key 2", float) = 0
+[Sub(GroupName)][ActiveIf(Or, _enum, E, 0)][ActiveIf(Or, _enum, G, 0)] _float2 ("Editable when key >= 0", float) = 0
+```
+
+#### ShowIf
+
+```c#
+/// Control the show or hide of a single or a group of properties based on multiple conditions.
+///
+/// logicalOperator: And | Or (Default: And).
+/// propNameOrKeyword: Target Property Name or Keyword used for comparison. If no matching property is found, it falls back to checking material keywords (enabled = 1, disabled = 0).
+/// compareFunction: Less (L) | Equal (E) | LessEqual (LEqual / LE) | Greater (G) | NotEqual (NEqual / NE) | GreaterEqual (GEqual / GE).
+/// value: Target Property Value used for comparison.
+public ShowIfDecorator(string propNameOrKeyword, string comparisonMethod, float value) : this("And", propNameOrKeyword, comparisonMethod, value) { }
+public ShowIfDecorator(string logicalOperator, string propNameOrKeyword, string compareFunction, float value)
+```
+
+Example:
+
+```c#
+[ShowIf(_enum, Equal, 1)]
+[Title(ShowIf Main Samples)]
+[Main(GroupName)] _group ("Group", float) = 0
+[Sub(GroupName)] _float ("Float", float) = 0
+[Sub(GroupName)] _Tex ("Tex", 2D) = "white" { }
+
+...
+
+[SubTitle(Group1, Conditional Display Samples       Enum)]
+[KWEnum(Group1, Name 1, _KEY1, Name 2, _KEY2, Name 3, _KEY3)] _enum ("KWEnum", float) = 0
+[Sub(Group1)][ShowIf(_enum, Equal, 0)] _key1_Float1 ("Key1 Float", float) = 0
+[Sub(Group1)][ShowIf(_enum, Equal, 1)] _key2_Float2 ("Key2 Float", float) = 0
+[SubIntRange(Group1)][ShowIf(_enum, Equal, 2)] _key3_Int_Range ("Key3 Int Range", Range(0, 10)) = 0
+[ShowIf(_enum, Equal, 0)][ShowIf(Or, _enum, Equal, 2)]
+[SubPowerSlider(Group1, 3)] _key13_PowerSlider ("Key1 or Key3 Power Slider", Range(0, 1)) = 0
+
+```
+
+![image-20231023010137495](./assets~/image-20231023010137495.png)
+
+![image-20231023010153213](./assets~/image-20231023010153213.png)
+
+![image-20231023010204399](./assets~/image-20231023010204399.png)
 
 #### PassSwitch
 
@@ -951,80 +1041,6 @@ Example:
 Tips:
 
 - LWGUI uses a tree data structure to store the relationship between Group, Advanced Block and their children. In theory, it can store unlimited multi-level parent-child relationships, but **currently LWGUI only manually handles 3-level parent-child relationships, which means you can put an Advanced Block in a Group, but a Group cannot be placed in an Advanced Block.**
-
-### Condition Display
-
-#### Hidden
-
-```c#
-/// Similar to HideInInspector(), the difference is that Hidden() can be unhidden through the Display Mode button.
-public HiddenDecorator()
-```
-
-#### ShowIf
-
-```c#
-/// Control the show or hide of a single or a group of properties based on multiple conditions.
-///
-/// logicalOperator: And | Or (Default: And).
-/// propNameOrKeyword: Target Property Name or Keyword used for comparison. If no matching property is found, it falls back to checking material keywords (enabled = 1, disabled = 0).
-/// compareFunction: Less (L) | Equal (E) | LessEqual (LEqual / LE) | Greater (G) | NotEqual (NEqual / NE) | GreaterEqual (GEqual / GE).
-/// value: Target Property Value used for comparison.
-public ShowIfDecorator(string propNameOrKeyword, string comparisonMethod, float value) : this("And", propNameOrKeyword, comparisonMethod, value) { }
-public ShowIfDecorator(string logicalOperator, string propNameOrKeyword, string compareFunction, float value)
-```
-
-Example:
-
-```c#
-[ShowIf(_enum, Equal, 1)]
-[Title(ShowIf Main Samples)]
-[Main(GroupName)] _group ("Group", float) = 0
-[Sub(GroupName)] _float ("Float", float) = 0
-[Sub(GroupName)] _Tex ("Tex", 2D) = "white" { }
-
-...
-
-[SubTitle(Group1, Conditional Display Samples       Enum)]
-[KWEnum(Group1, Name 1, _KEY1, Name 2, _KEY2, Name 3, _KEY3)] _enum ("KWEnum", float) = 0
-[Sub(Group1)][ShowIf(_enum, Equal, 0)] _key1_Float1 ("Key1 Float", float) = 0
-[Sub(Group1)][ShowIf(_enum, Equal, 1)] _key2_Float2 ("Key2 Float", float) = 0
-[SubIntRange(Group1)][ShowIf(_enum, Equal, 2)] _key3_Int_Range ("Key3 Int Range", Range(0, 10)) = 0
-[ShowIf(_enum, Equal, 0)][ShowIf(Or, _enum, Equal, 2)]
-[SubPowerSlider(Group1, 3)] _key13_PowerSlider ("Key1 or Key3 Power Slider", Range(0, 1)) = 0
-
-```
-
-![image-20231023010137495](./assets~/image-20231023010137495.png)
-
-![image-20231023010153213](./assets~/image-20231023010153213.png)
-
-![image-20231023010204399](./assets~/image-20231023010204399.png)
-
-#### ActiveIf
-
-```c#
-/// Control whether a single property or a group can be edited based on multiple conditions.
-/// 
-/// logicalOperator: And | Or (Default: And).
-/// propNameOrKeyword: Target Property Name or Keyword used for comparison. If no matching property is found, it falls back to checking material keywords (enabled = 1, disabled = 0).
-/// compareFunction: Less (L) | Equal (E) | LessEqual (LEqual / LE) | Greater (G) | NotEqual (NEqual / NE) | GreaterEqual (GEqual / GE).
-/// value: Target Property Value used for comparison.
-/// 
-/// When the condition is false, the property is read-only.
-public ActiveIfDecorator(string propNameOrKeyword, string comparisonMethod, float value) : this("And", propNameOrKeyword, comparisonMethod, value) { }
-public ActiveIfDecorator(string logicalOperator, string propNameOrKeyword, string compareFunction, float value)
-```
-
-Example:
-
-```c#
-[Main(GroupName)] _group ("Group", float) = 0
-[Sub(GroupName)][KWEnum(Key 1, _KEY1, key 2, _KEY2)] _enum ("KWEnum", float) = 0
-[Sub(GroupName)][ActiveIf(_enum, Equal, 0)] _float0 ("Editable only when key 1", float) = 0
-[Sub(GroupName)][ActiveIf(_enum, E, 1)] _float1 ("Editable only when key 2", float) = 0
-[Sub(GroupName)][ActiveIf(Or, _enum, E, 0)][ActiveIf(Or, _enum, G, 0)] _float2 ("Editable when key >= 0", float) = 0
-```
 
 ## LWGUI Timeline Tracks
 
@@ -1140,172 +1156,36 @@ You can build new Drawer or Decorator behaviors by inheriting `SubDrawer` (Decor
 
 ## Development Guide
 
-### Project Positioning and Core Goal
+### Data Structure (Shader &gt; Material &gt; Inspector)
 
-LWGUI aims to upgrade Shader properties in Unity Inspector from a "linear parameter list" to an editing experience that is "grouped, conditionally displayed, and highly extensible."
+The core purpose of `Editor/MetaData/` is to "avoid state interference and reduce redundant calculations" by isolating caches through different scopes.
 
-It uses `ShaderGUI` as the entry point, dispatches properties to corresponding Drawers/Decorators through property tags and custom rules, and relies on Helpers plus MetaData to manage state, caching, and resource linkage.
+```
+LWGUIMetaDatas
+├─ PerShaderData (Shader scope, static and immutable)
+│  ├─ propStaticDatas: Dictionary&lt;property name, PropertyStaticData&gt;
+│  │  ├─ Static property information (group name, Drawer, display mode, parent-child relationship)
+│  │  └─ Only rebuilt when Shader is recompiled
+│  ├─ displayModeData: Display mode settings (advanced properties, hidden properties, modified properties only)
+│  ├─ searchMode/searchString: Search state
+│  └─ defaultMaterial: Default material (for comparing modifications)
+│
+├─ PerMaterialData (Material scope, material-related)
+│  ├─ propDynamicDatas: Dictionary&lt;property name, PropertyDynamicData&gt;
+│  │  ├─ Current property values, default values, modification flags, ShowIf/ActiveIf results
+│  │  └─ forceInit flag controls whether to rebuild
+│  ├─ activePresetDatas: List of active Presets
+│  ├─ modifiedCount: Number of modified properties
+│  ├─ cachedModifiedProperties: Cache when showing only modified properties
+│  └─ shaderPerfDatas: Performance statistics data
+│
+└─ PerInspectorData (Inspector scope, window-specific)
+   └─ materialEditor: Current MaterialEditor reference
+```
 
-### Architecture and Layering Principles
-
-The system can be understood in three layers:
-
-1. **Editor layer (core capabilities)**
-   - Handles inspector rendering, property parsing, UI interaction, menu behavior, state caching, and asset synchronization.
-   - Main directory: `Editor/`
-2. **Runtime layer (runtime supplement)**
-   - Provides a small set of runtime-reusable data structures and Timeline-related capabilities.
-   - Main directory: `Runtime/`
-3. **UnityEditorExtension layer (editor enhancements)**
-   - Hosts additional editor windows and extension tools, such as `LwguiGradientEditor`.
-   - Main directory: `UnityEditorExtension/`
-
-The core call chain can be summarized as:
-
-1. `Editor/LWGUI.cs` takes over the material inspector entry.
-2. Parse shader properties, `MaterialProperty`, and tag metadata.
-3. Dispatch properties to `ShaderDrawers` / `BasicDrawers` / `ExtraDrawers` / `ExtraDecorators`.
-4. During rendering, use `Helper` modules for cross-cutting behaviors such as context menu, Ramp/Preset/Toolbar.
-5. Use `MetaData` to maintain state scopes across frames, materials, and shaders.
-6. Use `AssetProcessor` and `ScriptableObject` for lifecycle tasks such as import handling, reference sync, and atlas maintenance.
-
-### Code Structure and Responsibilities
-
-- `Editor/LWGUI.cs`
-  - Main ShaderGUI entry that orchestrates one inspector draw flow and stage events.
-- `Editor/ShaderDrawerBase.cs`
-  - Base drawer and common capabilities; defines extension points and core contracts.
-- `Editor/BasicDrawers/`
-  - Basic structural drawers such as foldout groups and sub-item containers.
-- `Editor/ShaderDrawers/`
-  - Shader-property-level drawers; core mapping from properties to UI.
-- `Editor/ShaderDrawers/ExtraDrawers/`
-  - Extra type drawers such as Numeric/Texture/Vector/Other.
-- `Editor/ExtraDecorators/`
-  - Decorator capabilities including appearance, conditional display, logic, and structure.
-- `Editor/Helper/`
-  - Cross-module utilities such as `ContextMenuHelper`, `RampHelper`, `PresetHelper`, and `ToolbarHelper`.
-- `Editor/MetaData/`
-  - Cache and state-scope management across inspector/material/shader dimensions.
-- `Editor/ScriptableObject/`
-  - Resource data definitions such as `LwguiRampAtlas`, `LwguiShaderPropertyPreset`, and `GradientObject`.
-- `Editor/AssetProcessor/`
-  - Handles import, rename, and asset-change listening to keep editor logic and resource states consistent.
-- `Editor/Timeline/` and `Runtime/Timeline/`
-  - Timeline-related editor and runtime features.
-- `Runtime/LwguiGradient/`
-  - Runtime-usable gradient data structures and logic.
-- `Test/`
-  - Regression and sample assets (Shader/Material/Preset) for key-path verification.
-
-### MetaData Deep Dive: Data Structures and Lifecycle
-
-The core purpose of `Editor/MetaData/` is to avoid state contamination and reduce repeated computation by isolating caches across scopes.
-
-#### 1) PerInspectorData (inspector scope)
-
-- Scope: within a single inspector window/session.
-- Typical usage:
-  - Foldout/expand UI states.
-  - Temporary interaction states (current editing target, current menu context, etc.).
-  - Short-lived caches reusable within a draw cycle.
-- Lifecycle:
-  - Initialized when the inspector is first drawn.
-  - Read and updated during each `OnGUI` pass.
-  - Released/rebuilt when the inspector is destroyed, reloaded, or context changes.
-- Why it matters:
-  - Prevents state contamination between inspector instances.
-
-#### 2) PerMaterialData (material scope)
-
-- Scope: per material asset (or instance).
-- Typical usage:
-  - Cache results tightly coupled with a specific material.
-  - Derived data computed from material properties.
-  - Material-level UI auxiliary states.
-- Lifecycle:
-  - Created when the material is first accessed by inspector/tools.
-  - Key fields refreshed when material properties change, reimport happens, or shader is replaced.
-  - Recycled when material becomes invalid, references are removed, or cleanup policies are triggered.
-- Why it matters:
-  - Ensures different materials using the same shader do not share incorrect state.
-
-#### 3) PerShaderData (shader scope)
-
-- Scope: per shader, shared by multiple materials.
-- Typical usage:
-  - Parsed shader-property metadata cache (property list, tag parse results, grouping structure, etc.).
-  - Static or semi-static data tied to shader text/structure and reusable across materials.
-- Lifecycle:
-  - Built when a shader is used for the first time.
-  - Invalidated/rebuilt when shader source changes, reimport happens, or related dependencies update.
-  - Lazily rebuilt after editor domain reload.
-- Why it matters:
-  - Reduces repeated parsing cost and improves inspector performance for large material sets.
-
-#### Overall MetaData Lifecycle Flow (recommended mental model)
-
-1. **Enter Inspector**
-   - Locate current material and shader, then fetch/create `PerInspectorData`, `PerMaterialData`, and `PerShaderData`.
-2. **Render stage**
-   - Drawers/Decorators read scoped data to execute conditional display, structural layout, and interaction logic.
-3. **Interaction and mutation stage**
-   - After user edits, write values back to material and update required caches; trigger helper/resource logic when needed.
-4. **Asset change stage**
-   - If shader/material/related resources are imported or structurally changed, listeners invalidate and rebuild related caches.
-5. **Exit or reload stage**
-   - Inspector-level temporary state is released; material/shader caches are retained or cleaned according to policy.
-
-Key benefits of this layered design:
-
-- Clear state isolation, reducing risks of cross-material contamination and cross-inspector state leaks.
-- Reasonable cache granularity that balances correctness and performance.
-- Easier troubleshooting by following `Inspector -> Material -> Shader`.
-
-### ShaderGUI Key Events and Invocation Timing
-
-The following timing model aligns with common Unity Inspector lifecycle behavior:
-
-1. **Entry stage (`LWGUI` invoked as `ShaderGUI`)**
-
-   - Triggered when a material is selected in Inspector and needs redraw.
-   - Typical actions: establish context, prepare property list, fetch MetaData.
-2. **Main `OnGUI` rendering stage**
-
-   - Entered on each Inspector Repaint / Layout / interaction event.
-   - Typical actions:
-     - Parse and iterate `MaterialProperty`.
-     - Invoke Drawers/Decorators for structure and control rendering.
-     - Apply conditional decorators for show/hide and disabled states.
-3. **Property change detection and write-back stage**
-
-   - Triggered after GUI change checks pass.
-   - Typical actions:
-     - Write new values back to material properties.
-     - Refresh keywords, dependent properties, and linkage logic.
-     - Update related `PerMaterialData` cache.
-4. **Context behavior stage (menu/toolbar/quick actions)**
-
-   - Triggered when users open context menus or invoke toolbar features.
-   - Typical actions:
-     - Route through `ContextMenuHelper`, `ToolbarHelper`, `RampHelper`, and `PresetHelper`.
-     - May cause resource-reference updates, preset application, or atlas operations.
-5. **Resource lifecycle linkage stage (import/rename/rebuild)**
-
-   - Triggered when related assets change (shader, texture, preset, ScriptableObject, etc.).
-   - Typical actions:
-     - `AssetProcessor` responds to changes and synchronizes references.
-     - Mark and rebuild affected `PerShaderData` / `PerMaterialData`.
-6. **Domain reload and reinitialization stage**
-
-   - Occurs after script recompilation or enter/exit PlayMode (depending on settings).
-   - Typical actions:
-     - Static caches are invalidated or reset.
-     - Next inspector render performs lazy initialization on demand.
-
-### Troubleshooting Tips (by event order)
-
-- **Incorrect display/grouping**: first inspect dispatch flow in `LWGUI.cs` and corresponding Drawer/Decorator paths.
-- **Menu/tool behavior issues**: focus on trigger conditions and side effects in `Editor/Helper/`.
-- **State contamination or stale cache**: verify MetaData scope selection first, then check cache invalidation timing.
-- **Failure after asset changes**: inspect synchronization flow between `AssetProcessor` and `ScriptableObject`.
+### Lifecycle
+- **PerShaderData**: Created when Shader is first accessed, released when Shader is reimported (`ReleaseShaderMetadataCache`)
+- **PerMaterialData**: Created when material is first accessed, released when material is modified/closed/shader is changed (`ReleaseMaterialMetadataCache`)
+- **PerInspectorData**: Created independently for each LWGUI instance (Inspector window)
+- **Forced Update**: Trigger complete PerMaterialData rebuild after modifying material via code
+  - Call `PresetHelper.ApplyPresetsInMaterial` after modifying Preset values

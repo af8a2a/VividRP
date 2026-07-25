@@ -1,4 +1,4 @@
-﻿// Copyright (c) Jason Ma
+// Copyright (c) Jason Ma
 
 using System;
 using System.Collections.Generic;
@@ -60,6 +60,9 @@ namespace LWGUI
 			{
 				SetShaderKeywordEnabled(materials, keywordNames[i], index == i);
 			}
+			
+			// Force set the currently selected Keyword
+			SetShaderKeywordEnabled(materials, keywordNames[index], true);
 		}
 
 		public static void SetShaderPassEnabled(Object[] materials, string[] lightModeNames, bool enabled)
@@ -118,7 +121,7 @@ namespace LWGUI
 
 		public static float GetCurrentPropertyLayoutWidth()
 		{
-			return ReflectionHelper.EditorGUILayout_kLabelFloatMinW - ReflectionHelper.EditorGUI_Indent - RevertableHelper.revertButtonWidth - 2;
+			return ReflectionHelper.EditorGUIUtility_contextWidth - ReflectionHelper.EditorGUI_indent - RevertableHelper.revertButtonWidth - 2;
 		}
 
 		#endregion
@@ -149,14 +152,6 @@ namespace LWGUI
 			}
 			return k;
 		}
-
-		public static void AdaptiveFieldWidth(GUIStyle style, GUIContent content)
-		{
-			var extraTextWidth = Mathf.Max(0, style.CalcSize(content).x - (EditorGUIUtility.fieldWidth - RevertableHelper.revertButtonWidth));
-			EditorGUIUtility.labelWidth -= extraTextWidth;
-			EditorGUIUtility.fieldWidth += extraTextWidth;
-		}
-
 
 		#endregion
 
@@ -248,6 +243,25 @@ namespace LWGUI
 
 		#region Draw GUI for Materials
 
+		public const float DefaultLabelWidthPercentage = 0.5f;
+
+		public static string GetLabelWidthPreferenceKey(string shaderUID) => $"LWGUI/{shaderUID}/LabelWidthPercentage";
+		
+		public static float GetLabelWidthPercentage(string shaderUID) => EditorPrefs.GetFloat(GetLabelWidthPreferenceKey(shaderUID), DefaultLabelWidthPercentage);
+
+		public static void SetLabelWidthPercentage(string shaderUID, float percentage) => EditorPrefs.SetFloat(GetLabelWidthPreferenceKey(shaderUID), percentage);
+		
+		/// <summary>
+		/// Set the GUI Widths that users can adjust.  
+		/// labelWidth actually determines the label and field width of most GUIs.  
+		/// fieldWidth only affects the calculation of labelWidth and a few GUIs (e.g., Texture preview width).
+		/// </summary>
+		public static void SetAdjustableGUIWidths(float labelWidthPercentage)
+		{
+			EditorGUIUtility.fieldWidth = 64f;
+			EditorGUIUtility.labelWidth = Mathf.Max(ReflectionHelper.EditorGUIUtility_contextWidth * labelWidthPercentage - EditorGUIUtility.fieldWidth, 120f);
+		}
+
 		public static void DrawSplitLine()
 		{
 			var rect = EditorGUILayout.GetControlRect(true, 1);
@@ -263,13 +277,15 @@ namespace LWGUI
 			var helpboxStr = propertyStaticData.helpboxMessages;
 			if (!string.IsNullOrEmpty(helpboxStr))
 			{
+				// Automatically calculate the Rect required for text
 				var content = new GUIContent(helpboxStr, _helpboxIcon);
-				var textWidth = GetCurrentPropertyLayoutWidth();
-				var textHeight = GUIStyles.helpbox.CalcHeight(content, textWidth);
-				var helpboxRect = EditorGUI.IndentedRect(EditorGUILayout.GetControlRect(true, textHeight));
-				helpboxRect.xMax -= RevertableHelper.revertButtonWidth;
+				EditorGUILayout.BeginHorizontal();
+				GUILayout.Space(ReflectionHelper.EditorGUI_indent);
+				var helpboxRect = GUILayoutUtility.GetRect(content, GUIStyles.helpbox);
+				GUILayout.Space(RevertableHelper.revertButtonWidth);
+				EditorGUILayout.EndHorizontal();
+				
 				GUI.Label(helpboxRect, content, GUIStyles.helpbox);
-				// EditorGUI.HelpBox(helpboxRect, helpboxStr, MessageType.Info);
 			}
 		}
 

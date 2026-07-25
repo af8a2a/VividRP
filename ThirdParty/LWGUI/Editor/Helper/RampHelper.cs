@@ -12,6 +12,8 @@ namespace LWGUI
 	{
 		#region RampEditor
 
+		private const string _iconCloneGUID = "9cdef444d18d2ce4abb6bbc4fed4d109";
+
 		private static readonly GUIContent _iconAdd     = new (EditorGUIUtility.IconContent("d_Toolbar Plus").image, "Add"),
 										   _iconClone   = new (EditorGUIUtility.IconContent("AnimatorController Icon").image, "Clone"),
 										   _iconEdit    = new (EditorGUIUtility.IconContent("editicon.sml").image, "Edit"),

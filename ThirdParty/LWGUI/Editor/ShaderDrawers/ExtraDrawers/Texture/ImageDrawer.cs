@@ -14,6 +14,7 @@ namespace LWGUI
 	/// group: parent group name (Default: none)
 	/// Target Property Type: Any
 	/// </summary>
+	[LwguiDrawerCategory("Texture")]
 	public class ImageDrawer : SubDrawer
 	{
 		public ImageDrawer() { }
@@ -32,8 +33,8 @@ namespace LWGUI
 
 			try
 			{
-				// If the display path already starts with Assets (project-relative), resolve from project root
-				if (inputPath.StartsWith("Assets"))
+				// If the display path already starts with Assets or Packages (project-relative), resolve from project root
+				if (inputPath.StartsWith("Assets") || inputPath.StartsWith("Packages"))
 				{
 					imageAbsPath = IOHelper.GetAbsPath(inputPath);
 				}

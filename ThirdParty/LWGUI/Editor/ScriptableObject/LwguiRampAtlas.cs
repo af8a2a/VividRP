@@ -131,7 +131,6 @@ namespace LWGUI
 		private string _rampAtlasSOPath      = string.Empty;
 		private string _rampAtlasTexturePath = string.Empty;
 		
-		[SerializeField] private bool _saveTextureToggle;
 		[SerializeField] private List<Ramp> _ramps = new List<Ramp>();
 		
 		[NonSerialized] public Texture2D rampAtlasTexture = null;
@@ -346,20 +345,18 @@ namespace LWGUI
 			LoadTexture();
 		}
 
-		private void OnValidate()
+		/// <summary>
+		/// Explicitly save texture with P4 checkout. Only call from user-initiated actions (e.g. Save button).
+		/// </summary>
+		public void SaveTextureWithCheckout()
 		{
-			// It is only called when the user manually saves it, avoiding some strange bugs
-			if (!_saveTextureToggle)
-				return;
-
 			InitData();
 
 			if (!LoadTexture())
 				return;
 
 			UpdateTexturePixels();
-			SaveTexture(checkoutAndForceWrite:_saveTextureToggle);
-			_saveTextureToggle = false;
+			SaveTexture(checkoutAndForceWrite: true);
 		}
 
 		#region Static

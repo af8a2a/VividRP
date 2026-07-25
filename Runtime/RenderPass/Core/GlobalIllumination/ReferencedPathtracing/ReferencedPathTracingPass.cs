@@ -19,8 +19,6 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string RayGenerationShaderName = "RayGenReferencedPathtracing";
 
         private const string AccelerationStructureName = "_AccelerationStructure";
-        private const int MaxBounceCount = 4;
-        private const int RussianRouletteStartBounce = 3;
 
         private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
         private static readonly int DiffuseRadianceHitDistanceId =
@@ -49,6 +47,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int RussianRouletteStartBounceId =
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
         private static readonly int FrameIndexId = Shader.PropertyToID("_ReferencedFrameIndex");
+        private static readonly int SeedId = Shader.PropertyToID("_ReferencedSeed");
         private static readonly int ReblurHitDistanceParametersId =
             Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
         private static readonly int ReblurCheckerboardModeId =
@@ -187,9 +186,11 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingReblurCheckerboardMode.Off;
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
+        private ReferencedPathTracingIntegratorState m_IntegratorState;
         private readonly RenderGraphBuffer m_DefaultEnvironmentImportanceDistribution;
         private bool m_DefaultEnvironmentImportanceDistributionInitialized;
         private int m_FrameIndex;
+        private int m_Seed;
 
         public ReferencedPathTracingPass()
         {
@@ -276,26 +277,38 @@ namespace VividRP.Runtime.RenderPass.Core
 
             ConfigureOutputs(m_Width, m_Height);
             PrepareEnvironmentImportanceDistributionFallback();
-            PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
+            var lightData = frameData.GetOrCreate<VividLightData>();
+            PrepareMainDirectionalLight(lightData);
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
+            m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
             var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
             m_ReblurHitDistanceParameters = reblurSettings.hitDistanceParameters;
             m_ReblurCheckerboardMode = reblurSettings.enabled
                 ? reblurSettings.checkerboardMode
                 : ReferencedPathTracingReblurCheckerboardMode.Off;
-            m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
-                ? cameraData.frameIndex
-                : Time.frameCount;
+            if (m_IntegratorState.deterministicSampling)
+            {
+                // Canonical samples must not inherit a denoiser checkerboard pattern.
+                m_ReblurCheckerboardMode =
+                    ReferencedPathTracingReblurCheckerboardMode.Off;
+            }
+            var pathTracingData =
+                frameData.GetOrCreate<VividReferencedPathTracingData>();
 
             var camera = cameraData?.camera;
             m_ShouldSkipExecution = camera == null || camera.orthographic;
             if (m_ShouldSkipExecution)
             {
+                pathTracingData.Reset();
                 m_CameraPositionWS = Vector4.zero;
                 m_PixelCoordToViewDirWS = Matrix4x4.identity;
                 m_WorldToView = Matrix4x4.identity;
                 m_RayMinDistance = 0.01f;
                 m_RayMaxDistance = 1000.0f;
+                m_FrameIndex = 0;
+                m_Seed = m_IntegratorState.deterministicSampling
+                    ? m_IntegratorState.fixedSeed
+                    : 0;
                 return;
             }
 
@@ -305,6 +318,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_WorldToView = cameraData.GetViewMatrix();
             m_RayMinDistance = Mathf.Max(camera.nearClipPlane, 0.0001f);
             m_RayMaxDistance = Mathf.Max(camera.farClipPlane, m_RayMinDistance + 0.0001f);
+            PrepareSampleSequence(
+                frameData,
+                cameraData,
+                pathTracingData);
         }
 
         public override void Record(UnsafePassContext context)
@@ -363,12 +380,16 @@ namespace VividRP.Runtime.RenderPass.Core
                     MainLightDirectionWSId,
                     m_MainLightDirectionWS);
                 cmd.SetRayTracingVectorParam(m_RayTracingShader, MainLightColorId, m_MainLightColor);
-                cmd.SetRayTracingIntParam(m_RayTracingShader, MaxBounceCountId, MaxBounceCount);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    MaxBounceCountId,
+                    m_IntegratorState.maxBounceCount);
                 cmd.SetRayTracingIntParam(
                     m_RayTracingShader,
                     RussianRouletteStartBounceId,
-                    RussianRouletteStartBounce);
+                    m_IntegratorState.russianRouletteStartBounce);
                 cmd.SetRayTracingIntParam(m_RayTracingShader, FrameIndexId, m_FrameIndex);
+                cmd.SetRayTracingIntParam(m_RayTracingShader, SeedId, m_Seed);
                 cmd.SetRayTracingVectorParam(
                     m_RayTracingShader,
                     ReblurHitDistanceParametersId,
@@ -378,7 +399,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     ReblurCheckerboardModeId,
                     (int)m_ReblurCheckerboardMode);
                 BindEnvironment(cmd);
-                var hasValidReGIRResources = HasValidReGIRResources();
+                var hasValidReGIRResources =
+                    m_IntegratorState.enableReGIR
+                    && HasValidReGIRResources();
                 cmd.SetGlobalInt(ReGIREnabledId, hasValidReGIRResources ? 1 : 0);
                 cmd.SetRayTracingIntParam(
                     m_RayTracingShader,
@@ -415,9 +438,12 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
             m_EnvironmentState = default;
             m_CameraBackgroundState = default;
+            m_IntegratorState = default;
             m_DefaultEnvironmentImportanceDistribution?.ClearImportedBuffer();
             m_DefaultEnvironmentImportanceDistributionInitialized = false;
             m_FrameIndex = 0;
+            m_Seed = 0;
+            ReferencedPathTracingSampleSequence.Dispose();
         }
 
         private void ConfigureOutputs(int width, int height)
@@ -571,6 +597,48 @@ namespace VividRP.Runtime.RenderPass.Core
             SkyManager.ImportSkySourceCubemap(
                 m_EnvironmentBackgroundTexture,
                 m_EnvironmentState.hasHdri ? skyData : null);
+        }
+
+        private void PrepareSampleSequence(
+            ContextContainer frameData,
+            VividCameraData cameraData,
+            VividReferencedPathTracingData pathTracingData)
+        {
+            var renderFrameIndex = cameraData.frameIndex >= 0
+                ? cameraData.frameIndex
+                : Time.frameCount;
+            var frameSignature =
+                ReferencedPathTracingFrameSignatureUtility.Compute(
+                    frameData,
+                    cameraData,
+                    m_Width,
+                    m_Height,
+                    m_IntegratorState,
+                    m_EnvironmentState,
+                    m_CameraBackgroundState);
+            var temporalData = frameData.Contains<VividTemporalData>()
+                ? frameData.Get<VividTemporalData>()
+                : null;
+            var sampleIndex = m_IntegratorState.deterministicSampling
+                ? ReferencedPathTracingSampleSequence.Resolve(
+                    cameraData.camera,
+                    renderFrameIndex,
+                    frameSignature,
+                    temporalData == null || temporalData.isFirstFrame)
+                : (uint)Mathf.Max(renderFrameIndex, 0);
+
+            m_FrameIndex = unchecked((int)sampleIndex);
+            m_Seed = m_IntegratorState.deterministicSampling
+                ? m_IntegratorState.fixedSeed
+                : 0;
+            pathTracingData.isValid = true;
+            pathTracingData.deterministicSampling =
+                m_IntegratorState.deterministicSampling;
+            pathTracingData.sampleIndex = sampleIndex;
+            pathTracingData.frameSignature = frameSignature;
+            pathTracingData.integratorSignature =
+                m_IntegratorState.signature;
+            pathTracingData.accumulatedSampleCount = 0;
         }
 
         private void BindEnvironment(CommandBuffer cmd)

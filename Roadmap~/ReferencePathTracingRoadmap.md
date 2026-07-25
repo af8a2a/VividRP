@@ -506,6 +506,7 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 
 #### E6: HDRI Validation and V1 Freeze Gate
 
+
 **Goal**
 
 冻结阶段一接口、验证场景和 canonical reference，作为启动 Reference Atmosphere 的前置条件。
@@ -527,6 +528,60 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - Canonical raw result 不依赖 denoiser、pre-exposure、ReGIR reservoir 随机状态或 raster GI。
 - HDRI environment 的接口、PDF version 和 AOV decomposition 被标记为 V1 frozen。
 - 完成 E6 后，Milestone 3 的 environment lighting 条目才视为完成，并允许启动 Phase 2。
+
+**Implementation Checkpoint (2026-07-25)**
+
+- `ReferencedPathTracingSettingsVolume` 已增加 canonical integrator contract：
+  deterministic sampling、fixed seed、max bounce、Russian roulette start bounce、
+  ReGIR gate 与 target SPP。普通交互模式默认行为保持不变；canonical 模式使用
+  accumulation-relative sample index，并在 camera/scene/light/environment/integrator
+  signature 变化时从 sample 0 重新开始。
+- `ReferencedPathTracingPass` 已将 fixed seed 显式混入 shader RNG。Canonical 模式强制
+  关闭 REBLUR checkerboard；`enableReGIR=false` 同时关闭 raygen 的 reservoir 输入消费，
+  并将 ReGIR 状态排除出 raw accumulation signature，确保 HDRI reference 不依赖外部
+  reservoir 随机序列。
+- 已建立 `ReferencedPathTracingV1Corpus` version 1，冻结 7 个 case ID：
+  constant furnace、rotation/tint/intensity、bright emitter、OpenPBR sphere grid、
+  interior occlusion、alpha foliage shadow、camera-hidden lighting。V1 capture profile 固定为
+  512×512、2048 SPP、seed `0x13579B`、4 bounce、RR depth 3、Importance Sampling + MIS。
+- `ReferencedPathTracingV1FreezeGate` 将 contract-ready 与 frozen 分离：
+  - contract-ready 要求 raw/unexposed、StandardLit-only、0 unsupported material、
+    无主光/局部光、无 ReGIR/denoiser/raster GI，并校验 HDRI content/PDF/version、
+    camera visibility、分辨率、SPP、seed 和 integrator signature；
+  - frozen 还要求 GPU evidence 为 Passed、EXR SHA-256 有效、finite pixel ratio 为 1、
+    negative radiance ratio 为 0、relative mean error 不超过 2%；
+  - `ValidateCorpus` 只有在 7 个 case 均存在唯一且通过的 capture 时才返回 true。
+- 新增 terminal `ReferencedPathTracingCapturePass`。其
+  `PathTracingAccumulationRaw` 输入必须连接 accumulation pass 的 FP32 current-history
+  输出；它仅在 exact target SPP 发起 async GPU readback，使用 float ZIP EXR，并同步
+  写出 JSON metadata 与 EXR SHA-256。Capture API 不覆盖已有文件：
+
+  ```csharp
+  ReferencedPathTracingCapture.Request(
+      camera,
+      "hdri-constant-furnace",
+      exrPath,
+      out var failure);
+  ```
+
+- Capture 生成的 evidence 初始状态刻意为 `NotRun`。GPU comparator 填入
+  finite/negative/relative-mean metrics 并标记 `Passed` 前，freeze gate 保持关闭；
+  这避免仅凭一次成功 readback 就错误宣布 V1 frozen。
+- Runtime 与 Editor Tests 项目已通过定向编译；新增测试覆盖 integrator signature、
+  sample sequence reset、raw capture pass 资源契约、7-case corpus completeness 以及
+  ReGIR/pre-exposure/camera-visibility 的拒绝路径。当前 Unity Editor 会话运行中，因此
+  未启动 batch EditMode/GPU graphics tests。
+
+**Remaining Freeze Evidence**
+
+- 在 package 外的 validation project 中创建并固定 7 个 scene/camera/HDRI asset。
+- 将 `ReferencedPathTracingAccumulationCurrent` 显式接入
+  `ReferencedPathTracingCapturePass.PathTracingAccumulationRaw`，逐 case 生成 EXR/JSON。
+- 对 constant furnace、三 estimator 均值、bright-emitter MIS、OpenPBR grid 和
+  visibility corpus 运行 DX12 GPU comparator，写回 metrics/status。
+- 只有 `ReferencedPathTracingV1FreezeGate.ValidateCorpus(...)` 返回 true 后，才更新本节为
+  V1 frozen 并启动 Reference Atmosphere；当前状态是 **freeze infrastructure complete,
+  GPU evidence pending**。
 
 ### Phase 2: Unreal-style Reference Atmosphere (Long-term)
 

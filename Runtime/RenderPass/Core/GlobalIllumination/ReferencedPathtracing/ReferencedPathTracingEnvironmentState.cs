@@ -347,7 +347,7 @@ namespace VividRP.Runtime.RenderPass.Core
     /// Display exposure is deliberately absent because raw path radiance is scene-linear.
     /// </summary>
     [Serializable]
-    internal sealed class ReferencedPathTracingEnvironmentMetadata
+    public sealed class ReferencedPathTracingEnvironmentMetadata
     {
         internal const int ContractVersion = 1;
 
@@ -358,6 +358,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public int contentHash;
         public int backgroundResolution;
         public int lightingResolution;
+        public bool lightingEnabled;
+        public bool cameraVisible;
         public float rotation;
         public float physicalIntensityMultiplier;
         public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
@@ -383,6 +385,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 contentHash = state.contentHash,
                 backgroundResolution = state.backgroundResolution,
                 lightingResolution = state.lightingResolution,
+                lightingEnabled = state.lightingEnabled,
+                cameraVisible = state.cameraVisible,
                 rotation = state.rotation,
                 physicalIntensityMultiplier = state.intensityMultiplier,
                 samplingMode = state.samplingMode,

@@ -1,4 +1,4 @@
-﻿#pragma max_recursion_depth 1
+#pragma max_recursion_depth 1
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
 
@@ -21,6 +21,7 @@ float _RayMaxDistance;
 int _ReferencedMaxBounceCount;
 int _ReferencedRussianRouletteStartBounce;
 int _ReferencedFrameIndex;
+int _ReferencedSeed;
 float4 _ReferencedReblurHitDistanceParameters;
 int _ReferencedReblurCheckerboardMode;
 
@@ -158,7 +159,10 @@ void RayGenReferencedPathtracing()
     uint2 pixelCoord = uint2(launchIndex.x, launchDimensions.y - launchIndex.y - 1u);
 
     uint pixelIndex = pixelCoord.x + pixelCoord.y * launchDimensions.x;
-    uint frameHash = HashReferencedPathtracingRng((uint)_ReferencedFrameIndex ^ 0xa511e9b3u);
+    uint frameHash = HashReferencedPathtracingRng(
+        (uint)_ReferencedFrameIndex
+        ^ HashReferencedPathtracingRng((uint)_ReferencedSeed)
+        ^ 0xa511e9b3u);
     uint rngState = HashReferencedPathtracingRng(pixelIndex ^ frameHash);
 
     RayDesc ray;

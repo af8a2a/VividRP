@@ -46,6 +46,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public ulong LocalLightSignature;
             public ulong EnvironmentSignature;
             public ulong CameraBackgroundSignature;
+            public ulong IntegratorSignature;
+            public ulong FrameSignature;
             public ulong SampleCount;
 
             public override void Dispose()
@@ -203,6 +205,10 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             var state = m_AccumulationStates.GetOrCreateBase(camera);
+            var pathTracingData =
+                frameData.GetOrCreate<VividReferencedPathTracingData>();
+            var integratorState =
+                ReferencedPathTracingIntegratorState.Resolve();
             var viewMatrix = cameraData.GetViewMatrix();
             var projectionMatrix = cameraData.GetProjectionMatrixNoJitter();
             ReferencedPathTracingLightSignatureUtility.Resolve(
@@ -210,6 +216,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 out var lightDirection,
                 out var lightColor,
                 out var localLightSignature);
+            if (!integratorState.enableReGIR)
+                localLightSignature = 0ul;
             var environmentState = ReferencedPathTracingEnvironmentState.Resolve(
                 frameData.GetOrCreate<VividSkyData>());
             var cameraBackgroundState =
@@ -227,18 +235,41 @@ namespace VividRP.Runtime.RenderPass.Core
                 && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon)
                 && state.LocalLightSignature == localLightSignature
                 && state.EnvironmentSignature == environmentState.signature
-                && state.CameraBackgroundSignature == cameraBackgroundState.signature;
+                && state.CameraBackgroundSignature == cameraBackgroundState.signature
+                && state.IntegratorSignature == integratorState.signature
+                && (!pathTracingData.isValid
+                    || state.FrameSignature
+                        == pathTracingData.frameSignature);
+            var deterministicSequenceMatches =
+                !pathTracingData.isValid
+                || !pathTracingData.deterministicSampling
+                || pathTracingData.sampleIndex == state.SampleCount;
 
             m_UseHistory = m_HasValidHistory
                 && signatureMatches
+                && deterministicSequenceMatches
                 && (temporalData == null || !temporalData.isFirstFrame);
 
-            if (m_UseHistory && state.SampleCount < ulong.MaxValue)
-                state.SampleCount++;
-            else if (!m_UseHistory)
-                state.SampleCount = 1;
+            if (pathTracingData.isValid
+                && pathTracingData.deterministicSampling)
+            {
+                if (!m_HasValidHistory && pathTracingData.sampleIndex > 0)
+                    ReferencedPathTracingSampleSequence.RequestReset(camera);
+
+                state.SampleCount = m_UseHistory
+                    ? (ulong)pathTracingData.sampleIndex + 1ul
+                    : 1ul;
+            }
+            else
+            {
+                if (m_UseHistory && state.SampleCount < ulong.MaxValue)
+                    state.SampleCount++;
+                else if (!m_UseHistory)
+                    state.SampleCount = 1;
+            }
 
             m_InverseSampleCount = (float)(1.0 / state.SampleCount);
+            pathTracingData.accumulatedSampleCount = state.SampleCount;
             state.HasSignature = true;
             state.Width = m_Width;
             state.Height = m_Height;
@@ -249,6 +280,10 @@ namespace VividRP.Runtime.RenderPass.Core
             state.LocalLightSignature = localLightSignature;
             state.EnvironmentSignature = environmentState.signature;
             state.CameraBackgroundSignature = cameraBackgroundState.signature;
+            state.IntegratorSignature = integratorState.signature;
+            state.FrameSignature = pathTracingData.isValid
+                ? pathTracingData.frameSignature
+                : 0ul;
         }
 
         private void ConfigureHistoryDescriptor(int width, int height)

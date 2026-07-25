@@ -30,6 +30,27 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CapturePass_ConsumesRawFp32AccumulationAndIsNeverCulled()
+        {
+            IRenderPass renderPass = new ReferencedPathTracingCapturePass();
+
+            var resources = renderPass.Initialize();
+            var rawAccumulation = resources.Textures.Single();
+
+            Assert.That(
+                typeof(IRenderGraphSideEffectPass).IsAssignableFrom(
+                    typeof(ReferencedPathTracingCapturePass)),
+                Is.True);
+            Assert.That(
+                rawAccumulation.Name,
+                Is.EqualTo("PathTracingAccumulationRaw"));
+            Assert.That(rawAccumulation.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                rawAccumulation.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+        }
+
+        [Test]
         public void Initialize_RegistersSceneRtasReGIRInputsAndReblurOutputs()
         {
             IRenderPass renderPass = new ReferencedPathTracingPass();
@@ -352,6 +373,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(metadata.contentHash, Is.EqualTo(17));
                 Assert.That(metadata.backgroundResolution, Is.EqualTo(8));
                 Assert.That(metadata.lightingResolution, Is.EqualTo(8));
+                Assert.That(metadata.lightingEnabled, Is.True);
+                Assert.That(metadata.cameraVisible, Is.True);
                 Assert.That(metadata.rotation, Is.EqualTo(75.0f));
                 Assert.That(metadata.physicalIntensityMultiplier, Is.EqualTo(3.0f));
                 Assert.That(
@@ -368,6 +391,110 @@ namespace VividRP.Editor.Tests
                 UnityEngine.Object.DestroyImmediate(settings);
                 UnityEngine.Object.DestroyImmediate(cubemap);
             }
+        }
+
+        [Test]
+        public void DeterministicSampleSequence_AdvancesOncePerFrameAndResetsOnSignature()
+        {
+            var gameObject =
+                new GameObject("ReferencedPathTracingSampleSequenceTests.Camera");
+            var camera = gameObject.AddComponent<Camera>();
+
+            try
+            {
+                var first = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    100,
+                    11ul,
+                    true);
+                var duplicatePrepare = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    100,
+                    11ul,
+                    false);
+                var nextFrame = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    101,
+                    11ul,
+                    false);
+                var changedScene = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    102,
+                    12ul,
+                    false);
+                ReferencedPathTracingSampleSequence.RequestReset(camera);
+                var requestedReset = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    103,
+                    12ul,
+                    false);
+
+                Assert.That(first, Is.Zero);
+                Assert.That(duplicatePrepare, Is.Zero);
+                Assert.That(nextFrame, Is.EqualTo(1u));
+                Assert.That(changedScene, Is.Zero);
+                Assert.That(requestedReset, Is.Zero);
+            }
+            finally
+            {
+                ReferencedPathTracingSampleSequence.Dispose();
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void V1FreezeGate_RequiresEveryCanonicalCaseAndPassedGpuEvidence()
+        {
+            var captures = ReferencedPathTracingV1Corpus.Cases
+                .Select(CreateValidFrozenCapture)
+                .ToArray();
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCorpus(
+                    captures,
+                    out var failure),
+                Is.True,
+                failure);
+
+            captures[0].validation.status =
+                ReferencedPathTracingValidationStatus.NotRun;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCorpus(
+                    captures,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("GPU validation evidence"));
+        }
+
+        [Test]
+        public void V1FreezeGate_RejectsReGIRPreExposureAndWrongCameraVisibility()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases.Single(
+                item => item.id == "hdri-camera-hidden-lighting");
+            var capture = CreateValidFrozenCapture(corpusCase);
+
+            capture.usesReGIR = true;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.usesReGIR = false;
+            capture.rawRadianceIsPreExposed = true;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.rawRadianceIsPreExposed = false;
+            capture.environment.cameraVisible = true;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
         }
 
         [Test]
@@ -638,6 +765,70 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
+        }
+
+        private static ReferencedPathTracingCaptureMetadata
+            CreateValidFrozenCapture(
+                ReferencedPathTracingV1CorpusCase corpusCase)
+        {
+            return new ReferencedPathTracingCaptureMetadata
+            {
+                freezeContractVersion =
+                    ReferencedPathTracingV1FreezeGate.ContractVersion,
+                corpusVersion = ReferencedPathTracingV1Corpus.Version,
+                integratorVersion =
+                    ReferencedPathTracingIntegratorState.Version,
+                corpusCaseId = corpusCase.id,
+                width = corpusCase.width,
+                height = corpusCase.height,
+                targetSampleCount = corpusCase.targetSampleCount,
+                accumulatedSampleCount =
+                    (ulong)corpusCase.targetSampleCount,
+                deterministicSampling = true,
+                fixedSeed = corpusCase.fixedSeed,
+                maxBounceCount = corpusCase.maxBounceCount,
+                russianRouletteStartBounce =
+                    corpusCase.russianRouletteStartBounce,
+                integratorSignature = 1ul,
+                usesReGIR = false,
+                usesDenoiser = false,
+                usesRasterGI = false,
+                rawRadianceIsPreExposed = false,
+                hasMainDirectionalLight = false,
+                localLightCount = 0,
+                unsupportedMaterialCount = 0,
+                standardLitOnly = true,
+                imageOriginBottomLeft = true,
+                environment =
+                    new ReferencedPathTracingEnvironmentMetadata
+                    {
+                        contractVersion =
+                            ReferencedPathTracingEnvironmentMetadata.ContractVersion,
+                        contentHash = 1,
+                        backgroundResolution = 1024,
+                        lightingResolution = 256,
+                        lightingEnabled = true,
+                        cameraVisible =
+                            corpusCase.id
+                            != "hdri-camera-hidden-lighting",
+                        samplingMode = corpusCase.samplingMode,
+                        estimatorMode = corpusCase.estimatorMode,
+                        physicalIntensityMultiplier = 1.0f,
+                        pdfVersion =
+                            ReferencedPathTracingEnvironmentImportanceLayout.Version,
+                        rawRadianceIsPreExposed = false
+                    },
+                validation = new ReferencedPathTracingValidationEvidence
+                {
+                    status = ReferencedPathTracingValidationStatus.Passed,
+                    graphicsApi = "Direct3D12",
+                    deviceName = "Canonical Test Device",
+                    referenceImageSha256 = new string('a', 64),
+                    finitePixelFraction = 1.0f,
+                    negativeRadianceFraction = 0.0f,
+                    relativeMeanError = 0.01f
+                }
+            };
         }
     }
 }

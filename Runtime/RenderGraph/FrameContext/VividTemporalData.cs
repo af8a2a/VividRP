@@ -24,4 +24,29 @@ namespace VividRP.Runtime
             isFirstFrame = true;
         }
     }
+
+    /// <summary>
+    /// Per-frame handshake shared by the reference ray dispatch, raw accumulation, and capture
+    /// stages. It is intentionally separate from display temporal data because canonical sample
+    /// indices must reset from the path-tracing scene signature rather than presentation frames.
+    /// </summary>
+    internal sealed class VividReferencedPathTracingData : ContextItem
+    {
+        internal bool isValid;
+        internal bool deterministicSampling;
+        internal uint sampleIndex;
+        internal ulong frameSignature;
+        internal ulong integratorSignature;
+        internal ulong accumulatedSampleCount;
+
+        public override void Reset()
+        {
+            isValid = false;
+            deterministicSampling = false;
+            sampleIndex = 0;
+            frameSignature = 0;
+            integratorSignature = 0;
+            accumulatedSampleCount = 0;
+        }
+    }
 }

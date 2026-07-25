@@ -469,6 +469,11 @@ void StandardLitReferencedPathtracingClosestHit(
     payload.reGIRLocalSpecularRadiance = 0.0;
     payload.reGIRLocalDirectionWS = 0.0;
     payload.reGIRLocalDistance = 0.0;
+    payload.environmentDirectDiffuseRadiance = 0.0;
+    payload.environmentDirectSpecularRadiance = 0.0;
+    payload.environmentDirectionWS = 0.0;
+    payload.environmentLightPdf = 0.0;
+    payload.environmentBsdfPdf = 0.0;
     payload.nextDirectionWS = 0.0;
     payload.nextThroughputWeight = 0.0;
     payload.nextPdf = 0.0;
@@ -525,6 +530,49 @@ void StandardLitReferencedPathtracingClosestHit(
                 max(localSpecularBsdf, 0.0) * reGIRWeightedIncidentRadiance;
             payload.reGIRLocalDirectionWS = reGIRLocalDirectionWS;
             payload.reGIRLocalDistance = reGIRLocalDistance;
+        }
+    }
+
+    float3 environmentDirectionWS;
+    float3 environmentRadiance;
+    float environmentLightPdf;
+    // The returned PDF already contains the discrete environment-light selection factor.
+    if (ReferencedPathtracingSampleEnvironmentLight(
+            payload.environmentRandom,
+            environmentDirectionWS,
+            environmentRadiance,
+            environmentLightPdf)
+        && dot(environmentDirectionWS, geometry.faceNormalWS) > 0.0)
+    {
+        OpenPBR_DiffuseSpecular environmentResponse = openpbr_eval(
+            preparedBsdf,
+            environmentDirectionWS);
+        float environmentBsdfPdf = openpbr_pdf(
+            preparedBsdf,
+            environmentDirectionWS);
+        float3 environmentDiffuseBsdf =
+            openpbr_extract_diffuse_from_diffuse_specular(environmentResponse);
+        float3 environmentSpecularBsdf =
+            openpbr_extract_specular_from_diffuse_specular(environmentResponse);
+        if (VividReferencedPathtracingIsFinite(environmentRadiance)
+            && VividReferencedPathtracingIsFinite(environmentDiffuseBsdf)
+            && VividReferencedPathtracingIsFinite(environmentSpecularBsdf)
+            && VividReferencedPathtracingIsFinite(environmentLightPdf)
+            && VividReferencedPathtracingIsFinite(environmentBsdfPdf)
+            && environmentLightPdf > 0.0
+            && environmentBsdfPdf >= 0.0)
+        {
+            float3 weightedEnvironmentRadiance =
+                max(environmentRadiance, 0.0) / environmentLightPdf;
+            payload.environmentDirectDiffuseRadiance =
+                max(environmentDiffuseBsdf, 0.0)
+                * weightedEnvironmentRadiance;
+            payload.environmentDirectSpecularRadiance =
+                max(environmentSpecularBsdf, 0.0)
+                * weightedEnvironmentRadiance;
+            payload.environmentDirectionWS = normalize(environmentDirectionWS);
+            payload.environmentLightPdf = environmentLightPdf;
+            payload.environmentBsdfPdf = environmentBsdfPdf;
         }
     }
 

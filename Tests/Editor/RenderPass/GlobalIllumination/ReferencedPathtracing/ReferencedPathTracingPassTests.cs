@@ -54,6 +54,10 @@ namespace VividRP.Editor.Tests
             var directLighting = resources.Textures.Single(
                 resource => resource.Name == "PathTracingDirectLighting");
             var emission = resources.Textures.Single(resource => resource.Name == "PathTracingEmission");
+            var environmentDirectDiffuse = resources.Textures.Single(
+                resource => resource.Name == "EnvironmentDirectDiffuse");
+            var environmentDirectSpecular = resources.Textures.Single(
+                resource => resource.Name == "EnvironmentDirectSpecular");
 
             Assert.That(accelerationStructure.Name, Is.EqualTo("SceneRTAS"));
             Assert.That(accelerationStructure.Access, Is.EqualTo(AccessFlags.Read));
@@ -95,6 +99,8 @@ namespace VividRP.Editor.Tests
             Assert.That(specular.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(directLighting.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(emission.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(environmentDirectDiffuse.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(environmentDirectSpecular.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(diffuse.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(specular.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(diffuse.Texture.desc.ClearBuffer, Is.True);
@@ -103,6 +109,14 @@ namespace VividRP.Editor.Tests
                 directLighting.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(emission.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+            Assert.That(
+                environmentDirectDiffuse.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+            Assert.That(
+                environmentDirectSpecular.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+            Assert.That(environmentDirectDiffuse.Texture.desc.ClearBuffer, Is.True);
+            Assert.That(environmentDirectSpecular.Texture.desc.ClearBuffer, Is.True);
         }
 
         [Test]
@@ -117,10 +131,20 @@ namespace VividRP.Editor.Tests
             pass.Prepare(frameData);
 
             var output = GetField<RenderGraphTexture>(pass, "m_WorldPositionTexture");
+            var environmentDirectDiffuse = GetField<RenderGraphTexture>(
+                pass,
+                "m_EnvironmentDirectDiffuse");
+            var environmentDirectSpecular = GetField<RenderGraphTexture>(
+                pass,
+                "m_EnvironmentDirectSpecular");
             Assert.That(output.desc.Width, Is.EqualTo(960));
             Assert.That(output.desc.Height, Is.EqualTo(540));
             Assert.That(output.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(output.desc.EnableRandomWrite, Is.True);
+            Assert.That(environmentDirectDiffuse.desc.Width, Is.EqualTo(960));
+            Assert.That(environmentDirectDiffuse.desc.Height, Is.EqualTo(540));
+            Assert.That(environmentDirectSpecular.desc.Width, Is.EqualTo(960));
+            Assert.That(environmentDirectSpecular.desc.Height, Is.EqualTo(540));
         }
 
         [Test]
@@ -207,6 +231,12 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetOutputPortByName("m_SpecularRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DirectLighting"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_Emission"), Is.Not.Null);
+                Assert.That(
+                    node.GetOutputPortByName("m_EnvironmentDirectDiffuse"),
+                    Is.Not.Null);
+                Assert.That(
+                    node.GetOutputPortByName("m_EnvironmentDirectSpecular"),
+                    Is.Not.Null);
             }
             finally
             {
@@ -243,6 +273,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(state.lightingEnabled, Is.True);
                 Assert.That(state.cameraVisible, Is.False);
                 Assert.That(state.importanceSamplingEnabled, Is.True);
+                Assert.That(state.neeEnabled, Is.True);
                 Assert.That(
                     state.samplingMode,
                     Is.EqualTo(
@@ -287,6 +318,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(state.lightingEnabled, Is.False);
                 Assert.That(state.cameraVisible, Is.False);
                 Assert.That(state.importanceSamplingEnabled, Is.False);
+                Assert.That(state.neeEnabled, Is.False);
                 Assert.That(state.tint, Is.EqualTo(Color.white));
                 Assert.That(state.intensityMultiplier, Is.Zero);
                 Assert.That(state.rotation, Is.Zero);
@@ -348,6 +380,11 @@ namespace VividRP.Editor.Tests
                     skyData,
                     settings);
                 settings.environmentSamplingMode.value =
+                    ReferencedPathTracingEnvironmentSamplingMode.UniformSphere;
+                var uniformSphere = ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+                settings.environmentSamplingMode.value =
                     ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
                 settings.environmentDebugMode.value =
                     ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly;
@@ -390,7 +427,10 @@ namespace VividRP.Editor.Tests
                     replacement.samplingSignature,
                     Is.Not.EqualTo(original.samplingSignature));
                 Assert.That(bsdfOnly.importanceSamplingEnabled, Is.False);
+                Assert.That(bsdfOnly.neeEnabled, Is.False);
                 Assert.That(bsdfOnly.lightingEnabled, Is.True);
+                Assert.That(uniformSphere.importanceSamplingEnabled, Is.False);
+                Assert.That(uniformSphere.neeEnabled, Is.True);
             }
             finally
             {

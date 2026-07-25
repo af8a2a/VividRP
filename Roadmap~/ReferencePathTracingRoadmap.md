@@ -339,7 +339,7 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
   安全失效而不会读取未初始化资源。
 - Runtime、Editor Tests 程序集以及 Unity ray-tracing/compute shader import 已通过。
   Constant、single-bright-texel 和 high-contrast HDRI 的 GPU histogram 回归仍需加入
-  canonical validation corpus；E3 之前不会把该 proposal 加入路径能量。
+  canonical validation corpus；该 proposal 已在 E3 接入路径能量。
 
 #### E3: Environment NEE and Visibility
 
@@ -361,6 +361,36 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - Environment-only 场景在 NEE 开启后显著降低亮区 HDRI 的收敛方差。
 - Light selection histogram、conditional environment PDF 和最终 combined PDF 一致。
 - 禁用 ReGIR 时环境结果不变；启用 ReGIR local-light proposal 时环境仍具有完整 support。
+
+**Implementation checkpoint (2026-07-25)**
+
+- 每次 surface interaction 为 environment NEE 分配独立二维随机流，不复用或推进
+  OpenPBR BSDF、ReGIR light/shape 以及后续 bounce 的既有 RNG 序列。`BSDF Only`
+  关闭 NEE；Importance 与 Uniform Sphere 模式启用相同的 visibility/integration 路径。
+- shader common contract 新增 `SampleEnvironmentLight()` 与
+  `EvaluateEnvironmentLightPdf()`。环境当前作为独立 proposal family，每个 hit 固定生成
+  一个 candidate，因此 `p(select environment) = 1`；该离散因子仍显式包含在 combined
+  light PDF 中，后续统一 light selector 可以改变选择概率而不改变 estimator 接口。
+- StandardLit closest-hit 使用 `openpbr_eval()` 拆分 diffuse/specular，并调用
+  `openpbr_pdf()` 保存 competing BSDF PDF。返回给 raygen 的未遮挡贡献为
+  `Le * f * abs(NdotL) / (p_select * p_environment)`，所有 PDF 都使用 solid-angle measure。
+- Raygen 对有效 candidate 发射 `RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH |
+  RAY_FLAG_SKIP_CLOSEST_HIT_SHADER` visibility ray，`TMax` 使用 `FLT_MAX` 表示无限远。
+  any-hit 仍然执行，因此 StandardLit alpha-test 会 `IgnoreHit()` 并继续搜索后续遮挡物。
+- Environment NEE 在每个 bounce 都参与积分：primary hit 保留 OpenPBR diffuse/specular
+  拆分并写入 `EnvironmentDirectDiffuse` 与 `EnvironmentDirectSpecular` 两个 FP32
+  RenderGraph direct debug AOV，后续 bounce 按 primary lobe 归类到 beauty/REBLUR signal。
+  Environment Only debug resolve 同时包含 background、BSDF miss 和所有 bounce 的
+  environment NEE。
+- Environment proposal 与 ReGIR local-light proposal 独立生成，ReGIR 开关不会改变
+  environment 的随机维度、选择 PDF 或 support。
+- Runtime 与 Editor Tests 程序集编译通过；Unity 6000.7 DX12 已重新导入
+  `ReferencedPathtracing.raytrace` 和 StandardLit material shader，未出现 E3 Shader error。
+- E3 按里程碑边界暂时保留 BSDF miss 权重 1，也尚未对 light-sampled candidate 应用
+  power heuristic，因此 Combined 输出会同时包含两个 environment estimator。E4 必须完成
+  双向 MIS/no-double-counting gate 后，结果才能重新标记为 canonical ground truth。
+- Alpha-tested blocker、bright-texel HDRI variance、light-selection histogram 与
+  ReGIR on/off 图像回归仍需加入 GPU validation corpus。
 
 #### E4: Bidirectional MIS and No-double-counting Gate
 

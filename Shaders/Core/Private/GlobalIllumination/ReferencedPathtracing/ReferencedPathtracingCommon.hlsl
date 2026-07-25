@@ -5,8 +5,7 @@ float4 _ReferencedMainLightDirectionWS;
 float4 _ReferencedMainLightColor;
 int _ReferencedReGIREnabled;
 
-// E0 environment contract, consumed by the E1 camera and BSDF miss paths.
-// E2 will add the importance-distribution textures used by the sampling mode below.
+// Environment contract shared by camera/background, BSDF miss, distribution build, and NEE.
 TextureCube<float4> _ReferencedEnvironmentTexture;
 SamplerState sampler_ReferencedEnvironmentTexture;
 float4 _ReferencedEnvironmentTint;
@@ -16,6 +15,7 @@ float4 _ReferencedEnvironmentParameters;
 int _ReferencedEnvironmentLightingEnabled;
 int _ReferencedEnvironmentCameraVisible;
 int _ReferencedEnvironmentImportanceSamplingEnabled;
+int _ReferencedEnvironmentNeeEnabled;
 int _ReferencedEnvironmentSamplingMode;
 int _ReferencedEnvironmentDebugMode;
 float4 _ReferencedCameraClearColor;
@@ -274,6 +274,54 @@ bool ReferencedPathtracingSampleEnvironment(
     return pdf > 0.0;
 }
 
+float ReferencedPathtracingGetEnvironmentLightSelectionPdf()
+{
+    // Environment is currently an independent NEE proposal family, so its discrete
+    // selection probability is one. Keeping this factor explicit freezes the combined
+    // PDF contract for the future unified light selector.
+    return _ReferencedEnvironmentNeeEnabled != 0
+        && _ReferencedEnvironmentLightingEnabled != 0
+        && _ReferencedEnvironmentSamplingMode
+            != kReferencedEnvironmentSamplingBsdfOnly
+        ? 1.0
+        : 0.0;
+}
+
+float ReferencedPathtracingEvaluateEnvironmentLightPdf(float3 directionWS)
+{
+    return ReferencedPathtracingGetEnvironmentLightSelectionPdf()
+        * ReferencedPathtracingEvaluateEnvironmentPdf(directionWS);
+}
+
+bool ReferencedPathtracingSampleEnvironmentLight(
+    float2 randomValue,
+    out float3 directionWS,
+    out float3 radiance,
+    out float lightPdf)
+{
+    directionWS = 0.0;
+    radiance = 0.0;
+    lightPdf = 0.0;
+
+    float selectionPdf =
+        ReferencedPathtracingGetEnvironmentLightSelectionPdf();
+    float environmentPdf;
+    if (selectionPdf <= 0.0
+        || !ReferencedPathtracingSampleEnvironment(
+            randomValue,
+            directionWS,
+            radiance,
+            environmentPdf))
+    {
+        return false;
+    }
+
+    lightPdf = selectionPdf * environmentPdf;
+    return lightPdf > 0.0
+        && !isnan(lightPdf)
+        && !isinf(lightPdf);
+}
+
 float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 {
     if (_ReferencedCameraSkyEnabled != 0
@@ -294,6 +342,7 @@ struct ReferencedPathtracingPayload
     float3 pathThroughput;
     float3 bsdfRandom;
     float3 directLightRandom;
+    float2 environmentRandom;
     float rayConeWidth;
     float rayConeSpreadAngle;
 
@@ -307,6 +356,11 @@ struct ReferencedPathtracingPayload
     float3 reGIRLocalSpecularRadiance;
     float3 reGIRLocalDirectionWS;
     float reGIRLocalDistance;
+    float3 environmentDirectDiffuseRadiance;
+    float3 environmentDirectSpecularRadiance;
+    float3 environmentDirectionWS;
+    float environmentLightPdf;
+    float environmentBsdfPdf;
     float3 nextDirectionWS;
     float3 nextThroughputWeight;
     float nextPdf;
@@ -321,6 +375,7 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.pathThroughput = 1.0;
     payload.bsdfRandom = 0.0;
     payload.directLightRandom = 0.0;
+    payload.environmentRandom = 0.0;
     payload.rayConeWidth = 0.0;
     payload.rayConeSpreadAngle = 0.0;
     payload.positionWS = 0.0;
@@ -332,6 +387,11 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.reGIRLocalSpecularRadiance = 0.0;
     payload.reGIRLocalDirectionWS = 0.0;
     payload.reGIRLocalDistance = 0.0;
+    payload.environmentDirectDiffuseRadiance = 0.0;
+    payload.environmentDirectSpecularRadiance = 0.0;
+    payload.environmentDirectionWS = 0.0;
+    payload.environmentLightPdf = 0.0;
+    payload.environmentBsdfPdf = 0.0;
     payload.nextDirectionWS = 0.0;
     payload.nextThroughputWeight = 0.0;
     payload.nextPdf = 0.0;

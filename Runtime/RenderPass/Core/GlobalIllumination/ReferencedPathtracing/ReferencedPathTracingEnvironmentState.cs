@@ -31,6 +31,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 lightingEnabled
                 && samplingMode
                     == ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
+            neeEnabled =
+                lightingEnabled
+                && samplingMode
+                    != ReferencedPathTracingEnvironmentSamplingMode.BsdfOnly;
             this.tint = tint;
             this.intensityMultiplier = intensityMultiplier;
             this.rotation = rotation;
@@ -65,6 +69,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal bool lightingEnabled { get; }
         internal bool cameraVisible { get; }
         internal bool importanceSamplingEnabled { get; }
+        internal bool neeEnabled { get; }
         internal ReferencedPathTracingEnvironmentSamplingMode samplingMode { get; }
         internal ReferencedPathTracingEnvironmentDebugMode debugMode { get; }
         internal Color tint { get; }

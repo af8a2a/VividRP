@@ -7,8 +7,8 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
     /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
-    /// path and performs next-event estimation against the main directional light plus ReGIR
-    /// point, spot, rectangle, and tube-light reservoirs at every hit.
+    /// path and performs next-event estimation against the main directional light, the active
+    /// HDRI environment, plus ReGIR point, spot, rectangle, and tube-light reservoirs at every hit.
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
@@ -29,6 +29,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int DirectLightingId =
             Shader.PropertyToID("_ReferencedPathTracingDirectLighting");
         private static readonly int EmissionId = Shader.PropertyToID("_ReferencedPathTracingEmission");
+        private static readonly int EnvironmentDirectDiffuseId =
+            Shader.PropertyToID("_ReferencedPathTracingEnvironmentDirectDiffuse");
+        private static readonly int EnvironmentDirectSpecularId =
+            Shader.PropertyToID("_ReferencedPathTracingEnvironmentDirectSpecular");
         private static readonly int DiffuseRayDirectionHitDistanceId =
             Shader.PropertyToID("_ReferencedDiffuseRayDirectionHitDistance");
         private static readonly int SpecularRayDirectionHitDistanceId =
@@ -67,6 +71,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedEnvironmentCameraVisible");
         private static readonly int EnvironmentImportanceSamplingEnabledId =
             Shader.PropertyToID("_ReferencedEnvironmentImportanceSamplingEnabled");
+        private static readonly int EnvironmentNeeEnabledId =
+            Shader.PropertyToID("_ReferencedEnvironmentNeeEnabled");
         private static readonly int EnvironmentSamplingModeId =
             Shader.PropertyToID("_ReferencedEnvironmentSamplingMode");
         private static readonly int EnvironmentDebugModeId =
@@ -128,6 +134,18 @@ namespace VividRP.Runtime.RenderPass.Core
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_Emission;
+
+        [RenderGraphResource(
+            Name = "EnvironmentDirectDiffuse",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_EnvironmentDirectDiffuse;
+
+        [RenderGraphResource(
+            Name = "EnvironmentDirectSpecular",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_EnvironmentDirectSpecular;
 
         [RenderGraphResource(
             Name = "DiffuseRayDirectionHitDistance",
@@ -201,6 +219,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R32G32B32A32_SFloat);
             m_Emission = RenderGraphTexture.CreateOutput(
                 "PathTracingEmission",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_EnvironmentDirectDiffuse = RenderGraphTexture.CreateOutput(
+                "EnvironmentDirectDiffuse",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_EnvironmentDirectSpecular = RenderGraphTexture.CreateOutput(
+                "EnvironmentDirectSpecular",
                 GraphicsFormat.R32G32B32A32_SFloat);
             m_DiffuseRayDirectionHitDistance = RenderGraphTexture.CreateOutput(
                 "DiffuseRayDirectionHitDistance",
@@ -302,6 +326,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 BindOutput(cmd, SpecularRadianceHitDistanceId, m_SpecularRadianceHitDistance);
                 BindOutput(cmd, DirectLightingId, m_DirectLighting);
                 BindOutput(cmd, EmissionId, m_Emission);
+                BindOutput(
+                    cmd,
+                    EnvironmentDirectDiffuseId,
+                    m_EnvironmentDirectDiffuse);
+                BindOutput(
+                    cmd,
+                    EnvironmentDirectSpecularId,
+                    m_EnvironmentDirectSpecular);
                 BindOutput(cmd, DiffuseRayDirectionHitDistanceId, m_DiffuseRayDirectionHitDistance);
                 BindOutput(cmd, SpecularRayDirectionHitDistanceId, m_SpecularRayDirectionHitDistance);
                 cmd.SetRayTracingVectorParam(m_RayTracingShader, CameraPositionId, m_CameraPositionWS);
@@ -409,6 +441,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R32G32B32A32_SFloat,
                 "PathTracingEmission");
             ConfigureOutput(
+                m_EnvironmentDirectDiffuse,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "EnvironmentDirectDiffuse");
+            ConfigureOutput(
+                m_EnvironmentDirectSpecular,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "EnvironmentDirectSpecular");
+            ConfigureOutput(
                 m_DiffuseRayDirectionHitDistance,
                 width,
                 height,
@@ -455,6 +499,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && IsValid(m_SpecularRadianceHitDistance)
                 && IsValid(m_DirectLighting)
                 && IsValid(m_Emission)
+                && IsValid(m_EnvironmentDirectDiffuse)
+                && IsValid(m_EnvironmentDirectSpecular)
                 && IsValid(m_DiffuseRayDirectionHitDistance)
                 && IsValid(m_SpecularRayDirectionHitDistance);
         }
@@ -548,6 +594,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 hasEnvironmentBinding && m_EnvironmentState.cameraVisible ? 1 : 0;
             var importanceSamplingEnabled =
                 hasEnvironmentBinding && m_EnvironmentState.importanceSamplingEnabled ? 1 : 0;
+            var neeEnabled =
+                hasEnvironmentBinding && m_EnvironmentState.neeEnabled ? 1 : 0;
             var samplingMode = (int)m_EnvironmentState.samplingMode;
             var debugMode = (int)m_EnvironmentState.debugMode;
             var clearColor = m_CameraBackgroundState.clearColor;
@@ -565,6 +613,7 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetGlobalInt(
                 EnvironmentImportanceSamplingEnabledId,
                 importanceSamplingEnabled);
+            cmd.SetGlobalInt(EnvironmentNeeEnabledId, neeEnabled);
             cmd.SetGlobalInt(EnvironmentSamplingModeId, samplingMode);
             cmd.SetGlobalInt(EnvironmentDebugModeId, debugMode);
             cmd.SetGlobalVector(CameraClearColorId, cameraClearColor);
@@ -590,6 +639,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 EnvironmentImportanceSamplingEnabledId,
                 importanceSamplingEnabled);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentNeeEnabledId,
+                neeEnabled);
             cmd.SetRayTracingIntParam(
                 m_RayTracingShader,
                 EnvironmentSamplingModeId,

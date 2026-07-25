@@ -8,6 +8,8 @@ RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
 RWTexture2D<float4> _ReferencedPathTracingDirectLighting;
 RWTexture2D<float4> _ReferencedPathTracingEmission;
+RWTexture2D<float4> _ReferencedPathTracingEnvironmentDirectDiffuse;
+RWTexture2D<float4> _ReferencedPathTracingEnvironmentDirectSpecular;
 RWTexture2D<float4> _ReferencedDiffuseRayDirectionHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRayDirectionHitDistance;
 
@@ -24,6 +26,8 @@ int _ReferencedReblurCheckerboardMode;
 
 static const float kReferencedPathtracingShadowMinBias = 0.001;
 static const float kReferencedPathtracingShadowMaxDistance = 100000.0;
+// DXR requires a finite float, so FLT_MAX is the infinite-light visibility endpoint.
+static const float kReferencedPathtracingInfiniteDistance = 3.402823466e+38;
 static const uint kReferencedPathtracingMaxSupportedBounceCount = 8u;
 
 float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
@@ -179,6 +183,9 @@ void RayGenReferencedPathtracing()
     float3 cameraBackgroundRadiance = 0.0;
     float3 primaryEnvironmentBackgroundRadiance = 0.0;
     float3 indirectEnvironmentRadiance = 0.0;
+    float3 environmentNeeRadiance = 0.0;
+    float3 environmentDirectDiffuseRadiance = 0.0;
+    float3 environmentDirectSpecularRadiance = 0.0;
     float cameraBackgroundAlpha = 0.0;
     float3 throughput = 1.0;
     float rayConeWidth = 0.0;
@@ -203,12 +210,18 @@ void RayGenReferencedPathtracing()
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
-        // Preserve the existing BSDF dimensions and append one discrete ReGIR dimension plus
-        // two continuous area-shape dimensions.
+        // Keep proposal dimensions independent: ReGIR consumes one discrete-light dimension
+        // plus two area-shape dimensions. Environment NEE derives a separate stream below so it
+        // does not shift the existing BSDF/ReGIR or later-bounce sequence.
         payload.directLightRandom = float3(
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
+        uint environmentRngState = HashReferencedPathtracingRng(
+            rngState ^ (0x68bc21ebu + bounceIndex * 0x9e3779b9u));
+        payload.environmentRandom = float2(
+            NextReferencedPathtracingRngFloat(environmentRngState),
+            NextReferencedPathtracingRngFloat(environmentRngState));
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
         TraceRay(
@@ -239,8 +252,8 @@ void RayGenReferencedPathtracing()
             }
             else
             {
-                // Until E2 adds environment NEE, every indirect environment contribution is a
-                // pure BSDF-sampled estimator: throughput already contains f * cos(theta) / pdf.
+                // E3 deliberately keeps the BSDF-sampled miss estimator at weight one.
+                // E4 will apply bidirectional MIS against the environment-light PDF.
                 float3 environmentRadiance =
                     ReferencedPathtracingEvaluateLightingEnvironment(ray.Direction);
                 float3 environmentContribution = throughput * environmentRadiance;
@@ -373,6 +386,48 @@ void RayGenReferencedPathtracing()
             }
         }
 
+        if (payload.environmentLightPdf > 0.0
+            && (any(payload.environmentDirectDiffuseRadiance > 0.0)
+                || any(payload.environmentDirectSpecularRadiance > 0.0)))
+        {
+            float3 environmentDirectionWS =
+                normalize(payload.environmentDirectionWS);
+            float visibility = TraceReferencedPathtracingVisibility(
+                payload.positionWS,
+                normalize(payload.faceNormalWS),
+                environmentDirectionWS,
+                kReferencedPathtracingInfiniteDistance);
+            float3 directDiffuse = throughput
+                * payload.environmentDirectDiffuseRadiance
+                * visibility;
+            float3 directSpecular = throughput
+                * payload.environmentDirectSpecularRadiance
+                * visibility;
+
+            if (IsFiniteReferencedPathtracingRadiance(directDiffuse)
+                && IsFiniteReferencedPathtracingRadiance(directSpecular))
+            {
+                environmentNeeRadiance += directDiffuse + directSpecular;
+
+                if (bounceIndex == 0u)
+                {
+                    // Direct environment AOVs describe the primary surface only.
+                    environmentDirectDiffuseRadiance += directDiffuse;
+                    environmentDirectSpecularRadiance += directSpecular;
+                    diffuseRadiance += directDiffuse;
+                    specularRadiance += directSpecular;
+                }
+                else if (primaryLobeClass == 1u)
+                {
+                    diffuseRadiance += directDiffuse + directSpecular;
+                }
+                else if (primaryLobeClass == 2u)
+                {
+                    specularRadiance += directDiffuse + directSpecular;
+                }
+            }
+        }
+
         if (payload.nextPdf <= 0.0)
             break;
 
@@ -423,6 +478,12 @@ void RayGenReferencedPathtracing()
         directLightingRadiance = 0.0;
     if (!IsFiniteReferencedPathtracingRadiance(emissionRadiance))
         emissionRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(environmentNeeRadiance))
+        environmentNeeRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(environmentDirectDiffuseRadiance))
+        environmentDirectDiffuseRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(environmentDirectSpecularRadiance))
+        environmentDirectSpecularRadiance = 0.0;
 
     float diffuseNormHitDistance = primaryHit != 0u
         ? GetReferencedPathtracingReblurNormHitDistance(
@@ -442,7 +503,9 @@ void RayGenReferencedPathtracing()
     if (_ReferencedEnvironmentDebugMode == kReferencedEnvironmentDebugEnvironmentOnly)
     {
         radiance =
-            primaryEnvironmentBackgroundRadiance + indirectEnvironmentRadiance;
+            primaryEnvironmentBackgroundRadiance
+            + indirectEnvironmentRadiance
+            + environmentNeeRadiance;
     }
     else if (_ReferencedEnvironmentDebugMode
         == kReferencedEnvironmentDebugPrimaryBackgroundOnly)
@@ -460,6 +523,12 @@ void RayGenReferencedPathtracing()
     _ReferencedPathTracingDirectLighting[pixelCoord] =
         float4(directLightingRadiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingEmission[pixelCoord] = float4(emissionRadiance, primaryHit != 0u ? 1.0 : 0.0);
+    _ReferencedPathTracingEnvironmentDirectDiffuse[pixelCoord] = float4(
+        environmentDirectDiffuseRadiance,
+        primaryHit != 0u ? 1.0 : 0.0);
+    _ReferencedPathTracingEnvironmentDirectSpecular[pixelCoord] = float4(
+        environmentDirectSpecularRadiance,
+        primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] = float4(
         diffuseRayDirectionWS,
         primaryHit != 0u ? diffuseHitDistance : 0.0);

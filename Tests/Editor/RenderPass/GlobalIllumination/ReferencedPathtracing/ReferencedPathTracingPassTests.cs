@@ -279,6 +279,9 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(
                         ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling));
                 Assert.That(
+                    state.estimatorMode,
+                    Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
+                Assert.That(
                     state.debugMode,
                     Is.EqualTo(ReferencedPathTracingEnvironmentDebugMode.Combined));
                 Assert.That(state.tint, Is.EqualTo(new Color(0.5f, 0.75f, 1.0f, 1.0f)));
@@ -374,6 +377,18 @@ namespace VividRP.Editor.Tests
                     skyData,
                     settings);
                 settings.environmentCameraVisible.value = true;
+                settings.environmentEstimatorMode.value =
+                    ReferencedPathTracingEnvironmentEstimatorMode.LightOnly;
+                var lightOnly = ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+                settings.environmentEstimatorMode.value =
+                    ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly;
+                var estimatorBsdfOnly = ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+                settings.environmentEstimatorMode.value =
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis;
                 settings.environmentSamplingMode.value =
                     ReferencedPathTracingEnvironmentSamplingMode.BsdfOnly;
                 var bsdfOnly = ReferencedPathTracingEnvironmentState.Resolve(
@@ -412,6 +427,16 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     hidden.samplingSignature,
                     Is.EqualTo(original.samplingSignature));
+                Assert.That(lightOnly.signature, Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    lightOnly.samplingSignature,
+                    Is.EqualTo(original.samplingSignature));
+                Assert.That(
+                    estimatorBsdfOnly.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    estimatorBsdfOnly.samplingSignature,
+                    Is.EqualTo(original.samplingSignature));
                 Assert.That(bsdfOnly.signature, Is.Not.EqualTo(original.signature));
                 Assert.That(
                     bsdfOnly.samplingSignature,
@@ -429,6 +454,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(bsdfOnly.importanceSamplingEnabled, Is.False);
                 Assert.That(bsdfOnly.neeEnabled, Is.False);
                 Assert.That(bsdfOnly.lightingEnabled, Is.True);
+                Assert.That(lightOnly.neeEnabled, Is.True);
+                Assert.That(estimatorBsdfOnly.neeEnabled, Is.False);
                 Assert.That(uniformSphere.importanceSamplingEnabled, Is.False);
                 Assert.That(uniformSphere.neeEnabled, Is.True);
             }

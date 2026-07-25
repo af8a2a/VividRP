@@ -416,6 +416,35 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - Combined light-pick probability 改变后均值保持稳定。
 - 通过 HDRI rotation/intensity matrix 和 bright-sun HDRI regression。
 
+**Implementation checkpoint (2026-07-25)**
+
+- shader common contract 已加入数值稳定的 power heuristic。实现先用两侧 PDF 的最大值
+  归一化再平方，避免极尖锐 glossy PDF 溢出；light-sampled estimator 使用
+  `PowerHeuristic(p_light, p_bsdf)`，其中 `p_light` 仍是包含离散环境选择概率的
+  combined solid-angle PDF。
+- Raygen 现在跨 bounce 保存 OpenPBR 返回的 combined BSDF PDF 和 sampled-lobe delta
+  标志。BSDF miss 重新评估同一方向的 combined environment light PDF，并使用
+  `PowerHeuristic(p_bsdf, p_light)`；throughput 已包含 `f * cos(theta) / p_bsdf`，
+  因此 miss 只乘 MIS 权重，不重复除 PDF。
+- OpenPBR vendor contract 已确认 `OpenPBR_BsdfLobeTypeSpecular` 表示 singular/delta
+  event，而 `Glossy` 仍是可与 environment NEE 竞争的连续分布。Delta miss 固定保留
+  权重 1，不向其应用不可达的连续 light PDF。
+- `ReferencedPathTracingSettingsVolume` 新增 `Environment Estimator Mode`：
+  `MIS` 为默认 production 路径；`Light Only` 关闭非 delta BSDF miss；
+  `BSDF Only` 从 CPU state gate 关闭 environment NEE，并令 miss 权重为 1。
+  Light Only 仍保留 delta miss；当 NEE 被 sampling mode 关闭或目标方向的 light PDF
+  为 0/无效时，也回退 BSDF estimator，确保 proposal 无 support 时不丢能量。
+- Estimator mode 进入完整 environment signature，因此切换模式会正确重置 progressive
+  accumulation；它不进入 `samplingSignature`，所以 Light Only/BSDF Only/MIS 对照不会
+  无谓重建同一 HDRI importance distribution。
+- C# state/default tests 已覆盖 MIS 默认值、各 estimator 对 NEE gate 的影响，以及
+  estimator 切换只失效 accumulation 而不失效 distribution cache。Editor Tests 项目
+  编译通过，Unity 6000.7 DX12 已重新编译 ray-tracing shader 与 StandardLit shader，
+  未出现 E4 shader error。
+- E4 的积分器闭环已完成；high-SPP 三估计器均值、rough/near-mirror/metal corpus、
+  bright-sun HDRI 与 combined light-pick probability 图像统计回归仍需在 canonical
+  GPU validation corpus 中执行后，才能关闭全部 acceptance。
+
 #### E5: Background/Lighting Resolution, Cache and Exposure Integration
 
 **Goal**

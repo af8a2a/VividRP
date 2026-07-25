@@ -14,6 +14,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool lightingEnabled,
             bool cameraVisible,
             ReferencedPathTracingEnvironmentSamplingMode samplingMode,
+            ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
             ReferencedPathTracingEnvironmentDebugMode debugMode,
             Color tint,
             float intensityMultiplier,
@@ -26,6 +27,7 @@ namespace VividRP.Runtime.RenderPass.Core
             this.lightingEnabled = lightingEnabled;
             this.cameraVisible = cameraVisible;
             this.samplingMode = samplingMode;
+            this.estimatorMode = estimatorMode;
             this.debugMode = debugMode;
             importanceSamplingEnabled =
                 lightingEnabled
@@ -34,7 +36,9 @@ namespace VividRP.Runtime.RenderPass.Core
             neeEnabled =
                 lightingEnabled
                 && samplingMode
-                    != ReferencedPathTracingEnvironmentSamplingMode.BsdfOnly;
+                    != ReferencedPathTracingEnvironmentSamplingMode.BsdfOnly
+                && estimatorMode
+                    != ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly;
             this.tint = tint;
             this.intensityMultiplier = intensityMultiplier;
             this.rotation = rotation;
@@ -46,6 +50,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 lightingEnabled,
                 cameraVisible,
                 samplingMode,
+                estimatorMode,
                 debugMode,
                 tint,
                 intensityMultiplier,
@@ -71,6 +76,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal bool importanceSamplingEnabled { get; }
         internal bool neeEnabled { get; }
         internal ReferencedPathTracingEnvironmentSamplingMode samplingMode { get; }
+        internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
         internal ReferencedPathTracingEnvironmentDebugMode debugMode { get; }
         internal Color tint { get; }
         internal float intensityMultiplier { get; }
@@ -97,6 +103,9 @@ namespace VividRP.Runtime.RenderPass.Core
             var samplingMode = useVolumeSettings
                 ? SanitizeSamplingMode(settings.environmentSamplingMode.value)
                 : ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
+            var estimatorMode = useVolumeSettings
+                ? SanitizeEstimatorMode(settings.environmentEstimatorMode.value)
+                : ReferencedPathTracingEnvironmentEstimatorMode.Mis;
             var debugMode = useVolumeSettings
                 ? SanitizeDebugMode(settings.environmentDebugMode.value)
                 : ReferencedPathTracingEnvironmentDebugMode.Combined;
@@ -111,6 +120,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     false,
                     false,
                     samplingMode,
+                    estimatorMode,
                     debugMode,
                     Color.white,
                     0.0f,
@@ -136,6 +146,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 lightingRequested && hasRadiance,
                 cameraVisibilityRequested,
                 samplingMode,
+                estimatorMode,
                 debugMode,
                 tint,
                 intensityMultiplier,
@@ -187,6 +198,19 @@ namespace VividRP.Runtime.RenderPass.Core
             }
         }
 
+        private static ReferencedPathTracingEnvironmentEstimatorMode SanitizeEstimatorMode(
+            ReferencedPathTracingEnvironmentEstimatorMode mode)
+        {
+            switch (mode)
+            {
+                case ReferencedPathTracingEnvironmentEstimatorMode.LightOnly:
+                case ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly:
+                    return mode;
+                default:
+                    return ReferencedPathTracingEnvironmentEstimatorMode.Mis;
+            }
+        }
+
         private static Color SanitizeTint(Color value)
         {
             return new Color(
@@ -211,6 +235,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool lightingEnabled,
             bool cameraVisible,
             ReferencedPathTracingEnvironmentSamplingMode samplingMode,
+            ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
             ReferencedPathTracingEnvironmentDebugMode debugMode,
             Color tint,
             float intensityMultiplier,
@@ -224,6 +249,7 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, lightingEnabled);
             Hash(ref hash, cameraVisible);
             Hash(ref hash, (uint)samplingMode);
+            Hash(ref hash, (uint)estimatorMode);
             Hash(ref hash, (uint)debugMode);
             Hash(ref hash, tint.r);
             Hash(ref hash, tint.g);

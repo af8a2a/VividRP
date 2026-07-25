@@ -19,6 +19,16 @@ namespace VividRP.Runtime
         IndirectMissOnly = 3
     }
 
+    public enum ReferencedPathTracingEnvironmentEstimatorMode
+    {
+        [InspectorName("MIS")]
+        Mis = 0,
+        [InspectorName("Light Only")]
+        LightOnly = 1,
+        [InspectorName("BSDF Only")]
+        BsdfOnly = 2
+    }
+
     [Serializable]
     public sealed class ReferencedPathTracingEnvironmentSamplingModeParameter
         : VolumeParameter<ReferencedPathTracingEnvironmentSamplingMode>
@@ -44,6 +54,18 @@ namespace VividRP.Runtime
     }
 
     [Serializable]
+    public sealed class ReferencedPathTracingEnvironmentEstimatorModeParameter
+        : VolumeParameter<ReferencedPathTracingEnvironmentEstimatorMode>
+    {
+        public ReferencedPathTracingEnvironmentEstimatorModeParameter(
+            ReferencedPathTracingEnvironmentEstimatorMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
     [VolumeComponentMenu("VividRP/Path Tracing/Reference Path Tracing")]
     public sealed class ReferencedPathTracingSettingsVolume : VolumeComponent
     {
@@ -62,6 +84,13 @@ namespace VividRP.Runtime
             new(ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling);
 
         [Tooltip(
+            "Selects how environment NEE and BSDF misses are combined. MIS is the production " +
+            "estimator; Light Only and BSDF Only are unbiased validation modes. Delta BSDF " +
+            "events retain their only reachable BSDF-miss path in every mode.")]
+        public ReferencedPathTracingEnvironmentEstimatorModeParameter environmentEstimatorMode =
+            new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+
+        [Tooltip(
             "Selects the reference environment contribution shown in the resolved path-tracing output. " +
             "The physical AOVs remain unchanged.")]
         public ReferencedPathTracingEnvironmentDebugModeParameter environmentDebugMode =
@@ -74,6 +103,9 @@ namespace VividRP.Runtime
             environmentSamplingMode ??=
                 new ReferencedPathTracingEnvironmentSamplingModeParameter(
                     ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling);
+            environmentEstimatorMode ??=
+                new ReferencedPathTracingEnvironmentEstimatorModeParameter(
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis);
             environmentDebugMode ??=
                 new ReferencedPathTracingEnvironmentDebugModeParameter(
                     ReferencedPathTracingEnvironmentDebugMode.Combined);

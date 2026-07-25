@@ -9,6 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
     /// path and performs next-event estimation against the main directional light, the active
     /// HDRI environment, plus ReGIR point, spot, rectangle, and tube-light reservoirs at every hit.
+    /// Environment NEE and BSDF misses are combined with power-heuristic MIS and delta-aware gates.
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
@@ -75,6 +76,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedEnvironmentNeeEnabled");
         private static readonly int EnvironmentSamplingModeId =
             Shader.PropertyToID("_ReferencedEnvironmentSamplingMode");
+        private static readonly int EnvironmentEstimatorModeId =
+            Shader.PropertyToID("_ReferencedEnvironmentEstimatorMode");
         private static readonly int EnvironmentDebugModeId =
             Shader.PropertyToID("_ReferencedEnvironmentDebugMode");
         private static readonly int CameraClearColorId =
@@ -597,6 +600,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var neeEnabled =
                 hasEnvironmentBinding && m_EnvironmentState.neeEnabled ? 1 : 0;
             var samplingMode = (int)m_EnvironmentState.samplingMode;
+            var estimatorMode = (int)m_EnvironmentState.estimatorMode;
             var debugMode = (int)m_EnvironmentState.debugMode;
             var clearColor = m_CameraBackgroundState.clearColor;
             var cameraClearColor = new Vector4(
@@ -615,6 +619,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 importanceSamplingEnabled);
             cmd.SetGlobalInt(EnvironmentNeeEnabledId, neeEnabled);
             cmd.SetGlobalInt(EnvironmentSamplingModeId, samplingMode);
+            cmd.SetGlobalInt(EnvironmentEstimatorModeId, estimatorMode);
             cmd.SetGlobalInt(EnvironmentDebugModeId, debugMode);
             cmd.SetGlobalVector(CameraClearColorId, cameraClearColor);
             cmd.SetGlobalInt(CameraSkyEnabledId, cameraSkyEnabled);
@@ -647,6 +652,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 EnvironmentSamplingModeId,
                 samplingMode);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentEstimatorModeId,
+                estimatorMode);
             cmd.SetRayTracingIntParam(
                 m_RayTracingShader,
                 EnvironmentDebugModeId,

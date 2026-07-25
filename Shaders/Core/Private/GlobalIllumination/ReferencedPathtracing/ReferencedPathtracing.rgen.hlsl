@@ -188,6 +188,8 @@ void RayGenReferencedPathtracing()
     float3 environmentDirectSpecularRadiance = 0.0;
     float cameraBackgroundAlpha = 0.0;
     float3 throughput = 1.0;
+    float previousBsdfPdf = 0.0;
+    bool previousBsdfWasDelta = false;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
     uint primaryLobeClass = 0u;
@@ -252,11 +254,17 @@ void RayGenReferencedPathtracing()
             }
             else
             {
-                // E3 deliberately keeps the BSDF-sampled miss estimator at weight one.
-                // E4 will apply bidirectional MIS against the environment-light PDF.
                 float3 environmentRadiance =
                     ReferencedPathtracingEvaluateLightingEnvironment(ray.Direction);
-                float3 environmentContribution = throughput * environmentRadiance;
+                float environmentLightPdf =
+                    ReferencedPathtracingEvaluateEnvironmentLightPdf(ray.Direction);
+                float bsdfEstimatorWeight =
+                    ReferencedPathtracingGetEnvironmentBsdfEstimatorWeight(
+                        previousBsdfPdf,
+                        environmentLightPdf,
+                        previousBsdfWasDelta);
+                float3 environmentContribution =
+                    throughput * environmentRadiance * bsdfEstimatorWeight;
                 if (IsFiniteReferencedPathtracingRadiance(environmentContribution))
                 {
                     if (primaryLobeClass == 1u)
@@ -390,6 +398,10 @@ void RayGenReferencedPathtracing()
             && (any(payload.environmentDirectDiffuseRadiance > 0.0)
                 || any(payload.environmentDirectSpecularRadiance > 0.0)))
         {
+            float lightEstimatorWeight =
+                ReferencedPathtracingGetEnvironmentLightEstimatorWeight(
+                    payload.environmentLightPdf,
+                    payload.environmentBsdfPdf);
             float3 environmentDirectionWS =
                 normalize(payload.environmentDirectionWS);
             float visibility = TraceReferencedPathtracingVisibility(
@@ -399,9 +411,11 @@ void RayGenReferencedPathtracing()
                 kReferencedPathtracingInfiniteDistance);
             float3 directDiffuse = throughput
                 * payload.environmentDirectDiffuseRadiance
+                * lightEstimatorWeight
                 * visibility;
             float3 directSpecular = throughput
                 * payload.environmentDirectSpecularRadiance
+                * lightEstimatorWeight
                 * visibility;
 
             if (IsFiniteReferencedPathtracingRadiance(directDiffuse)
@@ -440,6 +454,8 @@ void RayGenReferencedPathtracing()
                 specularRayDirectionWS = normalize(payload.nextDirectionWS);
         }
 
+        previousBsdfPdf = payload.nextPdf;
+        previousBsdfWasDelta = payload.nextLobeIsDelta != 0u;
         throughput *= payload.nextThroughputWeight;
         if (!IsFiniteReferencedPathtracingRadiance(throughput)
             || MaxReferencedPathtracingComponent(throughput) <= 0.0)

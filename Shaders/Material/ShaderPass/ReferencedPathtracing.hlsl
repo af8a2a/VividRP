@@ -602,6 +602,12 @@ void StandardLitReferencedPathtracingClosestHit(
             payload.nextLobeClass = (sampledLobeType & OpenPBR_BsdfLobeTypeDiffuse) != 0u
                 ? 1u
                 : 2u;
+            // OpenPBR uses the Specular flag for a singular (delta) event. Glossy
+            // reflection remains non-delta and competes with environment NEE.
+            payload.nextLobeIsDelta =
+                (sampledLobeType & OpenPBR_BsdfLobeTypeSpecular) != 0u
+                    ? 1u
+                    : 0u;
         }
     }
 

@@ -7,7 +7,7 @@ namespace VividRP.Editor.Tests
     public sealed class ReferencedPathTracingSettingsVolumeTests
     {
         [Test]
-        public void Defaults_EnableHdriLightingVisibilityAndImportanceSampling()
+        public void Defaults_EnableHdriLightingVisibilityImportanceSamplingAndMis()
         {
             var volume = ScriptableObject.CreateInstance<ReferencedPathTracingSettingsVolume>();
 
@@ -19,6 +19,9 @@ namespace VividRP.Editor.Tests
                     volume.environmentSamplingMode.value,
                     Is.EqualTo(
                         ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling));
+                Assert.That(
+                    volume.environmentEstimatorMode.value,
+                    Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
                 Assert.That(
                     volume.environmentDebugMode.value,
                     Is.EqualTo(ReferencedPathTracingEnvironmentDebugMode.Combined));

@@ -248,7 +248,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DirectionalLightSampling_UsesUniformSolidAngleAndReservesMisPayload()
+        public void DirectionalLightSampling_UsesUniformSolidAngleAndLightBsdfMis()
         {
             var commonSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
@@ -274,17 +274,44 @@ namespace VividRP.Editor.Tests
             Assert.That(commonSource, Does.Contain("float mainLightBsdfPdf;"));
             Assert.That(commonSource, Does.Contain("uint mainLightIsDelta;"));
             Assert.That(
-                closestHitSource,
-                Does.Contain("VividReferencedPathtracingSampleMainDirectionalLight"));
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf"));
+            Assert.That(
+                commonSource,
+                Does.Contain("lightPdf = rcp(solidAngle);"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateMainDirectionalLightPdf"));
             Assert.That(
                 closestHitSource,
-                Does.Contain("rcp(2.0 * PI * oneMinusCosThetaMax)"));
+                Does.Contain("ReferencedPathtracingSampleMainDirectionalLight"));
             Assert.That(
                 closestHitSource,
                 Does.Contain("openpbr_pdf(preparedBsdf, mainLightDirectionWS)"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain("payload.mainLightDirectionWS"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingGetMainLightEstimatorWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingGetMainBsdfEstimatorWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "mainLightIlluminance * mainLightPdfForBsdfSample"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("payload.nextThroughputWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "TraceReferencedPathtracingMainLightVisibility"));
             Assert.That(
                 rayGenerationSource,
                 Does.Not.Contain("normalize(_ReferencedMainLightDirectionWS.xyz)"));

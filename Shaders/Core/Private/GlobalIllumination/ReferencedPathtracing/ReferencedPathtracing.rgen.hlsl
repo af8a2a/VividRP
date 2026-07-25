@@ -151,6 +151,47 @@ float TraceReferencedPathtracingVisibility(
     return visibilityPayload.hit == 0u ? 1.0 : 0.0;
 }
 
+float TraceReferencedPathtracingMainLightVisibility(
+    float3 positionWS,
+    float3 faceNormalWS,
+    float3 lightDirectionWS)
+{
+    float shadowStrength = saturate(_ReferencedMainLightShadowStrength);
+    if (shadowStrength <= 0.0)
+        return 1.0;
+
+    float tracedVisibility = TraceReferencedPathtracingVisibility(
+        positionWS,
+        faceNormalWS,
+        lightDirectionWS,
+        max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance));
+    return lerp(1.0, tracedVisibility, shadowStrength);
+}
+
+void AccumulateReferencedPathtracingMainLightRadiance(
+    float3 contribution,
+    uint bounceIndex,
+    uint primaryLobeClass,
+    inout float3 directLightingRadiance,
+    inout float3 diffuseRadiance,
+    inout float3 specularRadiance)
+{
+    if (bounceIndex == 0u)
+    {
+        // A distant-light sample has no finite hit distance for REBLUR. Keep primary
+        // direct lighting in its dedicated AOV and converge it through accumulation.
+        directLightingRadiance += contribution;
+    }
+    else if (primaryLobeClass == 1u)
+    {
+        diffuseRadiance += contribution;
+    }
+    else if (primaryLobeClass == 2u)
+    {
+        specularRadiance += contribution;
+    }
+}
+
 [shader("raygeneration")]
 void RayGenReferencedPathtracing()
 {
@@ -320,8 +361,6 @@ void RayGenReferencedPathtracing()
 
         // Directional light RGB is photometric illuminance in lux. For a uniform solid-angle
         // proposal, distant radiance divided by the light PDF integrates back to illuminance.
-        // The closest-hit OpenPBR response already includes NdotL, so this phase-one estimator
-        // remains response * illuminance; the stored PDFs are reserved for the MIS phase.
         float3 mainLightIlluminance = max(_ReferencedMainLightColor.rgb, 0.0);
         float mainLightDirectionLengthSquared = dot(
             payload.mainLightDirectionWS,
@@ -331,45 +370,77 @@ void RayGenReferencedPathtracing()
             && (any(payload.mainLightDiffuseBsdf > 0.0)
                 || any(payload.mainLightSpecularBsdf > 0.0)))
         {
-            float mainLightShadowStrength =
-                saturate(_ReferencedMainLightShadowStrength);
-            float visibility = 1.0;
-            if (mainLightShadowStrength > 0.0)
-            {
-                float tracedVisibility = TraceReferencedPathtracingVisibility(
-                    payload.positionWS,
-                    normalize(payload.faceNormalWS),
-                    payload.mainLightDirectionWS
-                        * rsqrt(mainLightDirectionLengthSquared),
-                    max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance));
-                visibility = lerp(
-                    1.0,
-                    tracedVisibility,
-                    mainLightShadowStrength);
-            }
+            float3 mainLightDirectionWS = payload.mainLightDirectionWS
+                * rsqrt(mainLightDirectionLengthSquared);
+            float lightEstimatorWeight =
+                ReferencedPathtracingGetMainLightEstimatorWeight(
+                    payload.mainLightLightPdf,
+                    payload.mainLightBsdfPdf,
+                    payload.mainLightIsDelta);
+            float visibility = TraceReferencedPathtracingMainLightVisibility(
+                payload.positionWS,
+                normalize(payload.faceNormalWS),
+                mainLightDirectionWS);
             float3 directDiffuse = throughput
                 * payload.mainLightDiffuseBsdf
                 * mainLightIlluminance
+                * lightEstimatorWeight
                 * visibility;
             float3 directSpecular = throughput
                 * payload.mainLightSpecularBsdf
                 * mainLightIlluminance
+                * lightEstimatorWeight
                 * visibility;
+            AccumulateReferencedPathtracingMainLightRadiance(
+                directDiffuse + directSpecular,
+                bounceIndex,
+                primaryLobeClass,
+                directLightingRadiance,
+                diffuseRadiance,
+                specularRadiance);
+        }
 
-            if (bounceIndex == 0u)
+        // Evaluate the same finite sun disk with the path's BSDF proposal. Doing this at the
+        // current vertex, rather than only on a later miss, preserves artistic shadowStrength
+        // semantics and uses the exact same visibility interval as light-sampled NEE.
+        if (any(mainLightIlluminance > 0.0)
+            && payload.nextPdf > 0.0
+            && any(payload.nextThroughputWeight > 0.0))
+        {
+            float mainLightPdfForBsdfSample;
+            if (ReferencedPathtracingEvaluateMainDirectionalLightPdf(
+                    payload.nextDirectionWS,
+                    mainLightPdfForBsdfSample))
             {
-                // A distant-light sample has no finite hit distance for REBLUR. Keep primary
-                // direct lighting in its dedicated AOV and let progressive accumulation converge
-                // the sampled penumbra instead of assigning an invalid indirect hit distance.
-                directLightingRadiance += directDiffuse + directSpecular;
-            }
-            else if (primaryLobeClass == 1u)
-            {
-                diffuseRadiance += directDiffuse + directSpecular;
-            }
-            else if (primaryLobeClass == 2u)
-            {
-                specularRadiance += directDiffuse + directSpecular;
+                float bsdfEstimatorWeight =
+                    ReferencedPathtracingGetMainBsdfEstimatorWeight(
+                        payload.nextPdf,
+                        mainLightPdfForBsdfSample,
+                        payload.nextLobeIsDelta);
+                float visibility =
+                    TraceReferencedPathtracingMainLightVisibility(
+                        payload.positionWS,
+                        normalize(payload.faceNormalWS),
+                        normalize(payload.nextDirectionWS));
+                // Uniform distant radiance is illuminance divided by disk solid angle.
+                float3 mainLightRadiance =
+                    mainLightIlluminance * mainLightPdfForBsdfSample;
+                float3 bsdfSampledDirect = throughput
+                    * payload.nextThroughputWeight
+                    * mainLightRadiance
+                    * bsdfEstimatorWeight
+                    * visibility;
+                if (IsFiniteReferencedPathtracingRadiance(
+                        bsdfSampledDirect))
+                {
+                    AccumulateReferencedPathtracingMainLightRadiance(
+                        bsdfSampledDirect,
+                        bounceIndex,
+                        primaryLobeClass,
+                        directLightingRadiance,
+                        diffuseRadiance,
+                        specularRadiance);
+                }
             }
         }
 

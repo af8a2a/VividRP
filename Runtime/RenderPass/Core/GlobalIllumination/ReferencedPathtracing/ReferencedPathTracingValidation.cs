@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 1;
+        internal const int Version = 2;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,

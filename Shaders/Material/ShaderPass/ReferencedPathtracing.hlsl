@@ -69,75 +69,6 @@ bool VividReferencedPathtracingIsFinite(float2 value)
     return !any(isnan(value)) && !any(isinf(value));
 }
 
-float VividReferencedPathtracingOneMinusCosFromSinSquared(float sinThetaSquared)
-{
-    sinThetaSquared = saturate(sinThetaSquared);
-    return sinThetaSquared < 0.01
-        ? sinThetaSquared * (0.5 + 0.125 * sinThetaSquared)
-        : 1.0 - sqrt(max(1.0 - sinThetaSquared, 0.0));
-}
-
-void VividReferencedPathtracingBuildDirectionalBasis(
-    float3 directionWS,
-    out float3 basisX,
-    out float3 basisY)
-{
-    float signZ = directionWS.z >= 0.0 ? 1.0 : -1.0;
-    float a = -rcp(signZ + directionWS.z);
-    float b = directionWS.x * directionWS.y * a;
-    basisX = float3(
-        1.0 + signZ * directionWS.x * directionWS.x * a,
-        signZ * b,
-        -signZ * directionWS.x);
-    basisY = float3(
-        b,
-        signZ + directionWS.y * directionWS.y * a,
-        -directionWS.y);
-}
-
-void VividReferencedPathtracingSampleMainDirectionalLight(
-    float3 centerDirectionWS,
-    float2 randomSample,
-    out float3 sampledDirectionWS,
-    out float lightPdf,
-    out uint isDelta)
-{
-    sampledDirectionWS = centerDirectionWS;
-    lightPdf = 0.0;
-    isDelta = 1u;
-
-    float halfAngularDiameter = 0.5
-        * clamp(_ReferencedMainLightAngularDiameter, 0.0, 0.5 * PI);
-    float sinThetaMax = sin(halfAngularDiameter);
-    float sinThetaMaxSquared = sinThetaMax * sinThetaMax;
-    if (sinThetaMaxSquared <= 1e-12)
-        return;
-
-    float oneMinusCosThetaMax =
-        VividReferencedPathtracingOneMinusCosFromSinSquared(
-            sinThetaMaxSquared);
-    float cosTheta = 1.0
-        - oneMinusCosThetaMax * saturate(randomSample.y);
-    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
-    float phi = 2.0 * PI * saturate(randomSample.x);
-    float sinPhi;
-    float cosPhi;
-    sincos(phi, sinPhi, cosPhi);
-
-    float3 basisX;
-    float3 basisY;
-    VividReferencedPathtracingBuildDirectionalBasis(
-        centerDirectionWS,
-        basisX,
-        basisY);
-    sampledDirectionWS = normalize(
-        basisX * (sinTheta * cosPhi)
-        + basisY * (sinTheta * sinPhi)
-        + centerDirectionWS * cosTheta);
-    lightPdf = rcp(2.0 * PI * oneMinusCosThetaMax);
-    isDelta = 0u;
-}
-
 bool VividReferencedPathtracingResolveRectangleBarnDoor(
     VividReGIRLightData light,
     float3 positionWS,
@@ -557,7 +488,7 @@ void StandardLitReferencedPathtracingClosestHit(
     float3 mainLightDirectionWS;
     float mainLightLightPdf;
     uint mainLightIsDelta;
-    VividReferencedPathtracingSampleMainDirectionalLight(
+    ReferencedPathtracingSampleMainDirectionalLight(
         normalize(_ReferencedMainLightDirectionWS.xyz),
         payload.mainLightRandom,
         mainLightDirectionWS,

@@ -371,6 +371,160 @@ float ReferencedPathtracingPowerHeuristic(float pdfA, float pdfB)
     return squaredA / max(squaredA + squaredB, 1e-20);
 }
 
+float ReferencedPathtracingOneMinusCosFromSinSquared(float sinThetaSquared)
+{
+    sinThetaSquared = saturate(sinThetaSquared);
+    return sinThetaSquared < 0.01
+        ? sinThetaSquared * (0.5 + 0.125 * sinThetaSquared)
+        : 1.0 - sqrt(max(1.0 - sinThetaSquared, 0.0));
+}
+
+void ReferencedPathtracingBuildDirectionalBasis(
+    float3 directionWS,
+    out float3 basisX,
+    out float3 basisY)
+{
+    float signZ = directionWS.z >= 0.0 ? 1.0 : -1.0;
+    float a = -rcp(signZ + directionWS.z);
+    float b = directionWS.x * directionWS.y * a;
+    basisX = float3(
+        1.0 + signZ * directionWS.x * directionWS.x * a,
+        signZ * b,
+        -signZ * directionWS.x);
+    basisY = float3(
+        b,
+        signZ + directionWS.y * directionWS.y * a,
+        -directionWS.y);
+}
+
+bool ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
+    out float cosThetaMax,
+    out float lightPdf)
+{
+    cosThetaMax = 1.0;
+    lightPdf = 0.0;
+
+    float halfAngularDiameter = 0.5
+        * clamp(
+            _ReferencedMainLightAngularDiameter,
+            0.0,
+            0.5 * kReferencedPathtracingPi);
+    float sinThetaMax = sin(halfAngularDiameter);
+    float sinThetaMaxSquared = sinThetaMax * sinThetaMax;
+    if (sinThetaMaxSquared <= 1e-12)
+        return false;
+
+    float oneMinusCosThetaMax =
+        ReferencedPathtracingOneMinusCosFromSinSquared(
+            sinThetaMaxSquared);
+    float solidAngle =
+        2.0 * kReferencedPathtracingPi * oneMinusCosThetaMax;
+    if (solidAngle <= 0.0 || isnan(solidAngle) || isinf(solidAngle))
+        return false;
+
+    cosThetaMax = 1.0 - oneMinusCosThetaMax;
+    lightPdf = rcp(solidAngle);
+    return !isnan(lightPdf) && !isinf(lightPdf);
+}
+
+void ReferencedPathtracingSampleMainDirectionalLight(
+    float3 centerDirectionWS,
+    float2 randomSample,
+    out float3 sampledDirectionWS,
+    out float lightPdf,
+    out uint isDelta)
+{
+    sampledDirectionWS = centerDirectionWS;
+    lightPdf = 0.0;
+    isDelta = 1u;
+
+    float cosThetaMax;
+    if (!ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
+            cosThetaMax,
+            lightPdf))
+    {
+        return;
+    }
+
+    float cosTheta = lerp(
+        1.0,
+        cosThetaMax,
+        saturate(randomSample.y));
+    float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+    float phi =
+        2.0 * kReferencedPathtracingPi * saturate(randomSample.x);
+    float sinPhi;
+    float cosPhi;
+    sincos(phi, sinPhi, cosPhi);
+
+    float3 basisX;
+    float3 basisY;
+    ReferencedPathtracingBuildDirectionalBasis(
+        centerDirectionWS,
+        basisX,
+        basisY);
+    sampledDirectionWS = normalize(
+        basisX * (sinTheta * cosPhi)
+        + basisY * (sinTheta * sinPhi)
+        + centerDirectionWS * cosTheta);
+    isDelta = 0u;
+}
+
+bool ReferencedPathtracingEvaluateMainDirectionalLightPdf(
+    float3 directionWS,
+    out float lightPdf)
+{
+    float cosThetaMax;
+    if (!ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
+            cosThetaMax,
+            lightPdf))
+    {
+        return false;
+    }
+
+    float directionLengthSquared = dot(directionWS, directionWS);
+    float centerLengthSquared = dot(
+        _ReferencedMainLightDirectionWS.xyz,
+        _ReferencedMainLightDirectionWS.xyz);
+    if (directionLengthSquared <= 1e-8
+        || centerLengthSquared <= 1e-8
+        || isnan(directionLengthSquared)
+        || isinf(directionLengthSquared)
+        || isnan(centerLengthSquared)
+        || isinf(centerLengthSquared))
+    {
+        lightPdf = 0.0;
+        return false;
+    }
+
+    float3 direction = directionWS * rsqrt(directionLengthSquared);
+    float3 centerDirection = _ReferencedMainLightDirectionWS.xyz
+        * rsqrt(centerLengthSquared);
+    return dot(direction, centerDirection) >= cosThetaMax;
+}
+
+float ReferencedPathtracingGetMainLightEstimatorWeight(
+    float lightPdf,
+    float bsdfPdf,
+    uint lightIsDelta)
+{
+    if (lightIsDelta != 0u)
+        return 1.0;
+
+    return ReferencedPathtracingPowerHeuristic(lightPdf, bsdfPdf);
+}
+
+float ReferencedPathtracingGetMainBsdfEstimatorWeight(
+    float bsdfPdf,
+    float lightPdf,
+    uint sampledBsdfIsDelta)
+{
+    if (sampledBsdfIsDelta != 0u)
+        return 1.0;
+
+    return ReferencedPathtracingPowerHeuristic(bsdfPdf, lightPdf);
+}
+
 float ReferencedPathtracingGetEnvironmentLightEstimatorWeight(
     float lightPdf,
     float bsdfPdf)
@@ -456,7 +610,7 @@ struct ReferencedPathtracingPayload
     float3 mainLightDiffuseBsdf;
     float3 mainLightSpecularBsdf;
     float3 mainLightDirectionWS;
-    // Reserved for distant-light MIS; both PDFs use solid-angle measure.
+    // Distant-light MIS proposal data; both PDFs use solid-angle measure.
     float mainLightLightPdf;
     float mainLightBsdfPdf;
     uint mainLightIsDelta;

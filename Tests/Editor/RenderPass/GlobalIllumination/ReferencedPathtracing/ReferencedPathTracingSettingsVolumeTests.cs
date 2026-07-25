@@ -75,6 +75,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.enableReGIR, Is.False);
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
+                    ReferencedPathTracingIntegratorState.Version,
+                    Is.EqualTo(2));
+                Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
                 Assert.That(

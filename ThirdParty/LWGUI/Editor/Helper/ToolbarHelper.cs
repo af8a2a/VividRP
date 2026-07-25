@@ -472,7 +472,7 @@ namespace LWGUI
                 SetShowCompilerSettingsEnabled(shaderUID, newShowCompilerSettings);
             if (newShowCompilerSettings)
             {
-                if (GUILayout.Button("Install FXC (Windows SDK)", GUILayout.ExpandWidth(false)))
+                if (GUILayout.Button("Install DXC / FXC (Windows SDK)", GUILayout.ExpandWidth(false)))
                 {
                     Application.OpenURL("https://developer.microsoft.com/en-us/windows/downloads/windows-sdk/");
                 }
@@ -547,7 +547,7 @@ namespace LWGUI
             else
             {
                 DrawCompilerSettings(metaDatas);
-                EditorGUILayout.HelpBox("No shader compiler is available. Please install FXC (Windows SDK) or Mali Offline Compiler to view shader performance stats.", MessageType.Warning);
+                EditorGUILayout.HelpBox("No shader compiler is available. Please install DXC / FXC (Windows SDK) or Mali Offline Compiler to view shader performance stats.", MessageType.Warning);
             }
 
             EditorGUIUtility.fieldWidth = fieldWidth;

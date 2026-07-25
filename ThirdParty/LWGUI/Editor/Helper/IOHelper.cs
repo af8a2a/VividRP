@@ -183,7 +183,7 @@ namespace LWGUI
         #region Process
 
         public static bool RunProcess(string     file, string args,
-                                      out string output)
+                                      out string output, bool requireOutput = true)
         {
             output = string.Empty;
 
@@ -227,7 +227,7 @@ namespace LWGUI
             if (string.IsNullOrWhiteSpace(output))
             {
                 output = stderr.ToString();
-                return false;
+                return !requireOutput;
             }
 
             return true;

@@ -27,9 +27,13 @@ Upstream LWGUI loads several icons through fixed asset GUIDs. That does not surv
 
 Starting with the bundled 1.41.0 revision, LWGUI no longer embeds `fxc.exe`; its shader performance monitor locates FXC from an installed Windows SDK.
 
+VividRP also adds a DXC backend under `ThirdParty/LWGUI/Editor/PerformanceMonitor/ShaderCompiler/Dxc`. It preprocesses the selected Unity D3D12 shader variant to standalone HLSL, compiles Shader Model 6 DXIL, and reports IR-level ALU cost, texture operations, instruction count, and SSA temporary values. The SSA count is only a pressure indicator; physical register allocation remains driver and GPU dependent.
+
 When updating LWGUI from upstream, review these files before replacing the embedded copy:
 
 - `ThirdParty/LWGUI/Editor/Helper/LwguiAssetPathUtility.cs`
 - `ThirdParty/LWGUI/Editor/Helper/Helper.cs`
 - `ThirdParty/LWGUI/Editor/Helper/RevertableHelper.cs`
 - `ThirdParty/LWGUI/Editor/Helper/ToolbarHelper.cs`
+- `ThirdParty/LWGUI/Editor/Helper/IOHelper.cs`
+- `ThirdParty/LWGUI/Editor/PerformanceMonitor/ShaderCompiler/Dxc/ShaderCompilerDxc.cs`

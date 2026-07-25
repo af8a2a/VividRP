@@ -273,6 +273,10 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_HistoryMeta"));
             Assert.That(passSource, Does.Contain("m_ResurrectionColor"));
             Assert.That(passSource, Does.Contain("m_ResurrectionMeta"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.TsrHistoryColor"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.TsrHistoryMeta"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.TsrResurrectionColor"));
+            Assert.That(passSource, Does.Contain("CameraHistoryIds.TsrResurrectionMeta"));
             Assert.That(passSource, Does.Contain("TSR_DepthError"));
             Assert.That(passSource, Does.Contain("TSR_ReprojectionBoundary"));
             Assert.That(passSource, Does.Contain("TSR_ThinGeometryCoverage"));
@@ -302,6 +306,60 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("GraphicsDeviceType.Vulkan"));
             Assert.That(passSource, Does.Contain("GraphicsDeviceType.Metal"));
             Assert.That(passSource, Does.Contain("SetKeyword(cmd, shader, TsrWaveOpsKeyword, data.EnableWaveOps)"));
+        }
+
+        [Test]
+        public void CameraState_UsesCameraHistoryAndPreservesValidFrame()
+        {
+            var cameraObject = new GameObject("TSRCameraHistoryTests.Camera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var history = camera.GetVividCameraHistory();
+            var state = new TSRUpscalerPass.CameraState();
+
+            try
+            {
+                history.BeginFrame(8, 8);
+                Assert.That(
+                    state.Prepare(
+                        camera,
+                        new Vector2Int(8, 8),
+                        new Vector2Int(16, 16),
+                        VividTsrQualityMode.Balanced,
+                        16,
+                        1,
+                        false),
+                    Is.True);
+                Assert.That(
+                    history.TryGetTexture(CameraHistoryIds.TsrHistoryColor, out var historyColor),
+                    Is.True);
+                Assert.That(historyColor.FrameCount, Is.EqualTo(2));
+                Assert.That(
+                    history.TryGetTexture(CameraHistoryIds.TsrResurrectionMeta, out var resurrectionMeta),
+                    Is.True);
+                Assert.That(resurrectionMeta.FrameCount, Is.EqualTo(2));
+
+                state.MarkHistoryWritten();
+                history.CommitFrame();
+                history.BeginFrame(8, 8);
+
+                Assert.That(
+                    state.Prepare(
+                        camera,
+                        new Vector2Int(8, 8),
+                        new Vector2Int(16, 16),
+                        VividTsrQualityMode.Balanced,
+                        16,
+                        2,
+                        false),
+                    Is.False);
+            }
+            finally
+            {
+                history.AbortFrame();
+                state.Dispose();
+                CameraHistorySystem.Dispose();
+                Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]

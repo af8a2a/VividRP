@@ -65,13 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string SSRHDRPAccumulateProfilerTag = "SsrAccumulate";
         private const string HybridRayGenName = "RayGenScreenSpaceReflectionsHybridTrace";
         private const string RayTracingRayGenName = "RayGenIntegration";
-        private const string AccumulationHistoryKey = "SSRAccumulation";
-        private const string HDRPAccumulationHistoryKey = "SSRHDRPAccumulation";
-        private const string AccumulationFrameCountHistoryKey = "SSRAccumulationFrameCount";
         private const float HDRPDefaultSpeedRejection = 0.5f;
-        private const string ReBlurLightingDistanceHistoryKey = "SSRReBlurLightingDistance";
-        private const string ReBlurAccumulationHistoryKey = "SSRReBlurAccumulation";
-        private const string ReBlurStabilizationHistoryKey = "SSRReBlurStabilization";
 
         private static readonly uint[] s_InitialDispatchIndirectArgsData = { 0u, 1u, 1u, 0u };
         private static readonly uint[] s_InitialRayDispatchIndirectArgsData = { 0u, 1u, 1u };
@@ -318,36 +312,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_HDRPHitPointTexture;
 
-        private readonly RenderGraphTexture m_DefaultPreviousColorPyramidTexture;
-
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionHDRPAccumPrev",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_HDRPAccumHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionHDRPAccumTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_HDRPAccumHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionAccumPrev",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_AccumulationHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionAccumTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_AccumulationHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionPrevNumFramesAccum",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_NumFramesHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ScreenSpaceReflectionNumFramesAccum",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_NumFramesHistoryCurrent;
 
         [RenderGraphResource(
@@ -374,34 +348,16 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_ReBlurAccumulationTexture;
 
-        [RenderGraphResource(
-            Name = "ReBlurLightingDistanceHistory",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_ReBlurLightingDistanceHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ReBlurLightingDistanceHistoryTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurLightingDistanceHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ReBlurAccumulationHistory",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_ReBlurAccumulationHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ReBlurAccumulationHistoryTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurAccumulationHistoryCurrent;
 
-        [RenderGraphResource(
-            Name = "ReBlurStabilizationHistory",
-            Access = AccessFlags.Read)]
         private readonly RenderGraphTexture m_ReBlurStabilizationHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "ReBlurStabilizationHistoryTexture",
-            Access = AccessFlags.Write)]
         private readonly RenderGraphTexture m_ReBlurStabilizationHistoryCurrent;
 
         private int m_SSRClearKernel = -1;
@@ -441,11 +397,16 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_HistoryInvalidated = true;
         private bool m_HDRPHistoryInvalidated = true;
         private bool m_SupportsRayTracing;
+        private CameraHistoryTexture m_AccumulationHistory;
+        private CameraHistoryTexture m_AccumulationFrameCountHistory;
+        private CameraHistoryTexture m_HDRPAccumulationHistory;
+        private CameraHistoryTexture m_ReBlurLightingDistanceHistory;
+        private CameraHistoryTexture m_ReBlurAccumulationHistory;
+        private CameraHistoryTexture m_ReBlurStabilizationHistory;
 
         private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;
 
-        [RenderGraphResource(Name = "PreviousColorPyramid", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_PreviousColorPyramidTexture;
+        private TextureHandle m_PreviousColorPyramidTexture;
         private Color m_SkyTextureTint = Color.white;
         private Vector4 m_SkyTextureParams;
         private ScreenSpaceReflectionSettingsData m_Settings;
@@ -487,10 +448,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
             m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_HDRPHitPointTexture = CreateColorTexture("ScreenSpaceReflectionHDRPHitPoint", 1, 1, GraphicsFormat.R16G16_UNorm);
-            m_DefaultPreviousColorPyramidTexture = RenderGraphTexture.CreateInput(
-                "PreviousColorPyramid",
-                GraphicsFormat.R16G16B16A16_SFloat);
-            m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
             m_HDRPAccumHistoryPrevious = RenderGraphTexture.CreateInput(
                 "ScreenSpaceReflectionHDRPAccumPrev",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -742,6 +699,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
                         using (new ProfilingScope(cmd, s_SSRRayTracingDenoiseProfilingSampler))
                             DispatchRayTracingReBlur(cmd);
+
+                        MarkVividHistoryWritten();
+                        MarkReBlurHistoryWritten();
                     }
                     else
                     {
@@ -771,6 +731,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
                         using (new ProfilingScope(cmd, s_SSRAccumulateProfilingSampler))
                             DispatchAccumulate(cmd);
+
+                        MarkVividHistoryWritten();
                     }
 
                     executedPath = true;
@@ -779,12 +741,26 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (ShouldRunHDRPPath() && CanExecuteHDRPComparison())
                 {
                     DispatchHDRPComparison(cmd, context);
+                    m_HDRPAccumulationHistory?.MarkWritten();
                     executedPath = true;
                 }
 
                 if (!executedPath)
                     DispatchCopy(cmd);
             }
+        }
+
+        private void MarkVividHistoryWritten()
+        {
+            m_AccumulationHistory?.MarkWritten();
+            m_AccumulationFrameCountHistory?.MarkWritten();
+        }
+
+        private void MarkReBlurHistoryWritten()
+        {
+            m_ReBlurLightingDistanceHistory?.MarkWritten();
+            m_ReBlurAccumulationHistory?.MarkWritten();
+            m_ReBlurStabilizationHistory?.MarkWritten();
         }
 
         public override void Dispose()
@@ -812,10 +788,16 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HasValidAccumulationHistory = false;
             m_HasValidHDRPAccumulationHistory = false;
             m_HasValidReBlurHistory = false;
+            m_AccumulationHistory = null;
+            m_AccumulationFrameCountHistory = null;
+            m_HDRPAccumulationHistory = null;
+            m_ReBlurLightingDistanceHistory = null;
+            m_ReBlurAccumulationHistory = null;
+            m_ReBlurStabilizationHistory = null;
             m_HistoryInvalidated = true;
             m_HDRPHistoryInvalidated = true;
             m_SupportsRayTracing = false;
-            m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
+            m_PreviousColorPyramidTexture = default;
             m_SkyTextureTint = Color.white;
             m_SkyTextureParams = Vector4.zero;
             m_Settings = ScreenSpaceReflectionSettingsData.CreateDefault();
@@ -827,7 +809,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool ResolveColorPyramidHistory(ContextContainer frameData)
         {
             m_UseHistoryColorPyramid = false;
-            SetPreviousColorPyramidTexture(m_DefaultPreviousColorPyramidTexture);
+            SetPreviousColorPyramidTexture(default);
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidSize = Vector4.zero;
@@ -838,14 +820,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var colorPyramidData = frameData.Get<VividColorPyramidData>();
             if (colorPyramidData == null
-                || colorPyramidData.previousColorPyramid == null
+                || !colorPyramidData.previousColorPyramid.IsValid()
                 || colorPyramidData.width <= 0
                 || colorPyramidData.height <= 0)
             {
                 return false;
             }
 
-            SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
             int previousColorPyramidWidth = colorPyramidData.previousWidth > 0
                 ? colorPyramidData.previousWidth
                 : colorPyramidData.width;
@@ -863,6 +844,11 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!colorPyramidData.hasValidHistory)
                 return false;
 
+            SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
+            PassRecorder.RegisterImportedTextureForPass(
+                this,
+                m_PreviousColorPyramidTexture,
+                AccessFlags.Read);
             m_UseHistoryColorPyramid = true;
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 1;
             return true;
@@ -870,6 +856,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareAccumulationHistory(ContextContainer frameData)
         {
+            m_AccumulationHistory = null;
+            m_AccumulationFrameCountHistory = null;
             m_HasValidAccumulationHistory = false;
             m_ConstantBuffer.SsrUseAccumulationHistory = 0;
             m_ConstantBuffer.SsrAccumulationAmount = 1.0f;
@@ -908,16 +896,25 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            bool hasAccumulationHistory = AllocHistoryTexture(
-                AccumulationHistoryKey,
+            var camera = frameData.Get<VividCameraData>()?.camera;
+            bool hasAccumulationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrAccumulation,
                 m_AccumulationHistoryPrevious,
                 m_AccumulationHistoryCurrent,
-                m_AccumulationHistoryCurrent.desc);
-            bool hasFrameCountHistory = AllocHistoryTexture(
-                AccumulationFrameCountHistoryKey,
+                m_AccumulationHistoryCurrent.desc,
+                out m_AccumulationHistory,
+                AccessFlags.Write);
+            bool hasFrameCountHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrAccumulationFrameCount,
                 m_NumFramesHistoryPrevious,
                 m_NumFramesHistoryCurrent,
-                m_NumFramesHistoryCurrent.desc);
+                m_NumFramesHistoryCurrent.desc,
+                out m_AccumulationFrameCountHistory,
+                AccessFlags.Write);
 
             var temporalData = frameData.Get<VividTemporalData>();
             bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;
@@ -931,6 +928,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareHDRPAccumulationHistory(ContextContainer frameData)
         {
+            m_HDRPAccumulationHistory = null;
             m_HasValidHDRPAccumulationHistory = false;
             m_ConstantBuffer.SsrHDRPAccumulationHistorySize = BuildTextureSizeVector(m_Width, m_Height);
             m_ConstantBuffer.SsrHDRPAccumulationHistoryScale = Vector4.one;
@@ -952,17 +950,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            bool hasAccumulationHistory = AllocHistoryTexture(
-                HDRPAccumulationHistoryKey,
+            bool hasAccumulationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                frameData.Get<VividCameraData>()?.camera,
+                CameraHistoryIds.SsrHdrpAccumulation,
                 m_HDRPAccumHistoryPrevious,
                 m_HDRPAccumHistoryCurrent,
-                m_HDRPAccumHistoryCurrent.desc);
-            PassRecorder.TryGetHistoryTextureHandlesForPass(
-                this,
-                HDRPAccumulationHistoryKey,
-                out var previousHistoryHandle,
-                out var currentHistoryHandle,
-                out _);
+                m_HDRPAccumHistoryCurrent.desc,
+                out m_HDRPAccumulationHistory,
+                AccessFlags.Write);
+            var previousHistoryHandle = m_HDRPAccumulationHistory?.GetPrevious();
+            var currentHistoryHandle = m_HDRPAccumulationHistory?.GetCurrent();
 
             RTHandle historyPropertiesHandle = previousHistoryHandle ?? currentHistoryHandle;
             m_ConstantBuffer.SsrHDRPAccumulationHistorySize = ResolvePreviousHistoryTextureSize(
@@ -981,6 +979,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private void PrepareReBlurHistory(ContextContainer frameData)
         {
+            m_ReBlurLightingDistanceHistory = null;
+            m_ReBlurAccumulationHistory = null;
+            m_ReBlurStabilizationHistory = null;
             m_HasValidReBlurHistory = false;
             m_ConstantBuffer.ReBlurHistoryValidity = 0.0f;
 
@@ -1018,21 +1019,34 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!m_ShouldApply || !ShouldRunRayTracingPath())
                 return;
 
-            bool hasLightingHistory = AllocHistoryTexture(
-                ReBlurLightingDistanceHistoryKey,
+            var camera = frameData.Get<VividCameraData>()?.camera;
+            bool hasLightingHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrReBlurLightingDistance,
                 m_ReBlurLightingDistanceHistoryPrevious,
                 m_ReBlurLightingDistanceHistoryCurrent,
-                m_ReBlurLightingDistanceHistoryCurrent.desc);
-            bool hasAccumulationHistory = AllocHistoryTexture(
-                ReBlurAccumulationHistoryKey,
+                m_ReBlurLightingDistanceHistoryCurrent.desc,
+                out m_ReBlurLightingDistanceHistory,
+                AccessFlags.Write);
+            bool hasAccumulationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrReBlurAccumulation,
                 m_ReBlurAccumulationHistoryPrevious,
                 m_ReBlurAccumulationHistoryCurrent,
-                m_ReBlurAccumulationHistoryCurrent.desc);
-            bool hasStabilizationHistory = AllocHistoryTexture(
-                ReBlurStabilizationHistoryKey,
+                m_ReBlurAccumulationHistoryCurrent.desc,
+                out m_ReBlurAccumulationHistory,
+                AccessFlags.Write);
+            bool hasStabilizationHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                camera,
+                CameraHistoryIds.SsrReBlurStabilization,
                 m_ReBlurStabilizationHistoryPrevious,
                 m_ReBlurStabilizationHistoryCurrent,
-                m_ReBlurStabilizationHistoryCurrent.desc);
+                m_ReBlurStabilizationHistoryCurrent.desc,
+                out m_ReBlurStabilizationHistory,
+                AccessFlags.Write);
 
             var temporalData = frameData.Get<VividTemporalData>();
             bool isFirstFrame = temporalData != null && temporalData.isFirstFrame;
@@ -1044,14 +1058,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ConstantBuffer.ReBlurHistoryValidity = m_HasValidReBlurHistory ? 1.0f : 0.0f;
         }
 
-        private void SetPreviousColorPyramidTexture(RenderGraphTexture texture)
+        private void SetPreviousColorPyramidTexture(TextureHandle texture)
         {
-            var resolvedTexture = texture ?? m_DefaultPreviousColorPyramidTexture;
-            if (ReferenceEquals(m_PreviousColorPyramidTexture, resolvedTexture))
-                return;
-
-            m_PreviousColorPyramidTexture = resolvedTexture;
-            m_IsPassResourceLayoutDirty = true;
+            m_PreviousColorPyramidTexture = texture;
         }
 
         private bool ShouldRecordEffect()
@@ -1075,7 +1084,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanSampleHistoryColorPyramid()
         {
             return m_UseHistoryColorPyramid
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true;
+                && m_PreviousColorPyramidTexture.IsValid();
         }
 
         private bool CanSampleSkyFallback()
@@ -1214,7 +1223,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_DepthTexture?.innerHandle.IsValid() == true
                 && m_GBuffer0?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true
+                && m_PreviousColorPyramidTexture.IsValid()
                 && m_SkyTexture?.innerHandle.IsValid() == true;
         }
 
@@ -1350,10 +1359,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SkyTextureId, m_SkyTexture.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRTracingKernel, SSRTileListId, m_TileListBuffer.innerHandle);
-            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (m_PreviousColorPyramidTexture.IsValid())
             {
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
             }
             else
             {
@@ -1412,10 +1420,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 SSRHybridCandidateBufferId,
                 m_HybridCandidateBuffer.innerHandle);
 
-            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (m_PreviousColorPyramidTexture.IsValid())
             {
-                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
             }
             else
             {
@@ -1446,10 +1453,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_HybridCandidateBuffer?.innerHandle.IsValid() == true)
                 cmd.SetRayTracingBufferParam(m_HybridTraceRayTracingShader, SSRHybridCandidateBufferId, m_HybridCandidateBuffer.innerHandle);
 
-            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (m_PreviousColorPyramidTexture.IsValid())
             {
-                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
             }
             else
             {
@@ -1801,10 +1807,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_MotionVectors?.innerHandle.IsValid() == true
                         ? m_MotionVectors.innerHandle
                         : context.renderGraphContext.defaultResources.blackTexture);
-                if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                    && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+                if (m_PreviousColorPyramidTexture.IsValid())
                 {
-                    cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
                 }
                 else
                 {

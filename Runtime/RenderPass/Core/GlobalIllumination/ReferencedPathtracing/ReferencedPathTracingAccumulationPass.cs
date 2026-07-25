@@ -12,7 +12,6 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class ReferencedPathTracingAccumulationPass : ComputePass, IRenderGraphSideEffectPass
     {
         internal const string KernelName = "ReferencedPathTracingAccumulation";
-        internal const string HistoryKey = "ReferencedPathTracingAccumulation";
 
         private const float MatrixResetEpsilon = 1e-6f;
         private const float LightResetEpsilon = 1e-6f;
@@ -28,10 +27,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "PathTracingSampleRadiance", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SampleRadiance;
 
-        [RenderGraphResource(Name = "PathTracingAccumulationPrevious", Access = AccessFlags.Read)]
         private RenderGraphTexture m_AccumulationPrevious;
 
-        [RenderGraphResource(Name = "PathTracingAccumulationCurrent", Access = AccessFlags.WriteAll)]
         private RenderGraphTexture m_AccumulationCurrent;
 
         [RenderGraphResource(Name = "PathTracingResolvedColor", Access = AccessFlags.WriteAll)]
@@ -66,6 +63,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_Kernel = -1;
         private int m_Width = 1;
         private int m_Height = 1;
+        private CameraHistoryTexture m_AccumulationHistory;
         private bool m_HasValidHistory;
         private bool m_UseHistory;
         private float m_InverseSampleCount = 1.0f;
@@ -115,11 +113,15 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwnedTexture(m_AccumulationCurrent, m_Width, m_Height);
             ResizePassOwnedTexture(m_ResolvedColor, m_Width, m_Height);
             ConfigureHistoryDescriptor(m_Width, m_Height);
-            m_HasValidHistory = AllocHistoryTexture(
-                HistoryKey,
+            m_HasValidHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                this,
+                cameraData?.camera,
+                CameraHistoryIds.PathTracingAccumulation,
                 m_AccumulationPrevious,
                 m_AccumulationCurrent,
-                m_HistoryDescriptor);
+                m_HistoryDescriptor,
+                out m_AccumulationHistory,
+                AccessFlags.WriteAll);
 
             PrepareAccumulationState(frameData, cameraData);
             m_AccumulationStates.PurgeDestroyedCameras();
@@ -167,6 +169,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_ComputeShader,
                     ScreenSizeId,
                     new Vector4(m_Width, m_Height, 1.0f / m_Width, 1.0f / m_Height));
+                m_AccumulationHistory?.MarkWritten();
                 cmd.DispatchCompute(
                     m_ComputeShader,
                     m_Kernel,
@@ -183,6 +186,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Kernel = -1;
             m_Width = 1;
             m_Height = 1;
+            m_AccumulationHistory = null;
             m_HasValidHistory = false;
             m_UseHistory = false;
             m_InverseSampleCount = 1.0f;

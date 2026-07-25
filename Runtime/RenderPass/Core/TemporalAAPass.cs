@@ -27,14 +27,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "CameraDepth", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DepthTexture;
 
-        [RenderGraphResource(
-            Name = "TAAHistoryColor",
-            Access = AccessFlags.Read)]
         private RenderGraphTexture m_HistoryColorPrevious;
 
-        [RenderGraphResource(
-            Name = "TAAHistoryColorCurrent",
-            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_HistoryColorCurrent;
 
         [RenderGraphResource(Name = "TAAOutput", Access = AccessFlags.WriteAll)]
@@ -48,6 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private TAASettings m_TAASettings;
         private readonly RenderGraphTextureDesc m_HistoryColorDescriptor =
             RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16G16B16A16_SFloat);
+        private CameraHistoryTexture m_HistoryColor;
         private bool m_HasValidHistory;
         private Vector2 m_Jitter;
         private Vector2 m_PreviousJitter;
@@ -97,14 +92,18 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizePassOwned(m_HistoryColorCurrent, m_Width, m_Height);
 
             var historyDesc = CreateHistoryDescriptor();
+            m_HistoryColor = null;
 
             if (m_TAASettings.Enabled)
             {
-                m_HasValidHistory = AllocHistoryTexture(
-                    "TAAHistoryColor",
+                m_HasValidHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                    this,
+                    cameraData.camera,
+                    CameraHistoryIds.TemporalAa,
                     m_HistoryColorPrevious,
                     m_HistoryColorCurrent,
-                    historyDesc);
+                    historyDesc,
+                    out m_HistoryColor);
             }
             else
             {
@@ -135,6 +134,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ComputeShader = null;
             m_TaaKernel = -1;
             m_CopyKernel = -1;
+            m_HistoryColor = null;
             m_HasValidHistory = false;
         }
 
@@ -197,6 +197,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             int dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
             int dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
+            m_HistoryColor?.MarkWritten();
             cmd.DispatchCompute(m_ComputeShader, m_TaaKernel, dispatchX, dispatchY, 1);
         }
 

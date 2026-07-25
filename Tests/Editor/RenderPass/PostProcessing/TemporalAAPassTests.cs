@@ -26,10 +26,10 @@ namespace VividRP.Editor.Tests
                 "CameraDepth",
                 "Color",
                 "MotionVectors",
-                "TAAHistoryColor",
-                "TAAHistoryColorCurrent",
                 "TAAOutput",
             }));
+            Assert.That(textureEntries.Select(entry => entry.Name), Does.Not.Contain("TAAHistoryColor"));
+            Assert.That(textureEntries.Select(entry => entry.Name), Does.Not.Contain("TAAHistoryColorCurrent"));
         }
 
         [Test]

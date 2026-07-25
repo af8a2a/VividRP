@@ -125,6 +125,8 @@ namespace VividRP.Runtime
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
+            CameraHistory cameraHistory = null;
+            var cameraHistoryFrameActive = false;
             var projectionState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
 
             try
@@ -192,7 +194,16 @@ namespace VividRP.Runtime
                 }
 
                 var graphAsset = m_Asset.RenderGraphAsset;
+                cameraHistory = camera.GetVividCameraHistory();
+                cameraHistory.BeginFrame(
+                    camera.scaledPixelWidth > 0 ? camera.scaledPixelWidth : camera.pixelWidth,
+                    camera.scaledPixelHeight > 0 ? camera.scaledPixelHeight : camera.pixelHeight);
+                cameraHistoryFrameActive = true;
                 PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
+                var cameraData = PassRecorder.GetFrameData().Get<VividCameraData>();
+                cameraHistory.SetReferenceSize(
+                    cameraData?.actualWidth ?? camera.pixelWidth,
+                    cameraData?.actualHeight ?? camera.pixelHeight);
                 using (s_SetupCameraPropertiesMarker.Auto())
                 {
                     context.SetupCameraProperties(camera);
@@ -267,9 +278,18 @@ namespace VividRP.Runtime
                 {
                     RenderSubmittedGizmos(context, camera, graphAsset);
                 }
+
+                cameraHistory.CommitFrame();
+                cameraHistoryFrameActive = false;
             }
             finally
             {
+                if (cameraHistoryFrameActive)
+                {
+                    cameraHistory?.AbortFrame();
+                    cameraHistoryFrameActive = false;
+                }
+
                 if (cmdBuffer != null)
                 {
                     using (s_CommandBufferReleaseMarker.Auto())
@@ -778,6 +798,7 @@ namespace VividRP.Runtime
         protected override void Dispose(bool disposing)
         {
             PassRecorder.Dispose();
+            CameraHistorySystem.Dispose();
             VirtualTextureSystem.Deinitialize();
             SkyManager.Deinitialize();
             LTCAreaLightSystem.Deinitialize();

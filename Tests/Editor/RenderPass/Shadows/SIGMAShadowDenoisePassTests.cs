@@ -1,8 +1,10 @@
 using System.Reflection;
 using System.IO;
+using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.RenderPass.Core.Sigma;
 
@@ -10,6 +12,19 @@ namespace VividRP.Editor.Tests
 {
     public sealed class SIGMAShadowDenoisePassTests
     {
+        [Test]
+        public void Initialize_DoesNotExposeCameraHistoryTextures()
+        {
+            IRenderPass renderPass = new SIGMAShadowDenoisePass();
+
+            var resourceNames = renderPass.Initialize().Textures.Select(resource => resource.Name);
+
+            Assert.That(resourceNames, Does.Not.Contain("HistoryShadow"));
+            Assert.That(resourceNames, Does.Not.Contain("HistoryLength"));
+            Assert.That(resourceNames, Does.Not.Contain("SIGMA_HistoryShadowCurrent"));
+            Assert.That(resourceNames, Does.Not.Contain("SIGMA_HistoryLengthCurrent"));
+        }
+
         [Test]
         public void SIGMAShadowDenoisePass_ClassifyStage_WritesTileTextureBeforeSmoothStage()
         {

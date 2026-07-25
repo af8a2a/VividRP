@@ -9,7 +9,6 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class ColorPyramidPass : ComputePass, IStablePassResourceLayout, IRenderGraphSideEffectPass
     {
-        private const string HistoryKey = "ColorPyramid";
         private const int ThreadGroupSize = 8;
         private const int MaxMipCount = 13;
         private const int AtomicCounterCount = 6;
@@ -65,9 +64,9 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_CurrentColorPyramid;
 
-        private RenderGraphTexture m_PreviousColorPyramid;
         private ComputeShader m_ComputeShader;
         private GraphicsBuffer m_GlobalAtomicImportedBuffer;
+        private CameraHistoryTexture m_ColorPyramidHistory;
         private int m_CopyMip0Kernel = -1;
         private int m_SpdKernel = -1;
         private int m_Width = 1;
@@ -85,7 +84,6 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(nameof(ColorPyramidPass));
             source = RenderGraphTexture.CreateInput("source", GraphicsFormat.R16G16B16A16_SFloat);
             m_GlobalAtomicBuffer = CreateAtomicCounterBuffer("ColorPyramidGlobalAtomic");
-            m_PreviousColorPyramid = CreateColorPyramidTexture("ColorPyramidHistory");
             m_CurrentColorPyramid = CreateColorPyramidTexture("ColorPyramidHistoryCurrent");
         }
 
@@ -117,6 +115,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
+            m_ColorPyramidHistory = null;
             var colorPyramidData = frameData.GetOrCreate<VividColorPyramidData>();
             colorPyramidData.Reset();
 
@@ -129,7 +128,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_NumWorkGroups = m_DispatchGroupCountX * m_DispatchGroupCountY;
 
             ConfigureSourceDescriptor(source, m_Width, m_Height);
-            ConfigurePyramidDescriptor(m_PreviousColorPyramid, "ColorPyramidHistory", m_Width, m_Height, m_MipCount);
             ConfigurePyramidDescriptor(m_CurrentColorPyramid, "ColorPyramidHistoryCurrent", m_Width, m_Height, m_MipCount);
             EnsureAtomicCounterBuffer();
             ZeroAtomicCounterBuffer();
@@ -137,17 +135,20 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!HasValidShader())
                 return;
 
-            var hasValidHistory = AllocHistoryTexture(
-                HistoryKey,
-                m_PreviousColorPyramid,
-                m_CurrentColorPyramid,
-                m_CurrentColorPyramid.desc);
-            PassRecorder.TryGetHistoryTextureHandlesForPass(
-                this,
-                HistoryKey,
-                out var previousColorPyramidHandle,
-                out _,
-                out _);
+            var camera = cameraData?.camera;
+            if (camera == null)
+                return;
+
+            var history = camera.GetVividCameraHistory();
+            var descriptor = CameraHistoryRenderGraphBridge.CreateDescriptor(m_CurrentColorPyramid.desc);
+            m_ColorPyramidHistory = history.GetOrCreateTexture(
+                CameraHistoryIds.ColorPyramid,
+                2,
+                descriptor);
+            var hasValidHistory = m_ColorPyramidHistory.IsValid();
+            var previousColorPyramidHandle = m_ColorPyramidHistory.GetPrevious();
+            var previousColorPyramidTexture = CameraHistoryRenderGraphBridge.Import(m_ColorPyramidHistory, 1);
+            CameraHistoryRenderGraphBridge.Bind(m_CurrentColorPyramid, m_ColorPyramidHistory, 0);
 
             var previousViewportSize = ResolvePreviousColorPyramidViewportSize(
                 previousColorPyramidHandle,
@@ -155,7 +156,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Height);
 
             colorPyramidData.hasValidHistory = hasValidHistory;
-            colorPyramidData.previousColorPyramid = m_PreviousColorPyramid;
+            colorPyramidData.previousColorPyramid = previousColorPyramidTexture;
             colorPyramidData.currentColorPyramid = m_CurrentColorPyramid;
             colorPyramidData.width = m_Width;
             colorPyramidData.height = m_Height;
@@ -176,6 +177,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (!CanExecute())
                     return;
 
+                m_ColorPyramidHistory?.MarkWritten();
                 cmd.SetComputeVectorParam(
                     m_ComputeShader,
                     OutputSizeId,
@@ -217,6 +219,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CopyMip0Kernel = -1;
             m_SpdKernel = -1;
             ReleaseAtomicCounterBuffer();
+            m_ColorPyramidHistory = null;
             m_IsPassResourceLayoutDirty = false;
         }
 

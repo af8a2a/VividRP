@@ -106,6 +106,7 @@ namespace VividRP.Runtime
         public RenderGraphBufferDesc desc;
         private GraphicsBuffer m_ImportedGraphicsBuffer;
         private bool m_OwnsImportedGraphicsBuffer;
+        private bool m_UsesImportedHandle;
         internal BufferHandle innerHandle;
 
         public RenderGraphBuffer()
@@ -139,6 +140,21 @@ namespace VividRP.Runtime
 
         internal bool HasImportedBuffer => m_ImportedGraphicsBuffer != null;
 
+        internal bool HasImportedHandle => m_UsesImportedHandle && innerHandle.IsValid();
+
+        internal void SetImportedHandle(BufferHandle handle)
+        {
+            ClearImportedBuffer();
+            innerHandle = handle;
+            m_UsesImportedHandle = handle.IsValid();
+        }
+
+        internal void ClearImportedHandle()
+        {
+            innerHandle = default;
+            m_UsesImportedHandle = false;
+        }
+
         internal void SetImportedBuffer(GraphicsBuffer graphicsBuffer)
         {
             if (!ReferenceEquals(m_ImportedGraphicsBuffer, graphicsBuffer))
@@ -147,6 +163,7 @@ namespace VividRP.Runtime
             m_ImportedGraphicsBuffer = graphicsBuffer;
             m_OwnsImportedGraphicsBuffer = false;
             innerHandle = default;
+            m_UsesImportedHandle = false;
         }
 
         internal void ClearImportedBuffer()
@@ -155,6 +172,7 @@ namespace VividRP.Runtime
             m_ImportedGraphicsBuffer = null;
             m_OwnsImportedGraphicsBuffer = false;
             innerHandle = default;
+            m_UsesImportedHandle = false;
         }
 
         internal GraphicsBuffer EnsureImportedBuffer()
@@ -174,6 +192,7 @@ namespace VividRP.Runtime
                 m_ImportedGraphicsBuffer = new GraphicsBuffer(requiredTarget, requiredCount, requiredStride);
                 m_OwnsImportedGraphicsBuffer = true;
                 innerHandle = default;
+                m_UsesImportedHandle = false;
             }
 
             return m_ImportedGraphicsBuffer;

@@ -126,10 +126,8 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private RenderGraphTexture m_VBufferLightingFiltered;
 
-        [RenderGraphResource(Name = "VBufferHistory", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VBufferHistory;
 
-        [RenderGraphResource(Name = "VBufferFeedback", Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_VBufferFeedback;
 
         [RenderGraphResource(Name = "DirectionalLights", Access = AccessFlags.Read)]
@@ -203,6 +201,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphBuffer m_FrameDataBigTileVolumetricLightListBuffer;
         private readonly RenderGraphTextureDesc m_VBufferHistoryDescriptor = new();
         private readonly CameraRelativeSystem<VolumetricLightingHistoryState> m_HistoryStates = new();
+        private CameraHistoryTexture m_VBufferLightingHistory;
         private VolumetricLightingHistoryState m_CurrentHistoryState;
         private VBufferParameters m_PreviousVBufferParameters;
         private VBufferParameters m_LastVBufferParameters;
@@ -335,7 +334,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FilterDispatchZ = Mathf.Max(m_Settings.VBufferParameters.SliceCount, 1);
             PrepareClusteredLightingParameters(frameData);
             PrepareDirectionalShadowParameters(frameData);
-            PrepareVBufferHistory();
+            PrepareVBufferHistory(cameraData.camera);
 
             volumetricData.settings = m_Settings;
             volumetricData.shaderVariables = m_ShaderVariables;
@@ -361,6 +360,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (m_VBufferFeedback?.innerHandle.IsValid() != true)
                     return;
 
+                m_VBufferLightingHistory?.MarkWritten();
                 var lightingTarget = m_Settings.GaussianFilteringEnabled ? m_VBufferLightingFiltered : m_VBufferLighting;
                 BindSharedTextures(context, cmd, m_LightingKernel, lightingTarget);
                 BindLightLoopParameters(cmd, m_LightingKernel);
@@ -396,6 +396,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HasValidVBufferHistory = false;
             m_HasLastVBufferParameters = false;
             m_IsFirstFrame = true;
+            m_VBufferLightingHistory = null;
             m_CurrentHistoryState = null;
             m_HistoryStates.Dispose();
         }
@@ -582,8 +583,9 @@ namespace VividRP.Runtime.RenderPass.Core
             SetLightLoopBuffer(cmd, kernel, LogBaseBufferId, m_LogBaseBuffer);
         }
 
-        private void PrepareVBufferHistory()
+        private void PrepareVBufferHistory(Camera camera)
         {
+            m_VBufferLightingHistory = null;
             if (!m_Settings.Enabled || !m_Settings.TemporalReprojectionEnabled)
             {
                 m_HasValidVBufferHistory = false;
@@ -595,12 +597,31 @@ namespace VividRP.Runtime.RenderPass.Core
             var hadLastVBufferParameters = m_HasLastVBufferParameters;
             var historyParametersCompatible = hadLastVBufferParameters
                 && AreVBufferParametersCompatible(m_LastVBufferParameters, m_Settings.VBufferParameters);
-            var registryHasValidHistory = AllocHistoryTexture(
-                "VBufferLighting",
+            if (camera == null)
+            {
+                m_HasValidVBufferHistory = false;
+                return;
+            }
+
+            var history = camera.GetVividCameraHistory();
+            var descriptor = CameraHistoryRenderGraphBridge.CreateDescriptor(CreateVBufferHistoryDescriptor());
+            m_VBufferLightingHistory = history.GetOrCreateTexture(
+                CameraHistoryIds.VolumetricLighting,
+                2,
+                descriptor);
+            CameraHistoryRenderGraphBridge.BindForPass(
+                this,
                 m_VBufferHistory,
+                m_VBufferLightingHistory,
+                1,
+                AccessFlags.Read);
+            CameraHistoryRenderGraphBridge.BindForPass(
+                this,
                 m_VBufferFeedback,
-                CreateVBufferHistoryDescriptor());
-            m_HasValidVBufferHistory = registryHasValidHistory
+                m_VBufferLightingHistory,
+                0,
+                AccessFlags.ReadWrite);
+            m_HasValidVBufferHistory = m_VBufferLightingHistory.IsValid()
                 && historyParametersCompatible
                 && !m_IsFirstFrame;
 

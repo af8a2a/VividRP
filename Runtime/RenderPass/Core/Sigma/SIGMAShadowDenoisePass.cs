@@ -43,22 +43,13 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
 
         // --- history (code-managed, hidden from graph editor) ---
 
-        // Previous-frame read inputs (imported RTHandle by AllocHistoryTextureForPass)
-        [RenderGraphResource(Name = "HistoryShadow",
-            Access = AccessFlags.Read)]
+        // Previous/current history wrappers are imported by CameraHistoryRenderGraphBridge.
         private RenderGraphTexture m_HistoryShadowTexture;
 
-        [RenderGraphResource(Name = "HistoryLength",
-            Access = AccessFlags.Read)]
         private RenderGraphTexture m_HistoryLengthTexture;
 
-        // Current-frame write outputs (persistent history buffers imported when requested)
-        [RenderGraphResource(Name = "SIGMA_HistoryShadowCurrent",
-            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_HistoryShadowCurrent;
 
-        [RenderGraphResource(Name = "SIGMA_HistoryLengthCurrent",
-            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_HistoryLengthCurrent;
 
         // --- external outputs ---
@@ -139,6 +130,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
         private bool m_HistoryInvalidated;
         private bool m_UseRawShadowPassthrough;
         private uint m_MaxStabilizedFrameNum;
+        private CameraHistoryTexture m_ShadowHistory;
+        private CameraHistoryTexture m_HistoryLength;
 
         internal readonly struct ResolvedSigmaSettings
         {
@@ -248,6 +241,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             var sigmaSettings = ResolveSettings(VividVolumeManagerUtility.GetRayTracingSettingsVolume());
             m_MaxStabilizedFrameNum = sigmaSettings.MaxStabilizedFrameNum;
             bool useTemporalStabilization = !m_UseRawShadowPassthrough && m_MaxStabilizedFrameNum > 0;
+            m_ShadowHistory = null;
+            m_HistoryLength = null;
 
             if (m_UseRawShadowPassthrough)
             {
@@ -266,17 +261,25 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             if (lengthDesc != null) lengthDesc = lengthDesc.Clone();
             if (lengthDesc != null) { lengthDesc.Width = m_Width; lengthDesc.Height = m_Height; lengthDesc.EnableRandomWrite = true; }
 
-            bool hasShadowHistory = PassRecorder.AllocHistoryTextureForPass(
-                this, "HistoryShadow",
-                previous: m_HistoryShadowTexture,
-                current:  useTemporalStabilization ? m_HistoryShadowCurrent : null,
-                desc:     shadowDesc);
+            bool hasShadowHistory = useTemporalStabilization
+                && CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                    this,
+                    camera,
+                    CameraHistoryIds.SigmaShadow,
+                    m_HistoryShadowTexture,
+                    m_HistoryShadowCurrent,
+                    shadowDesc,
+                    out m_ShadowHistory);
 
-            bool hasLengthHistory = PassRecorder.AllocHistoryTextureForPass(
-                this, "HistoryLength",
-                previous: m_HistoryLengthTexture,
-                current:  useTemporalStabilization ? m_HistoryLengthCurrent : null,
-                desc:     lengthDesc);
+            bool hasLengthHistory = useTemporalStabilization
+                && CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                    this,
+                    camera,
+                    CameraHistoryIds.SigmaHistoryLength,
+                    m_HistoryLengthTexture,
+                    m_HistoryLengthCurrent,
+                    lengthDesc,
+                    out m_HistoryLength);
 
             var hadHistoryInvalidation = m_HistoryInvalidated;
             m_HasValidHistory = useTemporalStabilization
@@ -410,6 +413,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
                     nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_Shadow_Translucency, m_DenoisedShadowTexture.innerHandle);
                     nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_HistoryLength,    m_HistoryLengthCurrent.innerHandle);
                     nativeCmd.SetComputeTextureParam(m_ShadowTemporalStabilization, kernel, gOut_History,          m_HistoryShadowCurrent.innerHandle);
+                    m_ShadowHistory?.MarkWritten();
+                    m_HistoryLength?.MarkWritten();
                     nativeCmd.DispatchCompute(m_ShadowTemporalStabilization, kernel, dispatchX, dispatchY, 1);
                 }
             }
@@ -421,6 +426,8 @@ namespace VividRP.Runtime.RenderPass.Core.Sigma
             m_HistoryInvalidated = false;
             m_UseRawShadowPassthrough = false;
             m_MaxStabilizedFrameNum = 0;
+            m_ShadowHistory = null;
+            m_HistoryLength = null;
         }
 
         internal static ResolvedSigmaSettings ResolveSettings(RayTracingSettingsVolume volume)

@@ -54,6 +54,11 @@ namespace VividRP.Editor.Tests
             AssertWrite(resources, "DenoisedDiffuseRadianceHitDistance", GraphicsFormat.R16G16B16A16_SFloat);
             AssertWrite(resources, "DenoisedSpecularRadianceHitDistance", GraphicsFormat.R16G16B16A16_SFloat);
             AssertWrite(resources, "ReblurResolvedColor", GraphicsFormat.R32G32B32A32_SFloat);
+            Assert.That(
+                resources.Textures.Any(resource =>
+                    resource.Name.StartsWith("ReblurPrevious", StringComparison.Ordinal)
+                    || resource.Name.StartsWith("ReblurCurrent", StringComparison.Ordinal)),
+                Is.False);
         }
 
         [Test]

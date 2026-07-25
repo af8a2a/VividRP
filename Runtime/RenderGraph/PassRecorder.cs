@@ -362,6 +362,13 @@ namespace VividRP.Runtime
             if (bufferCache.TryGetValue(buffer, out var handle))
                 return handle;
 
+            if (buffer != null && buffer.HasImportedHandle)
+            {
+                handle = buffer.innerHandle;
+                bufferCache.Add(buffer, handle);
+                return handle;
+            }
+
             if (buffer != null && buffer.HasImportedBuffer)
             {
                 handle = renderGraph.ImportBuffer(buffer.ImportedGraphicsBuffer);
@@ -399,13 +406,14 @@ namespace VividRP.Runtime
             if (builder == null || buffer == null)
                 return default;
 
-            if (buffer.HasImportedBuffer)
+            if (buffer.HasImportedBuffer || buffer.HasImportedHandle)
             {
                 Debug.LogWarning(
-                    $"[VividRP] Transient buffer '{buffer.desc?.Name ?? "<Unnamed>"}' ignores imported graphics buffers.");
+                    $"[VividRP] Transient buffer '{buffer.desc?.Name ?? "<Unnamed>"}' ignores imported buffer handles.");
             }
 
             var handle = builder.CreateTransientBuffer(buffer.desc);
+            buffer.ClearImportedHandle();
             buffer.innerHandle = handle;
             return handle;
         }

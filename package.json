@@ -12,7 +12,8 @@
     "com.unity.timeline": "1.8.12",
     "com.unity.shadergraph": "17.6.0",
     "com.unity.rendering.denoising": "1.0.5",
-    "com.unity.performance.profile-analyzer": "1.4.0"
+    "com.unity.performance.profile-analyzer": "1.4.0",
+    "com.unity.ai.assistant": "2.16.0-pre.1"
   },
   "author": {
     "name": "af8a2a",

@@ -12,8 +12,6 @@ namespace VividRP.Runtime
         private const int ThreadGroupSize = 8;
         private const int TileSize = 8;
         private const int ApertureShapeSampleCount = 256;
-        private const string CoCHistoryKey = "DepthOfFieldCoC";
-
         private static readonly int InputColorId = Shader.PropertyToID("_InputColorTexture");
         private static readonly int InputLinearDepthId = Shader.PropertyToID("_InputLinearDepthTexture");
         private static readonly int InputCoCId = Shader.PropertyToID("_InputCoCTexture");
@@ -51,14 +49,8 @@ namespace VividRP.Runtime
         [TransientResource]
         private RenderGraphTexture m_FullResCoC;
 
-        [RenderGraphResource(
-            Name = "DepthOfFieldCoCHistory",
-            Access = AccessFlags.Read)]
         private RenderGraphTexture m_CoCHistoryPrevious;
 
-        [RenderGraphResource(
-            Name = "DepthOfFieldCoCHistoryCurrent",
-            Access = AccessFlags.ReadWrite)]
         private RenderGraphTexture m_CoCHistoryCurrent;
 
         [RenderGraphResource(
@@ -108,6 +100,7 @@ namespace VividRP.Runtime
         private bool m_UsesTemporalAntialiasing;
         private Camera m_Camera;
         private readonly RenderGraphTextureDesc m_CoCHistoryDescriptor = RenderGraphTextureDesc.CreateColorTarget(1, 1, GraphicsFormat.R16_SFloat);
+        private CameraHistoryTexture m_CoCHistory;
         private GraphicsBuffer m_ApertureShapeBuffer;
         private readonly Vector2[] m_ApertureShapeSamples = new Vector2[ApertureShapeSampleCount];
         private Vector2 m_LastApertureCurvature;
@@ -286,11 +279,19 @@ namespace VividRP.Runtime
             using (s_PrepareHistoryMarker.Auto())
             {
                 m_ShouldApply = postProcessingAllowed && ShouldApplySettings(m_Settings);
+                m_CoCHistory = null;
 
                 if (m_ShouldApply && m_Settings.coCStabilization && m_UsesTemporalAntialiasing)
                 {
                     var historyDesc = CreateHistoryDescriptor();
-                    m_HasValidCoCHistory = AllocHistoryTexture(CoCHistoryKey, m_CoCHistoryPrevious, m_CoCHistoryCurrent, historyDesc);
+                    m_HasValidCoCHistory = CameraHistoryRenderGraphBridge.PrepareTexturePair(
+                        this,
+                        m_Camera,
+                        CameraHistoryIds.DepthOfFieldCoC,
+                        m_CoCHistoryPrevious,
+                        m_CoCHistoryCurrent,
+                        historyDesc,
+                        out m_CoCHistory);
                 }
                 else
                 {
@@ -329,6 +330,7 @@ namespace VividRP.Runtime
                     else
                         DispatchCopyCoC(cmd, m_FullResCoC.innerHandle, m_CoCHistoryCurrent.innerHandle, m_Width, m_Height);
 
+                    m_CoCHistory?.MarkWritten();
                     effectiveCoC = m_CoCHistoryCurrent.innerHandle;
                 }
 
@@ -355,6 +357,7 @@ namespace VividRP.Runtime
             m_ComputeSlowTilesKernel = -1;
             m_GatherFastTilesKernel = -1;
             m_CombineFastTilesKernel = -1;
+            m_CoCHistory = null;
             m_HasValidCoCHistory = false;
             m_ShouldApply = false;
             m_IsPassResourceLayoutDirty = false;

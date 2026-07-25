@@ -960,9 +960,7 @@ namespace VividRP.Editor.Tests
                 "VBufferDensity",
                 "VBufferAnisotropy",
                 "VBufferLighting",
-                "VBufferLightingFiltered",
-                "VBufferHistory",
-                "VBufferFeedback"
+                "VBufferLightingFiltered"
             }));
             Assert.That(resources.Buffers.Select(entry => entry.Name), Is.EquivalentTo(new[]
             {
@@ -984,8 +982,8 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLighting").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").Access, Is.EqualTo(AccessFlags.ReadWrite));
             Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferLightingFiltered").IsTransient, Is.True);
-            Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferHistory").Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.Textures.Single(entry => entry.Name == "VBufferFeedback").Access, Is.EqualTo(AccessFlags.ReadWrite));
+            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("VBufferHistory"));
+            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("VBufferFeedback"));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "BigTileLightList").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "BigTileVolumetricLightList").Access, Is.EqualTo(AccessFlags.Read));
         }
@@ -1334,10 +1332,8 @@ namespace VividRP.Editor.Tests
             Assert.That(lightingPassSource, Does.Contain("ReferenceEquals(m_VBufferMaxZ, m_LocalVBufferMaxZ)"));
             Assert.That(lightingPassSource, Does.Contain("VolumetricMaxZPass.MaxZTileSize"));
             Assert.That(lightingPassSource, Does.Contain("BindVBufferMaxZ(context, cmd, kernel)"));
-            Assert.That(lightingPassSource, Does.Contain("Name = \"VBufferHistory\", Access = AccessFlags.Read"));
-            Assert.That(lightingPassSource, Does.Contain("Name = \"VBufferFeedback\", Access = AccessFlags.ReadWrite"));
             Assert.That(lightingPassSource, Does.Contain("PrepareVBufferHistory"));
-            Assert.That(lightingPassSource, Does.Contain("AllocHistoryTexture("));
+            Assert.That(lightingPassSource, Does.Contain("CameraHistoryIds.VolumetricLighting"));
             Assert.That(lightingPassSource, Does.Contain("CameraRelativeSystem<VolumetricLightingHistoryState>"));
             Assert.That(lightingPassSource, Does.Contain("m_CurrentHistoryState = ResolveHistoryState(cameraData.camera)"));
             Assert.That(lightingPassSource, Does.Contain("m_CurrentHistoryState?.HasLastVBufferParameters"));

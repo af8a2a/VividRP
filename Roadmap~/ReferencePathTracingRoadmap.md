@@ -316,6 +316,31 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - 全黑环境返回零 radiance/零可采样能量，并安全终止 NEE。
 - HDRI intensity 的纯全局缩放不会改变归一化后的方向分布。
 
+**Implementation checkpoint (2026-07-25)**
+
+- 已增加独立 `ReferencedPathTracingEnvironmentSamplingPass`，从 `SkyManager` 导入当前 HDRI
+  lighting cubemap，并构建固定 128×64 等面积域的 conditional/marginal CDF。
+- metadata、64 项 marginal CDF 和 64×128 项 per-row conditional CDF 打包在一个持久化
+  `EnvironmentImportanceDistribution` structured buffer 中；RenderGraph 只需将该输出连接到
+  `ReferencedPathTracingPass` 的同名输入即可建立构建到 ray dispatch 的显式依赖。
+- 分布权重使用已应用 rotation、tint 和 scene-linear physical intensity 的 HDRI luminance；
+  等面积映射的 Jacobian 为常数，因此构建阶段不额外乘 `sin(theta)`。
+- buffer metadata 保存 `meanLuminance`、`1 / (4 * PI * meanLuminance)`、valid flag 和 layout
+  version。全黑环境生成可安全二分搜索的 uniform CDF，但 valid 和 normalization 为 0，后续
+  NEE 会直接判定没有可采样能量，不产生除零或 NaN。
+- shader common contract 已提供世界空间 `direction <-> equiareal UV`、CDF 二分采样、
+  `ReferencedPathtracingSampleEnvironment()` 和
+  `ReferencedPathtracingEvaluateEnvironmentPdf()`。Importance 与 Uniform Sphere 返回
+  solid-angle PDF，BSDF Only 返回 0。
+- 分布使用独立 `samplingSignature` 缓存，仅追踪 HDRI identity/hash、rotation、tint、
+  intensity、lighting state 和 sampling mode；camera visibility 与 resolved debug mode
+  不会触发无关重建。
+- 未连接分布输入时，path-tracing pass 绑定全零 fallback buffer，importance sampling
+  安全失效而不会读取未初始化资源。
+- Runtime、Editor Tests 程序集以及 Unity ray-tracing/compute shader import 已通过。
+  Constant、single-bright-texel 和 high-contrast HDRI 的 GPU histogram 回归仍需加入
+  canonical validation corpus；E3 之前不会把该 proposal 加入路径能量。
+
 #### E3: Environment NEE and Visibility
 
 **Goal**

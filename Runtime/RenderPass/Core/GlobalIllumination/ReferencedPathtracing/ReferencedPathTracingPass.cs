@@ -55,6 +55,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReGIREnabledId = Shader.PropertyToID("_ReferencedReGIREnabled");
         private static readonly int EnvironmentTextureId =
             Shader.PropertyToID("_ReferencedEnvironmentTexture");
+        private static readonly int EnvironmentImportanceDistributionId =
+            Shader.PropertyToID("_ReferencedEnvironmentImportanceDistribution");
         private static readonly int EnvironmentTintId =
             Shader.PropertyToID("_ReferencedEnvironmentTint");
         private static readonly int EnvironmentParametersId =
@@ -91,6 +93,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "PathTracingEnvironment", Access = AccessFlags.Read)]
         private RenderGraphTexture m_EnvironmentTexture;
+
+        [RenderGraphResource(
+            Name = "EnvironmentImportanceDistribution",
+            Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_EnvironmentImportanceDistribution;
 
         [RenderGraphResource(
             Name = "WorldPosition",
@@ -152,6 +159,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingReblurCheckerboardMode.Off;
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
+        private readonly RenderGraphBuffer m_DefaultEnvironmentImportanceDistribution;
+        private bool m_DefaultEnvironmentImportanceDistributionInitialized;
         private int m_FrameIndex;
 
         public ReferencedPathTracingPass()
@@ -171,6 +180,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 "ReGIRLightPdfTexture",
                 GraphicsFormat.R32_SFloat);
             m_EnvironmentTexture = CreateEnvironmentTexture("PathTracingEnvironment");
+            m_DefaultEnvironmentImportanceDistribution =
+                RenderGraphBuffer.CreateStructured(
+                    "EnvironmentImportanceDistributionFallback",
+                    ReferencedPathTracingEnvironmentImportanceLayout.ElementCount,
+                    ReferencedPathTracingEnvironmentImportanceLayout.ElementStride);
+            m_EnvironmentImportanceDistribution =
+                m_DefaultEnvironmentImportanceDistribution;
             m_WorldPositionTexture = RenderGraphTexture.CreateOutput(
                 "WorldPosition",
                 GraphicsFormat.R32G32B32A32_SFloat);
@@ -223,6 +239,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 Screen.height);
 
             ConfigureOutputs(m_Width, m_Height);
+            PrepareEnvironmentImportanceDistributionFallback();
             PrepareMainDirectionalLight(frameData.GetOrCreate<VividLightData>());
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
@@ -354,6 +371,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
             m_EnvironmentState = default;
             m_CameraBackgroundState = default;
+            m_DefaultEnvironmentImportanceDistribution?.ClearImportedBuffer();
+            m_DefaultEnvironmentImportanceDistributionInitialized = false;
             m_FrameIndex = 0;
         }
 
@@ -505,6 +524,17 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_EnvironmentTexture.innerHandle);
             }
 
+            if (m_EnvironmentImportanceDistribution?.innerHandle.IsValid() == true)
+            {
+                cmd.SetGlobalBuffer(
+                    EnvironmentImportanceDistributionId,
+                    m_EnvironmentImportanceDistribution.innerHandle);
+                cmd.SetRayTracingBufferParam(
+                    m_RayTracingShader,
+                    EnvironmentImportanceDistributionId,
+                    m_EnvironmentImportanceDistribution.innerHandle);
+            }
+
             var tint = m_EnvironmentState.tint;
             var environmentTint = new Vector4(tint.r, tint.g, tint.b, 1.0f);
             var environmentParameters = new Vector4(
@@ -576,6 +606,24 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 CameraSkyEnabledId,
                 cameraSkyEnabled);
+        }
+
+        private void PrepareEnvironmentImportanceDistributionFallback()
+        {
+            if (!ReferenceEquals(
+                    m_EnvironmentImportanceDistribution,
+                    m_DefaultEnvironmentImportanceDistribution))
+            {
+                return;
+            }
+
+            m_DefaultEnvironmentImportanceDistribution.EnsureImportedBuffer();
+            if (m_DefaultEnvironmentImportanceDistributionInitialized)
+                return;
+
+            m_DefaultEnvironmentImportanceDistribution.SetData(
+                new float[ReferencedPathTracingEnvironmentImportanceLayout.ElementCount]);
+            m_DefaultEnvironmentImportanceDistributionInitialized = true;
         }
 
         private void PrepareMainDirectionalLight(VividLightData lightData)

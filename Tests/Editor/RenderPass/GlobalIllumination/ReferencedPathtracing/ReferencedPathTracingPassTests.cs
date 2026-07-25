@@ -41,6 +41,8 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "ReGIRParameters");
             var reGIRReservoirs = resources.Buffers.Single(
                 resource => resource.Name == "ReGIRReservoirs");
+            var environmentImportanceDistribution = resources.Buffers.Single(
+                resource => resource.Name == "EnvironmentImportanceDistribution");
             var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
             var lightPdfTexture = resources.Textures.Single(resource => resource.Name == "ReGIRLightPdfTexture");
             var environmentTexture = resources.Textures.Single(
@@ -57,11 +59,23 @@ namespace VividRP.Editor.Tests
             Assert.That(accelerationStructure.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 resources.Buffers.Select(resource => resource.Name),
-                Is.EquivalentTo(new[] { "ReGIRLights", "ReGIRParameters", "ReGIRReservoirs" }));
+                Is.EquivalentTo(new[]
+                {
+                    "ReGIRLights",
+                    "ReGIRParameters",
+                    "ReGIRReservoirs",
+                    "EnvironmentImportanceDistribution"
+                }));
             Assert.That(resources.Buffers.All(resource => resource.Access == AccessFlags.Read), Is.True);
             Assert.That(reGIRLights.Buffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
             Assert.That(reGIRParameters.Buffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
             Assert.That(reGIRReservoirs.Buffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
+            Assert.That(
+                environmentImportanceDistribution.Buffer.desc.Count,
+                Is.EqualTo(ReferencedPathTracingEnvironmentImportanceLayout.ElementCount));
+            Assert.That(
+                environmentImportanceDistribution.Buffer.desc.Stride,
+                Is.EqualTo(ReferencedPathTracingEnvironmentImportanceLayout.ElementStride));
             Assert.That(lightPdfTexture.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(lightPdfTexture.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(environmentTexture.Access, Is.EqualTo(AccessFlags.Read));
@@ -185,6 +199,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_ReGIRReservoirBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_ReGIRLightPdfTexture"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_EnvironmentTexture"), Is.Not.Null);
+                Assert.That(
+                    node.GetInputPortByName("m_EnvironmentImportanceDistribution"),
+                    Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SpecularRadianceHitDistance"), Is.Not.Null);
@@ -310,6 +327,16 @@ namespace VividRP.Editor.Tests
                     skyData,
                     settings);
                 skyData.rotation = 0.0f;
+                skyData.tint = new Color(0.5f, 1.0f, 1.0f, 1.0f);
+                var tinted = ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+                skyData.tint = Color.white;
+                skyData.exposure = 2.0f;
+                var intensified = ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+                skyData.exposure = 1.0f;
                 settings.environmentCameraVisible.value = false;
                 var hidden = ReferencedPathTracingEnvironmentState.Resolve(
                     skyData,
@@ -335,12 +362,33 @@ namespace VividRP.Editor.Tests
                     settings);
 
                 Assert.That(rotated.signature, Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    rotated.samplingSignature,
+                    Is.Not.EqualTo(original.samplingSignature));
+                Assert.That(
+                    tinted.samplingSignature,
+                    Is.Not.EqualTo(original.samplingSignature));
+                Assert.That(
+                    intensified.samplingSignature,
+                    Is.Not.EqualTo(original.samplingSignature));
                 Assert.That(hidden.signature, Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    hidden.samplingSignature,
+                    Is.EqualTo(original.samplingSignature));
                 Assert.That(bsdfOnly.signature, Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    bsdfOnly.samplingSignature,
+                    Is.Not.EqualTo(original.samplingSignature));
                 Assert.That(
                     indirectMissOnly.signature,
                     Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    indirectMissOnly.samplingSignature,
+                    Is.EqualTo(original.samplingSignature));
                 Assert.That(replacement.signature, Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    replacement.samplingSignature,
+                    Is.Not.EqualTo(original.samplingSignature));
                 Assert.That(bsdfOnly.importanceSamplingEnabled, Is.False);
                 Assert.That(bsdfOnly.lightingEnabled, Is.True);
             }

@@ -21,14 +21,44 @@ int _ReferencedEnvironmentDebugMode;
 float4 _ReferencedCameraClearColor;
 int _ReferencedCameraSkyEnabled;
 
+static const int kReferencedEnvironmentSamplingBsdfOnly = 0;
+static const int kReferencedEnvironmentSamplingImportance = 1;
+static const int kReferencedEnvironmentSamplingUniformSphere = 2;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
 static const int kReferencedEnvironmentDebugIndirectMissOnly = 3;
+static const float kReferencedPathtracingPi = 3.14159265358979323846;
+
+#define REFERENCED_ENVIRONMENT_DISTRIBUTION_VERSION 1
+#define REFERENCED_ENVIRONMENT_HEADER_ELEMENT_COUNT 4u
+#define REFERENCED_ENVIRONMENT_PDF_NORMALIZATION_OFFSET 0u
+#define REFERENCED_ENVIRONMENT_AVERAGE_LUMINANCE_OFFSET 1u
+#define REFERENCED_ENVIRONMENT_VALID_OFFSET 2u
+#define REFERENCED_ENVIRONMENT_VERSION_OFFSET 3u
+#define REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION 64u
+#define REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION 128u
+#define REFERENCED_ENVIRONMENT_MARGINAL_OFFSET \
+    REFERENCED_ENVIRONMENT_HEADER_ELEMENT_COUNT
+#define REFERENCED_ENVIRONMENT_CONDITIONAL_OFFSET \
+    (REFERENCED_ENVIRONMENT_MARGINAL_OFFSET \
+        + REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION)
+#define REFERENCED_ENVIRONMENT_MIN_LUMINANCE 1e-12
+
+#if defined(REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD)
+RWStructuredBuffer<float> _ReferencedEnvironmentImportanceDistribution;
+#else
+StructuredBuffer<float> _ReferencedEnvironmentImportanceDistribution;
+#endif
 
 bool ReferencedPathtracingHasEnvironment()
 {
     return _ReferencedEnvironmentParameters.w > 0.5;
+}
+
+float ReferencedPathtracingEnvironmentLuminance(float3 radiance)
+{
+    return max(dot(max(radiance, 0.0), float3(0.2126, 0.7152, 0.0722)), 0.0);
 }
 
 float3 ReferencedPathtracingRotateEnvironmentDirection(float3 directionWS)
@@ -73,6 +103,175 @@ float3 ReferencedPathtracingEvaluateLightingEnvironment(float3 directionWS)
     return _ReferencedEnvironmentLightingEnabled != 0
         ? ReferencedPathtracingSampleEnvironment(directionWS)
         : 0.0;
+}
+
+float2 ReferencedPathtracingMapDirectionToEquiarealUV(float3 directionWS)
+{
+    float directionLengthSquared = dot(directionWS, directionWS);
+    if (directionLengthSquared <= 1e-8
+        || isnan(directionLengthSquared)
+        || isinf(directionLengthSquared))
+    {
+        return 0.5;
+    }
+
+    float3 direction = directionWS * rsqrt(directionLengthSquared);
+    float phi = atan2(-direction.z, -direction.x);
+    float u = frac(0.5 - phi * (0.5 / kReferencedPathtracingPi));
+    float v = saturate((direction.y + 1.0) * 0.5);
+    return float2(u, v);
+}
+
+float3 ReferencedPathtracingMapEquiarealUVToDirection(float2 uv)
+{
+    uv = saturate(uv);
+    float phi = 2.0 * kReferencedPathtracingPi * (1.0 - uv.x);
+    float cosineTheta = clamp(2.0 * uv.y - 1.0, -1.0, 1.0);
+    float sineTheta = sqrt(saturate(1.0 - cosineTheta * cosineTheta));
+    float sinePhi;
+    float cosinePhi;
+    sincos(phi, sinePhi, cosinePhi);
+    return float3(cosinePhi * sineTheta, cosineTheta, sinePhi * sineTheta);
+}
+
+float ReferencedPathtracingReadEnvironmentCDF(
+    uint bufferOffset,
+    uint index)
+{
+    return _ReferencedEnvironmentImportanceDistribution[bufferOffset + index];
+}
+
+float ReferencedPathtracingSampleEnvironmentCDF(
+    uint bufferOffset,
+    uint elementCount,
+    float randomValue)
+{
+    float sampleValue = min(saturate(randomValue), 0.99999994);
+    uint lowerIndex = 0u;
+    uint upperIndex = elementCount;
+    while (lowerIndex + 1u < upperIndex)
+    {
+        uint middleIndex = (lowerIndex + upperIndex) >> 1u;
+        float middleCDF = ReferencedPathtracingReadEnvironmentCDF(
+            bufferOffset,
+            middleIndex);
+        if (middleCDF <= sampleValue)
+            lowerIndex = middleIndex;
+        else
+            upperIndex = middleIndex;
+    }
+
+    float lowerCDF = ReferencedPathtracingReadEnvironmentCDF(
+        bufferOffset,
+        lowerIndex);
+    float upperCDF =
+        lowerIndex + 1u < elementCount
+            ? ReferencedPathtracingReadEnvironmentCDF(
+                bufferOffset,
+                lowerIndex + 1u)
+            : 1.0;
+    float interval = max(upperCDF - lowerCDF, 1e-8);
+    float fraction = saturate((sampleValue - lowerCDF) / interval);
+    return (lowerIndex + fraction) / elementCount;
+}
+
+bool ReferencedPathtracingHasEnvironmentDistributionEnergy()
+{
+    float valid = _ReferencedEnvironmentImportanceDistribution[
+        REFERENCED_ENVIRONMENT_VALID_OFFSET];
+    float version = _ReferencedEnvironmentImportanceDistribution[
+        REFERENCED_ENVIRONMENT_VERSION_OFFSET];
+    float normalization = _ReferencedEnvironmentImportanceDistribution[
+        REFERENCED_ENVIRONMENT_PDF_NORMALIZATION_OFFSET];
+    return valid > 0.5
+        && abs(version - REFERENCED_ENVIRONMENT_DISTRIBUTION_VERSION) < 0.5
+        && normalization > 0.0
+        && !isnan(normalization)
+        && !isinf(normalization);
+}
+
+float ReferencedPathtracingEvaluateEnvironmentPdf(float3 directionWS)
+{
+    if (_ReferencedEnvironmentLightingEnabled == 0
+        || !ReferencedPathtracingHasEnvironment()
+        || !ReferencedPathtracingHasEnvironmentDistributionEnergy())
+    {
+        return 0.0;
+    }
+
+    if (_ReferencedEnvironmentSamplingMode
+        == kReferencedEnvironmentSamplingUniformSphere)
+    {
+        return 0.25 / kReferencedPathtracingPi;
+    }
+
+    if (_ReferencedEnvironmentImportanceSamplingEnabled == 0
+        || _ReferencedEnvironmentSamplingMode
+            != kReferencedEnvironmentSamplingImportance)
+    {
+        return 0.0;
+    }
+
+    float normalization = _ReferencedEnvironmentImportanceDistribution[
+        REFERENCED_ENVIRONMENT_PDF_NORMALIZATION_OFFSET];
+    float3 radiance =
+        ReferencedPathtracingEvaluateLightingEnvironment(directionWS);
+    float pdf =
+        ReferencedPathtracingEnvironmentLuminance(radiance) * normalization;
+    return !isnan(pdf) && !isinf(pdf) ? max(pdf, 0.0) : 0.0;
+}
+
+bool ReferencedPathtracingSampleEnvironment(
+    float2 randomValue,
+    out float3 directionWS,
+    out float3 radiance,
+    out float pdf)
+{
+    directionWS = 0.0;
+    radiance = 0.0;
+    pdf = 0.0;
+
+    if (_ReferencedEnvironmentLightingEnabled == 0
+        || !ReferencedPathtracingHasEnvironment()
+        || !ReferencedPathtracingHasEnvironmentDistributionEnergy())
+    {
+        return false;
+    }
+
+    float2 uv;
+    if (_ReferencedEnvironmentSamplingMode
+        == kReferencedEnvironmentSamplingUniformSphere)
+    {
+        uv = min(saturate(randomValue), 0.99999994);
+    }
+    else
+    {
+        if (_ReferencedEnvironmentImportanceSamplingEnabled == 0
+            || _ReferencedEnvironmentSamplingMode
+                != kReferencedEnvironmentSamplingImportance)
+        {
+            return false;
+        }
+
+        float v = ReferencedPathtracingSampleEnvironmentCDF(
+            REFERENCED_ENVIRONMENT_MARGINAL_OFFSET,
+            REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION,
+            randomValue.x);
+        uint rowIndex = min(
+            (uint)(v * REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION),
+            REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION - 1u);
+        float u = ReferencedPathtracingSampleEnvironmentCDF(
+            REFERENCED_ENVIRONMENT_CONDITIONAL_OFFSET
+                + rowIndex * REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION,
+            REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION,
+            randomValue.y);
+        uv = float2(u, v);
+    }
+
+    directionWS = ReferencedPathtracingMapEquiarealUVToDirection(uv);
+    radiance = ReferencedPathtracingEvaluateLightingEnvironment(directionWS);
+    pdf = ReferencedPathtracingEvaluateEnvironmentPdf(directionWS);
+    return pdf > 0.0;
 }
 
 float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)

@@ -49,6 +49,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 maxMipLevel,
                 skyHash,
                 textureIdentityHash);
+            samplingSignature = ComputeSamplingSignature(
+                hasHdri,
+                lightingEnabled,
+                samplingMode,
+                tint,
+                intensityMultiplier,
+                rotation,
+                maxMipLevel,
+                skyHash,
+                textureIdentityHash);
         }
 
         internal bool hasHdri { get; }
@@ -64,6 +74,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal int skyHash { get; }
         internal int textureIdentityHash { get; }
         internal ulong signature { get; }
+        internal ulong samplingSignature { get; }
 
         internal static ReferencedPathTracingEnvironmentState Resolve(
             VividSkyData skyData,
@@ -209,6 +220,32 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, cameraVisible);
             Hash(ref hash, (uint)samplingMode);
             Hash(ref hash, (uint)debugMode);
+            Hash(ref hash, tint.r);
+            Hash(ref hash, tint.g);
+            Hash(ref hash, tint.b);
+            Hash(ref hash, intensityMultiplier);
+            Hash(ref hash, rotation);
+            Hash(ref hash, unchecked((uint)maxMipLevel));
+            Hash(ref hash, unchecked((uint)skyHash));
+            Hash(ref hash, unchecked((uint)textureIdentityHash));
+            return hash;
+        }
+
+        private static ulong ComputeSamplingSignature(
+            bool hasHdri,
+            bool lightingEnabled,
+            ReferencedPathTracingEnvironmentSamplingMode samplingMode,
+            Color tint,
+            float intensityMultiplier,
+            float rotation,
+            int maxMipLevel,
+            int skyHash,
+            int textureIdentityHash)
+        {
+            var hash = FnvOffsetBasis;
+            Hash(ref hash, hasHdri);
+            Hash(ref hash, lightingEnabled);
+            Hash(ref hash, (uint)samplingMode);
             Hash(ref hash, tint.r);
             Hash(ref hash, tint.g);
             Hash(ref hash, tint.b);

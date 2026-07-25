@@ -1,0 +1,172 @@
+#pragma kernel ComputeConditional
+#pragma kernel ComputeMarginal
+#pragma only_renderers d3d11 vulkan metal
+
+#define REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD
+
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
+
+#define REFERENCED_ENVIRONMENT_SCAN_WIDTH 128
+
+void ReferencedEnvironmentParallelScan(
+    uint threadIndex,
+    uint elementCount,
+    uint bufferOffset,
+    out float sum)
+{
+    for (uint upsweepOffset = 1u;
+        upsweepOffset <= elementCount / 2u;
+        upsweepOffset *= 2u)
+    {
+        AllMemoryBarrierWithGroupSync();
+
+        uint first =
+            (2u * threadIndex + 1u) * upsweepOffset - 1u;
+        uint second = first + upsweepOffset;
+        if (second < elementCount)
+        {
+            _ReferencedEnvironmentImportanceDistribution[bufferOffset + second] +=
+                _ReferencedEnvironmentImportanceDistribution[bufferOffset + first];
+        }
+    }
+
+    AllMemoryBarrierWithGroupSync();
+    sum = _ReferencedEnvironmentImportanceDistribution[
+        bufferOffset + elementCount - 1u];
+
+    AllMemoryBarrierWithGroupSync();
+    if (threadIndex == 0u)
+        _ReferencedEnvironmentImportanceDistribution[bufferOffset + elementCount - 1u] = 0.0;
+
+    for (uint downsweepOffset = elementCount / 2u;
+        downsweepOffset > 0u;
+        downsweepOffset /= 2u)
+    {
+        AllMemoryBarrierWithGroupSync();
+
+        uint first =
+            (2u * threadIndex + 1u) * downsweepOffset - 1u;
+        uint second = first + downsweepOffset;
+        if (second < elementCount)
+        {
+            float value =
+                _ReferencedEnvironmentImportanceDistribution[bufferOffset + first];
+            _ReferencedEnvironmentImportanceDistribution[bufferOffset + first] =
+                _ReferencedEnvironmentImportanceDistribution[bufferOffset + second];
+            _ReferencedEnvironmentImportanceDistribution[bufferOffset + second] +=
+                value;
+        }
+    }
+
+    AllMemoryBarrierWithGroupSync();
+}
+
+[numthreads(REFERENCED_ENVIRONMENT_SCAN_WIDTH, 1, 1)]
+void ComputeConditional(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint threadIndex = dispatchThreadId.x;
+    uint rowIndex = dispatchThreadId.y;
+    uint conditionalOffset =
+        REFERENCED_ENVIRONMENT_CONDITIONAL_OFFSET
+        + rowIndex * REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION;
+    float v =
+        (rowIndex + 0.5)
+        / REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION;
+
+    uint columnIndex = threadIndex;
+    float u =
+        (columnIndex + 0.5)
+        / REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION;
+    float3 directionWS =
+        ReferencedPathtracingMapEquiarealUVToDirection(float2(u, v));
+    float3 radiance = ReferencedPathtracingSampleEnvironment(directionWS);
+    _ReferencedEnvironmentImportanceDistribution[
+        conditionalOffset + columnIndex] =
+        ReferencedPathtracingEnvironmentLuminance(radiance);
+
+    float rowSum;
+    ReferencedEnvironmentParallelScan(
+        threadIndex,
+        REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION,
+        conditionalOffset,
+        rowSum);
+
+    bool hasRowEnergy =
+        rowSum > REFERENCED_ENVIRONMENT_MIN_LUMINANCE
+        && !isnan(rowSum)
+        && !isinf(rowSum);
+    float inverseRowSum = hasRowEnergy ? rcp(rowSum) : 0.0;
+    _ReferencedEnvironmentImportanceDistribution[
+        conditionalOffset + columnIndex] =
+        hasRowEnergy
+            ? _ReferencedEnvironmentImportanceDistribution[
+                conditionalOffset + columnIndex] * inverseRowSum
+            : (float)columnIndex
+                / REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION;
+
+    if (threadIndex == 0u)
+    {
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_MARGINAL_OFFSET + rowIndex] =
+            hasRowEnergy
+                ? rowSum / REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION
+                : 0.0;
+    }
+}
+
+[numthreads(REFERENCED_ENVIRONMENT_SCAN_WIDTH, 1, 1)]
+void ComputeMarginal(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint threadIndex = dispatchThreadId.x;
+
+    float marginalSum;
+    ReferencedEnvironmentParallelScan(
+        threadIndex,
+        REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION,
+        REFERENCED_ENVIRONMENT_MARGINAL_OFFSET,
+        marginalSum);
+
+    bool hasEnvironmentEnergy =
+        marginalSum > REFERENCED_ENVIRONMENT_MIN_LUMINANCE
+        && !isnan(marginalSum)
+        && !isinf(marginalSum);
+    float inverseMarginalSum = hasEnvironmentEnergy ? rcp(marginalSum) : 0.0;
+    if (threadIndex < REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION)
+    {
+        uint rowIndex = threadIndex;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_MARGINAL_OFFSET + rowIndex] =
+            hasEnvironmentEnergy
+                ? _ReferencedEnvironmentImportanceDistribution[
+                    REFERENCED_ENVIRONMENT_MARGINAL_OFFSET + rowIndex]
+                    * inverseMarginalSum
+                : (float)rowIndex
+                    / REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION;
+    }
+
+    if (threadIndex == 0u)
+    {
+        float averageLuminance =
+            hasEnvironmentEnergy
+                ? marginalSum / REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION
+                : 0.0;
+        float pdfNormalization =
+            averageLuminance > REFERENCED_ENVIRONMENT_MIN_LUMINANCE
+                ? rcp(averageLuminance)
+                    * (0.25 / kReferencedPathtracingPi)
+                : 0.0;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_PDF_NORMALIZATION_OFFSET] =
+            pdfNormalization;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_AVERAGE_LUMINANCE_OFFSET] =
+            averageLuminance;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_VALID_OFFSET] =
+            pdfNormalization > 0.0 ? 1.0 : 0.0;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_VERSION_OFFSET] =
+            REFERENCED_ENVIRONMENT_DISTRIBUTION_VERSION;
+    }
+}

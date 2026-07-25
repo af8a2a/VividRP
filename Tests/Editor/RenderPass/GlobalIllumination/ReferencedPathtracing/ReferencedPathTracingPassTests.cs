@@ -47,6 +47,8 @@ namespace VividRP.Editor.Tests
             var lightPdfTexture = resources.Textures.Single(resource => resource.Name == "ReGIRLightPdfTexture");
             var environmentTexture = resources.Textures.Single(
                 resource => resource.Name == "PathTracingEnvironment");
+            var environmentBackgroundTexture = resources.Textures.Single(
+                resource => resource.Name == "PathTracingEnvironmentBackground");
             var diffuse = resources.Textures.Single(
                 resource => resource.Name == "DiffuseRadianceHitDistance");
             var specular = resources.Textures.Single(
@@ -90,6 +92,14 @@ namespace VividRP.Editor.Tests
                 environmentTexture.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(environmentTexture.Texture.desc.UseMipMap, Is.True);
+            Assert.That(environmentBackgroundTexture.Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                environmentBackgroundTexture.Texture.desc.Dimension,
+                Is.EqualTo(TextureDimension.Cube));
+            Assert.That(
+                environmentBackgroundTexture.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(environmentBackgroundTexture.Texture.desc.UseMipMap, Is.True);
             Assert.That(worldPosition.Name, Is.EqualTo("WorldPosition"));
             Assert.That(worldPosition.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(worldPosition.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
@@ -224,6 +234,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(node.GetInputPortByName("m_ReGIRLightPdfTexture"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_EnvironmentTexture"), Is.Not.Null);
                 Assert.That(
+                    node.GetInputPortByName("m_EnvironmentBackgroundTexture"),
+                    Is.Not.Null);
+                Assert.That(
                     node.GetInputPortByName("m_EnvironmentImportanceDistribution"),
                     Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
@@ -288,6 +301,67 @@ namespace VividRP.Editor.Tests
                 Assert.That(state.intensityMultiplier, Is.EqualTo(2.0f));
                 Assert.That(state.rotation, Is.EqualTo(45.0f));
                 Assert.That(state.skyHash, Is.EqualTo(1234));
+                Assert.That(state.contentHash, Is.Not.Zero);
+                Assert.That(state.backgroundResolution, Is.EqualTo(4));
+                Assert.That(state.lightingResolution, Is.EqualTo(4));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+                UnityEngine.Object.DestroyImmediate(cubemap);
+            }
+        }
+
+        [Test]
+        public void EnvironmentMetadata_CapturesRawLightingContractWithoutDisplayExposure()
+        {
+            var cubemap = new Cubemap(8, TextureFormat.RGBAHalf, true)
+            {
+                name = "Metadata HDRI"
+            };
+            var settings =
+                ScriptableObject.CreateInstance<ReferencedPathTracingSettingsVolume>();
+
+            try
+            {
+                settings.active = true;
+                settings.environmentSamplingMode.value =
+                    ReferencedPathTracingEnvironmentSamplingMode.UniformSphere;
+                settings.environmentEstimatorMode.value =
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis;
+                var skyData = new VividSkyData
+                {
+                    activeSkyType = SkyType.HDRI,
+                    specularCubemap = cubemap,
+                    tint = Color.white,
+                    exposure = 3.0f,
+                    rotation = 75.0f,
+                    skyHash = 91,
+                    skyContentHash = 17
+                };
+
+                var metadata = ReferencedPathTracingEnvironmentMetadata.Capture(
+                    skyData,
+                    settings);
+
+                Assert.That(
+                    metadata.contractVersion,
+                    Is.EqualTo(ReferencedPathTracingEnvironmentMetadata.ContractVersion));
+                Assert.That(metadata.assetName, Is.EqualTo("Metadata HDRI"));
+                Assert.That(metadata.skyHash, Is.EqualTo(91));
+                Assert.That(metadata.contentHash, Is.EqualTo(17));
+                Assert.That(metadata.backgroundResolution, Is.EqualTo(8));
+                Assert.That(metadata.lightingResolution, Is.EqualTo(8));
+                Assert.That(metadata.rotation, Is.EqualTo(75.0f));
+                Assert.That(metadata.physicalIntensityMultiplier, Is.EqualTo(3.0f));
+                Assert.That(
+                    metadata.samplingMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentSamplingMode.UniformSphere));
+                Assert.That(
+                    metadata.pdfVersion,
+                    Is.EqualTo(ReferencedPathTracingEnvironmentImportanceLayout.Version));
+                Assert.That(metadata.rawRadianceIsPreExposed, Is.False);
             }
             finally
             {
@@ -357,6 +431,17 @@ namespace VividRP.Editor.Tests
                 var original = ReferencedPathTracingEnvironmentState.Resolve(
                     skyData,
                     settings);
+                skyData.skyContentHash = original.contentHash + 1;
+                var contentChanged = ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+                skyData.skyContentHash = original.contentHash;
+                skyData.skyHash = 43;
+                var nonContentSkyStateChanged =
+                    ReferencedPathTracingEnvironmentState.Resolve(
+                        skyData,
+                        settings);
+                skyData.skyHash = 42;
                 skyData.rotation = 30.0f;
                 var rotated = ReferencedPathTracingEnvironmentState.Resolve(
                     skyData,
@@ -414,6 +499,18 @@ namespace VividRP.Editor.Tests
                     settings);
 
                 Assert.That(rotated.signature, Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    contentChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    contentChanged.samplingSignature,
+                    Is.Not.EqualTo(original.samplingSignature));
+                Assert.That(
+                    nonContentSkyStateChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    nonContentSkyStateChanged.samplingSignature,
+                    Is.EqualTo(original.samplingSignature));
                 Assert.That(
                     rotated.samplingSignature,
                     Is.Not.EqualTo(original.samplingSignature));

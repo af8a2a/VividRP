@@ -467,6 +467,43 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - 重复使用未变化 HDRI 时不发生逐帧 CDF dispatch 或资源分配。
 - Raw EXR 数值不随 display exposure 改变。
 
+**Implementation Checkpoint (2026-07-25)**
+
+- `SkySpecularCache` 已拆分 raw source cubemap 与 GGX lighting cubemap 两条句柄。
+  `ReferencedPathTracingPass` 的 primary camera miss 从
+  `PathTracingEnvironmentBackground` 采样原始 HDRI；BSDF miss、NEE 和
+  `ReferencedPathTracingEnvironmentSamplingPass` 继续使用
+  `PathTracingEnvironment`。Camera background 由 raygen 逐像素输出，天然跟随相机目标
+  分辨率，不需要额外维护 HDRP 式 2D background copy。
+- Lighting cubemap 采用独立 reflection resolution：Low/Default/High/Ultra 分别为
+  128/256/512/1024，并限制不超过源 HDRI 分辨率。GGX convolution 的 mip 0 会按方向
+  重采样 source，因此可以安全地生成较低分辨率 lighting cache；源 HDRI 仍保留完整
+  分辨率用于 camera presentation。
+- `VividSkyData.skyContentHash` 与 `SkyManager.GetSkyTextureContentHash` 已建立 content
+  contract，覆盖 `imageContentsHash`、尺寸、mip、graphics format 与 texture
+  dimension。Specular cache key 使用 source identity、content hash 和 lighting
+  resolution；HDRI rotation/intensity 不再触发无意义的 GGX reconvolution。
+- 完整 environment signature 继续负责 progressive accumulation invalidation，并覆盖
+  content、asset identity、rotation、tint、physical intensity、background/lighting
+  resolution 和 estimator state。CDF `samplingSignature` 仅覆盖会改变 directional
+  radiance/PDF 的 content、asset identity、rotation、tint、physical intensity、
+  lighting resolution 与 sampling mode；camera visibility、debug/estimator mode、
+  background resolution 和 display exposure 不进入 CDF key。
+- `ReferencedPathTracingEnvironmentMetadata` 已预留 runtime-compatible capture contract，
+  记录 asset name/identity、sky/content hash、两类分辨率、rotation、physical
+  intensity、sampling/estimator mode 与 PDF version。`rawRadianceIsPreExposed=false`
+  固化 raw capture 的 scene-linear 语义；未来 capture pass 可在 Editor 侧追加 asset
+  GUID，而不改变 runtime contract。
+- Exposure 路径维持 E5 要求：PT sample、REBLUR input 与 FP32 history 均为 raw
+  scene-linear radiance；accumulation/REBLUR resolve 才输出 pre-exposed presentation，
+  final blit 处理 current/pre-exposure ratio。`VividExposureData` 明确不参与 raw
+  accumulation signature，因此 auto exposure 变化不会清空 history 或重建 CDF。
+- `VividRP.Runtime.csproj` 编译通过（0 error）；Unity 6000.7 当前 Editor 会话的 Tundra
+  build 成功生成 `VividRP.Editor.Tests.dll`，并成功重新导入 ray-tracing shader 与
+  environment sampling compute，未出现本次相关 shader error。由于 Editor 正在运行，
+  按仓库约束未启动 batch EditMode Tests。Canonical raw EXR exposure 对照、camera
+  resize 与逐帧 allocation/dispatch GPU 验证仍留给 E6 corpus。
+
 #### E6: HDRI Validation and V1 Freeze Gate
 
 **Goal**

@@ -84,6 +84,7 @@ namespace VividRP.Runtime
     {
         internal const float DefaultEarthRadius = 6.3781f * 1000000.0f;
         internal const int DefaultSkyTextureResolution = 1024;
+        internal const int DefaultSkyReflectionResolution = 256;
 
         public EnumParameter<SkyType> skyType = new(SkyType.HDRI);
         public EnumParameter<SkyUpdateMode> updateMode = new(SkyUpdateMode.OnChanged);
@@ -173,6 +174,19 @@ namespace VividRP.Runtime
         internal static int GetSkyTextureResolution(SkySettingsVolume settings = null)
         {
             return DefaultSkyTextureResolution;
+        }
+
+        internal static int GetSkyReflectionResolution(SkySettingsVolume settings = null)
+        {
+            var quality = settings?.generatedCubemapQuality?.value
+                ?? SkyGeneratedCubemapQuality.PlatformDefault;
+            return quality switch
+            {
+                SkyGeneratedCubemapQuality.Low => 128,
+                SkyGeneratedCubemapQuality.High => 512,
+                SkyGeneratedCubemapQuality.Ultra => 1024,
+                _ => DefaultSkyReflectionResolution
+            };
         }
     }
 

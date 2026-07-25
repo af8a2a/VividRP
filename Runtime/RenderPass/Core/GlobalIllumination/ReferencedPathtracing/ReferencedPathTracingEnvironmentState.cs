@@ -21,6 +21,9 @@ namespace VividRP.Runtime.RenderPass.Core
             float rotation,
             int maxMipLevel,
             int skyHash,
+            int contentHash,
+            int backgroundResolution,
+            int lightingResolution,
             int textureIdentityHash)
         {
             this.hasHdri = hasHdri;
@@ -44,6 +47,9 @@ namespace VividRP.Runtime.RenderPass.Core
             this.rotation = rotation;
             this.maxMipLevel = maxMipLevel;
             this.skyHash = skyHash;
+            this.contentHash = contentHash;
+            this.backgroundResolution = backgroundResolution;
+            this.lightingResolution = lightingResolution;
             this.textureIdentityHash = textureIdentityHash;
             signature = ComputeSignature(
                 hasHdri,
@@ -57,7 +63,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 rotation,
                 maxMipLevel,
                 skyHash,
+                contentHash,
+                backgroundResolution,
+                lightingResolution,
                 textureIdentityHash);
+            // The distribution cache only tracks inputs that alter radiance or its directional
+            // density. Camera visibility, background resolution, debug/estimator modes, and
+            // display exposure must not cause a CDF rebuild.
             samplingSignature = ComputeSamplingSignature(
                 hasHdri,
                 lightingEnabled,
@@ -66,7 +78,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 intensityMultiplier,
                 rotation,
                 maxMipLevel,
-                skyHash,
+                contentHash,
+                lightingResolution,
                 textureIdentityHash);
         }
 
@@ -83,6 +96,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal float rotation { get; }
         internal int maxMipLevel { get; }
         internal int skyHash { get; }
+        internal int contentHash { get; }
+        internal int backgroundResolution { get; }
+        internal int lightingResolution { get; }
         internal int textureIdentityHash { get; }
         internal ulong signature { get; }
         internal ulong samplingSignature { get; }
@@ -127,6 +143,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     0.0f,
                     0,
                     0,
+                    0,
+                    0,
+                    0,
                     0);
             }
 
@@ -134,6 +153,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var intensityMultiplier = SanitizeNonNegative(skyData.exposure);
             var rotation = IsFinite(skyData.rotation) ? skyData.rotation : 0.0f;
             var maxMipLevel = SkyManager.GetSpecularCubemapMaxMip(skyData);
+            var contentHash = skyData.skyContentHash != 0
+                ? skyData.skyContentHash
+                : SkyManager.GetSkyTextureContentHash(skyData.specularCubemap);
+            var backgroundResolution = Mathf.Max(1, skyData.specularCubemap.width);
+            var lightingResolution =
+                SkyManager.GetSpecularCubemapResolution(skyData);
             var textureIdentityHash = EntityId
                 .ToULong(skyData.specularCubemap.GetEntityId())
                 .GetHashCode();
@@ -153,6 +178,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 rotation,
                 maxMipLevel,
                 skyData.skyHash,
+                contentHash,
+                backgroundResolution,
+                lightingResolution,
                 textureIdentityHash);
         }
 
@@ -242,6 +270,9 @@ namespace VividRP.Runtime.RenderPass.Core
             float rotation,
             int maxMipLevel,
             int skyHash,
+            int contentHash,
+            int backgroundResolution,
+            int lightingResolution,
             int textureIdentityHash)
         {
             var hash = FnvOffsetBasis;
@@ -258,6 +289,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, rotation);
             Hash(ref hash, unchecked((uint)maxMipLevel));
             Hash(ref hash, unchecked((uint)skyHash));
+            Hash(ref hash, unchecked((uint)contentHash));
+            Hash(ref hash, unchecked((uint)backgroundResolution));
+            Hash(ref hash, unchecked((uint)lightingResolution));
             Hash(ref hash, unchecked((uint)textureIdentityHash));
             return hash;
         }
@@ -270,7 +304,8 @@ namespace VividRP.Runtime.RenderPass.Core
             float intensityMultiplier,
             float rotation,
             int maxMipLevel,
-            int skyHash,
+            int contentHash,
+            int lightingResolution,
             int textureIdentityHash)
         {
             var hash = FnvOffsetBasis;
@@ -283,7 +318,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, intensityMultiplier);
             Hash(ref hash, rotation);
             Hash(ref hash, unchecked((uint)maxMipLevel));
-            Hash(ref hash, unchecked((uint)skyHash));
+            Hash(ref hash, unchecked((uint)contentHash));
+            Hash(ref hash, unchecked((uint)lightingResolution));
             Hash(ref hash, unchecked((uint)textureIdentityHash));
             return hash;
         }
@@ -302,6 +338,59 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             hash ^= value;
             hash *= FnvPrime;
+        }
+    }
+
+    /// <summary>
+    /// Runtime-compatible metadata contract for raw reference captures. Editor capture tooling may
+    /// enrich assetName with an asset GUID, while these fields remain available in player builds.
+    /// Display exposure is deliberately absent because raw path radiance is scene-linear.
+    /// </summary>
+    [Serializable]
+    internal sealed class ReferencedPathTracingEnvironmentMetadata
+    {
+        internal const int ContractVersion = 1;
+
+        public int contractVersion;
+        public string assetName;
+        public int textureIdentityHash;
+        public int skyHash;
+        public int contentHash;
+        public int backgroundResolution;
+        public int lightingResolution;
+        public float rotation;
+        public float physicalIntensityMultiplier;
+        public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
+        public ReferencedPathTracingEnvironmentEstimatorMode estimatorMode;
+        public int pdfVersion;
+        public bool rawRadianceIsPreExposed;
+
+        internal static ReferencedPathTracingEnvironmentMetadata Capture(
+            VividSkyData skyData,
+            ReferencedPathTracingSettingsVolume settings = null)
+        {
+            var state = ReferencedPathTracingEnvironmentState.Resolve(
+                skyData,
+                settings);
+            return new ReferencedPathTracingEnvironmentMetadata
+            {
+                contractVersion = ContractVersion,
+                assetName = skyData?.specularCubemap != null
+                    ? skyData.specularCubemap.name
+                    : string.Empty,
+                textureIdentityHash = state.textureIdentityHash,
+                skyHash = state.skyHash,
+                contentHash = state.contentHash,
+                backgroundResolution = state.backgroundResolution,
+                lightingResolution = state.lightingResolution,
+                rotation = state.rotation,
+                physicalIntensityMultiplier = state.intensityMultiplier,
+                samplingMode = state.samplingMode,
+                estimatorMode = state.estimatorMode,
+                pdfVersion =
+                    ReferencedPathTracingEnvironmentImportanceLayout.Version,
+                rawRadianceIsPreExposed = false
+            };
         }
     }
 

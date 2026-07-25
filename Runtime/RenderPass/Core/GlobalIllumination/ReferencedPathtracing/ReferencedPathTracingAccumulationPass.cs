@@ -215,6 +215,8 @@ namespace VividRP.Runtime.RenderPass.Core
             var cameraBackgroundState =
                 ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
 
+            // VividExposureData is deliberately excluded. History contains raw scene-linear
+            // radiance; only m_ResolvedColor is converted to the frame's pre-exposed domain.
             var temporalData = frameData.Get<VividTemporalData>();
             var signatureMatches = state.HasSignature
                 && state.Width == m_Width

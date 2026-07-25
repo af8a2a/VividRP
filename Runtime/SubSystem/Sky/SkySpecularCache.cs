@@ -12,7 +12,9 @@ namespace VividRP.Runtime
         private RTHandle m_ConvolvedCubemapHandle;
         private Cubemap m_FallbackCubemap;
         private RTHandle m_FallbackCubemapHandle;
-        private int m_CachedSkyHash;
+        private int m_CachedContentHash;
+        private int m_CachedResolution;
+        private bool m_ConvolutionAttemptedForCachedState;
         private readonly SkyCubemapGGXConvolution m_GgxConvolution = new();
 
         internal bool IsValid =>
@@ -40,7 +42,40 @@ namespace VividRP.Runtime
             }
         }
 
-        internal int SkyHash => m_CachedSkyHash;
+        internal RTHandle SourceCubemap
+        {
+            get
+            {
+                EnsureCachedSourceCubemapHandle();
+                if (m_CachedSourceCubemapHandle != null)
+                    return m_CachedSourceCubemapHandle;
+
+                return FallbackCubemap;
+            }
+        }
+
+        internal RTHandle FallbackCubemap
+        {
+            get
+            {
+                EnsureFallbackCubemapHandle();
+                return m_FallbackCubemapHandle;
+            }
+        }
+
+        internal int Resolution
+        {
+            get
+            {
+                if (m_ConvolvedCubemap != null)
+                    return m_ConvolvedCubemap.width;
+
+                return m_CachedSource != null
+                    ? Mathf.Max(1, m_CachedSource.width)
+                    : 1;
+            }
+        }
+
         internal int MaxMipLevel
         {
             get
@@ -72,21 +107,42 @@ namespace VividRP.Runtime
             m_GgxConvolution.Build(resources);
         }
 
-        internal void Update(CommandBuffer cmd, Texture source, int skyHash, bool forceRebuild = false)
+        internal void Update(
+            CommandBuffer cmd,
+            Texture source,
+            int contentHash,
+            int resolution,
+            bool forceRebuild = false)
         {
+            var targetResolution = ResolveTargetResolution(source, resolution);
+            var cachedStateMatches =
+                ReferenceEquals(m_CachedSource, source)
+                && contentHash == m_CachedContentHash
+                && targetResolution == m_CachedResolution;
+            var hasReusableCache =
+                m_ConvolvedCubemapHandle != null
+                || (m_CachedSourceCubemapHandle != null
+                    && (cmd == null
+                        || !m_GgxConvolution.IsSupported
+                        || !IsConvolvableCubemap(source)
+                        || m_ConvolutionAttemptedForCachedState));
             if (!forceRebuild
-                && ReferenceEquals(m_CachedSource, source)
-                && skyHash == m_CachedSkyHash
-                && (m_ConvolvedCubemapHandle != null || m_CachedSourceCubemapHandle != null))
+                && cachedStateMatches
+                && hasReusableCache)
                 return;
 
             if (source == null)
             {
                 ReleaseConvolvedCubemap();
                 ReleaseCachedSourceCubemapHandle();
-                m_CachedSkyHash = 0;
+                m_CachedContentHash = 0;
+                m_CachedResolution = 0;
+                m_ConvolutionAttemptedForCachedState = false;
                 return;
             }
+
+            if (!cachedStateMatches)
+                m_ConvolutionAttemptedForCachedState = false;
 
             if (!ReferenceEquals(m_CachedSource, source))
             {
@@ -95,16 +151,24 @@ namespace VividRP.Runtime
                 m_CachedSource = source;
             }
 
-            m_CachedSkyHash = skyHash;
-            if (TryConvolveCubemap(cmd, source))
+            m_CachedContentHash = contentHash;
+            m_CachedResolution = targetResolution;
+            if (cmd != null
+                && m_GgxConvolution.IsSupported
+                && IsConvolvableCubemap(source))
+            {
+                m_ConvolutionAttemptedForCachedState = true;
+            }
+
+            if (TryConvolveCubemap(cmd, source, targetResolution))
                 return;
 
             EnsureCachedSourceCubemapHandle();
         }
 
-        internal void Update(Texture source, int skyHash)
+        internal void Update(Texture source, int contentHash, int resolution)
         {
-            Update(null, source, skyHash);
+            Update(null, source, contentHash, resolution);
         }
 
         public void Dispose()
@@ -125,7 +189,9 @@ namespace VividRP.Runtime
                 m_FallbackCubemap = null;
             }
 
-            m_CachedSkyHash = 0;
+            m_CachedContentHash = 0;
+            m_CachedResolution = 0;
+            m_ConvolutionAttemptedForCachedState = false;
         }
 
         private void EnsureFallbackCubemapHandle()
@@ -153,7 +219,10 @@ namespace VividRP.Runtime
             m_CachedSourceCubemapHandle = RTHandles.Alloc(m_CachedSource);
         }
 
-        private bool TryConvolveCubemap(CommandBuffer cmd, Texture source)
+        private bool TryConvolveCubemap(
+            CommandBuffer cmd,
+            Texture source,
+            int targetResolution)
         {
             if (!m_GgxConvolution.IsSupported || cmd == null || !IsConvolvableCubemap(source))
             {
@@ -161,7 +230,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            EnsureConvolvedCubemap(source);
+            EnsureConvolvedCubemap(source, targetResolution);
             if (m_ConvolvedCubemap == null || !m_GgxConvolution.Convolve(cmd, source, m_ConvolvedCubemap))
             {
                 ReleaseConvolvedCubemap(false);
@@ -172,14 +241,14 @@ namespace VividRP.Runtime
             return true;
         }
 
-        private void EnsureConvolvedCubemap(Texture source)
+        private void EnsureConvolvedCubemap(Texture source, int targetResolution)
         {
-            if (IsConvolvedCubemapValid(source))
+            if (IsConvolvedCubemapValid(targetResolution))
                 return;
 
             ReleaseConvolvedCubemap(false);
 
-            m_ConvolvedCubemap = new RenderTexture(source.width, source.height, 0)
+            m_ConvolvedCubemap = new RenderTexture(targetResolution, targetResolution, 0)
             {
                 name = "VividSkySpecularGGX",
                 hideFlags = HideFlags.HideAndDontSave,
@@ -224,15 +293,26 @@ namespace VividRP.Runtime
                 m_CachedSource = null;
         }
 
-        private bool IsConvolvedCubemapValid(Texture source)
+        private bool IsConvolvedCubemapValid(int targetResolution)
         {
             return m_ConvolvedCubemap != null
                 && m_ConvolvedCubemap.IsCreated()
-                && source != null
                 && m_ConvolvedCubemap.dimension == TextureDimension.Cube
-                && m_ConvolvedCubemap.width == source.width
-                && m_ConvolvedCubemap.height == source.height
+                && m_ConvolvedCubemap.width == targetResolution
+                && m_ConvolvedCubemap.height == targetResolution
                 && m_ConvolvedCubemap.graphicsFormat == GraphicsFormat.R16G16B16A16_SFloat;
+        }
+
+        private static int ResolveTargetResolution(Texture source, int requestedResolution)
+        {
+            if (source == null)
+                return 0;
+
+            var sourceResolution = Mathf.Max(1, Mathf.Min(source.width, source.height));
+            if (requestedResolution <= 0)
+                return sourceResolution;
+
+            return Mathf.Clamp(requestedResolution, 1, sourceResolution);
         }
 
         private static bool IsConvolvableCubemap(Texture source)

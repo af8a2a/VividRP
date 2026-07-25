@@ -70,6 +70,7 @@ namespace VividRP.Runtime
             {
                 var hash = 17;
                 hash = AppendHash(hash, GetTextureEntityHash(cubemap));
+                hash = AppendHash(hash, SkyManager.GetSkyTextureContentHash(cubemap));
                 hash = AppendHash(hash, Color.white.GetHashCode());
                 hash = AppendHash(hash, intensityMultiplier);
                 hash = AppendHash(hash, rotation);
@@ -102,6 +103,7 @@ namespace VividRP.Runtime
             skyData.tint = Color.white;
             skyData.exposure = intensityMultiplier;
             skyData.rotation = rotation;
+            skyData.skyContentHash = SkyManager.GetSkyTextureContentHash(cubemap);
             var generatedCubemapResolution = 16;
             var ambientProbeRebuildReason = ResolveAmbientProbeRebuildReason(skyHash, generatedCubemapResolution);
             if (forceRebuild && ambientProbeRebuildReason == AmbientProbeRebuildReason.None)

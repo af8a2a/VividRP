@@ -239,6 +239,7 @@ namespace VividRP.Runtime
 
             skyData.activeSkyType = SkyType.PhysicallyBased;
             skyData.specularCubemap = m_RuntimeSkyCubemap;
+            skyData.skyContentHash = m_RuntimeSkyHash;
             skyData.tint = Color.white;
             skyData.exposure = 1.0f;
             skyData.rotation = 0.0f;
@@ -534,6 +535,7 @@ namespace VividRP.Runtime
                     m_RuntimeSkyHash = skyHash;
                     m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
                     skyData.specularCubemap = m_RuntimeSkyCubemap;
+                    skyData.skyContentHash = m_RuntimeSkyHash;
                     skyData.specularCubemapDirty = true;
                 }
             }

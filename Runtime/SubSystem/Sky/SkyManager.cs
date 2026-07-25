@@ -250,6 +250,14 @@ namespace VividRP.Runtime
             return s_SpecularCache.Cubemap;
         }
 
+        internal static RTHandle GetSkySourceCubemapHandle()
+        {
+            if (!IsInitialized)
+                Initialize();
+
+            return s_SpecularCache.SourceCubemap;
+        }
+
         internal static int GetSpecularCubemapMaxMip(VividSkyData skyData = null)
         {
             if (!IsInitialized)
@@ -262,13 +270,56 @@ namespace VividRP.Runtime
             return s_SpecularCache.MaxMipLevel;
         }
 
+        internal static int GetSpecularCubemapResolution(VividSkyData skyData = null)
+        {
+            if (!IsInitialized)
+                Initialize();
+
+            var source = skyData?.specularCubemap;
+            if (skyData != null && !s_SpecularCache.HasSource(source))
+                return source != null ? Mathf.Max(1, source.width) : 1;
+
+            return s_SpecularCache.Resolution;
+        }
+
         internal static void ImportSpecularCubemap(RenderGraphTexture texture, VividSkyData skyData = null)
         {
             if (texture == null || !PassRecorder.IsPassTextureImportActive)
                 return;
 
-            UpdateSpecularCubemap(skyData);
-            var handle = GetSpecularCubemapHandle();
+            RTHandle handle;
+            if (skyData != null && HasValidSkyTexture(skyData.specularCubemap))
+            {
+                UpdateSpecularCubemap(skyData);
+                handle = GetSpecularCubemapHandle();
+            }
+            else
+            {
+                handle = s_SpecularCache.FallbackCubemap;
+            }
+
+            if (handle != null)
+                PassRecorder.ImportTexture(texture, handle);
+        }
+
+        internal static void ImportSkySourceCubemap(
+            RenderGraphTexture texture,
+            VividSkyData skyData = null)
+        {
+            if (texture == null || !PassRecorder.IsPassTextureImportActive)
+                return;
+
+            RTHandle handle;
+            if (skyData != null && HasValidSkyTexture(skyData.specularCubemap))
+            {
+                UpdateSpecularCubemap(skyData);
+                handle = GetSkySourceCubemapHandle();
+            }
+            else
+            {
+                handle = s_SpecularCache.FallbackCubemap;
+            }
+
             if (handle != null)
                 PassRecorder.ImportTexture(texture, handle);
         }
@@ -365,10 +416,12 @@ namespace VividRP.Runtime
 
         private static void UpdateSpecularCubemap(CommandBuffer cmd, VividSkyData skyData, bool forceRebuild = false)
         {
+            var source = skyData?.specularCubemap;
             s_SpecularCache.Update(
                 cmd,
-                skyData?.specularCubemap,
-                skyData?.skyHash ?? 0,
+                source,
+                ResolveSkyContentHash(skyData),
+                ResolveSkyReflectionResolution(source),
                 forceRebuild || (skyData?.specularCubemapDirty == true));
             if (skyData != null)
                 skyData.specularCubemapDirty = false;
@@ -376,7 +429,11 @@ namespace VividRP.Runtime
 
         private static void UpdateSpecularCubemap(VividSkyData skyData)
         {
-            s_SpecularCache.Update(skyData?.specularCubemap, skyData?.skyHash ?? 0);
+            var source = skyData?.specularCubemap;
+            s_SpecularCache.Update(
+                source,
+                ResolveSkyContentHash(skyData),
+                ResolveSkyReflectionResolution(source));
         }
 
         private static void UpdateDiffuseAmbientProbe(CommandBuffer cmd, VividSkyData skyData, bool forceRebuild)
@@ -408,6 +465,43 @@ namespace VividRP.Runtime
             }
 
             return texture is not RenderTexture renderTexture || renderTexture.IsCreated();
+        }
+
+        internal static int GetSkyTextureContentHash(Texture texture)
+        {
+            if (!HasValidSkyTexture(texture))
+                return 0;
+
+            unchecked
+            {
+                var hash = 17;
+                hash = (hash * 397) ^ texture.imageContentsHash.GetHashCode();
+                hash = (hash * 397) ^ texture.width;
+                hash = (hash * 397) ^ texture.height;
+                hash = (hash * 397) ^ texture.mipmapCount;
+                hash = (hash * 397) ^ texture.graphicsFormat.GetHashCode();
+                hash = (hash * 397) ^ texture.dimension.GetHashCode();
+                return hash;
+            }
+        }
+
+        private static int ResolveSkyContentHash(VividSkyData skyData)
+        {
+            if (skyData == null)
+                return 0;
+
+            return skyData.skyContentHash != 0
+                ? skyData.skyContentHash
+                : GetSkyTextureContentHash(skyData.specularCubemap);
+        }
+
+        private static int ResolveSkyReflectionResolution(Texture source)
+        {
+            var requestedResolution = SkySettingsVolume.GetSkyReflectionResolution(
+                VividVolumeManagerUtility.GetSkySettingsVolume());
+            return source != null
+                ? Mathf.Clamp(requestedResolution, 1, Mathf.Max(1, source.width))
+                : requestedResolution;
         }
 
         private static Vector4 BuildVolumetricAmbientProbeFogParameters()

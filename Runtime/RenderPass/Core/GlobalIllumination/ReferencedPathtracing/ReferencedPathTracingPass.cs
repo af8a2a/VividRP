@@ -60,6 +60,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ReGIREnabledId = Shader.PropertyToID("_ReferencedReGIREnabled");
         private static readonly int EnvironmentTextureId =
             Shader.PropertyToID("_ReferencedEnvironmentTexture");
+        private static readonly int EnvironmentBackgroundTextureId =
+            Shader.PropertyToID("_ReferencedEnvironmentBackgroundTexture");
         private static readonly int EnvironmentImportanceDistributionId =
             Shader.PropertyToID("_ReferencedEnvironmentImportanceDistribution");
         private static readonly int EnvironmentTintId =
@@ -102,6 +104,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "PathTracingEnvironment", Access = AccessFlags.Read)]
         private RenderGraphTexture m_EnvironmentTexture;
+
+        [RenderGraphResource(
+            Name = "PathTracingEnvironmentBackground",
+            Access = AccessFlags.Read)]
+        private RenderGraphTexture m_EnvironmentBackgroundTexture;
 
         [RenderGraphResource(
             Name = "EnvironmentImportanceDistribution",
@@ -201,6 +208,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 "ReGIRLightPdfTexture",
                 GraphicsFormat.R32_SFloat);
             m_EnvironmentTexture = CreateEnvironmentTexture("PathTracingEnvironment");
+            m_EnvironmentBackgroundTexture =
+                CreateEnvironmentTexture("PathTracingEnvironmentBackground");
             m_DefaultEnvironmentImportanceDistribution =
                 RenderGraphBuffer.CreateStructured(
                     "EnvironmentImportanceDistributionFallback",
@@ -549,6 +558,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private void PrepareEnvironment(VividSkyData skyData, VividCameraData cameraData)
         {
             m_EnvironmentTexture.ClearImportedHandle();
+            m_EnvironmentBackgroundTexture.ClearImportedHandle();
             m_EnvironmentState = ReferencedPathTracingEnvironmentState.Resolve(skyData);
             m_CameraBackgroundState =
                 ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
@@ -557,6 +567,9 @@ namespace VividRP.Runtime.RenderPass.Core
             // SkyManager's black cubemap for disabled, missing, or unsupported sky types.
             SkyManager.ImportSpecularCubemap(
                 m_EnvironmentTexture,
+                m_EnvironmentState.hasHdri ? skyData : null);
+            SkyManager.ImportSkySourceCubemap(
+                m_EnvironmentBackgroundTexture,
                 m_EnvironmentState.hasHdri ? skyData : null);
         }
 
@@ -571,6 +584,19 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     EnvironmentTextureId,
                     m_EnvironmentTexture.innerHandle);
+            }
+
+            var hasBackgroundBinding =
+                m_EnvironmentBackgroundTexture?.innerHandle.IsValid() == true;
+            if (hasBackgroundBinding)
+            {
+                cmd.SetGlobalTexture(
+                    EnvironmentBackgroundTextureId,
+                    m_EnvironmentBackgroundTexture.innerHandle);
+                cmd.SetRayTracingTextureParam(
+                    m_RayTracingShader,
+                    EnvironmentBackgroundTextureId,
+                    m_EnvironmentBackgroundTexture.innerHandle);
             }
 
             if (m_EnvironmentImportanceDistribution?.innerHandle.IsValid() == true)
@@ -594,7 +620,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var lightingEnabled =
                 hasEnvironmentBinding && m_EnvironmentState.lightingEnabled ? 1 : 0;
             var cameraVisible =
-                hasEnvironmentBinding && m_EnvironmentState.cameraVisible ? 1 : 0;
+                hasBackgroundBinding && m_EnvironmentState.cameraVisible ? 1 : 0;
             var importanceSamplingEnabled =
                 hasEnvironmentBinding && m_EnvironmentState.importanceSamplingEnabled ? 1 : 0;
             var neeEnabled =

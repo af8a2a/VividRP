@@ -11,9 +11,42 @@ namespace VividRP.Editor.Tests
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkySpecularCache.cs"));
 
             Assert.That(source, Does.Contain("private readonly SkyCubemapGGXConvolution m_GgxConvolution = new();"));
-            Assert.That(source, Does.Contain("if (TryConvolveCubemap(cmd, source))"));
-            Assert.That(source, Does.Contain("m_ConvolvedCubemap = new RenderTexture(source.width, source.height, 0)"));
+            Assert.That(
+                source,
+                Does.Contain(
+                    "if (TryConvolveCubemap(cmd, source, targetResolution))"));
+            Assert.That(source, Does.Contain("m_ConvolvedCubemap = new RenderTexture(targetResolution, targetResolution, 0)"));
             Assert.That(source, Does.Not.Contain("cmd.GenerateMips"));
+        }
+
+        [Test]
+        public void SkyTextureContentHash_IsStableAndTracksTextureShape()
+        {
+            var first = new UnityEngine.Cubemap(
+                4,
+                UnityEngine.TextureFormat.RGBAHalf,
+                true);
+            var second = new UnityEngine.Cubemap(
+                8,
+                UnityEngine.TextureFormat.RGBAHalf,
+                true);
+
+            try
+            {
+                var firstHash = VividRP.Runtime.SkyManager.GetSkyTextureContentHash(first);
+                var unchangedHash =
+                    VividRP.Runtime.SkyManager.GetSkyTextureContentHash(first);
+                var secondHash =
+                    VividRP.Runtime.SkyManager.GetSkyTextureContentHash(second);
+
+                Assert.That(unchangedHash, Is.EqualTo(firstHash));
+                Assert.That(secondHash, Is.Not.EqualTo(firstHash));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(second);
+                UnityEngine.Object.DestroyImmediate(first);
+            }
         }
 
         [Test]

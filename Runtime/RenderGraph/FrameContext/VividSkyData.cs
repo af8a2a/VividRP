@@ -16,6 +16,7 @@ namespace VividRP.Runtime
         public float rotation;
         public float ambientProbeRotation;
         public int skyHash;
+        public int skyContentHash;
         public int ambientProbeHash;
         internal bool specularCubemapDirty;
 
@@ -32,6 +33,7 @@ namespace VividRP.Runtime
             rotation = 0.0f;
             ambientProbeRotation = 0.0f;
             skyHash = 0;
+            skyContentHash = 0;
             ambientProbeHash = 0;
             specularCubemapDirty = false;
         }
@@ -55,6 +57,7 @@ namespace VividRP.Runtime
             rotation = other.rotation;
             ambientProbeRotation = other.ambientProbeRotation;
             skyHash = other.skyHash;
+            skyContentHash = other.skyContentHash;
             ambientProbeHash = other.ambientProbeHash;
             specularCubemapDirty = other.specularCubemapDirty;
         }

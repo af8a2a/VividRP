@@ -5,9 +5,12 @@ float4 _ReferencedMainLightDirectionWS;
 float4 _ReferencedMainLightColor;
 int _ReferencedReGIREnabled;
 
-// Environment contract shared by camera/background, BSDF miss, distribution build, and NEE.
+// Lower-resolution lighting cubemap shared by BSDF miss, distribution build, and NEE.
 TextureCube<float4> _ReferencedEnvironmentTexture;
 SamplerState sampler_ReferencedEnvironmentTexture;
+// Raw source cubemap retained at asset resolution for primary camera background evaluation.
+TextureCube<float4> _ReferencedEnvironmentBackgroundTexture;
+SamplerState sampler_ReferencedEnvironmentBackgroundTexture;
 float4 _ReferencedEnvironmentTint;
 // x: scene-linear intensity multiplier, y: rotation in degrees,
 // z: maximum available mip, w: valid HDRI source.
@@ -93,6 +96,30 @@ float3 ReferencedPathtracingSampleEnvironment(float3 directionWS)
         directionWS * rsqrt(directionLengthSquared));
     float3 radiance = _ReferencedEnvironmentTexture.SampleLevel(
         sampler_ReferencedEnvironmentTexture,
+        rotatedDirectionWS,
+        0.0).rgb;
+    radiance *= max(_ReferencedEnvironmentTint.rgb, 0.0)
+        * max(_ReferencedEnvironmentParameters.x, 0.0);
+    return !any(isnan(radiance)) && !any(isinf(radiance))
+        ? max(radiance, 0.0)
+        : 0.0;
+}
+
+float3 ReferencedPathtracingSampleBackgroundEnvironment(float3 directionWS)
+{
+    float directionLengthSquared = dot(directionWS, directionWS);
+    if (!ReferencedPathtracingHasEnvironment()
+        || directionLengthSquared <= 1e-8
+        || isnan(directionLengthSquared)
+        || isinf(directionLengthSquared))
+    {
+        return 0.0;
+    }
+
+    float3 rotatedDirectionWS = ReferencedPathtracingRotateEnvironmentDirection(
+        directionWS * rsqrt(directionLengthSquared));
+    float3 radiance = _ReferencedEnvironmentBackgroundTexture.SampleLevel(
+        sampler_ReferencedEnvironmentBackgroundTexture,
         rotatedDirectionWS,
         0.0).rgb;
     radiance *= max(_ReferencedEnvironmentTint.rgb, 0.0)
@@ -399,7 +426,9 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
         && _ReferencedEnvironmentCameraVisible != 0
         && ReferencedPathtracingHasEnvironment())
     {
-        return float4(ReferencedPathtracingSampleEnvironment(directionWS), 1.0);
+        return float4(
+            ReferencedPathtracingSampleBackgroundEnvironment(directionWS),
+            1.0);
     }
 
     return float4(

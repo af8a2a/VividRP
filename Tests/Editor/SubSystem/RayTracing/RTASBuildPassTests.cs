@@ -205,6 +205,24 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateCullingConfig_ClassifiesAlphaTestMaterialsForAnyHit()
+        {
+            var settings = CreateDefaultResolvedSettings();
+            var cullingConfig = RTASBuildPass.CreateCullingConfig(null, in settings, false);
+
+            Assert.That(
+                cullingConfig.alphaTestedMaterialConfig.optionalShaderKeywords,
+                Is.EqualTo(new[] { "_ALPHATEST_ON" }));
+            Assert.That(
+                cullingConfig.subMeshFlagsConfig.alphaTestedMaterials,
+                Is.EqualTo(RayTracingSubMeshFlags.Enabled));
+            Assert.That(
+                (cullingConfig.subMeshFlagsConfig.alphaTestedMaterials
+                    & RayTracingSubMeshFlags.ClosestHitOnly) != 0,
+                Is.False);
+        }
+
+        [Test]
         public void CountMeshletCandidateInstances_CountsPerSubMesh_WhenFallbackFilterIsUsed()
         {
             Material firstMaterial = null;

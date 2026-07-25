@@ -679,7 +679,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 useRenderPipelineTagFilter ? m_RequiredShaderTags : null,
                 extendedFrustumPlanes,
                 false,
-                false,
                 !DiagnosticDisableSceneRendererLodCulling);
         }
 
@@ -689,7 +688,6 @@ namespace VividRP.Runtime.RenderPass.Core
             RayTracingInstanceCullingTest[] instanceTests,
             RayTracingInstanceCullingShaderTagConfig[] requiredShaderTags,
             Plane[] extendedFrustumPlanes,
-            bool useOptionalMaterialKeywordFilters = true,
             bool checkDoubleSidedGIMaterial = true,
             bool enableLodCulling = true)
         {
@@ -721,13 +719,12 @@ namespace VividRP.Runtime.RenderPass.Core
             cullingConfig.triangleCullingConfig.checkDoubleSidedGIMaterial = checkDoubleSidedGIMaterial;
             cullingConfig.triangleCullingConfig.frontTriangleCounterClockwise = false;
             cullingConfig.triangleCullingConfig.forceDoubleSided = !checkDoubleSidedGIMaterial;
-
-            if (useOptionalMaterialKeywordFilters)
-            {
-                cullingConfig.triangleCullingConfig.optionalDoubleSidedShaderKeywords = s_DoubleSidedShaderKeywords;
-                cullingConfig.alphaTestedMaterialConfig.optionalShaderKeywords = s_AlphaTestShaderKeywords;
-                cullingConfig.transparentMaterialConfig.optionalShaderKeywords = s_TransparentShaderKeywords;
-            }
+            cullingConfig.triangleCullingConfig.optionalDoubleSidedShaderKeywords =
+                s_DoubleSidedShaderKeywords;
+            cullingConfig.alphaTestedMaterialConfig.optionalShaderKeywords =
+                s_AlphaTestShaderKeywords;
+            cullingConfig.transparentMaterialConfig.optionalShaderKeywords =
+                s_TransparentShaderKeywords;
 
             if (requiredShaderTags != null)
                 cullingConfig.materialTest.requiredShaderTags = requiredShaderTags;

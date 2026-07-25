@@ -20,18 +20,21 @@ namespace VividRP.Editor.Tests
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(4));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(16));
                 Assert.That(SkySettingsVolume.GetSkyTextureResolution(volume), Is.EqualTo(1024));
+                Assert.That(SkySettingsVolume.GetSkyReflectionResolution(volume), Is.EqualTo(128));
 
                 volume.generatedCubemapQuality.value = SkyGeneratedCubemapQuality.High;
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(16));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(8));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(64));
                 Assert.That(SkySettingsVolume.GetSkyTextureResolution(volume), Is.EqualTo(1024));
+                Assert.That(SkySettingsVolume.GetSkyReflectionResolution(volume), Is.EqualTo(512));
 
                 volume.generatedCubemapQuality.value = SkyGeneratedCubemapQuality.Ultra;
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapViewSampleCount(volume), Is.EqualTo(24));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(volume), Is.EqualTo(12));
                 Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(volume), Is.EqualTo(128));
                 Assert.That(SkySettingsVolume.GetSkyTextureResolution(volume), Is.EqualTo(1024));
+                Assert.That(SkySettingsVolume.GetSkyReflectionResolution(volume), Is.EqualTo(1024));
             }
             finally
             {
@@ -46,6 +49,7 @@ namespace VividRP.Editor.Tests
             Assert.That(SkySettingsVolume.GetGeneratedCubemapLightSampleCount(), Is.EqualTo(6));
             Assert.That(SkySettingsVolume.GetGeneratedCubemapResolution(), Is.EqualTo(32));
             Assert.That(SkySettingsVolume.GetSkyTextureResolution(), Is.EqualTo(1024));
+            Assert.That(SkySettingsVolume.GetSkyReflectionResolution(), Is.EqualTo(256));
             Assert.That(SkySettingsVolume.GetIncludeSunInBaking(), Is.False);
         }
 

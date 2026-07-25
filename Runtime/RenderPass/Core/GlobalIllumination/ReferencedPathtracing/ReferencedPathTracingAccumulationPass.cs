@@ -47,6 +47,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public Vector3 MainLightDirection;
             public Vector3 MainLightColor;
             public ulong LocalLightSignature;
+            public ulong EnvironmentSignature;
+            public ulong CameraBackgroundSignature;
             public ulong SampleCount;
 
             public override void Dispose()
@@ -204,6 +206,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 out var lightDirection,
                 out var lightColor,
                 out var localLightSignature);
+            var environmentState = ReferencedPathTracingEnvironmentState.Resolve(
+                frameData.GetOrCreate<VividSkyData>());
+            var cameraBackgroundState =
+                ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
 
             var temporalData = frameData.Get<VividTemporalData>();
             var signatureMatches = state.HasSignature
@@ -213,7 +219,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 && MatricesApproximatelyEqual(state.ProjectionMatrix, projectionMatrix, MatrixResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightDirection, lightDirection, LightResetEpsilon)
                 && VectorsApproximatelyEqual(state.MainLightColor, lightColor, LightResetEpsilon)
-                && state.LocalLightSignature == localLightSignature;
+                && state.LocalLightSignature == localLightSignature
+                && state.EnvironmentSignature == environmentState.signature
+                && state.CameraBackgroundSignature == cameraBackgroundState.signature;
 
             m_UseHistory = m_HasValidHistory
                 && signatureMatches
@@ -233,6 +241,8 @@ namespace VividRP.Runtime.RenderPass.Core
             state.MainLightDirection = lightDirection;
             state.MainLightColor = lightColor;
             state.LocalLightSignature = localLightSignature;
+            state.EnvironmentSignature = environmentState.signature;
+            state.CameraBackgroundSignature = cameraBackgroundState.signature;
         }
 
         private void ConfigureHistoryDescriptor(int width, int height)

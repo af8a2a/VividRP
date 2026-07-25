@@ -5,6 +5,90 @@ float4 _ReferencedMainLightDirectionWS;
 float4 _ReferencedMainLightColor;
 int _ReferencedReGIREnabled;
 
+// E0 environment contract. E1 will consume this source from camera and BSDF miss paths;
+// E2 will add the importance-distribution textures used by the sampling mode below.
+TextureCube<float4> _ReferencedEnvironmentTexture;
+SamplerState sampler_ReferencedEnvironmentTexture;
+float4 _ReferencedEnvironmentTint;
+// x: scene-linear intensity multiplier, y: rotation in degrees,
+// z: maximum available mip, w: valid HDRI source.
+float4 _ReferencedEnvironmentParameters;
+int _ReferencedEnvironmentLightingEnabled;
+int _ReferencedEnvironmentCameraVisible;
+int _ReferencedEnvironmentImportanceSamplingEnabled;
+int _ReferencedEnvironmentSamplingMode;
+int _ReferencedEnvironmentDebugMode;
+float4 _ReferencedCameraClearColor;
+int _ReferencedCameraSkyEnabled;
+
+static const int kReferencedEnvironmentDebugCombined = 0;
+static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
+static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
+static const int kReferencedEnvironmentDebugIndirectMissOnly = 3;
+
+bool ReferencedPathtracingHasEnvironment()
+{
+    return _ReferencedEnvironmentParameters.w > 0.5;
+}
+
+float3 ReferencedPathtracingRotateEnvironmentDirection(float3 directionWS)
+{
+    float rotationRadians = radians(_ReferencedEnvironmentParameters.y);
+    float sine;
+    float cosine;
+    sincos(rotationRadians, sine, cosine);
+
+    return float3(
+        cosine * directionWS.x - sine * directionWS.z,
+        directionWS.y,
+        sine * directionWS.x + cosine * directionWS.z);
+}
+
+float3 ReferencedPathtracingSampleEnvironment(float3 directionWS)
+{
+    float directionLengthSquared = dot(directionWS, directionWS);
+    if (!ReferencedPathtracingHasEnvironment()
+        || directionLengthSquared <= 1e-8
+        || isnan(directionLengthSquared)
+        || isinf(directionLengthSquared))
+    {
+        return 0.0;
+    }
+
+    float3 rotatedDirectionWS = ReferencedPathtracingRotateEnvironmentDirection(
+        directionWS * rsqrt(directionLengthSquared));
+    float3 radiance = _ReferencedEnvironmentTexture.SampleLevel(
+        sampler_ReferencedEnvironmentTexture,
+        rotatedDirectionWS,
+        0.0).rgb;
+    radiance *= max(_ReferencedEnvironmentTint.rgb, 0.0)
+        * max(_ReferencedEnvironmentParameters.x, 0.0);
+    return !any(isnan(radiance)) && !any(isinf(radiance))
+        ? max(radiance, 0.0)
+        : 0.0;
+}
+
+float3 ReferencedPathtracingEvaluateLightingEnvironment(float3 directionWS)
+{
+    return _ReferencedEnvironmentLightingEnabled != 0
+        ? ReferencedPathtracingSampleEnvironment(directionWS)
+        : 0.0;
+}
+
+float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
+{
+    if (_ReferencedCameraSkyEnabled != 0
+        && _ReferencedEnvironmentCameraVisible != 0
+        && ReferencedPathtracingHasEnvironment())
+    {
+        return float4(ReferencedPathtracingSampleEnvironment(directionWS), 1.0);
+    }
+
+    return float4(
+        max(_ReferencedCameraClearColor.rgb, 0.0),
+        saturate(_ReferencedCameraClearColor.a));
+}
+
 struct ReferencedPathtracingPayload
 {
     // Raygen inputs consumed by closest-hit.

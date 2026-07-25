@@ -239,6 +239,20 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - 缺失 cubemap、无效资源和禁用 Sky 时不会输出 NaN/Inf。
 - 环境 texture、rotation、tint、intensity 或 enable state 进入 accumulation signature。
 
+**Implementation checkpoint (2026-07-25)**
+
+- 已增加 `ReferencedPathTracingEnvironmentState`，统一解析 `VividSkyData`、HDRI 有效性、scene-linear
+  intensity、rotation、tint、sky hash，以及 lighting/camera/sampling 三类独立开关。
+- 已增加 `ReferencedPathTracingSettingsVolume`，支持环境照明、相机可见性，以及
+  BSDF-only / importance sampling / uniform-sphere 调试采样模式。
+- `ReferencedPathTracingPass` 已通过显式 RenderGraph cube 资源消费 `SkyManager` 的 HDRI
+  specular cubemap；缺失、禁用或非 HDRI Sky 时导入 Sky 子系统的黑色 fallback cubemap。
+- 环境纹理和契约参数已在 dispatch 前同时绑定为 global 与 ray-tracing 参数，供 material
+  closest-hit 和 raygen/miss 路径共享。
+- 环境契约 signature 已接入无限累积历史判定；Sky 或环境 Volume 状态改变会重置累积。
+- E0 到此只建立资源与状态契约。实际 camera/BSDF miss 采样留在 E1，重要性分布纹理及 PDF
+  留在 E2。
+
 #### E1: Camera Background and BSDF Miss Evaluation
 
 **Goal**

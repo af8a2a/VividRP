@@ -176,6 +176,10 @@ void RayGenReferencedPathtracing()
     float3 specularRadiance = 0.0;
     float3 directLightingRadiance = 0.0;
     float3 emissionRadiance = 0.0;
+    float3 cameraBackgroundRadiance = 0.0;
+    float3 primaryEnvironmentBackgroundRadiance = 0.0;
+    float3 indirectEnvironmentRadiance = 0.0;
+    float cameraBackgroundAlpha = 0.0;
     float3 throughput = 1.0;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
@@ -218,7 +222,45 @@ void RayGenReferencedPathtracing()
             payload);
 
         if (payload.hit == 0u)
+        {
+            if (bounceIndex == 0u)
+            {
+                float4 cameraBackground =
+                    ReferencedPathtracingEvaluateCameraBackground(ray.Direction);
+                cameraBackgroundRadiance = cameraBackground.rgb;
+                cameraBackgroundAlpha = cameraBackground.a;
+
+                bool usesEnvironmentBackground =
+                    _ReferencedCameraSkyEnabled != 0
+                    && _ReferencedEnvironmentCameraVisible != 0
+                    && ReferencedPathtracingHasEnvironment();
+                if (usesEnvironmentBackground)
+                    primaryEnvironmentBackgroundRadiance = cameraBackground.rgb;
+            }
+            else
+            {
+                // Until E2 adds environment NEE, every indirect environment contribution is a
+                // pure BSDF-sampled estimator: throughput already contains f * cos(theta) / pdf.
+                float3 environmentRadiance =
+                    ReferencedPathtracingEvaluateLightingEnvironment(ray.Direction);
+                float3 environmentContribution = throughput * environmentRadiance;
+                if (IsFiniteReferencedPathtracingRadiance(environmentContribution))
+                {
+                    if (primaryLobeClass == 1u)
+                    {
+                        diffuseRadiance += environmentContribution;
+                        indirectEnvironmentRadiance += environmentContribution;
+                    }
+                    else if (primaryLobeClass == 2u)
+                    {
+                        specularRadiance += environmentContribution;
+                        indirectEnvironmentRadiance += environmentContribution;
+                    }
+                }
+            }
+
             break;
+        }
 
         if (bounceIndex == 0u)
         {
@@ -394,10 +436,27 @@ void RayGenReferencedPathtracing()
             primaryViewZ,
             primaryLinearRoughness)
         : 0.0;
-    float3 radiance =
+    float3 surfaceRadiance =
         diffuseRadiance + specularRadiance + directLightingRadiance + emissionRadiance;
+    float3 radiance = surfaceRadiance + cameraBackgroundRadiance;
+    if (_ReferencedEnvironmentDebugMode == kReferencedEnvironmentDebugEnvironmentOnly)
+    {
+        radiance =
+            primaryEnvironmentBackgroundRadiance + indirectEnvironmentRadiance;
+    }
+    else if (_ReferencedEnvironmentDebugMode
+        == kReferencedEnvironmentDebugPrimaryBackgroundOnly)
+    {
+        radiance = cameraBackgroundRadiance;
+    }
+    else if (_ReferencedEnvironmentDebugMode
+        == kReferencedEnvironmentDebugIndirectMissOnly)
+    {
+        radiance = indirectEnvironmentRadiance;
+    }
 
-    _WorldPositionTexture[pixelCoord] = float4(radiance, primaryHit != 0u ? 1.0 : 0.0);
+    float outputAlpha = primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
+    _WorldPositionTexture[pixelCoord] = float4(radiance, outputAlpha);
     _ReferencedPathTracingDirectLighting[pixelCoord] =
         float4(directLightingRadiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingEmission[pixelCoord] = float4(emissionRadiance, primaryHit != 0u ? 1.0 : 0.0);

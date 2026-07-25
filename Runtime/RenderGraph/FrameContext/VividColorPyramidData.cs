@@ -1,12 +1,13 @@
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
     public sealed class VividColorPyramidData : ContextItem
     {
         public bool hasValidHistory;
-        public RenderGraphTexture previousColorPyramid;
+        public TextureHandle previousColorPyramid;
         public RenderGraphTexture currentColorPyramid;
         public int width;
         public int height;
@@ -18,7 +19,7 @@ namespace VividRP.Runtime
         public override void Reset()
         {
             hasValidHistory = false;
-            previousColorPyramid = null;
+            previousColorPyramid = default;
             currentColorPyramid = null;
             width = 0;
             height = 0;

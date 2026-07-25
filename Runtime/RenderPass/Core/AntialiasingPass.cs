@@ -35,14 +35,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [RenderGraphResource(Name = "AntialiasingOutput", Access = AccessFlags.Write)]
         private RenderGraphTexture AntialiasingOutput;
 
-        [RenderGraphResource(Name = "AntialiasingTAAHistoryColor", Access = AccessFlags.Read)]
-        [TransientResource]
-        private RenderGraphTexture m_TaaHistoryColorPrevious;
-
-        [RenderGraphResource(Name = "AntialiasingTAAHistoryColorCurrent", Access = AccessFlags.ReadWrite)]
-        [TransientResource]
-        private RenderGraphTexture m_TaaHistoryColorCurrent;
-
         private readonly RenderGraphTexture m_DefaultColor;
         private readonly RenderGraphTexture m_DefaultMotionVectors;
         private readonly RenderGraphTexture m_DefaultCameraDepth;
@@ -62,6 +54,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_TaaKernel = -1;
         private int m_Width = 1;
         private int m_Height = 1;
+        private CameraHistoryTexture m_TaaHistory;
+        private TextureHandle m_TaaHistoryColorPrevious;
+        private TextureHandle m_TaaHistoryColorCurrent;
         private bool m_HasValidTaaHistory;
         private bool m_IsFirstFrame = true;
         private bool m_ResetHistory;
@@ -83,14 +78,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DefaultMotionVectors = MotionVectors;
             m_DefaultCameraDepth = CameraDepth;
             AntialiasingOutput = CreatePassOwnedTexture("AntialiasingOutput", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
-            m_TaaHistoryColorPrevious = RenderGraphTexture.CreateInput(
-                "AntialiasingTAAHistoryColor",
-                GraphicsFormat.R16G16B16A16_SFloat);
-            m_TaaHistoryColorCurrent = CreatePassOwnedTexture(
-                "AntialiasingTAAHistoryColorCurrent",
-                1,
-                1,
-                GraphicsFormat.R16G16B16A16_SFloat);
         }
 
         public void ClearPassResourceLayoutDirty()
@@ -135,7 +122,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_PreviousJitter = temporalData != null ? temporalData.previousJitter : Vector2.zero;
 
             UpdateOutputDescriptor(cameraData, antialiasingData);
-            PrepareTaaHistory();
+            PrepareTaaHistory(cameraData);
             PrepareCmaa2(frameData);
         }
 
@@ -230,13 +217,18 @@ namespace VividRP.Runtime.RenderPass.Core
 #endif
             m_ComputeShader = null;
             m_TaaKernel = -1;
+            m_TaaHistory = null;
+            m_TaaHistoryColorPrevious = default;
+            m_TaaHistoryColorCurrent = default;
             m_HasValidTaaHistory = false;
             m_IsPassResourceLayoutDirty = false;
         }
 
-        private void PrepareTaaHistory()
+        private void PrepareTaaHistory(VividCameraData cameraData)
         {
-            ResizePassOwned(m_TaaHistoryColorCurrent, m_Width, m_Height);
+            m_TaaHistory = null;
+            m_TaaHistoryColorPrevious = default;
+            m_TaaHistoryColorCurrent = default;
 
             if (m_EffectiveMode != VividAntialiasingMode.TemporalAntiAliasing || !m_TaaSettings.Enabled)
             {
@@ -244,11 +236,22 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            m_HasValidTaaHistory = AllocHistoryTexture(
-                "AntialiasingTAAHistoryColor",
-                m_TaaHistoryColorPrevious,
-                m_TaaHistoryColorCurrent,
-                CreateTaaHistoryDescriptor());
+            var camera = cameraData?.camera;
+            if (camera == null)
+            {
+                m_HasValidTaaHistory = false;
+                return;
+            }
+
+            var history = camera.GetVividCameraHistory();
+            var descriptor = CameraHistoryRenderGraphBridge.CreateDescriptor(CreateTaaHistoryDescriptor());
+            m_TaaHistory = history.GetOrCreateTexture(
+                CameraHistoryIds.AntialiasingTaa,
+                2,
+                descriptor);
+            m_HasValidTaaHistory = m_TaaHistory.IsValid();
+            m_TaaHistoryColorPrevious = CameraHistoryRenderGraphBridge.Import(m_TaaHistory, 1);
+            m_TaaHistoryColorCurrent = CameraHistoryRenderGraphBridge.Import(m_TaaHistory, 0);
         }
 
         private static void ResolveInputHandle(RenderGraphRecordingContext context, RenderGraphTexture texture)
@@ -293,9 +296,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var historyPreviousHandle = m_HasValidTaaHistory && !m_IsFirstFrame
                 && !m_ResetHistory
-                ? context.GetOrCreateTextureHandle(m_TaaHistoryColorPrevious)
+                ? m_TaaHistoryColorPrevious
                 : sourceHandle;
-            var historyCurrentHandle = context.GetOrCreateTextureHandle(m_TaaHistoryColorCurrent);
+            var historyCurrentHandle = m_TaaHistoryColorCurrent;
 
             using var builder = context.RenderGraph.AddComputePass<TaaPassData>(
                 "Antialiasing/TAA",
@@ -639,6 +642,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 JitterId,
                 new Vector4(m_Jitter.x, m_Jitter.y, m_PreviousJitter.x, m_PreviousJitter.y));
 
+            m_TaaHistory?.MarkWritten();
             var dispatchX = CoreUtils.DivRoundUp(m_Width, 8);
             var dispatchY = CoreUtils.DivRoundUp(m_Height, 8);
             cmd.DispatchCompute(m_ComputeShader, m_TaaKernel, dispatchX, dispatchY, 1);
@@ -757,9 +761,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTextureDesc CreateTaaHistoryDescriptor()
         {
             var desc = m_TaaHistoryColorDescriptor;
-            if (m_TaaHistoryColorPrevious?.desc != null)
-                RenderGraphTextureDescUtility.Copy(m_TaaHistoryColorPrevious.desc, desc);
-
             desc.Name = "AntialiasingTAAHistoryColorCurrent";
             desc.Width = m_Width;
             desc.Height = m_Height;

@@ -125,6 +125,8 @@ namespace VividRP.Runtime
 
             CommandBuffer cmdBuffer = null;
             var shouldSubmit = false;
+            CameraHistory cameraHistory = null;
+            var cameraHistoryFrameActive = false;
             var projectionState = CameraProjectionMatrixUtility.CaptureProjectionState(camera);
 
             try
@@ -193,6 +195,12 @@ namespace VividRP.Runtime
 
                 var graphAsset = m_Asset.RenderGraphAsset;
                 PassRecorder.InitializeContext(context, camera, cullingResults, graphAsset);
+                var cameraData = PassRecorder.GetFrameData().Get<VividCameraData>();
+                cameraHistory = camera.GetVividCameraHistory();
+                cameraHistory.BeginFrame(
+                    cameraData?.actualWidth ?? camera.pixelWidth,
+                    cameraData?.actualHeight ?? camera.pixelHeight);
+                cameraHistoryFrameActive = true;
                 using (s_SetupCameraPropertiesMarker.Auto())
                 {
                     context.SetupCameraProperties(camera);
@@ -267,9 +275,18 @@ namespace VividRP.Runtime
                 {
                     RenderSubmittedGizmos(context, camera, graphAsset);
                 }
+
+                cameraHistory.CommitFrame();
+                cameraHistoryFrameActive = false;
             }
             finally
             {
+                if (cameraHistoryFrameActive)
+                {
+                    cameraHistory?.AbortFrame();
+                    cameraHistoryFrameActive = false;
+                }
+
                 if (cmdBuffer != null)
                 {
                     using (s_CommandBufferReleaseMarker.Auto())
@@ -778,6 +795,7 @@ namespace VividRP.Runtime
         protected override void Dispose(bool disposing)
         {
             PassRecorder.Dispose();
+            CameraHistorySystem.Dispose();
             VirtualTextureSystem.Deinitialize();
             SkyManager.Deinitialize();
             LTCAreaLightSystem.Deinitialize();

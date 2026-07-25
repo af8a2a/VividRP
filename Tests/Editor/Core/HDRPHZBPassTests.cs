@@ -123,7 +123,7 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionAccumTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionPrevNumFramesAccum").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(resources.Textures.Single(entry => entry.Name == "ScreenSpaceReflectionNumFramesAccum").Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Contain("PreviousColorPyramid"));
+            Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("PreviousColorPyramid"));
             Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("ScreenSpaceReflectionSkyTexture"));
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRTileList").IsTransient, Is.False);
             Assert.That(resources.Buffers.Single(entry => entry.Name == "SSRDispatchIndirectArgs").IsTransient, Is.False);
@@ -439,89 +439,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ScreenSpaceReflectionPass_PrepareRenderGraph_RefreshesPreviousColorPyramidAfterColorPyramidPrepare()
+        public void ScreenSpaceReflectionPass_PrepareRenderGraph_KeepsInvalidColorPyramidHistoryDisabled()
         {
             var pass = new ScreenSpaceReflectionPass();
-            IRenderPass renderPass = pass;
             IRenderGraphPreparePass preparePass = pass;
-            var resources = renderPass.Initialize();
-            var previousEntry = resources.Textures.Single(entry => entry.Name == "PreviousColorPyramid");
+            var resources = ((IRenderPass)pass).Initialize();
             var frameData = new ContextContainer();
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             cameraData.actualWidth = 1920;
             cameraData.actualHeight = 1080;
+            var colorPyramidData = frameData.GetOrCreate<VividColorPyramidData>();
+            colorPyramidData.hasValidHistory = false;
+            colorPyramidData.width = 1920;
+            colorPyramidData.height = 1080;
+            colorPyramidData.mipCount = 12;
 
             try
             {
                 pass.Prepare(frameData);
-                Assert.That(GetPrivateField<bool>(pass, "m_UseHistoryColorPyramid"), Is.False);
-
-                var previousColorPyramid = RenderGraphTexture.CreateInput(
-                    "ColorPyramidHistory",
-                    GraphicsFormat.R16G16B16A16_SFloat);
-                previousColorPyramid.desc.Width = 1920;
-                previousColorPyramid.desc.Height = 1080;
-                previousColorPyramid.desc.UseMipMap = true;
-                previousColorPyramid.desc.MipCount = 12;
-
-                var colorPyramidData = frameData.GetOrCreate<VividColorPyramidData>();
-                colorPyramidData.hasValidHistory = true;
-                colorPyramidData.previousColorPyramid = previousColorPyramid;
-                colorPyramidData.width = 1920;
-                colorPyramidData.height = 1080;
-                colorPyramidData.mipCount = 12;
-
-                preparePass.PrepareRenderGraph(frameData);
-
-                Assert.That(GetPrivateField<bool>(pass, "m_UseHistoryColorPyramid"), Is.True);
-                Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
-                Assert.That(PassResourceReferenceRefreshUtility.TryRefresh(pass, resources), Is.True);
-                Assert.That(previousEntry.Texture, Is.SameAs(previousColorPyramid));
-            }
-            finally
-            {
-                pass.Dispose();
-            }
-        }
-
-        [Test]
-        public void ScreenSpaceReflectionPass_PrepareRenderGraph_BindsPreviousColorPyramidEvenBeforeHistoryIsValid()
-        {
-            var pass = new ScreenSpaceReflectionPass();
-            IRenderPass renderPass = pass;
-            IRenderGraphPreparePass preparePass = pass;
-            var resources = renderPass.Initialize();
-            var previousEntry = resources.Textures.Single(entry => entry.Name == "PreviousColorPyramid");
-            var frameData = new ContextContainer();
-            var cameraData = frameData.GetOrCreate<VividCameraData>();
-            cameraData.actualWidth = 1920;
-            cameraData.actualHeight = 1080;
-
-            try
-            {
-                pass.Prepare(frameData);
-
-                var previousColorPyramid = RenderGraphTexture.CreateInput(
-                    "ColorPyramidHistory",
-                    GraphicsFormat.R16G16B16A16_SFloat);
-                previousColorPyramid.desc.Width = 1920;
-                previousColorPyramid.desc.Height = 1080;
-                previousColorPyramid.desc.UseMipMap = true;
-                previousColorPyramid.desc.MipCount = 12;
-
-                var colorPyramidData = frameData.GetOrCreate<VividColorPyramidData>();
-                colorPyramidData.hasValidHistory = false;
-                colorPyramidData.previousColorPyramid = previousColorPyramid;
-                colorPyramidData.width = 1920;
-                colorPyramidData.height = 1080;
-                colorPyramidData.mipCount = 12;
-
                 preparePass.PrepareRenderGraph(frameData);
 
                 Assert.That(GetPrivateField<bool>(pass, "m_UseHistoryColorPyramid"), Is.False);
-                Assert.That(pass.IsPassResourceLayoutDirty, Is.True);
-                Assert.That(PassResourceReferenceRefreshUtility.TryRefresh(pass, resources), Is.True);
-                Assert.That(previousEntry.Texture, Is.SameAs(previousColorPyramid));
+                Assert.That(pass.IsPassResourceLayoutDirty, Is.False);
+                Assert.That(resources.Textures.Select(entry => entry.Name), Does.Not.Contain("PreviousColorPyramid"));
             }
             finally
             {

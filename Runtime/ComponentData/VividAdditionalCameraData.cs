@@ -64,6 +64,11 @@ namespace VividRP.Runtime
 
     public static class VividCameraExtensions
     {
+        public static CameraHistory GetVividCameraHistory(this Camera camera)
+        {
+            return CameraHistorySystem.GetOrCreate(camera);
+        }
+
         public static VividAdditionalCameraData GetVividAdditionalCameraData(this Camera camera)
         {
             if (camera == null)

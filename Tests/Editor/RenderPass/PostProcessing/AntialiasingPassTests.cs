@@ -33,8 +33,6 @@ namespace VividRP.Editor.Tests
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
                 "AntialiasingOutput",
-                "AntialiasingTAAHistoryColor",
-                "AntialiasingTAAHistoryColorCurrent",
                 "CameraDepth",
                 "Color",
                 "MotionVectors",

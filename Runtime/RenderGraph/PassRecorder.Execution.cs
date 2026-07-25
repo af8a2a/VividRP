@@ -88,8 +88,10 @@ namespace VividRP.Runtime
         private static readonly Dictionary<string, CodeManagedTextureHistoryRequest> s_CodeManagedTextureHistoryRequests = new(StringComparer.Ordinal);
         private static readonly Dictionary<string, CodeManagedBufferHistoryRequest> s_CodeManagedBufferHistoryRequests = new(StringComparer.Ordinal);
         private static readonly HashSet<RenderGraphTexture> s_HistoryImportedTextures = new();
+        private static readonly HashSet<RenderGraphBuffer> s_HistoryImportedBuffers = new();
         private static readonly HashSet<RenderGraphBuffer> s_CodeManagedHistoryImportedBuffers = new();
         private static readonly Dictionary<RTHandle, TextureHandle> s_HistoryTextureImportCache = new(16);
+        private static readonly Dictionary<GraphicsBuffer, BufferHandle> s_HistoryBufferImportCache = new(16);
         private static readonly Dictionary<RenderGraphTexture, TextureHandle> s_RecordGraphTextureCache = new(64);
         private static readonly Dictionary<RenderGraphBuffer, BufferHandle> s_RecordGraphBufferCache = new(16);
         private static readonly Dictionary<RenderGraphRenderList, RendererListHandle> s_RecordGraphRenderListCache = new(16);
@@ -437,6 +439,14 @@ namespace VividRP.Runtime
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         internal static TextureHandle ImportTextureForPass(IRenderPass pass, RTHandle rtHandle, AccessFlags access = AccessFlags.Read)
         {
+            var handle = ImportTextureHandle(rtHandle);
+            RegisterImportedTextureForPass(pass, handle, access);
+            return handle;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static TextureHandle ImportTextureHandle(RTHandle rtHandle)
+        {
             if (s_CurrentRenderGraph == null)
             {
                 Debug.LogWarning("[VividRP] Cannot import texture: RenderGraph is not active. Call Import() only during Prepare().");
@@ -449,11 +459,66 @@ namespace VividRP.Runtime
                 return default;
             }
 
-            var handle = s_CurrentRenderGraph.ImportTexture(rtHandle);
-
-            RegisterImportedTextureForPass(pass, handle, access);
+            if (!s_HistoryTextureImportCache.TryGetValue(rtHandle, out var handle))
+            {
+                handle = s_CurrentRenderGraph.ImportTexture(rtHandle);
+                s_HistoryTextureImportCache.Add(rtHandle, handle);
+            }
 
             return handle;
+        }
+
+        internal static void BindImportedTexture(RenderGraphTexture texture, TextureHandle handle)
+        {
+            if (texture == null || !handle.IsValid())
+                return;
+
+            texture.SetImportedHandle(handle);
+            s_HistoryImportedTextures.Add(texture);
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static BufferHandle ImportBufferForPass(
+            IRenderPass pass,
+            GraphicsBuffer graphicsBuffer,
+            AccessFlags access = AccessFlags.Read)
+        {
+            var handle = ImportBufferHandle(graphicsBuffer);
+            RegisterImportedBufferForPass(pass, handle, access);
+            return handle;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static BufferHandle ImportBufferHandle(GraphicsBuffer graphicsBuffer)
+        {
+            if (s_CurrentRenderGraph == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot import buffer: RenderGraph is not active. Call Import() only during Prepare().");
+                return default;
+            }
+
+            if (graphicsBuffer == null)
+            {
+                Debug.LogWarning("[VividRP] Cannot import buffer: GraphicsBuffer is null");
+                return default;
+            }
+
+            if (!s_HistoryBufferImportCache.TryGetValue(graphicsBuffer, out var handle))
+            {
+                handle = s_CurrentRenderGraph.ImportBuffer(graphicsBuffer);
+                s_HistoryBufferImportCache.Add(graphicsBuffer, handle);
+            }
+
+            return handle;
+        }
+
+        internal static void BindImportedBuffer(RenderGraphBuffer buffer, BufferHandle handle)
+        {
+            if (buffer == null || !handle.IsValid())
+                return;
+
+            buffer.SetImportedHandle(handle);
+            s_HistoryImportedBuffers.Add(buffer);
         }
 
         internal static bool IsPassTextureImportActive => s_CurrentRenderGraph != null;
@@ -837,6 +902,8 @@ namespace VividRP.Runtime
             s_ImportedRTHandles.Clear();
             foreach (var handles in s_PassImportedHandles.Values)
                 handles?.Clear();
+            s_HistoryTextureImportCache.Clear();
+            s_HistoryBufferImportCache.Clear();
             s_CurrentRenderGraph = null;
         }
 
@@ -846,8 +913,13 @@ namespace VividRP.Runtime
             {
                 texture?.ClearImportedHandle();
             }
+            foreach (var buffer in s_HistoryImportedBuffers)
+            {
+                buffer?.ClearImportedHandle();
+            }
 
             s_HistoryImportedTextures.Clear();
+            s_HistoryImportedBuffers.Clear();
             s_TextureHistoryFrameBindings.Clear();
             s_CodeManagedTextureHistoryRequests.Clear();
         }
@@ -1394,15 +1466,11 @@ namespace VividRP.Runtime
             if (renderGraph == null || s_TextureHistoryFrameBindings.Count == 0)
                 return;
 
-            s_HistoryTextureImportCache.Clear();
-
             foreach (var binding in s_TextureHistoryFrameBindings.Values)
             {
                 ImportHistoryTexture(renderGraph, binding.PreviousTexture, binding.PreviousHandle, s_HistoryTextureImportCache);
                 ImportHistoryTexture(renderGraph, binding.CurrentTexture, binding.CurrentHandle, s_HistoryTextureImportCache);
             }
-
-            s_HistoryTextureImportCache.Clear();
         }
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void ImportHistoryTexture(
@@ -1631,6 +1699,8 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.RecordRenderGraphSetCurrentGraphMarker.Auto())
             {
+                s_HistoryTextureImportCache.Clear();
+                s_HistoryBufferImportCache.Clear();
                 s_CurrentRenderGraph = renderGraph;
             }
 
@@ -2025,6 +2095,7 @@ namespace VividRP.Runtime
                     if (!sourceHandle.IsValid())
                         return false;
 
+                    outputBuffer.ClearImportedHandle();
                     outputBuffer.innerHandle = sourceHandle;
                     bufferCache[outputBuffer] = sourceHandle;
                     return true;
@@ -2123,7 +2194,7 @@ namespace VividRP.Runtime
                 if (!ShouldClearInactivePassOutput(entry, bypassRules, bypassVersion) || entry.Buffer == null)
                     continue;
 
-                entry.Buffer.innerHandle = default;
+                entry.Buffer.ClearImportedHandle();
             }
         }
 

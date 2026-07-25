@@ -318,8 +318,6 @@ namespace VividRP.Runtime.RenderPass.Core
         [TransientResource]
         private readonly RenderGraphTexture m_HDRPHitPointTexture;
 
-        private readonly RenderGraphTexture m_DefaultPreviousColorPyramidTexture;
-
         [RenderGraphResource(
             Name = "ScreenSpaceReflectionHDRPAccumPrev",
             Access = AccessFlags.Read)]
@@ -444,8 +442,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private ScreenSpaceReflectionExecutionPath m_ExecutionPath = ScreenSpaceReflectionExecutionPath.Vivid;
 
-        [RenderGraphResource(Name = "PreviousColorPyramid", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_PreviousColorPyramidTexture;
+        private TextureHandle m_PreviousColorPyramidTexture;
         private Color m_SkyTextureTint = Color.white;
         private Vector4 m_SkyTextureParams;
         private ScreenSpaceReflectionSettingsData m_Settings;
@@ -487,10 +484,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_SkyTexture = CreateSkyCubemapTexture("ScreenSpaceReflectionSkyTexture");
             m_DebugTexture = CreateColorTexture("ScreenSpaceReflectionDebug", 1, 1, GraphicsFormat.R16G16B16A16_SFloat);
             m_HDRPHitPointTexture = CreateColorTexture("ScreenSpaceReflectionHDRPHitPoint", 1, 1, GraphicsFormat.R16G16_UNorm);
-            m_DefaultPreviousColorPyramidTexture = RenderGraphTexture.CreateInput(
-                "PreviousColorPyramid",
-                GraphicsFormat.R16G16B16A16_SFloat);
-            m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
             m_HDRPAccumHistoryPrevious = RenderGraphTexture.CreateInput(
                 "ScreenSpaceReflectionHDRPAccumPrev",
                 GraphicsFormat.R16G16B16A16_SFloat);
@@ -815,7 +808,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_HistoryInvalidated = true;
             m_HDRPHistoryInvalidated = true;
             m_SupportsRayTracing = false;
-            m_PreviousColorPyramidTexture = m_DefaultPreviousColorPyramidTexture;
+            m_PreviousColorPyramidTexture = default;
             m_SkyTextureTint = Color.white;
             m_SkyTextureParams = Vector4.zero;
             m_Settings = ScreenSpaceReflectionSettingsData.CreateDefault();
@@ -827,7 +820,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool ResolveColorPyramidHistory(ContextContainer frameData)
         {
             m_UseHistoryColorPyramid = false;
-            SetPreviousColorPyramidTexture(m_DefaultPreviousColorPyramidTexture);
+            SetPreviousColorPyramidTexture(default);
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidMaxMip = 0;
             m_ConstantBuffer.SsrHistoryColorPyramidSize = Vector4.zero;
@@ -838,14 +831,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var colorPyramidData = frameData.Get<VividColorPyramidData>();
             if (colorPyramidData == null
-                || colorPyramidData.previousColorPyramid == null
+                || !colorPyramidData.previousColorPyramid.IsValid()
                 || colorPyramidData.width <= 0
                 || colorPyramidData.height <= 0)
             {
                 return false;
             }
 
-            SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
             int previousColorPyramidWidth = colorPyramidData.previousWidth > 0
                 ? colorPyramidData.previousWidth
                 : colorPyramidData.width;
@@ -863,6 +855,11 @@ namespace VividRP.Runtime.RenderPass.Core
             if (!colorPyramidData.hasValidHistory)
                 return false;
 
+            SetPreviousColorPyramidTexture(colorPyramidData.previousColorPyramid);
+            PassRecorder.RegisterImportedTextureForPass(
+                this,
+                m_PreviousColorPyramidTexture,
+                AccessFlags.Read);
             m_UseHistoryColorPyramid = true;
             m_ConstantBuffer.SsrUseHistoryColorPyramid = 1;
             return true;
@@ -1044,14 +1041,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ConstantBuffer.ReBlurHistoryValidity = m_HasValidReBlurHistory ? 1.0f : 0.0f;
         }
 
-        private void SetPreviousColorPyramidTexture(RenderGraphTexture texture)
+        private void SetPreviousColorPyramidTexture(TextureHandle texture)
         {
-            var resolvedTexture = texture ?? m_DefaultPreviousColorPyramidTexture;
-            if (ReferenceEquals(m_PreviousColorPyramidTexture, resolvedTexture))
-                return;
-
-            m_PreviousColorPyramidTexture = resolvedTexture;
-            m_IsPassResourceLayoutDirty = true;
+            m_PreviousColorPyramidTexture = texture;
         }
 
         private bool ShouldRecordEffect()
@@ -1075,7 +1067,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool CanSampleHistoryColorPyramid()
         {
             return m_UseHistoryColorPyramid
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true;
+                && m_PreviousColorPyramidTexture.IsValid();
         }
 
         private bool CanSampleSkyFallback()
@@ -1214,7 +1206,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_DepthTexture?.innerHandle.IsValid() == true
                 && m_GBuffer0?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true
+                && m_PreviousColorPyramidTexture.IsValid()
                 && m_SkyTexture?.innerHandle.IsValid() == true;
         }
 
@@ -1350,10 +1342,9 @@ namespace VividRP.Runtime.RenderPass.Core
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, GBuffer2Id, m_GBuffer2.innerHandle);
             cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, SkyTextureId, m_SkyTexture.innerHandle);
             cmd.SetComputeBufferParam(m_ComputeShader, m_SSRTracingKernel, SSRTileListId, m_TileListBuffer.innerHandle);
-            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (m_PreviousColorPyramidTexture.IsValid())
             {
-                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_ComputeShader, m_SSRTracingKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
             }
             else
             {
@@ -1412,10 +1403,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 SSRHybridCandidateBufferId,
                 m_HybridCandidateBuffer.innerHandle);
 
-            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (m_PreviousColorPyramidTexture.IsValid())
             {
-                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
             }
             else
             {
@@ -1446,10 +1436,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_HybridCandidateBuffer?.innerHandle.IsValid() == true)
                 cmd.SetRayTracingBufferParam(m_HybridTraceRayTracingShader, SSRHybridCandidateBufferId, m_HybridCandidateBuffer.innerHandle);
 
-            if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+            if (m_PreviousColorPyramidTexture.IsValid())
             {
-                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                cmd.SetRayTracingTextureParam(m_HybridTraceRayTracingShader, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
             }
             else
             {
@@ -1801,10 +1790,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_MotionVectors?.innerHandle.IsValid() == true
                         ? m_MotionVectors.innerHandle
                         : context.renderGraphContext.defaultResources.blackTexture);
-                if (!ReferenceEquals(m_PreviousColorPyramidTexture, m_DefaultPreviousColorPyramidTexture)
-                    && m_PreviousColorPyramidTexture?.innerHandle.IsValid() == true)
+                if (m_PreviousColorPyramidTexture.IsValid())
                 {
-                    cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture.innerHandle);
+                    cmd.SetComputeTextureParam(m_ComputeShader, m_SSRHDRPReprojectionKernel, PreviousColorPyramidTextureId, m_PreviousColorPyramidTexture);
                 }
                 else
                 {

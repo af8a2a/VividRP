@@ -69,9 +69,7 @@ namespace LWGUI
 			//-----------------------------------------------------------------------------
 			// Draw Properties
 			{
-				// move fields left to make rect for Revert Button
-				editor.SetDefaultGUIWidths();
-				RevertableHelper.InitRevertableGUIWidths();
+				Helper.SetAdjustableGUIWidths(metaDatas.perShaderData.displayModeData.labelWidthPercentage);
 
 				// start drawing properties
 				foreach (var prop in props)
@@ -107,19 +105,23 @@ namespace LWGUI
 
 						if (!propStaticData.isExpanding)
 						{
-							RevertableHelper.SetRevertableGUIWidths();
 							EditorGUI.indentLevel = indentLevel;
 							continue;
 						}
 					}
 
+					if (propStaticData.labelWidth > 0)
+					{
+						var indent = ReflectionHelper.EditorGUI_indent;
+						if (propStaticData.labelWidth > EditorGUIUtility.labelWidth - indent)
+							EditorGUIUtility.labelWidth = propStaticData.labelWidth + indent;
+					}
+
 					DrawProperty(prop);
 
-					RevertableHelper.SetRevertableGUIWidths();
 					EditorGUI.indentLevel = indentLevel;
+					Helper.SetAdjustableGUIWidths(metaDatas.perShaderData.displayModeData.labelWidthPercentage);
 				}
-
-				editor.SetDefaultGUIWidths();
 			}
 
 
@@ -148,12 +150,15 @@ namespace LWGUI
 		private void DrawAdvancedHeader(PropertyStaticData propStaticData, MaterialProperty prop)
 		{
 			EditorGUILayout.Space(3);
+			
 			var rect = EditorGUILayout.GetControlRect();
 			var revertButtonRect = RevertableHelper.SplitRevertButtonRect(ref rect);
 			var label = string.IsNullOrEmpty(propStaticData.advancedHeaderString) ? "Advanced" : propStaticData.advancedHeaderString;
+			
 			propStaticData.isExpanding = EditorGUI.Foldout(rect, propStaticData.isExpanding, label, EditorStyles.foldoutHeader);
 			if (Event.current.type == EventType.MouseDown && Event.current.button == 0 && rect.Contains(Event.current.mousePosition))
 				propStaticData.isExpanding = !propStaticData.isExpanding;
+			
 			RevertableHelper.DrawRevertableProperty(revertButtonRect, prop, metaDatas, true);
 			ContextMenuHelper.DoPropertyContextMenus(rect, prop, metaDatas);
 		}
@@ -170,8 +175,7 @@ namespace LWGUI
 
 			var label = new GUIContent(propStaticData.displayName, MetaDataHelper.GetPropertyTooltip(propStaticData, propDynamicData));
 			var height = metaDatas.perInspectorData.materialEditor.GetPropertyHeight(prop, label.text);
-			var rect = EditorGUILayout.GetControlRect(true, height);
-
+			var rect = EditorGUILayout.GetControlRect(true, height, EditorStyles.layerMaskField);
 			var revertButtonRect = RevertableHelper.SplitRevertButtonRect(ref rect);
 
 			var enabled = GUI.enabled;
@@ -180,12 +184,11 @@ namespace LWGUI
 			Helper.BeginProperty(rect, prop, metaDatas);
 			ContextMenuHelper.DoPropertyContextMenus(rect, prop, metaDatas);
 			
-			RevertableHelper.FixGUIWidthMismatch(prop.GetPropertyType(), materialEditor);
 			if (propStaticData.isAdvancedHeaderProperty)
 				propStaticData.isExpanding = EditorGUI.Foldout(rect, propStaticData.isExpanding, string.Empty);
 			
 			RevertableHelper.DrawRevertableProperty(revertButtonRect, prop, metaDatas, propStaticData.isMain || propStaticData.isAdvancedHeaderProperty);
-			materialEditor.ShaderProperty(rect, prop, label);
+			materialEditor.LwguiShaderProperty(rect, prop, label);
 
 			Helper.EndProperty(metaDatas, prop);
 			GUI.enabled = enabled;
@@ -236,20 +239,6 @@ namespace LWGUI
 			else
 			{
 				if (!hasChange) hasChange = true;
-			}
-		}
-		
-		[MenuItem("CONTEXT/Material/Reimport Shader", false, 100)]
-		static void MenuItem_ReimportShader(MenuCommand command)
-		{
-			var mat = command.context as Material;
-			if (mat != null)
-			{
-				var path = AssetDatabase.GetAssetPath(mat.shader);
-				if (!string.IsNullOrEmpty(path))
-				{
-					AssetDatabase.ImportAsset(path);
-				}
 			}
 		}
 	}

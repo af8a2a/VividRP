@@ -5,8 +5,8 @@ VividRP vendors [LWGUI](https://github.com/JasonMa0012/LWGUI) under `ThirdParty/
 ## Bundled upstream revision
 
 - Branch: `1.x`
-- Commit: `881ca3b5e3b72a73fdaefe9257818c8766a1e374`
-- Package version: `1.35.0`
+- Commit: `0acba799ec7d582ebb667ea6db0aefd32fd8c2ef`
+- Package version: `1.41.0`
 
 ## Included content
 
@@ -23,7 +23,9 @@ Tests, package metadata, documentation assets, and Unity `.meta` files are inten
 
 ## VividRP-specific adaptation
 
-Upstream LWGUI loads several icons and `fxc.exe` through fixed asset GUIDs. That does not survive vendoring without the original `.meta` files, so VividRP replaces those lookups with relative-path loading via `ThirdParty/LWGUI/Editor/Helper/LwguiAssetPathUtility.cs`.
+Upstream LWGUI loads several icons through fixed asset GUIDs. That does not survive vendoring without the original `.meta` files, so VividRP replaces those lookups with relative-path loading via `ThirdParty/LWGUI/Editor/Helper/LwguiAssetPathUtility.cs`.
+
+Starting with the bundled 1.41.0 revision, LWGUI no longer embeds `fxc.exe`; its shader performance monitor locates FXC from an installed Windows SDK.
 
 When updating LWGUI from upstream, review these files before replacing the embedded copy:
 
@@ -31,4 +33,3 @@ When updating LWGUI from upstream, review these files before replacing the embed
 - `ThirdParty/LWGUI/Editor/Helper/Helper.cs`
 - `ThirdParty/LWGUI/Editor/Helper/RevertableHelper.cs`
 - `ThirdParty/LWGUI/Editor/Helper/ToolbarHelper.cs`
-- `ThirdParty/LWGUI/Editor/PerformanceMonitor/ShaderCompiler/Fxc/ShaderCompilerDefaultFxc.cs`

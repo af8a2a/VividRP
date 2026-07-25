@@ -33,11 +33,21 @@ namespace LWGUI
 	/// bitDescription 7-0: Description of each Bit. (Default: none)
 	/// Target Property Type: Int/Integer
 	/// </summary>
+	[LwguiDrawerCategory("Numeric", 10)]
+	[LwguiDrawerParameterString("group", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription7", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription6", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription5", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription4", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription3", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription2", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription1", "", "Empty")]
+	[LwguiDrawerParameterString("bitDescription0", "", "Empty")]
 	public class BitMaskDrawer : SubDrawer
 	{
 		public int bitCount = 8;
 		
-		public float maxHeight = EditorGUIUtility.singleLineHeight;
+		public float maxHeight = EditorGUIUtility.singleLineHeight * 2;
 
 		public List<GUIContent> buttonLables = new ();
 		
@@ -74,7 +84,7 @@ namespace LWGUI
 				buttonWidths.Add(Mathf.Max(_minButtonWidth, EditorStyles.miniButton.CalcSize(buttonLables[i]).x));
 
 				if (!string.IsNullOrEmpty(description))
-					maxHeight = EditorGUIUtility.singleLineHeight * 2;
+					maxHeight = EditorGUIUtility.singleLineHeight * 3;
 			}
 
 			for (int i = 0; i < bitCount; i++)
@@ -86,32 +96,40 @@ namespace LWGUI
 				else
 					buttonStyles.Add(new GUIStyle(EditorStyles.miniButton));
 					
-				buttonStyles[i].fixedHeight = maxHeight;
+				buttonStyles[i].fixedHeight = maxHeight - EditorGUIUtility.singleLineHeight;
 			}
 
 			totalButtonWidth = buttonWidths.Sum();
 		}
 		
-		protected override bool IsMatchPropType(MaterialProperty property) 
-			=> property.GetPropertyType() is ShaderPropertyType.Float or ShaderPropertyType.Int;
+		public override bool IsMatchPropType(ShaderPropertyType propType) 
+			=> propType is ShaderPropertyType.Float or ShaderPropertyType.Int;
 
-		protected override float GetVisibleHeight(MaterialProperty prop) { return maxHeight; }
+		protected override float GetVisibleHeight(MaterialProperty prop)
+		{
+			return string.IsNullOrEmpty(prop.displayName) ? EditorGUIUtility.singleLineHeight : maxHeight;
+		}
 
 		public override void DrawProp(Rect position, MaterialProperty prop, GUIContent label, MaterialEditor editor)
 		{
-			label.tooltip += $"\nCurrent Value: { prop.GetNumericValue() }";
+			bool hasLabel = !string.IsNullOrEmpty(label.text);
+			if (hasLabel)
+				label.tooltip += $"\nCurrent Value: { prop.GetNumericValue() }";
 			
 			int controlId = GUIUtility.GetControlID(_hint, FocusType.Keyboard, position);
 			var fieldRect = EditorGUI.PrefixLabel(position, controlId, label);
 			
-			if (position.width < totalButtonWidth) 
-				return;
+			var needSecondRow = hasLabel && totalButtonWidth > fieldRect.width;
+			var scale = needSecondRow ? (position.width - ReflectionHelper.EditorGUI_indent) / totalButtonWidth : fieldRect.width / totalButtonWidth;
+			
+			if (needSecondRow)
+				fieldRect = new Rect(position.x + ReflectionHelper.EditorGUI_indent, position.y + EditorGUIUtility.singleLineHeight, position.width - ReflectionHelper.EditorGUI_indent, maxHeight - EditorGUIUtility.singleLineHeight);
 
 			fieldRect.xMin = fieldRect.xMax;
 			
 			for (int i = 0; i < bitCount; i++)
 			{
-				fieldRect.xMin = fieldRect.xMax - buttonWidths[i];
+				fieldRect.xMin = fieldRect.xMax - buttonWidths[i] * scale;
 				var buttonLable = buttonLables[i];
 				var active = RuntimeHelper.IsBitEnabled((int)prop.GetNumericValue(), i);
 				var style = buttonStyles[i];

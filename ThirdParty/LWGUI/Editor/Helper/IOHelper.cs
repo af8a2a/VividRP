@@ -29,7 +29,31 @@ namespace LWGUI
             }
         }
 
-        public static string GetAbsPath(string unityProjectRelativePath) => Path.Combine(ProjectPath, unityProjectRelativePath);
+        public static string GetAbsPath(string unityProjectRelativePath)
+        {
+            if (string.IsNullOrEmpty(unityProjectRelativePath))
+                return null;
+            
+            if (unityProjectRelativePath.StartsWith("Packages/", StringComparison.Ordinal))
+            {
+                var pkgInfo = UnityEditor.PackageManager.PackageInfo.FindForAssetPath(unityProjectRelativePath);
+                if (pkgInfo != null)
+                {
+                    var prefix = $"Packages/{pkgInfo.name}/";
+                    var relativePart = unityProjectRelativePath.Substring(prefix.Length);
+                    return Path.Combine(pkgInfo.resolvedPath, relativePart);
+                }
+            }
+            return Path.Combine(ProjectPath, unityProjectRelativePath);
+        }
+
+        public static string GetAssetAbsPathFromGUID(string guid)
+        {
+            var assetPath = AssetDatabase.GUIDToAssetPath(guid);
+            if (string.IsNullOrEmpty(assetPath))
+                return null;
+            return GetAbsPath(assetPath);
+        }
         
         public static string GetRelativePath(string absPath) => Path.GetFullPath(absPath).Replace(Path.GetFullPath(ProjectPath), string.Empty);
 

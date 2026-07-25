@@ -15,6 +15,7 @@ namespace LWGUI
 	/// Target Property Type: Range, range limits express the MinMaxSlider value range
 	/// Output Min/Max Property Type: Range, it's value is limited by it's range
 	/// </summary>
+	[LwguiDrawerCategory("Numeric")]
 	public class MinMaxSliderDrawer : SubDrawer
 	{
 		private string _minPropName;
@@ -29,7 +30,7 @@ namespace LWGUI
 			this._maxPropName = maxPropName;
 		}
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.GetPropertyType() == ShaderPropertyType.Range; }
+		public override bool IsMatchPropType(ShaderPropertyType propType) { return propType == ShaderPropertyType.Range; }
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
 		{
@@ -71,8 +72,6 @@ namespace LWGUI
 
 			// define draw area
 			Rect controlRect = position; // this is the full length rect area
-			var w = EditorGUIUtility.labelWidth;
-			EditorGUIUtility.labelWidth = 0;
 			Rect inputRect = MaterialEditor.GetRectAfterLabelWidth(controlRect); // this is the remaining rect area after label's area
 
 			// draw label
@@ -115,7 +114,6 @@ namespace LWGUI
 			}
 
 			EditorGUI.indentLevel = indentLevel;
-			EditorGUIUtility.labelWidth = w;
 		}
 	}
 }

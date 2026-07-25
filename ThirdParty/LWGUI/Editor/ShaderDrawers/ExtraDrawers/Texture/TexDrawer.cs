@@ -16,6 +16,7 @@ namespace LWGUI
 	/// Extra Property Type: Color, Vector
 	/// Target Property Type: Texture2D
 	/// </summary>
+	[LwguiDrawerCategory("Texture")]
 	public class TexDrawer : SubDrawer
 	{
 		private string        _extraPropName = String.Empty;
@@ -33,12 +34,14 @@ namespace LWGUI
 
 		protected override float GetVisibleHeight(MaterialProperty prop) { return EditorGUIUtility.singleLineHeight; }
 
-		protected override bool IsMatchPropType(MaterialProperty property) { return property.GetPropertyType() == ShaderPropertyType.Texture; }
+		public override bool IsMatchPropType(ShaderPropertyType propType) { return propType == ShaderPropertyType.Texture; }
 
 		public override void BuildStaticMetaData(Shader inShader, MaterialProperty inProp, MaterialProperty[] inProps, PropertyStaticData inoutPropertyStaticData)
 		{
 			base.BuildStaticMetaData(inShader, inProp, inProps, inoutPropertyStaticData);
 			inoutPropertyStaticData.AddExtraProperty(_extraPropName);
+			inoutPropertyStaticData.labelWidth = Mathf.Max(inoutPropertyStaticData.labelWidth,
+				EditorStyles.label.CalcSize(new GUIContent(inoutPropertyStaticData.displayName)).x + 32f);
 		}
 
 		public override void GetDefaultValueDescription(Shader inShader, MaterialProperty inProp, MaterialProperty inDefaultProp, PerShaderData inPerShaderData, PerMaterialData inoutPerMaterialData)
@@ -63,23 +66,18 @@ namespace LWGUI
 			var rect = position;
 
 			MaterialProperty extraProp = metaDatas.GetProperty(_extraPropName);
-			if (extraProp != null
-			 // && (
-				// 	extraProp.type == MaterialProperty.PropType.Color
-				//  || extraProp.type == MaterialProperty.PropType.Vector
-				// )
-			)
+			if (extraProp != null)
 			{
 				var i = EditorGUI.indentLevel;
 				EditorGUI.indentLevel = 0;
-
-				var extraRect = MaterialEditor.GetRightAlignedFieldRect(rect);
-				extraRect.height = rect.height;
+				
+				var extraRect = MaterialEditor.GetRectAfterLabelWidth(rect);
+				extraRect.xMin += 2f;
 
 				if (extraProp.GetPropertyType() == ShaderPropertyType.Vector)
 					_channelDrawer.OnGUI(extraRect, extraProp, GUIContent.none, editor);
 				else
-					editor.ShaderProperty(extraRect, extraProp, GUIContent.none);
+					editor.LwguiShaderProperty(extraRect, extraProp, GUIContent.none);
 
 				EditorGUI.indentLevel = i;
 			}

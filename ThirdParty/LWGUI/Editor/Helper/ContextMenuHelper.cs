@@ -7,8 +7,36 @@ using UnityEngine.Rendering;
 
 namespace LWGUI
 {
-    public class ContextMenuHelper
+    public static class ContextMenuHelper
     {
+	    #region Material Context Menu
+		
+	    [MenuItem("CONTEXT/Material/Reimport Shader", false, 100)]
+	    static void MenuItem_ReimportShader(MenuCommand command)
+	    {
+		    var mat = command.context as Material;
+		    if (mat != null)
+		    {
+			    var path = AssetDatabase.GetAssetPath(mat.shader);
+			    if (!string.IsNullOrEmpty(path))
+			    {
+				    AssetDatabase.ImportAsset(path);
+			    }
+		    }
+	    }
+
+	    [MenuItem("CONTEXT/Material/Copy Material Name", false, 990)]
+	    static void MenuItem_CopyMaterialName(MenuCommand command)
+	    {
+		    var mat = command.context as Material;
+		    if (mat != null)
+		    {
+			    GUIUtility.systemCopyBuffer = mat.name;
+		    }
+	    }
+
+	    #endregion
+	    
 		#region Copy and Paste
 		
 		private static Material     _copiedMaterial;

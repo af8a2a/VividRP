@@ -5,7 +5,7 @@ Component Name: LWGUI
 
 Source: https://github.com/JasonMa0012/LWGUI
 
-Version / Revision: 1.35.0 (branch 1.x, commit 881ca3b5e3b72a73fdaefe9257818c8766a1e374)
+Version / Revision: 1.41.0 (branch 1.x, commit 0acba799ec7d582ebb667ea6db0aefd32fd8c2ef)
 
 License Type: MIT
 

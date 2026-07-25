@@ -5,7 +5,7 @@ float4 _ReferencedMainLightDirectionWS;
 float4 _ReferencedMainLightColor;
 int _ReferencedReGIREnabled;
 
-// E0 environment contract. E1 will consume this source from camera and BSDF miss paths;
+// E0 environment contract, consumed by the E1 camera and BSDF miss paths.
 // E2 will add the importance-distribution textures used by the sampling mode below.
 TextureCube<float4> _ReferencedEnvironmentTexture;
 SamplerState sampler_ReferencedEnvironmentTexture;

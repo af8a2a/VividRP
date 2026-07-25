@@ -275,6 +275,25 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 - Primary background 不施加 BSDF/light MIS 权重。
 - 恒定环境下 diffuse white sphere 的高 SPP 均值符合 Lambert/OpenPBR 解析预期。
 
+**Implementation checkpoint (2026-07-25)**
+
+- Primary miss 已按 camera clear flags 在 HDRI Sky 与 scene-linear camera clear color 之间选择；
+  Sky background 输出 alpha 1，clear color 保留 camera alpha，表面命中保持 alpha 1。
+- Secondary 及后续 BSDF miss 已按世界空间射线方向采样 lighting cubemap，并应用与相机背景共享的
+  HDRI rotation、tint 和物理强度。OpenPBR throughput 已包含 `f * cos(theta) / pdf`，因此 miss
+  不再重复除以 BSDF PDF；E2 之前也不施加 environment light PDF 或 MIS 权重。
+- Environment radiance、clear color 和累积 history 均保持未曝光 scene-linear；VividRP
+  pre-exposure 仍只在 presentation/resolve 阶段应用。
+- 已增加 Combined、Environment Only、Primary Background Only 和 Indirect Miss Only 调试输出。
+  debug mode、camera clear flags、scene-linear clear color 以及 E0 环境契约都进入 accumulation
+  signature，相关状态变化会清空历史。
+- Primary background 与 indirect miss 按相同方向旋转约定读取 cubemap；`cameraVisible` 与
+  `lightingEnabled` 可独立关闭，缺失 HDRI 时相机回退 clear color、间接路径回退黑环境。
+- 当前 camera background 与 lighting 共用 `SkyManager` cubemap 的 mip 0。单独的全分辨率
+  raster-sky background 仍保留为可选资源扩展，不允许回退读取已经合成场景几何的 raster color。
+- C# runtime 与 EditMode test assembly 已通过编译；恒定环境 white-sphere 的高 SPP GPU
+  解析验收仍需在 canonical validation scene 中完成。
+
 #### E2: Equiareal Importance Distribution
 
 **Goal**

@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.InteropServices;
@@ -29,6 +30,175 @@ namespace VividRP.Editor.Tests
                 typeof(IRenderGraphSideEffectPass).IsAssignableFrom(
                     typeof(ReferencedPathTracingReblurPass)),
                 Is.True);
+        }
+
+        [Test]
+        public void MainLightSolidAngleClassification_MatchesShaderDeltaCutoff()
+        {
+            Assert.That(
+                ReferencedPathTracingLightSignatureUtility
+                    .HasFiniteMainLightSolidAngle(0.0f),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingLightSignatureUtility
+                    .HasFiniteMainLightSolidAngle(1e-6f),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingLightSignatureUtility
+                    .HasFiniteMainLightSolidAngle(3e-6f),
+                Is.True);
+            Assert.That(
+                ReferencedPathTracingLightSignatureUtility
+                    .HasFiniteMainLightSolidAngle(
+                        0.53f * Mathf.Deg2Rad),
+                Is.True);
+        }
+
+        [Test]
+        public void ReblurRouting_ConsumesPathTracerProducerHandshake()
+        {
+            var passSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathTracingPass.cs"));
+            var reblurSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathTracingReblurPass.cs"));
+
+            Assert.That(
+                passSource,
+                Does.Contain(
+                    "pathTracingData.mainLightInDenoiserSignals"));
+            Assert.That(
+                reblurSource,
+                Does.Contain(
+                    "pathTracingData.mainLightInDenoiserSignals"));
+            Assert.That(
+                reblurSource,
+                Does.Not.Contain(
+                    "out var mainLightAngularDiameter"));
+        }
+
+        [Test]
+        public void SignalEncoding_UsesLinearRgbAcrossProducerDenoiserAndResolve()
+        {
+            var encodingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "NRD",
+                "REBLUR",
+                "VividReblurSignalEncoding.hlsli"));
+            var configSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "NRD",
+                "REBLUR",
+                "Private",
+                "REBLUR_Config.hlsli"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var resolveSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "NRD",
+                "REBLUR",
+                "REBLUR_DiffuseSpecular_Resolve.compute"));
+
+            Assert.That(
+                encodingSource,
+                Does.Contain("#define VIVID_REBLUR_SIGNAL_USE_YCOCG 0"));
+            Assert.That(
+                configSource,
+                Does.Contain(
+                    "#define REBLUR_USE_YCOCG"));
+            Assert.That(
+                configSource,
+                Does.Contain("VIVID_REBLUR_SIGNAL_USE_YCOCG"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("VividReblurEncodeRadiance(radiance)"));
+            Assert.That(
+                resolveSource,
+                Does.Contain("VividReblurDecodeRadiance(diffuse.xyz)"));
+            Assert.That(
+                resolveSource,
+                Does.Contain("VividReblurEncodeRadiance(diffuseRadiance)"));
+        }
+
+        [Test]
+        public void CameraState_InvalidatesHistoryWhenPathTracingSignatureChanges()
+        {
+            var cameraObject = new GameObject(
+                "ReferencedPathTracingReblurPassTests.SignatureCamera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var pass = new ReferencedPathTracingReblurPass();
+            var settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            var pathTracingData = new VividReferencedPathTracingData
+            {
+                isValid = true,
+                frameSignature = 17ul
+            };
+            var updateMethod =
+                typeof(ReferencedPathTracingReblurPass).GetMethod(
+                    "UpdateCameraSettings",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+
+            try
+            {
+                Assert.That(updateMethod, Is.Not.Null);
+                Assert.That(
+                    (bool)updateMethod.Invoke(
+                        pass,
+                        new object[]
+                        {
+                            camera,
+                            settings,
+                            pathTracingData
+                        }),
+                    Is.False);
+                Assert.That(
+                    (bool)updateMethod.Invoke(
+                        pass,
+                        new object[]
+                        {
+                            camera,
+                            settings,
+                            pathTracingData
+                        }),
+                    Is.True);
+
+                pathTracingData.frameSignature = 18ul;
+                Assert.That(
+                    (bool)updateMethod.Invoke(
+                        pass,
+                        new object[]
+                        {
+                            camera,
+                            settings,
+                            pathTracingData
+                        }),
+                    Is.False);
+            }
+            finally
+            {
+                pass.Dispose();
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]
@@ -381,6 +551,15 @@ namespace VividRP.Editor.Tests
             Assert.That(resource.Access, Is.EqualTo(AccessFlags.Write), name);
             Assert.That(resource.Texture.desc.ColorFormat, Is.EqualTo(format), name);
             Assert.That(resource.Texture.desc.EnableRandomWrite, Is.True, name);
+        }
+
+        private static string GetPackageFilePath(params string[] relativeParts)
+        {
+            var packageInfo = UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                typeof(ReferencedPathTracingReblurPass).Assembly);
+
+            Assert.That(packageInfo, Is.Not.Null);
+            return Path.Combine(packageInfo.resolvedPath, Path.Combine(relativeParts));
         }
     }
 }

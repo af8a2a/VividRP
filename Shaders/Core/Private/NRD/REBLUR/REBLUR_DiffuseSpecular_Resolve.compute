@@ -4,6 +4,7 @@
 #pragma use_dxc
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
 Texture2D<float4> _ReblurDiffuse;
 Texture2D<float4> _ReblurSpecular;
@@ -19,18 +20,7 @@ RWTexture2D<float4> _ReblurResolvedColor;
 float2 _ReblurResolveScreenSize;
 float2 _ReblurCheckerboardModes;
 int _ReblurFrameIndex;
-
-float3 ReblurLinearToYCoCg(float3 color)
-{
-    float t = 0.25 * (color.r + color.b);
-    return float3(t + 0.5 * color.g, 0.5 * (color.r - color.b), t - 0.5 * color.g);
-}
-
-float3 ReblurYCoCgToLinear(float3 color)
-{
-    float t = color.x - color.z;
-    return max(float3(t + color.y, color.x + color.z, t - color.y), 0.0);
-}
+int _ReblurMainLightInSignals;
 
 float3 ReblurSanitizeHalfRadiance(float3 radiance)
 {
@@ -100,14 +90,14 @@ void Prepare(uint3 dispatchThreadId : SV_DispatchThreadID)
         _ReblurSpecularMaterialFactor.Load(int3(specularMaterialPixel, 0)).xyz,
         0.02);
     float3 diffuseRadiance = ReblurSanitizeHalfRadiance(
-        ReblurYCoCgToLinear(diffuse.xyz) / diffuseFactor);
+        VividReblurDecodeRadiance(diffuse.xyz) / diffuseFactor);
     float3 specularRadiance = ReblurSanitizeHalfRadiance(
-        ReblurYCoCgToLinear(specular.xyz) / specularFactor);
+        VividReblurDecodeRadiance(specular.xyz) / specularFactor);
 
     _ReblurPreparedDiffuse[pixelCoord] =
-        float4(ReblurLinearToYCoCg(diffuseRadiance), diffuse.w);
+        float4(VividReblurEncodeRadiance(diffuseRadiance), diffuse.w);
     _ReblurPreparedSpecular[pixelCoord] =
-        float4(ReblurLinearToYCoCg(specularRadiance), specular.w);
+        float4(VividReblurEncodeRadiance(specularRadiance), specular.w);
 }
 
 [numthreads(8, 8, 1)]
@@ -125,9 +115,13 @@ void Resolve(uint3 dispatchThreadId : SV_DispatchThreadID)
         _ReblurSpecularMaterialFactor.Load(int3(pixelCoord, 0)).xyz;
     float4 directLighting = _ReblurDirectLighting.Load(int3(pixelCoord, 0));
     float4 emission = _ReblurEmission.Load(int3(pixelCoord, 0));
-    float3 color = ReblurYCoCgToLinear(diffuse.xyz) * max(diffuseFactor, 0.0)
-        + ReblurYCoCgToLinear(specular.xyz) * max(specularFactor, 0.0)
-        + max(directLighting.xyz, 0.0)
+    float3 unfilteredDirectLighting = _ReblurMainLightInSignals != 0
+        ? 0.0
+        : max(directLighting.xyz, 0.0);
+    float3 color =
+        VividReblurDecodeRadiance(diffuse.xyz) * max(diffuseFactor, 0.0)
+        + VividReblurDecodeRadiance(specular.xyz) * max(specularFactor, 0.0)
+        + unfilteredDirectLighting
         + max(emission.xyz, 0.0);
     _ReblurResolvedColor[pixelCoord] =
         float4(ReblurPreparePresentationRadiance(color), max(directLighting.w, emission.w));
@@ -154,9 +148,12 @@ void ResolveRaw(uint3 dispatchThreadId : SV_DispatchThreadID)
         : 0.0;
     float4 directLighting = _ReblurDirectLighting.Load(int3(pixelCoord, 0));
     float4 emission = _ReblurEmission.Load(int3(pixelCoord, 0));
-    float3 color = ReblurYCoCgToLinear(diffuse.xyz)
-        + ReblurYCoCgToLinear(specular.xyz)
-        + max(directLighting.xyz, 0.0)
+    float3 unfilteredDirectLighting = _ReblurMainLightInSignals != 0
+        ? 0.0
+        : max(directLighting.xyz, 0.0);
+    float3 color = VividReblurDecodeRadiance(diffuse.xyz)
+        + VividReblurDecodeRadiance(specular.xyz)
+        + unfilteredDirectLighting
         + max(emission.xyz, 0.0);
     _ReblurResolvedColor[pixelCoord] =
         float4(ReblurPreparePresentationRadiance(color), max(directLighting.w, emission.w));

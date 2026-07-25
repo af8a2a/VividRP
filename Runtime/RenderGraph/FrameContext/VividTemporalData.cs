@@ -38,6 +38,7 @@ namespace VividRP.Runtime
         internal ulong frameSignature;
         internal ulong integratorSignature;
         internal ulong accumulatedSampleCount;
+        internal bool mainLightInDenoiserSignals;
 
         public override void Reset()
         {
@@ -47,6 +48,7 @@ namespace VividRP.Runtime
             frameSignature = 0;
             integratorSignature = 0;
             accumulatedSampleCount = 0;
+            mainLightInDenoiserSignals = false;
         }
     }
 }

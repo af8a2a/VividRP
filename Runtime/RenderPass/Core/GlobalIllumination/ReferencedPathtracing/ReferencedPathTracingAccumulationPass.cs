@@ -364,6 +364,19 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         private const ulong FnvOffsetBasis = 14695981039346656037ul;
         private const ulong FnvPrime = 1099511628211ul;
+        private const float MainLightDeltaSinSquaredThreshold = 1e-12f;
+
+        internal static bool HasFiniteMainLightSolidAngle(
+            float angularDiameter)
+        {
+            var halfAngularDiameter = 0.5f * Mathf.Clamp(
+                angularDiameter,
+                0.0f,
+                0.5f * Mathf.PI);
+            var sinThetaMax = Mathf.Sin(halfAngularDiameter);
+            return sinThetaMax * sinThetaMax
+                > MainLightDeltaSinSquaredThreshold;
+        }
 
         internal static void Resolve(
             VividLightData lightData,

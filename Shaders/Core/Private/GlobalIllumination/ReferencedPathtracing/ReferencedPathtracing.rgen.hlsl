@@ -1,6 +1,7 @@
 #pragma max_recursion_depth 1
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
 RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _WorldPositionTexture;
@@ -69,14 +70,6 @@ float MaxReferencedPathtracingComponent(float3 value)
     return max(value.x, max(value.y, value.z));
 }
 
-float3 ReferencedPathtracingLinearToYCoCg(float3 color)
-{
-    float y = dot(color, float3(0.25, 0.5, 0.25));
-    float co = dot(color, float3(0.5, 0.0, -0.5));
-    float cg = dot(color, float3(-0.25, 0.5, -0.25));
-    return float3(y, co, cg);
-}
-
 float GetReferencedPathtracingReblurNormHitDistance(
     float hitDistance,
     float viewZ,
@@ -99,7 +92,37 @@ float4 PackReferencedPathtracingReblurSignal(float3 radiance, float normalizedHi
     normalizedHitDistance = !isnan(normalizedHitDistance) && !isinf(normalizedHitDistance)
         ? saturate(normalizedHitDistance)
         : 0.0;
-    return float4(ReferencedPathtracingLinearToYCoCg(radiance), normalizedHitDistance);
+    return float4(
+        VividReblurEncodeRadiance(radiance),
+        normalizedHitDistance);
+}
+
+float GetReferencedPathtracingDenoiserLuminance(float3 radiance)
+{
+    return dot(max(radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
+}
+
+float CombineReferencedPathtracingDenoiserHitDistance(
+    float3 currentRadiance,
+    float currentHitDistance,
+    float3 addedRadiance,
+    float addedHitDistance)
+{
+    // Match RTXPT stable-plane accumulation: when multiple estimators share one REBLUR
+    // signal, hitT represents their radiance-weighted source distance.
+    float addedLuminance =
+        GetReferencedPathtracingDenoiserLuminance(addedRadiance);
+    if (addedLuminance < 1e-5)
+        return currentHitDistance;
+
+    float currentLuminance =
+        GetReferencedPathtracingDenoiserLuminance(currentRadiance);
+    float addedWeight =
+        addedLuminance / max(currentLuminance + addedLuminance, 1e-6);
+    return lerp(
+        abs(currentHitDistance),
+        max(addedHitDistance, 0.0),
+        saturate(addedWeight));
 }
 
 float3 OffsetReferencedPathtracingRayOrigin(
@@ -170,17 +193,30 @@ float TraceReferencedPathtracingMainLightVisibility(
 
 void AccumulateReferencedPathtracingMainLightRadiance(
     float3 contribution,
+    uint contributionLobeClass,
     uint bounceIndex,
     uint primaryLobeClass,
+    bool includeInPrimaryDenoiserSignal,
     inout float3 directLightingRadiance,
     inout float3 diffuseRadiance,
-    inout float3 specularRadiance)
+    inout float3 specularRadiance,
+    inout float3 primaryDenoiserDiffuseRadiance,
+    inout float3 primaryDenoiserSpecularRadiance)
 {
     if (bounceIndex == 0u)
     {
-        // A distant-light sample has no finite hit distance for REBLUR. Keep primary
-        // direct lighting in its dedicated AOV and converge it through accumulation.
+        // Preserve the raw FP32 direct-light AOV for canonical accumulation/capture.
         directLightingRadiance += contribution;
+
+        // A finite sun is stochastic. Copy it into the preview-only REBLUR signals,
+        // while keeping delta directional lighting out of spatial filtering.
+        if (includeInPrimaryDenoiserSignal)
+        {
+            if (contributionLobeClass == 1u)
+                primaryDenoiserDiffuseRadiance += contribution;
+            else if (contributionLobeClass == 2u)
+                primaryDenoiserSpecularRadiance += contribution;
+        }
     }
     else if (primaryLobeClass == 1u)
     {
@@ -224,6 +260,8 @@ void RayGenReferencedPathtracing()
     float3 diffuseRadiance = 0.0;
     float3 specularRadiance = 0.0;
     float3 directLightingRadiance = 0.0;
+    float3 primaryDenoiserMainLightDiffuseRadiance = 0.0;
+    float3 primaryDenoiserMainLightSpecularRadiance = 0.0;
     float3 emissionRadiance = 0.0;
     float3 cameraBackgroundRadiance = 0.0;
     float3 primaryEnvironmentBackgroundRadiance = 0.0;
@@ -391,13 +429,30 @@ void RayGenReferencedPathtracing()
                 * mainLightIlluminance
                 * lightEstimatorWeight
                 * visibility;
+            bool includeInPrimaryDenoiserSignal =
+                payload.mainLightIsDelta == 0u;
             AccumulateReferencedPathtracingMainLightRadiance(
-                directDiffuse + directSpecular,
+                directDiffuse,
+                1u,
                 bounceIndex,
                 primaryLobeClass,
+                includeInPrimaryDenoiserSignal,
                 directLightingRadiance,
                 diffuseRadiance,
-                specularRadiance);
+                specularRadiance,
+                primaryDenoiserMainLightDiffuseRadiance,
+                primaryDenoiserMainLightSpecularRadiance);
+            AccumulateReferencedPathtracingMainLightRadiance(
+                directSpecular,
+                2u,
+                bounceIndex,
+                primaryLobeClass,
+                includeInPrimaryDenoiserSignal,
+                directLightingRadiance,
+                diffuseRadiance,
+                specularRadiance,
+                primaryDenoiserMainLightDiffuseRadiance,
+                primaryDenoiserMainLightSpecularRadiance);
         }
 
         // Evaluate the same finite sun disk with the path's BSDF proposal. Doing this at the
@@ -435,11 +490,15 @@ void RayGenReferencedPathtracing()
                 {
                     AccumulateReferencedPathtracingMainLightRadiance(
                         bsdfSampledDirect,
+                        payload.nextLobeClass,
                         bounceIndex,
                         primaryLobeClass,
+                        true,
                         directLightingRadiance,
                         diffuseRadiance,
-                        specularRadiance);
+                        specularRadiance,
+                        primaryDenoiserMainLightDiffuseRadiance,
+                        primaryDenoiserMainLightSpecularRadiance);
                 }
             }
         }
@@ -589,6 +648,16 @@ void RayGenReferencedPathtracing()
         specularRadiance = 0.0;
     if (!IsFiniteReferencedPathtracingRadiance(directLightingRadiance))
         directLightingRadiance = 0.0;
+    if (!IsFiniteReferencedPathtracingRadiance(
+            primaryDenoiserMainLightDiffuseRadiance))
+    {
+        primaryDenoiserMainLightDiffuseRadiance = 0.0;
+    }
+    if (!IsFiniteReferencedPathtracingRadiance(
+            primaryDenoiserMainLightSpecularRadiance))
+    {
+        primaryDenoiserMainLightSpecularRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(emissionRadiance))
         emissionRadiance = 0.0;
     if (!IsFiniteReferencedPathtracingRadiance(environmentNeeRadiance))
@@ -598,15 +667,30 @@ void RayGenReferencedPathtracing()
     if (!IsFiniteReferencedPathtracingRadiance(environmentDirectSpecularRadiance))
         environmentDirectSpecularRadiance = 0.0;
 
+    // A sampled directional emitter is represented at the visibility endpoint. Combining
+    // that source distance with the existing indirect sample prevents direct sunlight from
+    // inheriting an unrelated first-bounce hitT in REBLUR.
+    float diffuseSignalHitDistance =
+        CombineReferencedPathtracingDenoiserHitDistance(
+            diffuseRadiance,
+            diffuseHitDistance,
+            primaryDenoiserMainLightDiffuseRadiance,
+            kReferencedPathtracingShadowMaxDistance);
+    float specularSignalHitDistance =
+        CombineReferencedPathtracingDenoiserHitDistance(
+            specularRadiance,
+            specularHitDistance,
+            primaryDenoiserMainLightSpecularRadiance,
+            kReferencedPathtracingShadowMaxDistance);
     float diffuseNormHitDistance = primaryHit != 0u
         ? GetReferencedPathtracingReblurNormHitDistance(
-            diffuseHitDistance,
+            diffuseSignalHitDistance,
             primaryViewZ,
             primaryLinearRoughness)
         : 0.0;
     float specularNormHitDistance = primaryHit != 0u
         ? GetReferencedPathtracingReblurNormHitDistance(
-            specularHitDistance,
+            specularSignalHitDistance,
             primaryViewZ,
             primaryLinearRoughness)
         : 0.0;
@@ -665,13 +749,19 @@ void RayGenReferencedPathtracing()
     if (writeDiffuse)
     {
         _ReferencedDiffuseRadianceHitDistance[signalPixelCoord] =
-            PackReferencedPathtracingReblurSignal(diffuseRadiance, diffuseNormHitDistance);
+            PackReferencedPathtracingReblurSignal(
+                diffuseRadiance
+                    + primaryDenoiserMainLightDiffuseRadiance,
+                diffuseNormHitDistance);
     }
 
     if (writeSpecular)
     {
         _ReferencedSpecularRadianceHitDistance[signalPixelCoord] =
-            PackReferencedPathtracingReblurSignal(specularRadiance, specularNormHitDistance);
+            PackReferencedPathtracingReblurSignal(
+                specularRadiance
+                    + primaryDenoiserMainLightSpecularRadiance,
+                specularNormHitDistance);
     }
 }
 

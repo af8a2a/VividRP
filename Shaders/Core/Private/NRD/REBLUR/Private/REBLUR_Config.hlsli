@@ -18,7 +18,8 @@ license agreement from NVIDIA CORPORATION is strictly prohibited.
 #define REBLUR_USE_CATROM_FOR_VIRTUAL_MOTION_IN_TA              1
 #define REBLUR_USE_CATROM_FOR_SURFACE_MOTION_IN_TS              1
 #define REBLUR_USE_CATROM_FOR_VIRTUAL_MOTION_IN_TS              1
-#define REBLUR_USE_YCOCG                                        1
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
+#define REBLUR_USE_YCOCG                                        VIVID_REBLUR_SIGNAL_USE_YCOCG
 #define REBLUR_USE_CONFIDENCE_NON_LINEARLY                      1
 #define REBLUR_USE_STF                                          1 // gives very minor IQ boost visible only in debug visualization
 #define REBLUR_USE_ANTILAG_NOT_INVOKING_HISTORY_FIX             1 // TODO: for now full history reset is undesired

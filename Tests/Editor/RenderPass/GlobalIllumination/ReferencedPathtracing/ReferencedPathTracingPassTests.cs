@@ -269,6 +269,13 @@ namespace VividRP.Editor.Tests
                 "GlobalIllumination",
                 "ReferencedPathtracing",
                 "ReferencedPathtracing.rgen.hlsl"));
+            var reblurResolveSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "NRD",
+                "REBLUR",
+                "REBLUR_DiffuseSpecular_Resolve.compute"));
 
             Assert.That(commonSource, Does.Contain("float mainLightLightPdf;"));
             Assert.That(commonSource, Does.Contain("float mainLightBsdfPdf;"));
@@ -312,6 +319,32 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "TraceReferencedPathtracingMainLightVisibility"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "primaryDenoiserMainLightDiffuseRadiance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "primaryDenoiserMainLightSpecularRadiance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "payload.mainLightIsDelta == 0u"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "CombineReferencedPathtracingDenoiserHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingShadowMaxDistance"));
+            Assert.That(
+                reblurResolveSource,
+                Does.Contain("_ReblurMainLightInSignals != 0"));
+            Assert.That(
+                reblurResolveSource,
+                Does.Contain("+ unfilteredDirectLighting"));
             Assert.That(
                 rayGenerationSource,
                 Does.Not.Contain("normalize(_ReferencedMainLightDirectionWS.xyz)"));

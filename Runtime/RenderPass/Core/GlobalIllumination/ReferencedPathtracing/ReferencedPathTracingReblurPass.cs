@@ -17,11 +17,15 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             public bool hasSettings;
             public ReferencedPathTracingReblurSettings settings;
+            public bool hasFrameSignature;
+            public ulong frameSignature;
 
             public override void Dispose()
             {
                 hasSettings = false;
                 settings = default;
+                hasFrameSignature = false;
+                frameSignature = 0;
             }
         }
 
@@ -112,6 +116,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ResolveCheckerboardModesId =
             Shader.PropertyToID("_ReblurCheckerboardModes");
         private static readonly int ResolveFrameIndexId = Shader.PropertyToID("_ReblurFrameIndex");
+        private static readonly int ResolveMainLightInSignalsId =
+            Shader.PropertyToID("_ReblurMainLightInSignals");
 
         [RenderGraphResource(Name = "DiffuseRadianceHitDistance", Access = AccessFlags.Read)]
         private RenderGraphTexture m_DiffuseInput;
@@ -272,6 +278,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_HasValidHistory;
         private ReferencedPathTracingReblurSettings m_Settings =
             ReferencedPathTracingReblurSettings.CreateDefault();
+        private int m_MainLightInSignals;
 
         public ReferencedPathTracingReblurPass()
         {
@@ -423,6 +430,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData?.pixelHeight ?? 0,
                 Screen.height);
             m_Settings = ReferencedPathTracingReblurSettingsResolver.Resolve();
+            var pathTracingData =
+                frameData.GetOrCreate<VividReferencedPathTracingData>();
+            // Consume the producer's exact routing decision. Re-classifying the light here can
+            // disagree when pass preparation observes light data at a different completion point,
+            // which would add both the raw direct AOV and its denoised copy to the preview.
+            m_MainLightInSignals = pathTracingData.isValid
+                && pathTracingData.mainLightInDenoiserSignals
+                ? 1
+                : 0;
 
             ResizeFullResolutionTextures();
             ResizeTexture(m_Tiles, CoreUtils.DivRoundUp(m_Width, 16), CoreUtils.DivRoundUp(m_Height, 16));
@@ -499,7 +515,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R16_SFloat,
                 9);
 
-            bool settingsMatch = UpdateCameraSettings(cameraData?.camera, m_Settings);
+            bool settingsMatch = UpdateCameraSettings(
+                cameraData?.camera,
+                m_Settings,
+                pathTracingData);
             m_HasValidHistory = m_Settings.enabled
                 && temporalData != null
                 && !temporalData.isFirstFrame
@@ -785,19 +804,33 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Width = 1;
             m_Height = 1;
             m_Settings = ReferencedPathTracingReblurSettings.CreateDefault();
+            m_MainLightInSignals = 0;
         }
 
         private bool UpdateCameraSettings(
             Camera camera,
-            ReferencedPathTracingReblurSettings settings)
+            ReferencedPathTracingReblurSettings settings,
+            VividReferencedPathTracingData pathTracingData)
         {
             if (camera == null)
                 return false;
 
             var state = m_CameraStates.GetOrCreateBase(camera);
-            bool matches = state.hasSettings && state.settings.Equals(settings);
+            bool frameSignatureMatches = pathTracingData == null
+                || !pathTracingData.isValid
+                || (state.hasFrameSignature
+                    && state.frameSignature
+                        == pathTracingData.frameSignature);
+            bool matches = state.hasSettings
+                && state.settings.Equals(settings)
+                && frameSignatureMatches;
             state.hasSettings = true;
             state.settings = settings;
+            if (pathTracingData != null && pathTracingData.isValid)
+            {
+                state.hasFrameSignature = true;
+                state.frameSignature = pathTracingData.frameSignature;
+            }
             return matches;
         }
 
@@ -1072,6 +1105,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Resolve,
                 ResolveScreenSizeId,
                 new Vector4(m_Width, m_Height, 1.0f / m_Width, 1.0f / m_Height));
+            cmd.SetComputeIntParam(
+                m_Resolve,
+                ResolveMainLightInSignalsId,
+                m_MainLightInSignals);
             cmd.DispatchCompute(
                 m_Resolve,
                 kernel,

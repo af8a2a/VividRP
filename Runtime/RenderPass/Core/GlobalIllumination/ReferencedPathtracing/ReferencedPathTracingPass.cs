@@ -657,6 +657,10 @@ namespace VividRP.Runtime.RenderPass.Core
             pathTracingData.integratorSignature =
                 m_IntegratorState.signature;
             pathTracingData.accumulatedSampleCount = 0;
+            pathTracingData.mainLightInDenoiserSignals =
+                ReferencedPathTracingLightSignatureUtility
+                    .HasFiniteMainLightSolidAngle(
+                        m_MainLightAngularDiameter);
         }
 
         private void BindEnvironment(CommandBuffer cmd)

@@ -944,11 +944,20 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   3x3/5x5 hit-distance reconstruction；当 `maxStabilizedFrameNum` 为 0 时使用无稳定化的
   PostBlur permutation 并跳过 TemporalStabilization。
 - `ReferencedPathTracingPass` 现在输出 NRD front-end 约定的 diffuse/specular
-  `RGBA16F radiance + normalized hit distance`（YCoCg packing），并将 emission 单独保留，最终 resolve
+  `RGBA16F radiance + normalized hit distance`（linear-RGB packing），并将 emission 单独保留，最终 resolve
   时再合成，避免 emission 进入时域滤波。
 - 2026-07-23 的正确性修正进一步把 primary-bounce 主方向光 NEE 拆为
   `PathTracingDirectLighting`：确定性的硬阴影不再进入 REBLUR 的空间滤波，只在降噪完成后与
   indirect diffuse/specular 和 emission 合成；secondary-bounce NEE 仍属于需要降噪的随机路径信号。
+- 2026-07-25 的有限太阳圆盘阶段继续保留 FP32 `PathTracingDirectLighting` 作为 canonical raw direct
+  AOV，但会按 OpenPBR lobe 将 finite-angle 主光的 primary diffuse/specular 副本写入 REBLUR signal。
+  该分流遵循 RTXPT stable-plane NEE 契约：太阳使用远光源 hitT，并与已有路径信号按辐射亮度合成
+  source distance；路径追踪 pass 通过 frame context 把实际分流决策交给 REBLUR resolve，避免独立
+  重判造成 raw direct 与 denoised direct 重复叠加。零角直径 delta 主光仍沿用未滤波 direct 路径。
+  这样 raw beauty/累积保持无偏且 AOV 语义不变，交互预览的随机软阴影可以参与时域与空间收敛。
+- REBLUR signal 使用统一的 linear-RGB 契约。有限精度的中间滤波或 history 一旦裁掉 YCoCg 的负色度，
+  高饱和红/蓝局部光会解码成错误色相；path tracer producer、NRD permutation 与 resolve 现在共享同一
+  encoding 开关，避免输入、history 和输出对 signal 颜色空间产生分歧。
 - 新增专用 `RaytracingGBufferPass`，使用稳定的 primary visibility ray 输出 NRD guide：positive linear
   viewZ、2.5D pixel motion、`R10G10B10A2_UNorm` oct normal + linear roughness；同时预留
   DLSS Ray Reconstruction guide：RG16F screen-space motion、hardware depth、world normal + perceptual

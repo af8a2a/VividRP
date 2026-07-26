@@ -97,6 +97,9 @@ namespace VividRP.Runtime
         private LayerMask m_VolumeLayerMask = 1;
 
         [SerializeField]
+        private GameObject m_ExposureTarget;
+
+        [SerializeField]
         private bool m_StopNaNs;
 
         [SerializeField]
@@ -256,6 +259,12 @@ namespace VividRP.Runtime
         {
             get => m_VolumeLayerMask;
             set => m_VolumeLayerMask = value;
+        }
+
+        public GameObject exposureTarget
+        {
+            get => m_ExposureTarget;
+            set => m_ExposureTarget = value;
         }
 
         public bool stopNaNs

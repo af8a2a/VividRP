@@ -48,6 +48,9 @@ namespace VividRP.Editor
         private static readonly GUIContent s_StopNaNsLabel = EditorGUIUtility.TrTextContent("Stop NaNs");
         private static readonly GUIContent s_DitheringLabel = EditorGUIUtility.TrTextContent("Dithering");
         private static readonly GUIContent s_VolumeLayerMaskLabel = EditorGUIUtility.TrTextContent("Volume Layer Mask");
+        private static readonly GUIContent s_ExposureTargetLabel = EditorGUIUtility.TrTextContent(
+            "Exposure Target",
+            "Optional target used to center HDRP procedural exposure metering.");
         private static readonly GUIContent s_AntialiasingLabel = EditorGUIUtility.TrTextContent("Anti-Aliasing");
         private static readonly GUIContent s_ExportFinalFrameScreenshotLabel = EditorGUIUtility.TrTextContent(
             VividAdditionalCameraData.ExportFinalFrameScreenshotButtonText,
@@ -218,6 +221,7 @@ namespace VividRP.Editor
                 EditorGUILayout.PropertyField(m_SerializedCamera.stopNaNs, s_StopNaNsLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.dithering, s_DitheringLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.volumeLayerMask, s_VolumeLayerMaskLabel);
+                EditorGUILayout.PropertyField(m_SerializedCamera.exposureTarget, s_ExposureTargetLabel);
                 EditorGUILayout.PropertyField(m_SerializedCamera.antialiasing, s_AntialiasingLabel);
                 if (ShouldShowAntialiasingPassRequiredMessage())
                     EditorGUILayout.HelpBox(AntialiasingPassRequiredMessage, MessageType.Info);

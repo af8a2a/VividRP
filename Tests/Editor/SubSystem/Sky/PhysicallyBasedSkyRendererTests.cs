@@ -378,14 +378,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private void ApplyAtmosphereLutHandle(VividSkyData skyData)"));
             Assert.That(source, Does.Contain("private bool TryPrepareLocalSkyPrecomputation("));
             Assert.That(source, Does.Contain("&& m_LocalSkyPrecomputationHash == localSkyPrecomputationHash"));
-            Assert.That(source, Does.Contain("&& !m_LocalSkyPrecomputationRebuiltThisFrame"));
             Assert.That(source, Does.Contain("&& HasLocalSkyPrecomputationTextures()"));
-            Assert.That(source, Does.Contain("m_LocalSkyPrecomputationRebuiltThisFrame = false;"));
-            Assert.That(source, Does.Contain("m_SkyViewLutRebuiltForBakingThisFrame = false;"));
-            Assert.That(source, Does.Contain("m_RuntimeCubemapNeedsDeferredBakingResourceRefresh ="));
-            Assert.That(source, Does.Contain("m_LocalSkyPrecomputationRebuiltThisFrame || m_SkyViewLutRebuiltForBakingThisFrame"));
-            Assert.That(source, Does.Contain("&& m_RuntimeCubemapNeedsDeferredBakingResourceRefresh"));
-            Assert.That(source, Does.Contain("!m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame"));
             Assert.That(source, Does.Contain("private void ApplyLocalSkyPrecomputationTextures(MaterialPropertyBlock properties)"));
             Assert.That(source, Does.Contain("properties.SetTexture(GroundIrradianceTextureId, m_GroundIrradianceTable);"));
             Assert.That(source, Does.Contain("properties.SetTexture(AirSingleScatteringTextureId, m_AirSingleScatteringTable);"));
@@ -394,6 +387,18 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("private bool HasLocalSkyPrecomputationTextures()"));
             Assert.That(source, Does.Contain("private void ImportSkyViewLutForPass(RenderGraphTexture skyViewLut)"));
             Assert.That(source, Does.Contain("PassRecorder.ImportTexture(skyViewLut, handle);"));
+        }
+
+        [Test]
+        public void Source_ConsumesFreshSkyBakeResourcesWithoutOneFrameFallback()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "PhysicallyBasedSky", "PhysicallyBasedSkyRenderer.cs"));
+
+            Assert.That(source, Does.Contain("return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut);"));
+            Assert.That(source, Does.Contain("Consume the freshly generated LUT immediately"));
+            Assert.That(source, Does.Not.Contain("m_LocalSkyPrecomputationRebuiltThisFrame"));
+            Assert.That(source, Does.Not.Contain("m_SkyViewLutRebuiltForBakingThisFrame"));
+            Assert.That(source, Does.Not.Contain("m_RuntimeCubemapNeedsDeferredBakingResourceRefresh"));
         }
 
         [Test]

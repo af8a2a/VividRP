@@ -42,6 +42,13 @@ namespace VividRP.Runtime
         public float curveMapMinEV100;
         public float curveMapMaxEV100;
         public Texture meterMask;
+        public bool histogramUseCurveRemapping;
+        public bool centerAroundExposureTarget;
+        public Vector2 proceduralCenter;
+        public Vector2 proceduralRadii;
+        public float proceduralSoftness;
+        public float maskMinIntensity;
+        public float maskMaxIntensity;
 
         public static AutoExposureSettingsData CreateDefault()
         {
@@ -85,6 +92,13 @@ namespace VividRP.Runtime
                 curveMapMinEV100 = AutoExposureCurveMapUtility.DefaultCurveMinEV100,
                 curveMapMaxEV100 = AutoExposureCurveMapUtility.DefaultCurveMaxEV100,
                 meterMask = null,
+                histogramUseCurveRemapping = false,
+                centerAroundExposureTarget = false,
+                proceduralCenter = new Vector2(0.5f, 0.5f),
+                proceduralRadii = new Vector2(0.5f, 0.5f),
+                proceduralSoftness = 1f,
+                maskMinIntensity = -30f,
+                maskMaxIntensity = 30f,
             };
         }
     }
@@ -228,7 +242,10 @@ namespace VividRP.Runtime
             s_HistorySystem.PurgeDestroyedCameras();
 
             var settings = postProcessingAllowed
-                ? AutoExposureSettingsResolver.Resolve(camera, temporalData != null && temporalData.isFirstFrame)
+                ? AutoExposureSettingsResolver.Resolve(
+                    camera,
+                    temporalData != null && temporalData.isFirstFrame,
+                    implementation)
                 : AutoExposureSettingsData.CreateDefault();
             settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);
             var hasAutoExposureCompute = AutoExposureImplementationUtility.SupportsDispatch(
@@ -455,7 +472,7 @@ namespace VividRP.Runtime
         }
     }
 
-    internal static class AutoExposureSettingsResolver
+    internal static partial class AutoExposureSettingsResolver
     {
         internal const float MiddleGrey = 0.18f;
         internal const float DefaultStartDistance = 1.5f;
@@ -466,7 +483,10 @@ namespace VividRP.Runtime
         private const float MinSpeed = 0.001f;
         private const float FrameTimeEpsilon = 1f / 60f;
 
-        internal static AutoExposureSettingsData Resolve(Camera camera, bool isFirstFrame)
+        internal static AutoExposureSettingsData Resolve(
+            Camera camera,
+            bool isFirstFrame,
+            AutoExposureImplementationPath implementation)
         {
             var settings = AutoExposureSettingsData.CreateDefault();
             var stack = VolumeManager.instance.stack;
@@ -477,98 +497,9 @@ namespace VividRP.Runtime
             if (autoExposure == null)
                 return settings;
 
-            settings.exposureMode = autoExposure.ResolveExposureMode();
-            settings.mode = AutoExposureExposureModeUtility.ResolveRuntimeMode(settings.exposureMode);
-            settings.meteringMode = autoExposure.meteringMode.value;
-            settings.adaptationMode = autoExposure.adaptationMode.value;
-            settings.applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode);
-            settings.manualEV100 = ResolveManualEV100(
-                camera,
-                autoExposure.manualEV100.value,
-                settings.applyPhysicalCameraExposure);
-            switch (autoExposure.targetMidGray.value)
-            {
-                case TargetMidGray.Grey125:
-                    ColorUtils.s_LightMeterCalibrationConstant = 12.5f;
-                    break;
-                case TargetMidGray.Grey14:
-                    ColorUtils.s_LightMeterCalibrationConstant = 14.0f;
-                    break;
-                case TargetMidGray.Grey18:
-                    ColorUtils.s_LightMeterCalibrationConstant = 18.0f;
-                    break;
-                default:
-                    ColorUtils.s_LightMeterCalibrationConstant = 12.5f;
-                    break;
-            }
-            settings.targetMidGray = ColorUtils.s_LightMeterCalibrationConstant;
-            settings.exposureCompensationSettings = ResolveExposureCompensation(autoExposure.exposureCompensation.value);
-            settings.exposureCompensationCurveStops = settings.mode == AutoExposureMode.Manual
-                ? ResolveExposureCompensationCurveStops(
-                    autoExposure.exposureCompensationCurve.value,
-                    settings.manualEV100)
-                : 0f;
-            settings.exposureCompensationAll = ResolveExposureCompensationAll(
-                settings.exposureCompensationSettings,
-                settings.exposureCompensationCurveStops);
-            settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(settings.manualEV100);
-            settings.fixedExposureScale = ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll);
-            var curveTextureData = AutoExposureCompensationCurveUtility.Resolve(autoExposure.exposureCompensationCurve.value);
-            settings.exposureCompensationCurveTexture = curveTextureData.texture;
-            settings.exposureCompensationCurveMinEV100 = curveTextureData.minEV100;
-            settings.exposureCompensationCurveInvRange = curveTextureData.invRange;
-            settings.exposureCompensationCurveEnabled = curveTextureData.enabled;
-            var curveMapTextureData = AutoExposureCurveMapUtility.Resolve(
-                autoExposure.curveMap.value,
-                autoExposure.minEV100.value,
-                autoExposure.maxEV100.value);
-            settings.curveMapTexture = curveMapTextureData.texture;
-            settings.curveMapMinEV100 = curveMapTextureData.minEV100;
-            settings.curveMapMaxEV100 = curveMapTextureData.maxEV100;
-            settings.meterMask = autoExposure.meterMask.value;
-
-            if (settings.mode == AutoExposureMode.Manual)
-            {
-                settings.enabled = autoExposure.enabled.value;
-                settings.forceTarget = 1f;
-                return settings;
-            }
-
-            var exposureHighPercent = Mathf.Clamp(autoExposure.percent.max, 1f, 99f) * PercentToScale;
-            var exposureLowPercent = Mathf.Min(
-                Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * PercentToScale,
-                exposureHighPercent);
-
-            var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value);
-            var maxWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value);
-            maxWhitePointLuminance = Mathf.Max(minWhitePointLuminance, maxWhitePointLuminance);
-            var histogramLogRangeValue = autoExposure.histogramLogRange.value;
-
-            var histogramLogRange = ResolveHistogramLogRangeFromEV100(
-                histogramLogRangeValue.x,
-                histogramLogRangeValue.y);
-            var histogramScaleBias = BuildHistogramScaleBias(histogramLogRange.x, histogramLogRange.y);
-            var validRange = autoExposure.minEV100.value < autoExposure.maxEV100.value;
-            var usesProgressiveAdaptation = settings.adaptationMode == AutoExposureAdaptationMode.Progressive;
-            var validSpeeds = !usesProgressiveAdaptation
-                || (autoExposure.speedUp.value > 0f && autoExposure.speedDown.value > 0f);
-
-            settings.enabled = autoExposure.IsActive();
-            settings.exposureLowPercent = exposureLowPercent;
-            settings.exposureHighPercent = exposureHighPercent;
-            settings.minAverageLuminance = minWhitePointLuminance * MiddleGrey;
-            settings.maxAverageLuminance = maxWhitePointLuminance * MiddleGrey;
-            settings.deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
-            settings.exposureSpeedUp = Mathf.Max(autoExposure.speedUp.value, MinSpeed);
-            settings.exposureSpeedDown = Mathf.Max(autoExposure.speedDown.value, MinSpeed);
-            settings.histogramScale = histogramScaleBias.x;
-            settings.histogramBias = histogramScaleBias.y;
-            settings.luminanceMin = Mathf.Pow(2f, histogramLogRange.x);
-            settings.exponentialUpM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedUp, DefaultStartDistance);
-            settings.exponentialDownM = ComputeExponentialTransitionMultiplier(settings.exposureSpeedDown, DefaultStartDistance);
-            settings.startDistance = DefaultStartDistance;
-            settings.forceTarget = !usesProgressiveAdaptation || isFirstFrame || !validRange || !validSpeeds ? 1f : 0f;
-            return settings;
+            return implementation == AutoExposureImplementationPath.HDRP
+                ? ResolveHDRP(autoExposure, camera, isFirstFrame)
+                : ResolveUnreal(autoExposure, camera, isFirstFrame);
         }
 
         internal static float ResolveExposureCompensation(float compensationStops)

@@ -72,9 +72,6 @@ namespace VividRP.Runtime
         private int m_AmbientProbeSkyHash;
         private int m_LocalSkyPrecomputationHash;
         private bool m_HasLocalSkyPrecomputation;
-        private bool m_LocalSkyPrecomputationRebuiltThisFrame;
-        private bool m_SkyViewLutRebuiltForBakingThisFrame;
-        private bool m_RuntimeCubemapNeedsDeferredBakingResourceRefresh;
         private RenderGraphTexture m_ColorTarget;
         private RenderGraphTexture m_DepthTexture;
         private RenderGraphTexture m_DirectionalShadowTexture;
@@ -150,8 +147,6 @@ namespace VividRP.Runtime
 
         public void UpdateFrameResources(in SkyRendererContext context, VividSkyData skyData, CommandBuffer cmd)
         {
-            m_LocalSkyPrecomputationRebuiltThisFrame = false;
-            m_SkyViewLutRebuiltForBakingThisFrame = false;
             m_AtmosphereLutCache.Update(context, cmd);
             ApplyAtmosphereLutHandle(skyData);
             UpdateLocalSkyPrecomputation(context, skyData, cmd);
@@ -390,9 +385,6 @@ namespace VividRP.Runtime
             m_AmbientProbeSkyHash = 0;
             m_LocalSkyPrecomputationHash = 0;
             m_HasLocalSkyPrecomputation = false;
-            m_LocalSkyPrecomputationRebuiltThisFrame = false;
-            m_SkyViewLutRebuiltForBakingThisFrame = false;
-            m_RuntimeCubemapNeedsDeferredBakingResourceRefresh = false;
             m_ColorTarget = null;
             m_DepthTexture = null;
             m_DirectionalShadowTexture = null;
@@ -514,11 +506,6 @@ namespace VividRP.Runtime
                 skyHash,
                 skyTextureResolution,
                 generatedCubemapViewSampleCount);
-            if (runtimeCubemapRebuildReason == SkyRebuildReason.None
-                && m_RuntimeCubemapNeedsDeferredBakingResourceRefresh)
-            {
-                runtimeCubemapRebuildReason = SkyRebuildReason.ParametersChanged;
-            }
 
             if (runtimeCubemapRebuildReason == SkyRebuildReason.None || !CanRebuildRuntimeCubemap())
                 return;
@@ -546,7 +533,6 @@ namespace VividRP.Runtime
             in PhysicallyBasedSkyMaterialParameters materialParameters)
         {
             return m_HasLocalSkyPrecomputation
-                   && !m_LocalSkyPrecomputationRebuiltThisFrame
                    && m_LocalSkyPrecomputationHash == ComputeLocalSkyPrecomputationHash(skyParameters, materialParameters)
                    && HasLocalSkyPrecomputationTextures();
         }
@@ -793,8 +779,6 @@ namespace VividRP.Runtime
                 properties,
                 m_SkyBakingPass);
             SkyCubemapBakingUtility.GenerateCubemapMipmaps(cmd, m_RuntimeSkyCubemap);
-            m_RuntimeCubemapNeedsDeferredBakingResourceRefresh =
-                m_LocalSkyPrecomputationRebuiltThisFrame || m_SkyViewLutRebuiltForBakingThisFrame;
             return true;
         }
 
@@ -916,30 +900,15 @@ namespace VividRP.Runtime
             }
 
             if (m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut))
-            {
-                if (!m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
-                    return true;
-
-                m_SkyViewLutRebuiltForBakingThisFrame = true;
-                skyViewLut = null;
-                return false;
-            }
+                return true;
 
             if (cmd == null)
                 return false;
 
+            // LUT generation and cubemap baking are recorded in order on the same command buffer.
+            // Consume the freshly generated LUT immediately to avoid a one-frame analytic fallback.
             m_AtmosphereLutCache.Update(context, cmd, forceSkyViewRebuild: true);
-            if (m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut)
-                && !m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
-            {
-                return true;
-            }
-
-            if (m_AtmosphereLutCache.SkyViewLutRebuiltThisFrame)
-                m_SkyViewLutRebuiltForBakingThisFrame = true;
-
-            skyViewLut = null;
-            return false;
+            return m_AtmosphereLutCache.TryGetSkyViewLut(skyViewLutHash, out skyViewLut);
         }
 
         private bool TryPrepareLocalSkyPrecomputation(
@@ -968,7 +937,6 @@ namespace VividRP.Runtime
 
             m_LocalSkyPrecomputationHash = localSkyPrecomputationHash;
             m_HasLocalSkyPrecomputation = true;
-            m_LocalSkyPrecomputationRebuiltThisFrame = true;
             return true;
         }
 
@@ -1069,9 +1037,6 @@ namespace VividRP.Runtime
             ReleaseRenderTexture(ref m_MultipleScatteringTable);
             ReleaseRenderTexture(ref m_MultiScatteringLut);
             m_HasLocalSkyPrecomputation = false;
-            m_LocalSkyPrecomputationRebuiltThisFrame = false;
-            m_SkyViewLutRebuiltForBakingThisFrame = false;
-            m_RuntimeCubemapNeedsDeferredBakingResourceRefresh = false;
             m_LocalSkyPrecomputationHash = 0;
         }
 

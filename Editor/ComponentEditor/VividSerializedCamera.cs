@@ -17,6 +17,7 @@ namespace VividRP.Editor
         public SerializedProperty stopNaNs { get; }
         public SerializedProperty allowDynamicResolution { get; }
         public SerializedProperty volumeLayerMask { get; }
+        public SerializedProperty exposureTarget { get; }
         public SerializedProperty clearDepth { get; }
         public SerializedProperty antialiasing { get; }
         public SerializedProperty enableTAA { get; }
@@ -67,6 +68,7 @@ namespace VividRP.Editor
             renderType = serializedAdditionalDataObject.FindProperty("m_RenderType");
             clearDepth = serializedAdditionalDataObject.FindProperty("m_ClearDepth");
             volumeLayerMask = serializedAdditionalDataObject.FindProperty("m_VolumeLayerMask");
+            exposureTarget = serializedAdditionalDataObject.FindProperty("m_ExposureTarget");
             stopNaNs = serializedAdditionalDataObject.FindProperty("m_StopNaNs");
             dithering = serializedAdditionalDataObject.FindProperty("m_Dithering");
             antialiasing = serializedAdditionalDataObject.FindProperty("m_Antialiasing");

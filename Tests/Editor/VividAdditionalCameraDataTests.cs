@@ -10,6 +10,26 @@ namespace VividRP.Editor.Tests
     public class VividAdditionalCameraDataTests
     {
         [Test]
+        public void ExposureTarget_RoundTripsForProceduralMetering()
+        {
+            var cameraObject = new GameObject("VividAdditionalCameraDataTests.Camera");
+            var targetObject = new GameObject("VividAdditionalCameraDataTests.ExposureTarget");
+            var additionalData = cameraObject.AddComponent<VividAdditionalCameraData>();
+
+            try
+            {
+                additionalData.exposureTarget = targetObject;
+
+                Assert.That(additionalData.exposureTarget, Is.SameAs(targetObject));
+            }
+            finally
+            {
+                GameObject.DestroyImmediate(targetObject);
+                GameObject.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void Antialiasing_Setter_KeepsLegacyTaaFlagInSync()
         {
             var gameObject = new GameObject("VividAdditionalCameraDataTests");

@@ -1,0 +1,183 @@
+using UnityEngine;
+using UnityEngine.Rendering;
+
+namespace VividRP.Runtime
+{
+    internal static partial class AutoExposureSettingsResolver
+    {
+        internal static AutoExposureSettingsData ResolveHDRP(
+            AutoExposure autoExposure,
+            Camera camera,
+            bool isFirstFrame)
+        {
+            var settings = AutoExposureSettingsData.CreateDefault();
+            settings.exposureMode = autoExposure.ResolveExposureMode();
+            settings.mode = AutoExposureExposureModeUtility.ResolveRuntimeMode(
+                settings.exposureMode);
+            settings.meteringMode = autoExposure.meteringMode.value;
+            settings.adaptationMode = autoExposure.adaptationMode.value;
+            settings.applyPhysicalCameraExposure =
+                AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode);
+            settings.manualEV100 = ResolveManualEV100(
+                camera,
+                autoExposure.fixedExposure.value,
+                settings.applyPhysicalCameraExposure);
+            settings.targetMidGray = ResolveHDRPTargetMidGray(
+                autoExposure.targetMidGray.value);
+            settings.exposureCompensationSettings = ResolveExposureCompensation(
+                autoExposure.compensation.value);
+            settings.exposureCompensationCurveStops = 0f;
+            settings.exposureCompensationAll = settings.exposureCompensationSettings;
+            settings.manualAverageSceneLuminance = ResolveAverageSceneLuminanceFromEV100(
+                settings.manualEV100);
+            settings.fixedExposureScale = ResolveManualExposureScale(
+                settings.manualEV100,
+                settings.exposureCompensationAll);
+            settings.meterMask = autoExposure.weightTextureMask.value;
+            settings.histogramUseCurveRemapping =
+                autoExposure.histogramUseCurveRemapping.value;
+            settings.centerAroundExposureTarget =
+                autoExposure.centerAroundExposureTarget.value;
+            settings.proceduralCenter = autoExposure.proceduralCenter.value;
+            settings.proceduralRadii = autoExposure.proceduralRadii.value;
+            settings.proceduralSoftness = Mathf.Max(
+                autoExposure.proceduralSoftness.value,
+                0.001f);
+            settings.maskMinIntensity = autoExposure.maskMinIntensity.value;
+            settings.maskMaxIntensity = autoExposure.maskMaxIntensity.value;
+
+            var usesCurveRemapping = AutoExposureExposureModeUtility.UsesCurveRemapping(
+                    settings.exposureMode)
+                || (settings.exposureMode == AutoExposureExposureMode.AutomaticHistogram
+                    && settings.histogramUseCurveRemapping);
+            if (usesCurveRemapping)
+            {
+                var curveMapTextureData = AutoExposureCurveMapUtility.Resolve(
+                    autoExposure.curveMap.value,
+                    autoExposure.limitMin.value,
+                    autoExposure.limitMax.value);
+                settings.curveMapTexture = curveMapTextureData.texture;
+                settings.curveMapMinEV100 = curveMapTextureData.minEV100;
+                settings.curveMapMaxEV100 = curveMapTextureData.maxEV100;
+            }
+
+            if (settings.mode == AutoExposureMode.Manual)
+            {
+                settings.enabled = autoExposure.enabled.value;
+                settings.forceTarget = 1f;
+                return settings;
+            }
+
+            var exposureHighPercent = Mathf.Clamp(
+                    autoExposure.histogramPercentages.max,
+                    0f,
+                    100f)
+                * PercentToScale;
+            var exposureLowPercent = Mathf.Min(
+                Mathf.Clamp(autoExposure.histogramPercentages.min, 0f, 100f)
+                    * PercentToScale,
+                exposureHighPercent);
+            var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(
+                autoExposure.limitMin.value);
+            var maxWhitePointLuminance = Mathf.Max(
+                minWhitePointLuminance,
+                ResolveWhitePointLuminanceFromEV100(autoExposure.limitMax.value));
+            var histogramScaleBias = BuildHistogramScaleBiasFromEV100(
+                autoExposure.limitMin.value,
+                autoExposure.limitMax.value);
+            var usesProgressiveAdaptation =
+                settings.adaptationMode == AutoExposureAdaptationMode.Progressive;
+            var validRange = autoExposure.limitMin.value < autoExposure.limitMax.value;
+            var validSpeeds = !usesProgressiveAdaptation
+                || (autoExposure.adaptationSpeedDarkToLight.value > 0f
+                    && autoExposure.adaptationSpeedLightToDark.value > 0f);
+
+            settings.enabled = autoExposure.IsHDRPActive();
+            settings.exposureLowPercent = exposureLowPercent;
+            settings.exposureHighPercent = exposureHighPercent;
+            settings.minAverageLuminance = minWhitePointLuminance * MiddleGrey;
+            settings.maxAverageLuminance = maxWhitePointLuminance * MiddleGrey;
+            settings.deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
+            settings.exposureSpeedUp = Mathf.Max(
+                autoExposure.adaptationSpeedDarkToLight.value,
+                MinSpeed);
+            settings.exposureSpeedDown = Mathf.Max(
+                autoExposure.adaptationSpeedLightToDark.value,
+                MinSpeed);
+            settings.histogramScale = histogramScaleBias.x;
+            settings.histogramBias = histogramScaleBias.y;
+            settings.luminanceMin = Mathf.Pow(2f, autoExposure.limitMin.value);
+            settings.exponentialUpM = ComputeExponentialTransitionMultiplier(
+                settings.exposureSpeedUp,
+                DefaultStartDistance);
+            settings.exponentialDownM = ComputeExponentialTransitionMultiplier(
+                settings.exposureSpeedDown,
+                DefaultStartDistance);
+            settings.startDistance = DefaultStartDistance;
+            settings.forceTarget = !usesProgressiveAdaptation
+                || isFirstFrame
+                || !validRange
+                || !validSpeeds
+                ? 1f
+                : 0f;
+            return settings;
+        }
+
+        internal static float ResolveHDRPTargetMidGray(TargetMidGray targetMidGray)
+        {
+            switch (targetMidGray)
+            {
+                case TargetMidGray.Grey14:
+                    return 14f;
+                case TargetMidGray.Grey18:
+                    return 18f;
+                default:
+                    return 12.5f;
+            }
+        }
+
+        internal static void ResolveHDRPProceduralMeteringParameters(
+            in AutoExposureSettingsData settings,
+            Camera camera,
+            int viewportWidth,
+            int viewportHeight,
+            out Vector4 proceduralMaskParams,
+            out Vector4 proceduralMaskParams2)
+        {
+            var center = settings.proceduralCenter;
+            if (settings.centerAroundExposureTarget
+                && camera != null
+                && camera.TryGetComponent<VividAdditionalCameraData>(out var cameraData)
+                && cameraData.exposureTarget != null)
+            {
+                var viewportPosition = camera.WorldToViewportPoint(
+                    cameraData.exposureTarget.transform.position);
+                if (viewportPosition.z > 0f)
+                {
+                    center += new Vector2(
+                        viewportPosition.x,
+                        1f - viewportPosition.y);
+                }
+            }
+
+            center.x = Mathf.Clamp01(center.x);
+            center.y = Mathf.Clamp01(center.y);
+            var radii = new Vector2(
+                Mathf.Max(Mathf.Clamp01(settings.proceduralRadii.x), 1e-4f),
+                Mathf.Max(Mathf.Clamp01(settings.proceduralRadii.y), 1e-4f));
+            var width = Mathf.Max(1, viewportWidth);
+            var height = Mathf.Max(1, viewportHeight);
+
+            proceduralMaskParams = new Vector4(
+                center.x * width,
+                center.y * height,
+                radii.x * width,
+                radii.y * height);
+            proceduralMaskParams2 = new Vector4(
+                1f / Mathf.Max(settings.proceduralSoftness, 0.001f),
+                LightUnitUtils.Ev100ToNits(settings.maskMinIntensity),
+                LightUnitUtils.Ev100ToNits(settings.maskMaxIntensity),
+                0f);
+        }
+    }
+}

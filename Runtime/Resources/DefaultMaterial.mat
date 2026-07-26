@@ -59,22 +59,31 @@ Material:
         m_Offset: {x: 0, y: 0}
     m_Ints: []
     m_Floats:
+    - _AORemap: 1
+    - _AORemapMax: 1
+    - _AORemapMin: 0
     - _AlphaClip: 0
     - _Blend: 0
     - _BumpScale: 1
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 1
     - _Cull: 2
-    - _Cutoff: 0.204
+    - _Cutoff: 0
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _Metallic: 0
+    - _Metallic: 1
+    - _MetallicRemap: 1
+    - _MetallicRemapMax: 1
+    - _MetallicRemapMin: 0
     - _OcclusionStrength: 1
     - _QueueOffset: 0
     - _ReceiveDecals: 1
     - _ReceiveSSR: 1
     - _ReceiveShadows: 0
-    - _Smoothness: 0
+    - _Smoothness: 1
+    - _SmoothnessRemap: 1
+    - _SmoothnessRemapMax: 1
+    - _SmoothnessRemapMin: 0
     - _SmoothnessTextureChannel: 0
     - _SrcBlend: 1
     - _SrcBlendAlpha: 1
@@ -86,6 +95,6 @@ Material:
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _EmissionColor: {r: 0, g: 0, b: 0, a: 0}
+    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

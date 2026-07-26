@@ -3,6 +3,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using VividRP.Runtime;
 
 namespace VividRP.Editor.Tests
@@ -64,7 +65,7 @@ namespace VividRP.Editor.Tests
             autoExposure.speedUp.value = 3f;
             autoExposure.speedDown.value = 1f;
 
-            Assert.That(autoExposure.IsActive(), Is.True);
+            Assert.That(autoExposure.IsUnrealActive(), Is.True);
         }
 
         [Test]
@@ -77,7 +78,7 @@ namespace VividRP.Editor.Tests
             autoExposure.speedUp.value = 3f;
             autoExposure.speedDown.value = 1f;
 
-            Assert.That(autoExposure.IsActive(), Is.True);
+            Assert.That(autoExposure.IsUnrealActive(), Is.True);
         }
 
         [Test]
@@ -91,19 +92,55 @@ namespace VividRP.Editor.Tests
             autoExposure.speedUp.value = 0f;
             autoExposure.speedDown.value = 0f;
 
-            Assert.That(autoExposure.IsActive(), Is.True);
+            Assert.That(autoExposure.IsUnrealActive(), Is.True);
         }
 
         [Test]
-        public void ResolveExposureMode_UsesLegacyManualFields_WhenHdrpModeIsStillDefault()
+        public void AutoExposure_ImplementationPaths_DoNotSynchronizeModes()
         {
             var autoExposure = new AutoExposure();
             autoExposure.mode.value = AutoExposureMode.Manual;
             autoExposure.applyPhysicalCameraExposure.value = true;
             autoExposure.exposureMode.overrideState = false;
-            autoExposure.exposureMode.value = AutoExposureExposureMode.Automatic;
+            autoExposure.exposureMode.value = AutoExposureExposureMode.AutomaticHistogram;
 
-            Assert.That(autoExposure.ResolveExposureMode(), Is.EqualTo(AutoExposureExposureMode.UsePhysicalCamera));
+            Assert.That(
+                autoExposure.ResolveExposureMode(),
+                Is.EqualTo(AutoExposureExposureMode.AutomaticHistogram));
+            Assert.That(autoExposure.mode.value, Is.EqualTo(AutoExposureMode.Manual));
+        }
+
+        [Test]
+        public void AutoExposure_HDRPMigration_CopiesOverriddenSharedSettingsOnlyOnce()
+        {
+            var autoExposure = new AutoExposure();
+            autoExposure.percent.overrideState = true;
+            autoExposure.percent.value = new Vector2(25f, 75f);
+            autoExposure.minEV100.overrideState = true;
+            autoExposure.minEV100.value = -2f;
+
+            var migrate = typeof(AutoExposure).GetMethod(
+                "MigrateSharedHDRPSettingsIfNeeded",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(migrate, Is.Not.Null);
+            migrate.Invoke(autoExposure, null);
+
+            Assert.That(autoExposure.histogramPercentages.overrideState, Is.True);
+            Assert.That(
+                autoExposure.histogramPercentages.value,
+                Is.EqualTo(new Vector2(25f, 75f)));
+            Assert.That(autoExposure.limitMin.overrideState, Is.True);
+            Assert.That(autoExposure.limitMin.value, Is.EqualTo(-2f));
+            Assert.That(autoExposure.limitMax.overrideState, Is.False);
+            Assert.That(autoExposure.limitMax.value, Is.EqualTo(13f));
+
+            autoExposure.percent.value = new Vector2(40f, 60f);
+            migrate.Invoke(autoExposure, null);
+
+            Assert.That(
+                autoExposure.histogramPercentages.value,
+                Is.EqualTo(new Vector2(25f, 75f)));
         }
 
         [Test]
@@ -112,10 +149,74 @@ namespace VividRP.Editor.Tests
             var autoExposure = new AutoExposure();
             autoExposure.enabled.value = true;
             autoExposure.adaptationMode.value = AutoExposureAdaptationMode.Fixed;
-            autoExposure.speedUp.value = 0f;
-            autoExposure.speedDown.value = 0f;
+            autoExposure.adaptationSpeedDarkToLight.value = 0f;
+            autoExposure.adaptationSpeedLightToDark.value = 0f;
 
-            Assert.That(autoExposure.IsActive(), Is.True);
+            Assert.That(autoExposure.IsHDRPActive(), Is.True);
+        }
+
+        [Test]
+        public void AutoExposure_HDRPDefaults_MatchReferenceProfile()
+        {
+            var autoExposure = new AutoExposure();
+
+            Assert.That(
+                autoExposure.exposureMode.value,
+                Is.EqualTo(AutoExposureExposureMode.AutomaticHistogram));
+            Assert.That(
+                autoExposure.meteringMode.value,
+                Is.EqualTo(AutoExposureMeteringMode.ProceduralMask));
+            Assert.That(autoExposure.centerAroundExposureTarget.value, Is.False);
+            Assert.That(autoExposure.proceduralCenter.value, Is.EqualTo(new Vector2(0.5f, 0.5f)));
+            Assert.That(autoExposure.proceduralRadii.value, Is.EqualTo(new Vector2(0.5f, 0.5f)));
+            Assert.That(autoExposure.proceduralSoftness.value, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(autoExposure.maskMinIntensity.value, Is.EqualTo(-30f).Within(1e-5f));
+            Assert.That(autoExposure.maskMaxIntensity.value, Is.EqualTo(30f).Within(1e-5f));
+            Assert.That(autoExposure.limitMin.value, Is.EqualTo(5f).Within(1e-5f));
+            Assert.That(autoExposure.limitMax.value, Is.EqualTo(13f).Within(1e-5f));
+            Assert.That(autoExposure.compensation.value, Is.Zero);
+            Assert.That(
+                autoExposure.histogramPercentages.value,
+                Is.EqualTo(new Vector2(10f, 90f)));
+            Assert.That(autoExposure.histogramUseCurveRemapping.value, Is.False);
+            Assert.That(
+                autoExposure.adaptationMode.value,
+                Is.EqualTo(AutoExposureAdaptationMode.Progressive));
+            Assert.That(
+                autoExposure.adaptationSpeedDarkToLight.value,
+                Is.EqualTo(4f).Within(1e-5f));
+            Assert.That(
+                autoExposure.adaptationSpeedLightToDark.value,
+                Is.EqualTo(4f).Within(1e-5f));
+            Assert.That(autoExposure.targetMidGray.value, Is.EqualTo(TargetMidGray.Grey125));
+        }
+
+        [Test]
+        public void ResolveHDRPProceduralMeteringParameters_PacksReferenceDefaults()
+        {
+            var settings = AutoExposureSettingsData.CreateDefault();
+            settings.proceduralCenter = new Vector2(0.5f, 0.5f);
+            settings.proceduralRadii = new Vector2(0.5f, 0.5f);
+            settings.proceduralSoftness = 1f;
+            settings.maskMinIntensity = -30f;
+            settings.maskMaxIntensity = 30f;
+
+            AutoExposureSettingsResolver.ResolveHDRPProceduralMeteringParameters(
+                settings,
+                null,
+                1920,
+                1080,
+                out var maskParams,
+                out var maskParams2);
+
+            Assert.That(maskParams, Is.EqualTo(new Vector4(960f, 540f, 960f, 540f)));
+            Assert.That(maskParams2.x, Is.EqualTo(1f).Within(1e-5f));
+            Assert.That(
+                maskParams2.y,
+                Is.EqualTo(LightUnitUtils.Ev100ToNits(-30f)).Within(1e-8f));
+            Assert.That(
+                maskParams2.z,
+                Is.EqualTo(LightUnitUtils.Ev100ToNits(30f)).Within(1e-3f));
         }
 
         [Test]
@@ -576,7 +677,14 @@ namespace VividRP.Editor.Tests
         [Test]
         public void AutoExposureShader_DeclaresHistogramAndExposureKernels()
         {
-            var autoExposureSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.cs"));
+            var autoExposureCommonSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.cs"));
+            var autoExposureHDRPSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.HDRP.cs"));
+            var autoExposureUnrealSource = File.ReadAllText(
+                GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposure.Unreal.cs"));
+            var autoExposureSource =
+                autoExposureCommonSource + autoExposureHDRPSource + autoExposureUnrealSource;
             var shaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "Unreal", "AutoExposure.compute"));
             var hdrpShaderSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "Exposure.compute"));
             var hdrpCommonSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "AutoExposure", "HDRP", "ExposureCommon.hlsl"));
@@ -584,17 +692,33 @@ namespace VividRP.Editor.Tests
             var normalizedHdrpPassSource = hdrpPassSource.Replace("\r\n", "\n");
             var autoExposurePassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposurePass.cs"));
             var helperSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Public", "AutoExposure.hlsl"));
-            var runtimeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"));
+            var runtimeSource =
+                File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.cs"))
+                + File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.HDRP.cs"))
+                + File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureRuntimeUtility.Unreal.cs"));
             var implementationSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureImplementationUtility.cs"));
             var assetSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPipeline", "VividRenderPipelineAsset.cs"));
             var resourcesSource = File.ReadAllText(GetPackageFilePath("Runtime", "Utility", "PipelineResource", "VividResources.cs"));
 
             Assert.That(autoExposureSource, Does.Contain("public AutoExposureExposureModeParameter exposureMode"));
             Assert.That(autoExposureSource, Does.Contain("public AutoExposureMeteringModeParameter meteringMode"));
+            Assert.That(autoExposureSource, Does.Contain("AutoExposureMeteringMode.ProceduralMask"));
             Assert.That(autoExposureSource, Does.Contain("public AutoExposureAdaptationModeParameter adaptationMode"));
             Assert.That(autoExposureSource, Does.Contain("public EnumParameter<TargetMidGray> targetMidGray"));
             Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter curveMap"));
             Assert.That(autoExposureSource, Does.Contain("public NoInterpAnimationCurveParameter exposureCompensationCurve"));
+            Assert.That(
+                autoExposureCommonSource,
+                Does.Not.Contain("public AutoExposureModeParameter mode"));
+            Assert.That(
+                autoExposureCommonSource,
+                Does.Not.Contain("public AutoExposureExposureModeParameter exposureMode"));
+            Assert.That(
+                autoExposureHDRPSource,
+                Does.Not.Contain("public AutoExposureModeParameter mode"));
+            Assert.That(
+                autoExposureUnrealSource,
+                Does.Not.Contain("public AutoExposureExposureModeParameter exposureMode"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
@@ -623,6 +747,9 @@ namespace VividRP.Editor.Tests
             Assert.That(hdrpCommonSource, Does.Contain("float BinLocationToEV(uint binIdx)"));
             Assert.That(hdrpCommonSource, Does.Contain("float CurveRemap(float inEV, out float limitMin, out float limitMax)"));
             Assert.That(hdrpCommonSource, Does.Contain("float3 curveSample = SAMPLE_TEXTURE2D_LOD(_ExposureCurveTexture"));
+            Assert.That(hdrpCommonSource, Does.Contain("case 4u:"));
+            Assert.That(hdrpCommonSource, Does.Contain("ProceduralCenter"));
+            Assert.That(hdrpCommonSource, Does.Contain("ProceduralSoftness"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("ColorUtils.lensImperfectionExposureScale"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("ResolveHDRPHistogramScaleBias(minExposureEV100, maxExposureEV100);"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("private static readonly uint[] s_EmptyHdrpHistogramData = new uint[HdrpAutoExposureHistogramBucketCount];"));
@@ -630,9 +757,11 @@ namespace VividRP.Editor.Tests
             Assert.That(normalizedHdrpPassSource, Does.Contain("private readonly int[] m_HdrpVariants = new int[4];"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("CoreUtils.DivRoundUp(Mathf.Max(1, m_AutoExposureWidth / 2), HdrpHistogramThreadGroupSizeX)"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("CoreUtils.DivRoundUp(Mathf.Max(1, m_AutoExposureHeight / 2), HdrpHistogramThreadGroupSizeY)"));
-            Assert.That(normalizedHdrpPassSource, Does.Contain("var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)\n                ? 2u\n                : 0u;"));
+            Assert.That(normalizedHdrpPassSource, Does.Contain("var evaluateMode = UsesHDRPCurveRemapping()\n                ? 2u\n                : 0u;"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("BindHDRPHistogramGenerationParameters(cmd);"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("BindHDRPHistogramReductionParameters(cmd, evaluateMode);"));
+            Assert.That(normalizedHdrpPassSource, Does.Contain("case AutoExposureMeteringMode.ProceduralMask:"));
+            Assert.That(normalizedHdrpPassSource, Does.Contain("ResolveHDRPProceduralMeteringParameters("));
             Assert.That(normalizedHdrpPassSource, Does.Contain("private void SetHDRPVariants("));
             Assert.That(normalizedHdrpPassSource, Does.Contain("cmd.SetComputeIntParams(m_AutoExposureCompute, HdrpVariantsId, m_HdrpVariants);"));
             Assert.That(normalizedHdrpPassSource, Does.Contain("cmd.SetGlobalTexture(HdrpPreviousExposureTextureId, currentExposureTexture);"));
@@ -657,24 +786,24 @@ namespace VividRP.Editor.Tests
             Assert.That(helperSource, Does.Contain("float3 VividApplyPreExposure(float3 color)"));
             Assert.That(runtimeSource, Does.Contain("settings.mode == AutoExposureMode.Manual"));
             Assert.That(runtimeSource, Does.Contain("settings.exposureMode = autoExposure.ResolveExposureMode();"));
-            Assert.That(runtimeSource, Does.Contain("settings.mode = AutoExposureExposureModeUtility.ResolveRuntimeMode(settings.exposureMode);"));
+            Assert.That(runtimeSource, Does.Contain("settings.mode = AutoExposureExposureModeUtility.ResolveRuntimeMode("));
             Assert.That(runtimeSource, Does.Contain("settings.meteringMode = autoExposure.meteringMode.value;"));
             Assert.That(runtimeSource, Does.Contain("settings.adaptationMode = autoExposure.adaptationMode.value;"));
-            Assert.That(runtimeSource, Does.Contain("settings.applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode);"));
-            Assert.That(runtimeSource, Does.Contain("settings.targetMidGray = ColorUtils.s_LightMeterCalibrationConstant;"));
+            Assert.That(runtimeSource, Does.Contain("AutoExposureExposureModeUtility.UsesPhysicalCamera(settings.exposureMode)"));
+            Assert.That(runtimeSource, Does.Contain("settings.targetMidGray = ResolveHDRPTargetMidGray("));
             Assert.That(runtimeSource, Does.Contain("settings.manualEV100 = ResolveManualEV100("));
             Assert.That(runtimeSource, Does.Contain("settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);"));
             Assert.That(runtimeSource, Does.Contain("var histogramLogRangeValue = autoExposure.histogramLogRange.value;"));
-            Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value)"));
-            Assert.That(runtimeSource, Does.Contain("ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value)"));
+            Assert.That(runtimeSource, Does.Contain("autoExposure.minEV100.value"));
+            Assert.That(runtimeSource, Does.Contain("autoExposure.maxEV100.value"));
             Assert.That(runtimeSource, Does.Contain("ResolveHistogramLogRangeFromEV100("));
             Assert.That(runtimeSource, Does.Contain("BuildHistogramScaleBiasFromEV100("));
             Assert.That(runtimeSource, Does.Contain("ColorUtils.ComputeEV100(aperture, shutterSpeed, iso)"));
-            Assert.That(runtimeSource, Does.Contain("settings.exposureCompensationSettings = ResolveExposureCompensation(autoExposure.exposureCompensation.value);"));
+            Assert.That(runtimeSource, Does.Contain("autoExposure.exposureCompensation.value"));
             Assert.That(runtimeSource, Does.Contain("ResolveExposureCompensationCurveStops("));
-            Assert.That(runtimeSource, Does.Contain("settings.exposureCompensationAll = ResolveExposureCompensationAll("));
-            Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale(settings.manualEV100, settings.exposureCompensationAll)"));
-            Assert.That(runtimeSource, Does.Contain("AutoExposureCompensationCurveUtility.Resolve(autoExposure.exposureCompensationCurve.value)"));
+            Assert.That(runtimeSource, Does.Contain("ResolveExposureCompensationAll("));
+            Assert.That(runtimeSource, Does.Contain("ResolveManualExposureScale("));
+            Assert.That(runtimeSource, Does.Contain("AutoExposureCompensationCurveUtility.Resolve("));
             Assert.That(runtimeSource, Does.Contain("public Texture curveMapTexture;"));
             Assert.That(runtimeSource, Does.Contain("public float curveMapMinEV100;"));
             Assert.That(runtimeSource, Does.Contain("public float curveMapMaxEV100;"));
@@ -686,7 +815,7 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("internal static class AutoExposureCurveMapUtility"));
             Assert.That(runtimeSource, Does.Contain("new Color(remappedEV100, resolvedClampMinEV100, resolvedClampMaxEV100, 0f)"));
             Assert.That(runtimeSource, Does.Contain("AutoExposureCurveMapUtility.Dispose();"));
-            Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100(settings.manualEV100)"));
+            Assert.That(runtimeSource, Does.Contain("ResolveAverageSceneLuminanceFromEV100("));
             Assert.That(runtimeSource, Does.Contain("internal static AutoExposureSettingsData ResolvePhysicalCameraFallback"));
             Assert.That(runtimeSource, Does.Contain("AutoExposureImplementationUtility.ResolveComputeShader("));
             Assert.That(runtimeSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
@@ -737,7 +866,14 @@ namespace VividRP.Editor.Tests
         [Test]
         public void AutoExposureEditorOnlyGpuReadbackPath_WiresRuntimeAndEditorStatsMonitor()
         {
-            var autoExposurePassSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "AutoExposurePass.cs"));
+            var autoExposurePassSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Runtime",
+                    "RenderPass",
+                    "Core",
+                    "PostProcessing",
+                    "AutoExposure",
+                    "AutoExposurePass.cs"));
             var readbackBridgeSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposureStatsReadbackBridge.cs"));
             var editorSource = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
             var statsShaderSource = File.ReadAllText(GetPackageFilePath("Editor", "Shader", "AutoExposureStats.shader"));

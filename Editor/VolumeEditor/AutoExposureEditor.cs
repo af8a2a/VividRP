@@ -10,7 +10,7 @@ namespace VividRP.Editor
 {
     [CanEditMultipleObjects]
     [CustomEditor(typeof(AutoExposure))]
-    internal sealed class AutoExposureEditor : VolumeComponentEditor
+    internal sealed partial class AutoExposureEditor : VolumeComponentEditor
     {
         private const int HistogramBucketCount = 64;
         private const string StatsPreviewShaderName = "Hidden/VividRP/Editor/Auto Exposure Stats";
@@ -37,7 +37,7 @@ namespace VividRP.Editor
         private static readonly GUIContent s_CurveMapLabel = EditorGUIUtility.TrTextContent("Curve Map");
         private static readonly GUIContent s_MeteringModeLabel = EditorGUIUtility.TrTextContent("Metering Mode");
         private static readonly GUIContent s_AdaptationModeLabel = EditorGUIUtility.TrTextContent("Adaptation Mode");
-        private static readonly GUIContent s_TargetMidGrayLabel = EditorGUIUtility.TrTextContent("Target Mid Gray");
+        private static readonly GUIContent s_TargetMidGrayLabel = EditorGUIUtility.TrTextContent("Target Mid Grey");
         private static readonly GUIContent s_WeightTextureMaskLabel = EditorGUIUtility.TrTextContent("Weight Texture Mask");
         private static readonly GUIContent s_SpeedDarkToLightLabel = EditorGUIUtility.TrTextContent("Speed Dark to Light");
         private static readonly GUIContent s_SpeedLightToDarkLabel = EditorGUIUtility.TrTextContent("Speed Light to Dark");
@@ -51,22 +51,6 @@ namespace VividRP.Editor
         private static readonly GUIContent[] s_PresetOptions = BuildPresetOptions();
 
         private SerializedDataParameter m_Enabled;
-        private SerializedDataParameter m_Mode;
-        private SerializedDataParameter m_Percent;
-        private SerializedDataParameter m_MinEV100;
-        private SerializedDataParameter m_MaxEV100;
-        private SerializedDataParameter m_SpeedUp;
-        private SerializedDataParameter m_SpeedDown;
-        private SerializedDataParameter m_ManualEV100;
-        private SerializedDataParameter m_MeteringMode;
-        private SerializedDataParameter m_AdaptationMode;
-        private SerializedDataParameter m_TargetMidGray;
-        private SerializedDataParameter m_ApplyPhysicalCameraExposure;
-        private SerializedDataParameter m_ExposureCompensation;
-        private SerializedDataParameter m_ExposureCompensationCurve;
-        private SerializedDataParameter m_CurveMap;
-        private SerializedDataParameter m_HistogramLogRange;
-        private SerializedDataParameter m_MeterMask;
 
         private Rect m_StatsPreviewRect;
         private Material m_StatsPreviewMaterial;
@@ -202,27 +186,10 @@ namespace VividRP.Editor
         public override void OnEnable()
         {
             var o = new PropertyFetcher<AutoExposure>(serializedObject);
-            var exposureModeProperty = o.Find(x => x.exposureMode);
 
             m_Enabled = Unpack(o.Find(x => x.enabled));
-            m_Mode = exposureModeProperty != null
-                ? Unpack(exposureModeProperty)
-                : Unpack(o.Find(x => x.mode));
-            m_Percent = Unpack(o.Find(x => x.percent));
-            m_MinEV100 = Unpack(o.Find(x => x.minEV100));
-            m_MaxEV100 = Unpack(o.Find(x => x.maxEV100));
-            m_SpeedUp = Unpack(o.Find(x => x.speedUp));
-            m_SpeedDown = Unpack(o.Find(x => x.speedDown));
-            m_ManualEV100 = Unpack(o.Find(x => x.manualEV100));
-            m_MeteringMode = Unpack(o.Find(x => x.meteringMode));
-            m_AdaptationMode = Unpack(o.Find(x => x.adaptationMode));
-            m_TargetMidGray = Unpack(o.Find(x => x.targetMidGray));
-            m_ApplyPhysicalCameraExposure = Unpack(o.Find(x => x.applyPhysicalCameraExposure));
-            m_ExposureCompensation = Unpack(o.Find(x => x.exposureCompensation));
-            m_ExposureCompensationCurve = Unpack(o.Find(x => x.exposureCompensationCurve));
-            m_CurveMap = Unpack(o.Find(x => x.curveMap));
-            m_HistogramLogRange = Unpack(o.Find(x => x.histogramLogRange));
-            m_MeterMask = Unpack(o.Find(x => x.meterMask));
+            InitializeUnrealProperties(o);
+            InitializeHDRPProperties(o);
 
             k_LightUnitSlider = new LightUnitSliderUIDrawer();
 
@@ -242,13 +209,18 @@ namespace VividRP.Editor
 
         public override void OnInspectorGUI()
         {
+            var implementation = ResolveEditorImplementation();
             PropertyField(m_Enabled, s_EnableLabel);
-            DrawPresetControls();
+
+            if (implementation == AutoExposureImplementationPath.Unreal)
+                DrawPresetControls();
 
             using (new EditorGUI.DisabledScope(!m_Enabled.value.boolValue))
             {
-                PropertyField(m_Mode, s_ModeLabel);
-                DrawHdrpModeInspector(ResolveSelectedExposureMode());
+                if (implementation == AutoExposureImplementationPath.HDRP)
+                    DrawHDRPInspector();
+                else
+                    DrawUnrealInspector();
 
                 EditorGUILayout.Space();
                 DrawSectionHeader("Monitor");
@@ -274,116 +246,6 @@ namespace VividRP.Editor
 
             var preset = AutoExposureCommonPresets.Get(m_SelectedPreset);
             EditorGUILayout.HelpBox(preset.Description, MessageType.None);
-        }
-
-        private void DrawHdrpModeInspector(AutoExposureExposureMode mode)
-        {
-            DrawModeSupportInfo(mode);
-
-            switch (mode)
-            {
-                case AutoExposureExposureMode.Fixed:
-                    EditorGUILayout.Space();
-                    DrawSectionHeader("Fixed");
-                    DoExposurePropertyField(m_ManualEV100, s_FixedExposureLabel);
-                    PropertyField(m_ExposureCompensation, s_CompensationLabel);
-                    PropertyField(m_ExposureCompensationCurve, s_CompensationCurveLabel);
-                    break;
-
-                case AutoExposureExposureMode.UsePhysicalCamera:
-                    EditorGUILayout.Space();
-                    DrawSectionHeader("Physical Camera");
-                    PropertyField(m_ExposureCompensation, s_CompensationLabel);
-                    PropertyField(m_ExposureCompensationCurve, s_CompensationCurveLabel);
-                    break;
-
-                case AutoExposureExposureMode.CurveMapping:
-                    DrawAutomaticInspector(drawHistogramControls: false);
-
-                    EditorGUILayout.Space();
-                    DrawSectionHeader("Curve Mapping");
-                    PropertyField(m_CurveMap, s_CurveMapLabel);
-                    break;
-
-                case AutoExposureExposureMode.AutomaticHistogram:
-                    DrawAutomaticInspector(drawHistogramControls: true);
-                    break;
-
-                default:
-                    DrawAutomaticInspector(drawHistogramControls: false);
-                    break;
-            }
-        }
-
-        private void DrawAutomaticInspector(bool drawHistogramControls)
-        {
-            EditorGUILayout.Space();
-            DrawSectionHeader("Metering");
-            PropertyField(m_MeteringMode, s_MeteringModeLabel);
-
-            if ((AutoExposureMeteringMode)m_MeteringMode.value.intValue == AutoExposureMeteringMode.MaskWeighted)
-                PropertyField(m_MeterMask, s_WeightTextureMaskLabel);
-
-            EditorGUILayout.Space();
-            DrawSectionHeader(drawHistogramControls ? "Automatic Histogram" : "Automatic");
-            DoExposurePropertyField(m_MinEV100, s_LimitMinLabel);
-            DoExposurePropertyField(m_MaxEV100, s_LimitMaxLabel);
-            PropertyField(m_TargetMidGray, s_TargetMidGrayLabel);
-            PropertyField(m_ExposureCompensation, s_CompensationLabel);
-            PropertyField(m_ExposureCompensationCurve, s_CompensationCurveLabel);
-
-            if (drawHistogramControls)
-            {
-                DrawHistogramPercentages();
-
-                EditorGUILayout.Space();
-                DrawSectionHeader("Histogram");
-                PropertyField(m_HistogramLogRange, s_HistogramEv100RangeLabel);
-            }
-
-            EditorGUILayout.Space();
-            DrawSectionHeader("Adaptation");
-            PropertyField(m_AdaptationMode, s_AdaptationModeLabel);
-
-            if ((AutoExposureAdaptationMode)m_AdaptationMode.value.intValue == AutoExposureAdaptationMode.Progressive)
-            {
-                PropertyField(m_SpeedUp, s_SpeedDarkToLightLabel);
-                PropertyField(m_SpeedDown, s_SpeedLightToDarkLabel);
-            }
-        }
-
-        private void DrawModeSupportInfo(AutoExposureExposureMode mode)
-        {
-            if (mode == AutoExposureExposureMode.CurveMapping)
-            {
-                EditorGUILayout.HelpBox(
-                    "Curve Mapping now uses HDRP-style curve remapping at runtime. The curve is baked into a runtime texture, and Limit Min/Max still define the final exposure clamp range.",
-                    MessageType.Info);
-                return;
-            }
-
-            if (mode == AutoExposureExposureMode.AutomaticHistogram)
-            {
-                EditorGUILayout.HelpBox(
-                    "Automatic Histogram now runs through a dedicated HDRP histogram path. It no longer falls back to Unreal auto exposure or dispatches HDRP's KPrePass/KReduction average-luminance chain.",
-                    MessageType.Info);
-            }
-        }
-
-        private AutoExposureExposureMode ResolveSelectedExposureMode()
-        {
-            return Enum.IsDefined(typeof(AutoExposureExposureMode), m_Mode.value.intValue)
-                ? (AutoExposureExposureMode)m_Mode.value.intValue
-                : AutoExposureExposureMode.Automatic;
-        }
-
-        private void DrawHistogramPercentages()
-        {
-            EditorGUILayout.LabelField(s_HistogramPercentagesLabel, EditorStyles.miniLabel);
-            using (new EditorGUI.IndentLevelScope())
-            {
-                PropertyField(m_Percent);
-            }
         }
 
         private void DrawStatsPreview()
@@ -532,20 +394,43 @@ namespace VividRP.Editor
         private AutoExposureStatsPreviewData BuildFallbackStatsPreviewData()
         {
             var autoExposure = (AutoExposure)target;
-            var mode = autoExposure.ResolveExposureMode();
+            var implementation = ResolveEditorImplementation();
+            var usesHDRP = implementation == AutoExposureImplementationPath.HDRP;
+            var mode = usesHDRP
+                ? autoExposure.ResolveExposureMode()
+                : autoExposure.mode.value == AutoExposureMode.Manual
+                    ? autoExposure.applyPhysicalCameraExposure.value
+                        ? AutoExposureExposureMode.UsePhysicalCamera
+                        : AutoExposureExposureMode.Fixed
+                    : AutoExposureExposureMode.AutomaticHistogram;
             var enabled = autoExposure.enabled.value;
-            var active = autoExposure.IsActive();
+            var active = autoExposure.IsActive(implementation);
             var applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(mode);
             var previewCamera = ResolvePreviewCamera();
             var hasPhysicalCameraPreview = applyPhysicalCameraExposure
                 && previewCamera != null
                 && previewCamera.usePhysicalProperties;
 
-            var lowPercent = Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * 0.01f;
-            var highPercent = Mathf.Clamp(autoExposure.percent.max, 1f, 99f) * 0.01f;
+            var histogramPercentages = usesHDRP
+                ? autoExposure.histogramPercentages.value
+                : autoExposure.percent.value;
+            var percentileMinimum = usesHDRP ? 0f : 1f;
+            var percentileMaximum = usesHDRP ? 100f : 99f;
+            var lowPercent = Mathf.Clamp(
+                    histogramPercentages.x,
+                    percentileMinimum,
+                    percentileMaximum)
+                * 0.01f;
+            var highPercent = Mathf.Clamp(
+                    histogramPercentages.y,
+                    percentileMinimum,
+                    percentileMaximum)
+                * 0.01f;
             highPercent = Mathf.Max(lowPercent, highPercent);
 
-            var histogramEV100Range = autoExposure.histogramLogRange.value;
+            var histogramEV100Range = usesHDRP
+                ? new Vector2(autoExposure.limitMin.value, autoExposure.limitMax.value)
+                : autoExposure.histogramLogRange.value;
             var histogramLogRange = AutoExposureSettingsResolver.ResolveHistogramLogRangeFromEV100(
                 histogramEV100Range.x,
                 histogramEV100Range.y);
@@ -554,21 +439,35 @@ namespace VividRP.Editor
                 histogramLogRange.y);
             var luminanceMin = Mathf.Pow(2f, histogramLogRange.x);
 
-            var minEV100 = autoExposure.minEV100.value;
-            var maxEV100 = Mathf.Max(minEV100, autoExposure.maxEV100.value);
+            var minEV100 = usesHDRP
+                ? autoExposure.limitMin.value
+                : autoExposure.minEV100.value;
+            var maxEV100 = Mathf.Max(
+                minEV100,
+                usesHDRP
+                    ? autoExposure.limitMax.value
+                    : autoExposure.maxEV100.value);
             var minAverageLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(minEV100)
                 * AutoExposureSettingsResolver.MiddleGrey;
             var maxAverageLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(maxEV100)
                 * AutoExposureSettingsResolver.MiddleGrey;
 
             var resolvedEV100 = AutoExposureExposureModeUtility.UsesManualSettings(mode)
-                ? ResolveManualPreviewEV100(autoExposure, previewCamera, hasPhysicalCameraPreview)
+                ? ResolveManualPreviewEV100(
+                    usesHDRP ? autoExposure.fixedExposure.value : autoExposure.manualEV100.value,
+                    mode,
+                    previewCamera,
+                    hasPhysicalCameraPreview)
                 : 0.5f * (minEV100 + maxEV100);
             var resolvedAverageLuminance = AutoExposureSettingsResolver.ResolveAverageSceneLuminanceFromEV100(resolvedEV100);
-            var compensationSettingsStops = autoExposure.exposureCompensation.value;
-            var compensationCurveStops = AutoExposureSettingsResolver.ResolveExposureCompensationCurveStops(
-                autoExposure.exposureCompensationCurve.value,
-                resolvedEV100);
+            var compensationSettingsStops = usesHDRP
+                ? autoExposure.compensation.value
+                : autoExposure.exposureCompensation.value;
+            var compensationCurveStops = usesHDRP
+                ? 0f
+                : AutoExposureSettingsResolver.ResolveExposureCompensationCurveStops(
+                    autoExposure.exposureCompensationCurve.value,
+                    resolvedEV100);
             var compensationSettingsLinear = AutoExposureSettingsResolver.ResolveExposureCompensation(compensationSettingsStops);
             var compensationAllStops = compensationSettingsStops + compensationCurveStops;
             var compensationAllLinear = AutoExposureSettingsResolver.ResolveExposureCompensationAll(
@@ -605,7 +504,7 @@ namespace VividRP.Editor
                 mode,
                 applyPhysicalCameraExposure,
                 hasPhysicalCameraPreview,
-                autoExposure.meterMask.value != null,
+                usesHDRP && autoExposure.weightTextureMask.value != null,
                 false,
                 lowPercent,
                 highPercent,
@@ -1005,15 +904,19 @@ namespace VividRP.Editor
         }
 
         private static float ResolveManualPreviewEV100(
-            AutoExposure autoExposure,
+            float fixedExposure,
+            AutoExposureExposureMode mode,
             Camera previewCamera,
             bool hasPhysicalCameraPreview)
         {
-            if (!AutoExposureExposureModeUtility.UsesManualSettings(autoExposure.ResolveExposureMode()))
-                return autoExposure.manualEV100.value;
+            if (!AutoExposureExposureModeUtility.UsesManualSettings(mode))
+                return fixedExposure;
 
-            if (!AutoExposureExposureModeUtility.UsesPhysicalCamera(autoExposure.ResolveExposureMode()) || !hasPhysicalCameraPreview)
-                return autoExposure.manualEV100.value;
+            if (!AutoExposureExposureModeUtility.UsesPhysicalCamera(mode)
+                || !hasPhysicalCameraPreview)
+            {
+                return fixedExposure;
+            }
 
             return AutoExposureSettingsResolver.ResolvePhysicalCameraEV100(previewCamera);
         }

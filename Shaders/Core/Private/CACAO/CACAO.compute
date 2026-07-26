@@ -1,0 +1,41 @@
+#pragma use_dxc
+#pragma require Native16Bit
+
+#pragma kernel FFX_CACAO_ClearLoadCounter
+#pragma kernel FFX_CACAO_PrepareDownsampledDepths
+#pragma kernel FFX_CACAO_PrepareNativeDepths
+#pragma kernel FFX_CACAO_PrepareDownsampledDepthsAndMips
+#pragma kernel FFX_CACAO_PrepareNativeDepthsAndMips
+#pragma kernel FFX_CACAO_PrepareDownsampledNormals
+#pragma kernel FFX_CACAO_PrepareNativeNormals
+#pragma kernel FFX_CACAO_PrepareDownsampledNormalsFromInputNormals
+#pragma kernel FFX_CACAO_PrepareNativeNormalsFromInputNormals
+#pragma kernel FFX_CACAO_PrepareDownsampledDepthsHalf
+#pragma kernel FFX_CACAO_PrepareNativeDepthsHalf
+#pragma kernel FFX_CACAO_GenerateQ0
+#pragma kernel FFX_CACAO_GenerateQ1
+#pragma kernel FFX_CACAO_GenerateQ2
+#pragma kernel FFX_CACAO_GenerateQ3
+#pragma kernel FFX_CACAO_GenerateQ3Base
+#pragma kernel FFX_CACAO_GenerateImportanceMap
+#pragma kernel FFX_CACAO_PostprocessImportanceMapA
+#pragma kernel FFX_CACAO_PostprocessImportanceMapB
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur1
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur2
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur3
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur4
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur5
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur6
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur7
+#pragma kernel FFX_CACAO_EdgeSensitiveBlur8
+#pragma kernel FFX_CACAO_Apply
+#pragma kernel FFX_CACAO_NonSmartApply
+#pragma kernel FFX_CACAO_NonSmartHalfApply
+#pragma kernel FFX_CACAO_UpscaleBilateral5x5Smart
+#pragma kernel FFX_CACAO_UpscaleBilateral5x5NonSmart
+#pragma kernel FFX_CACAO_UpscaleBilateral5x5Half
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/ShaderVariablesFunctions.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/CACAO/ffx_cacao.hlsl"

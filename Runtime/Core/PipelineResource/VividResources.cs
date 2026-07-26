@@ -221,6 +221,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GTAO/GTAO.compute")]
         public ComputeShader GTAOCompute;
 
+        [VividResourcePath("Shaders/Core/Private/CACAO/CACAO.compute")]
+        public ComputeShader CACAOCompute;
+
 
         [VividResourcePath("Shaders/Core/Private/Debug/ClusterDebug")]
         public Shader ClusterDebugShader;

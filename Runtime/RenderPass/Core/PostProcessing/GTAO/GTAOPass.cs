@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     //todo:
     //candidate async compute
-    public sealed class GTAOPass : ComputePass
+    public sealed partial class GTAOPass : ComputePass
     {
         private const int MainKernelThreadGroupSize = 8;
         private const int DenoiseThreadGroupSizeX = 16;
@@ -122,21 +122,24 @@ namespace VividRP.Runtime.RenderPass.Core
             m_WorkingAOTermTexture = CreateTexture("GTAOWorkingAOTerm", GraphicsFormat.R8_UInt);
             m_WorkingAOTermPongTexture = CreateTexture("GTAOWorkingAOTermPong", GraphicsFormat.R8_UInt);
             m_WorkingEdgesTexture = CreateTexture("GTAOWorkingEdges", GraphicsFormat.R8_UNorm);
+            InitializeCacaoResources();
         }
 
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_GTAOCompute = resources?.GTAOCompute;
-            if (m_GTAOCompute == null)
-                return;
+            if (m_GTAOCompute != null)
+            {
+                m_GTAOLowKernel = m_GTAOCompute.FindKernel("CSGTAOLow");
+                m_GTAOMediumKernel = m_GTAOCompute.FindKernel("CSGTAOMedium");
+                m_GTAOHighKernel = m_GTAOCompute.FindKernel("CSGTAOHigh");
+                m_GTAOUltraKernel = m_GTAOCompute.FindKernel("CSGTAOUltra");
+                m_DenoiseKernel = m_GTAOCompute.FindKernel("CSDenoisePass");
+                m_DenoiseLastKernel = m_GTAOCompute.FindKernel("CSDenoiseLastPass");
+            }
 
-            m_GTAOLowKernel = m_GTAOCompute.FindKernel("CSGTAOLow");
-            m_GTAOMediumKernel = m_GTAOCompute.FindKernel("CSGTAOMedium");
-            m_GTAOHighKernel = m_GTAOCompute.FindKernel("CSGTAOHigh");
-            m_GTAOUltraKernel = m_GTAOCompute.FindKernel("CSGTAOUltra");
-            m_DenoiseKernel = m_GTAOCompute.FindKernel("CSDenoisePass");
-            m_DenoiseLastKernel = m_GTAOCompute.FindKernel("CSDenoiseLastPass");
+            CreateCacao(resources);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -152,16 +155,45 @@ namespace VividRP.Runtime.RenderPass.Core
             ResizeTexture(m_HzbTexture, m_Width, m_Height);
             ResizeTexture(m_GBuffer1, m_Width, m_Height);
             ResizeOutputTexture(m_GTAOTexture, m_Width, m_Height, GraphicsFormat.R8_UNorm, Color.white);
-            ResizeOutputTexture(m_WorkingAOTermTexture, m_Width, m_Height, GraphicsFormat.R8_UInt, Color.clear, clearBuffer: false);
-            ResizeOutputTexture(m_WorkingAOTermPongTexture, m_Width, m_Height, GraphicsFormat.R8_UInt, Color.clear, clearBuffer: false);
-            ResizeOutputTexture(m_WorkingEdgesTexture, m_Width, m_Height, GraphicsFormat.R8_UNorm, Color.clear, clearBuffer: false);
+            bool useCacao = m_Settings.enabled
+                && m_Settings.implementation == AmbientOcclusionImplementation.FidelityFXCACAO;
+            int gtaoWorkingWidth = useCacao ? 1 : m_Width;
+            int gtaoWorkingHeight = useCacao ? 1 : m_Height;
+            ResizeOutputTexture(
+                m_WorkingAOTermTexture,
+                gtaoWorkingWidth,
+                gtaoWorkingHeight,
+                GraphicsFormat.R8_UInt,
+                Color.clear,
+                clearBuffer: false);
+            ResizeOutputTexture(
+                m_WorkingAOTermPongTexture,
+                gtaoWorkingWidth,
+                gtaoWorkingHeight,
+                GraphicsFormat.R8_UInt,
+                Color.clear,
+                clearBuffer: false);
+            ResizeOutputTexture(
+                m_WorkingEdgesTexture,
+                gtaoWorkingWidth,
+                gtaoWorkingHeight,
+                GraphicsFormat.R8_UNorm,
+                Color.clear,
+                clearBuffer: false);
 
             m_ConstantBuffer = BuildConstantBuffer(cameraData, m_Width, m_Height, m_Settings);
+            PrepareCacao(cameraData, useCacao);
         }
 
 
         public override void Record(ComputePassContext context)
         {
+            if (m_Settings.implementation == AmbientOcclusionImplementation.FidelityFXCACAO)
+            {
+                RecordCacao(context);
+                return;
+            }
+
             var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
@@ -230,6 +262,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Height = 1;
             m_Settings = GTAOSettingsData.CreateDefault();
             m_ConstantBuffer = default;
+            DisposeCacao();
         }
 
         private bool CanExecute()

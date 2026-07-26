@@ -8,7 +8,7 @@ namespace VividRP.Runtime
 {
     internal enum BloomFftExecutionPath
     {
-        MultiDispatch,
+        Lds,
         Wave32,
         Wave64
     }
@@ -48,8 +48,6 @@ namespace VividRP.Runtime
             && FrequencyWidth >= ImageWidth
             && FrequencyHeight >= ImageHeight;
 
-        public int TransformStageCount => Log2Width + Log2Height;
-
         private static int IntegerLog2(int value)
         {
             int result = 0;
@@ -68,7 +66,6 @@ namespace VividRP.Runtime
 
         private static readonly int FftSizeId = Shader.PropertyToID("_FFTSize");
         private static readonly int FftImageSizeId = Shader.PropertyToID("_FFTImageSize");
-        private static readonly int FftStageId = Shader.PropertyToID("_FFTStage");
         private static readonly int FftInverseId = Shader.PropertyToID("_FFTInverse");
         private static readonly int FftKernelParamsId = Shader.PropertyToID("_FFTKernelParams");
         private static readonly int FftResolveScaleId = Shader.PropertyToID("_FFTResolveScale");
@@ -102,8 +99,8 @@ namespace VividRP.Runtime
         private ComputeShader m_FftCS;
         private int m_FftPrepareSourceKernel = -1;
         private int m_FftPrepareKernelKernel = -1;
-        private int m_FftHorizontalKernel = -1;
-        private int m_FftVerticalKernel = -1;
+        private int m_FftLdsHorizontalKernel = -1;
+        private int m_FftLdsVerticalKernel = -1;
         private int m_FftWaveHorizontal32Kernel = -1;
         private int m_FftWaveVertical32Kernel = -1;
         private int m_FftWaveHorizontal64Kernel = -1;
@@ -151,7 +148,7 @@ namespace VividRP.Runtime
             int minimumAxis = Mathf.Min(frequencyWidth, frequencyHeight);
             int maximumAxis = Mathf.Max(frequencyWidth, frequencyHeight);
             if (maximumAxis > k_MaxWaveFftSize)
-                return BloomFftExecutionPath.MultiDispatch;
+                return BloomFftExecutionPath.Lds;
 
             if (computeSubGroupSize == 64
                 && minimumAxis >= 64
@@ -163,18 +160,7 @@ namespace VividRP.Runtime
                 && hasWave32Kernels)
                 return BloomFftExecutionPath.Wave32;
 
-            return BloomFftExecutionPath.MultiDispatch;
-        }
-
-        internal static int GetFftTransformOutputIndex(
-            int initialIndex,
-            BloomFftExecutionPath executionPath,
-            int multiDispatchStageCount)
-        {
-            if (executionPath != BloomFftExecutionPath.MultiDispatch)
-                return initialIndex;
-
-            return initialIndex ^ (multiDispatchStageCount & 1);
+            return BloomFftExecutionPath.Lds;
         }
 
         internal static BloomFftDomain CalculateFftDomain(
@@ -234,8 +220,8 @@ namespace VividRP.Runtime
             {
                 m_FftPrepareSourceKernel = m_FftCS.FindKernel("KFFTPrepareSource");
                 m_FftPrepareKernelKernel = m_FftCS.FindKernel("KFFTPrepareKernel");
-                m_FftHorizontalKernel = m_FftCS.FindKernel("KFFTStageHorizontal");
-                m_FftVerticalKernel = m_FftCS.FindKernel("KFFTStageVertical");
+                m_FftLdsHorizontalKernel = m_FftCS.FindKernel("KFFTLdsHorizontal");
+                m_FftLdsVerticalKernel = m_FftCS.FindKernel("KFFTLdsVertical");
                 m_FftMultiplyKernel = m_FftCS.FindKernel("KFFTMultiplyAndBitReverse");
                 m_FftResolveKernel = m_FftCS.FindKernel("KFFTResolve");
                 m_FftReduceEnergyKernel = m_FftCS.FindKernel("KFFTReduceEnergy");
@@ -250,8 +236,8 @@ namespace VividRP.Runtime
             {
                 m_FftPrepareSourceKernel = -1;
                 m_FftPrepareKernelKernel = -1;
-                m_FftHorizontalKernel = -1;
-                m_FftVerticalKernel = -1;
+                m_FftLdsHorizontalKernel = -1;
+                m_FftLdsVerticalKernel = -1;
                 m_FftWaveHorizontal32Kernel = -1;
                 m_FftWaveVertical32Kernel = -1;
                 m_FftWaveHorizontal64Kernel = -1;
@@ -391,10 +377,7 @@ namespace VividRP.Runtime
         {
             SetFftDomainParameters(cmd);
 
-            int kernelSpectralIndex = GetFftTransformOutputIndex(
-                0,
-                m_FftExecutionPath,
-                m_FftDomain.TransformStageCount);
+            int kernelSpectralIndex = 0;
             if (m_FftKernelNeedsUpdate)
             {
                 ExecuteFftKernelPreparation(cmd);
@@ -558,49 +541,51 @@ namespace VividRP.Runtime
             int initialIndex,
             bool inverse)
         {
-            if (m_FftExecutionPath != BloomFftExecutionPath.MultiDispatch)
+            int horizontalKernel = m_FftLdsHorizontalKernel;
+            int verticalKernel = m_FftLdsVerticalKernel;
+            if (m_FftExecutionPath != BloomFftExecutionPath.Lds)
             {
-                return ExecuteWaveFftTransform(
-                    cmd,
-                    realTextures,
-                    imaginaryTextures,
-                    initialIndex,
-                    inverse);
+                horizontalKernel = m_FftSelectedWaveHorizontalKernel;
+                verticalKernel = m_FftSelectedWaveVerticalKernel;
             }
 
-            return ExecuteMultiDispatchFftTransform(
+            return ExecuteScanlineFftTransform(
                 cmd,
                 realTextures,
                 imaginaryTextures,
                 initialIndex,
-                inverse);
+                inverse,
+                horizontalKernel,
+                verticalKernel);
         }
 
-        private int ExecuteWaveFftTransform(
+        private int ExecuteScanlineFftTransform(
             CommandBuffer cmd,
             TextureHandle[] realTextures,
             TextureHandle[] imaginaryTextures,
             int initialIndex,
-            bool inverse)
+            bool inverse,
+            int horizontalKernel,
+            int verticalKernel)
         {
             cmd.SetComputeIntParam(m_FftCS, FftInverseId, inverse ? 1 : 0);
 
             int horizontalOutputIndex = 1 - initialIndex;
             BindFftInput(
                 cmd,
-                m_FftSelectedWaveHorizontalKernel,
+                horizontalKernel,
                 realTextures,
                 imaginaryTextures,
                 initialIndex);
             BindFftOutput(
                 cmd,
-                m_FftSelectedWaveHorizontalKernel,
+                horizontalKernel,
                 realTextures,
                 imaginaryTextures,
                 horizontalOutputIndex);
             cmd.DispatchCompute(
                 m_FftCS,
-                m_FftSelectedWaveHorizontalKernel,
+                horizontalKernel,
                 m_FftDomain.FrequencyHeight,
                 1,
                 1);
@@ -608,57 +593,24 @@ namespace VividRP.Runtime
             int verticalOutputIndex = 1 - horizontalOutputIndex;
             BindFftInput(
                 cmd,
-                m_FftSelectedWaveVerticalKernel,
+                verticalKernel,
                 realTextures,
                 imaginaryTextures,
                 horizontalOutputIndex);
             BindFftOutput(
                 cmd,
-                m_FftSelectedWaveVerticalKernel,
+                verticalKernel,
                 realTextures,
                 imaginaryTextures,
                 verticalOutputIndex);
             cmd.DispatchCompute(
                 m_FftCS,
-                m_FftSelectedWaveVerticalKernel,
+                verticalKernel,
                 m_FftDomain.FrequencyWidth,
                 1,
                 1);
 
             return verticalOutputIndex;
-        }
-
-        private int ExecuteMultiDispatchFftTransform(
-            CommandBuffer cmd,
-            TextureHandle[] realTextures,
-            TextureHandle[] imaginaryTextures,
-            int initialIndex,
-            bool inverse)
-        {
-            cmd.SetComputeIntParam(m_FftCS, FftInverseId, inverse ? 1 : 0);
-            int currentIndex = initialIndex;
-
-            for (int stage = 0; stage < m_FftDomain.Log2Width; stage++)
-            {
-                int outputIndex = 1 - currentIndex;
-                cmd.SetComputeIntParam(m_FftCS, FftStageId, stage);
-                BindFftInput(cmd, m_FftHorizontalKernel, realTextures, imaginaryTextures, currentIndex);
-                BindFftOutput(cmd, m_FftHorizontalKernel, realTextures, imaginaryTextures, outputIndex);
-                DispatchFftDomain(cmd, m_FftHorizontalKernel);
-                currentIndex = outputIndex;
-            }
-
-            for (int stage = 0; stage < m_FftDomain.Log2Height; stage++)
-            {
-                int outputIndex = 1 - currentIndex;
-                cmd.SetComputeIntParam(m_FftCS, FftStageId, stage);
-                BindFftInput(cmd, m_FftVerticalKernel, realTextures, imaginaryTextures, currentIndex);
-                BindFftOutput(cmd, m_FftVerticalKernel, realTextures, imaginaryTextures, outputIndex);
-                DispatchFftDomain(cmd, m_FftVerticalKernel);
-                currentIndex = outputIndex;
-            }
-
-            return currentIndex;
         }
 
         private void SelectWaveFftKernels()

@@ -73,9 +73,9 @@ namespace VividRP.Editor.Tests
 
         [TestCase(32, true, true, (int)BloomFftExecutionPath.Wave32)]
         [TestCase(64, true, true, (int)BloomFftExecutionPath.Wave64)]
-        [TestCase(16, true, true, (int)BloomFftExecutionPath.MultiDispatch)]
-        [TestCase(32, false, true, (int)BloomFftExecutionPath.MultiDispatch)]
-        [TestCase(64, true, false, (int)BloomFftExecutionPath.MultiDispatch)]
+        [TestCase(16, true, true, (int)BloomFftExecutionPath.Lds)]
+        [TestCase(32, false, true, (int)BloomFftExecutionPath.Lds)]
+        [TestCase(64, true, false, (int)BloomFftExecutionPath.Lds)]
         public void ResolveFftExecutionPath_SelectsMatchingWaveKernels(
             int computeSubGroupSize,
             bool hasWave32Kernels,
@@ -93,43 +93,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ResolveFftExecutionPath_FallsBackOutsideWaveLdsLimits()
+        public void ResolveFftExecutionPath_UsesLdsOutsideWaveLimits()
         {
             Assert.That(
                 BloomPass.ResolveFftExecutionPath(32, 4096, 2048, true, true),
-                Is.EqualTo(BloomFftExecutionPath.MultiDispatch));
+                Is.EqualTo(BloomFftExecutionPath.Lds));
             Assert.That(
                 BloomPass.ResolveFftExecutionPath(64, 2048, 32, true, true),
-                Is.EqualTo(BloomFftExecutionPath.MultiDispatch));
-        }
-
-        [Test]
-        public void GetFftTransformOutputIndex_AccountsForDispatchPath()
-        {
-            Assert.That(
-                BloomPass.GetFftTransformOutputIndex(
-                    0,
-                    BloomFftExecutionPath.MultiDispatch,
-                    19),
-                Is.EqualTo(1));
-            Assert.That(
-                BloomPass.GetFftTransformOutputIndex(
-                    1,
-                    BloomFftExecutionPath.MultiDispatch,
-                    18),
-                Is.EqualTo(1));
-            Assert.That(
-                BloomPass.GetFftTransformOutputIndex(
-                    0,
-                    BloomFftExecutionPath.Wave32,
-                    19),
-                Is.EqualTo(0));
-            Assert.That(
-                BloomPass.GetFftTransformOutputIndex(
-                    1,
-                    BloomFftExecutionPath.Wave64,
-                    19),
-                Is.EqualTo(1));
+                Is.EqualTo(BloomFftExecutionPath.Lds));
         }
 
         [Test]
@@ -140,8 +111,8 @@ namespace VividRP.Editor.Tests
 
             Assert.That(shader.HasKernel("KFFTPrepareSource"), Is.True);
             Assert.That(shader.HasKernel("KFFTPrepareKernel"), Is.True);
-            Assert.That(shader.HasKernel("KFFTStageHorizontal"), Is.True);
-            Assert.That(shader.HasKernel("KFFTStageVertical"), Is.True);
+            Assert.That(shader.HasKernel("KFFTLdsHorizontal"), Is.True);
+            Assert.That(shader.HasKernel("KFFTLdsVertical"), Is.True);
             Assert.That(shader.HasKernel("KFFTWaveHorizontal32"), Is.True);
             Assert.That(shader.HasKernel("KFFTWaveVertical32"), Is.True);
             Assert.That(shader.HasKernel("KFFTWaveHorizontal64"), Is.True);

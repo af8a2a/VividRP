@@ -71,6 +71,67 @@ namespace VividRP.Editor.Tests
             Assert.That(domain.FrequencyHeight, Is.EqualTo(512));
         }
 
+        [TestCase(32, true, true, (int)BloomFftExecutionPath.Wave32)]
+        [TestCase(64, true, true, (int)BloomFftExecutionPath.Wave64)]
+        [TestCase(16, true, true, (int)BloomFftExecutionPath.MultiDispatch)]
+        [TestCase(32, false, true, (int)BloomFftExecutionPath.MultiDispatch)]
+        [TestCase(64, true, false, (int)BloomFftExecutionPath.MultiDispatch)]
+        public void ResolveFftExecutionPath_SelectsMatchingWaveKernels(
+            int computeSubGroupSize,
+            bool hasWave32Kernels,
+            bool hasWave64Kernels,
+            int expected)
+        {
+            var path = BloomPass.ResolveFftExecutionPath(
+                computeSubGroupSize,
+                1024,
+                512,
+                hasWave32Kernels,
+                hasWave64Kernels);
+
+            Assert.That((int)path, Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void ResolveFftExecutionPath_FallsBackOutsideWaveLdsLimits()
+        {
+            Assert.That(
+                BloomPass.ResolveFftExecutionPath(32, 4096, 2048, true, true),
+                Is.EqualTo(BloomFftExecutionPath.MultiDispatch));
+            Assert.That(
+                BloomPass.ResolveFftExecutionPath(64, 2048, 32, true, true),
+                Is.EqualTo(BloomFftExecutionPath.MultiDispatch));
+        }
+
+        [Test]
+        public void GetFftTransformOutputIndex_AccountsForDispatchPath()
+        {
+            Assert.That(
+                BloomPass.GetFftTransformOutputIndex(
+                    0,
+                    BloomFftExecutionPath.MultiDispatch,
+                    19),
+                Is.EqualTo(1));
+            Assert.That(
+                BloomPass.GetFftTransformOutputIndex(
+                    1,
+                    BloomFftExecutionPath.MultiDispatch,
+                    18),
+                Is.EqualTo(1));
+            Assert.That(
+                BloomPass.GetFftTransformOutputIndex(
+                    0,
+                    BloomFftExecutionPath.Wave32,
+                    19),
+                Is.EqualTo(0));
+            Assert.That(
+                BloomPass.GetFftTransformOutputIndex(
+                    1,
+                    BloomFftExecutionPath.Wave64,
+                    19),
+                Is.EqualTo(1));
+        }
+
         [Test]
         public void BloomBlurCompute_ContainsFftConvolutionKernels()
         {
@@ -81,6 +142,10 @@ namespace VividRP.Editor.Tests
             Assert.That(shader.HasKernel("KFFTPrepareKernel"), Is.True);
             Assert.That(shader.HasKernel("KFFTStageHorizontal"), Is.True);
             Assert.That(shader.HasKernel("KFFTStageVertical"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveHorizontal32"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveVertical32"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveHorizontal64"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveVertical64"), Is.True);
             Assert.That(shader.HasKernel("KFFTMultiplyAndBitReverse"), Is.True);
             Assert.That(shader.HasKernel("KFFTResolve"), Is.True);
             Assert.That(shader.HasKernel("KFFTReduceEnergy"), Is.True);

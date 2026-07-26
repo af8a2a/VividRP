@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
 
 - FidelityFX CACAO as a selectable alternative to the existing GTAO implementation.
-- FFT convolution bloom with user-authored kernels, padded power-of-two domains, kernel-spectrum caching, and energy normalization.
+- FFT convolution bloom with user-authored kernels, padded power-of-two domains, kernel-spectrum caching, energy normalization, a Wave32/Wave64 primary path, and a portable multi-dispatch fallback.
 
 ### Changed
 

@@ -35,7 +35,7 @@ Pass 通过 `[RenderGraphResource]` 标记的字段自动生成端口。运行�
 | --- | --- |
 | 基础渲染 | 预深度、GBuffer、延迟光照、Motion Vector、HZB、通用物体绘制、Color Pyramid |
 | 阴影与光照 | CSM / PCSS、簇状光照、方向光 DXR 阴影与 SIGMA 降噪、天空与大气散射 |
-| 后处理 | 自动曝光、Bloom、色彩分级、景深、GTAO、镜头光晕、SSR（含 REBLUR：Checkerboard 交织、时域稳定、Hit-Distance 重建、可配置降噪与分离直接光照）、局部曝光、最终合成 |
+| 后处理 | 自动曝光、Bloom（Mip Scattering 与 FFT 卷积核模式）、色彩分级、景深、GTAO、镜头光晕、SSR（含 REBLUR：Checkerboard 交织、时域稳定、Hit-Distance 重建、可配置降噪与分离直接光照）、局部曝光、最终合成 |
 | 抗锯齿与超分 | CMAA2、TAA、TSR、FSR3；DLSS Super Resolution / Ray Reconstruction 需额外插件集成 |
 | NVIDIA 集成 | NVAPI Shader Execution Reordering（SER） |
 | 体积效果 | 全局及局部体积雾、VBuffer、体积光照和 Max-Z 生成 |

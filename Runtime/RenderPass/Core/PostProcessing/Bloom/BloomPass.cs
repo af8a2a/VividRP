@@ -7,7 +7,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
-    public class BloomPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
+    public partial class BloomPass : UnsafePass, IPostProcessSourceOverridePass, IStablePassResourceLayout
     {
         private const int k_MaxBloomMipCount = 16;
         private const int k_MaxBloomSpdMipCount = 13;
@@ -169,19 +169,15 @@ namespace VividRP.Runtime
             }
             if (m_UpsampleCS != null)
                 m_UpsampleKernel = m_UpsampleCS.FindKernel("KMain");
+
+            InitializeFftKernels(m_BlurCS);
         }
 
         public override void Dispose()
         {
-            for (int i = 0; i < k_MaxBloomMipCount; i++)
-            {
-                m_MipDownHandles[i]?.Release();
-                m_MipDownHandles[i] = null;
-                m_MipUpHandles[i]?.Release();
-                m_MipUpHandles[i] = null;
-            }
-
+            ReleaseMipHandles();
             ReleaseSpdAtomicCounterBuffer();
+            DisposeFftResources();
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -216,18 +212,41 @@ namespace VividRP.Runtime
                 m_ShouldOutputBloomTexture = m_Settings.enabled;
                 m_ShouldOutputScreenSpaceLensFlareMip = m_ScreenSpaceLensFlareSettings.enabled;
                 m_UseSpdDownsample = false;
+                m_UseFftConvolution = false;
                 m_SpdDispatchGroupCountX = 0;
                 m_SpdDispatchGroupCountY = 0;
                 m_SpdNumWorkGroups = 0;
             }
 
-            if (!m_Settings.enabled && !m_ScreenSpaceLensFlareSettings.enabled
-                || m_PrefilterCS == null || m_BlurCS == null || m_UpsampleCS == null
+            bool fftRequested = ShouldUseFftConvolution(
+                m_Settings.enabled && m_Settings.mode == BloomMode.ConvolutionFFT,
+                m_Settings.convolutionKernel != null,
+                m_FftKernelsReady);
+            if (!fftRequested)
+                DisposeFftResources();
+
+            if ((!m_Settings.enabled && !m_ScreenSpaceLensFlareSettings.enabled)
                 || m_ScreenWidth <= 0 || m_ScreenHeight <= 0)
                 return;
 
             using (s_PrepareMipsMarker.Auto())
             {
+                if (fftRequested)
+                {
+                    if (PrepareFftResources())
+                    {
+                        ReleaseMipHandles();
+                        ReleaseSpdAtomicCounterBuffer();
+                        m_UseFftConvolution = true;
+                        return;
+                    }
+
+                    DisposeFftResources();
+                }
+
+                if (m_PrefilterCS == null || m_BlurCS == null || m_UpsampleCS == null)
+                    return;
+
                 float ana    = m_Settings.anamorphic;
                 float scaleW = ana < 0f ? 1f + ana * 0.5f : 1f;
                 float scaleH = ana > 0f ? 1f - ana * 0.5f : 1f;
@@ -288,6 +307,19 @@ namespace VividRP.Runtime
         public override void Record(UnsafePassContext context)
         {
             var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+
+            if (m_UseFftConvolution)
+            {
+                if (source?.innerHandle.IsValid() != true)
+                {
+                    SetBloomDisabled(cmd);
+                    return;
+                }
+
+                using (new ProfilingScope(context.cmd, profilingSampler))
+                    ExecuteFftBloom(cmd);
+                return;
+            }
 
             if (m_MipCount == 0 || source?.innerHandle.IsValid() != true)
             {
@@ -566,6 +598,17 @@ namespace VividRP.Runtime
                 filterMode: FilterMode.Bilinear,
                 wrapMode: TextureWrapMode.Clamp,
                 name: name);
+        }
+
+        private void ReleaseMipHandles()
+        {
+            for (int i = 0; i < k_MaxBloomMipCount; i++)
+            {
+                m_MipDownHandles[i]?.Release();
+                m_MipDownHandles[i] = null;
+                m_MipUpHandles[i]?.Release();
+                m_MipUpHandles[i] = null;
+            }
         }
 
         private static string[] CreateMipNames(string prefix)

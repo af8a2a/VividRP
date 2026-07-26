@@ -35,6 +35,58 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BloomSettingsData_DefaultsToScatteringWithQuarterResolutionFft()
+        {
+            var settings = BloomSettingsData.CreateDefault();
+
+            Assert.That(settings.mode, Is.EqualTo(BloomMode.Scattering));
+            Assert.That(settings.convolutionResolutionScale, Is.EqualTo(0.25f));
+            Assert.That(settings.convolutionKernel, Is.Null);
+        }
+
+        [Test]
+        public void ShouldUseFftConvolution_RequiresModeKernelAndKernels()
+        {
+            Assert.That(BloomPass.ShouldUseFftConvolution(false, true, true), Is.False);
+            Assert.That(BloomPass.ShouldUseFftConvolution(true, false, true), Is.False);
+            Assert.That(BloomPass.ShouldUseFftConvolution(true, true, false), Is.False);
+            Assert.That(BloomPass.ShouldUseFftConvolution(true, true, true), Is.True);
+        }
+
+        [Test]
+        public void CalculateFftDomain_UsesKernelPaddingAndPowerOfTwoExtent()
+        {
+            var domain = BloomPass.CalculateFftDomain(
+                1920,
+                1080,
+                0.25f,
+                0.15f,
+                0.25f);
+
+            Assert.That(domain.ImageWidth, Is.EqualTo(480));
+            Assert.That(domain.ImageHeight, Is.EqualTo(270));
+            Assert.That(domain.KernelSize, Is.EqualTo(72));
+            Assert.That(domain.Padding, Is.EqualTo(36));
+            Assert.That(domain.FrequencyWidth, Is.EqualTo(1024));
+            Assert.That(domain.FrequencyHeight, Is.EqualTo(512));
+        }
+
+        [Test]
+        public void BloomBlurCompute_ContainsFftConvolutionKernels()
+        {
+            var shader = PipelineResourceManager.Get<VividRPCoreResources>().BloomBlurCompute;
+            Assert.That(shader, Is.Not.Null);
+
+            Assert.That(shader.HasKernel("KFFTPrepareSource"), Is.True);
+            Assert.That(shader.HasKernel("KFFTPrepareKernel"), Is.True);
+            Assert.That(shader.HasKernel("KFFTStageHorizontal"), Is.True);
+            Assert.That(shader.HasKernel("KFFTStageVertical"), Is.True);
+            Assert.That(shader.HasKernel("KFFTMultiplyAndBitReverse"), Is.True);
+            Assert.That(shader.HasKernel("KFFTResolve"), Is.True);
+            Assert.That(shader.HasKernel("KFFTReduceEnergy"), Is.True);
+        }
+
+        [Test]
         public void ShouldUseSpdDownsample_RequiresRequestAndEligibleResources()
         {
             Assert.That(BloomPass.ShouldUseSpdDownsample(false, 8, true, true), Is.False);

@@ -4,6 +4,21 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum BloomMode
+    {
+        Scattering,
+        ConvolutionFFT
+    }
+
+    [Serializable]
+    public sealed class BloomModeParameter : VolumeParameter<BloomMode>
+    {
+        public BloomModeParameter(BloomMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
     public enum BloomResolution
     {
         Quarter = 4,
@@ -23,6 +38,9 @@ namespace VividRP.Runtime
     [VolumeComponentMenu("Post-processing/Bloom")]
     public sealed class Bloom : VolumeComponent, IPostProcessComponent
     {
+        [Tooltip("Scattering uses the fast mip pyramid. Convolution FFT uses an image-space kernel for physically shaped bloom.")]
+        public BloomModeParameter mode = new(BloomMode.Scattering);
+
         [Tooltip("Brightness cutoff applied before the blur (gamma-space).")]
         public MinFloatParameter threshold = new(0f, 0f);
 
@@ -55,6 +73,24 @@ namespace VividRP.Runtime
 
         [Tooltip("Experimental: use FidelityFX SPD to build the downsample chain in one compute dispatch.")]
         public BoolParameter experimentalSpdDownsample = new(false);
+
+        [Tooltip("Kernel texture used by Convolution FFT. The brightest point should be near Convolution Center.")]
+        public Texture2DParameter convolutionKernel = new(null);
+
+        [Tooltip("Kernel diameter relative to the bloom image's major axis.")]
+        public ClampedFloatParameter convolutionSize = new(0.15f, 0.01f, 1f);
+
+        [Tooltip("Limits the zero-padding reserved for the kernel. Zero uses the full convolution size.")]
+        public ClampedFloatParameter convolutionBufferScale = new(0.25f, 0f, 1f);
+
+        [Tooltip("Normalized center of the convolution kernel texture.")]
+        public Vector2Parameter convolutionCenter = new(new Vector2(0.5f, 0.5f));
+
+        [Tooltip("Clamps the bright kernel center before convolution, preserving the scattering lobe without duplicating the source highlight.")]
+        public ClampedFloatParameter convolutionKernelClamp = new(0.1f, 0.001f, 1f);
+
+        [Tooltip("Axis resolution used by FFT convolution. Lower values reduce the power-of-two FFT domain and memory cost.")]
+        public ClampedFloatParameter convolutionResolutionScale = new(0.25f, 0.1f, 0.5f);
 
         public bool IsActive()
         {

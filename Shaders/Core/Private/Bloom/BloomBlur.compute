@@ -1,10 +1,18 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Bloom/BloomCommon.hlsl"
 
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 
 #pragma kernel KMain          MAIN=KMain
 #pragma kernel KDownsample    MAIN=KDownsample  DOWNSAMPLE
 #pragma kernel KSpdDownsample
+#pragma kernel KFFTPrepareSource
+#pragma kernel KFFTPrepareKernel
+#pragma kernel KFFTStageHorizontal
+#pragma kernel KFFTStageVertical
+#pragma kernel KFFTMultiplyAndBitReverse
+#pragma kernel KFFTResolve
+#pragma kernel KFFTReduceEnergy
 #pragma use_dxc
 #pragma require Native16Bit
 
@@ -334,4 +342,250 @@ void KSpdDownsample(uint3 workGroupId : SV_GroupID, uint localThreadIndex : SV_G
         AU1(numWorkGroups),
         AU1(workGroupId.z),
         AU2(workGroupOffset));
+}
+
+// -----------------------------------------------------------------------------
+// FFT convolution bloom
+//
+// This is a unitary radix-2 FFT. Both forward and inverse butterflies use
+// 1/sqrt(2), so convolution resolve restores sqrt(width * height). The spatial
+// kernel is wrapped around the origin before its transform, matching the
+// periodic layout expected by frequency-domain convolution.
+
+Texture2D<float4> _FFTSourceTexture;
+Texture2D<float4> _FFTKernelTexture;
+Texture2D<float4> _FFTRealInput;
+Texture2D<float4> _FFTImagInput;
+Texture2D<float4> _FFTKernelReal;
+Texture2D<float4> _FFTKernelImag;
+Texture2D<float4> _FFTEnergyInput;
+Texture2D<float4> _FFTKernelEnergy;
+
+RWTexture2D<float4> _FFTRealOutput;
+RWTexture2D<float4> _FFTImagOutput;
+RWTexture2D<float4> _FFTEnergyOutput;
+RWTexture2D<float4> _FFTOutputTexture;
+
+CBUFFER_START(fftConstants)
+    float4 _FFTSize;         // xy: frequency size, zw: log2 frequency size
+    float4 _FFTImageSize;    // xy: image size, zw: reciprocal image size
+    float4 _FFTKernelParams; // x: diameter in pixels, y: center clamp, zw: center UV
+    float4 _FFTInputSize;    // xy: reduction input size
+    float4 _FFTOutputSize;   // xy: reduction output size
+    float4 _BloomThreshold;
+    uint _FFTStage;
+    uint _FFTInverse;
+    float _FFTResolveScale;
+    float _FFTPadding;
+CBUFFER_END
+
+static const float k_FftUnitaryButterflyScale = 0.7071067811865475244;
+
+uint ReverseFftIndex(uint index, uint bitCount)
+{
+    return bitCount == 0u ? 0u : reversebits(index) >> (32u - bitCount);
+}
+
+uint2 ReverseFftCoord(uint2 coord)
+{
+    return uint2(
+        ReverseFftIndex(coord.x, uint(_FFTSize.z)),
+        ReverseFftIndex(coord.y, uint(_FFTSize.w)));
+}
+
+void LoadFftButterfly(
+    uint2 evenCoord,
+    uint2 oddCoord,
+    uint offset,
+    uint span,
+    out float3 outputReal,
+    out float3 outputImag)
+{
+    float3 evenReal = _FFTRealInput[evenCoord].xyz;
+    float3 evenImag = _FFTImagInput[evenCoord].xyz;
+    float3 oddReal = _FFTRealInput[oddCoord].xyz;
+    float3 oddImag = _FFTImagInput[oddCoord].xyz;
+
+    uint halfSpan = span >> 1u;
+    uint twiddleIndex = offset & (halfSpan - 1u);
+    float direction = _FFTInverse != 0u ? 1.0 : -1.0;
+    float angle = direction * TWO_PI * float(twiddleIndex) / float(span);
+    float sine;
+    float cosine;
+    sincos(angle, sine, cosine);
+
+    float3 twiddledReal = oddReal * cosine - oddImag * sine;
+    float3 twiddledImag = oddReal * sine + oddImag * cosine;
+    bool upperHalf = offset >= halfSpan;
+    outputReal = (upperHalf ? evenReal - twiddledReal : evenReal + twiddledReal)
+        * k_FftUnitaryButterflyScale;
+    outputImag = (upperHalf ? evenImag - twiddledImag : evenImag + twiddledImag)
+        * k_FftUnitaryButterflyScale;
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTPrepareSource(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    float3 color = 0.0;
+    uint2 imageSize = uint2(_FFTImageSize.xy);
+    if (all(coord < imageSize))
+    {
+        float2 uv = (float2(coord) + 0.5) * _FFTImageSize.zw;
+        color = max(_FFTSourceTexture.SampleLevel(sampler_LinearClamp, uv, 0.0).xyz, 0.0);
+        color = QuadraticThreshold(
+            color,
+            _BloomThreshold.x,
+            _BloomThreshold.yzw);
+    }
+
+    uint2 outputCoord = ReverseFftCoord(coord);
+    _FFTRealOutput[outputCoord] = float4(color, 0.0);
+    _FFTImagOutput[outputCoord] = 0.0;
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTPrepareKernel(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    int2 signedCoord = int2(coord);
+    if (coord.x > frequencySize.x / 2u)
+        signedCoord.x -= int(frequencySize.x);
+    if (coord.y > frequencySize.y / 2u)
+        signedCoord.y -= int(frequencySize.y);
+
+    float kernelDiameter = max(_FFTKernelParams.x, 1.0);
+    float2 centerUv = _FFTKernelParams.zw;
+    float2 kernelUv = centerUv + float2(signedCoord) / kernelDiameter;
+    float halfDiameter = kernelDiameter * 0.5;
+    bool insideSupport = all(abs(float2(signedCoord)) <= halfDiameter);
+    bool insideTexture = all(kernelUv >= 0.0) && all(kernelUv <= 1.0);
+
+    float3 kernel = 0.0;
+    if (insideSupport && insideTexture)
+    {
+        float3 centerValue = max(
+            _FFTKernelTexture.SampleLevel(sampler_LinearClamp, centerUv, 0.0).xyz,
+            0.0);
+        float3 maximumScatter = max(centerValue * _FFTKernelParams.y, 1e-6);
+        float3 sampledKernel = max(
+            _FFTKernelTexture.SampleLevel(sampler_LinearClamp, kernelUv, 0.0).xyz,
+            0.0);
+        kernel = min(sampledKernel, maximumScatter);
+    }
+
+    uint2 outputCoord = ReverseFftCoord(coord);
+    _FFTRealOutput[outputCoord] = float4(kernel, 0.0);
+    _FFTImagOutput[outputCoord] = 0.0;
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTStageHorizontal(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    uint span = 1u << (_FFTStage + 1u);
+    uint offset = coord.x & (span - 1u);
+    uint blockStart = coord.x - offset;
+    uint twiddleIndex = offset & ((span >> 1u) - 1u);
+    uint2 evenCoord = uint2(blockStart + twiddleIndex, coord.y);
+    uint2 oddCoord = uint2(evenCoord.x + (span >> 1u), coord.y);
+
+    float3 outputReal;
+    float3 outputImag;
+    LoadFftButterfly(evenCoord, oddCoord, offset, span, outputReal, outputImag);
+    _FFTRealOutput[coord] = float4(outputReal, 0.0);
+    _FFTImagOutput[coord] = float4(outputImag, 0.0);
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTStageVertical(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    uint span = 1u << (_FFTStage + 1u);
+    uint offset = coord.y & (span - 1u);
+    uint blockStart = coord.y - offset;
+    uint twiddleIndex = offset & ((span >> 1u) - 1u);
+    uint2 evenCoord = uint2(coord.x, blockStart + twiddleIndex);
+    uint2 oddCoord = uint2(coord.x, evenCoord.y + (span >> 1u));
+
+    float3 outputReal;
+    float3 outputImag;
+    LoadFftButterfly(evenCoord, oddCoord, offset, span, outputReal, outputImag);
+    _FFTRealOutput[coord] = float4(outputReal, 0.0);
+    _FFTImagOutput[coord] = float4(outputImag, 0.0);
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTMultiplyAndBitReverse(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    float3 sourceReal = _FFTRealInput[coord].xyz;
+    float3 sourceImag = _FFTImagInput[coord].xyz;
+    float3 kernelReal = _FFTKernelReal[coord].xyz;
+    float3 kernelImag = _FFTKernelImag[coord].xyz;
+
+    float3 productReal = sourceReal * kernelReal - sourceImag * kernelImag;
+    float3 productImag = sourceReal * kernelImag + sourceImag * kernelReal;
+    uint2 outputCoord = ReverseFftCoord(coord);
+    _FFTRealOutput[outputCoord] = float4(productReal, 0.0);
+    _FFTImagOutput[outputCoord] = float4(productImag, 0.0);
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTReduceEnergy(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputCoord = dispatchThreadId.xy;
+    uint2 outputSize = uint2(_FFTOutputSize.xy);
+    if (any(outputCoord >= outputSize))
+        return;
+
+    uint2 inputSize = uint2(_FFTInputSize.xy);
+    uint2 inputCoord = outputCoord * 2u;
+    float3 energy = 0.0;
+    [unroll]
+    for (uint y = 0u; y < 2u; y++)
+    {
+        [unroll]
+        for (uint x = 0u; x < 2u; x++)
+        {
+            uint2 sampleCoord = inputCoord + uint2(x, y);
+            if (all(sampleCoord < inputSize))
+                energy += _FFTEnergyInput[sampleCoord].xyz;
+        }
+    }
+
+    _FFTEnergyOutput[outputCoord] = float4(energy, 0.0);
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTResolve(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 imageSize = uint2(_FFTImageSize.xy);
+    if (any(coord >= imageSize))
+        return;
+
+    float3 kernelEnergy = max(_FFTKernelEnergy[uint2(0u, 0u)].xyz, 1e-5);
+    float3 bloom = max(_FFTRealInput[coord].xyz * _FFTResolveScale / kernelEnergy, 0.0);
+    _FFTOutputTexture[coord] = float4(min(bloom, 65504.0), 1.0);
 }

@@ -75,7 +75,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal struct ReferencedPathTracingLightListParameters
     {
         internal const int Stride = 48;
-        internal const uint Version = 2;
+        internal const uint Version = 3;
         internal const uint DistributionModeCdf = 1;
 
         internal uint lightCount;
@@ -90,7 +90,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal uint version;
         internal uint distributionMode;
-        internal uint reserved0;
+        internal uint incompleteLocalProposalLightCount;
         internal uint reserved1;
 
         internal static ReferencedPathTracingLightListParameters CreateEmpty()
@@ -176,7 +176,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 word7 = parameters.signatureHigh,
                 word8 = parameters.version,
                 word9 = parameters.distributionMode,
-                word10 = parameters.reserved0,
+                word10 = parameters.incompleteLocalProposalLightCount,
                 word11 = parameters.reserved1,
             };
         }
@@ -821,6 +821,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var records = uniqueRecords.ToArray();
             double totalSelectionWeight = 0.0;
             uint activeLightCount = 0;
+            uint incompleteLocalProposalLightCount = 0;
 
             for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
             {
@@ -830,6 +831,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 totalSelectionWeight += record.selectionWeight;
                 activeLightCount++;
+                if (RequiresGlobalProposalSupport(
+                    (ReferencedPathTracingLightType)record.lightType))
+                {
+                    incompleteLocalProposalLightCount++;
+                }
             }
 
             var parameters =
@@ -838,6 +844,8 @@ namespace VividRP.Runtime.RenderPass.Core
             parameters.activeLightCount = activeLightCount;
             parameters.unsupportedLightCount = unsupportedLightCount;
             parameters.unstableLightCount = unstableLightCount;
+            parameters.incompleteLocalProposalLightCount =
+                incompleteLocalProposalLightCount;
 
             if (totalSelectionWeight > 0.0
                 && totalSelectionWeight <= float.MaxValue)
@@ -1187,6 +1195,20 @@ namespace VividRP.Runtime.RenderPass.Core
             return HasFiniteVector(value);
         }
 
+        private static bool RequiresGlobalProposalSupport(
+            ReferencedPathTracingLightType lightType)
+        {
+            // The local point/spot support tests use the same range and cone
+            // windows as candidate evaluation. Area/line lights are indexed
+            // by conservative bounds and use center-based local importance,
+            // so they retain a global proposal to cover their full shapes.
+            return lightType == ReferencedPathTracingLightType.Rectangle
+                || lightType == ReferencedPathTracingLightType.Tube
+                || lightType == ReferencedPathTracingLightType.Disc
+                || lightType
+                    == ReferencedPathTracingLightType.EmissiveTriangle;
+        }
+
         private static bool HasFiniteVector(Vector3 value)
         {
             return IsFinite(value.x)
@@ -1217,6 +1239,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, parameters.unstableLightCount);
             Hash(ref hash, parameters.totalSelectionWeight);
             Hash(ref hash, parameters.inverseTotalSelectionWeight);
+            Hash(
+                ref hash,
+                parameters.incompleteLocalProposalLightCount);
 
             for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
                 Hash(ref hash, records[lightIndex]);

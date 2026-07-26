@@ -117,6 +117,9 @@ namespace VividRP.Editor.Tests
                 forward.parameters.totalSelectionWeight,
                 Is.EqualTo(16.0f).Within(1e-6f));
             Assert.That(
+                forward.parameters.incompleteLocalProposalLightCount,
+                Is.EqualTo(1u));
+            Assert.That(
                 forward.parameters.signatureLow,
                 Is.EqualTo(reversed.parameters.signatureLow));
             Assert.That(
@@ -131,6 +134,54 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 forward.storageBlocks[0].word8,
                 Is.EqualTo(ReferencedPathTracingLightListParameters.Version));
+            Assert.That(
+                forward.storageBlocks[0].word10,
+                Is.EqualTo(1u));
+        }
+
+        [Test]
+        public void Build_TracksWhetherLocalProposalHasCompleteSupport()
+        {
+            var directional = CreateLight(
+                1,
+                LightType.Directional,
+                Vector3.one);
+            var point = CreateLight(2, LightType.Point, Vector3.one);
+            var spot = CreateLight(3, LightType.Spot, Vector3.one);
+
+            var punctualResult =
+                ReferencedPathTracingLightListBuilder.Build(
+                    new[] { spot, directional, point });
+
+            Assert.That(
+                punctualResult.parameters
+                    .incompleteLocalProposalLightCount,
+                Is.Zero);
+            Assert.That(
+                punctualResult.storageBlocks[0].word10,
+                Is.Zero);
+
+            var rectangle = CreateLight(
+                4,
+                LightType.Rectangle,
+                Vector3.one);
+            rectangle.areaSize = Vector2.one;
+            var tube = CreateLight(5, LightType.Tube, Vector3.one);
+            tube.areaSize = Vector2.one;
+            var disc = CreateLight(6, LightType.Disc, Vector3.one);
+            disc.shapeRadius = 0.5f;
+
+            var shapedResult =
+                ReferencedPathTracingLightListBuilder.Build(
+                    new[] { disc, tube, rectangle, spot, point });
+
+            Assert.That(
+                shapedResult.parameters
+                    .incompleteLocalProposalLightCount,
+                Is.EqualTo(3u));
+            Assert.That(
+                shapedResult.storageBlocks[0].word10,
+                Is.EqualTo(3u));
         }
 
         [Test]

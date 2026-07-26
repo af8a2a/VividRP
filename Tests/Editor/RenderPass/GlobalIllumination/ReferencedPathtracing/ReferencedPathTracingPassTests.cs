@@ -445,6 +445,10 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "REFERENCED_LIGHT_CONTEXT_FULL_SCAN_FALLBACK"));
             Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "parameters.incompleteLocalProposalLightCount == 0u"));
+            Assert.That(
                 candidateSource,
                 Does.Contain("struct ReferencedPathtracingNEECandidate"));
             Assert.That(

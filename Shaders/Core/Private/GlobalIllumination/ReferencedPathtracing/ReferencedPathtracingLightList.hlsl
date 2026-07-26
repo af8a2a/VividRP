@@ -1,7 +1,7 @@
 #ifndef VIVIDRP_REFERENCED_PATH_TRACING_LIGHT_LIST_INCLUDED
 #define VIVIDRP_REFERENCED_PATH_TRACING_LIGHT_LIST_INCLUDED
 
-#define REFERENCED_LIGHT_LIST_VERSION 2u
+#define REFERENCED_LIGHT_LIST_VERSION 3u
 #define REFERENCED_LIGHT_DISTRIBUTION_CDF 1u
 #define REFERENCED_LIGHT_SPATIAL_INDEX_VERSION 1u
 #define REFERENCED_LIGHT_SPATIAL_INDEX_AXIS_COUNT 3u
@@ -86,7 +86,7 @@ struct ReferencedPathTracingLightListParameters
 
     uint version;
     uint distributionMode;
-    uint reserved0;
+    uint incompleteLocalProposalLightCount;
     uint reserved1;
 };
 
@@ -117,7 +117,7 @@ uint ReferencedPathtracingLoadLightListStorageWord(uint wordIndex)
         case 7u: return block.signatureHigh;
         case 8u: return block.version;
         case 9u: return block.distributionMode;
-        case 10u: return block.reserved0;
+        case 10u: return block.incompleteLocalProposalLightCount;
         case 11u: return block.reserved1;
     }
 
@@ -824,15 +824,29 @@ ReferencedPathtracingCreateLightSelectionContext(
         && context.localTotalWeight > 0.0
         && _ReferencedShadingPointLightSelectionEnabled != 0)
     {
-        float configuredProbability =
-            _ReferencedGlobalLightProposalProbability;
-        if (isnan(configuredProbability)
-            || isinf(configuredProbability))
+        ReferencedPathTracingLightListParameters parameters =
+            ReferencedPathtracingLoadReferenceLightListParameters();
+        if (parameters.incompleteLocalProposalLightCount == 0u)
         {
-            configuredProbability = 0.25;
+            // Point/spot range and cone support are evaluated identically by
+            // the local proposal and the NEE candidate. Mixing in the global
+            // CDF here can select a different punctual light outside its
+            // influence range, producing zero samples and visible dark bands
+            // where punctual ranges overlap at one candidate per pixel.
+            context.globalProposalProbability = 0.0;
         }
-        context.globalProposalProbability =
-            clamp(configuredProbability, 0.05, 1.0);
+        else
+        {
+            float configuredProbability =
+                _ReferencedGlobalLightProposalProbability;
+            if (isnan(configuredProbability)
+                || isinf(configuredProbability))
+            {
+                configuredProbability = 0.25;
+            }
+            context.globalProposalProbability =
+                clamp(configuredProbability, 0.05, 1.0);
+        }
     }
 
     return context;

@@ -1104,6 +1104,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - REBLUR signal 使用统一的 linear-RGB 契约。有限精度的中间滤波或 history 一旦裁掉 YCoCg 的负色度，
   高饱和红/蓝局部光会解码成错误色相；path tracer producer、NRD permutation 与 resolve 现在共享同一
   encoding 开关，避免输入、history 和输出对 signal 颜色空间产生分歧。
+- 2026-07-26 修正 punctual range 交叠处的单 candidate 黑带：light-list v3 标记局部 proposal 无法
+  完整覆盖贡献支持域的 rectangle/disc/tube 灯。仅含 directional/point/spot 的场景会使用支持域精确
+  的 shading-point proposal，不再强制混入可能选中范围外零贡献 punctual 灯的 global CDF；存在形状
+  光时仍保留 global/local mixture，维持完整支持域与 MIS PDF 一致性。
 - 新增专用 `RaytracingGBufferPass`，使用稳定的 primary visibility ray 输出 NRD guide：positive linear
   viewZ、2.5D pixel motion、`R10G10B10A2_UNorm` oct normal + linear roughness；同时预留
   DLSS Ray Reconstruction guide：RG16F screen-space motion、hardware depth、world normal + perceptual

@@ -200,10 +200,9 @@ namespace VividRP.Runtime.RenderPass.Core
             double totalSelectionWeight = 0.0;
             uint activeLightCount = 0;
 
-            for (var lightIndex = 0; lightIndex < candidates.Count; lightIndex++)
+            for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
             {
-                var record = candidates[lightIndex].record;
-                records[lightIndex] = record;
+                var record = records[lightIndex];
                 if (record.selectionWeight <= 0.0f)
                     continue;
 
@@ -386,8 +385,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     break;
                 case ReferencedPathTracingLightType.Rectangle:
                 case ReferencedPathTracingLightType.Disc:
-                    flags |= ReferencedPathTracingLightFlags.BsdfReachable
-                        | ReferencedPathTracingLightFlags.OneSided
+                    flags |= ReferencedPathTracingLightFlags.OneSided
                         | ReferencedPathTracingLightFlags.UsesAreaMeasure;
                     break;
                 case ReferencedPathTracingLightType.Tube:

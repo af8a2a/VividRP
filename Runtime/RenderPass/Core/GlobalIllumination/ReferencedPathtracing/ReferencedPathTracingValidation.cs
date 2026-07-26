@@ -129,8 +129,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 out var mainLightAngularDiameter,
                 out var mainLightShadowStrength,
                 out var localLightSignature);
-            if (!integratorState.enableReGIR)
-                localLightSignature = 0ul;
             AddVector(ref hash, mainLightDirection);
             AddVector(ref hash, mainLightColor);
             ReferencedPathTracingStableHash.Add(
@@ -574,7 +572,21 @@ namespace VividRP.Runtime.RenderPass.Core
             var integratorState =
                 ReferencedPathTracingIntegratorState.Resolve();
             var lightData = frameData?.GetOrCreate<VividLightData>();
-            lightData?.CompleteReGIRPrepare();
+            var lightDatabase = VividLightRenderDatabase.instance;
+            lightDatabase.CompleteSceneLightPrepare();
+            var lightListBuild = ReferencedPathTracingLightListBuilder.Build(
+                lightDatabase.sceneLightData);
+            var localLightCount = 0;
+            for (var lightIndex = 0;
+                 lightIndex < lightListBuild.records.Length;
+                 lightIndex++)
+            {
+                if (lightListBuild.records[lightIndex].lightType
+                    != (uint)ReferencedPathTracingLightType.Directional)
+                {
+                    localLightCount++;
+                }
+            }
             var width = CameraDimensionUtility.ResolveCameraDimension(
                 cameraData?.actualWidth ?? 0,
                 cameraData?.pixelWidth ?? 0,
@@ -609,9 +621,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 rawRadianceIsPreExposed = false,
                 hasMainDirectionalLight =
                     lightData?.hasMainDirectionalLight == true,
-                localLightCount = lightData != null
-                    ? Mathf.Max(0, lightData.reGIRLightCount)
-                    : 0,
+                localLightCount = localLightCount,
                 unsupportedMaterialCount =
                     Mathf.Max(0, unsupportedMaterialCount),
                 standardLitOnly = unsupportedMaterialCount <= 0,

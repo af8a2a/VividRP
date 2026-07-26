@@ -364,6 +364,9 @@ Reference Path Tracing V1 的阻塞项。阶段二参考 Unreal Path Tracer，�
 
 **Implementation checkpoint (2026-07-25)**
 
+> Historical E3 checkpoint. Its independent environment/ReGIR proposal layout was superseded by
+> Phase 4.2 Unified NEE Candidate on 2026-07-26.
+
 - 每次 surface interaction 为 environment NEE 分配独立二维随机流，不复用或推进
   OpenPBR BSDF、ReGIR light/shape 以及后续 bounce 的既有 RNG 序列。`BSDF Only`
   关闭 NEE；Importance 与 Uniform Sphere 模式启用相同的 visibility/integration 路径。
@@ -927,13 +930,32 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   避免静默改变 reference scene。
 - 每条记录保存 power-proxy selection weight、归一化 selection PDF 与单调 CDF。rectangle/disc 使用
   area measure，tube 使用 line measure；delta/continuous、infinite、one-sided、BSDF-reachable 和
-  shadow capability 由 flags 固化，Phase 4.2 可据此选择正确的条件 PDF/MIS 分支而无需修改 buffer ABI。
+  shadow capability 由 flags 固化。当前只有显式有限方向光模型标记为 BSDF-reachable；解析面积灯尚未
+  进入 RTAS，不能声明不存在的 BSDF 反向策略。
 - 参数 buffer 保存 light/active/rejected 数量、总权重、逆总权重、distribution/version 以及对排序后
   完整记录计算的 64-bit deterministic signature。空场景、全黑灯光和未连接 RenderGraph 输入都绑定
   versioned zero fallback，不读取未初始化 GPU 资源。
 - `ReferencedPathTracingPass` 已声明并绑定 `ReferenceLightList` 与
-  `ReferenceLightListParameters` 输入；Phase 4.1 只建立 inventory/distribution contract，
-  当前 directional/environment/ReGIR NEE 路径尚未切换到该列表，因此本阶段预期不改变 beauty 结果。
+  `ReferenceLightListParameters` 输入；Phase 4.1 只建立 inventory/distribution contract。
+
+### Phase 4.2 checkpoint: Unified NEE Candidate (2026-07-26)
+
+- 每个 shading vertex 现在只生成一个 `ReferencedPathtracingNEECandidate`。解析灯总权重与
+  `4π × HDRI average luminance` 组成同一个离散选择域；环境、方向光、point、spot、rectangle、
+  tube 与 disc 不再分别运行独立 NEE estimator。
+- candidate 对齐 RTXPT `PathLightSample` 约定，保存 `incidentRadianceOverPdf`、方向、距离、
+  stable light index/type/flags、shadow strength，并把离散 `selectionPdf` 与条件
+  `solidAnglePdf` 分开保留。payload 使用同一布局，未来引入 emissive triangle、light tree 或
+  proposal mixture 时无需再次迁移 payload。
+- closest-hit 只负责采样 candidate 与计算 OpenPBR diffuse/specular response；raygen 统一负责
+  shadow visibility、delta/BSDF-reachable gate、power-heuristic MIS 和 AOV 路由。环境 miss 的
+  BSDF-side PDF 也乘相同的全局 environment selection PDF，避免 light/BSDF 两侧使用不同 proposal。
+- finite directional 的 BSDF 反向策略遍历 Reference Light List，并使用
+  `selectionPdf × conditional solid-angle PDF` 参与 MIS。rectangle/disc 仍是 light-only；
+  等 emissive geometry 进入 RTAS 后再开启其 BSDF-reachable flag 和反向 PDF。
+- Reference PT 已移除对 ReGIR light/grid/reservoir RenderGraph 输入的依赖。为兼容已序列化 Volume，
+  `enableReGIR` 字段暂时保留，但运行时只作为本地解析灯 NEE 开关；积累失效签名改用完整
+  Reference Light List signature，不再受 ReGIR collection volume 或相机位置影响。
 
 ## Milestone 4: Progressive Accumulation and Capture
 
@@ -1012,33 +1034,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   raw AOV 和 FP32 accumulation history 仍保持未曝光的 scene-linear 数据。这样 AutoExposurePass 可以先
   去除上一帧 pre-exposure 后计量场景亮度，FinalBlit 再应用 current/pre-exposure 比值，同时曝光适应不会
   污染时域历史或 ground-truth capture。
-- Raygen/closest-hit 已消费 `ReGIRLights`、`ReGIRParameters` 与 `ReGIRReservoirs`，在每次表面命中随机选择
-  一个 cell slot，并直接使用 reservoir 中的 RIS correction weight。cell 外或 reservoir 无效时回退到
-  全局 uniform light estimator；无效 slot 会先把条件化随机数重映射回 slot 内 `[0, 1)`，保持 fallback
-  PDF 严格均匀，避免有限 ReGIR 覆盖范围造成漏光或偏差。ReGIR proposal target 对与 cell 相交的
-  range/spot support 保留非零下限；该下限只影响采样概率，不参与最终 radiance。
-- ReGIR presample entry 已从 `uint2(lightIndex, invSourcePdf)` 扩为
-  `uint4(lightIndex, invSourcePdf, shapeSample.xy)`，cell reservoir 在保持 16-byte stride 的同时用原 padding
-  保存 `float2 shapeSample`。离散 light RIS correction 与连续 shape PDF 分开处理：rectangle 使用 uniform
-  area sampling，估计器包含 `cosThetaLight * area / distance²`；tube 使用 uniform line sampling，并包含
-  Vivid/HDRP 零半径 tube 模型的 `2 * radialCosine * length / distance²`。大面积 emitter 的 ReGIR range
-  proposal 还会按 shape radius 扩张，避免中心落在 range 外时错误失去 support。
-- 当前 ReGIR NEE 支持 point、spot、rectangle 与 tube。point/spot 的 RGB candela 经 inverse-square、
-  range window、shape-radius 和 spot-cone attenuation 转为 illuminance；area-light RGB 作为 emitted
-  radiance，经 range window、geometry term 和 shape PDF correction 后与 OpenPBR `BSDF * NdotL` 相乘。
-  所有 local light 都使用 `TMax = lightDistance - bias` 的有限距离 alpha-aware visibility ray；primary
-  diffuse/specular 进入 REBLUR signal，secondary NEE 按 primary lobe AOV 分类。
-- Rectangle barn door 已进入 `VividReGIRLightData`。路径追踪按 HDRP/Vivid raster
-  契约为每个命中点解析 barn-door 可见子矩形，再把 reservoir 的 `shapeSample.xy` 映射到该子矩形；
-  连续 PDF 使用裁剪后面积。离散 ReGIR proposal 仍按完整 emitter power 构建，避免在每个 grid candidate
-  中运行高寄存器压力的点相关裁剪，并由 shading-point PDF correction 保持无偏。barn-door angle/length
-  变化也会使无限累积与 Unity Open Image Denoise 历史失效。
-- 无限累积与 Unity Open Image Denoise backend 现在会追踪与顺序无关的 ReGIR local-light signature；
-  point/spot/rectangle/tube 的实际积分参数变化时会自动清空旧历史，而 ReGIR frame index、reservoir 与
-  shape sample 的随机变化不会错误触发 reset。
-- Area-light V1 尚未把 cookie、IES、light/shadow rendering layers 与 shadow strength 编入
-  `VividReGIRLightData`；rectangle 当前为单面 emitter，tube 为无穷小半径线光模型。这些属于后续
-  light-record ABI 扩展，不影响当前无偏的 shape-sampling 基线。
+- Phase 4.2 已用 camera-independent Reference Light List + HDRI 的单一 candidate selector
+  取代上述 ReGIR reservoir 积分路径。point/spot、rectangle/disc、tube、方向光与环境光共享离散
+  selection PDF；shape/direction PDF 单独保存，visibility、MIS 与 AOV 路由由 raygen 统一处理。
+  积累与 OIDN 历史现在追踪完整 Reference Light List signature，而不是 ReGIR cell/reservoir 状态。
 - 当前 Raytracing GBuffer 只覆盖 StandardLit，motion vector 只包含 camera motion；skinned/deformed
   object previous position、confidence 与动态分辨率列为后续质量项。
 - 当前降噪仅用于交互 preview。raw FP32 accumulation 仍是 canonical ground-truth/capture 来源，不能以 denoised

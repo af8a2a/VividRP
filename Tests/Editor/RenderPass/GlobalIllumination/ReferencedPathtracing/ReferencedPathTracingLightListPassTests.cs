@@ -157,6 +157,10 @@ namespace VividRP.Editor.Tests
                 discFlags
                 & ReferencedPathTracingLightFlags.UsesAreaMeasure,
                 Is.Not.EqualTo(ReferencedPathTracingLightFlags.None));
+            Assert.That(
+                discFlags
+                & ReferencedPathTracingLightFlags.BsdfReachable,
+                Is.EqualTo(ReferencedPathTracingLightFlags.None));
         }
 
         [Test]

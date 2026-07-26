@@ -92,8 +92,9 @@ namespace VividRP.Runtime
             new(3, 1, MaximumSupportedBounceCount);
 
         [Tooltip(
-            "Allows punctual and area lights to be sampled through ReGIR. Canonical HDRI V1 " +
-            "validation disables this so the reference is independent of reservoir state.")]
+            "Allows punctual and area lights from the stable Reference Light List to participate " +
+            "in canonical next-event estimation. The serialized field name is retained for " +
+            "existing Volume assets.")]
         public BoolParameter enableReGIR = new(true);
 
         [Tooltip(

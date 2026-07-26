@@ -52,7 +52,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersReferenceLightReGIRInputsAndReblurOutputs()
+        public void Initialize_RegistersUnifiedReferenceLightInputsAndReblurOutputs()
         {
             IRenderPass renderPass = new ReferencedPathTracingPass();
 
@@ -62,15 +62,9 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "ReferenceLightList");
             var referenceLightListParameters = resources.Buffers.Single(
                 resource => resource.Name == "ReferenceLightListParameters");
-            var reGIRLights = resources.Buffers.Single(resource => resource.Name == "ReGIRLights");
-            var reGIRParameters = resources.Buffers.Single(
-                resource => resource.Name == "ReGIRParameters");
-            var reGIRReservoirs = resources.Buffers.Single(
-                resource => resource.Name == "ReGIRReservoirs");
             var environmentImportanceDistribution = resources.Buffers.Single(
                 resource => resource.Name == "EnvironmentImportanceDistribution");
             var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
-            var lightPdfTexture = resources.Textures.Single(resource => resource.Name == "ReGIRLightPdfTexture");
             var environmentTexture = resources.Textures.Single(
                 resource => resource.Name == "PathTracingEnvironment");
             var environmentBackgroundTexture = resources.Textures.Single(
@@ -95,9 +89,6 @@ namespace VividRP.Editor.Tests
                 {
                     "ReferenceLightList",
                     "ReferenceLightListParameters",
-                    "ReGIRLights",
-                    "ReGIRParameters",
-                    "ReGIRReservoirs",
                     "EnvironmentImportanceDistribution"
                 }));
             Assert.That(resources.Buffers.All(resource => resource.Access == AccessFlags.Read), Is.True);
@@ -107,17 +98,12 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 referenceLightListParameters.Buffer.desc.Stride,
                 Is.EqualTo(ReferencedPathTracingLightListParameters.Stride));
-            Assert.That(reGIRLights.Buffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
-            Assert.That(reGIRParameters.Buffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
-            Assert.That(reGIRReservoirs.Buffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
             Assert.That(
                 environmentImportanceDistribution.Buffer.desc.Count,
                 Is.EqualTo(ReferencedPathTracingEnvironmentImportanceLayout.ElementCount));
             Assert.That(
                 environmentImportanceDistribution.Buffer.desc.Stride,
                 Is.EqualTo(ReferencedPathTracingEnvironmentImportanceLayout.ElementStride));
-            Assert.That(lightPdfTexture.Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(lightPdfTexture.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32_SFloat));
             Assert.That(environmentTexture.Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 environmentTexture.Texture.desc.Dimension,
@@ -225,42 +211,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_PreservesMainDirectionalLightPhysicalIlluminance()
-        {
-            var pass = new ReferencedPathTracingPass();
-            var frameData = new ContextContainer();
-            var lightData = frameData.GetOrCreate<VividLightData>();
-            lightData.directionalLights = new[]
-            {
-                new VividLightData.DirectionalLightData
-                {
-                    directionWS = new Vector3(0.0f, 2.0f, 0.0f),
-                    color = new Vector3(130000.0f, 65000.0f, 32500.0f),
-                    angularDiameter = 1.25f * Mathf.Deg2Rad,
-                    shadowStrength = 0.4f,
-                }
-            };
-            lightData.directionalLightCount = 1;
-            lightData.mainDirectionalLightIndex = 0;
-
-            pass.Prepare(frameData);
-
-            Assert.That(
-                GetField<Vector4>(pass, "m_MainLightDirectionWS"),
-                Is.EqualTo(new Vector4(0.0f, 1.0f, 0.0f, 0.0f)));
-            Assert.That(
-                GetField<Vector4>(pass, "m_MainLightColor"),
-                Is.EqualTo(new Vector4(130000.0f, 65000.0f, 32500.0f, 1.0f)));
-            Assert.That(
-                GetField<float>(pass, "m_MainLightAngularDiameter"),
-                Is.EqualTo(1.25f * Mathf.Deg2Rad).Within(0.000001f));
-            Assert.That(
-                GetField<float>(pass, "m_MainLightShadowStrength"),
-                Is.EqualTo(0.4f).Within(0.000001f));
-        }
-
-        [Test]
-        public void DirectionalLightSampling_UsesUniformSolidAngleAndLightBsdfMis()
+        public void UnifiedNeeCandidate_PreservesProposalPdfsAndDirectionalMis()
         {
             var commonSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
@@ -274,6 +225,20 @@ namespace VividRP.Editor.Tests
                 "Material",
                 "ShaderPass",
                 "ReferencedPathtracing.hlsl"));
+            var lightListSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingLightList.hlsl"));
+            var candidateSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingNEECandidate.hlsl"));
             var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Core",
@@ -289,48 +254,64 @@ namespace VividRP.Editor.Tests
                 "REBLUR",
                 "REBLUR_DiffuseSpecular_Resolve.compute"));
 
-            Assert.That(commonSource, Does.Contain("float mainLightLightPdf;"));
-            Assert.That(commonSource, Does.Contain("float mainLightBsdfPdf;"));
-            Assert.That(commonSource, Does.Contain("uint mainLightIsDelta;"));
+            Assert.That(commonSource, Does.Contain("float neeSelectionPdf;"));
+            Assert.That(commonSource, Does.Contain("float neeSolidAnglePdf;"));
+            Assert.That(commonSource, Does.Contain("float neeBsdfPdf;"));
+            Assert.That(commonSource, Does.Contain("uint neeLightType;"));
             Assert.That(
                 commonSource,
                 Does.Contain(
-                    "ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf"));
+                    "ReferencedPathtracingGetDirectionalLightSolidAnglePdf"));
             Assert.That(
                 commonSource,
                 Does.Contain("lightPdf = rcp(solidAngle);"));
             Assert.That(
-                commonSource,
+                lightListSource,
+                Does.Contain("ReferencedPathtracingSampleUnifiedLightSource"));
+            Assert.That(
+                lightListSource,
                 Does.Contain(
-                    "ReferencedPathtracingEvaluateMainDirectionalLightPdf"));
+                    "REFERENCED_ENVIRONMENT_AVERAGE_LUMINANCE_OFFSET"));
+            Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf"));
+            Assert.That(
+                candidateSource,
+                Does.Contain("struct ReferencedPathtracingNEECandidate"));
+            Assert.That(
+                candidateSource,
+                Does.Contain("float3 incidentRadianceOverPdf;"));
+            Assert.That(
+                candidateSource,
+                Does.Contain(
+                    "ReferencedPathtracingSampleUnifiedNEECandidate"));
             Assert.That(
                 closestHitSource,
-                Does.Contain("ReferencedPathtracingSampleMainDirectionalLight"));
+                Does.Contain(
+                    "ReferencedPathtracingSampleUnifiedNEECandidate"));
             Assert.That(
                 closestHitSource,
-                Does.Contain("openpbr_pdf(preparedBsdf, mainLightDirectionWS)"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain("payload.mainLightDirectionWS"));
+                Does.Contain("payload.neeSelectionPdf"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "ReferencedPathtracingGetMainLightEstimatorWeight"));
+                    "GetReferencedPathtracingNEELightEstimatorWeight"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "ReferencedPathtracingGetMainBsdfEstimatorWeight"));
+                    "ReferencedPathtracingEvaluateUnifiedEnvironmentLightPdf"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "mainLightIlluminance * mainLightPdfForBsdfSample"));
+                    "ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateDirectionalLightPdf"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain("payload.nextThroughputWeight"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "TraceReferencedPathtracingMainLightVisibility"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
@@ -342,15 +323,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "payload.mainLightIsDelta == 0u"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
                     "CombineReferencedPathtracingDenoiserHitDistance"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "kReferencedPathtracingShadowMaxDistance"));
             Assert.That(
                 reblurResolveSource,
                 Does.Contain("_ReblurMainLightInSignals != 0"));
@@ -359,11 +332,14 @@ namespace VividRP.Editor.Tests
                 Does.Contain("+ unfilteredDirectLighting"));
             Assert.That(
                 rayGenerationSource,
-                Does.Not.Contain("normalize(_ReferencedMainLightDirectionWS.xyz)"));
+                Does.Not.Contain("payload.mainLightDirectionWS"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain("payload.environmentDirectionWS"));
         }
 
         [Test]
-        public void RenderGraphNode_DefinesReferenceLightReGIRInputsAndReblurOutputs()
+        public void RenderGraphNode_DefinesUnifiedReferenceLightInputsAndReblurOutputs()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -379,10 +355,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     node.GetInputPortByName("m_ReferenceLightListParameters"),
                     Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_ReGIRLightBuffer"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_ReGIRParameterBuffer"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_ReGIRReservoirBuffer"), Is.Not.Null);
-                Assert.That(node.GetInputPortByName("m_ReGIRLightPdfTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_ReGIRLightBuffer"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_ReGIRParameterBuffer"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_ReGIRReservoirBuffer"), Is.Null);
+                Assert.That(node.GetInputPortByName("m_ReGIRLightPdfTexture"), Is.Null);
                 Assert.That(node.GetInputPortByName("m_EnvironmentTexture"), Is.Not.Null);
                 Assert.That(
                     node.GetInputPortByName("m_EnvironmentBackgroundTexture"),

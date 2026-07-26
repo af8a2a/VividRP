@@ -114,74 +114,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void LightSignature_IsOrderIndependentAndTracksRectangleBarnDoorChanges()
+        public void ReferenceLightListSignature_IsOrderIndependentAndTracksBarnDoorChanges()
         {
-            var firstLight = new VividReGIRLightData
-            {
-                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
-                range = 10.0f,
-                color = new Vector3(100.0f, 80.0f, 60.0f),
-                lightType = VividReGIRLightData.TypePoint,
-                shapeRadius = 0.1f
-            };
-            var secondLight = new VividReGIRLightData
-            {
-                positionWS = new Vector3(-2.0f, 4.0f, 1.0f),
-                range = 8.0f,
-                color = new Vector3(40.0f, 50.0f, 60.0f),
-                lightType = VividReGIRLightData.TypeSpot,
-                directionWS = Vector3.down,
-                angleScale = 2.0f,
-                angleOffset = -1.0f
-            };
-            var areaLight = new VividReGIRLightData
-            {
-                positionWS = new Vector3(0.0f, 5.0f, 0.0f),
-                range = 12.0f,
-                color = new Vector3(15.0f, 12.0f, 10.0f),
-                lightType = VividReGIRLightData.TypeRectangle,
-                directionWS = Vector3.down,
-                rightWS = Vector3.right,
-                upWS = Vector3.forward,
-                areaSize = new Vector2(2.0f, 1.0f),
-                cosBarnDoorAngle = Mathf.Cos(45.0f * Mathf.Deg2Rad),
-                barnDoorLength = 0.35f
-            };
-            var lightData = new VividLightData
-            {
-                reGIRLights = new[] { firstLight, secondLight, areaLight },
-                reGIRLightCount = 3
-            };
+            var firstLight = CreateReferenceLight(
+                1,
+                LightType.Point,
+                new Vector3(100.0f, 80.0f, 60.0f));
+            var secondLight = CreateReferenceLight(
+                2,
+                LightType.Spot,
+                new Vector3(40.0f, 50.0f, 60.0f));
+            var areaLight = CreateReferenceLight(
+                3,
+                LightType.Rectangle,
+                new Vector3(15.0f, 12.0f, 10.0f));
+            areaLight.areaSize = new Vector2(2.0f, 1.0f);
+            areaLight.barnDoorAngle = 45.0f;
+            areaLight.barnDoorLength = 0.35f;
 
-            ReferencedPathTracingLightSignatureUtility.Resolve(
-                lightData,
-                out _,
-                out _,
-                out _,
-                out _,
-                out var originalSignature);
-
-            lightData.reGIRLights = new[] { areaLight, secondLight, firstLight };
-            ReferencedPathTracingLightSignatureUtility.Resolve(
-                lightData,
-                out _,
-                out _,
-                out _,
-                out _,
-                out var reorderedSignature);
-
+            var original = ReferencedPathTracingLightListBuilder.Build(
+                new[] { firstLight, secondLight, areaLight });
+            var reordered = ReferencedPathTracingLightListBuilder.Build(
+                new[] { areaLight, secondLight, firstLight });
             areaLight.barnDoorLength += 0.1f;
-            lightData.reGIRLights = new[] { secondLight, firstLight, areaLight };
-            ReferencedPathTracingLightSignatureUtility.Resolve(
-                lightData,
-                out _,
-                out _,
-                out _,
-                out _,
-                out var changedSignature);
+            var changed = ReferencedPathTracingLightListBuilder.Build(
+                new[] { secondLight, firstLight, areaLight });
 
-            Assert.That(reorderedSignature, Is.EqualTo(originalSignature));
-            Assert.That(changedSignature, Is.Not.EqualTo(originalSignature));
+            Assert.That(
+                reordered.parameters.signatureLow,
+                Is.EqualTo(original.parameters.signatureLow));
+            Assert.That(
+                reordered.parameters.signatureHigh,
+                Is.EqualTo(original.parameters.signatureHigh));
+            Assert.That(
+                (changed.parameters.signatureHigh,
+                    changed.parameters.signatureLow),
+                Is.Not.EqualTo(
+                    (original.parameters.signatureHigh,
+                        original.parameters.signatureLow)));
         }
 
         [Test]
@@ -225,6 +195,34 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (T)field.GetValue(pass);
+        }
+
+        private static VividLightRenderData CreateReferenceLight(
+            ulong stableId,
+            LightType lightType,
+            Vector3 color)
+        {
+            return new VividLightRenderData
+            {
+                lightEntityId = EntityId.FromULong(stableId),
+                lightType = lightType,
+                positionWS = new Vector3(1.0f, 2.0f, 3.0f),
+                range = 10.0f,
+                forwardWS = Vector3.forward,
+                rightWS = Vector3.right,
+                upWS = Vector3.up,
+                areaSize = Vector2.one,
+                shapeRadius = 0.1f,
+                color = color,
+                shadowStrength = 1.0f,
+                spotAngle = 60.0f,
+                innerSpotAngle = 30.0f,
+                rangeAttenuationScale = 0.01f,
+                rangeAttenuationBias = 1.0f,
+                flags = VividLightRenderDataFlags.Enabled
+                    | VividLightRenderDataFlags.ActiveInHierarchy
+                    | VividLightRenderDataFlags.CastShadows,
+            };
         }
     }
 }

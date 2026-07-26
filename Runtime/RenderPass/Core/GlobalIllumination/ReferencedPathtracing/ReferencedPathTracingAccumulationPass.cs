@@ -220,8 +220,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 out var lightAngularDiameter,
                 out var lightShadowStrength,
                 out var localLightSignature);
-            if (!integratorState.enableReGIR)
-                localLightSignature = 0ul;
             var environmentState = ReferencedPathTracingEnvironmentState.Resolve(
                 frameData.GetOrCreate<VividSkyData>());
             var cameraBackgroundState =
@@ -362,8 +360,6 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingLightSignatureUtility
     {
-        private const ulong FnvOffsetBasis = 14695981039346656037ul;
-        private const ulong FnvPrime = 1099511628211ul;
         private const float MainLightDeltaSinSquaredThreshold = 1e-12f;
 
         internal static bool HasFiniteMainLightSolidAngle(
@@ -394,7 +390,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (lightData == null)
                 return;
 
-            lightData.CompleteReGIRPrepare();
+            lightData.CompleteLightGridPrepare();
             if (lightData.hasMainDirectionalLight)
             {
                 var mainLight = lightData.mainDirectionalLight;
@@ -413,102 +409,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     mainLight.shadowStrength);
             }
 
-            var lightCount = Mathf.Clamp(
-                lightData.reGIRLightCount,
-                0,
-                lightData.reGIRLights?.Length ?? 0);
-            ulong signatureSum = 0ul;
-            ulong signatureXor = 0ul;
-            uint localLightCount = 0u;
-            for (var lightIndex = 0; lightIndex < lightCount; lightIndex++)
-            {
-                var light = lightData.reGIRLights[lightIndex];
-                var lightSignature = ComputeLocalLightSignature(light);
-                var mixedSignature = Mix(lightSignature);
-                signatureSum += mixedSignature;
-                signatureXor ^= RotateLeft(mixedSignature, (int)(mixedSignature & 63ul));
-                localLightCount++;
-            }
-
-            localLightSignature = Mix(
-                signatureSum
-                ^ signatureXor
-                ^ ((ulong)localLightCount * 0x9e3779b97f4a7c15ul));
+            var lightDatabase = VividLightRenderDatabase.instance;
+            lightDatabase.CompleteSceneLightPrepare();
+            var buildResult = ReferencedPathTracingLightListBuilder.Build(
+                lightDatabase.sceneLightData);
+            localLightSignature =
+                ((ulong)buildResult.parameters.signatureHigh << 32)
+                | buildResult.parameters.signatureLow;
         }
 
-        private static ulong ComputeLocalLightSignature(VividReGIRLightData light)
-        {
-            var signature = FnvOffsetBasis;
-            Hash(ref signature, light.lightType);
-            Hash(ref signature, light.positionWS);
-            Hash(ref signature, light.range);
-            Hash(ref signature, light.color);
-            Hash(ref signature, light.shapeRadius);
-
-            if (light.lightType == VividReGIRLightData.TypeSpot)
-            {
-                Hash(ref signature, light.directionWS);
-                Hash(ref signature, light.angleScale);
-                Hash(ref signature, light.angleOffset);
-            }
-            else if (light.lightType == VividReGIRLightData.TypeRectangle)
-            {
-                Hash(ref signature, light.directionWS);
-                Hash(ref signature, light.rightWS);
-                Hash(ref signature, light.upWS);
-                Hash(ref signature, light.areaSize);
-                Hash(ref signature, light.cosBarnDoorAngle);
-                Hash(ref signature, light.barnDoorLength);
-            }
-            else if (light.lightType == VividReGIRLightData.TypeTube)
-            {
-                Hash(ref signature, light.rightWS);
-                Hash(ref signature, light.areaSize);
-            }
-
-            return signature;
-        }
-
-        private static void Hash(ref ulong signature, Vector3 value)
-        {
-            Hash(ref signature, value.x);
-            Hash(ref signature, value.y);
-            Hash(ref signature, value.z);
-        }
-
-        private static void Hash(ref ulong signature, Vector2 value)
-        {
-            Hash(ref signature, value.x);
-            Hash(ref signature, value.y);
-        }
-
-        private static void Hash(ref ulong signature, float value)
-        {
-            Hash(ref signature, unchecked((uint)value.GetHashCode()));
-        }
-
-        private static void Hash(ref ulong signature, uint value)
-        {
-            signature ^= value;
-            signature *= FnvPrime;
-        }
-
-        private static ulong Mix(ulong value)
-        {
-            value ^= value >> 30;
-            value *= 0xbf58476d1ce4e5b9ul;
-            value ^= value >> 27;
-            value *= 0x94d049bb133111ebul;
-            value ^= value >> 31;
-            return value;
-        }
-
-        private static ulong RotateLeft(ulong value, int bitCount)
-        {
-            if (bitCount == 0)
-                return value;
-
-            return (value << bitCount) | (value >> (64 - bitCount));
-        }
     }
 }

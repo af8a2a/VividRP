@@ -141,4 +141,195 @@ bool ReferencedPathtracingSampleReferenceLightIndex(
     return true;
 }
 
+float ReferencedPathtracingGetReferenceLightSelectionWeight()
+{
+    ReferencedPathTracingLightListParameters parameters =
+        _ReferencedLightListParameters[0];
+    if (parameters.version != REFERENCED_LIGHT_LIST_VERSION
+        || parameters.distributionMode != REFERENCED_LIGHT_DISTRIBUTION_CDF
+        || parameters.activeLightCount == 0u
+        || parameters.totalSelectionWeight <= 0.0
+        || isnan(parameters.totalSelectionWeight)
+        || isinf(parameters.totalSelectionWeight))
+    {
+        return 0.0;
+    }
+
+    if (_ReferencedLocalLightNeeEnabled != 0)
+        return parameters.totalSelectionWeight;
+
+    // The serialized legacy toggle now disables local analytic lights. Rebuild the
+    // eligible weight on the GPU so disabled entries do not consume rejection samples.
+    float directionalSelectionWeight = 0.0;
+    for (uint lightIndex = 0u;
+         lightIndex < parameters.lightCount;
+         ++lightIndex)
+    {
+        ReferencedPathTracingLightRecord light =
+            ReferencedPathtracingLoadReferenceLight(lightIndex);
+        if (light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+        {
+            directionalSelectionWeight += max(
+                light.selectionWeight,
+                0.0);
+        }
+    }
+
+    return directionalSelectionWeight;
+}
+
+float ReferencedPathtracingGetEnvironmentSelectionWeight()
+{
+    if (_ReferencedEnvironmentNeeEnabled == 0
+        || _ReferencedEnvironmentLightingEnabled == 0
+        || _ReferencedEnvironmentEstimatorMode
+            == kReferencedEnvironmentEstimatorBsdfOnly
+        || _ReferencedEnvironmentSamplingMode
+            == kReferencedEnvironmentSamplingBsdfOnly
+        || !ReferencedPathtracingHasEnvironment()
+        || !ReferencedPathtracingHasEnvironmentDistributionEnergy())
+    {
+        return 0.0;
+    }
+
+    // The distribution stores mean scene-linear luminance over the sphere. Multiplying
+    // by 4 PI gives an energy proxy in the same "power-like" role as analytic weights.
+    float averageLuminance =
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ENVIRONMENT_AVERAGE_LUMINANCE_OFFSET];
+    float selectionWeight =
+        4.0 * kReferencedPathtracingPi * max(averageLuminance, 0.0);
+    return !isnan(selectionWeight) && !isinf(selectionWeight)
+        ? selectionWeight
+        : 0.0;
+}
+
+float ReferencedPathtracingGetUnifiedLightSelectionWeight()
+{
+    return ReferencedPathtracingGetReferenceLightSelectionWeight()
+        + ReferencedPathtracingGetEnvironmentSelectionWeight();
+}
+
+float ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+    ReferencedPathTracingLightRecord light)
+{
+    if (_ReferencedLocalLightNeeEnabled == 0
+        && light.lightType != REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+    {
+        return 0.0;
+    }
+
+    float totalSelectionWeight =
+        ReferencedPathtracingGetUnifiedLightSelectionWeight();
+    return totalSelectionWeight > 0.0
+        ? max(light.selectionWeight, 0.0) / totalSelectionWeight
+        : 0.0;
+}
+
+float ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf()
+{
+    float environmentWeight =
+        ReferencedPathtracingGetEnvironmentSelectionWeight();
+    float totalSelectionWeight =
+        ReferencedPathtracingGetReferenceLightSelectionWeight()
+        + environmentWeight;
+    return totalSelectionWeight > 0.0
+        ? environmentWeight / totalSelectionWeight
+        : 0.0;
+}
+
+bool ReferencedPathtracingSampleUnifiedLightSource(
+    float randomValue,
+    out uint lightType,
+    out uint lightIndex,
+    out float selectionPdf)
+{
+    lightType = REFERENCED_LIGHT_TYPE_INVALID;
+    lightIndex = 0xffffffffu;
+    selectionPdf = 0.0;
+
+    float analyticWeight =
+        ReferencedPathtracingGetReferenceLightSelectionWeight();
+    float environmentWeight =
+        ReferencedPathtracingGetEnvironmentSelectionWeight();
+    float totalSelectionWeight = analyticWeight + environmentWeight;
+    if (totalSelectionWeight <= 0.0
+        || isnan(totalSelectionWeight)
+        || isinf(totalSelectionWeight))
+    {
+        return false;
+    }
+
+    float weightedSample =
+        min(saturate(randomValue), 0.99999994) * totalSelectionWeight;
+    if (weightedSample < analyticWeight)
+    {
+        if (_ReferencedLocalLightNeeEnabled != 0)
+        {
+            float conditionalSample = weightedSample / analyticWeight;
+            float conditionalSelectionPdf;
+            if (!ReferencedPathtracingSampleReferenceLightIndex(
+                    conditionalSample,
+                    lightIndex,
+                    conditionalSelectionPdf))
+            {
+                return false;
+            }
+
+            ReferencedPathTracingLightRecord light =
+                ReferencedPathtracingLoadReferenceLight(lightIndex);
+            lightType = light.lightType;
+            selectionPdf = conditionalSelectionPdf
+                * analyticWeight
+                / totalSelectionWeight;
+        }
+        else
+        {
+            ReferencedPathTracingLightListParameters parameters =
+                _ReferencedLightListParameters[0];
+            float accumulatedWeight = 0.0;
+            for (uint candidateIndex = 0u;
+                 candidateIndex < parameters.lightCount;
+                 ++candidateIndex)
+            {
+                ReferencedPathTracingLightRecord light =
+                    ReferencedPathtracingLoadReferenceLight(
+                        candidateIndex);
+                if (light.lightType
+                    != REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                {
+                    continue;
+                }
+
+                accumulatedWeight += max(light.selectionWeight, 0.0);
+                if (weightedSample < accumulatedWeight)
+                {
+                    lightIndex = candidateIndex;
+                    lightType = light.lightType;
+                    selectionPdf =
+                        max(light.selectionWeight, 0.0)
+                        / totalSelectionWeight;
+                    break;
+                }
+            }
+        }
+    }
+    else
+    {
+        lightType = REFERENCED_LIGHT_TYPE_ENVIRONMENT;
+        selectionPdf = environmentWeight / totalSelectionWeight;
+    }
+
+    return selectionPdf > 0.0
+        && !isnan(selectionPdf)
+        && !isinf(selectionPdf);
+}
+
+float ReferencedPathtracingEvaluateUnifiedEnvironmentLightPdf(
+    float3 directionWS)
+{
+    return ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf()
+        * ReferencedPathtracingEvaluateEnvironmentPdf(directionWS);
+}
+
 #endif

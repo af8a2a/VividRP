@@ -1,11 +1,7 @@
 #ifndef VIVIDRP_REFERENCED_PATH_TRACING_COMMON_INCLUDED
 #define VIVIDRP_REFERENCED_PATH_TRACING_COMMON_INCLUDED
 
-float4 _ReferencedMainLightDirectionWS;
-float4 _ReferencedMainLightColor;
-float _ReferencedMainLightAngularDiameter;
-float _ReferencedMainLightShadowStrength;
-int _ReferencedReGIREnabled;
+int _ReferencedLocalLightNeeEnabled;
 
 // Lower-resolution lighting cubemap shared by BSDF miss, distribution build, and NEE.
 TextureCube<float4> _ReferencedEnvironmentTexture;
@@ -307,54 +303,6 @@ bool ReferencedPathtracingSampleEnvironment(
     return pdf > 0.0;
 }
 
-float ReferencedPathtracingGetEnvironmentLightSelectionPdf()
-{
-    // Environment is currently an independent NEE proposal family, so its discrete
-    // selection probability is one. Keeping this factor explicit freezes the combined
-    // PDF contract for the future unified light selector.
-    return _ReferencedEnvironmentNeeEnabled != 0
-        && _ReferencedEnvironmentLightingEnabled != 0
-        && _ReferencedEnvironmentSamplingMode
-            != kReferencedEnvironmentSamplingBsdfOnly
-        ? 1.0
-        : 0.0;
-}
-
-float ReferencedPathtracingEvaluateEnvironmentLightPdf(float3 directionWS)
-{
-    return ReferencedPathtracingGetEnvironmentLightSelectionPdf()
-        * ReferencedPathtracingEvaluateEnvironmentPdf(directionWS);
-}
-
-bool ReferencedPathtracingSampleEnvironmentLight(
-    float2 randomValue,
-    out float3 directionWS,
-    out float3 radiance,
-    out float lightPdf)
-{
-    directionWS = 0.0;
-    radiance = 0.0;
-    lightPdf = 0.0;
-
-    float selectionPdf =
-        ReferencedPathtracingGetEnvironmentLightSelectionPdf();
-    float environmentPdf;
-    if (selectionPdf <= 0.0
-        || !ReferencedPathtracingSampleEnvironment(
-            randomValue,
-            directionWS,
-            radiance,
-            environmentPdf))
-    {
-        return false;
-    }
-
-    lightPdf = selectionPdf * environmentPdf;
-    return lightPdf > 0.0
-        && !isnan(lightPdf)
-        && !isinf(lightPdf);
-}
-
 float ReferencedPathtracingPowerHeuristic(float pdfA, float pdfB)
 {
     pdfA = !isnan(pdfA) && !isinf(pdfA) ? max(pdfA, 0.0) : 0.0;
@@ -397,7 +345,8 @@ void ReferencedPathtracingBuildDirectionalBasis(
         -directionWS.y);
 }
 
-bool ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
+bool ReferencedPathtracingGetDirectionalLightSolidAnglePdf(
+    float angularDiameter,
     out float cosThetaMax,
     out float lightPdf)
 {
@@ -406,7 +355,7 @@ bool ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
 
     float halfAngularDiameter = 0.5
         * clamp(
-            _ReferencedMainLightAngularDiameter,
+            angularDiameter,
             0.0,
             0.5 * kReferencedPathtracingPi);
     float sinThetaMax = sin(halfAngularDiameter);
@@ -427,8 +376,9 @@ bool ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
     return !isnan(lightPdf) && !isinf(lightPdf);
 }
 
-void ReferencedPathtracingSampleMainDirectionalLight(
+void ReferencedPathtracingSampleDirectionalLight(
     float3 centerDirectionWS,
+    float angularDiameter,
     float2 randomSample,
     out float3 sampledDirectionWS,
     out float lightPdf,
@@ -439,7 +389,8 @@ void ReferencedPathtracingSampleMainDirectionalLight(
     isDelta = 1u;
 
     float cosThetaMax;
-    if (!ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
+    if (!ReferencedPathtracingGetDirectionalLightSolidAnglePdf(
+            angularDiameter,
             cosThetaMax,
             lightPdf))
     {
@@ -470,12 +421,15 @@ void ReferencedPathtracingSampleMainDirectionalLight(
     isDelta = 0u;
 }
 
-bool ReferencedPathtracingEvaluateMainDirectionalLightPdf(
+bool ReferencedPathtracingEvaluateDirectionalLightPdf(
+    float3 centerDirectionWS,
+    float angularDiameter,
     float3 directionWS,
     out float lightPdf)
 {
     float cosThetaMax;
-    if (!ReferencedPathtracingGetMainDirectionalLightSolidAnglePdf(
+    if (!ReferencedPathtracingGetDirectionalLightSolidAnglePdf(
+            angularDiameter,
             cosThetaMax,
             lightPdf))
     {
@@ -484,8 +438,8 @@ bool ReferencedPathtracingEvaluateMainDirectionalLightPdf(
 
     float directionLengthSquared = dot(directionWS, directionWS);
     float centerLengthSquared = dot(
-        _ReferencedMainLightDirectionWS.xyz,
-        _ReferencedMainLightDirectionWS.xyz);
+        centerDirectionWS,
+        centerDirectionWS);
     if (directionLengthSquared <= 1e-8
         || centerLengthSquared <= 1e-8
         || isnan(directionLengthSquared)
@@ -498,31 +452,9 @@ bool ReferencedPathtracingEvaluateMainDirectionalLightPdf(
     }
 
     float3 direction = directionWS * rsqrt(directionLengthSquared);
-    float3 centerDirection = _ReferencedMainLightDirectionWS.xyz
+    float3 centerDirection = centerDirectionWS
         * rsqrt(centerLengthSquared);
     return dot(direction, centerDirection) >= cosThetaMax;
-}
-
-float ReferencedPathtracingGetMainLightEstimatorWeight(
-    float lightPdf,
-    float bsdfPdf,
-    uint lightIsDelta)
-{
-    if (lightIsDelta != 0u)
-        return 1.0;
-
-    return ReferencedPathtracingPowerHeuristic(lightPdf, bsdfPdf);
-}
-
-float ReferencedPathtracingGetMainBsdfEstimatorWeight(
-    float bsdfPdf,
-    float lightPdf,
-    uint sampledBsdfIsDelta)
-{
-    if (sampledBsdfIsDelta != 0u)
-        return 1.0;
-
-    return ReferencedPathtracingPowerHeuristic(bsdfPdf, lightPdf);
 }
 
 float ReferencedPathtracingGetEnvironmentLightEstimatorWeight(
@@ -597,9 +529,7 @@ struct ReferencedPathtracingPayload
     // Raygen inputs consumed by closest-hit.
     float3 pathThroughput;
     float3 bsdfRandom;
-    float2 mainLightRandom;
     float3 directLightRandom;
-    float2 environmentRandom;
     float rayConeWidth;
     float rayConeSpreadAngle;
 
@@ -607,22 +537,19 @@ struct ReferencedPathtracingPayload
     float3 positionWS;
     float3 faceNormalWS;
     float3 emission;
-    float3 mainLightDiffuseBsdf;
-    float3 mainLightSpecularBsdf;
-    float3 mainLightDirectionWS;
-    // Distant-light MIS proposal data; both PDFs use solid-angle measure.
-    float mainLightLightPdf;
-    float mainLightBsdfPdf;
-    uint mainLightIsDelta;
-    float3 reGIRLocalDiffuseRadiance;
-    float3 reGIRLocalSpecularRadiance;
-    float3 reGIRLocalDirectionWS;
-    float reGIRLocalDistance;
-    float3 environmentDirectDiffuseRadiance;
-    float3 environmentDirectSpecularRadiance;
-    float3 environmentDirectionWS;
-    float environmentLightPdf;
-    float environmentBsdfPdf;
+    float3 neeDiffuseRadiance;
+    float3 neeSpecularRadiance;
+    float3 neeDirectionWS;
+    float neeDistance;
+    // Keep discrete and conditional PDFs separate for future proposal mixtures.
+    float neeSelectionPdf;
+    float neeSolidAnglePdf;
+    float neeBsdfPdf;
+    float neeShadowStrength;
+    uint neeLightIndex;
+    uint neeLightType;
+    uint neeFlags;
+    uint neeValid;
     float3 nextDirectionWS;
     float3 nextThroughputWeight;
     float nextPdf;
@@ -637,29 +564,24 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
 {
     payload.pathThroughput = 1.0;
     payload.bsdfRandom = 0.0;
-    payload.mainLightRandom = 0.0;
     payload.directLightRandom = 0.0;
-    payload.environmentRandom = 0.0;
     payload.rayConeWidth = 0.0;
     payload.rayConeSpreadAngle = 0.0;
     payload.positionWS = 0.0;
     payload.faceNormalWS = 0.0;
     payload.emission = 0.0;
-    payload.mainLightDiffuseBsdf = 0.0;
-    payload.mainLightSpecularBsdf = 0.0;
-    payload.mainLightDirectionWS = 0.0;
-    payload.mainLightLightPdf = 0.0;
-    payload.mainLightBsdfPdf = 0.0;
-    payload.mainLightIsDelta = 1u;
-    payload.reGIRLocalDiffuseRadiance = 0.0;
-    payload.reGIRLocalSpecularRadiance = 0.0;
-    payload.reGIRLocalDirectionWS = 0.0;
-    payload.reGIRLocalDistance = 0.0;
-    payload.environmentDirectDiffuseRadiance = 0.0;
-    payload.environmentDirectSpecularRadiance = 0.0;
-    payload.environmentDirectionWS = 0.0;
-    payload.environmentLightPdf = 0.0;
-    payload.environmentBsdfPdf = 0.0;
+    payload.neeDiffuseRadiance = 0.0;
+    payload.neeSpecularRadiance = 0.0;
+    payload.neeDirectionWS = 0.0;
+    payload.neeDistance = 0.0;
+    payload.neeSelectionPdf = 0.0;
+    payload.neeSolidAnglePdf = 0.0;
+    payload.neeBsdfPdf = 0.0;
+    payload.neeShadowStrength = 0.0;
+    payload.neeLightIndex = 0xffffffffu;
+    payload.neeLightType = 0u;
+    payload.neeFlags = 0u;
+    payload.neeValid = 0u;
     payload.nextDirectionWS = 0.0;
     payload.nextThroughputWeight = 0.0;
     payload.nextPdf = 0.0;

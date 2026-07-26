@@ -175,12 +175,14 @@ float TraceReferencedPathtracingVisibility(
     return visibilityPayload.hit == 0u ? 1.0 : 0.0;
 }
 
-float TraceReferencedPathtracingMainLightVisibility(
+float TraceReferencedPathtracingCandidateVisibility(
     float3 positionWS,
     float3 faceNormalWS,
-    float3 lightDirectionWS)
+    float3 lightDirectionWS,
+    float lightDistance,
+    float shadowStrength)
 {
-    float shadowStrength = saturate(_ReferencedMainLightShadowStrength);
+    shadowStrength = saturate(shadowStrength);
     if (shadowStrength <= 0.0)
         return 1.0;
 
@@ -188,8 +190,32 @@ float TraceReferencedPathtracingMainLightVisibility(
         positionWS,
         faceNormalWS,
         lightDirectionWS,
-        max(_RayMaxDistance, kReferencedPathtracingShadowMaxDistance));
+        lightDistance);
     return lerp(1.0, tracedVisibility, shadowStrength);
+}
+
+float GetReferencedPathtracingNEELightEstimatorWeight(
+    uint lightType,
+    uint lightFlags,
+    float selectionPdf,
+    float solidAnglePdf,
+    float bsdfPdf)
+{
+    float lightPdf = selectionPdf * solidAnglePdf;
+    if (lightType == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+    {
+        return ReferencedPathtracingGetEnvironmentLightEstimatorWeight(
+            lightPdf,
+            bsdfPdf);
+    }
+
+    if ((lightFlags & REFERENCED_LIGHT_FLAG_SINGULAR) != 0u
+        || (lightFlags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) == 0u)
+    {
+        return 1.0;
+    }
+
+    return ReferencedPathtracingPowerHeuristic(lightPdf, bsdfPdf);
 }
 
 void AccumulateReferencedPathtracingMainLightRadiance(
@@ -296,23 +322,12 @@ void RayGenReferencedPathtracing()
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
-        // Keep proposal dimensions independent: ReGIR consumes one discrete-light dimension
-        // plus two area-shape dimensions. Distant-light and environment NEE derive separate
-        // streams below so neither shifts the existing BSDF/ReGIR or later-bounce sequence.
+        // A single dimension selects the source and the remaining pair samples its
+        // conditional shape or direction.
         payload.directLightRandom = float3(
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState),
             NextReferencedPathtracingRngFloat(rngState));
-        uint mainLightRngState = HashReferencedPathtracingRng(
-            rngState ^ (0x243f6a88u + bounceIndex * 0x9e3779b9u));
-        payload.mainLightRandom = float2(
-            NextReferencedPathtracingRngFloat(mainLightRngState),
-            NextReferencedPathtracingRngFloat(mainLightRngState));
-        uint environmentRngState = HashReferencedPathtracingRng(
-            rngState ^ (0x68bc21ebu + bounceIndex * 0x9e3779b9u));
-        payload.environmentRandom = float2(
-            NextReferencedPathtracingRngFloat(environmentRngState),
-            NextReferencedPathtracingRngFloat(environmentRngState));
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
         TraceRay(
@@ -346,7 +361,8 @@ void RayGenReferencedPathtracing()
                 float3 environmentRadiance =
                     ReferencedPathtracingEvaluateLightingEnvironment(ray.Direction);
                 float environmentLightPdf =
-                    ReferencedPathtracingEvaluateEnvironmentLightPdf(ray.Direction);
+                    ReferencedPathtracingEvaluateUnifiedEnvironmentLightPdf(
+                        ray.Direction);
                 float bsdfEstimatorWeight =
                     ReferencedPathtracingGetEnvironmentBsdfEstimatorWeight(
                         previousBsdfPdf,
@@ -398,191 +414,74 @@ void RayGenReferencedPathtracing()
             }
         }
 
-        // Directional light RGB is photometric illuminance in lux. For a uniform solid-angle
-        // proposal, distant radiance divided by the light PDF integrates back to illuminance.
-        float3 mainLightIlluminance = max(_ReferencedMainLightColor.rgb, 0.0);
-        float mainLightDirectionLengthSquared = dot(
-            payload.mainLightDirectionWS,
-            payload.mainLightDirectionWS);
-        if (any(mainLightIlluminance > 0.0)
-            && mainLightDirectionLengthSquared > 1e-8
-            && (any(payload.mainLightDiffuseBsdf > 0.0)
-                || any(payload.mainLightSpecularBsdf > 0.0)))
-        {
-            float3 mainLightDirectionWS = payload.mainLightDirectionWS
-                * rsqrt(mainLightDirectionLengthSquared);
-            float lightEstimatorWeight =
-                ReferencedPathtracingGetMainLightEstimatorWeight(
-                    payload.mainLightLightPdf,
-                    payload.mainLightBsdfPdf,
-                    payload.mainLightIsDelta);
-            float visibility = TraceReferencedPathtracingMainLightVisibility(
-                payload.positionWS,
-                normalize(payload.faceNormalWS),
-                mainLightDirectionWS);
-            float3 directDiffuse = throughput
-                * payload.mainLightDiffuseBsdf
-                * mainLightIlluminance
-                * lightEstimatorWeight
-                * visibility;
-            float3 directSpecular = throughput
-                * payload.mainLightSpecularBsdf
-                * mainLightIlluminance
-                * lightEstimatorWeight
-                * visibility;
-            bool includeInPrimaryDenoiserSignal =
-                payload.mainLightIsDelta == 0u;
-            AccumulateReferencedPathtracingMainLightRadiance(
-                directDiffuse,
-                1u,
-                bounceIndex,
-                primaryLobeClass,
-                includeInPrimaryDenoiserSignal,
-                directLightingRadiance,
-                diffuseRadiance,
-                specularRadiance,
-                primaryDenoiserMainLightDiffuseRadiance,
-                primaryDenoiserMainLightSpecularRadiance);
-            AccumulateReferencedPathtracingMainLightRadiance(
-                directSpecular,
-                2u,
-                bounceIndex,
-                primaryLobeClass,
-                includeInPrimaryDenoiserSignal,
-                directLightingRadiance,
-                diffuseRadiance,
-                specularRadiance,
-                primaryDenoiserMainLightDiffuseRadiance,
-                primaryDenoiserMainLightSpecularRadiance);
-        }
-
-        // Evaluate the same finite sun disk with the path's BSDF proposal. Doing this at the
-        // current vertex, rather than only on a later miss, preserves artistic shadowStrength
-        // semantics and uses the exact same visibility interval as light-sampled NEE.
-        if (any(mainLightIlluminance > 0.0)
-            && payload.nextPdf > 0.0
-            && any(payload.nextThroughputWeight > 0.0))
-        {
-            float mainLightPdfForBsdfSample;
-            if (ReferencedPathtracingEvaluateMainDirectionalLightPdf(
-                    payload.nextDirectionWS,
-                    mainLightPdfForBsdfSample))
-            {
-                float bsdfEstimatorWeight =
-                    ReferencedPathtracingGetMainBsdfEstimatorWeight(
-                        payload.nextPdf,
-                        mainLightPdfForBsdfSample,
-                        payload.nextLobeIsDelta);
-                float visibility =
-                    TraceReferencedPathtracingMainLightVisibility(
-                        payload.positionWS,
-                        normalize(payload.faceNormalWS),
-                        normalize(payload.nextDirectionWS));
-                // Uniform distant radiance is illuminance divided by disk solid angle.
-                float3 mainLightRadiance =
-                    mainLightIlluminance * mainLightPdfForBsdfSample;
-                float3 bsdfSampledDirect = throughput
-                    * payload.nextThroughputWeight
-                    * mainLightRadiance
-                    * bsdfEstimatorWeight
-                    * visibility;
-                if (IsFiniteReferencedPathtracingRadiance(
-                        bsdfSampledDirect))
-                {
-                    AccumulateReferencedPathtracingMainLightRadiance(
-                        bsdfSampledDirect,
-                        payload.nextLobeClass,
-                        bounceIndex,
-                        primaryLobeClass,
-                        true,
-                        directLightingRadiance,
-                        diffuseRadiance,
-                        specularRadiance,
-                        primaryDenoiserMainLightDiffuseRadiance,
-                        primaryDenoiserMainLightSpecularRadiance);
-                }
-            }
-        }
-
-        if (payload.reGIRLocalDistance > 0.0
-            && (any(payload.reGIRLocalDiffuseRadiance > 0.0)
-                || any(payload.reGIRLocalSpecularRadiance > 0.0)))
-        {
-            float3 localLightDirectionWS = normalize(payload.reGIRLocalDirectionWS);
-            float visibility = TraceReferencedPathtracingVisibility(
-                payload.positionWS,
-                normalize(payload.faceNormalWS),
-                localLightDirectionWS,
-                payload.reGIRLocalDistance);
-            float3 directDiffuse = throughput
-                * payload.reGIRLocalDiffuseRadiance
-                * visibility;
-            float3 directSpecular = throughput
-                * payload.reGIRLocalSpecularRadiance
-                * visibility;
-
-            if (bounceIndex == 0u)
-            {
-                // ReGIR selects one corrected local-light estimator per pixel and frame. Keep its
-                // primary diffuse/specular components in the REBLUR signals instead of the
-                // deterministic direct-light AOV used by the main directional light.
-                diffuseRadiance += directDiffuse;
-                specularRadiance += directSpecular;
-
-                if (any(directDiffuse > 0.0))
-                {
-                    diffuseRayDirectionWS = localLightDirectionWS;
-                    diffuseHitDistance = payload.reGIRLocalDistance;
-                }
-
-                if (any(directSpecular > 0.0))
-                {
-                    specularRayDirectionWS = localLightDirectionWS;
-                    specularHitDistance = payload.reGIRLocalDistance;
-                }
-            }
-            else if (primaryLobeClass == 1u)
-            {
-                diffuseRadiance += directDiffuse + directSpecular;
-            }
-            else if (primaryLobeClass == 2u)
-            {
-                specularRadiance += directDiffuse + directSpecular;
-            }
-        }
-
-        if (payload.environmentLightPdf > 0.0
-            && (any(payload.environmentDirectDiffuseRadiance > 0.0)
-                || any(payload.environmentDirectSpecularRadiance > 0.0)))
+        if (payload.neeValid != 0u
+            && (any(payload.neeDiffuseRadiance > 0.0)
+                || any(payload.neeSpecularRadiance > 0.0)))
         {
             float lightEstimatorWeight =
-                ReferencedPathtracingGetEnvironmentLightEstimatorWeight(
-                    payload.environmentLightPdf,
-                    payload.environmentBsdfPdf);
-            float3 environmentDirectionWS =
-                normalize(payload.environmentDirectionWS);
-            float visibility = TraceReferencedPathtracingVisibility(
-                payload.positionWS,
-                normalize(payload.faceNormalWS),
-                environmentDirectionWS,
-                kReferencedPathtracingInfiniteDistance);
+                GetReferencedPathtracingNEELightEstimatorWeight(
+                    payload.neeLightType,
+                    payload.neeFlags,
+                    payload.neeSelectionPdf,
+                    payload.neeSolidAnglePdf,
+                    payload.neeBsdfPdf);
+            float3 neeDirectionWS = normalize(payload.neeDirectionWS);
+            float visibility =
+                TraceReferencedPathtracingCandidateVisibility(
+                    payload.positionWS,
+                    normalize(payload.faceNormalWS),
+                    neeDirectionWS,
+                    payload.neeDistance,
+                    payload.neeShadowStrength);
             float3 directDiffuse = throughput
-                * payload.environmentDirectDiffuseRadiance
+                * payload.neeDiffuseRadiance
                 * lightEstimatorWeight
                 * visibility;
             float3 directSpecular = throughput
-                * payload.environmentDirectSpecularRadiance
+                * payload.neeSpecularRadiance
                 * lightEstimatorWeight
                 * visibility;
 
-            if (IsFiniteReferencedPathtracingRadiance(directDiffuse)
-                && IsFiniteReferencedPathtracingRadiance(directSpecular))
+            bool finiteContributions =
+                IsFiniteReferencedPathtracingRadiance(directDiffuse)
+                && IsFiniteReferencedPathtracingRadiance(directSpecular);
+            if (finiteContributions
+                && payload.neeLightType
+                    == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+            {
+                bool includeInPrimaryDenoiserSignal =
+                    (payload.neeFlags
+                        & REFERENCED_LIGHT_FLAG_SINGULAR) == 0u;
+                AccumulateReferencedPathtracingMainLightRadiance(
+                    directDiffuse,
+                    1u,
+                    bounceIndex,
+                    primaryLobeClass,
+                    includeInPrimaryDenoiserSignal,
+                    directLightingRadiance,
+                    diffuseRadiance,
+                    specularRadiance,
+                    primaryDenoiserMainLightDiffuseRadiance,
+                    primaryDenoiserMainLightSpecularRadiance);
+                AccumulateReferencedPathtracingMainLightRadiance(
+                    directSpecular,
+                    2u,
+                    bounceIndex,
+                    primaryLobeClass,
+                    includeInPrimaryDenoiserSignal,
+                    directLightingRadiance,
+                    diffuseRadiance,
+                    specularRadiance,
+                    primaryDenoiserMainLightDiffuseRadiance,
+                    primaryDenoiserMainLightSpecularRadiance);
+            }
+            else if (finiteContributions
+                && payload.neeLightType
+                    == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
             {
                 environmentNeeRadiance += directDiffuse + directSpecular;
-
                 if (bounceIndex == 0u)
                 {
-                    // Direct environment AOVs describe the primary surface only.
                     environmentDirectDiffuseRadiance += directDiffuse;
                     environmentDirectSpecularRadiance += directSpecular;
                     diffuseRadiance += directDiffuse;
@@ -596,6 +495,126 @@ void RayGenReferencedPathtracing()
                 {
                     specularRadiance += directDiffuse + directSpecular;
                 }
+            }
+            else if (finiteContributions)
+            {
+                if (bounceIndex == 0u)
+                {
+                    diffuseRadiance += directDiffuse;
+                    specularRadiance += directSpecular;
+
+                    if (any(directDiffuse > 0.0))
+                    {
+                        diffuseRayDirectionWS = neeDirectionWS;
+                        diffuseHitDistance = payload.neeDistance;
+                    }
+
+                    if (any(directSpecular > 0.0))
+                    {
+                        specularRayDirectionWS = neeDirectionWS;
+                        specularHitDistance = payload.neeDistance;
+                    }
+                }
+                else if (primaryLobeClass == 1u)
+                {
+                    diffuseRadiance += directDiffuse + directSpecular;
+                }
+                else if (primaryLobeClass == 2u)
+                {
+                    specularRadiance += directDiffuse + directSpecular;
+                }
+            }
+        }
+
+        // Analytic finite directionals are the only Reference Light List entries with an
+        // explicit BSDF-side strategy. Area-light geometry is not in the RTAS yet, so it
+        // intentionally remains light-sampled-only.
+        if (payload.nextPdf > 0.0
+            && any(payload.nextThroughputWeight > 0.0))
+        {
+            ReferencedPathTracingLightListParameters lightListParameters =
+                _ReferencedLightListParameters[0];
+            for (uint lightIndex = 0u;
+                 lightIndex < lightListParameters.lightCount;
+                 ++lightIndex)
+            {
+                ReferencedPathTracingLightRecord light =
+                    ReferencedPathtracingLoadReferenceLight(lightIndex);
+                if (light.lightType != REFERENCED_LIGHT_TYPE_DIRECTIONAL
+                    || (light.flags
+                        & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) == 0u)
+                {
+                    continue;
+                }
+
+                float forwardLengthSquared =
+                    dot(light.forwardWS, light.forwardWS);
+                if (forwardLengthSquared <= 1e-8)
+                    continue;
+
+                float conditionalLightPdf;
+                if (!ReferencedPathtracingEvaluateDirectionalLightPdf(
+                        -light.forwardWS * rsqrt(forwardLengthSquared),
+                        light.angularDiameter,
+                        payload.nextDirectionWS,
+                        conditionalLightPdf))
+                {
+                    continue;
+                }
+
+                float selectionPdf =
+                    ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+                        light);
+                float fullLightPdf =
+                    selectionPdf * conditionalLightPdf;
+                if (fullLightPdf <= 0.0)
+                    continue;
+
+                float bsdfEstimatorWeight =
+                    payload.nextLobeIsDelta != 0u
+                        ? 1.0
+                        : ReferencedPathtracingPowerHeuristic(
+                            payload.nextPdf,
+                            fullLightPdf);
+                float shadowStrength =
+                    (light.flags
+                        & REFERENCED_LIGHT_FLAG_CASTS_SHADOWS) != 0u
+                            ? light.shadowStrength
+                            : 0.0;
+                float visibility =
+                    TraceReferencedPathtracingCandidateVisibility(
+                        payload.positionWS,
+                        normalize(payload.faceNormalWS),
+                        normalize(payload.nextDirectionWS),
+                        kReferencedPathtracingInfiniteDistance,
+                        shadowStrength);
+                // Directional RGB is illuminance; uniform disk radiance is E / solidAngle.
+                float3 directionalRadiance =
+                    max(light.radiometricColor, 0.0)
+                    * conditionalLightPdf;
+                float3 bsdfSampledDirect =
+                    throughput
+                    * payload.nextThroughputWeight
+                    * directionalRadiance
+                    * bsdfEstimatorWeight
+                    * visibility;
+                if (!IsFiniteReferencedPathtracingRadiance(
+                        bsdfSampledDirect))
+                {
+                    continue;
+                }
+
+                AccumulateReferencedPathtracingMainLightRadiance(
+                    bsdfSampledDirect,
+                    payload.nextLobeClass,
+                    bounceIndex,
+                    primaryLobeClass,
+                    true,
+                    directLightingRadiance,
+                    diffuseRadiance,
+                    specularRadiance,
+                    primaryDenoiserMainLightDiffuseRadiance,
+                    primaryDenoiserMainLightSpecularRadiance);
             }
         }
 

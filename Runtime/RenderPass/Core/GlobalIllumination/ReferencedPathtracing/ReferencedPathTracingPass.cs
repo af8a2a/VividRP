@@ -7,9 +7,9 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
     /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
-    /// path and performs next-event estimation against the main directional light, the active
-    /// HDRI environment, plus ReGIR point, spot, rectangle, and tube-light reservoirs at every hit.
-    /// Environment NEE and BSDF misses are combined with power-heuristic MIS and delta-aware gates.
+    /// path and samples one canonical next-event candidate from the stable Reference Light List
+    /// plus the active HDRI environment at every hit. Environment NEE, finite directional lights,
+    /// and BSDF paths are combined with power-heuristic MIS and delta-aware gates.
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
@@ -41,12 +41,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int WorldToViewId = Shader.PropertyToID("_ReferencedWorldToView");
         private static readonly int RayMinDistanceId = Shader.PropertyToID("_RayMinDistance");
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
-        private static readonly int MainLightDirectionWSId = Shader.PropertyToID("_ReferencedMainLightDirectionWS");
-        private static readonly int MainLightColorId = Shader.PropertyToID("_ReferencedMainLightColor");
-        private static readonly int MainLightAngularDiameterId =
-            Shader.PropertyToID("_ReferencedMainLightAngularDiameter");
-        private static readonly int MainLightShadowStrengthId =
-            Shader.PropertyToID("_ReferencedMainLightShadowStrength");
         private static readonly int MaxBounceCountId = Shader.PropertyToID("_ReferencedMaxBounceCount");
         private static readonly int RussianRouletteStartBounceId =
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
@@ -60,11 +54,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedLightList");
         private static readonly int ReferenceLightListParametersId =
             Shader.PropertyToID("_ReferencedLightListParameters");
-        private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
-        private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
-        private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
-        private static readonly int ReGIRLightPdfTextureId = Shader.PropertyToID("_ReGIRLightPdfTexture");
-        private static readonly int ReGIREnabledId = Shader.PropertyToID("_ReferencedReGIREnabled");
+        private static readonly int LocalLightNeeEnabledId =
+            Shader.PropertyToID("_ReferencedLocalLightNeeEnabled");
         private static readonly int EnvironmentTextureId =
             Shader.PropertyToID("_ReferencedEnvironmentTexture");
         private static readonly int EnvironmentBackgroundTextureId =
@@ -104,18 +95,6 @@ namespace VividRP.Runtime.RenderPass.Core
             Name = "ReferenceLightListParameters",
             Access = AccessFlags.Read)]
         private RenderGraphBuffer m_ReferenceLightListParameters;
-
-        [RenderGraphResource(Name = "ReGIRLights", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_ReGIRLightBuffer;
-
-        [RenderGraphResource(Name = "ReGIRParameters", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_ReGIRParameterBuffer;
-
-        [RenderGraphResource(Name = "ReGIRReservoirs", Access = AccessFlags.Read)]
-        private RenderGraphBuffer m_ReGIRReservoirBuffer;
-
-        [RenderGraphResource(Name = "ReGIRLightPdfTexture", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_ReGIRLightPdfTexture;
 
         [RenderGraphResource(Name = "PathTracingEnvironment", Access = AccessFlags.Read)]
         private RenderGraphTexture m_EnvironmentTexture;
@@ -194,10 +173,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private Matrix4x4 m_WorldToView = Matrix4x4.identity;
         private float m_RayMinDistance = 0.01f;
         private float m_RayMaxDistance = 1000.0f;
-        private Vector4 m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
-        private Vector4 m_MainLightColor = Vector4.zero;
-        private float m_MainLightAngularDiameter;
-        private float m_MainLightShadowStrength;
+        private bool m_HasFiniteDirectionalLight;
         private Vector4 m_ReblurHitDistanceParameters =
             ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
         private ReferencedPathTracingReblurCheckerboardMode m_ReblurCheckerboardMode =
@@ -229,18 +205,6 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReferenceLightList = m_DefaultReferenceLightList;
             m_ReferenceLightListParameters =
                 m_DefaultReferenceLightListParameters;
-            m_ReGIRLightBuffer = RenderGraphBuffer.CreateStructured(
-                "ReGIRLights",
-                VividReGIRLightData.Stride);
-            m_ReGIRParameterBuffer = RenderGraphBuffer.CreateStructured(
-                "ReGIRParameters",
-                VividReGIRParameters.Stride);
-            m_ReGIRReservoirBuffer = RenderGraphBuffer.CreateStructured(
-                "ReGIRReservoirs",
-                VividReGIRReservoir.Stride);
-            m_ReGIRLightPdfTexture = RenderGraphTexture.CreateInput(
-                "ReGIRLightPdfTexture",
-                GraphicsFormat.R32_SFloat);
             m_EnvironmentTexture = CreateEnvironmentTexture("PathTracingEnvironment");
             m_EnvironmentBackgroundTexture =
                 CreateEnvironmentTexture("PathTracingEnvironmentBackground");
@@ -311,8 +275,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigureOutputs(m_Width, m_Height);
             PrepareReferenceLightListFallback();
             PrepareEnvironmentImportanceDistributionFallback();
-            var lightData = frameData.GetOrCreate<VividLightData>();
-            PrepareMainDirectionalLight(lightData);
+            PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
             var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
@@ -407,23 +370,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetRayTracingMatrixParam(m_RayTracingShader, WorldToViewId, m_WorldToView);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMinDistanceId, m_RayMinDistance);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
-                cmd.SetGlobalVector(MainLightDirectionWSId, m_MainLightDirectionWS);
-                cmd.SetGlobalVector(MainLightColorId, m_MainLightColor);
-                cmd.SetGlobalFloat(MainLightAngularDiameterId, m_MainLightAngularDiameter);
-                cmd.SetGlobalFloat(MainLightShadowStrengthId, m_MainLightShadowStrength);
-                cmd.SetRayTracingVectorParam(
-                    m_RayTracingShader,
-                    MainLightDirectionWSId,
-                    m_MainLightDirectionWS);
-                cmd.SetRayTracingVectorParam(m_RayTracingShader, MainLightColorId, m_MainLightColor);
-                cmd.SetRayTracingFloatParam(
-                    m_RayTracingShader,
-                    MainLightAngularDiameterId,
-                    m_MainLightAngularDiameter);
-                cmd.SetRayTracingFloatParam(
-                    m_RayTracingShader,
-                    MainLightShadowStrengthId,
-                    m_MainLightShadowStrength);
                 cmd.SetRayTracingIntParam(
                     m_RayTracingShader,
                     MaxBounceCountId,
@@ -444,16 +390,16 @@ namespace VividRP.Runtime.RenderPass.Core
                     (int)m_ReblurCheckerboardMode);
                 BindReferenceLightList(cmd);
                 BindEnvironment(cmd);
-                var hasValidReGIRResources =
-                    m_IntegratorState.enableReGIR
-                    && HasValidReGIRResources();
-                cmd.SetGlobalInt(ReGIREnabledId, hasValidReGIRResources ? 1 : 0);
+                // Keep the serialized setting as a local-light NEE gate. Reference PT no
+                // longer consumes the camera-space ReGIR grid or reservoir resources.
+                var localLightNeeEnabled = m_IntegratorState.enableReGIR;
+                cmd.SetGlobalInt(
+                    LocalLightNeeEnabledId,
+                    localLightNeeEnabled ? 1 : 0);
                 cmd.SetRayTracingIntParam(
                     m_RayTracingShader,
-                    ReGIREnabledId,
-                    hasValidReGIRResources ? 1 : 0);
-                if (hasValidReGIRResources)
-                    BindReGIRGlobals(cmd);
+                    LocalLightNeeEnabledId,
+                    localLightNeeEnabled ? 1 : 0);
                 cmd.DispatchRays(
                     m_RayTracingShader,
                     RayGenerationShaderName,
@@ -476,10 +422,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_WorldToView = Matrix4x4.identity;
             m_RayMinDistance = 0.01f;
             m_RayMaxDistance = 1000.0f;
-            m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
-            m_MainLightColor = Vector4.zero;
-            m_MainLightAngularDiameter = 0.0f;
-            m_MainLightShadowStrength = 0.0f;
+            m_HasFiniteDirectionalLight = false;
             m_ReblurHitDistanceParameters =
                 ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
@@ -690,9 +633,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_IntegratorState.signature;
             pathTracingData.accumulatedSampleCount = 0;
             pathTracingData.mainLightInDenoiserSignals =
-                ReferencedPathTracingLightSignatureUtility
-                    .HasFiniteMainLightSolidAngle(
-                        m_MainLightAngularDiameter);
+                m_HasFiniteDirectionalLight;
         }
 
         private void BindEnvironment(CommandBuffer cmd)
@@ -888,56 +829,30 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ReferenceLightListParameters.innerHandle);
         }
 
-        private void PrepareMainDirectionalLight(VividLightData lightData)
+        private void PrepareDirectionalDenoiserState()
         {
-            m_MainLightDirectionWS = new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
-            m_MainLightColor = Vector4.zero;
-            m_MainLightAngularDiameter = 0.0f;
-            m_MainLightShadowStrength = 0.0f;
-
-            if (lightData == null)
-                return;
-
-            lightData.CompleteLightGridPrepare();
-            if (!lightData.hasMainDirectionalLight)
-                return;
-
-            var mainLight = lightData.mainDirectionalLight;
-            var directionWS = mainLight.directionWS;
-            if (directionWS.sqrMagnitude <= 1e-8f)
-                return;
-
-            directionWS.Normalize();
-            m_MainLightDirectionWS = new Vector4(directionWS.x, directionWS.y, directionWS.z, 0.0f);
-            // DirectionalLightData.color is RGB illuminance in lux. Preserve that physical scale:
-            // OpenPBR eval already returns BSDF * NdotL, so raygen can multiply it directly by
-            // illuminance to obtain outgoing scene-linear radiance without another cosine or PI.
-            m_MainLightColor = new Vector4(
-                Mathf.Max(mainLight.color.x, 0.0f),
-                Mathf.Max(mainLight.color.y, 0.0f),
-                Mathf.Max(mainLight.color.z, 0.0f),
-                1.0f);
-            m_MainLightAngularDiameter = Mathf.Clamp(
-                mainLight.angularDiameter,
-                0.0f,
-                0.5f * Mathf.PI);
-            m_MainLightShadowStrength = Mathf.Clamp01(mainLight.shadowStrength);
+            m_HasFiniteDirectionalLight = false;
+            var lightDatabase = VividLightRenderDatabase.instance;
+            lightDatabase.CompleteSceneLightPrepare();
+            var buildResult = ReferencedPathTracingLightListBuilder.Build(
+                lightDatabase.sceneLightData);
+            for (var lightIndex = 0;
+                 lightIndex < buildResult.records.Length;
+                 lightIndex++)
+            {
+                var light = buildResult.records[lightIndex];
+                if (light.lightType
+                        == (uint)ReferencedPathTracingLightType.Directional
+                    && light.selectionWeight > 0.0f
+                    && ReferencedPathTracingLightSignatureUtility
+                        .HasFiniteMainLightSolidAngle(
+                            light.angularDiameter))
+                {
+                    m_HasFiniteDirectionalLight = true;
+                    return;
+                }
+            }
         }
 
-        private bool HasValidReGIRResources()
-        {
-            return m_ReGIRLightBuffer?.innerHandle.IsValid() == true
-                && m_ReGIRParameterBuffer?.innerHandle.IsValid() == true
-                && m_ReGIRReservoirBuffer?.innerHandle.IsValid() == true
-                && m_ReGIRLightPdfTexture?.innerHandle.IsValid() == true;
-        }
-
-        private void BindReGIRGlobals(CommandBuffer cmd)
-        {
-            cmd.SetGlobalBuffer(ReGIRLightsId, m_ReGIRLightBuffer.innerHandle);
-            cmd.SetGlobalBuffer(ReGIRParametersId, m_ReGIRParameterBuffer.innerHandle);
-            cmd.SetGlobalBuffer(ReGIRReservoirsId, m_ReGIRReservoirBuffer.innerHandle);
-            cmd.SetGlobalTexture(ReGIRLightPdfTextureId, m_ReGIRLightPdfTexture.innerHandle);
-        }
     }
 }

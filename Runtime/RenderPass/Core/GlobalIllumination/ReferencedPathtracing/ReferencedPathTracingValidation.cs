@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 5;
+        internal const int Version = 6;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -21,7 +21,6 @@ namespace VividRP.Runtime.RenderPass.Core
             bool lightSpatialIndex,
             bool enableShaderExecutionReordering,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
-            ReferencedPathTracingTransportDebugMode transportDebugMode,
             int targetSampleCount)
         {
             this.deterministicSampling = deterministicSampling;
@@ -46,8 +45,6 @@ namespace VividRP.Runtime.RenderPass.Core
             this.enableShaderExecutionReordering =
                 enableShaderExecutionReordering;
             this.estimatorMode = SanitizeEstimatorMode(estimatorMode);
-            this.transportDebugMode =
-                SanitizeTransportDebugMode(transportDebugMode);
             this.targetSampleCount = Mathf.Clamp(
                 targetSampleCount,
                 1,
@@ -76,9 +73,6 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 (int)this.estimatorMode);
-            ReferencedPathTracingStableHash.Add(
-                ref hash,
-                (int)this.transportDebugMode);
             // SER only changes execution scheduling; it must not invalidate a
             // mathematically identical reference accumulation.
             signature = hash;
@@ -94,7 +88,6 @@ namespace VividRP.Runtime.RenderPass.Core
         internal bool lightSpatialIndex { get; }
         internal bool enableShaderExecutionReordering { get; }
         internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
-        internal ReferencedPathTracingTransportDebugMode transportDebugMode { get; }
         internal int targetSampleCount { get; }
         internal ulong signature { get; }
 
@@ -124,9 +117,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 useVolumeSettings
                     ? settings.environmentEstimatorMode.value
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis,
-                useVolumeSettings
-                    ? settings.transportDebugMode.value
-                    : ReferencedPathTracingTransportDebugMode.Combined,
                 useVolumeSettings ? settings.targetSampleCount.value : 2048);
         }
 
@@ -138,16 +128,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 or ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly
                     ? mode
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis;
-        }
-
-        private static ReferencedPathTracingTransportDebugMode
-            SanitizeTransportDebugMode(
-                ReferencedPathTracingTransportDebugMode mode)
-        {
-            return mode is >= ReferencedPathTracingTransportDebugMode.NeePdfs
-                and <= ReferencedPathTracingTransportDebugMode.LightSpatialIndex
-                    ? mode
-                    : ReferencedPathTracingTransportDebugMode.Combined;
         }
 
         public bool Equals(ReferencedPathTracingIntegratorState other)
@@ -971,7 +951,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 4;
+        public const int ContractVersion = 5;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -1274,7 +1254,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     pathTracingData?.integratorSignature
                     ?? integratorState.signature,
                 estimatorMode = integratorState.estimatorMode,
-                transportDebugMode = integratorState.transportDebugMode,
+                transportDebugMode =
+                    ReferencedPathTracingTransportDebugMode.Combined,
                 usesShadingPointLightSelection =
                     integratorState.shadingPointLightSelection,
                 globalLightProposalProbability =

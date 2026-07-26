@@ -61,35 +61,11 @@ namespace VividRP.Runtime
     }
 
     [Serializable]
-    public sealed class ReferencedPathTracingEnvironmentDebugModeParameter
-        : VolumeParameter<ReferencedPathTracingEnvironmentDebugMode>
-    {
-        public ReferencedPathTracingEnvironmentDebugModeParameter(
-            ReferencedPathTracingEnvironmentDebugMode value,
-            bool overrideState = false)
-            : base(value, overrideState)
-        {
-        }
-    }
-
-    [Serializable]
     public sealed class ReferencedPathTracingEnvironmentEstimatorModeParameter
         : VolumeParameter<ReferencedPathTracingEnvironmentEstimatorMode>
     {
         public ReferencedPathTracingEnvironmentEstimatorModeParameter(
             ReferencedPathTracingEnvironmentEstimatorMode value,
-            bool overrideState = false)
-            : base(value, overrideState)
-        {
-        }
-    }
-
-    [Serializable]
-    public sealed class ReferencedPathTracingTransportDebugModeParameter
-        : VolumeParameter<ReferencedPathTracingTransportDebugMode>
-    {
-        public ReferencedPathTracingTransportDebugModeParameter(
-            ReferencedPathTracingTransportDebugMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -180,19 +156,6 @@ namespace VividRP.Runtime
         public ReferencedPathTracingEnvironmentEstimatorModeParameter environmentEstimatorMode =
             new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
 
-        [Tooltip(
-            "Replaces only the resolved path-tracing output with raw first-bounce transport " +
-            "diagnostics. Physical lighting AOVs remain unchanged. PDF views output unscaled " +
-            "selection, solid-angle, and BSDF densities in RGB.")]
-        public ReferencedPathTracingTransportDebugModeParameter transportDebugMode =
-            new(ReferencedPathTracingTransportDebugMode.Combined);
-
-        [Tooltip(
-            "Selects the reference environment contribution shown in the resolved path-tracing output. " +
-            "The physical AOVs remain unchanged.")]
-        public ReferencedPathTracingEnvironmentDebugModeParameter environmentDebugMode =
-            new(ReferencedPathTracingEnvironmentDebugMode.Combined);
-
         protected override void OnEnable()
         {
             deterministicSampling ??= new BoolParameter(false);
@@ -220,12 +183,6 @@ namespace VividRP.Runtime
             environmentEstimatorMode ??=
                 new ReferencedPathTracingEnvironmentEstimatorModeParameter(
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis);
-            transportDebugMode ??=
-                new ReferencedPathTracingTransportDebugModeParameter(
-                    ReferencedPathTracingTransportDebugMode.Combined);
-            environmentDebugMode ??=
-                new ReferencedPathTracingEnvironmentDebugModeParameter(
-                    ReferencedPathTracingEnvironmentDebugMode.Combined);
             base.OnEnable();
         }
     }

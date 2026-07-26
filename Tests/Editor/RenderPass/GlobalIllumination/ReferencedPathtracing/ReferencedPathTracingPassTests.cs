@@ -191,6 +191,8 @@ namespace VividRP.Editor.Tests
             var environmentImportanceDistribution = resources.Buffers.Single(
                 resource => resource.Name == "EnvironmentImportanceDistribution");
             var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
+            var debugTexture = resources.Textures.Single(
+                resource => resource.Name == "DebugTexture");
             var environmentTexture = resources.Textures.Single(
                 resource => resource.Name == "PathTracingEnvironment");
             var environmentBackgroundTexture = resources.Textures.Single(
@@ -251,6 +253,12 @@ namespace VividRP.Editor.Tests
             Assert.That(worldPosition.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(worldPosition.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(worldPosition.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(debugTexture.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                debugTexture.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+            Assert.That(debugTexture.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(debugTexture.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(diffuse.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(specular.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(directLighting.Access, Is.EqualTo(AccessFlags.Write));
@@ -287,6 +295,9 @@ namespace VividRP.Editor.Tests
             pass.Prepare(frameData);
 
             var output = GetField<RenderGraphTexture>(pass, "m_WorldPositionTexture");
+            var debugTexture = GetField<RenderGraphTexture>(
+                pass,
+                "m_DebugTexture");
             var environmentDirectDiffuse = GetField<RenderGraphTexture>(
                 pass,
                 "m_EnvironmentDirectDiffuse");
@@ -297,6 +308,10 @@ namespace VividRP.Editor.Tests
             Assert.That(output.desc.Height, Is.EqualTo(540));
             Assert.That(output.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(output.desc.EnableRandomWrite, Is.True);
+            Assert.That(debugTexture.desc.Width, Is.EqualTo(960));
+            Assert.That(debugTexture.desc.Height, Is.EqualTo(540));
+            Assert.That(debugTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+            Assert.That(debugTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(environmentDirectDiffuse.desc.Width, Is.EqualTo(960));
             Assert.That(environmentDirectDiffuse.desc.Height, Is.EqualTo(540));
             Assert.That(environmentDirectSpecular.desc.Width, Is.EqualTo(960));
@@ -496,6 +511,26 @@ namespace VividRP.Editor.Tests
                 Does.Contain("lightSpatialIndexDiagnostic"));
             Assert.That(
                 rayGenerationSource,
+                Does.Contain(
+                    "RWTexture2D<float4> _ReferencedPathTracingDebugTexture;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_WorldPositionTexture[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "float4(physicalRadiance, physicalOutputAlpha)"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedPathTracingDebugTexture[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "float4(debugRadiance, debugOutputAlpha)"));
+            Assert.That(
+                rayGenerationSource,
                 Does.Contain("neeTransportDiagnostic"));
             Assert.That(
                 rayGenerationSource,
@@ -555,6 +590,8 @@ namespace VividRP.Editor.Tests
                     node.GetInputPortByName("m_EnvironmentImportanceDistribution"),
                     Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SpecularRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DirectLighting"), Is.Not.Null);
@@ -570,6 +607,61 @@ namespace VividRP.Editor.Tests
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
+        }
+
+        [Test]
+        public void Prepare_UsesRenderingDebuggerPathTracingModes()
+        {
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingTransportDebugMode =
+                        ReferencedPathTracingTransportDebugMode.NeePdfs;
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingEnvironmentDebugMode =
+                        ReferencedPathTracingEnvironmentDebugMode
+                            .IndirectMissOnly;
+                var pass = new ReferencedPathTracingPass();
+                var frameData = new ContextContainer();
+                frameData.GetOrCreate<VividCameraData>();
+
+                pass.Prepare(frameData);
+
+                var settings =
+                    GetField<ReferencedPathTracingDebugSettings>(
+                        pass,
+                        "m_DebugSettings");
+                Assert.That(
+                    settings.transportMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingTransportDebugMode.NeePdfs));
+                Assert.That(
+                    settings.environmentMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentDebugMode
+                            .IndirectMissOnly));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+            }
+        }
+
+        [Test]
+        public void DebugSettings_DefaultToCombinedWithoutRenderingDebuggerData()
+        {
+            var settings =
+                ReferencedPathTracingDebugSettings.Resolve(null);
+
+            Assert.That(
+                settings.transportMode,
+                Is.EqualTo(
+                    ReferencedPathTracingTransportDebugMode.Combined));
+            Assert.That(
+                settings.environmentMode,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentDebugMode.Combined));
         }
 
         [Test]
@@ -609,9 +701,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     state.estimatorMode,
                     Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
-                Assert.That(
-                    state.debugMode,
-                    Is.EqualTo(ReferencedPathTracingEnvironmentDebugMode.Combined));
                 Assert.That(state.tint, Is.EqualTo(new Color(0.5f, 0.75f, 1.0f, 1.0f)));
                 Assert.That(state.intensityMultiplier, Is.EqualTo(2.0f));
                 Assert.That(state.rotation, Is.EqualTo(45.0f));
@@ -986,13 +1075,6 @@ namespace VividRP.Editor.Tests
                     settings);
                 settings.environmentSamplingMode.value =
                     ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
-                settings.environmentDebugMode.value =
-                    ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly;
-                var indirectMissOnly = ReferencedPathTracingEnvironmentState.Resolve(
-                    skyData,
-                    settings);
-                settings.environmentDebugMode.value =
-                    ReferencedPathTracingEnvironmentDebugMode.Combined;
                 skyData.specularCubemap = replacementCubemap;
                 var replacement = ReferencedPathTracingEnvironmentState.Resolve(
                     skyData,
@@ -1038,12 +1120,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     bsdfOnly.samplingSignature,
                     Is.Not.EqualTo(original.samplingSignature));
-                Assert.That(
-                    indirectMissOnly.signature,
-                    Is.Not.EqualTo(original.signature));
-                Assert.That(
-                    indirectMissOnly.samplingSignature,
-                    Is.EqualTo(original.samplingSignature));
                 Assert.That(replacement.signature, Is.Not.EqualTo(original.signature));
                 Assert.That(
                     replacement.samplingSignature,

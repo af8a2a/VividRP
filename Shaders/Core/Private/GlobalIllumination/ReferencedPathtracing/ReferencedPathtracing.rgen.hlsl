@@ -7,7 +7,7 @@
 
 #if defined(VIVID_REFERENCE_PT_SER)
 // This slot must match ReferencedPathTracingPass.ShaderExecutionReorderingUavSlot.
-// u31 stays clear of the pass's nine automatically allocated output UAVs.
+// u31 stays clear of the pass's ten automatically allocated output UAVs.
 #define NV_SHADER_EXTN_SLOT u31
 #define NV_HITOBJECT_USE_MACRO_API
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NVAPI/nvHLSLExtns.h"
@@ -15,6 +15,7 @@
 
 RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _WorldPositionTexture;
+RWTexture2D<float4> _ReferencedPathTracingDebugTexture;
 RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
 RWTexture2D<float4> _ReferencedPathTracingDirectLighting;
@@ -871,10 +872,12 @@ void RayGenReferencedPathtracing()
         : 0.0;
     float3 surfaceRadiance =
         diffuseRadiance + specularRadiance + directLightingRadiance + emissionRadiance;
-    float3 radiance = surfaceRadiance + cameraBackgroundRadiance;
+    float3 physicalRadiance =
+        surfaceRadiance + cameraBackgroundRadiance;
+    float3 debugRadiance = physicalRadiance;
     if (_ReferencedEnvironmentDebugMode == kReferencedEnvironmentDebugEnvironmentOnly)
     {
-        radiance =
+        debugRadiance =
             primaryEnvironmentBackgroundRadiance
             + indirectEnvironmentRadiance
             + environmentNeeRadiance;
@@ -882,22 +885,22 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedEnvironmentDebugMode
         == kReferencedEnvironmentDebugPrimaryBackgroundOnly)
     {
-        radiance = cameraBackgroundRadiance;
+        debugRadiance = cameraBackgroundRadiance;
     }
     else if (_ReferencedEnvironmentDebugMode
         == kReferencedEnvironmentDebugIndirectMissOnly)
     {
-        radiance = indirectEnvironmentRadiance;
+        debugRadiance = indirectEnvironmentRadiance;
     }
 
     if (_ReferencedTransportDebugMode == kReferencedTransportDebugNeePdfs)
     {
-        radiance = neeTransportDiagnostic.xyz;
+        debugRadiance = neeTransportDiagnostic.xyz;
     }
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugNeeMisWeight)
     {
-        radiance = float3(
+        debugRadiance = float3(
             neeTransportDiagnostic.w,
             neeTransportContributionValid ? 1.0 : 0.0,
             0.0);
@@ -905,12 +908,12 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugBsdfSegmentPdfs)
     {
-        radiance = segmentTransportDiagnostic.xyz;
+        debugRadiance = segmentTransportDiagnostic.xyz;
     }
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugBsdfSegmentMisWeight)
     {
-        radiance = float3(
+        debugRadiance = float3(
             segmentTransportDiagnostic.w,
             hasSegmentTransportDiagnostic ? 1.0 : 0.0,
             0.0);
@@ -918,26 +921,33 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugNeeLightIdentity)
     {
-        radiance = neeLightIdentityDiagnostic;
+        debugRadiance = neeLightIdentityDiagnostic;
     }
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugInvalidSampleMask)
     {
-        radiance = invalidSampleMask;
+        debugRadiance = invalidSampleMask;
     }
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugLightSpatialIndex)
     {
         // R: traversal candidate count, G: selected axis + 1,
         // B: context flags (indexed/fallback/outside/overflow).
-        radiance = lightSpatialIndexDiagnostic;
+        debugRadiance = lightSpatialIndexDiagnostic;
     }
 
-    float outputAlpha =
+    float physicalOutputAlpha =
+        primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
+    float debugOutputAlpha =
         _ReferencedTransportDebugMode != kReferencedTransportDebugCombined
+            || _ReferencedEnvironmentDebugMode
+                != kReferencedEnvironmentDebugCombined
             ? 1.0
-            : primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
-    _WorldPositionTexture[pixelCoord] = float4(radiance, outputAlpha);
+            : physicalOutputAlpha;
+    _WorldPositionTexture[pixelCoord] =
+        float4(physicalRadiance, physicalOutputAlpha);
+    _ReferencedPathTracingDebugTexture[pixelCoord] =
+        float4(debugRadiance, debugOutputAlpha);
     _ReferencedPathTracingDirectLighting[pixelCoord] =
         float4(directLightingRadiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingEmission[pixelCoord] = float4(emissionRadiance, primaryHit != 0u ? 1.0 : 0.0);

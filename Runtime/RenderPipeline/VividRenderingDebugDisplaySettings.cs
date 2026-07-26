@@ -43,6 +43,12 @@ namespace VividRP.Runtime
     {
         internal const ReGIRDebugVisualizationMode DefaultReGIRDebugMode = ReGIRDebugVisualizationMode.None;
         internal const float DefaultReGIRDebugOpacity = 0.45f;
+        internal const ReferencedPathTracingTransportDebugMode
+            DefaultReferencedPathTracingTransportDebugMode =
+                ReferencedPathTracingTransportDebugMode.Combined;
+        internal const ReferencedPathTracingEnvironmentDebugMode
+            DefaultReferencedPathTracingEnvironmentDebugMode =
+                ReferencedPathTracingEnvironmentDebugMode.Combined;
 
         [SerializeField]
         private TileClusterDebug m_TileClusterDebug = TileClusterDebug.None;
@@ -64,6 +70,16 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_ReGIRDebugOpacity = DefaultReGIRDebugOpacity;
+
+        [SerializeField]
+        private ReferencedPathTracingTransportDebugMode
+            m_ReferencedPathTracingTransportDebugMode =
+                DefaultReferencedPathTracingTransportDebugMode;
+
+        [SerializeField]
+        private ReferencedPathTracingEnvironmentDebugMode
+            m_ReferencedPathTracingEnvironmentDebugMode =
+                DefaultReferencedPathTracingEnvironmentDebugMode;
 
         [SerializeField]
         private ExposureDebugMode m_ExposureMode = ExposureDebugMode.None;
@@ -199,6 +215,24 @@ namespace VividRP.Runtime
         {
             get => m_ReGIRDebugOpacity;
             set => m_ReGIRDebugOpacity = value;
+        }
+
+        internal ReferencedPathTracingTransportDebugMode
+            referencedPathTracingTransportDebugMode
+        {
+            get => NormalizeReferencedPathTracingTransportDebugMode(
+                m_ReferencedPathTracingTransportDebugMode);
+            set => m_ReferencedPathTracingTransportDebugMode =
+                NormalizeReferencedPathTracingTransportDebugMode(value);
+        }
+
+        internal ReferencedPathTracingEnvironmentDebugMode
+            referencedPathTracingEnvironmentDebugMode
+        {
+            get => NormalizeReferencedPathTracingEnvironmentDebugMode(
+                m_ReferencedPathTracingEnvironmentDebugMode);
+            set => m_ReferencedPathTracingEnvironmentDebugMode =
+                NormalizeReferencedPathTracingEnvironmentDebugMode(value);
         }
 
         internal ExposureDebugMode exposureMode
@@ -395,6 +429,10 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_ClusterDebugDistance, 1f)
             || reGIRDebugMode != DefaultReGIRDebugMode
             || !Mathf.Approximately(m_ReGIRDebugOpacity, DefaultReGIRDebugOpacity)
+            || referencedPathTracingTransportDebugMode
+                != DefaultReferencedPathTracingTransportDebugMode
+            || referencedPathTracingEnvironmentDebugMode
+                != DefaultReferencedPathTracingEnvironmentDebugMode
             || m_ExposureMode != ExposureDebugMode.None
             || !Mathf.Approximately(m_DebugExposure, 0f)
             || m_CenterHistogramAroundMiddleGrey
@@ -441,6 +479,10 @@ namespace VividRP.Runtime
             m_ClusterDebugDistance = 1f;
             m_ReGIRDebugMode = DefaultReGIRDebugMode;
             m_ReGIRDebugOpacity = DefaultReGIRDebugOpacity;
+            m_ReferencedPathTracingTransportDebugMode =
+                DefaultReferencedPathTracingTransportDebugMode;
+            m_ReferencedPathTracingEnvironmentDebugMode =
+                DefaultReferencedPathTracingEnvironmentDebugMode;
             m_ExposureMode = ExposureDebugMode.None;
             m_DebugExposure = 0f;
             m_CenterHistogramAroundMiddleGrey = false;
@@ -472,6 +514,28 @@ namespace VividRP.Runtime
             m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
             m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
             m_VirtualTextureStatsCamera = null;
+        }
+
+        private static ReferencedPathTracingTransportDebugMode
+            NormalizeReferencedPathTracingTransportDebugMode(
+                ReferencedPathTracingTransportDebugMode value)
+        {
+            return value is >= ReferencedPathTracingTransportDebugMode.NeePdfs
+                and <= ReferencedPathTracingTransportDebugMode.LightSpatialIndex
+                    ? value
+                    : ReferencedPathTracingTransportDebugMode.Combined;
+        }
+
+        private static ReferencedPathTracingEnvironmentDebugMode
+            NormalizeReferencedPathTracingEnvironmentDebugMode(
+                ReferencedPathTracingEnvironmentDebugMode value)
+        {
+            return value is
+                ReferencedPathTracingEnvironmentDebugMode.EnvironmentOnly
+                or ReferencedPathTracingEnvironmentDebugMode.PrimaryBackgroundOnly
+                or ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly
+                    ? value
+                    : ReferencedPathTracingEnvironmentDebugMode.Combined;
         }
 
         private static TileClusterCategoryDebug NormalizeTileClusterCategory(TileClusterCategoryDebug value)
@@ -522,6 +586,8 @@ namespace VividRP.Runtime
             public const string RootName = "VividRP Debug";
             public const string ClusterName = "Cluster";
             public const string ReGIRName = "ReGIR";
+            public const string ReferencedPathTracingName =
+                "Reference Path Tracing";
             public const string ExposureName = "Exposure";
             public const string OverlayName = "Overlay";
             public const string MaterialName = "Material";
@@ -571,6 +637,22 @@ namespace VividRP.Runtime
                 name = "Opacity",
                 tooltip = "Opacity of the ReGIR debug overlay."
             };
+
+            public static readonly NameAndTooltip
+                ReferencedPathTracingTransportDebugMode = new()
+                {
+                    name = "Transport",
+                    tooltip =
+                        "Select the Reference Path Tracing transport diagnostic written to DebugTexture."
+                };
+
+            public static readonly NameAndTooltip
+                ReferencedPathTracingEnvironmentDebugMode = new()
+                {
+                    name = "Environment",
+                    tooltip =
+                        "Select the Reference Path Tracing environment diagnostic written to DebugTexture."
+                };
 
             public static readonly NameAndTooltip ExposureMode = new()
             {
@@ -779,6 +861,8 @@ namespace VividRP.Runtime
 
                 root.children.Add(CreateClusterFoldout(data));
                 root.children.Add(CreateReGIRFoldout(data));
+                root.children.Add(
+                    CreateReferencedPathTracingFoldout(data));
                 root.children.Add(CreateExposureFoldout(data));
                 root.children.Add(CreateOverlayFoldout(data));
                 root.children.Add(CreateMaterialFoldout(data));
@@ -830,6 +914,29 @@ namespace VividRP.Runtime
                     min = () => 0f,
                     isHiddenCallback = () => data.tileClusterDebug != TileClusterDebug.Cluster,
                 });
+                return foldout;
+            }
+
+            private static DebugUI.Foldout
+                CreateReferencedPathTracingFoldout(
+                    VividRenderingDebugSettingsData data)
+            {
+                var foldout = new DebugUI.Foldout
+                {
+                    displayName = Strings.ReferencedPathTracingName,
+                    opened = true,
+                };
+
+                foldout.children.Add(CreateEnumField(
+                    Strings.ReferencedPathTracingTransportDebugMode,
+                    () => data.referencedPathTracingTransportDebugMode,
+                    value =>
+                        data.referencedPathTracingTransportDebugMode = value));
+                foldout.children.Add(CreateEnumField(
+                    Strings.ReferencedPathTracingEnvironmentDebugMode,
+                    () => data.referencedPathTracingEnvironmentDebugMode,
+                    value =>
+                        data.referencedPathTracingEnvironmentDebugMode = value));
                 return foldout;
             }
 

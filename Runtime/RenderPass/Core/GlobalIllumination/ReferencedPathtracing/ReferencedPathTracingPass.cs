@@ -6,6 +6,39 @@ using VividRP.Runtime.Plugin;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    internal readonly struct ReferencedPathTracingDebugSettings
+    {
+        internal ReferencedPathTracingDebugSettings(
+            ReferencedPathTracingTransportDebugMode transportMode,
+            ReferencedPathTracingEnvironmentDebugMode environmentMode)
+        {
+            this.transportMode = transportMode;
+            this.environmentMode = environmentMode;
+        }
+
+        internal ReferencedPathTracingTransportDebugMode transportMode
+        {
+            get;
+        }
+
+        internal ReferencedPathTracingEnvironmentDebugMode environmentMode
+        {
+            get;
+        }
+
+        internal static ReferencedPathTracingDebugSettings Resolve(
+            VividRenderingDebugSettingsData data)
+        {
+            return data != null
+                ? new ReferencedPathTracingDebugSettings(
+                    data.referencedPathTracingTransportDebugMode,
+                    data.referencedPathTracingEnvironmentDebugMode)
+                : new ReferencedPathTracingDebugSettings(
+                    ReferencedPathTracingTransportDebugMode.Combined,
+                    ReferencedPathTracingEnvironmentDebugMode.Combined);
+        }
+    }
+
     /// <summary>
     /// OpenPBR reference path-tracing prototype for StandardLit. It traces an iterative multi-bounce
     /// path and samples one canonical next-event candidate from the stable Reference Light List
@@ -30,6 +63,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private const int NvidiaShaderExtensionStructStride = 256;
 
         private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
+        private static readonly int DebugTextureId =
+            Shader.PropertyToID("_ReferencedPathTracingDebugTexture");
         private static readonly int NvidiaShaderExtensionBufferId =
             Shader.PropertyToID("g_NvidiaExt");
         private static readonly int DiffuseRadianceHitDistanceId =
@@ -137,6 +172,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_WorldPositionTexture;
 
         [RenderGraphResource(
+            Name = "DebugTexture",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_DebugTexture;
+
+        [RenderGraphResource(
             Name = "DiffuseRadianceHitDistance",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
@@ -209,6 +250,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
+        private ReferencedPathTracingDebugSettings m_DebugSettings;
         private readonly RenderGraphBuffer m_DefaultReferenceLightList;
         private readonly RenderGraphBuffer m_DefaultReferenceLightListParameters;
         private bool m_DefaultReferenceLightListInitialized;
@@ -247,6 +289,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_DefaultEnvironmentImportanceDistribution;
             m_WorldPositionTexture = RenderGraphTexture.CreateOutput(
                 "WorldPosition",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_DebugTexture = RenderGraphTexture.CreateOutput(
+                "ReferencedPathTracingDebug",
                 GraphicsFormat.R32G32B32A32_SFloat);
             m_DiffuseRadianceHitDistance = RenderGraphTexture.CreateOutput(
                 "DiffuseRadianceHitDistance",
@@ -326,6 +371,8 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
+            m_DebugSettings = ReferencedPathTracingDebugSettings.Resolve(
+                VividRenderingDebugDisplaySettings.Data);
             // A RayTracingShader reimport invalidates LocalKeyword handles while
             // keeping the serialized shader reference alive. Recreate the handle
             // before querying it so editor hot reload cannot dereference stale
@@ -424,6 +471,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     WorldPositionTextureId,
                     m_WorldPositionTexture.innerHandle);
+                BindOutput(cmd, DebugTextureId, m_DebugTexture);
                 BindOutput(cmd, DiffuseRadianceHitDistanceId, m_DiffuseRadianceHitDistance);
                 BindOutput(cmd, SpecularRadianceHitDistanceId, m_SpecularRadianceHitDistance);
                 BindOutput(cmd, DirectLightingId, m_DirectLighting);
@@ -538,6 +586,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnvironmentState = default;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
+            m_DebugSettings = default;
             m_DefaultReferenceLightList?.ClearImportedBuffer();
             m_DefaultReferenceLightListParameters?.ClearImportedBuffer();
             m_DefaultReferenceLightListInitialized = false;
@@ -639,6 +688,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 GraphicsFormat.R32G32B32A32_SFloat,
                 "WorldPosition");
             ConfigureOutput(
+                m_DebugTexture,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "ReferencedPathTracingDebug");
+            ConfigureOutput(
                 m_DiffuseRadianceHitDistance,
                 width,
                 height,
@@ -717,6 +772,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool HaveValidOutputs()
         {
             return IsValid(m_WorldPositionTexture)
+                && IsValid(m_DebugTexture)
                 && IsValid(m_DiffuseRadianceHitDistance)
                 && IsValid(m_SpecularRadianceHitDistance)
                 && IsValid(m_DirectLighting)
@@ -881,9 +937,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 hasEnvironmentBinding && m_EnvironmentState.neeEnabled ? 1 : 0;
             var samplingMode = (int)m_EnvironmentState.samplingMode;
             var estimatorMode = (int)m_IntegratorState.estimatorMode;
-            var transportDebugMode =
-                (int)m_IntegratorState.transportDebugMode;
-            var debugMode = (int)m_EnvironmentState.debugMode;
+            var transportDebugMode = (int)m_DebugSettings.transportMode;
+            var debugMode = (int)m_DebugSettings.environmentMode;
             var clearColor = m_CameraBackgroundState.clearColor;
             var cameraClearColor = new Vector4(
                 clearColor.r,

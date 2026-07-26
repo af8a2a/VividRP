@@ -42,11 +42,13 @@ namespace VividRP.Editor.Tests
                     volume.environmentEstimatorMode.value,
                     Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
                 Assert.That(
-                    volume.transportDebugMode.value,
-                    Is.EqualTo(ReferencedPathTracingTransportDebugMode.Combined));
+                    typeof(ReferencedPathTracingSettingsVolume)
+                        .GetField("transportDebugMode"),
+                    Is.Null);
                 Assert.That(
-                    volume.environmentDebugMode.value,
-                    Is.EqualTo(ReferencedPathTracingEnvironmentDebugMode.Combined));
+                    typeof(ReferencedPathTracingSettingsVolume)
+                        .GetField("environmentDebugMode"),
+                    Is.Null);
             }
             finally
             {
@@ -92,12 +94,6 @@ namespace VividRP.Editor.Tests
                     ReferencedPathTracingIntegratorState.Resolve(volume);
                 volume.environmentEstimatorMode.value =
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis;
-                volume.transportDebugMode.value =
-                    ReferencedPathTracingTransportDebugMode.NeePdfs;
-                var transportDebugChanged =
-                    ReferencedPathTracingIntegratorState.Resolve(volume);
-                volume.transportDebugMode.value =
-                    ReferencedPathTracingTransportDebugMode.Combined;
                 volume.shadingPointLightSelection.value = false;
                 var lightProposalModeChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
@@ -132,17 +128,13 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(
                         ReferencedPathTracingEnvironmentEstimatorMode.Mis));
                 Assert.That(
-                    original.transportDebugMode,
-                    Is.EqualTo(
-                        ReferencedPathTracingTransportDebugMode.Combined));
-                Assert.That(
                     shaderExecutionReorderingChanged
                         .enableShaderExecutionReordering,
                     Is.True);
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(5));
+                    Is.EqualTo(6));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -154,9 +146,6 @@ namespace VividRP.Editor.Tests
                     Is.Not.EqualTo(original.signature));
                 Assert.That(
                     estimatorChanged.signature,
-                    Is.Not.EqualTo(original.signature));
-                Assert.That(
-                    transportDebugChanged.signature,
                     Is.Not.EqualTo(original.signature));
                 Assert.That(
                     lightProposalModeChanged.signature,

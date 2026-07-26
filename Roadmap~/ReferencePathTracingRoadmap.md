@@ -982,7 +982,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - 原 `environmentEstimatorMode` 序列化字段保留以兼容已有 Volume Profile，但语义扩展为全局
   transport estimator。`MIS`、`Light Only` 与 `BSDF Only` 现在统一控制解析灯 NEE、
   BSDF-segment light evaluation 和 environment NEE/miss；integrator contract 升级为 V3，
-  estimator/debug mode 进入积累失效签名与 capture metadata。
+  estimator mode 进入积累失效签名与 capture metadata。debug mode 后续已迁移到
+  Rendering Debugger，不再参与积累签名。
 - BSDF-only 模式会从 unified candidate distribution 中剔除 `BSDF_REACHABLE` emitter，
   因而 segment/miss 侧观察到 selection PDF 为 0 并以权重 1 保留完整 support。point、spot、
   tube、delta directional 等 BSDF 不可达或 singular 事件仍保留 NEE，Light-only 模式也保留
@@ -990,7 +991,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - 新增 raw transport debug views：首个 primary NEE 的 selection/solid-angle/BSDF PDF、
   light-side MIS weight、stable light identity，以及首个 primary BSDF-segment emitter 的对应
   PDF 与 BSDF-side MIS weight。Invalid Sample Mask 分离标记 NEE、segment 和最终 path 的
-  NaN/Inf/negative-radiance 异常；debug view 只替换 resolved output，不污染物理 lighting AOV。
+  NaN/Inf/negative-radiance 异常。debug view 由 Rendering Debugger 管理并写入独立
+  `DebugTexture`；resolved output 和物理 lighting AOV 始终保持 Combined。
 - 新增 CPU estimator-policy mirror 和 `ReferencedPathTracingTransportConformanceGate`。
   conformance evidence 必须同时提供三 estimator 的高 SPP 均值/standard error、light-selection
   histogram 与 sample/evaluate PDF reciprocity；V1 frozen capture contract 升级为 V2 并要求
@@ -1046,8 +1048,12 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   lights，不会把容量截断作为 correctness authority。
 - 新增 `Light Spatial Index` Volume 开关与 transport debug view。debug RGB 分别输出 traversal
   candidate count、selected axis + 1 和 context flags（indexed/fallback/outside/overflow）。
-  integrator contract 升级为 V5，V1 freeze contract 升级为 V4，并在 capture metadata 中记录
-  index version、resolution 和 cell capacity。
+  transport/environment debug 选项现由 Rendering Debugger 的 `Reference Path Tracing`
+  foldout 管理，并统一输出到 pass-owned `DebugTexture` RenderGraph port；切换 debug view
+  不再修改 Volume、主路径追踪输出或 accumulation signature。debug state 与 integrator/
+  environment state 解耦后 integrator contract 升级为 V6，V1 freeze contract 升级为 V5；
+  capture metadata 继续固定记录 Combined，明确 raw radiance 未经过 debug 替换。
+  capture metadata 仍记录 spatial-index version、resolution 和 cell capacity。
 - `VividRP.Runtime.csproj` 与 `VividRP.Editor.Tests.csproj` 的 .NET 编译已通过，light-list HLSL
   也通过 DXC `lib_6_6` 编译；新增 deterministic packing、stable-order 和 overflow behavior
   tests。实际 Unity shader import、DX12 debug view 和 spatial-index OFF/ON 高 SPP 均值对比

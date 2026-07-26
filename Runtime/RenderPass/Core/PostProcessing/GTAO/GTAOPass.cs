@@ -8,13 +8,12 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     //todo:
     //candidate async compute
-    public sealed class GTAOPass : ComputePass
+    public sealed partial class GTAOPass : ComputePass
     {
-        private const int DepthMipCount = 5;
-        private const int PrefilterTileSize = 16;
         private const int MainKernelThreadGroupSize = 8;
         private const int DenoiseThreadGroupSizeX = 16;
         private const int DenoiseThreadGroupSizeY = 8;
+        private const int RequiredHzbMipCount = 6;
         private const float DefaultRadiusMultiplier = 1.457f;
         private const float DefaultSampleDistributionPower = 2.0f;
         private const float DefaultThinOccluderCompensation = 0.0f;
@@ -24,23 +23,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private const float PlaneEpsilon = 1e-6f;
 
         private static readonly int GTAOConstantBufferId = Shader.PropertyToID("GTAOConstantBuffer");
-        private static readonly int DepthTextureId = Shader.PropertyToID("_DepthTexture");
+        private static readonly int HzbTextureId = Shader.PropertyToID("_HZBTexture");
         private static readonly int GBuffer1Id = Shader.PropertyToID("_GBuffer1");
-        private static readonly int WorkingDepthId = Shader.PropertyToID("_WorkingDepth");
         private static readonly int WorkingAOTermId = Shader.PropertyToID("_WorkingAOTerm");
         private static readonly int WorkingEdgesId = Shader.PropertyToID("_WorkingEdges");
         private static readonly int SourceAOTermId = Shader.PropertyToID("_SourceAOTerm");
         private static readonly int SourceEdgesId = Shader.PropertyToID("_SourceEdges");
         private static readonly int DenoiseAOTermId = Shader.PropertyToID("_DenoiseAOTerm");
         private static readonly int GTAOTextureId = Shader.PropertyToID("_GTAOTexture");
-        private static readonly int[] s_WorkingDepthMipIds =
-        {
-            Shader.PropertyToID("_WorkingDepthMIP0"),
-            Shader.PropertyToID("_WorkingDepthMIP1"),
-            Shader.PropertyToID("_WorkingDepthMIP2"),
-            Shader.PropertyToID("_WorkingDepthMIP3"),
-            Shader.PropertyToID("_WorkingDepthMIP4")
-        };
 
         [StructLayout(LayoutKind.Sequential)]
         private struct GTAOConstantBufferData
@@ -83,20 +73,14 @@ namespace VividRP.Runtime.RenderPass.Core
             public Vector4 Frustum { get; }
         }
 
-        [RenderGraphResource(Name = "Depth", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_DepthTexture;
+        [RenderGraphResource(Name = "HZB", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_HzbTexture;
 
         [RenderGraphResource(Name = "GBuffer1", Access = AccessFlags.Read)]
         private RenderGraphTexture m_GBuffer1;
 
         [RenderGraphResource(Name = "GTAOTexture", Access = AccessFlags.Write)]
         private RenderGraphTexture m_GTAOTexture;
-
-        [RenderGraphResource(
-            Name = "GTAOWorkingDepth",
-            Access = AccessFlags.ReadWrite)]
-        [TransientResource]
-        private RenderGraphTexture m_WorkingDepthTexture;
 
         [RenderGraphResource(
             Name = "GTAOWorkingAOTerm",
@@ -117,7 +101,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_WorkingEdgesTexture;
 
         private ComputeShader m_GTAOCompute;
-        private int m_PrefilterKernel = -1;
         private int m_GTAOLowKernel = -1;
         private int m_GTAOMediumKernel = -1;
         private int m_GTAOHighKernel = -1;
@@ -133,29 +116,30 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(GTAOPass));
 
-            m_DepthTexture = RenderGraphTexture.CreateInput("Depth", GraphicsFormat.None, DepthBits.Depth32);
+            m_HzbTexture = CreateHzbInput("HZB");
             m_GBuffer1 = RenderGraphTexture.CreateInput("GBuffer1", GraphicsFormat.A2B10G10R10_UNormPack32);
             m_GTAOTexture = CreateTexture("GTAOTexture", GraphicsFormat.R8_UNorm, clearBuffer: true, clearColor: Color.white);
-            m_WorkingDepthTexture = CreateTexture("GTAOWorkingDepth", GraphicsFormat.R16_SFloat, useMipMap: true, mipCount: DepthMipCount);
             m_WorkingAOTermTexture = CreateTexture("GTAOWorkingAOTerm", GraphicsFormat.R8_UInt);
             m_WorkingAOTermPongTexture = CreateTexture("GTAOWorkingAOTermPong", GraphicsFormat.R8_UInt);
             m_WorkingEdgesTexture = CreateTexture("GTAOWorkingEdges", GraphicsFormat.R8_UNorm);
+            InitializeCacaoResources();
         }
 
         public override void Create()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();
             m_GTAOCompute = resources?.GTAOCompute;
-            if (m_GTAOCompute == null)
-                return;
+            if (m_GTAOCompute != null)
+            {
+                m_GTAOLowKernel = m_GTAOCompute.FindKernel("CSGTAOLow");
+                m_GTAOMediumKernel = m_GTAOCompute.FindKernel("CSGTAOMedium");
+                m_GTAOHighKernel = m_GTAOCompute.FindKernel("CSGTAOHigh");
+                m_GTAOUltraKernel = m_GTAOCompute.FindKernel("CSGTAOUltra");
+                m_DenoiseKernel = m_GTAOCompute.FindKernel("CSDenoisePass");
+                m_DenoiseLastKernel = m_GTAOCompute.FindKernel("CSDenoiseLastPass");
+            }
 
-            m_PrefilterKernel = m_GTAOCompute.FindKernel("CSPrefilterDepths16x16");
-            m_GTAOLowKernel = m_GTAOCompute.FindKernel("CSGTAOLow");
-            m_GTAOMediumKernel = m_GTAOCompute.FindKernel("CSGTAOMedium");
-            m_GTAOHighKernel = m_GTAOCompute.FindKernel("CSGTAOHigh");
-            m_GTAOUltraKernel = m_GTAOCompute.FindKernel("CSGTAOUltra");
-            m_DenoiseKernel = m_GTAOCompute.FindKernel("CSDenoisePass");
-            m_DenoiseLastKernel = m_GTAOCompute.FindKernel("CSDenoiseLastPass");
+            CreateCacao(resources);
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -168,20 +152,48 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Height = CameraDimensionUtility.ResolveCameraDimension(cameraData?.actualHeight ?? 0, cameraData?.pixelHeight ?? 0, Screen.height);
             m_Settings = postProcessingAllowed ? GTAOSettingsResolver.Resolve() : GTAOSettingsData.CreateDefault();
 
-            ResizeTexture(m_DepthTexture, m_Width, m_Height);
+            ResizeTexture(m_HzbTexture, m_Width, m_Height);
             ResizeTexture(m_GBuffer1, m_Width, m_Height);
             ResizeOutputTexture(m_GTAOTexture, m_Width, m_Height, GraphicsFormat.R8_UNorm, Color.white);
-            ResizeWorkingDepthTexture(m_WorkingDepthTexture, m_Width, m_Height);
-            ResizeOutputTexture(m_WorkingAOTermTexture, m_Width, m_Height, GraphicsFormat.R8_UInt, Color.clear, clearBuffer: false);
-            ResizeOutputTexture(m_WorkingAOTermPongTexture, m_Width, m_Height, GraphicsFormat.R8_UInt, Color.clear, clearBuffer: false);
-            ResizeOutputTexture(m_WorkingEdgesTexture, m_Width, m_Height, GraphicsFormat.R8_UNorm, Color.clear, clearBuffer: false);
+            bool useCacao = m_Settings.enabled
+                && m_Settings.implementation == AmbientOcclusionImplementation.FidelityFXCACAO;
+            int gtaoWorkingWidth = useCacao ? 1 : m_Width;
+            int gtaoWorkingHeight = useCacao ? 1 : m_Height;
+            ResizeOutputTexture(
+                m_WorkingAOTermTexture,
+                gtaoWorkingWidth,
+                gtaoWorkingHeight,
+                GraphicsFormat.R8_UInt,
+                Color.clear,
+                clearBuffer: false);
+            ResizeOutputTexture(
+                m_WorkingAOTermPongTexture,
+                gtaoWorkingWidth,
+                gtaoWorkingHeight,
+                GraphicsFormat.R8_UInt,
+                Color.clear,
+                clearBuffer: false);
+            ResizeOutputTexture(
+                m_WorkingEdgesTexture,
+                gtaoWorkingWidth,
+                gtaoWorkingHeight,
+                GraphicsFormat.R8_UNorm,
+                Color.clear,
+                clearBuffer: false);
 
             m_ConstantBuffer = BuildConstantBuffer(cameraData, m_Width, m_Height, m_Settings);
+            PrepareCacao(cameraData, useCacao);
         }
 
 
         public override void Record(ComputePassContext context)
         {
+            if (m_Settings.implementation == AmbientOcclusionImplementation.FidelityFXCACAO)
+            {
+                RecordCacao(context);
+                return;
+            }
+
             var cmd = context.cmd;
             using (new ProfilingScope(cmd, profilingSampler))
             {
@@ -191,17 +203,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 ConstantBuffer.Push(cmd, m_ConstantBuffer, m_GTAOCompute, GTAOConstantBufferId);
 
-                cmd.SetComputeTextureParam(m_GTAOCompute, m_PrefilterKernel, DepthTextureId, m_DepthTexture.innerHandle);
-                BindWorkingDepthMips(cmd);
-                cmd.DispatchCompute(
-                    m_GTAOCompute,
-                    m_PrefilterKernel,
-                    CoreUtils.DivRoundUp(m_Width, PrefilterTileSize),
-                    CoreUtils.DivRoundUp(m_Height, PrefilterTileSize),
-                    1);
-
                 int mainKernel = ResolveQualityKernel(m_Settings.qualityLevel);
-                cmd.SetComputeTextureParam(m_GTAOCompute, mainKernel, WorkingDepthId, m_WorkingDepthTexture.innerHandle);
+                cmd.SetComputeTextureParam(m_GTAOCompute, mainKernel, HzbTextureId, m_HzbTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_GTAOCompute, mainKernel, GBuffer1Id, m_GBuffer1.innerHandle);
                 cmd.SetComputeTextureParam(m_GTAOCompute, mainKernel, WorkingAOTermId, m_WorkingAOTermTexture.innerHandle);
                 cmd.SetComputeTextureParam(m_GTAOCompute, mainKernel, WorkingEdgesId, m_WorkingEdgesTexture.innerHandle);
@@ -249,7 +252,6 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Dispose()
         {
             m_GTAOCompute = null;
-            m_PrefilterKernel = -1;
             m_GTAOLowKernel = -1;
             m_GTAOMediumKernel = -1;
             m_GTAOHighKernel = -1;
@@ -260,28 +262,21 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Height = 1;
             m_Settings = GTAOSettingsData.CreateDefault();
             m_ConstantBuffer = default;
+            DisposeCacao();
         }
 
         private bool CanExecute()
         {
             return m_GTAOCompute != null
-                && m_PrefilterKernel >= 0
                 && ResolveQualityKernel(m_Settings.qualityLevel) >= 0
                 && m_DenoiseKernel >= 0
                 && m_DenoiseLastKernel >= 0
-                && m_DepthTexture?.innerHandle.IsValid() == true
+                && m_HzbTexture?.innerHandle.IsValid() == true
                 && m_GBuffer1?.innerHandle.IsValid() == true
                 && m_GTAOTexture?.innerHandle.IsValid() == true
-                && m_WorkingDepthTexture?.innerHandle.IsValid() == true
                 && m_WorkingAOTermTexture?.innerHandle.IsValid() == true
                 && m_WorkingAOTermPongTexture?.innerHandle.IsValid() == true
                 && m_WorkingEdgesTexture?.innerHandle.IsValid() == true;
-        }
-
-        private void BindWorkingDepthMips(ComputeCommandBuffer cmd)
-        {
-            for (int mipIndex = 0; mipIndex < DepthMipCount; mipIndex++)
-                cmd.SetComputeTextureParam(m_GTAOCompute, m_PrefilterKernel, s_WorkingDepthMipIds[mipIndex], m_WorkingDepthTexture.innerHandle, mipIndex);
         }
 
         private int ResolveQualityKernel(int qualityLevel)
@@ -473,32 +468,23 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.ClearColor = clearColor;
         }
 
-        private static void ResizeWorkingDepthTexture(RenderGraphTexture texture, int width, int height)
+        private static RenderGraphTexture CreateHzbInput(string name)
         {
-            if (texture?.desc == null)
-                return;
-
-            texture.desc.Width = width;
-            texture.desc.Height = height;
-            texture.desc.ColorFormat = GraphicsFormat.R16_SFloat;
-            texture.desc.DepthBufferBits = DepthBits.None;
-            texture.desc.MsaaSamples = MSAASamples.None;
+            var texture = RenderGraphTexture.CreateInput(name, GraphicsFormat.R16_SFloat);
             texture.desc.FilterMode = FilterMode.Point;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.EnableRandomWrite = true;
             texture.desc.UseMipMap = true;
             texture.desc.AutoGenerateMips = false;
-            texture.desc.MipCount = DepthMipCount;
+            texture.desc.MipCount = RequiredHzbMipCount;
             texture.desc.ClearBuffer = false;
+            return texture;
         }
 
         private static RenderGraphTexture CreateTexture(
             string name,
             GraphicsFormat format,
             bool clearBuffer = false,
-            Color? clearColor = null,
-            bool useMipMap = false,
-            int mipCount = 1)
+            Color? clearColor = null)
         {
             var texture = new RenderGraphTexture
             {
@@ -509,9 +495,9 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.EnableRandomWrite = true;
             texture.desc.FilterMode = FilterMode.Point;
             texture.desc.WrapMode = TextureWrapMode.Clamp;
-            texture.desc.UseMipMap = useMipMap;
+            texture.desc.UseMipMap = false;
             texture.desc.AutoGenerateMips = false;
-            texture.desc.MipCount = mipCount;
+            texture.desc.MipCount = 1;
             texture.desc.ClearBuffer = clearBuffer;
             texture.desc.ClearColor = clearColor ?? Color.clear;
             texture.desc.MsaaSamples = MSAASamples.None;

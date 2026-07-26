@@ -35,6 +35,94 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BloomSettingsData_DefaultsToScatteringWithQuarterResolutionFft()
+        {
+            var settings = BloomSettingsData.CreateDefault();
+
+            Assert.That(settings.mode, Is.EqualTo(BloomMode.Scattering));
+            Assert.That(settings.convolutionResolutionScale, Is.EqualTo(0.25f));
+            Assert.That(settings.convolutionKernel, Is.Null);
+        }
+
+        [Test]
+        public void ShouldUseFftConvolution_RequiresModeKernelAndKernels()
+        {
+            Assert.That(BloomPass.ShouldUseFftConvolution(false, true, true), Is.False);
+            Assert.That(BloomPass.ShouldUseFftConvolution(true, false, true), Is.False);
+            Assert.That(BloomPass.ShouldUseFftConvolution(true, true, false), Is.False);
+            Assert.That(BloomPass.ShouldUseFftConvolution(true, true, true), Is.True);
+        }
+
+        [Test]
+        public void CalculateFftDomain_UsesKernelPaddingAndPowerOfTwoExtent()
+        {
+            var domain = BloomPass.CalculateFftDomain(
+                1920,
+                1080,
+                0.25f,
+                0.15f,
+                0.25f);
+
+            Assert.That(domain.ImageWidth, Is.EqualTo(480));
+            Assert.That(domain.ImageHeight, Is.EqualTo(270));
+            Assert.That(domain.KernelSize, Is.EqualTo(72));
+            Assert.That(domain.Padding, Is.EqualTo(36));
+            Assert.That(domain.FrequencyWidth, Is.EqualTo(1024));
+            Assert.That(domain.FrequencyHeight, Is.EqualTo(512));
+        }
+
+        [TestCase(32, true, true, (int)BloomFftExecutionPath.Wave32)]
+        [TestCase(64, true, true, (int)BloomFftExecutionPath.Wave64)]
+        [TestCase(16, true, true, (int)BloomFftExecutionPath.Lds)]
+        [TestCase(32, false, true, (int)BloomFftExecutionPath.Lds)]
+        [TestCase(64, true, false, (int)BloomFftExecutionPath.Lds)]
+        public void ResolveFftExecutionPath_SelectsMatchingWaveKernels(
+            int computeSubGroupSize,
+            bool hasWave32Kernels,
+            bool hasWave64Kernels,
+            int expected)
+        {
+            var path = BloomPass.ResolveFftExecutionPath(
+                computeSubGroupSize,
+                1024,
+                512,
+                hasWave32Kernels,
+                hasWave64Kernels);
+
+            Assert.That((int)path, Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void ResolveFftExecutionPath_UsesLdsOutsideWaveLimits()
+        {
+            Assert.That(
+                BloomPass.ResolveFftExecutionPath(32, 4096, 2048, true, true),
+                Is.EqualTo(BloomFftExecutionPath.Lds));
+            Assert.That(
+                BloomPass.ResolveFftExecutionPath(64, 2048, 32, true, true),
+                Is.EqualTo(BloomFftExecutionPath.Lds));
+        }
+
+        [Test]
+        public void BloomBlurCompute_ContainsFftConvolutionKernels()
+        {
+            var shader = PipelineResourceManager.Get<VividRPCoreResources>().BloomBlurCompute;
+            Assert.That(shader, Is.Not.Null);
+
+            Assert.That(shader.HasKernel("KFFTPrepareSource"), Is.True);
+            Assert.That(shader.HasKernel("KFFTPrepareKernel"), Is.True);
+            Assert.That(shader.HasKernel("KFFTLdsHorizontal"), Is.True);
+            Assert.That(shader.HasKernel("KFFTLdsVertical"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveHorizontal32"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveVertical32"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveHorizontal64"), Is.True);
+            Assert.That(shader.HasKernel("KFFTWaveVertical64"), Is.True);
+            Assert.That(shader.HasKernel("KFFTMultiplyAndBitReverse"), Is.True);
+            Assert.That(shader.HasKernel("KFFTResolve"), Is.True);
+            Assert.That(shader.HasKernel("KFFTReduceEnergy"), Is.True);
+        }
+
+        [Test]
         public void ShouldUseSpdDownsample_RequiresRequestAndEligibleResources()
         {
             Assert.That(BloomPass.ShouldUseSpdDownsample(false, 8, true, true), Is.False);

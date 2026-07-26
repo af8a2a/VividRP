@@ -29,6 +29,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 53067c774fab54b44965255f7ccef814, type: 3}
   - ResourceName: Shaders/Core/Private/Bloom/BloomUpsample.compute
     ResourceObject: {fileID: 7200000, guid: e1d72709f493eff4b9dec6418757b59f, type: 3}
+  - ResourceName: Shaders/Core/Private/CACAO/CACAO.compute
+    ResourceObject: {fileID: 7200000, guid: fecfefb7d0a18f34789c1a502b3ca429, type: 3}
   - ResourceName: Shaders/Core/Private/CSMShadowResolve
     ResourceObject: {fileID: 7200000, guid: 46a3b53f4378e9044ac12b6bedeb99d5, type: 3}
   - ResourceName: Shaders/Core/Private/CameraMotionVectors

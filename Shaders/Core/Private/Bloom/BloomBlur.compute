@@ -1,12 +1,45 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/Bloom/BloomCommon.hlsl"
 
 #pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch
 
 #pragma kernel KMain          MAIN=KMain
 #pragma kernel KDownsample    MAIN=KDownsample  DOWNSAMPLE
 #pragma kernel KSpdDownsample
+#pragma kernel KFFTPrepareSource
+#pragma kernel KFFTPrepareKernel
+#pragma kernel KFFTLdsHorizontal VIVID_FFT_LDS
+#pragma kernel KFFTLdsVertical VIVID_FFT_LDS
+#pragma kernel KFFTWaveHorizontal32 VIVID_FFT_WAVE_32
+#pragma kernel KFFTWaveVertical32 VIVID_FFT_WAVE_32
+#pragma kernel KFFTWaveHorizontal64 VIVID_FFT_WAVE_64
+#pragma kernel KFFTWaveVertical64 VIVID_FFT_WAVE_64
+#pragma kernel KFFTMultiplyAndBitReverse
+#pragma kernel KFFTResolve
+#pragma kernel KFFTReduceEnergy
 #pragma use_dxc
 #pragma require Native16Bit
+#pragma multi_compile _ UNITY_DEVICE_SUPPORTS_WAVE_32 UNITY_DEVICE_SUPPORTS_WAVE_64
+
+#if defined(VIVID_FFT_WAVE_64) && defined(UNITY_DEVICE_SUPPORTS_WAVE_64) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 64
+    #define VIVID_FFT_WAVE_SIZE 64
+    #define VIVID_FFT_WAVE_LOG2_SIZE 6
+    #define VIVID_FFT_USE_WAVE_INTRINSICS 1
+#elif defined(VIVID_FFT_WAVE_32) && defined(UNITY_DEVICE_SUPPORTS_WAVE_32) && defined(UNITY_HW_WAVE_SIZE) && UNITY_HW_WAVE_SIZE == 32
+    #define VIVID_FFT_WAVE_SIZE 32
+    #define VIVID_FFT_WAVE_LOG2_SIZE 5
+    #define VIVID_FFT_USE_WAVE_INTRINSICS 1
+#else
+    #define VIVID_FFT_WAVE_SIZE 0
+    #define VIVID_FFT_WAVE_LOG2_SIZE 0
+    #define VIVID_FFT_USE_WAVE_INTRINSICS 0
+#endif
+
+#if defined(VIVID_FFT_LDS)
+    #define VIVID_FFT_USE_LDS 1
+#else
+    #define VIVID_FFT_USE_LDS 0
+#endif
 
 TEXTURE2D(_InputTexture);
 SAMPLER(sampler_LinearClamp);
@@ -334,4 +367,617 @@ void KSpdDownsample(uint3 workGroupId : SV_GroupID, uint localThreadIndex : SV_G
         AU1(numWorkGroups),
         AU1(workGroupId.z),
         AU2(workGroupOffset));
+}
+
+// -----------------------------------------------------------------------------
+// FFT convolution bloom
+//
+// This is a unitary radix-2 FFT. Both forward and inverse butterflies use
+// 1/sqrt(2), so convolution resolve restores sqrt(width * height). The spatial
+// kernel is wrapped around the origin before its transform, matching the
+// periodic layout expected by frequency-domain convolution.
+
+Texture2D<float4> _FFTSourceTexture;
+Texture2D<float4> _FFTKernelTexture;
+Texture2D<float4> _FFTRealInput;
+Texture2D<float4> _FFTImagInput;
+Texture2D<float4> _FFTKernelReal;
+Texture2D<float4> _FFTKernelImag;
+Texture2D<float4> _FFTEnergyInput;
+Texture2D<float4> _FFTKernelEnergy;
+
+RWTexture2D<float4> _FFTRealOutput;
+RWTexture2D<float4> _FFTImagOutput;
+RWTexture2D<float4> _FFTEnergyOutput;
+RWTexture2D<float4> _FFTOutputTexture;
+
+CBUFFER_START(fftConstants)
+    float4 _FFTSize;         // xy: frequency size, zw: log2 frequency size
+    float4 _FFTImageSize;    // xy: image size, zw: reciprocal image size
+    float4 _FFTKernelParams; // x: diameter in pixels, y: center clamp, zw: center UV
+    float4 _FFTInputSize;    // xy: reduction input size
+    float4 _FFTOutputSize;   // xy: reduction output size
+    float4 _BloomThreshold;
+    uint _FFTInverse;
+    float _FFTResolveScale;
+    float _FFTPadding;
+CBUFFER_END
+
+static const float k_FftUnitaryButterflyScale = 0.7071067811865475244;
+static const uint k_FftScanlineGroupSize = 256u;
+static const uint k_FftWaveMaximumLength = 2048u;
+static const uint k_FftLdsMaximumLength = 4096u;
+
+uint ReverseFftIndex(uint index, uint bitCount)
+{
+    return bitCount == 0u ? 0u : reversebits(index) >> (32u - bitCount);
+}
+
+uint2 ReverseFftCoord(uint2 coord)
+{
+    return uint2(
+        ReverseFftIndex(coord.x, uint(_FFTSize.z)),
+        ReverseFftIndex(coord.y, uint(_FFTSize.w)));
+}
+
+void CalculateFftButterflyPair(
+    float3 evenReal,
+    float3 evenImag,
+    float3 oddReal,
+    float3 oddImag,
+    uint twiddleIndex,
+    uint span,
+    out float3 lowerReal,
+    out float3 lowerImaginary,
+    out float3 upperReal,
+    out float3 upperImaginary)
+{
+    float direction = _FFTInverse != 0u ? 1.0 : -1.0;
+    float angle = direction * TWO_PI * float(twiddleIndex) / float(span);
+    float sine;
+    float cosine;
+    sincos(angle, sine, cosine);
+
+    float3 twiddledReal = oddReal * cosine - oddImag * sine;
+    float3 twiddledImaginary = oddReal * sine + oddImag * cosine;
+    lowerReal = (evenReal + twiddledReal) * k_FftUnitaryButterflyScale;
+    lowerImaginary = (evenImag + twiddledImaginary) * k_FftUnitaryButterflyScale;
+    upperReal = (evenReal - twiddledReal) * k_FftUnitaryButterflyScale;
+    upperImaginary = (evenImag - twiddledImaginary) * k_FftUnitaryButterflyScale;
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTPrepareSource(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    float3 color = 0.0;
+    uint2 imageSize = uint2(_FFTImageSize.xy);
+    if (all(coord < imageSize))
+    {
+        float2 uv = (float2(coord) + 0.5) * _FFTImageSize.zw;
+        color = max(_FFTSourceTexture.SampleLevel(sampler_LinearClamp, uv, 0.0).xyz, 0.0);
+        color = QuadraticThreshold(
+            color,
+            _BloomThreshold.x,
+            _BloomThreshold.yzw);
+    }
+
+    uint2 outputCoord = ReverseFftCoord(coord);
+    _FFTRealOutput[outputCoord] = float4(color, 0.0);
+    _FFTImagOutput[outputCoord] = 0.0;
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTPrepareKernel(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    int2 signedCoord = int2(coord);
+    if (coord.x > frequencySize.x / 2u)
+        signedCoord.x -= int(frequencySize.x);
+    if (coord.y > frequencySize.y / 2u)
+        signedCoord.y -= int(frequencySize.y);
+
+    float kernelDiameter = max(_FFTKernelParams.x, 1.0);
+    float2 centerUv = _FFTKernelParams.zw;
+    float2 kernelUv = centerUv + float2(signedCoord) / kernelDiameter;
+    float halfDiameter = kernelDiameter * 0.5;
+    bool insideSupport = all(abs(float2(signedCoord)) <= halfDiameter);
+    bool insideTexture = all(kernelUv >= 0.0) && all(kernelUv <= 1.0);
+
+    float3 kernel = 0.0;
+    if (insideSupport && insideTexture)
+    {
+        float3 centerValue = max(
+            _FFTKernelTexture.SampleLevel(sampler_LinearClamp, centerUv, 0.0).xyz,
+            0.0);
+        float3 maximumScatter = max(centerValue * _FFTKernelParams.y, 1e-6);
+        float3 sampledKernel = max(
+            _FFTKernelTexture.SampleLevel(sampler_LinearClamp, kernelUv, 0.0).xyz,
+            0.0);
+        kernel = min(sampledKernel, maximumScatter);
+    }
+
+    uint2 outputCoord = ReverseFftCoord(coord);
+    _FFTRealOutput[outputCoord] = float4(kernel, 0.0);
+    _FFTImagOutput[outputCoord] = 0.0;
+}
+
+#if VIVID_FFT_USE_LDS
+
+// The compatibility path reuses one 16 KiB half-packed complex buffer for
+// each RGB channel. Processing the channels sequentially keeps the full 4096
+// point domain within the common 32 KiB thread-group shared-memory limit.
+groupshared uint gs_FftLds[k_FftLdsMaximumLength];
+
+uint PackLdsFftComplex(float realValue, float imaginaryValue)
+{
+    return f32tof16(realValue) | (f32tof16(imaginaryValue) << 16u);
+}
+
+float2 UnpackLdsFftComplex(uint packedValue)
+{
+    return float2(
+        f16tof32(packedValue),
+        f16tof32(packedValue >> 16u));
+}
+
+void CalculateScalarFftButterflyPair(
+    float2 evenValue,
+    float2 oddValue,
+    uint twiddleIndex,
+    uint span,
+    out float2 lowerValue,
+    out float2 upperValue)
+{
+    float direction = _FFTInverse != 0u ? 1.0 : -1.0;
+    float angle = direction * TWO_PI * float(twiddleIndex) / float(span);
+    float sine;
+    float cosine;
+    sincos(angle, sine, cosine);
+
+    float2 twiddled = float2(
+        oddValue.x * cosine - oddValue.y * sine,
+        oddValue.x * sine + oddValue.y * cosine);
+    lowerValue = (evenValue + twiddled) * k_FftUnitaryButterflyScale;
+    upperValue = (evenValue - twiddled) * k_FftUnitaryButterflyScale;
+}
+
+float GetFftChannel(float3 value, uint channel)
+{
+    if (channel == 0u)
+        return value.r;
+
+    if (channel == 1u)
+        return value.g;
+
+    return value.b;
+}
+
+void StoreLdsFftOutputChannel(uint2 coord, uint channel, float2 complexValue)
+{
+    float4 realOutput = _FFTRealOutput[coord];
+    float4 imaginaryOutput = _FFTImagOutput[coord];
+    if (channel == 0u)
+    {
+        realOutput.r = complexValue.x;
+        imaginaryOutput.r = complexValue.y;
+    }
+    else if (channel == 1u)
+    {
+        realOutput.g = complexValue.x;
+        imaginaryOutput.g = complexValue.y;
+    }
+    else
+    {
+        realOutput.b = complexValue.x;
+        imaginaryOutput.b = complexValue.y;
+    }
+
+    _FFTRealOutput[coord] = realOutput;
+    _FFTImagOutput[coord] = imaginaryOutput;
+}
+
+void ExecuteLdsFftAxis(uint lineIndex, uint localThreadIndex, bool horizontal)
+{
+    uint axisLength = horizontal ? uint(_FFTSize.x) : uint(_FFTSize.y);
+    uint log2AxisLength = horizontal ? uint(_FFTSize.z) : uint(_FFTSize.w);
+    uint batchCount = (axisLength + k_FftScanlineGroupSize - 1u) / k_FftScanlineGroupSize;
+
+    for (uint batch = 0u; batch < batchCount; batch++)
+    {
+        uint sampleIndex = localThreadIndex + batch * k_FftScanlineGroupSize;
+        if (sampleIndex >= axisLength)
+            continue;
+
+        uint2 coord = horizontal
+            ? uint2(sampleIndex, lineIndex)
+            : uint2(lineIndex, sampleIndex);
+        _FFTRealOutput[coord] = 0.0;
+        _FFTImagOutput[coord] = 0.0;
+    }
+
+    AllMemoryBarrierWithGroupSync();
+
+    [unroll]
+    for (uint channel = 0u; channel < 3u; channel++)
+    {
+        for (uint batch = 0u; batch < batchCount; batch++)
+        {
+            uint sampleIndex = localThreadIndex + batch * k_FftScanlineGroupSize;
+            if (sampleIndex >= axisLength)
+                continue;
+
+            uint2 coord = horizontal
+                ? uint2(sampleIndex, lineIndex)
+                : uint2(lineIndex, sampleIndex);
+            gs_FftLds[sampleIndex] = PackLdsFftComplex(
+                GetFftChannel(_FFTRealInput[coord].xyz, channel),
+                GetFftChannel(_FFTImagInput[coord].xyz, channel));
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+
+        for (uint stage = 0u; stage < log2AxisLength; stage++)
+        {
+            uint span = 1u << (stage + 1u);
+            uint halfSpan = span >> 1u;
+            uint butterflyCount = axisLength >> 1u;
+
+            for (uint butterflyIndex = localThreadIndex;
+                 butterflyIndex < butterflyCount;
+                 butterflyIndex += k_FftScanlineGroupSize)
+            {
+                uint blockIndex = butterflyIndex / halfSpan;
+                uint twiddleIndex = butterflyIndex & (halfSpan - 1u);
+                uint evenIndex = blockIndex * span + twiddleIndex;
+                uint oddIndex = evenIndex + halfSpan;
+
+                float2 evenValue = UnpackLdsFftComplex(gs_FftLds[evenIndex]);
+                float2 oddValue = UnpackLdsFftComplex(gs_FftLds[oddIndex]);
+                float2 lowerValue;
+                float2 upperValue;
+                CalculateScalarFftButterflyPair(
+                    evenValue,
+                    oddValue,
+                    twiddleIndex,
+                    span,
+                    lowerValue,
+                    upperValue);
+                gs_FftLds[evenIndex] = PackLdsFftComplex(lowerValue.x, lowerValue.y);
+                gs_FftLds[oddIndex] = PackLdsFftComplex(upperValue.x, upperValue.y);
+            }
+
+            GroupMemoryBarrierWithGroupSync();
+        }
+
+        for (uint batch = 0u; batch < batchCount; batch++)
+        {
+            uint sampleIndex = localThreadIndex + batch * k_FftScanlineGroupSize;
+            if (sampleIndex >= axisLength)
+                continue;
+
+            uint2 coord = horizontal
+                ? uint2(sampleIndex, lineIndex)
+                : uint2(lineIndex, sampleIndex);
+            StoreLdsFftOutputChannel(
+                coord,
+                channel,
+                UnpackLdsFftComplex(gs_FftLds[sampleIndex]));
+        }
+
+        AllMemoryBarrierWithGroupSync();
+    }
+}
+
+#endif
+
+[numthreads(256, 1, 1)]
+void KFFTLdsHorizontal(uint3 groupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+#if VIVID_FFT_USE_LDS
+    ExecuteLdsFftAxis(groupId.x, localThreadIndex, true);
+#endif
+}
+
+[numthreads(256, 1, 1)]
+void KFFTLdsVertical(uint3 groupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+#if VIVID_FFT_USE_LDS
+    ExecuteLdsFftAxis(groupId.x, localThreadIndex, false);
+#endif
+}
+
+#if VIVID_FFT_USE_WAVE_INTRINSICS
+
+// The primary FFT path uses one 256-thread group per scanline. The first
+// log2(waveSize) stages stay in registers and exchange values with wave
+// shuffles. Remaining stages update disjoint butterfly pairs in-place through
+// 24 KiB of half-packed complex RGB LDS, staying within the common 32 KiB
+// thread-group shared-memory limit.
+groupshared uint gs_FftWaveR[k_FftWaveMaximumLength];
+groupshared uint gs_FftWaveG[k_FftWaveMaximumLength];
+groupshared uint gs_FftWaveB[k_FftWaveMaximumLength];
+
+uint PackFftComplex(float realValue, float imaginaryValue)
+{
+    return f32tof16(realValue) | (f32tof16(imaginaryValue) << 16u);
+}
+
+float2 UnpackFftComplex(uint packedValue)
+{
+    return float2(
+        f16tof32(packedValue),
+        f16tof32(packedValue >> 16u));
+}
+
+void StoreWaveFftValue(
+    uint index,
+    float3 realValue,
+    float3 imaginaryValue)
+{
+    gs_FftWaveR[index] = PackFftComplex(realValue.r, imaginaryValue.r);
+    gs_FftWaveG[index] = PackFftComplex(realValue.g, imaginaryValue.g);
+    gs_FftWaveB[index] = PackFftComplex(realValue.b, imaginaryValue.b);
+}
+
+void LoadWaveFftValue(
+    uint index,
+    out float3 realValue,
+    out float3 imaginaryValue)
+{
+    float2 complexR = UnpackFftComplex(gs_FftWaveR[index]);
+    float2 complexG = UnpackFftComplex(gs_FftWaveG[index]);
+    float2 complexB = UnpackFftComplex(gs_FftWaveB[index]);
+    realValue = float3(complexR.x, complexG.x, complexB.x);
+    imaginaryValue = float3(complexR.y, complexG.y, complexB.y);
+}
+
+float2 ExecuteWaveFftButterfly(float2 value, uint sampleIndex, uint stage)
+{
+    uint halfSpan = 1u << stage;
+    uint span = halfSpan << 1u;
+    uint laneIndex = WaveGetLaneIndex();
+    uint partnerLane = laneIndex ^ halfSpan;
+    float2 partner = float2(
+        WaveReadLaneAt(value.x, partnerLane),
+        WaveReadLaneAt(value.y, partnerLane));
+
+    uint offset = sampleIndex & (span - 1u);
+    uint twiddleIndex = offset & (halfSpan - 1u);
+    bool upperHalf = offset >= halfSpan;
+    float2 evenValue = upperHalf ? partner : value;
+    float2 oddValue = upperHalf ? value : partner;
+
+    float direction = _FFTInverse != 0u ? 1.0 : -1.0;
+    float angle = direction * TWO_PI * float(twiddleIndex) / float(span);
+    float sine;
+    float cosine;
+    sincos(angle, sine, cosine);
+    float2 twiddled = float2(
+        oddValue.x * cosine - oddValue.y * sine,
+        oddValue.x * sine + oddValue.y * cosine);
+    return (upperHalf ? evenValue - twiddled : evenValue + twiddled)
+        * k_FftUnitaryButterflyScale;
+}
+
+void ExecuteWaveFftAxis(uint lineIndex, uint localThreadIndex, bool horizontal)
+{
+    uint axisLength = horizontal ? uint(_FFTSize.x) : uint(_FFTSize.y);
+    uint log2AxisLength = horizontal ? uint(_FFTSize.z) : uint(_FFTSize.w);
+    uint batchCount = (axisLength + k_FftScanlineGroupSize - 1u) / k_FftScanlineGroupSize;
+
+    for (uint batch = 0u; batch < batchCount; batch++)
+    {
+        uint sampleIndex = localThreadIndex + batch * k_FftScanlineGroupSize;
+        bool active = sampleIndex < axisLength;
+        float3 realValue = 0.0;
+        float3 imaginaryValue = 0.0;
+        if (active)
+        {
+            uint2 coord = horizontal
+                ? uint2(sampleIndex, lineIndex)
+                : uint2(lineIndex, sampleIndex);
+            realValue = _FFTRealInput[coord].xyz;
+            imaginaryValue = _FFTImagInput[coord].xyz;
+
+            [unroll]
+            for (uint stage = 0u; stage < VIVID_FFT_WAVE_LOG2_SIZE; stage++)
+            {
+                float2 complexR = ExecuteWaveFftButterfly(
+                    float2(realValue.r, imaginaryValue.r),
+                    sampleIndex,
+                    stage);
+                float2 complexG = ExecuteWaveFftButterfly(
+                    float2(realValue.g, imaginaryValue.g),
+                    sampleIndex,
+                    stage);
+                float2 complexB = ExecuteWaveFftButterfly(
+                    float2(realValue.b, imaginaryValue.b),
+                    sampleIndex,
+                    stage);
+                realValue = float3(complexR.x, complexG.x, complexB.x);
+                imaginaryValue = float3(complexR.y, complexG.y, complexB.y);
+            }
+
+            StoreWaveFftValue(sampleIndex, realValue, imaginaryValue);
+        }
+    }
+
+    GroupMemoryBarrierWithGroupSync();
+
+    for (uint stage = VIVID_FFT_WAVE_LOG2_SIZE; stage < log2AxisLength; stage++)
+    {
+        uint span = 1u << (stage + 1u);
+        uint halfSpan = span >> 1u;
+        uint butterflyCount = axisLength >> 1u;
+
+        for (uint butterflyIndex = localThreadIndex;
+             butterflyIndex < butterflyCount;
+             butterflyIndex += k_FftScanlineGroupSize)
+        {
+            uint blockIndex = butterflyIndex / halfSpan;
+            uint twiddleIndex = butterflyIndex & (halfSpan - 1u);
+            uint evenIndex = blockIndex * span + twiddleIndex;
+            uint oddIndex = evenIndex + halfSpan;
+
+            float3 evenReal;
+            float3 evenImaginary;
+            float3 oddReal;
+            float3 oddImaginary;
+            LoadWaveFftValue(
+                evenIndex,
+                evenReal,
+                evenImaginary);
+            LoadWaveFftValue(
+                oddIndex,
+                oddReal,
+                oddImaginary);
+
+            float3 lowerReal;
+            float3 lowerImaginary;
+            float3 upperReal;
+            float3 upperImaginary;
+            CalculateFftButterflyPair(
+                evenReal,
+                evenImaginary,
+                oddReal,
+                oddImaginary,
+                twiddleIndex,
+                span,
+                lowerReal,
+                lowerImaginary,
+                upperReal,
+                upperImaginary);
+            StoreWaveFftValue(
+                evenIndex,
+                lowerReal,
+                lowerImaginary);
+            StoreWaveFftValue(
+                oddIndex,
+                upperReal,
+                upperImaginary);
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    for (uint batch = 0u; batch < batchCount; batch++)
+    {
+        uint sampleIndex = localThreadIndex + batch * k_FftScanlineGroupSize;
+        if (sampleIndex >= axisLength)
+            continue;
+
+        float3 realValue;
+        float3 imaginaryValue;
+        LoadWaveFftValue(
+            sampleIndex,
+            realValue,
+            imaginaryValue);
+        uint2 coord = horizontal
+            ? uint2(sampleIndex, lineIndex)
+            : uint2(lineIndex, sampleIndex);
+        _FFTRealOutput[coord] = float4(realValue, 0.0);
+        _FFTImagOutput[coord] = float4(imaginaryValue, 0.0);
+    }
+}
+
+#endif
+
+[numthreads(256, 1, 1)]
+void KFFTWaveHorizontal32(uint3 groupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+#if VIVID_FFT_USE_WAVE_INTRINSICS
+    ExecuteWaveFftAxis(groupId.x, localThreadIndex, true);
+#endif
+}
+
+[numthreads(256, 1, 1)]
+void KFFTWaveVertical32(uint3 groupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+#if VIVID_FFT_USE_WAVE_INTRINSICS
+    ExecuteWaveFftAxis(groupId.x, localThreadIndex, false);
+#endif
+}
+
+[numthreads(256, 1, 1)]
+void KFFTWaveHorizontal64(uint3 groupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+#if VIVID_FFT_USE_WAVE_INTRINSICS
+    ExecuteWaveFftAxis(groupId.x, localThreadIndex, true);
+#endif
+}
+
+[numthreads(256, 1, 1)]
+void KFFTWaveVertical64(uint3 groupId : SV_GroupID, uint localThreadIndex : SV_GroupIndex)
+{
+#if VIVID_FFT_USE_WAVE_INTRINSICS
+    ExecuteWaveFftAxis(groupId.x, localThreadIndex, false);
+#endif
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTMultiplyAndBitReverse(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 frequencySize = uint2(_FFTSize.xy);
+    if (any(coord >= frequencySize))
+        return;
+
+    float3 sourceReal = _FFTRealInput[coord].xyz;
+    float3 sourceImag = _FFTImagInput[coord].xyz;
+    float3 kernelReal = _FFTKernelReal[coord].xyz;
+    float3 kernelImag = _FFTKernelImag[coord].xyz;
+
+    float3 productReal = sourceReal * kernelReal - sourceImag * kernelImag;
+    float3 productImag = sourceReal * kernelImag + sourceImag * kernelReal;
+    uint2 outputCoord = ReverseFftCoord(coord);
+    _FFTRealOutput[outputCoord] = float4(productReal, 0.0);
+    _FFTImagOutput[outputCoord] = float4(productImag, 0.0);
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTReduceEnergy(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 outputCoord = dispatchThreadId.xy;
+    uint2 outputSize = uint2(_FFTOutputSize.xy);
+    if (any(outputCoord >= outputSize))
+        return;
+
+    uint2 inputSize = uint2(_FFTInputSize.xy);
+    uint2 inputCoord = outputCoord * 2u;
+    float3 energy = 0.0;
+    [unroll]
+    for (uint y = 0u; y < 2u; y++)
+    {
+        [unroll]
+        for (uint x = 0u; x < 2u; x++)
+        {
+            uint2 sampleCoord = inputCoord + uint2(x, y);
+            if (all(sampleCoord < inputSize))
+                energy += _FFTEnergyInput[sampleCoord].xyz;
+        }
+    }
+
+    _FFTEnergyOutput[outputCoord] = float4(energy, 0.0);
+}
+
+[numthreads(GROUP_SIZE, GROUP_SIZE, 1)]
+void KFFTResolve(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coord = dispatchThreadId.xy;
+    uint2 imageSize = uint2(_FFTImageSize.xy);
+    if (any(coord >= imageSize))
+        return;
+
+    float3 kernelEnergy = max(_FFTKernelEnergy[uint2(0u, 0u)].xyz, 1e-5);
+    float3 bloom = max(_FFTRealInput[coord].xyz * _FFTResolveScale / kernelEnergy, 0.0);
+    _FFTOutputTexture[coord] = float4(min(bloom, 65504.0), 1.0);
 }

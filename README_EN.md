@@ -35,7 +35,7 @@ The modules below have implementations in the current package. Availability stil
 | --- | --- |
 | Core rendering | Pre-depth, GBuffer, deferred lighting, motion vectors, HZB, general object drawing, and color pyramids |
 | Shadows and lighting | CSM / PCSS, clustered lighting, directional DXR shadows with SIGMA denoising, sky, and atmospheric scattering |
-| Post processing | Auto exposure, bloom, color grading, depth of field, GTAO, lens flares, SSR with ReBlur, local exposure, and final compositing |
+| Post processing | Auto exposure, bloom with mip-scattering and FFT-convolution modes, color grading, depth of field, GTAO, lens flares, SSR with ReBlur, local exposure, and final compositing |
 | Anti-aliasing and upscaling | CMAA2, TAA, TSR, and FSR3; DLSS Super Resolution / Ray Reconstruction require additional plugin integration |
 | Volumetrics | Global and local volumetric fog, VBuffer, volumetric lighting, and Max-Z generation |
 | GPU Driven | Meshlet import and rendering, Visibility Buffer, object dispatch, debug overlay, and bindless descriptor support |

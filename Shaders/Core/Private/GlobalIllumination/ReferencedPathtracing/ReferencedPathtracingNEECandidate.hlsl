@@ -318,6 +318,10 @@ bool ReferencedPathtracingSampleUnifiedNEECandidate(
     bool sampled = false;
     if (candidate.lightType == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
     {
+        candidate.shadowStrength = 1.0;
+        candidate.flags = REFERENCED_LIGHT_FLAG_INFINITE
+            | REFERENCED_LIGHT_FLAG_BSDF_REACHABLE
+            | REFERENCED_LIGHT_FLAG_CASTS_SHADOWS;
         sampled = ReferencedPathtracingSampleEnvironmentCandidate(
             randomSample.yz,
             candidate);
@@ -326,6 +330,7 @@ bool ReferencedPathtracingSampleUnifiedNEECandidate(
     {
         ReferencedPathTracingLightRecord light =
             ReferencedPathtracingLoadReferenceLight(candidate.lightIndex);
+        candidate.flags = light.flags;
         candidate.shadowStrength =
             (light.flags & REFERENCED_LIGHT_FLAG_CASTS_SHADOWS) != 0u
                 ? saturate(light.shadowStrength)

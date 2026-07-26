@@ -29,6 +29,23 @@ namespace VividRP.Runtime
         BsdfOnly = 2
     }
 
+    public enum ReferencedPathTracingTransportDebugMode
+    {
+        Combined = 0,
+        [InspectorName("NEE PDFs")]
+        NeePdfs = 1,
+        [InspectorName("NEE MIS Weight")]
+        NeeMisWeight = 2,
+        [InspectorName("BSDF Segment PDFs")]
+        BsdfSegmentPdfs = 3,
+        [InspectorName("BSDF Segment MIS Weight")]
+        BsdfSegmentMisWeight = 4,
+        [InspectorName("NEE Light Identity")]
+        NeeLightIdentity = 5,
+        [InspectorName("Invalid Sample Mask")]
+        InvalidSampleMask = 6
+    }
+
     [Serializable]
     public sealed class ReferencedPathTracingEnvironmentSamplingModeParameter
         : VolumeParameter<ReferencedPathTracingEnvironmentSamplingMode>
@@ -59,6 +76,18 @@ namespace VividRP.Runtime
     {
         public ReferencedPathTracingEnvironmentEstimatorModeParameter(
             ReferencedPathTracingEnvironmentEstimatorMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingTransportDebugModeParameter
+        : VolumeParameter<ReferencedPathTracingTransportDebugMode>
+    {
+        public ReferencedPathTracingTransportDebugModeParameter(
+            ReferencedPathTracingTransportDebugMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -122,12 +151,21 @@ namespace VividRP.Runtime
         public ReferencedPathTracingEnvironmentSamplingModeParameter environmentSamplingMode =
             new(ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling);
 
+        [InspectorName("Transport Estimator Mode")]
         [Tooltip(
-            "Selects how environment NEE and BSDF misses are combined. MIS is the production " +
-            "estimator; Light Only and BSDF Only are unbiased validation modes. Delta BSDF " +
-            "events retain their only reachable BSDF-miss path in every mode.")]
+            "Selects how analytic-light and environment NEE are combined with BSDF-sampled " +
+            "segments. MIS is the production estimator. Light Only and BSDF Only are validation " +
+            "modes; singular lights and delta BSDF events retain their only reachable strategy. " +
+            "The serialized field name is retained for existing Volume assets.")]
         public ReferencedPathTracingEnvironmentEstimatorModeParameter environmentEstimatorMode =
             new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+
+        [Tooltip(
+            "Replaces only the resolved path-tracing output with raw first-bounce transport " +
+            "diagnostics. Physical lighting AOVs remain unchanged. PDF views output unscaled " +
+            "selection, solid-angle, and BSDF densities in RGB.")]
+        public ReferencedPathTracingTransportDebugModeParameter transportDebugMode =
+            new(ReferencedPathTracingTransportDebugMode.Combined);
 
         [Tooltip(
             "Selects the reference environment contribution shown in the resolved path-tracing output. " +
@@ -158,6 +196,9 @@ namespace VividRP.Runtime
             environmentEstimatorMode ??=
                 new ReferencedPathTracingEnvironmentEstimatorModeParameter(
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+            transportDebugMode ??=
+                new ReferencedPathTracingTransportDebugModeParameter(
+                    ReferencedPathTracingTransportDebugMode.Combined);
             environmentDebugMode ??=
                 new ReferencedPathTracingEnvironmentDebugModeParameter(
                     ReferencedPathTracingEnvironmentDebugMode.Combined);

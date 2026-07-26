@@ -35,6 +35,9 @@ namespace VividRP.Editor.Tests
                     volume.environmentEstimatorMode.value,
                     Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
                 Assert.That(
+                    volume.transportDebugMode.value,
+                    Is.EqualTo(ReferencedPathTracingTransportDebugMode.Combined));
+                Assert.That(
                     volume.environmentDebugMode.value,
                     Is.EqualTo(ReferencedPathTracingEnvironmentDebugMode.Combined));
             }
@@ -72,6 +75,17 @@ namespace VividRP.Editor.Tests
                 volume.fixedSeed.value = 12346;
                 var seedChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.fixedSeed.value = 12345;
+                volume.environmentEstimatorMode.value =
+                    ReferencedPathTracingEnvironmentEstimatorMode.LightOnly;
+                var estimatorChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.environmentEstimatorMode.value =
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis;
+                volume.transportDebugMode.value =
+                    ReferencedPathTracingTransportDebugMode.NeePdfs;
+                var transportDebugChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
 
                 Assert.That(original.deterministicSampling, Is.True);
                 Assert.That(original.fixedSeed, Is.EqualTo(12345));
@@ -84,13 +98,21 @@ namespace VividRP.Editor.Tests
                     original.enableShaderExecutionReordering,
                     Is.False);
                 Assert.That(
+                    original.estimatorMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentEstimatorMode.Mis));
+                Assert.That(
+                    original.transportDebugMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingTransportDebugMode.Combined));
+                Assert.That(
                     shaderExecutionReorderingChanged
                         .enableShaderExecutionReordering,
                     Is.True);
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(2));
+                    Is.EqualTo(3));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -100,11 +122,189 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     seedChanged.signature,
                     Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    estimatorChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    transportDebugChanged.signature,
+                    Is.Not.EqualTo(original.signature));
             }
             finally
             {
                 Object.DestroyImmediate(volume);
             }
+        }
+
+        [Test]
+        public void EstimatorPolicy_PreservesOnlyReachableStrategiesInEveryMode()
+        {
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.IsNeeEligible(
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis,
+                    true),
+                Is.True);
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.IsNeeEligible(
+                    ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
+                    true),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.IsNeeEligible(
+                    ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
+                    false),
+                Is.True);
+
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetLightEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis,
+                    true,
+                    false,
+                    0.25f,
+                    0.25f),
+                Is.EqualTo(0.5f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetLightEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.LightOnly,
+                    true,
+                    false,
+                    0.25f,
+                    0.25f),
+                Is.EqualTo(1.0f));
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetLightEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
+                    true,
+                    false,
+                    0.25f,
+                    0.25f),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetLightEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
+                    false,
+                    true,
+                    0.0f,
+                    0.25f),
+                Is.EqualTo(1.0f));
+
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetBsdfEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.Mis,
+                    false,
+                    0.25f,
+                    0.25f),
+                Is.EqualTo(0.5f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetBsdfEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.LightOnly,
+                    false,
+                    0.25f,
+                    0.25f),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetBsdfEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.LightOnly,
+                    true,
+                    0.25f,
+                    0.25f),
+                Is.EqualTo(1.0f));
+            Assert.That(
+                ReferencedPathTracingEstimatorPolicy.GetBsdfEstimatorWeight(
+                    ReferencedPathTracingEnvironmentEstimatorMode.LightOnly,
+                    false,
+                    0.25f,
+                    0.0f),
+                Is.EqualTo(1.0f));
+        }
+
+        [Test]
+        public void TransportConformanceGate_ValidatesMeansHistogramAndPdfReciprocity()
+        {
+            var evidence = CreateValidTransportConformanceEvidence();
+
+            Assert.That(
+                ReferencedPathTracingTransportConformanceGate.Validate(
+                    evidence,
+                    out var failure),
+                Is.True,
+                failure);
+
+            evidence.estimatorMeasurements[1].meanLuminance = 1.2f;
+            Assert.That(
+                ReferencedPathTracingTransportConformanceGate.Validate(
+                    evidence,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("means disagree"));
+
+            evidence = CreateValidTransportConformanceEvidence();
+            evidence.lightSelection.observedSelectionCounts[0] = 9000;
+            evidence.lightSelection.observedSelectionCounts[1] = 1000;
+            Assert.That(
+                ReferencedPathTracingTransportConformanceGate.Validate(
+                    evidence,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("Light-selection bin"));
+
+            evidence = CreateValidTransportConformanceEvidence();
+            evidence.pdfConsistency.maximumRelativeError = 0.01f;
+            Assert.That(
+                ReferencedPathTracingTransportConformanceGate.Validate(
+                    evidence,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("PDF consistency"));
+        }
+
+        private static ReferencedPathTracingTransportConformanceEvidence
+            CreateValidTransportConformanceEvidence()
+        {
+            return new ReferencedPathTracingTransportConformanceEvidence
+            {
+                status = ReferencedPathTracingValidationStatus.Passed,
+                estimatorMeasurements = new[]
+                {
+                    CreateEstimatorMeasurement(
+                        ReferencedPathTracingEnvironmentEstimatorMode.Mis,
+                        1.0f),
+                    CreateEstimatorMeasurement(
+                        ReferencedPathTracingEnvironmentEstimatorMode.LightOnly,
+                        1.005f),
+                    CreateEstimatorMeasurement(
+                        ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
+                        0.995f)
+                },
+                lightSelection = new ReferencedPathTracingLightSelectionEvidence
+                {
+                    sampleCount = 10000,
+                    declaredSelectionPdfs = new[] { 0.25f, 0.75f },
+                    observedSelectionCounts = new[] { 2500, 7500 }
+                },
+                pdfConsistency =
+                    new ReferencedPathTracingPdfConsistencyEvidence
+                {
+                    comparisonCount = 10000,
+                    nonFiniteCount = 0,
+                    maximumRelativeError = 1e-6f
+                }
+            };
+        }
+
+        private static ReferencedPathTracingEstimatorMeasurement
+            CreateEstimatorMeasurement(
+                ReferencedPathTracingEnvironmentEstimatorMode mode,
+                float meanLuminance)
+        {
+            return new ReferencedPathTracingEstimatorMeasurement
+            {
+                estimatorMode = mode,
+                sampleCount = 4096,
+                meanLuminance = meanLuminance,
+                standardError = 0.005f,
+                finitePixelFraction = 1.0f,
+                negativeRadianceFraction = 0.0f
+            };
         }
     }
 }

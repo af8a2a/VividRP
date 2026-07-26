@@ -83,8 +83,10 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedEnvironmentNeeEnabled");
         private static readonly int EnvironmentSamplingModeId =
             Shader.PropertyToID("_ReferencedEnvironmentSamplingMode");
-        private static readonly int EnvironmentEstimatorModeId =
-            Shader.PropertyToID("_ReferencedEnvironmentEstimatorMode");
+        private static readonly int TransportEstimatorModeId =
+            Shader.PropertyToID("_ReferencedTransportEstimatorMode");
+        private static readonly int TransportDebugModeId =
+            Shader.PropertyToID("_ReferencedTransportDebugMode");
         private static readonly int EnvironmentDebugModeId =
             Shader.PropertyToID("_ReferencedEnvironmentDebugMode");
         private static readonly int CameraClearColorId =
@@ -809,7 +811,9 @@ namespace VividRP.Runtime.RenderPass.Core
             var neeEnabled =
                 hasEnvironmentBinding && m_EnvironmentState.neeEnabled ? 1 : 0;
             var samplingMode = (int)m_EnvironmentState.samplingMode;
-            var estimatorMode = (int)m_EnvironmentState.estimatorMode;
+            var estimatorMode = (int)m_IntegratorState.estimatorMode;
+            var transportDebugMode =
+                (int)m_IntegratorState.transportDebugMode;
             var debugMode = (int)m_EnvironmentState.debugMode;
             var clearColor = m_CameraBackgroundState.clearColor;
             var cameraClearColor = new Vector4(
@@ -828,7 +832,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 importanceSamplingEnabled);
             cmd.SetGlobalInt(EnvironmentNeeEnabledId, neeEnabled);
             cmd.SetGlobalInt(EnvironmentSamplingModeId, samplingMode);
-            cmd.SetGlobalInt(EnvironmentEstimatorModeId, estimatorMode);
+            cmd.SetGlobalInt(TransportEstimatorModeId, estimatorMode);
+            cmd.SetGlobalInt(TransportDebugModeId, transportDebugMode);
             cmd.SetGlobalInt(EnvironmentDebugModeId, debugMode);
             cmd.SetGlobalVector(CameraClearColorId, cameraClearColor);
             cmd.SetGlobalInt(CameraSkyEnabledId, cameraSkyEnabled);
@@ -863,8 +868,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 samplingMode);
             cmd.SetRayTracingIntParam(
                 m_RayTracingShader,
-                EnvironmentEstimatorModeId,
+                TransportEstimatorModeId,
                 estimatorMode);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                TransportDebugModeId,
+                transportDebugMode);
             cmd.SetRayTracingIntParam(
                 m_RayTracingShader,
                 EnvironmentDebugModeId,

@@ -155,35 +155,42 @@ float ReferencedPathtracingGetReferenceLightSelectionWeight()
         return 0.0;
     }
 
-    if (_ReferencedLocalLightNeeEnabled != 0)
+    if (_ReferencedLocalLightNeeEnabled != 0
+        && _ReferencedTransportEstimatorMode
+            != kReferencedTransportEstimatorBsdfOnly)
+    {
         return parameters.totalSelectionWeight;
+    }
 
-    // The serialized legacy toggle now disables local analytic lights. Rebuild the
-    // eligible weight on the GPU so disabled entries do not consume rejection samples.
-    float directionalSelectionWeight = 0.0;
+    // Rebuild the eligible domain when local NEE or the BSDF-only validation
+    // strategy removes entries from the CPU-authored global distribution.
+    float eligibleSelectionWeight = 0.0;
     for (uint lightIndex = 0u;
          lightIndex < parameters.lightCount;
          ++lightIndex)
     {
         ReferencedPathTracingLightRecord light =
             ReferencedPathtracingLoadReferenceLight(lightIndex);
-        if (light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+        bool localLightAllowed =
+            _ReferencedLocalLightNeeEnabled != 0
+            || light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
+        bool bsdfReachable =
+            (light.flags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
+        if (localLightAllowed
+            && ReferencedPathtracingIsLightNeeEligible(bsdfReachable))
         {
-            directionalSelectionWeight += max(
-                light.selectionWeight,
-                0.0);
+            eligibleSelectionWeight += max(light.selectionWeight, 0.0);
         }
     }
 
-    return directionalSelectionWeight;
+    return eligibleSelectionWeight;
 }
 
 float ReferencedPathtracingGetEnvironmentSelectionWeight()
 {
     if (_ReferencedEnvironmentNeeEnabled == 0
         || _ReferencedEnvironmentLightingEnabled == 0
-        || _ReferencedEnvironmentEstimatorMode
-            == kReferencedEnvironmentEstimatorBsdfOnly
+        || !ReferencedPathtracingIsLightNeeEligible(true)
         || _ReferencedEnvironmentSamplingMode
             == kReferencedEnvironmentSamplingBsdfOnly
         || !ReferencedPathtracingHasEnvironment()
@@ -213,8 +220,13 @@ float ReferencedPathtracingGetUnifiedLightSelectionWeight()
 float ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
     ReferencedPathTracingLightRecord light)
 {
-    if (_ReferencedLocalLightNeeEnabled == 0
-        && light.lightType != REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+    bool localLightAllowed =
+        _ReferencedLocalLightNeeEnabled != 0
+        || light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
+    bool bsdfReachable =
+        (light.flags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
+    if (!localLightAllowed
+        || !ReferencedPathtracingIsLightNeeEligible(bsdfReachable))
     {
         return 0.0;
     }
@@ -264,7 +276,9 @@ bool ReferencedPathtracingSampleUnifiedLightSource(
         min(saturate(randomValue), 0.99999994) * totalSelectionWeight;
     if (weightedSample < analyticWeight)
     {
-        if (_ReferencedLocalLightNeeEnabled != 0)
+        if (_ReferencedLocalLightNeeEnabled != 0
+            && _ReferencedTransportEstimatorMode
+                != kReferencedTransportEstimatorBsdfOnly)
         {
             float conditionalSample = weightedSample / analyticWeight;
             float conditionalSelectionPdf;
@@ -295,8 +309,16 @@ bool ReferencedPathtracingSampleUnifiedLightSource(
                 ReferencedPathTracingLightRecord light =
                     ReferencedPathtracingLoadReferenceLight(
                         candidateIndex);
-                if (light.lightType
-                    != REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                bool localLightAllowed =
+                    _ReferencedLocalLightNeeEnabled != 0
+                    || light.lightType
+                        == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
+                bool bsdfReachable =
+                    (light.flags
+                        & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
+                if (!localLightAllowed
+                    || !ReferencedPathtracingIsLightNeeEligible(
+                        bsdfReachable))
                 {
                     continue;
                 }

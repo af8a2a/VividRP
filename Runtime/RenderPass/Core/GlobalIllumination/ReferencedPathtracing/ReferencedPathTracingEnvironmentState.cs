@@ -349,7 +349,7 @@ namespace VividRP.Runtime.RenderPass.Core
     [Serializable]
     public sealed class ReferencedPathTracingEnvironmentMetadata
     {
-        internal const int ContractVersion = 1;
+        internal const int ContractVersion = 2;
 
         public int contractVersion;
         public string assetName;
@@ -364,6 +364,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public float physicalIntensityMultiplier;
         public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
         public ReferencedPathTracingEnvironmentEstimatorMode estimatorMode;
+        public ReferencedPathTracingEnvironmentDebugMode debugMode;
         public int pdfVersion;
         public bool rawRadianceIsPreExposed;
 
@@ -391,6 +392,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 physicalIntensityMultiplier = state.intensityMultiplier,
                 samplingMode = state.samplingMode,
                 estimatorMode = state.estimatorMode,
+                debugMode = state.debugMode,
                 pdfVersion =
                     ReferencedPathTracingEnvironmentImportanceLayout.Version,
                 rawRadianceIsPreExposed = false

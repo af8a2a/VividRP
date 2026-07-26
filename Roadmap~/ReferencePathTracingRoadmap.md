@@ -977,6 +977,27 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   使用解析 emitter hit distance；finite directional 继续保留 FP32 direct AOV 与 finite-sun
   denoiser copy。
 
+### Phase 4.4 checkpoint: Light Transport Conformance (2026-07-26)
+
+- 原 `environmentEstimatorMode` 序列化字段保留以兼容已有 Volume Profile，但语义扩展为全局
+  transport estimator。`MIS`、`Light Only` 与 `BSDF Only` 现在统一控制解析灯 NEE、
+  BSDF-segment light evaluation 和 environment NEE/miss；integrator contract 升级为 V3，
+  estimator/debug mode 进入积累失效签名与 capture metadata。
+- BSDF-only 模式会从 unified candidate distribution 中剔除 `BSDF_REACHABLE` emitter，
+  因而 segment/miss 侧观察到 selection PDF 为 0 并以权重 1 保留完整 support。point、spot、
+  tube、delta directional 等 BSDF 不可达或 singular 事件仍保留 NEE，Light-only 模式也保留
+  delta BSDF 的唯一可达路径。
+- 新增 raw transport debug views：首个 primary NEE 的 selection/solid-angle/BSDF PDF、
+  light-side MIS weight、stable light identity，以及首个 primary BSDF-segment emitter 的对应
+  PDF 与 BSDF-side MIS weight。Invalid Sample Mask 分离标记 NEE、segment 和最终 path 的
+  NaN/Inf/negative-radiance 异常；debug view 只替换 resolved output，不污染物理 lighting AOV。
+- 新增 CPU estimator-policy mirror 和 `ReferencedPathTracingTransportConformanceGate`。
+  conformance evidence 必须同时提供三 estimator 的高 SPP 均值/standard error、light-selection
+  histogram 与 sample/evaluate PDF reciprocity；V1 frozen capture contract 升级为 V2 并要求
+  conformance evidence 为 Passed，且所有 transport/environment debug mode 为 Combined。
+- 代码与 EditMode contract 已建立；实际 DX12 GPU corpus 仍需填充 estimator measurements、
+  histogram 和 PDF comparison evidence，未执行前不得将 V1 freeze 标记为完成。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

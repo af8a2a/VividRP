@@ -127,6 +127,18 @@ namespace VividRP.Runtime
         public BoolParameter enableReGIR = new(true);
 
         [Tooltip(
+            "Mixes the stable global light distribution with a position- and normal-aware " +
+            "proposal at every shading vertex. The global proposal remains active as a support " +
+            "floor, so enabling this changes variance but not the converged result.")]
+        public BoolParameter shadingPointLightSelection = new(true);
+
+        [Tooltip(
+            "Probability of sampling the stable global light proposal when shading-point-aware " +
+            "selection is enabled. The remaining probability samples the local proposal.")]
+        public ClampedFloatParameter globalLightProposalProbability =
+            new(0.25f, 0.05f, 1.0f);
+
+        [Tooltip(
             "Uses NVIDIA Shader Execution Reordering for surface rays when running Direct3D 12 " +
             "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
         public BoolParameter enableShaderExecutionReordering = new(false);
@@ -182,6 +194,9 @@ namespace VividRP.Runtime
             russianRouletteStartBounce ??=
                 new ClampedIntParameter(3, 1, MaximumSupportedBounceCount);
             enableReGIR ??= new BoolParameter(true);
+            shadingPointLightSelection ??= new BoolParameter(true);
+            globalLightProposalProbability ??=
+                new ClampedFloatParameter(0.25f, 0.05f, 1.0f);
             enableShaderExecutionReordering ??= new BoolParameter(false);
             targetSampleCount ??=
                 new ClampedIntParameter(

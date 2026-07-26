@@ -131,6 +131,7 @@ void StandardLitReferencedPathtracingClosestHit(
     bool validNeeCandidate =
         ReferencedPathtracingSampleUnifiedNEECandidate(
             geometry.positionWS,
+            geometry.faceNormalWS,
             payload.directLightRandom,
             neeCandidate);
     // Preserve the selected source and declared densities even when its

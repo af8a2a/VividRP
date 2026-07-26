@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 3;
+        internal const int Version = 4;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -16,6 +16,8 @@ namespace VividRP.Runtime.RenderPass.Core
             int maxBounceCount,
             int russianRouletteStartBounce,
             bool enableReGIR,
+            bool shadingPointLightSelection,
+            float globalLightProposalProbability,
             bool enableShaderExecutionReordering,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
             ReferencedPathTracingTransportDebugMode transportDebugMode,
@@ -32,6 +34,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 1,
                 ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount);
             this.enableReGIR = enableReGIR;
+            this.shadingPointLightSelection = shadingPointLightSelection;
+            this.globalLightProposalProbability =
+                ReferencedPathTracingLightProposalPolicy
+                    .SanitizeGlobalProposalProbability(
+                        globalLightProposalProbability,
+                        ReferencedPathTracingLightProposalPolicy
+                            .DefaultGlobalProposalProbability);
             this.enableShaderExecutionReordering =
                 enableShaderExecutionReordering;
             this.estimatorMode = SanitizeEstimatorMode(estimatorMode);
@@ -55,6 +64,12 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(ref hash, enableReGIR);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
+                shadingPointLightSelection);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                this.globalLightProposalProbability);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
                 (int)this.estimatorMode);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -69,6 +84,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal int maxBounceCount { get; }
         internal int russianRouletteStartBounce { get; }
         internal bool enableReGIR { get; }
+        internal bool shadingPointLightSelection { get; }
+        internal float globalLightProposalProbability { get; }
         internal bool enableShaderExecutionReordering { get; }
         internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
         internal ReferencedPathTracingTransportDebugMode transportDebugMode { get; }
@@ -89,6 +106,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? settings.russianRouletteStartBounce.value
                     : 3,
                 !useVolumeSettings || settings.enableReGIR.value,
+                !useVolumeSettings
+                    || settings.shadingPointLightSelection.value,
+                useVolumeSettings
+                    ? settings.globalLightProposalProbability.value
+                    : ReferencedPathTracingLightProposalPolicy
+                        .DefaultGlobalProposalProbability,
                 useVolumeSettings
                     && settings.enableShaderExecutionReordering.value,
                 useVolumeSettings
@@ -345,6 +368,74 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    internal static class ReferencedPathTracingLightProposalPolicy
+    {
+        internal const float DefaultGlobalProposalProbability = 0.25f;
+        internal const float MinimumGlobalProposalProbability = 0.05f;
+
+        internal static float SanitizeGlobalProposalProbability(
+            float probability,
+            float fallback)
+        {
+            var finiteFallback = IsFinite(fallback)
+                ? fallback
+                : DefaultGlobalProposalProbability;
+            return Mathf.Clamp(
+                IsFinite(probability) ? probability : finiteFallback,
+                MinimumGlobalProposalProbability,
+                1.0f);
+        }
+
+        internal static float ResolveGlobalProposalProbability(
+            bool shadingPointSelectionEnabled,
+            float configuredProbability,
+            float globalTotalWeight,
+            float localTotalWeight)
+        {
+            if (!IsFinitePositive(globalTotalWeight))
+                return IsFinitePositive(localTotalWeight) ? 0.0f : 1.0f;
+            if (!shadingPointSelectionEnabled
+                || !IsFinitePositive(localTotalWeight))
+            {
+                return 1.0f;
+            }
+
+            return SanitizeGlobalProposalProbability(
+                configuredProbability,
+                DefaultGlobalProposalProbability);
+        }
+
+        internal static float EvaluateMixturePdf(
+            float globalProposalProbability,
+            float globalPdf,
+            float localPdf)
+        {
+            var probability = Mathf.Clamp01(
+                IsFinite(globalProposalProbability)
+                    ? globalProposalProbability
+                    : 1.0f);
+            globalPdf = IsFiniteNonNegative(globalPdf) ? globalPdf : 0.0f;
+            localPdf = IsFiniteNonNegative(localPdf) ? localPdf : 0.0f;
+            return probability * globalPdf
+                + (1.0f - probability) * localPdf;
+        }
+
+        private static bool IsFinitePositive(float value)
+        {
+            return value > 0.0f && IsFinite(value);
+        }
+
+        private static bool IsFiniteNonNegative(float value)
+        {
+            return value >= 0.0f && IsFinite(value);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+    }
+
     [Serializable]
     public sealed class ReferencedPathTracingValidationEvidence
     {
@@ -387,10 +478,25 @@ namespace VividRP.Runtime.RenderPass.Core
     }
 
     [Serializable]
+    public sealed class ReferencedPathTracingLightProposalMeasurement
+    {
+        public bool shadingPointSelectionEnabled;
+        public float globalProposalProbability;
+        public int sampleCount;
+        public float meanLuminance;
+        public float standardError;
+        public float luminanceVariance;
+        public float finitePixelFraction;
+        public float negativeRadianceFraction;
+    }
+
+    [Serializable]
     public sealed class ReferencedPathTracingTransportConformanceEvidence
     {
         public ReferencedPathTracingValidationStatus status;
         public ReferencedPathTracingEstimatorMeasurement[] estimatorMeasurements;
+        public ReferencedPathTracingLightProposalMeasurement[]
+            lightProposalMeasurements;
         public ReferencedPathTracingLightSelectionEvidence lightSelection;
         public ReferencedPathTracingPdfConsistencyEvidence pdfConsistency;
         public string notes;
@@ -419,6 +525,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (!ValidateEstimatorMeasurements(
                     evidence.estimatorMeasurements,
+                    out failure)
+                || !ValidateLightProposalMeasurements(
+                    evidence.lightProposalMeasurements,
                     out failure)
                 || !ValidateLightSelection(evidence.lightSelection, out failure)
                 || !ValidatePdfConsistency(evidence.pdfConsistency, out failure))
@@ -484,6 +593,90 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Transport estimator means disagree beyond statistical tolerance.",
+                    out failure);
+            }
+
+            failure = string.Empty;
+            return true;
+        }
+
+        private static bool ValidateLightProposalMeasurements(
+            IReadOnlyList<ReferencedPathTracingLightProposalMeasurement>
+                measurements,
+            out string failure)
+        {
+            if (measurements == null || measurements.Count != 2)
+            {
+                return Fail(
+                    "Global-only and shading-point light-proposal measurements are required.",
+                    out failure);
+            }
+
+            ReferencedPathTracingLightProposalMeasurement globalOnly = null;
+            ReferencedPathTracingLightProposalMeasurement shadingPoint = null;
+            foreach (var measurement in measurements)
+            {
+                if (measurement == null
+                    || measurement.sampleCount <= 0
+                    || !IsFiniteNonNegative(measurement.meanLuminance)
+                    || !IsFiniteNonNegative(measurement.standardError)
+                    || !IsFiniteNonNegative(measurement.luminanceVariance)
+                    || measurement.finitePixelFraction != 1.0f
+                    || measurement.negativeRadianceFraction != 0.0f)
+                {
+                    return Fail(
+                        "Light-proposal measurements contain invalid data.",
+                        out failure);
+                }
+
+                if (measurement.shadingPointSelectionEnabled)
+                {
+                    if (shadingPoint != null
+                        || measurement.globalProposalProbability
+                            < ReferencedPathTracingLightProposalPolicy
+                                .MinimumGlobalProposalProbability
+                        || measurement.globalProposalProbability > 1.0f
+                        || float.IsNaN(
+                            measurement.globalProposalProbability)
+                        || float.IsInfinity(
+                            measurement.globalProposalProbability))
+                    {
+                        return Fail(
+                            "Shading-point light-proposal evidence has an invalid support floor.",
+                            out failure);
+                    }
+
+                    shadingPoint = measurement;
+                }
+                else
+                {
+                    if (globalOnly != null
+                        || measurement.globalProposalProbability != 1.0f)
+                    {
+                        return Fail(
+                            "Global-only light-proposal evidence must declare probability one.",
+                            out failure);
+                    }
+
+                    globalOnly = measurement;
+                }
+            }
+
+            if (globalOnly == null || shadingPoint == null)
+            {
+                return Fail(
+                    "Both light-proposal modes must be measured.",
+                    out failure);
+            }
+
+            if (!MeansAgree(
+                    globalOnly.meanLuminance,
+                    globalOnly.standardError,
+                    shadingPoint.meanLuminance,
+                    shadingPoint.standardError))
+            {
+                return Fail(
+                    "Global-only and shading-point light-proposal means disagree beyond statistical tolerance.",
                     out failure);
             }
 
@@ -589,17 +782,30 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingEstimatorMeasurement first,
             ReferencedPathTracingEstimatorMeasurement second)
         {
+            return MeansAgree(
+                first.meanLuminance,
+                first.standardError,
+                second.meanLuminance,
+                second.standardError);
+        }
+
+        private static bool MeansAgree(
+            float firstMean,
+            float firstStandardError,
+            float secondMean,
+            float secondStandardError)
+        {
             var difference = Math.Abs(
-                (double)first.meanLuminance - second.meanLuminance);
+                (double)firstMean - secondMean);
             var relativeTolerance = MeanRelativeTolerance
                 * Math.Max(
-                    Math.Max(first.meanLuminance, second.meanLuminance),
+                    Math.Max(firstMean, secondMean),
                     1e-6f);
             var standardErrorTolerance =
                 MeanStandardErrorMultiplier
                 * Math.Sqrt(
-                    first.standardError * first.standardError
-                    + second.standardError * second.standardError);
+                    firstStandardError * firstStandardError
+                    + secondStandardError * secondStandardError);
             return difference
                 <= Math.Max(relativeTolerance, standardErrorTolerance);
         }
@@ -636,6 +842,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public ulong integratorSignature;
         public ReferencedPathTracingEnvironmentEstimatorMode estimatorMode;
         public ReferencedPathTracingTransportDebugMode transportDebugMode;
+        public bool usesShadingPointLightSelection;
+        public float globalLightProposalProbability;
         public bool usesReGIR;
         public bool usesDenoiser;
         public bool usesRasterGI;
@@ -664,6 +872,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public int russianRouletteStartBounce;
         public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
         public ReferencedPathTracingEnvironmentEstimatorMode estimatorMode;
+        public bool usesShadingPointLightSelection;
+        public float globalLightProposalProbability;
 
         internal ReferencedPathTracingV1CorpusCase(
             string id,
@@ -681,6 +891,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
             estimatorMode =
                 ReferencedPathTracingEnvironmentEstimatorMode.Mis;
+            usesShadingPointLightSelection = true;
+            globalLightProposalProbability =
+                ReferencedPathTracingLightProposalPolicy
+                    .DefaultGlobalProposalProbability;
         }
     }
 
@@ -744,7 +958,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 2;
+        public const int ContractVersion = 3;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -806,6 +1020,18 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Transport estimator or diagnostic mode does not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.usesShadingPointLightSelection
+                    != corpusCase.usesShadingPointLightSelection
+                || !IsFinite(metadata.globalLightProposalProbability)
+                || Math.Abs(
+                    metadata.globalLightProposalProbability
+                    - corpusCase.globalLightProposalProbability) > 1e-6f)
+            {
+                return Fail(
+                    "Light-proposal settings do not match the corpus.",
                     out failure);
             }
 
@@ -901,6 +1127,13 @@ namespace VividRP.Runtime.RenderPass.Core
 
             if (!ReferencedPathTracingTransportConformanceGate.Validate(
                     metadata.transportConformance,
+                    out failure))
+            {
+                return false;
+            }
+
+            if (!ValidateLightProposalEvidenceContract(
+                    metadata,
                     out failure))
             {
                 return false;
@@ -1013,6 +1246,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     ?? integratorState.signature,
                 estimatorMode = integratorState.estimatorMode,
                 transportDebugMode = integratorState.transportDebugMode,
+                usesShadingPointLightSelection =
+                    integratorState.shadingPointLightSelection,
+                globalLightProposalProbability =
+                    integratorState.globalLightProposalProbability,
                 usesReGIR = integratorState.enableReGIR,
                 usesDenoiser = false,
                 usesRasterGI = false,
@@ -1040,7 +1277,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     status = ReferencedPathTracingValidationStatus.NotRun,
                     notes =
-                        "Pending estimator-mean, light-selection, and PDF-consistency validation."
+                        "Pending estimator-mean, proposal on/off, light-selection, and PDF-consistency validation."
                 }
             };
         }
@@ -1049,6 +1286,44 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             failure = message;
             return false;
+        }
+
+        private static bool ValidateLightProposalEvidenceContract(
+            ReferencedPathTracingCaptureMetadata metadata,
+            out string failure)
+        {
+            var measurements =
+                metadata.transportConformance?.lightProposalMeasurements;
+            if (measurements == null)
+            {
+                return Fail(
+                    "Light-proposal evidence is missing.",
+                    out failure);
+            }
+
+            for (var index = 0; index < measurements.Length; index++)
+            {
+                var measurement = measurements[index];
+                if (measurement == null
+                    || !measurement.shadingPointSelectionEnabled)
+                {
+                    continue;
+                }
+
+                if (Math.Abs(
+                        measurement.globalProposalProbability
+                        - metadata.globalLightProposalProbability) <= 1e-6f)
+                {
+                    failure = string.Empty;
+                    return true;
+                }
+
+                break;
+            }
+
+            return Fail(
+                "Light-proposal evidence does not match the capture settings.",
+                out failure);
         }
 
         private static bool IsFinite(float value)

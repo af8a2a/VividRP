@@ -2,6 +2,8 @@
 #define VIVIDRP_REFERENCED_PATH_TRACING_COMMON_INCLUDED
 
 int _ReferencedLocalLightNeeEnabled;
+int _ReferencedShadingPointLightSelectionEnabled;
+float _ReferencedGlobalLightProposalProbability;
 
 // Lower-resolution lighting cubemap shared by BSDF miss, distribution build, and NEE.
 TextureCube<float4> _ReferencedEnvironmentTexture;

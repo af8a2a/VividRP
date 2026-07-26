@@ -141,6 +141,31 @@ bool ReferencedPathtracingSampleReferenceLightIndex(
     return true;
 }
 
+struct ReferencedPathtracingLightSelectionContext
+{
+    float3 positionWS;
+    float globalAnalyticWeight;
+    float3 normalWS;
+    float globalEnvironmentWeight;
+    float localAnalyticWeight;
+    float localEnvironmentWeight;
+    float globalTotalWeight;
+    float localTotalWeight;
+    float globalProposalProbability;
+};
+
+bool ReferencedPathtracingIsReferenceLightNeeEligible(
+    ReferencedPathTracingLightRecord light)
+{
+    bool localLightAllowed =
+        _ReferencedLocalLightNeeEnabled != 0
+        || light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
+    bool bsdfReachable =
+        (light.flags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
+    return localLightAllowed
+        && ReferencedPathtracingIsLightNeeEligible(bsdfReachable);
+}
+
 float ReferencedPathtracingGetReferenceLightSelectionWeight()
 {
     ReferencedPathTracingLightListParameters parameters =
@@ -162,8 +187,6 @@ float ReferencedPathtracingGetReferenceLightSelectionWeight()
         return parameters.totalSelectionWeight;
     }
 
-    // Rebuild the eligible domain when local NEE or the BSDF-only validation
-    // strategy removes entries from the CPU-authored global distribution.
     float eligibleSelectionWeight = 0.0;
     for (uint lightIndex = 0u;
          lightIndex < parameters.lightCount;
@@ -171,16 +194,8 @@ float ReferencedPathtracingGetReferenceLightSelectionWeight()
     {
         ReferencedPathTracingLightRecord light =
             ReferencedPathtracingLoadReferenceLight(lightIndex);
-        bool localLightAllowed =
-            _ReferencedLocalLightNeeEnabled != 0
-            || light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
-        bool bsdfReachable =
-            (light.flags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
-        if (localLightAllowed
-            && ReferencedPathtracingIsLightNeeEligible(bsdfReachable))
-        {
+        if (ReferencedPathtracingIsReferenceLightNeeEligible(light))
             eligibleSelectionWeight += max(light.selectionWeight, 0.0);
-        }
     }
 
     return eligibleSelectionWeight;
@@ -199,8 +214,6 @@ float ReferencedPathtracingGetEnvironmentSelectionWeight()
         return 0.0;
     }
 
-    // The distribution stores mean scene-linear luminance over the sphere. Multiplying
-    // by 4 PI gives an energy proxy in the same "power-like" role as analytic weights.
     float averageLuminance =
         _ReferencedEnvironmentImportanceDistribution[
             REFERENCED_ENVIRONMENT_AVERAGE_LUMINANCE_OFFSET];
@@ -211,46 +224,311 @@ float ReferencedPathtracingGetEnvironmentSelectionWeight()
         : 0.0;
 }
 
-float ReferencedPathtracingGetUnifiedLightSelectionWeight()
+float ReferencedPathtracingEvaluateLocalRangeWindow(
+    float distanceSquared,
+    float2 rangeAttenuation)
 {
-    return ReferencedPathtracingGetReferenceLightSelectionWeight()
-        + ReferencedPathtracingGetEnvironmentSelectionWeight();
+    float scaledDistanceSquared =
+        distanceSquared * max(rangeAttenuation.x, 0.0);
+    float window = saturate(
+        max(rangeAttenuation.y, 0.0)
+        - scaledDistanceSquared * scaledDistanceSquared);
+    return window * window;
 }
 
-float ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+float ReferencedPathtracingGetLocalReferenceLightWeight(
+    ReferencedPathtracingLightSelectionContext context,
     ReferencedPathTracingLightRecord light)
 {
-    bool localLightAllowed =
-        _ReferencedLocalLightNeeEnabled != 0
-        || light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
-    bool bsdfReachable =
-        (light.flags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
-    if (!localLightAllowed
-        || !ReferencedPathtracingIsLightNeeEligible(bsdfReachable))
+    float baseWeight = max(light.selectionWeight, 0.0);
+    if (baseWeight <= 0.0
+        || !ReferencedPathtracingIsReferenceLightNeeEligible(light))
     {
         return 0.0;
     }
 
-    float totalSelectionWeight =
-        ReferencedPathtracingGetUnifiedLightSelectionWeight();
-    return totalSelectionWeight > 0.0
-        ? max(light.selectionWeight, 0.0) / totalSelectionWeight
+    float normalLengthSquared = dot(context.normalWS, context.normalWS);
+    bool hasNormal = normalLengthSquared > 1e-8
+        && !isnan(normalLengthSquared)
+        && !isinf(normalLengthSquared);
+    float3 normalWS = hasNormal
+        ? context.normalWS * rsqrt(normalLengthSquared)
+        : 0.0;
+
+    float importance = 1.0;
+    if (light.lightType == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+    {
+        float directionLengthSquared = dot(light.forwardWS, light.forwardWS);
+        if (directionLengthSquared <= 1e-8)
+            return 0.0;
+        float3 directionToLight =
+            -light.forwardWS * rsqrt(directionLengthSquared);
+        importance = hasNormal
+            ? saturate(dot(normalWS, directionToLight))
+            : 1.0;
+    }
+    else
+    {
+        float3 surfaceToLight = light.positionWS - context.positionWS;
+        float distanceSquared = dot(surfaceToLight, surfaceToLight);
+        if (distanceSquared <= 1e-8
+            || isnan(distanceSquared)
+            || isinf(distanceSquared))
+        {
+            return 0.0;
+        }
+
+        float3 directionToLight =
+            surfaceToLight * rsqrt(distanceSquared);
+        float surfaceCosine = hasNormal
+            ? saturate(dot(normalWS, directionToLight))
+            : 1.0;
+        float rangeWindow =
+            ReferencedPathtracingEvaluateLocalRangeWindow(
+                distanceSquared,
+                light.rangeAttenuation);
+        float distanceFactor = rcp(max(
+            distanceSquared
+                + max(light.shapeRadius * light.shapeRadius, 0.0),
+            1e-4));
+        importance = surfaceCosine * rangeWindow * distanceFactor;
+
+        if (light.lightType == REFERENCED_LIGHT_TYPE_SPOT)
+        {
+            float forwardLengthSquared =
+                dot(light.forwardWS, light.forwardWS);
+            if (forwardLengthSquared <= 1e-8)
+                return 0.0;
+            float3 forwardWS =
+                light.forwardWS * rsqrt(forwardLengthSquared);
+            float spotAttenuation = saturate(
+                dot(forwardWS, -directionToLight)
+                    * light.spotAngleParameters.x
+                + light.spotAngleParameters.y);
+            importance *= spotAttenuation * spotAttenuation;
+        }
+        else if ((light.flags & REFERENCED_LIGHT_FLAG_ONE_SIDED) != 0u)
+        {
+            float forwardLengthSquared =
+                dot(light.forwardWS, light.forwardWS);
+            if (forwardLengthSquared <= 1e-8)
+                return 0.0;
+            float3 forwardWS =
+                light.forwardWS * rsqrt(forwardLengthSquared);
+            importance *= saturate(dot(-directionToLight, forwardWS));
+        }
+        else if (light.lightType == REFERENCED_LIGHT_TYPE_TUBE)
+        {
+            float rightLengthSquared = dot(light.rightWS, light.rightWS);
+            if (rightLengthSquared <= 1e-8)
+                return 0.0;
+            float3 rightWS = light.rightWS * rsqrt(rightLengthSquared);
+            float axialCosine = abs(dot(directionToLight, rightWS));
+            importance *= sqrt(saturate(
+                1.0 - axialCosine * axialCosine));
+        }
+    }
+
+    float localWeight = baseWeight * max(importance, 0.0);
+    return !isnan(localWeight) && !isinf(localWeight)
+        ? min(localWeight, 1e30)
         : 0.0;
 }
 
-float ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf()
+ReferencedPathtracingLightSelectionContext
+ReferencedPathtracingCreateLightSelectionContext(
+    float3 positionWS,
+    float3 normalWS)
 {
-    float environmentWeight =
+    ReferencedPathtracingLightSelectionContext context =
+        (ReferencedPathtracingLightSelectionContext)0;
+    context.positionWS = positionWS;
+    context.normalWS = normalWS;
+    context.globalAnalyticWeight =
+        ReferencedPathtracingGetReferenceLightSelectionWeight();
+    context.globalEnvironmentWeight =
         ReferencedPathtracingGetEnvironmentSelectionWeight();
-    float totalSelectionWeight =
-        ReferencedPathtracingGetReferenceLightSelectionWeight()
-        + environmentWeight;
-    return totalSelectionWeight > 0.0
-        ? environmentWeight / totalSelectionWeight
+    context.globalTotalWeight =
+        context.globalAnalyticWeight
+        + context.globalEnvironmentWeight;
+
+    if (_ReferencedShadingPointLightSelectionEnabled != 0
+        && context.globalTotalWeight > 0.0)
+    {
+        ReferencedPathTracingLightListParameters parameters =
+            _ReferencedLightListParameters[0];
+        for (uint lightIndex = 0u;
+             lightIndex < parameters.lightCount;
+             ++lightIndex)
+        {
+            ReferencedPathTracingLightRecord light =
+                ReferencedPathtracingLoadReferenceLight(lightIndex);
+            context.localAnalyticWeight +=
+                ReferencedPathtracingGetLocalReferenceLightWeight(
+                    context,
+                    light);
+        }
+
+        // Environment remains present in the local proposal. Its directional
+        // conditional distribution already carries the HDRI importance.
+        context.localEnvironmentWeight =
+            context.globalEnvironmentWeight;
+        context.localTotalWeight =
+            context.localAnalyticWeight
+            + context.localEnvironmentWeight;
+    }
+
+    context.globalProposalProbability = 1.0;
+    if (context.globalTotalWeight <= 0.0
+        && context.localTotalWeight > 0.0)
+    {
+        context.globalProposalProbability = 0.0;
+    }
+    else if (context.globalTotalWeight > 0.0
+        && context.localTotalWeight > 0.0
+        && _ReferencedShadingPointLightSelectionEnabled != 0)
+    {
+        float configuredProbability =
+            _ReferencedGlobalLightProposalProbability;
+        if (isnan(configuredProbability)
+            || isinf(configuredProbability))
+        {
+            configuredProbability = 0.25;
+        }
+        context.globalProposalProbability =
+            clamp(configuredProbability, 0.05, 1.0);
+    }
+
+    return context;
+}
+
+float ReferencedPathtracingEvaluateMixtureSelectionPdf(
+    ReferencedPathtracingLightSelectionContext context,
+    float globalWeight,
+    float localWeight)
+{
+    float globalPdf = context.globalTotalWeight > 0.0
+        ? max(globalWeight, 0.0) / context.globalTotalWeight
         : 0.0;
+    float localPdf = context.localTotalWeight > 0.0
+        ? max(localWeight, 0.0) / context.localTotalWeight
+        : 0.0;
+    float selectionPdf =
+        context.globalProposalProbability * globalPdf
+        + (1.0 - context.globalProposalProbability) * localPdf;
+    return !isnan(selectionPdf) && !isinf(selectionPdf)
+        ? max(selectionPdf, 0.0)
+        : 0.0;
+}
+
+float ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+    ReferencedPathtracingLightSelectionContext context,
+    ReferencedPathTracingLightRecord light)
+{
+    if (!ReferencedPathtracingIsReferenceLightNeeEligible(light))
+        return 0.0;
+
+    return ReferencedPathtracingEvaluateMixtureSelectionPdf(
+        context,
+        light.selectionWeight,
+        ReferencedPathtracingGetLocalReferenceLightWeight(
+            context,
+            light));
+}
+
+float ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf(
+    ReferencedPathtracingLightSelectionContext context)
+{
+    return ReferencedPathtracingEvaluateMixtureSelectionPdf(
+        context,
+        context.globalEnvironmentWeight,
+        context.localEnvironmentWeight);
+}
+
+bool ReferencedPathtracingSampleGlobalAnalyticLight(
+    ReferencedPathtracingLightSelectionContext context,
+    float weightedSample,
+    out uint lightIndex)
+{
+    lightIndex = 0xffffffffu;
+    if (context.globalAnalyticWeight <= 0.0)
+        return false;
+
+    if (_ReferencedLocalLightNeeEnabled != 0
+        && _ReferencedTransportEstimatorMode
+            != kReferencedTransportEstimatorBsdfOnly)
+    {
+        float conditionalSelectionPdf;
+        return ReferencedPathtracingSampleReferenceLightIndex(
+            weightedSample / context.globalAnalyticWeight,
+            lightIndex,
+            conditionalSelectionPdf);
+    }
+
+    ReferencedPathTracingLightListParameters parameters =
+        _ReferencedLightListParameters[0];
+    float accumulatedWeight = 0.0;
+    uint lastEligibleLightIndex = 0xffffffffu;
+    for (uint candidateIndex = 0u;
+         candidateIndex < parameters.lightCount;
+         ++candidateIndex)
+    {
+        ReferencedPathTracingLightRecord light =
+            ReferencedPathtracingLoadReferenceLight(candidateIndex);
+        if (!ReferencedPathtracingIsReferenceLightNeeEligible(light))
+            continue;
+
+        if (light.selectionWeight > 0.0)
+            lastEligibleLightIndex = candidateIndex;
+        accumulatedWeight += max(light.selectionWeight, 0.0);
+        if (weightedSample < accumulatedWeight)
+        {
+            lightIndex = candidateIndex;
+            return true;
+        }
+    }
+
+    lightIndex = lastEligibleLightIndex;
+    return lightIndex != 0xffffffffu;
+}
+
+bool ReferencedPathtracingSampleLocalAnalyticLight(
+    ReferencedPathtracingLightSelectionContext context,
+    float weightedSample,
+    out uint lightIndex)
+{
+    lightIndex = 0xffffffffu;
+    ReferencedPathTracingLightListParameters parameters =
+        _ReferencedLightListParameters[0];
+    float accumulatedWeight = 0.0;
+    uint lastEligibleLightIndex = 0xffffffffu;
+    for (uint candidateIndex = 0u;
+         candidateIndex < parameters.lightCount;
+         ++candidateIndex)
+    {
+        ReferencedPathTracingLightRecord light =
+            ReferencedPathtracingLoadReferenceLight(candidateIndex);
+        float localWeight =
+            ReferencedPathtracingGetLocalReferenceLightWeight(
+                context,
+                light);
+        if (localWeight > 0.0)
+            lastEligibleLightIndex = candidateIndex;
+        accumulatedWeight += localWeight;
+        if (localWeight > 0.0
+            && weightedSample < accumulatedWeight)
+        {
+            lightIndex = candidateIndex;
+            return true;
+        }
+    }
+
+    lightIndex = lastEligibleLightIndex;
+    return lightIndex != 0xffffffffu;
 }
 
 bool ReferencedPathtracingSampleUnifiedLightSource(
+    ReferencedPathtracingLightSelectionContext context,
     float randomValue,
     out uint lightType,
     out uint lightIndex,
@@ -259,87 +537,66 @@ bool ReferencedPathtracingSampleUnifiedLightSource(
     lightType = REFERENCED_LIGHT_TYPE_INVALID;
     lightIndex = 0xffffffffu;
     selectionPdf = 0.0;
-
-    float analyticWeight =
-        ReferencedPathtracingGetReferenceLightSelectionWeight();
-    float environmentWeight =
-        ReferencedPathtracingGetEnvironmentSelectionWeight();
-    float totalSelectionWeight = analyticWeight + environmentWeight;
-    if (totalSelectionWeight <= 0.0
-        || isnan(totalSelectionWeight)
-        || isinf(totalSelectionWeight))
+    if (context.globalTotalWeight <= 0.0
+        && context.localTotalWeight <= 0.0)
     {
         return false;
     }
 
-    float weightedSample =
-        min(saturate(randomValue), 0.99999994) * totalSelectionWeight;
-    if (weightedSample < analyticWeight)
+    float sample = min(saturate(randomValue), 0.99999994);
+    bool sampleGlobal =
+        context.globalProposalProbability >= 1.0
+        || sample < context.globalProposalProbability;
+    float proposalSample = sampleGlobal
+        ? sample / max(context.globalProposalProbability, 1e-8)
+        : (sample - context.globalProposalProbability)
+            / max(1.0 - context.globalProposalProbability, 1e-8);
+    proposalSample = min(saturate(proposalSample), 0.99999994);
+
+    float analyticWeight = sampleGlobal
+        ? context.globalAnalyticWeight
+        : context.localAnalyticWeight;
+    float environmentWeight = sampleGlobal
+        ? context.globalEnvironmentWeight
+        : context.localEnvironmentWeight;
+    float totalWeight = analyticWeight + environmentWeight;
+    if (totalWeight <= 0.0
+        || isnan(totalWeight)
+        || isinf(totalWeight))
     {
-        if (_ReferencedLocalLightNeeEnabled != 0
-            && _ReferencedTransportEstimatorMode
-                != kReferencedTransportEstimatorBsdfOnly)
-        {
-            float conditionalSample = weightedSample / analyticWeight;
-            float conditionalSelectionPdf;
-            if (!ReferencedPathtracingSampleReferenceLightIndex(
-                    conditionalSample,
-                    lightIndex,
-                    conditionalSelectionPdf))
-            {
-                return false;
-            }
+        return false;
+    }
 
-            ReferencedPathTracingLightRecord light =
-                ReferencedPathtracingLoadReferenceLight(lightIndex);
-            lightType = light.lightType;
-            selectionPdf = conditionalSelectionPdf
-                * analyticWeight
-                / totalSelectionWeight;
-        }
-        else
-        {
-            ReferencedPathTracingLightListParameters parameters =
-                _ReferencedLightListParameters[0];
-            float accumulatedWeight = 0.0;
-            for (uint candidateIndex = 0u;
-                 candidateIndex < parameters.lightCount;
-                 ++candidateIndex)
-            {
-                ReferencedPathTracingLightRecord light =
-                    ReferencedPathtracingLoadReferenceLight(
-                        candidateIndex);
-                bool localLightAllowed =
-                    _ReferencedLocalLightNeeEnabled != 0
-                    || light.lightType
-                        == REFERENCED_LIGHT_TYPE_DIRECTIONAL;
-                bool bsdfReachable =
-                    (light.flags
-                        & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u;
-                if (!localLightAllowed
-                    || !ReferencedPathtracingIsLightNeeEligible(
-                        bsdfReachable))
-                {
-                    continue;
-                }
+    float weightedSample = proposalSample * totalWeight;
+    if (environmentWeight <= 0.0
+        || weightedSample < analyticWeight)
+    {
+        bool sampled = sampleGlobal
+            ? ReferencedPathtracingSampleGlobalAnalyticLight(
+                context,
+                weightedSample,
+                lightIndex)
+            : ReferencedPathtracingSampleLocalAnalyticLight(
+                context,
+                weightedSample,
+                lightIndex);
+        if (!sampled)
+            return false;
 
-                accumulatedWeight += max(light.selectionWeight, 0.0);
-                if (weightedSample < accumulatedWeight)
-                {
-                    lightIndex = candidateIndex;
-                    lightType = light.lightType;
-                    selectionPdf =
-                        max(light.selectionWeight, 0.0)
-                        / totalSelectionWeight;
-                    break;
-                }
-            }
-        }
+        ReferencedPathTracingLightRecord light =
+            ReferencedPathtracingLoadReferenceLight(lightIndex);
+        lightType = light.lightType;
+        selectionPdf =
+            ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+                context,
+                light);
     }
     else
     {
         lightType = REFERENCED_LIGHT_TYPE_ENVIRONMENT;
-        selectionPdf = environmentWeight / totalSelectionWeight;
+        selectionPdf =
+            ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf(
+                context);
     }
 
     return selectionPdf > 0.0
@@ -348,9 +605,11 @@ bool ReferencedPathtracingSampleUnifiedLightSource(
 }
 
 float ReferencedPathtracingEvaluateUnifiedEnvironmentLightPdf(
+    ReferencedPathtracingLightSelectionContext context,
     float3 directionWS)
 {
-    return ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf()
+    return ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf(
+            context)
         * ReferencedPathtracingEvaluateEnvironmentPdf(directionWS);
 }
 

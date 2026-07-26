@@ -759,6 +759,21 @@ namespace VividRP.Editor.Tests
                     out failure),
                 Is.False);
             Assert.That(failure, Does.Contain("Transport conformance"));
+
+            captures[0].transportConformance.status =
+                ReferencedPathTracingValidationStatus.Passed;
+            captures[0]
+                .transportConformance
+                .lightProposalMeasurements[1]
+                .globalProposalProbability = 0.5f;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCorpus(
+                    captures,
+                    out failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("does not match the capture settings"));
         }
 
         [Test]
@@ -804,6 +819,23 @@ namespace VividRP.Editor.Tests
                 ReferencedPathTracingTransportDebugMode.Combined;
             capture.environment.debugMode =
                 ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.environment.debugMode =
+                ReferencedPathTracingEnvironmentDebugMode.Combined;
+            capture.usesShadingPointLightSelection = false;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.usesShadingPointLightSelection = true;
+            capture.globalLightProposalProbability = 0.5f;
             Assert.That(
                 ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
                     capture,
@@ -1116,6 +1148,10 @@ namespace VividRP.Editor.Tests
                 estimatorMode = corpusCase.estimatorMode,
                 transportDebugMode =
                     ReferencedPathTracingTransportDebugMode.Combined,
+                usesShadingPointLightSelection =
+                    corpusCase.usesShadingPointLightSelection,
+                globalLightProposalProbability =
+                    corpusCase.globalLightProposalProbability,
                 usesReGIR = false,
                 usesDenoiser = false,
                 usesRasterGI = false,
@@ -1172,6 +1208,19 @@ namespace VividRP.Editor.Tests
                             ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
                             0.995f)
                     },
+                    lightProposalMeasurements = new[]
+                    {
+                        CreateLightProposalMeasurement(
+                            false,
+                            1.0f,
+                            1.0f,
+                            0.4f),
+                        CreateLightProposalMeasurement(
+                            true,
+                            corpusCase.globalLightProposalProbability,
+                            1.005f,
+                            0.25f)
+                    },
                     lightSelection =
                         new ReferencedPathTracingLightSelectionEvidence
                     {
@@ -1189,6 +1238,26 @@ namespace VividRP.Editor.Tests
                         maximumRelativeError = 1e-6f
                     }
                 }
+            };
+        }
+
+        private static ReferencedPathTracingLightProposalMeasurement
+            CreateLightProposalMeasurement(
+                bool enabled,
+                float globalProposalProbability,
+                float meanLuminance,
+                float luminanceVariance)
+        {
+            return new ReferencedPathTracingLightProposalMeasurement
+            {
+                shadingPointSelectionEnabled = enabled,
+                globalProposalProbability = globalProposalProbability,
+                sampleCount = 4096,
+                meanLuminance = meanLuminance,
+                standardError = 0.005f,
+                luminanceVariance = luminanceVariance,
+                finitePixelFraction = 1.0f,
+                negativeRadianceFraction = 0.0f
             };
         }
 

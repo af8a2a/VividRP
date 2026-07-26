@@ -22,6 +22,12 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(3));
                 Assert.That(volume.enableReGIR.value, Is.True);
                 Assert.That(
+                    volume.shadingPointLightSelection.value,
+                    Is.True);
+                Assert.That(
+                    volume.globalLightProposalProbability.value,
+                    Is.EqualTo(0.25f));
+                Assert.That(
                     volume.enableShaderExecutionReordering.value,
                     Is.False);
                 Assert.That(volume.targetSampleCount.value, Is.EqualTo(2048));
@@ -61,6 +67,8 @@ namespace VividRP.Editor.Tests
                 volume.maxBounceCount.value = 6;
                 volume.russianRouletteStartBounce.value = 5;
                 volume.enableReGIR.value = false;
+                volume.shadingPointLightSelection.value = true;
+                volume.globalLightProposalProbability.value = 0.25f;
                 volume.enableShaderExecutionReordering.value = false;
                 volume.targetSampleCount.value = 1024;
                 var original =
@@ -86,6 +94,15 @@ namespace VividRP.Editor.Tests
                     ReferencedPathTracingTransportDebugMode.NeePdfs;
                 var transportDebugChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.transportDebugMode.value =
+                    ReferencedPathTracingTransportDebugMode.Combined;
+                volume.shadingPointLightSelection.value = false;
+                var lightProposalModeChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.shadingPointLightSelection.value = true;
+                volume.globalLightProposalProbability.value = 0.5f;
+                var lightProposalProbabilityChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
 
                 Assert.That(original.deterministicSampling, Is.True);
                 Assert.That(original.fixedSeed, Is.EqualTo(12345));
@@ -94,6 +111,12 @@ namespace VividRP.Editor.Tests
                     original.russianRouletteStartBounce,
                     Is.EqualTo(5));
                 Assert.That(original.enableReGIR, Is.False);
+                Assert.That(
+                    original.shadingPointLightSelection,
+                    Is.True);
+                Assert.That(
+                    original.globalLightProposalProbability,
+                    Is.EqualTo(0.25f));
                 Assert.That(
                     original.enableShaderExecutionReordering,
                     Is.False);
@@ -112,7 +135,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(3));
+                    Is.EqualTo(4));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -128,11 +151,71 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     transportDebugChanged.signature,
                     Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    lightProposalModeChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    lightProposalProbabilityChanged.signature,
+                    Is.Not.EqualTo(original.signature));
             }
             finally
             {
                 Object.DestroyImmediate(volume);
             }
+        }
+
+        [Test]
+        public void LightProposalPolicy_PreservesSupportAndEvaluatesMixturePdf()
+        {
+            Assert.That(
+                ReferencedPathTracingLightProposalPolicy
+                    .ResolveGlobalProposalProbability(
+                        false,
+                        0.25f,
+                        4.0f,
+                        2.0f),
+                Is.EqualTo(1.0f));
+            Assert.That(
+                ReferencedPathTracingLightProposalPolicy
+                    .ResolveGlobalProposalProbability(
+                        true,
+                        0.25f,
+                        4.0f,
+                        0.0f),
+                Is.EqualTo(1.0f));
+            Assert.That(
+                ReferencedPathTracingLightProposalPolicy
+                    .ResolveGlobalProposalProbability(
+                        true,
+                        float.NaN,
+                        4.0f,
+                        2.0f),
+                Is.EqualTo(0.25f));
+            Assert.That(
+                ReferencedPathTracingLightProposalPolicy
+                    .ResolveGlobalProposalProbability(
+                        true,
+                        0.25f,
+                        4.0f,
+                        2.0f),
+                Is.EqualTo(0.25f));
+            Assert.That(
+                ReferencedPathTracingLightProposalPolicy.EvaluateMixturePdf(
+                    0.25f,
+                    0.1f,
+                    0.4f),
+                Is.EqualTo(0.325f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingLightProposalPolicy.EvaluateMixturePdf(
+                        0.25f,
+                        0.1f,
+                        0.4f)
+                    + ReferencedPathTracingLightProposalPolicy
+                        .EvaluateMixturePdf(
+                            0.25f,
+                            0.9f,
+                            0.6f),
+                Is.EqualTo(1.0f).Within(1e-6f));
         }
 
         [Test]
@@ -238,6 +321,15 @@ namespace VividRP.Editor.Tests
             Assert.That(failure, Does.Contain("means disagree"));
 
             evidence = CreateValidTransportConformanceEvidence();
+            evidence.lightProposalMeasurements[1].meanLuminance = 1.2f;
+            Assert.That(
+                ReferencedPathTracingTransportConformanceGate.Validate(
+                    evidence,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("light-proposal means disagree"));
+
+            evidence = CreateValidTransportConformanceEvidence();
             evidence.lightSelection.observedSelectionCounts[0] = 9000;
             evidence.lightSelection.observedSelectionCounts[1] = 1000;
             Assert.That(
@@ -275,6 +367,19 @@ namespace VividRP.Editor.Tests
                         ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
                         0.995f)
                 },
+                lightProposalMeasurements = new[]
+                {
+                    CreateLightProposalMeasurement(
+                        false,
+                        1.0f,
+                        1.0f,
+                        0.4f),
+                    CreateLightProposalMeasurement(
+                        true,
+                        0.25f,
+                        1.005f,
+                        0.25f)
+                },
                 lightSelection = new ReferencedPathTracingLightSelectionEvidence
                 {
                     sampleCount = 10000,
@@ -288,6 +393,26 @@ namespace VividRP.Editor.Tests
                     nonFiniteCount = 0,
                     maximumRelativeError = 1e-6f
                 }
+            };
+        }
+
+        private static ReferencedPathTracingLightProposalMeasurement
+            CreateLightProposalMeasurement(
+                bool enabled,
+                float globalProposalProbability,
+                float meanLuminance,
+                float luminanceVariance)
+        {
+            return new ReferencedPathTracingLightProposalMeasurement
+            {
+                shadingPointSelectionEnabled = enabled,
+                globalProposalProbability = globalProposalProbability,
+                sampleCount = 4096,
+                meanLuminance = meanLuminance,
+                standardError = 0.005f,
+                luminanceVariance = luminanceVariance,
+                finitePixelFraction = 1.0f,
+                negativeRadianceFraction = 0.0f
             };
         }
 

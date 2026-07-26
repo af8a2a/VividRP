@@ -998,6 +998,31 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - 代码与 EditMode contract 已建立；实际 DX12 GPU corpus 仍需填充 estimator measurements、
   histogram 和 PDF comparison evidence，未执行前不得将 V1 freeze 标记为完成。
 
+### Phase 4.5 checkpoint: Shading-point-aware Light Selection (2026-07-26)
+
+- unified source selector 现在混合两套离散 proposal：
+  `p_select = α × p_global + (1 - α) × p_local`。`p_global` 继续使用稳定 Reference Light
+  List 的 power proxy；`p_local` 在每个 shading vertex 根据位置、几何法线、距离/range window、
+  spot cone、单面 area emitter 朝向以及 tube radial factor 重排解析灯。HDRI 在 local proposal
+  中仍保留，并继续由自身的方向重要性分布负责条件采样。
+- 默认 `α = 0.25`，并强制至少 0.05 的 global support floor。关闭
+  `Shading Point Light Selection` 时退化为原全局 distribution；局部 proposal 无有效支持时也自动
+  fallback 到全局 proposal。该策略只改变方差，不裁剪任何原 proposal 可达的光源。
+- 每个 shading vertex 只构建一次 `ReferencedPathtracingLightSelectionContext`，缓存 global/local
+  analytic、environment 与 total weight。NEE 从混合 proposal 采样；BSDF segment 遍历复用同一
+  context 直接求每个 emitter 的完整 mixture selection PDF；environment miss 使用上一 vertex 的
+  同一 context。因此解析 emitter 路径保持 O(N)，不会因逐灯重复归一化退化为 O(N²)。
+- light-sampled candidate、BSDF-segment emitter 和 environment miss 都使用完全相同的
+  mixture selection PDF，并再乘各自的条件 solid-angle PDF 参与 Phase 4.4 MIS。现有 payload
+  已独立保存 selection/conditional PDF，本阶段没有改变 ray payload 布局。
+- 新开关和 global proposal probability 已进入 integrator V4 签名、shader binding、capture
+  metadata 与 V1 freeze contract V3。transport conformance evidence 新增 global-only 与
+  shading-point proposal 的高 SPP 均值、standard error 和 variance；冻结门禁要求两者均值在统计
+  容差内一致，但 variance 只记录不作为 correctness hard gate。
+- CPU contract 与 shader importer 检查已建立；实际 DX12 light-matrix/interior GPU capture 仍需
+  填充 proposal on/off evidence。只有均值一致且局部 proposal 显示预期方差收益后，才把 4.5
+  标记为 GPU-validated。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

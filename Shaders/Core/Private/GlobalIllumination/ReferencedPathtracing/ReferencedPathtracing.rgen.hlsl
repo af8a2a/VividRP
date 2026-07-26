@@ -337,6 +337,9 @@ void RayGenReferencedPathtracing()
     float3 throughput = 1.0;
     float previousBsdfPdf = 0.0;
     bool previousBsdfWasDelta = false;
+    ReferencedPathtracingLightSelectionContext
+        previousLightSelectionContext =
+            (ReferencedPathtracingLightSelectionContext)0;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
     uint primaryLobeClass = 0u;
@@ -393,6 +396,7 @@ void RayGenReferencedPathtracing()
                     ReferencedPathtracingEvaluateLightingEnvironment(ray.Direction);
                 float environmentLightPdf =
                     ReferencedPathtracingEvaluateUnifiedEnvironmentLightPdf(
+                        previousLightSelectionContext,
                         ray.Direction);
                 float bsdfEstimatorWeight =
                     ReferencedPathtracingGetBsdfEstimatorWeight(
@@ -596,6 +600,11 @@ void RayGenReferencedPathtracing()
         if (payload.nextPdf > 0.0
             && any(payload.nextThroughputWeight > 0.0))
         {
+            ReferencedPathtracingLightSelectionContext selectionContext =
+                ReferencedPathtracingCreateLightSelectionContext(
+                    payload.positionWS,
+                    payload.faceNormalWS);
+            previousLightSelectionContext = selectionContext;
             ReferencedPathTracingLightListParameters lightListParameters =
                 _ReferencedLightListParameters[0];
             for (uint lightIndex = 0u;
@@ -604,11 +613,16 @@ void RayGenReferencedPathtracing()
             {
                 ReferencedPathTracingLightRecord light =
                     ReferencedPathtracingLoadReferenceLight(lightIndex);
+                float lightSelectionPdf =
+                    ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+                        selectionContext,
+                        light);
                 ReferencedPathtracingSegmentLightHit segmentLightHit;
                 if (!ReferencedPathtracingEvaluateSegmentLight(
                         payload.positionWS,
                         payload.nextDirectionWS,
                         lightIndex,
+                        lightSelectionPdf,
                         light,
                         segmentLightHit))
                 {

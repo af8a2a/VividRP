@@ -63,6 +63,12 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedLightListParameters");
         private static readonly int LocalLightNeeEnabledId =
             Shader.PropertyToID("_ReferencedLocalLightNeeEnabled");
+        private static readonly int ShadingPointLightSelectionEnabledId =
+            Shader.PropertyToID(
+                "_ReferencedShadingPointLightSelectionEnabled");
+        private static readonly int GlobalLightProposalProbabilityId =
+            Shader.PropertyToID(
+                "_ReferencedGlobalLightProposalProbability");
         private static readonly int EnvironmentTextureId =
             Shader.PropertyToID("_ReferencedEnvironmentTexture");
         private static readonly int EnvironmentBackgroundTextureId =
@@ -175,6 +181,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private RayTracingShader m_RayTracingShader;
         private GraphicsBuffer m_NvidiaShaderExtensionBuffer;
         private LocalKeyword m_ShaderExecutionReorderingKeyword;
+        private bool m_ShaderExecutionReorderingKeywordAvailable;
         private bool m_SupportsRayTracing;
         private bool m_ShaderExecutionReorderingAvailable;
         private bool m_UseShaderExecutionReordering;
@@ -289,9 +296,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            m_ShaderExecutionReorderingKeyword = new LocalKeyword(
-                m_RayTracingShader,
-                ShaderExecutionReorderingKeywordName);
+            RefreshShaderExecutionReorderingKeyword();
             PrepareShaderExecutionReorderingBuffer();
         }
 
@@ -313,6 +318,11 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
+            // A RayTracingShader reimport invalidates LocalKeyword handles while
+            // keeping the serialized shader reference alive. Recreate the handle
+            // before querying it so editor hot reload cannot dereference stale
+            // native keyword state.
+            RefreshShaderExecutionReorderingKeyword();
             PrepareShaderExecutionReorderingState();
             var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
             m_ReblurHitDistanceParameters = reblurSettings.hitDistanceParameters;
@@ -375,7 +385,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var cmd = context.GetNativeCommandBuffer();
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                if (m_ShaderExecutionReorderingKeyword.isValid)
+                if (m_ShaderExecutionReorderingKeywordAvailable)
                 {
                     cmd.SetKeyword(
                         m_RayTracingShader,
@@ -458,6 +468,22 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     LocalLightNeeEnabledId,
                     localLightNeeEnabled ? 1 : 0);
+                var shadingPointLightSelectionEnabled =
+                    m_IntegratorState.shadingPointLightSelection;
+                cmd.SetGlobalInt(
+                    ShadingPointLightSelectionEnabledId,
+                    shadingPointLightSelectionEnabled ? 1 : 0);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    ShadingPointLightSelectionEnabledId,
+                    shadingPointLightSelectionEnabled ? 1 : 0);
+                cmd.SetGlobalFloat(
+                    GlobalLightProposalProbabilityId,
+                    m_IntegratorState.globalLightProposalProbability);
+                cmd.SetRayTracingFloatParam(
+                    m_RayTracingShader,
+                    GlobalLightProposalProbabilityId,
+                    m_IntegratorState.globalLightProposalProbability);
                 cmd.DispatchRays(
                     m_RayTracingShader,
                     RayGenerationShaderName,
@@ -474,6 +500,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_NvidiaShaderExtensionBuffer = null;
             m_RayTracingShader = null;
             m_ShaderExecutionReorderingKeyword = default;
+            m_ShaderExecutionReorderingKeywordAvailable = false;
             m_SupportsRayTracing = false;
             m_ShaderExecutionReorderingAvailable = false;
             m_UseShaderExecutionReordering = false;
@@ -509,7 +536,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var requested =
                 m_IntegratorState.enableShaderExecutionReordering;
             var keywordAvailable =
-                m_ShaderExecutionReorderingKeyword.isValid;
+                m_ShaderExecutionReorderingKeywordAvailable;
             m_UseShaderExecutionReordering =
                 requested
                 && m_ShaderExecutionReorderingAvailable
@@ -531,6 +558,31 @@ namespace VividRP.Runtime.RenderPass.Core
                 $"Reordering, but {failureReason ?? "initialization failed"}. " +
                 "The standard TraceRay variant will be used.");
             m_ShaderExecutionReorderingWarningIssued = true;
+        }
+
+        private void RefreshShaderExecutionReorderingKeyword()
+        {
+            m_ShaderExecutionReorderingKeyword = default;
+            m_ShaderExecutionReorderingKeywordAvailable = false;
+            if (m_RayTracingShader == null)
+                return;
+
+            try
+            {
+                var keyword = new LocalKeyword(
+                    m_RayTracingShader,
+                    ShaderExecutionReorderingKeywordName);
+                if (!keyword.isValid)
+                    return;
+
+                m_ShaderExecutionReorderingKeyword = keyword;
+                m_ShaderExecutionReorderingKeywordAvailable = true;
+            }
+            catch (System.Exception exception)
+            {
+                m_ShaderExecutionReorderingFailureReason =
+                    $"the SER shader keyword could not be refreshed ({exception.Message})";
+            }
         }
 
         private void PrepareShaderExecutionReorderingBuffer()

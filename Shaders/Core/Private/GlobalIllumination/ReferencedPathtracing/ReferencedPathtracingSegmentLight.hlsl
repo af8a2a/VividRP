@@ -290,6 +290,7 @@ bool ReferencedPathtracingEvaluateSegmentLight(
     float3 rayOriginWS,
     float3 rayDirectionWS,
     uint lightIndex,
+    float selectionPdf,
     ReferencedPathTracingLightRecord light,
     out ReferencedPathtracingSegmentLightHit lightHit)
 {
@@ -311,8 +312,7 @@ bool ReferencedPathtracingEvaluateSegmentLight(
     lightHit.lightIndex = lightIndex;
     lightHit.lightType = light.lightType;
     lightHit.flags = light.flags;
-    lightHit.selectionPdf =
-        ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(light);
+    lightHit.selectionPdf = selectionPdf;
     lightHit.shadowStrength =
         (light.flags & REFERENCED_LIGHT_FLAG_CASTS_SHADOWS) != 0u
             ? saturate(light.shadowStrength)

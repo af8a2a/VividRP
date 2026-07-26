@@ -302,11 +302,17 @@ bool ReferencedPathtracingSampleEnvironmentCandidate(
 
 bool ReferencedPathtracingSampleUnifiedNEECandidate(
     float3 positionWS,
+    float3 normalWS,
     float3 randomSample,
     out ReferencedPathtracingNEECandidate candidate)
 {
     ReferencedPathtracingInitializeNEECandidate(candidate);
+    ReferencedPathtracingLightSelectionContext selectionContext =
+        ReferencedPathtracingCreateLightSelectionContext(
+            positionWS,
+            normalWS);
     if (!ReferencedPathtracingSampleUnifiedLightSource(
+            selectionContext,
             randomSample.x,
             candidate.lightType,
             candidate.lightIndex,

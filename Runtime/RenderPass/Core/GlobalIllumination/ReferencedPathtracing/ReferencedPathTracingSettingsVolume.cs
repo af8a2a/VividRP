@@ -29,24 +29,31 @@ namespace VividRP.Runtime
         BsdfOnly = 2
     }
 
+    public enum ReferencedPathTracingTransportDebugMode
+    {
+        Combined = 0,
+        [InspectorName("NEE PDFs")]
+        NeePdfs = 1,
+        [InspectorName("NEE MIS Weight")]
+        NeeMisWeight = 2,
+        [InspectorName("BSDF Segment PDFs")]
+        BsdfSegmentPdfs = 3,
+        [InspectorName("BSDF Segment MIS Weight")]
+        BsdfSegmentMisWeight = 4,
+        [InspectorName("NEE Light Identity")]
+        NeeLightIdentity = 5,
+        [InspectorName("Invalid Sample Mask")]
+        InvalidSampleMask = 6,
+        [InspectorName("Light Spatial Index")]
+        LightSpatialIndex = 7
+    }
+
     [Serializable]
     public sealed class ReferencedPathTracingEnvironmentSamplingModeParameter
         : VolumeParameter<ReferencedPathTracingEnvironmentSamplingMode>
     {
         public ReferencedPathTracingEnvironmentSamplingModeParameter(
             ReferencedPathTracingEnvironmentSamplingMode value,
-            bool overrideState = false)
-            : base(value, overrideState)
-        {
-        }
-    }
-
-    [Serializable]
-    public sealed class ReferencedPathTracingEnvironmentDebugModeParameter
-        : VolumeParameter<ReferencedPathTracingEnvironmentDebugMode>
-    {
-        public ReferencedPathTracingEnvironmentDebugModeParameter(
-            ReferencedPathTracingEnvironmentDebugMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -98,6 +105,24 @@ namespace VividRP.Runtime
         public BoolParameter enableReGIR = new(true);
 
         [Tooltip(
+            "Mixes the stable global light distribution with a position- and normal-aware " +
+            "proposal at every shading vertex. The global proposal remains active as a support " +
+            "floor, so enabling this changes variance but not the converged result.")]
+        public BoolParameter shadingPointLightSelection = new(true);
+
+        [Tooltip(
+            "Probability of sampling the stable global light proposal when shading-point-aware " +
+            "selection is enabled. The remaining probability samples the local proposal.")]
+        public ClampedFloatParameter globalLightProposalProbability =
+            new(0.25f, 0.05f, 1.0f);
+
+        [Tooltip(
+            "Uses the deterministic Reference Light Spatial Index to bound shading-point " +
+            "light selection and analytic emitter traversal. Overflowed cells fall back to " +
+            "the complete Reference Light List.")]
+        public BoolParameter lightSpatialIndex = new(true);
+
+        [Tooltip(
             "Uses NVIDIA Shader Execution Reordering for surface rays when running Direct3D 12 " +
             "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
         public BoolParameter enableShaderExecutionReordering = new(false);
@@ -122,18 +147,14 @@ namespace VividRP.Runtime
         public ReferencedPathTracingEnvironmentSamplingModeParameter environmentSamplingMode =
             new(ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling);
 
+        [InspectorName("Transport Estimator Mode")]
         [Tooltip(
-            "Selects how environment NEE and BSDF misses are combined. MIS is the production " +
-            "estimator; Light Only and BSDF Only are unbiased validation modes. Delta BSDF " +
-            "events retain their only reachable BSDF-miss path in every mode.")]
+            "Selects how analytic-light and environment NEE are combined with BSDF-sampled " +
+            "segments. MIS is the production estimator. Light Only and BSDF Only are validation " +
+            "modes; singular lights and delta BSDF events retain their only reachable strategy. " +
+            "The serialized field name is retained for existing Volume assets.")]
         public ReferencedPathTracingEnvironmentEstimatorModeParameter environmentEstimatorMode =
             new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
-
-        [Tooltip(
-            "Selects the reference environment contribution shown in the resolved path-tracing output. " +
-            "The physical AOVs remain unchanged.")]
-        public ReferencedPathTracingEnvironmentDebugModeParameter environmentDebugMode =
-            new(ReferencedPathTracingEnvironmentDebugMode.Combined);
 
         protected override void OnEnable()
         {
@@ -144,6 +165,10 @@ namespace VividRP.Runtime
             russianRouletteStartBounce ??=
                 new ClampedIntParameter(3, 1, MaximumSupportedBounceCount);
             enableReGIR ??= new BoolParameter(true);
+            shadingPointLightSelection ??= new BoolParameter(true);
+            globalLightProposalProbability ??=
+                new ClampedFloatParameter(0.25f, 0.05f, 1.0f);
+            lightSpatialIndex ??= new BoolParameter(true);
             enableShaderExecutionReordering ??= new BoolParameter(false);
             targetSampleCount ??=
                 new ClampedIntParameter(
@@ -158,9 +183,6 @@ namespace VividRP.Runtime
             environmentEstimatorMode ??=
                 new ReferencedPathTracingEnvironmentEstimatorModeParameter(
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis);
-            environmentDebugMode ??=
-                new ReferencedPathTracingEnvironmentDebugModeParameter(
-                    ReferencedPathTracingEnvironmentDebugMode.Combined);
             base.OnEnable();
         }
     }

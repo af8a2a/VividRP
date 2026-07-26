@@ -75,7 +75,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal struct ReferencedPathTracingLightListParameters
     {
         internal const int Stride = 48;
-        internal const uint Version = 1;
+        internal const uint Version = 3;
         internal const uint DistributionModeCdf = 1;
 
         internal uint lightCount;
@@ -90,7 +90,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal uint version;
         internal uint distributionMode;
-        internal uint reserved0;
+        internal uint incompleteLocalProposalLightCount;
         internal uint reserved1;
 
         internal static ReferencedPathTracingLightListParameters CreateEmpty()
@@ -103,19 +103,641 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ReferencedPathTracingLightListStorageBlock
+    {
+        internal const int WordCount = 12;
+        internal const int Stride = WordCount * sizeof(uint);
+
+        internal uint word0;
+        internal uint word1;
+        internal uint word2;
+        internal uint word3;
+        internal uint word4;
+        internal uint word5;
+        internal uint word6;
+        internal uint word7;
+        internal uint word8;
+        internal uint word9;
+        internal uint word10;
+        internal uint word11;
+
+        internal uint GetWord(int wordIndex)
+        {
+            return wordIndex switch
+            {
+                0 => word0,
+                1 => word1,
+                2 => word2,
+                3 => word3,
+                4 => word4,
+                5 => word5,
+                6 => word6,
+                7 => word7,
+                8 => word8,
+                9 => word9,
+                10 => word10,
+                11 => word11,
+                _ => 0u,
+            };
+        }
+
+        internal void SetWord(int wordIndex, uint value)
+        {
+            switch (wordIndex)
+            {
+                case 0: word0 = value; break;
+                case 1: word1 = value; break;
+                case 2: word2 = value; break;
+                case 3: word3 = value; break;
+                case 4: word4 = value; break;
+                case 5: word5 = value; break;
+                case 6: word6 = value; break;
+                case 7: word7 = value; break;
+                case 8: word8 = value; break;
+                case 9: word9 = value; break;
+                case 10: word10 = value; break;
+                case 11: word11 = value; break;
+            }
+        }
+
+        internal static ReferencedPathTracingLightListStorageBlock
+            FromParameters(ReferencedPathTracingLightListParameters parameters)
+        {
+            return new ReferencedPathTracingLightListStorageBlock
+            {
+                word0 = parameters.lightCount,
+                word1 = parameters.activeLightCount,
+                word2 = parameters.unsupportedLightCount,
+                word3 = parameters.unstableLightCount,
+                word4 = FloatToUInt(parameters.totalSelectionWeight),
+                word5 = FloatToUInt(parameters.inverseTotalSelectionWeight),
+                word6 = parameters.signatureLow,
+                word7 = parameters.signatureHigh,
+                word8 = parameters.version,
+                word9 = parameters.distributionMode,
+                word10 = parameters.incompleteLocalProposalLightCount,
+                word11 = parameters.reserved1,
+            };
+        }
+
+        private static uint FloatToUInt(float value)
+        {
+            return unchecked((uint)BitConverter.SingleToInt32Bits(value));
+        }
+    }
+
+    internal readonly struct ReferencedPathTracingLightSpatialIndexBuildResult
+    {
+        internal ReferencedPathTracingLightSpatialIndexBuildResult(
+            uint[] words,
+            Vector3 boundsMin,
+            Vector3 inverseBoundsExtent,
+            int finiteLightCount,
+            int unboundedLightCount,
+            int overflowCellCount,
+            ulong signature)
+        {
+            this.words = words ?? Array.Empty<uint>();
+            this.boundsMin = boundsMin;
+            this.inverseBoundsExtent = inverseBoundsExtent;
+            this.finiteLightCount = finiteLightCount;
+            this.unboundedLightCount = unboundedLightCount;
+            this.overflowCellCount = overflowCellCount;
+            this.signature = signature;
+        }
+
+        internal uint[] words { get; }
+
+        internal Vector3 boundsMin { get; }
+
+        internal Vector3 inverseBoundsExtent { get; }
+
+        internal int finiteLightCount { get; }
+
+        internal int unboundedLightCount { get; }
+
+        internal int overflowCellCount { get; }
+
+        internal ulong signature { get; }
+    }
+
     internal readonly struct ReferencedPathTracingLightListBuildResult
     {
         internal ReferencedPathTracingLightListBuildResult(
             ReferencedPathTracingLightRecord[] records,
-            ReferencedPathTracingLightListParameters parameters)
+            ReferencedPathTracingLightListParameters parameters,
+            ReferencedPathTracingLightSpatialIndexBuildResult spatialIndex,
+            ReferencedPathTracingLightListStorageBlock[] storageBlocks)
         {
             this.records = records ?? Array.Empty<ReferencedPathTracingLightRecord>();
             this.parameters = parameters;
+            this.spatialIndex = spatialIndex;
+            this.storageBlocks = storageBlocks
+                ?? Array.Empty<ReferencedPathTracingLightListStorageBlock>();
         }
 
         internal ReferencedPathTracingLightRecord[] records { get; }
 
         internal ReferencedPathTracingLightListParameters parameters { get; }
+
+        internal ReferencedPathTracingLightSpatialIndexBuildResult spatialIndex
+        {
+            get;
+        }
+
+        internal ReferencedPathTracingLightListStorageBlock[] storageBlocks
+        {
+            get;
+        }
+    }
+
+    internal static class ReferencedPathTracingLightSpatialIndexBuilder
+    {
+        internal const uint Version = 1;
+        internal const int GridResolution = 32;
+        internal const int CellCapacity = 64;
+        internal const int AxisCount = 3;
+        internal const int HeaderWordCount = 24;
+        internal const int CellHeaderWordCount = 2;
+        internal const uint CellOverflowMask = 1u << 31;
+        internal const int EmptyStorageBlockCount =
+            1
+            + (
+                HeaderWordCount
+                + AxisCount
+                    * GridResolution
+                    * GridResolution
+                    * CellHeaderWordCount
+                + ReferencedPathTracingLightListStorageBlock.WordCount
+                - 1)
+            / ReferencedPathTracingLightListStorageBlock.WordCount;
+
+        private const ulong FnvOffsetBasis = 14695981039346656037UL;
+        private const ulong FnvPrime = 1099511628211UL;
+        private const float MinimumBoundsExtent = 0.001f;
+
+        private sealed class CellBuilder
+        {
+            internal readonly List<uint> lightIndices = new(CellCapacity);
+            internal bool overflow;
+        }
+
+        private readonly struct InfluenceBounds
+        {
+            internal InfluenceBounds(Vector3 min, Vector3 max)
+            {
+                this.min = min;
+                this.max = max;
+            }
+
+            internal Vector3 min { get; }
+
+            internal Vector3 max { get; }
+        }
+
+        internal static ReferencedPathTracingLightSpatialIndexBuildResult Build(
+            IReadOnlyList<ReferencedPathTracingLightRecord> records,
+            ReferencedPathTracingLightListParameters listParameters)
+        {
+            var recordCount = records?.Count ?? 0;
+            var unboundedLightIndices = new List<uint>();
+            var finiteLightIndices = new List<uint>();
+            var finiteLightBounds = new List<InfluenceBounds>();
+            var boundsMin = new Vector3(
+                float.PositiveInfinity,
+                float.PositiveInfinity,
+                float.PositiveInfinity);
+            var boundsMax = new Vector3(
+                float.NegativeInfinity,
+                float.NegativeInfinity,
+                float.NegativeInfinity);
+
+            for (var lightIndex = 0; lightIndex < recordCount; lightIndex++)
+            {
+                var record = records[lightIndex];
+                if (!TryCreateInfluenceBounds(record, out var bounds))
+                {
+                    unboundedLightIndices.Add((uint)lightIndex);
+                    continue;
+                }
+
+                finiteLightIndices.Add((uint)lightIndex);
+                finiteLightBounds.Add(bounds);
+                boundsMin = Vector3.Min(boundsMin, bounds.min);
+                boundsMax = Vector3.Max(boundsMax, bounds.max);
+            }
+
+            Vector3 inverseBoundsExtent;
+            if (finiteLightIndices.Count > 0)
+            {
+                ExpandDegenerateBounds(ref boundsMin, ref boundsMax);
+                var boundsExtent = boundsMax - boundsMin;
+                inverseBoundsExtent = new Vector3(
+                    1.0f / boundsExtent.x,
+                    1.0f / boundsExtent.y,
+                    1.0f / boundsExtent.z);
+            }
+            else
+            {
+                boundsMin = Vector3.zero;
+                inverseBoundsExtent = Vector3.zero;
+            }
+
+            var cells = new CellBuilder[GetCellCount()];
+            for (var finiteIndex = 0;
+                 finiteIndex < finiteLightIndices.Count;
+                 finiteIndex++)
+            {
+                RasterizeInfluenceBounds(
+                    finiteLightIndices[finiteIndex],
+                    finiteLightBounds[finiteIndex],
+                    boundsMin,
+                    inverseBoundsExtent,
+                    cells);
+            }
+
+            var cellHeaderWordOffset = HeaderWordCount;
+            var lightIndexWordOffset =
+                cellHeaderWordOffset + cells.Length * CellHeaderWordCount;
+            var packedLightIndices = new List<uint>(
+                unboundedLightIndices.Count + cells.Length);
+            packedLightIndices.AddRange(unboundedLightIndices);
+            var cellOffsets = new uint[cells.Length];
+            var cellCountsAndFlags = new uint[cells.Length];
+            var overflowCellCount = 0;
+            for (var cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                var cell = cells[cellIndex];
+                cellOffsets[cellIndex] = (uint)packedLightIndices.Count;
+                if (cell == null)
+                    continue;
+
+                packedLightIndices.AddRange(cell.lightIndices);
+                var countAndFlags = (uint)cell.lightIndices.Count;
+                if (cell.overflow)
+                {
+                    countAndFlags |= CellOverflowMask;
+                    overflowCellCount++;
+                }
+
+                cellCountsAndFlags[cellIndex] = countAndFlags;
+            }
+
+            var words = new uint[
+                lightIndexWordOffset + packedLightIndices.Count];
+            words[0] = Version;
+            words[1] = GridResolution;
+            words[2] = CellCapacity;
+            words[3] = (uint)cells.Length;
+            words[4] = (uint)cellHeaderWordOffset;
+            words[5] = (uint)lightIndexWordOffset;
+            words[6] = (uint)packedLightIndices.Count;
+            words[7] = (uint)overflowCellCount;
+            words[8] = FloatToUInt(boundsMin.x);
+            words[9] = FloatToUInt(boundsMin.y);
+            words[10] = FloatToUInt(boundsMin.z);
+            words[11] = FloatToUInt(inverseBoundsExtent.x);
+            words[12] = FloatToUInt(inverseBoundsExtent.y);
+            words[13] = FloatToUInt(inverseBoundsExtent.z);
+            words[14] = 0u;
+            words[15] = (uint)unboundedLightIndices.Count;
+            words[16] = (uint)finiteLightIndices.Count;
+            words[17] = listParameters.signatureLow;
+            words[18] = listParameters.signatureHigh;
+            words[19] = HeaderWordCount;
+
+            for (var cellIndex = 0; cellIndex < cells.Length; cellIndex++)
+            {
+                var wordOffset =
+                    cellHeaderWordOffset
+                    + cellIndex * CellHeaderWordCount;
+                words[wordOffset] = cellOffsets[cellIndex];
+                words[wordOffset + 1] = cellCountsAndFlags[cellIndex];
+            }
+
+            for (var lightIndex = 0;
+                 lightIndex < packedLightIndices.Count;
+                 lightIndex++)
+            {
+                words[lightIndexWordOffset + lightIndex] =
+                    packedLightIndices[lightIndex];
+            }
+
+            var signature = ComputeSignature(
+                listParameters,
+                boundsMin,
+                inverseBoundsExtent,
+                finiteLightIndices.Count,
+                unboundedLightIndices.Count,
+                overflowCellCount);
+            words[20] = (uint)signature;
+            words[21] = (uint)(signature >> 32);
+            return new ReferencedPathTracingLightSpatialIndexBuildResult(
+                words,
+                boundsMin,
+                inverseBoundsExtent,
+                finiteLightIndices.Count,
+                unboundedLightIndices.Count,
+                overflowCellCount,
+                signature);
+        }
+
+        internal static ReferencedPathTracingLightListStorageBlock[]
+            CreateStorageBlocks(
+                ReferencedPathTracingLightListParameters parameters,
+                ReferencedPathTracingLightSpatialIndexBuildResult spatialIndex)
+        {
+            var spatialWords = spatialIndex.words ?? Array.Empty<uint>();
+            var spatialBlockCount =
+                (spatialWords.Length
+                    + ReferencedPathTracingLightListStorageBlock.WordCount
+                    - 1)
+                / ReferencedPathTracingLightListStorageBlock.WordCount;
+            var blocks =
+                new ReferencedPathTracingLightListStorageBlock[
+                    1 + spatialBlockCount];
+            blocks[0] =
+                ReferencedPathTracingLightListStorageBlock.FromParameters(
+                    parameters);
+
+            for (var wordIndex = 0;
+                 wordIndex < spatialWords.Length;
+                 wordIndex++)
+            {
+                var blockIndex =
+                    1
+                    + wordIndex
+                        / ReferencedPathTracingLightListStorageBlock.WordCount;
+                var blockWordIndex =
+                    wordIndex
+                    % ReferencedPathTracingLightListStorageBlock.WordCount;
+                var block = blocks[blockIndex];
+                block.SetWord(blockWordIndex, spatialWords[wordIndex]);
+                blocks[blockIndex] = block;
+            }
+
+            return blocks;
+        }
+
+        private static bool TryCreateInfluenceBounds(
+            ReferencedPathTracingLightRecord record,
+            out InfluenceBounds bounds)
+        {
+            bounds = default;
+            var flags = (ReferencedPathTracingLightFlags)record.flags;
+            if ((flags & ReferencedPathTracingLightFlags.Infinite) != 0
+                || !HasFiniteVector(record.positionWS))
+            {
+                return false;
+            }
+
+            var range = ResolveInfluenceRange(record);
+            if (!IsFinite(range) || range <= 0.0f)
+                return false;
+
+            var shapeExtent = ResolveShapeExtent(record);
+            if (!HasFiniteVector(shapeExtent))
+                return false;
+
+            var rangeExtent = new Vector3(range, range, range);
+            var totalExtent = shapeExtent + rangeExtent;
+            var min = record.positionWS - totalExtent;
+            var max = record.positionWS + totalExtent;
+            if (!HasFiniteVector(min) || !HasFiniteVector(max))
+                return false;
+
+            bounds = new InfluenceBounds(min, max);
+            return true;
+        }
+
+        private static float ResolveInfluenceRange(
+            ReferencedPathTracingLightRecord record)
+        {
+            var range = Mathf.Max(record.range, 0.0f);
+            var scale = record.rangeAttenuation.x;
+            var bias = record.rangeAttenuation.y;
+            if (IsFinite(scale)
+                && IsFinite(bias)
+                && scale > 0.0f
+                && bias > 0.0f)
+            {
+                var attenuationRange =
+                    Mathf.Sqrt(Mathf.Sqrt(bias) / scale);
+                if (IsFinite(attenuationRange))
+                    range = Mathf.Max(range, attenuationRange);
+            }
+
+            return range;
+        }
+
+        private static Vector3 ResolveShapeExtent(
+            ReferencedPathTracingLightRecord record)
+        {
+            var lightType =
+                (ReferencedPathTracingLightType)record.lightType;
+            var absoluteRight = Abs(record.rightWS);
+            var absoluteUp = Abs(record.upWS);
+            return lightType switch
+            {
+                ReferencedPathTracingLightType.Rectangle =>
+                    0.5f
+                    * (Mathf.Max(record.areaSize.x, 0.0f) * absoluteRight
+                        + Mathf.Max(record.areaSize.y, 0.0f) * absoluteUp),
+                ReferencedPathTracingLightType.Disc =>
+                    Mathf.Max(record.shapeRadius, 0.0f)
+                    * (absoluteRight + absoluteUp),
+                ReferencedPathTracingLightType.Tube =>
+                    0.5f
+                    * Mathf.Max(record.areaSize.x, 0.0f)
+                    * absoluteRight,
+                _ => Vector3.zero,
+            };
+        }
+
+        private static void RasterizeInfluenceBounds(
+            uint lightIndex,
+            InfluenceBounds bounds,
+            Vector3 boundsMin,
+            Vector3 inverseBoundsExtent,
+            CellBuilder[] cells)
+        {
+            var minimum = ScaleToGrid(
+                bounds.min,
+                boundsMin,
+                inverseBoundsExtent);
+            var maximum = ScaleToGrid(
+                bounds.max,
+                boundsMin,
+                inverseBoundsExtent);
+
+            RasterizeProjection(
+                lightIndex,
+                0,
+                minimum.y,
+                maximum.y,
+                minimum.z,
+                maximum.z,
+                cells);
+            RasterizeProjection(
+                lightIndex,
+                1,
+                minimum.x,
+                maximum.x,
+                minimum.z,
+                maximum.z,
+                cells);
+            RasterizeProjection(
+                lightIndex,
+                2,
+                minimum.x,
+                maximum.x,
+                minimum.y,
+                maximum.y,
+                cells);
+        }
+
+        private static void RasterizeProjection(
+            uint lightIndex,
+            int axis,
+            int minimumU,
+            int maximumU,
+            int minimumV,
+            int maximumV,
+            CellBuilder[] cells)
+        {
+            var cellsPerAxis = GridResolution * GridResolution;
+            for (var v = minimumV; v <= maximumV; v++)
+            {
+                for (var u = minimumU; u <= maximumU; u++)
+                {
+                    var cellIndex =
+                        axis * cellsPerAxis + u + v * GridResolution;
+                    var cell = cells[cellIndex] ??= new CellBuilder();
+                    if (cell.lightIndices.Count < CellCapacity)
+                        cell.lightIndices.Add(lightIndex);
+                    else
+                        cell.overflow = true;
+                }
+            }
+        }
+
+        private static Vector3Int ScaleToGrid(
+            Vector3 position,
+            Vector3 boundsMin,
+            Vector3 inverseBoundsExtent)
+        {
+            var normalized = Vector3.Scale(
+                position - boundsMin,
+                inverseBoundsExtent);
+            return new Vector3Int(
+                ScaleToGrid(normalized.x),
+                ScaleToGrid(normalized.y),
+                ScaleToGrid(normalized.z));
+        }
+
+        private static int ScaleToGrid(float normalized)
+        {
+            return Mathf.Clamp(
+                Mathf.FloorToInt(normalized * GridResolution),
+                0,
+                GridResolution - 1);
+        }
+
+        private static void ExpandDegenerateBounds(
+            ref Vector3 boundsMin,
+            ref Vector3 boundsMax)
+        {
+            for (var axis = 0; axis < 3; axis++)
+            {
+                if (boundsMax[axis] - boundsMin[axis]
+                    >= MinimumBoundsExtent)
+                {
+                    continue;
+                }
+
+                var center =
+                    0.5f * (boundsMin[axis] + boundsMax[axis]);
+                boundsMin[axis] =
+                    center - 0.5f * MinimumBoundsExtent;
+                boundsMax[axis] =
+                    center + 0.5f * MinimumBoundsExtent;
+            }
+        }
+
+        private static int GetCellCount()
+        {
+            return AxisCount * GridResolution * GridResolution;
+        }
+
+        private static ulong ComputeSignature(
+            ReferencedPathTracingLightListParameters listParameters,
+            Vector3 boundsMin,
+            Vector3 inverseBoundsExtent,
+            int finiteLightCount,
+            int unboundedLightCount,
+            int overflowCellCount)
+        {
+            var hash = FnvOffsetBasis;
+            Hash(ref hash, Version);
+            Hash(ref hash, GridResolution);
+            Hash(ref hash, CellCapacity);
+            Hash(ref hash, listParameters.signatureLow);
+            Hash(ref hash, listParameters.signatureHigh);
+            Hash(ref hash, boundsMin.x);
+            Hash(ref hash, boundsMin.y);
+            Hash(ref hash, boundsMin.z);
+            Hash(ref hash, inverseBoundsExtent.x);
+            Hash(ref hash, inverseBoundsExtent.y);
+            Hash(ref hash, inverseBoundsExtent.z);
+            Hash(ref hash, finiteLightCount);
+            Hash(ref hash, unboundedLightCount);
+            Hash(ref hash, overflowCellCount);
+            return hash;
+        }
+
+        private static void Hash(ref ulong hash, uint value)
+        {
+            hash ^= value;
+            hash *= FnvPrime;
+        }
+
+        private static void Hash(ref ulong hash, int value)
+        {
+            Hash(ref hash, unchecked((uint)value));
+        }
+
+        private static void Hash(ref ulong hash, float value)
+        {
+            Hash(
+                ref hash,
+                unchecked((uint)BitConverter.SingleToInt32Bits(value)));
+        }
+
+        private static Vector3 Abs(Vector3 value)
+        {
+            return new Vector3(
+                Mathf.Abs(value.x),
+                Mathf.Abs(value.y),
+                Mathf.Abs(value.z));
+        }
+
+        private static bool HasFiniteVector(Vector3 value)
+        {
+            return IsFinite(value.x)
+                && IsFinite(value.y)
+                && IsFinite(value.z);
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static uint FloatToUInt(float value)
+        {
+            return unchecked((uint)BitConverter.SingleToInt32Bits(value));
+        }
     }
 
     internal static class ReferencedPathTracingLightListBuilder
@@ -199,6 +821,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var records = uniqueRecords.ToArray();
             double totalSelectionWeight = 0.0;
             uint activeLightCount = 0;
+            uint incompleteLocalProposalLightCount = 0;
 
             for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
             {
@@ -208,6 +831,11 @@ namespace VividRP.Runtime.RenderPass.Core
 
                 totalSelectionWeight += record.selectionWeight;
                 activeLightCount++;
+                if (RequiresGlobalProposalSupport(
+                    (ReferencedPathTracingLightType)record.lightType))
+                {
+                    incompleteLocalProposalLightCount++;
+                }
             }
 
             var parameters =
@@ -216,6 +844,8 @@ namespace VividRP.Runtime.RenderPass.Core
             parameters.activeLightCount = activeLightCount;
             parameters.unsupportedLightCount = unsupportedLightCount;
             parameters.unstableLightCount = unstableLightCount;
+            parameters.incompleteLocalProposalLightCount =
+                incompleteLocalProposalLightCount;
 
             if (totalSelectionWeight > 0.0
                 && totalSelectionWeight <= float.MaxValue)
@@ -229,9 +859,18 @@ namespace VividRP.Runtime.RenderPass.Core
             var signature = ComputeSignature(records, parameters);
             parameters.signatureLow = (uint)signature;
             parameters.signatureHigh = (uint)(signature >> 32);
+            var spatialIndex =
+                ReferencedPathTracingLightSpatialIndexBuilder.Build(
+                    records,
+                    parameters);
+            var storageBlocks =
+                ReferencedPathTracingLightSpatialIndexBuilder
+                    .CreateStorageBlocks(parameters, spatialIndex);
             return new ReferencedPathTracingLightListBuildResult(
                 records,
-                parameters);
+                parameters,
+                spatialIndex,
+                storageBlocks);
         }
 
         private static bool TryCreateRecord(
@@ -556,6 +1195,20 @@ namespace VividRP.Runtime.RenderPass.Core
             return HasFiniteVector(value);
         }
 
+        private static bool RequiresGlobalProposalSupport(
+            ReferencedPathTracingLightType lightType)
+        {
+            // The local point/spot support tests use the same range and cone
+            // windows as candidate evaluation. Area/line lights are indexed
+            // by conservative bounds and use center-based local importance,
+            // so they retain a global proposal to cover their full shapes.
+            return lightType == ReferencedPathTracingLightType.Rectangle
+                || lightType == ReferencedPathTracingLightType.Tube
+                || lightType == ReferencedPathTracingLightType.Disc
+                || lightType
+                    == ReferencedPathTracingLightType.EmissiveTriangle;
+        }
+
         private static bool HasFiniteVector(Vector3 value)
         {
             return IsFinite(value.x)
@@ -586,6 +1239,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, parameters.unstableLightCount);
             Hash(ref hash, parameters.totalSelectionWeight);
             Hash(ref hash, parameters.inverseTotalSelectionWeight);
+            Hash(
+                ref hash,
+                parameters.incompleteLocalProposalLightCount);
 
             for (var lightIndex = 0; lightIndex < records.Length; lightIndex++)
                 Hash(ref hash, records[lightIndex]);

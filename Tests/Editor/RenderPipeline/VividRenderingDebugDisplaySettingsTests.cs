@@ -36,6 +36,18 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> ReGIR -> Opacity"), Is.Not.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Reference Path Tracing"),
+                Is.Not.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Reference Path Tracing -> Transport"),
+                Is.Not.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Reference Path Tracing -> Environment"),
+                Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Overlay -> Channel Mode"), Is.Not.Null);
@@ -263,6 +275,73 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Reset_RestoresReferencedPathTracingDebugDefaults()
+        {
+            VividRenderingDebugDisplaySettings.Data
+                .referencedPathTracingTransportDebugMode =
+                    ReferencedPathTracingTransportDebugMode
+                        .BsdfSegmentMisWeight;
+            VividRenderingDebugDisplaySettings.Data
+                .referencedPathTracingEnvironmentDebugMode =
+                    ReferencedPathTracingEnvironmentDebugMode.EnvironmentOnly;
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingTransportDebugMode,
+                Is.EqualTo(
+                    VividRenderingDebugSettingsData
+                        .DefaultReferencedPathTracingTransportDebugMode));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingEnvironmentDebugMode,
+                Is.EqualTo(
+                    VividRenderingDebugSettingsData
+                        .DefaultReferencedPathTracingEnvironmentDebugMode));
+        }
+
+        [Test]
+        public void ReferencedPathTracingDebugWidgets_MapToDebuggerState()
+        {
+            var transportWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Reference Path Tracing -> Transport")
+                as DebugUI.EnumField;
+            var environmentWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Reference Path Tracing -> Environment")
+                as DebugUI.EnumField;
+
+            Assert.That(transportWidget, Is.Not.Null);
+            Assert.That(environmentWidget, Is.Not.Null);
+            var transportIndex = Array.IndexOf(
+                transportWidget.enumValues,
+                (int)ReferencedPathTracingTransportDebugMode
+                    .LightSpatialIndex);
+            var environmentIndex = Array.IndexOf(
+                environmentWidget.enumValues,
+                (int)ReferencedPathTracingEnvironmentDebugMode
+                    .IndirectMissOnly);
+            Assert.That(transportIndex, Is.GreaterThanOrEqualTo(0));
+            Assert.That(environmentIndex, Is.GreaterThanOrEqualTo(0));
+
+            transportWidget.setIndex(transportIndex);
+            environmentWidget.setIndex(environmentIndex);
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingTransportDebugMode,
+                Is.EqualTo(
+                    ReferencedPathTracingTransportDebugMode
+                        .LightSpatialIndex));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingEnvironmentDebugMode,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentDebugMode
+                        .IndirectMissOnly));
+        }
+
+        [Test]
         public void Reset_RestoresReflectionProbeAtlasDebugDefaults()
         {
             VividRenderingDebugDisplaySettings.Data.reflectionProbeAtlasDebugMode =
@@ -389,6 +468,31 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.reGIRDebugOpacity = 0.25f;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+        }
+
+        [Test]
+        public void AreAnySettingsActive_TracksReferencedPathTracingDebugModes()
+        {
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive,
+                Is.False);
+
+            VividRenderingDebugDisplaySettings.Data
+                .referencedPathTracingTransportDebugMode =
+                    ReferencedPathTracingTransportDebugMode.NeeMisWeight;
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive,
+                Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data
+                .referencedPathTracingEnvironmentDebugMode =
+                    ReferencedPathTracingEnvironmentDebugMode.EnvironmentOnly;
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive,
+                Is.True);
         }
 
         [Test]

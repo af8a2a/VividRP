@@ -191,6 +191,8 @@ namespace VividRP.Editor.Tests
             var environmentImportanceDistribution = resources.Buffers.Single(
                 resource => resource.Name == "EnvironmentImportanceDistribution");
             var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
+            var debugTexture = resources.Textures.Single(
+                resource => resource.Name == "DebugTexture");
             var environmentTexture = resources.Textures.Single(
                 resource => resource.Name == "PathTracingEnvironment");
             var environmentBackgroundTexture = resources.Textures.Single(
@@ -251,6 +253,12 @@ namespace VividRP.Editor.Tests
             Assert.That(worldPosition.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(worldPosition.Texture.desc.EnableRandomWrite, Is.True);
             Assert.That(worldPosition.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(debugTexture.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                debugTexture.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+            Assert.That(debugTexture.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(debugTexture.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(diffuse.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(specular.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(directLighting.Access, Is.EqualTo(AccessFlags.Write));
@@ -287,6 +295,9 @@ namespace VividRP.Editor.Tests
             pass.Prepare(frameData);
 
             var output = GetField<RenderGraphTexture>(pass, "m_WorldPositionTexture");
+            var debugTexture = GetField<RenderGraphTexture>(
+                pass,
+                "m_DebugTexture");
             var environmentDirectDiffuse = GetField<RenderGraphTexture>(
                 pass,
                 "m_EnvironmentDirectDiffuse");
@@ -297,6 +308,10 @@ namespace VividRP.Editor.Tests
             Assert.That(output.desc.Height, Is.EqualTo(540));
             Assert.That(output.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(output.desc.EnableRandomWrite, Is.True);
+            Assert.That(debugTexture.desc.Width, Is.EqualTo(960));
+            Assert.That(debugTexture.desc.Height, Is.EqualTo(540));
+            Assert.That(debugTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
+            Assert.That(debugTexture.desc.EnableRandomWrite, Is.True);
             Assert.That(environmentDirectDiffuse.desc.Width, Is.EqualTo(960));
             Assert.That(environmentDirectDiffuse.desc.Height, Is.EqualTo(540));
             Assert.That(environmentDirectSpecular.desc.Width, Is.EqualTo(960));
@@ -393,14 +408,26 @@ namespace VividRP.Editor.Tests
             Assert.That(commonSource, Does.Contain("uint neeLightType;"));
             Assert.That(
                 commonSource,
+                Does.Contain("int _ReferencedLightSpatialIndexEnabled;"));
+            Assert.That(
+                commonSource,
                 Does.Contain(
                     "ReferencedPathtracingGetDirectionalLightSolidAnglePdf"));
             Assert.That(
                 commonSource,
                 Does.Contain("lightPdf = rcp(solidAngle);"));
             Assert.That(
+                commonSource,
+                Does.Contain("ReferencedPathtracingGetLightEstimatorWeight"));
+            Assert.That(
+                commonSource,
+                Does.Contain("ReferencedPathtracingGetBsdfEstimatorWeight"));
+            Assert.That(
                 lightListSource,
                 Does.Contain("ReferencedPathtracingSampleUnifiedLightSource"));
+            Assert.That(
+                lightListSource,
+                Does.Contain("ReferencedPathtracingIsLightNeeEligible"));
             Assert.That(
                 lightListSource,
                 Does.Contain(
@@ -409,6 +436,18 @@ namespace VividRP.Editor.Tests
                 lightListSource,
                 Does.Contain(
                     "ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf"));
+            Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "ReferencedPathtracingResolveLightSpatialCandidateSet"));
+            Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "REFERENCED_LIGHT_CONTEXT_FULL_SCAN_FALLBACK"));
+            Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "parameters.incompleteLocalProposalLightCount == 0u"));
             Assert.That(
                 candidateSource,
                 Does.Contain("struct ReferencedPathtracingNEECandidate"));
@@ -470,6 +509,39 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
+                    "ReferencedPathtracingGetContextLightIndex"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("lightSpatialIndexDiagnostic"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "RWTexture2D<float4> _ReferencedPathTracingDebugTexture;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_WorldPositionTexture[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "float4(physicalRadiance, physicalOutputAlpha)"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedPathTracingDebugTexture[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "float4(debugRadiance, debugOutputAlpha)"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("neeTransportDiagnostic"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("segmentTransportDiagnostic"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
                     "primaryDenoiserMainLightDiffuseRadiance"));
             Assert.That(
                 rayGenerationSource,
@@ -522,6 +594,8 @@ namespace VividRP.Editor.Tests
                     node.GetInputPortByName("m_EnvironmentImportanceDistribution"),
                     Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_SpecularRadianceHitDistance"), Is.Not.Null);
                 Assert.That(node.GetOutputPortByName("m_DirectLighting"), Is.Not.Null);
@@ -537,6 +611,61 @@ namespace VividRP.Editor.Tests
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
+        }
+
+        [Test]
+        public void Prepare_UsesRenderingDebuggerPathTracingModes()
+        {
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            try
+            {
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingTransportDebugMode =
+                        ReferencedPathTracingTransportDebugMode.NeePdfs;
+                VividRenderingDebugDisplaySettings.Data
+                    .referencedPathTracingEnvironmentDebugMode =
+                        ReferencedPathTracingEnvironmentDebugMode
+                            .IndirectMissOnly;
+                var pass = new ReferencedPathTracingPass();
+                var frameData = new ContextContainer();
+                frameData.GetOrCreate<VividCameraData>();
+
+                pass.Prepare(frameData);
+
+                var settings =
+                    GetField<ReferencedPathTracingDebugSettings>(
+                        pass,
+                        "m_DebugSettings");
+                Assert.That(
+                    settings.transportMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingTransportDebugMode.NeePdfs));
+                Assert.That(
+                    settings.environmentMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentDebugMode
+                            .IndirectMissOnly));
+            }
+            finally
+            {
+                VividRenderingDebugDisplaySettings.Data.Reset();
+            }
+        }
+
+        [Test]
+        public void DebugSettings_DefaultToCombinedWithoutRenderingDebuggerData()
+        {
+            var settings =
+                ReferencedPathTracingDebugSettings.Resolve(null);
+
+            Assert.That(
+                settings.transportMode,
+                Is.EqualTo(
+                    ReferencedPathTracingTransportDebugMode.Combined));
+            Assert.That(
+                settings.environmentMode,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentDebugMode.Combined));
         }
 
         [Test]
@@ -576,9 +705,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     state.estimatorMode,
                     Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
-                Assert.That(
-                    state.debugMode,
-                    Is.EqualTo(ReferencedPathTracingEnvironmentDebugMode.Combined));
                 Assert.That(state.tint, Is.EqualTo(new Color(0.5f, 0.75f, 1.0f, 1.0f)));
                 Assert.That(state.intensityMultiplier, Is.EqualTo(2.0f));
                 Assert.That(state.rotation, Is.EqualTo(45.0f));
@@ -642,6 +768,14 @@ namespace VividRP.Editor.Tests
                     metadata.samplingMode,
                     Is.EqualTo(
                         ReferencedPathTracingEnvironmentSamplingMode.UniformSphere));
+                Assert.That(
+                    metadata.estimatorMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentEstimatorMode.Mis));
+                Assert.That(
+                    metadata.debugMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentDebugMode.Combined));
                 Assert.That(
                     metadata.pdfVersion,
                     Is.EqualTo(ReferencedPathTracingEnvironmentImportanceLayout.Version));
@@ -725,6 +859,32 @@ namespace VividRP.Editor.Tests
                     out failure),
                 Is.False);
             Assert.That(failure, Does.Contain("GPU validation evidence"));
+
+            captures[0].validation.status =
+                ReferencedPathTracingValidationStatus.Passed;
+            captures[0].transportConformance.status =
+                ReferencedPathTracingValidationStatus.NotRun;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCorpus(
+                    captures,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("Transport conformance"));
+
+            captures[0].transportConformance.status =
+                ReferencedPathTracingValidationStatus.Passed;
+            captures[0]
+                .transportConformance
+                .lightProposalMeasurements[1]
+                .globalProposalProbability = 0.5f;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCorpus(
+                    captures,
+                    out failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("does not match the capture settings"));
         }
 
         [Test]
@@ -751,6 +911,51 @@ namespace VividRP.Editor.Tests
 
             capture.rawRadianceIsPreExposed = false;
             capture.environment.cameraVisible = true;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.environment.cameraVisible = false;
+            capture.transportDebugMode =
+                ReferencedPathTracingTransportDebugMode.NeePdfs;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.transportDebugMode =
+                ReferencedPathTracingTransportDebugMode.Combined;
+            capture.environment.debugMode =
+                ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.environment.debugMode =
+                ReferencedPathTracingEnvironmentDebugMode.Combined;
+            capture.usesShadingPointLightSelection = false;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.usesShadingPointLightSelection = true;
+            capture.globalLightProposalProbability = 0.5f;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
+
+            capture.globalLightProposalProbability =
+                corpusCase.globalLightProposalProbability;
+            capture.usesLightSpatialIndex = false;
             Assert.That(
                 ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
                     capture,
@@ -874,13 +1079,6 @@ namespace VividRP.Editor.Tests
                     settings);
                 settings.environmentSamplingMode.value =
                     ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
-                settings.environmentDebugMode.value =
-                    ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly;
-                var indirectMissOnly = ReferencedPathTracingEnvironmentState.Resolve(
-                    skyData,
-                    settings);
-                settings.environmentDebugMode.value =
-                    ReferencedPathTracingEnvironmentDebugMode.Combined;
                 skyData.specularCubemap = replacementCubemap;
                 var replacement = ReferencedPathTracingEnvironmentState.Resolve(
                     skyData,
@@ -926,12 +1124,6 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     bsdfOnly.samplingSignature,
                     Is.Not.EqualTo(original.samplingSignature));
-                Assert.That(
-                    indirectMissOnly.signature,
-                    Is.Not.EqualTo(original.signature));
-                Assert.That(
-                    indirectMissOnly.samplingSignature,
-                    Is.EqualTo(original.samplingSignature));
                 Assert.That(replacement.signature, Is.Not.EqualTo(original.signature));
                 Assert.That(
                     replacement.samplingSignature,
@@ -1060,6 +1252,23 @@ namespace VividRP.Editor.Tests
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,
                 integratorSignature = 1ul,
+                estimatorMode = corpusCase.estimatorMode,
+                transportDebugMode =
+                    ReferencedPathTracingTransportDebugMode.Combined,
+                usesShadingPointLightSelection =
+                    corpusCase.usesShadingPointLightSelection,
+                globalLightProposalProbability =
+                    corpusCase.globalLightProposalProbability,
+                usesLightSpatialIndex =
+                    corpusCase.usesLightSpatialIndex,
+                lightSpatialIndexVersion =
+                    (int)ReferencedPathTracingLightSpatialIndexBuilder.Version,
+                lightSpatialIndexResolution =
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .GridResolution,
+                lightSpatialIndexCellCapacity =
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .CellCapacity,
                 usesReGIR = false,
                 usesDenoiser = false,
                 usesRasterGI = false,
@@ -1083,6 +1292,8 @@ namespace VividRP.Editor.Tests
                             != "hdri-camera-hidden-lighting",
                         samplingMode = corpusCase.samplingMode,
                         estimatorMode = corpusCase.estimatorMode,
+                        debugMode =
+                            ReferencedPathTracingEnvironmentDebugMode.Combined,
                         physicalIntensityMultiplier = 1.0f,
                         pdfVersion =
                             ReferencedPathTracingEnvironmentImportanceLayout.Version,
@@ -1097,7 +1308,89 @@ namespace VividRP.Editor.Tests
                     finitePixelFraction = 1.0f,
                     negativeRadianceFraction = 0.0f,
                     relativeMeanError = 0.01f
+                },
+                transportConformance =
+                    new ReferencedPathTracingTransportConformanceEvidence
+                {
+                    status = ReferencedPathTracingValidationStatus.Passed,
+                    estimatorMeasurements = new[]
+                    {
+                        CreateEstimatorMeasurement(
+                            ReferencedPathTracingEnvironmentEstimatorMode.Mis,
+                            1.0f),
+                        CreateEstimatorMeasurement(
+                            ReferencedPathTracingEnvironmentEstimatorMode.LightOnly,
+                            1.005f),
+                        CreateEstimatorMeasurement(
+                            ReferencedPathTracingEnvironmentEstimatorMode.BsdfOnly,
+                            0.995f)
+                    },
+                    lightProposalMeasurements = new[]
+                    {
+                        CreateLightProposalMeasurement(
+                            false,
+                            1.0f,
+                            1.0f,
+                            0.4f),
+                        CreateLightProposalMeasurement(
+                            true,
+                            corpusCase.globalLightProposalProbability,
+                            1.005f,
+                            0.25f)
+                    },
+                    lightSelection =
+                        new ReferencedPathTracingLightSelectionEvidence
+                    {
+                        sampleCount = 10000,
+                        declaredSelectionPdfs =
+                            new[] { 0.25f, 0.75f },
+                        observedSelectionCounts =
+                            new[] { 2500, 7500 }
+                    },
+                    pdfConsistency =
+                        new ReferencedPathTracingPdfConsistencyEvidence
+                    {
+                        comparisonCount = 10000,
+                        nonFiniteCount = 0,
+                        maximumRelativeError = 1e-6f
+                    }
                 }
+            };
+        }
+
+        private static ReferencedPathTracingLightProposalMeasurement
+            CreateLightProposalMeasurement(
+                bool enabled,
+                float globalProposalProbability,
+                float meanLuminance,
+                float luminanceVariance)
+        {
+            return new ReferencedPathTracingLightProposalMeasurement
+            {
+                shadingPointSelectionEnabled = enabled,
+                globalProposalProbability = globalProposalProbability,
+                sampleCount = 4096,
+                meanLuminance = meanLuminance,
+                standardError = 0.005f,
+                luminanceVariance = luminanceVariance,
+                finitePixelFraction = 1.0f,
+                negativeRadianceFraction = 0.0f
+            };
+        }
+
+        private static ReferencedPathTracingEstimatorMeasurement
+            CreateEstimatorMeasurement(
+                ReferencedPathTracingEnvironmentEstimatorMode mode,
+                float meanLuminance)
+        {
+            return new ReferencedPathTracingEstimatorMeasurement
+            {
+                estimatorMode = mode,
+                sampleCount = 4096,
+                meanLuminance = meanLuminance,
+                standardError = 0.005f,
+                finitePixelFraction = 1.0f,
+                negativeRadianceFraction = 0.0f
             };
         }
     }

@@ -128,10 +128,28 @@ void StandardLitReferencedPathtracingClosestHit(
     payload.nextLobeClass = 0u;
 
     ReferencedPathtracingNEECandidate neeCandidate;
-    if (ReferencedPathtracingSampleUnifiedNEECandidate(
+    bool validNeeCandidate =
+        ReferencedPathtracingSampleUnifiedNEECandidate(
             geometry.positionWS,
+            geometry.faceNormalWS,
             payload.directLightRandom,
-            neeCandidate)
+            neeCandidate);
+    // Preserve the selected source and declared densities even when its
+    // conditional sample is rejected. Phase 4.4 diagnostics use this to
+    // measure the selector itself rather than only positive contributions.
+    if (neeCandidate.selectionPdf > 0.0)
+    {
+        payload.neeDirectionWS = neeCandidate.directionWS;
+        payload.neeDistance = neeCandidate.distance;
+        payload.neeSelectionPdf = neeCandidate.selectionPdf;
+        payload.neeSolidAnglePdf = neeCandidate.solidAnglePdf;
+        payload.neeShadowStrength = neeCandidate.shadowStrength;
+        payload.neeLightIndex = neeCandidate.lightIndex;
+        payload.neeLightType = neeCandidate.lightType;
+        payload.neeFlags = neeCandidate.flags;
+    }
+
+    if (validNeeCandidate
         && dot(neeCandidate.directionWS, geometry.faceNormalWS) > 0.0)
     {
         OpenPBR_DiffuseSpecular neeResponse = openpbr_eval(
@@ -155,15 +173,7 @@ void StandardLitReferencedPathtracingClosestHit(
             payload.neeSpecularRadiance =
                 max(neeSpecularBsdf, 0.0)
                 * neeCandidate.incidentRadianceOverPdf;
-            payload.neeDirectionWS = normalize(neeCandidate.directionWS);
-            payload.neeDistance = neeCandidate.distance;
-            payload.neeSelectionPdf = neeCandidate.selectionPdf;
-            payload.neeSolidAnglePdf = neeCandidate.solidAnglePdf;
             payload.neeBsdfPdf = neeBsdfPdf;
-            payload.neeShadowStrength = neeCandidate.shadowStrength;
-            payload.neeLightIndex = neeCandidate.lightIndex;
-            payload.neeLightType = neeCandidate.lightType;
-            payload.neeFlags = neeCandidate.flags;
             payload.neeValid = 1u;
         }
     }

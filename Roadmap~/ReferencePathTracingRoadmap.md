@@ -977,6 +977,88 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   使用解析 emitter hit distance；finite directional 继续保留 FP32 direct AOV 与 finite-sun
   denoiser copy。
 
+### Phase 4.4 checkpoint: Light Transport Conformance (2026-07-26)
+
+- 原 `environmentEstimatorMode` 序列化字段保留以兼容已有 Volume Profile，但语义扩展为全局
+  transport estimator。`MIS`、`Light Only` 与 `BSDF Only` 现在统一控制解析灯 NEE、
+  BSDF-segment light evaluation 和 environment NEE/miss；integrator contract 升级为 V3，
+  estimator mode 进入积累失效签名与 capture metadata。debug mode 后续已迁移到
+  Rendering Debugger，不再参与积累签名。
+- BSDF-only 模式会从 unified candidate distribution 中剔除 `BSDF_REACHABLE` emitter，
+  因而 segment/miss 侧观察到 selection PDF 为 0 并以权重 1 保留完整 support。point、spot、
+  tube、delta directional 等 BSDF 不可达或 singular 事件仍保留 NEE，Light-only 模式也保留
+  delta BSDF 的唯一可达路径。
+- 新增 raw transport debug views：首个 primary NEE 的 selection/solid-angle/BSDF PDF、
+  light-side MIS weight、stable light identity，以及首个 primary BSDF-segment emitter 的对应
+  PDF 与 BSDF-side MIS weight。Invalid Sample Mask 分离标记 NEE、segment 和最终 path 的
+  NaN/Inf/negative-radiance 异常。debug view 由 Rendering Debugger 管理并写入独立
+  `DebugTexture`；resolved output 和物理 lighting AOV 始终保持 Combined。
+- 新增 CPU estimator-policy mirror 和 `ReferencedPathTracingTransportConformanceGate`。
+  conformance evidence 必须同时提供三 estimator 的高 SPP 均值/standard error、light-selection
+  histogram 与 sample/evaluate PDF reciprocity；V1 frozen capture contract 升级为 V2 并要求
+  conformance evidence 为 Passed，且所有 transport/environment debug mode 为 Combined。
+- 代码与 EditMode contract 已建立；实际 DX12 GPU corpus 仍需填充 estimator measurements、
+  histogram 和 PDF comparison evidence，未执行前不得将 V1 freeze 标记为完成。
+
+### Phase 4.5 checkpoint: Shading-point-aware Light Selection (2026-07-26)
+
+- unified source selector 现在混合两套离散 proposal：
+  `p_select = α × p_global + (1 - α) × p_local`。`p_global` 继续使用稳定 Reference Light
+  List 的 power proxy；`p_local` 在每个 shading vertex 根据位置、几何法线、距离/range window、
+  spot cone、单面 area emitter 朝向以及 tube radial factor 重排解析灯。HDRI 在 local proposal
+  中仍保留，并继续由自身的方向重要性分布负责条件采样。
+- 默认 `α = 0.25`，并强制至少 0.05 的 global support floor。关闭
+  `Shading Point Light Selection` 时退化为原全局 distribution；局部 proposal 无有效支持时也自动
+  fallback 到全局 proposal。该策略只改变方差，不裁剪任何原 proposal 可达的光源。
+- 每个 shading vertex 只构建一次 `ReferencedPathtracingLightSelectionContext`，缓存 global/local
+  analytic、environment 与 total weight。NEE 从混合 proposal 采样；BSDF segment 遍历复用同一
+  context 直接求每个 emitter 的完整 mixture selection PDF；environment miss 使用上一 vertex 的
+  同一 context。因此解析 emitter 路径保持 O(N)，不会因逐灯重复归一化退化为 O(N²)。
+- light-sampled candidate、BSDF-segment emitter 和 environment miss 都使用完全相同的
+  mixture selection PDF，并再乘各自的条件 solid-angle PDF 参与 Phase 4.4 MIS。现有 payload
+  已独立保存 selection/conditional PDF，本阶段没有改变 ray payload 布局。
+- 新开关和 global proposal probability 已进入 integrator V4 签名、shader binding、capture
+  metadata 与 V1 freeze contract V3。transport conformance evidence 新增 global-only 与
+  shading-point proposal 的高 SPP 均值、standard error 和 variance；冻结门禁要求两者均值在统计
+  容差内一致，但 variance 只记录不作为 correctness hard gate。
+- CPU contract 与 shader importer 检查已建立；实际 DX12 light-matrix/interior GPU capture 仍需
+  填充 proposal on/off evidence。只有均值一致且局部 proposal 显示预期方差收益后，才把 4.5
+  标记为 GPU-validated。
+
+### Phase 4.6 checkpoint: Reference Light Spatial Index (2026-07-26)
+
+- Reference Light List builder 现在基于每个 finite light 的 conservative influence AABB 构建
+  camera-independent 三轴投影空间索引。XY、XZ、YZ cell 分别保存稳定 light index；shading
+  point 查询三个投影并选择未溢出且候选最少的轴。directional 和其他无法建立有限 influence
+  bound 的记录进入独立 unbounded 集合。
+- 索引采用固定 `32 × 32 × 3` cell、每 cell 64 个候选。area/tube 的 shape extent 与
+  range window 一起扩张 influence bound；自定义 range attenuation 会反解其最远非零距离，
+  避免只使用 `Light.range` 造成 emitter 漏检。cell index 按 Reference Light List 的 stable
+  order 写入，因此同一 light signature 生成完全一致的 buffer。
+- 为保持 `.vrdg` 与 payload ABI 不变，空间 header、cell header 和 packed light indices
+  追加在现有 `ReferenceLightListParameters` structured buffer 尾部；首个 48-byte block 仍保留
+  light-list parameters ABI。light-list contract 升级为 V2，ray payload 没有变化。
+- Phase 4.5 selection context 现在缓存 unbounded range、spatial candidate range、选中的轴和
+  fallback flags。local proposal 只在该完整候选域内归一化；global NEE 命中候选域外灯时，
+  local PDF 分量精确为 0，最终仍由 global support floor 保持完整支持。sample/evaluate 和
+  BSDF-side MIS 通过相同的 stable-index membership query 观察同一个 mixture PDF。
+- BSDF-segment analytic emitter traversal 与 NEE 复用同一 context。任一完整投影可用时只遍历
+  unbounded + cell candidates；三个投影同时 overflow、索引关闭或 header 无效时回退完整
+  Reference Light List。shading point 位于所有 finite influence bounds 之外时只遍历 unbounded
+  lights，不会把容量截断作为 correctness authority。
+- 新增 `Light Spatial Index` Volume 开关与 transport debug view。debug RGB 分别输出 traversal
+  candidate count、selected axis + 1 和 context flags（indexed/fallback/outside/overflow）。
+  transport/environment debug 选项现由 Rendering Debugger 的 `Reference Path Tracing`
+  foldout 管理，并统一输出到 pass-owned `DebugTexture` RenderGraph port；切换 debug view
+  不再修改 Volume、主路径追踪输出或 accumulation signature。debug state 与 integrator/
+  environment state 解耦后 integrator contract 升级为 V6，V1 freeze contract 升级为 V5；
+  capture metadata 继续固定记录 Combined，明确 raw radiance 未经过 debug 替换。
+  capture metadata 仍记录 spatial-index version、resolution 和 cell capacity。
+- `VividRP.Runtime.csproj` 与 `VividRP.Editor.Tests.csproj` 的 .NET 编译已通过，light-list HLSL
+  也通过 DXC `lib_6_6` 编译；新增 deterministic packing、stable-order 和 overflow behavior
+  tests。实际 Unity shader import、DX12 debug view 和 spatial-index OFF/ON 高 SPP 均值对比
+  仍是 GPU validation gate。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal
@@ -1022,6 +1104,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - REBLUR signal 使用统一的 linear-RGB 契约。有限精度的中间滤波或 history 一旦裁掉 YCoCg 的负色度，
   高饱和红/蓝局部光会解码成错误色相；path tracer producer、NRD permutation 与 resolve 现在共享同一
   encoding 开关，避免输入、history 和输出对 signal 颜色空间产生分歧。
+- 2026-07-26 修正 punctual range 交叠处的单 candidate 黑带：light-list v3 标记局部 proposal 无法
+  完整覆盖贡献支持域的 rectangle/disc/tube 灯。仅含 directional/point/spot 的场景会使用支持域精确
+  的 shading-point proposal，不再强制混入可能选中范围外零贡献 punctual 灯的 global CDF；存在形状
+  光时仍保留 global/local mixture，维持完整支持域与 MIS PDF 一致性。
 - 新增专用 `RaytracingGBufferPass`，使用稳定的 primary visibility ray 输出 NRD guide：positive linear
   viewZ、2.5D pixel motion、`R10G10B10A2_UNorm` oct normal + linear roughness；同时预留
   DLSS Ray Reconstruction guide：RG16F screen-space motion、hardware depth、world normal + perceptual

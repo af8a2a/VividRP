@@ -7,7 +7,7 @@
 
 #if defined(VIVID_REFERENCE_PT_SER)
 // This slot must match ReferencedPathTracingPass.ShaderExecutionReorderingUavSlot.
-// u31 stays clear of the pass's nine automatically allocated output UAVs.
+// u31 stays clear of the pass's ten automatically allocated output UAVs.
 #define NV_SHADER_EXTN_SLOT u31
 #define NV_HITOBJECT_USE_MACRO_API
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NVAPI/nvHLSLExtns.h"
@@ -15,6 +15,7 @@
 
 RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _WorldPositionTexture;
+RWTexture2D<float4> _ReferencedPathTracingDebugTexture;
 RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
 RWTexture2D<float4> _ReferencedPathTracingDirectLighting;
@@ -235,27 +236,17 @@ void TraceReferencedPathtracingSurface(
 }
 
 float GetReferencedPathtracingNEELightEstimatorWeight(
-    uint lightType,
     uint lightFlags,
     float selectionPdf,
     float solidAnglePdf,
     float bsdfPdf)
 {
     float lightPdf = selectionPdf * solidAnglePdf;
-    if (lightType == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
-    {
-        return ReferencedPathtracingGetEnvironmentLightEstimatorWeight(
-            lightPdf,
-            bsdfPdf);
-    }
-
-    if ((lightFlags & REFERENCED_LIGHT_FLAG_SINGULAR) != 0u
-        || (lightFlags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) == 0u)
-    {
-        return 1.0;
-    }
-
-    return ReferencedPathtracingPowerHeuristic(lightPdf, bsdfPdf);
+    return ReferencedPathtracingGetLightEstimatorWeight(
+        (lightFlags & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) != 0u,
+        (lightFlags & REFERENCED_LIGHT_FLAG_SINGULAR) != 0u,
+        lightPdf,
+        bsdfPdf);
 }
 
 void AccumulateReferencedPathtracingMainLightRadiance(
@@ -336,10 +327,21 @@ void RayGenReferencedPathtracing()
     float3 environmentNeeRadiance = 0.0;
     float3 environmentDirectDiffuseRadiance = 0.0;
     float3 environmentDirectSpecularRadiance = 0.0;
+    float4 neeTransportDiagnostic = 0.0;
+    float4 segmentTransportDiagnostic = 0.0;
+    float3 neeLightIdentityDiagnostic = 0.0;
+    float3 lightSpatialIndexDiagnostic = 0.0;
+    float3 invalidSampleMask = 0.0;
+    bool hasNeeTransportDiagnostic = false;
+    bool neeTransportContributionValid = false;
+    bool hasSegmentTransportDiagnostic = false;
     float cameraBackgroundAlpha = 0.0;
     float3 throughput = 1.0;
     float previousBsdfPdf = 0.0;
     bool previousBsdfWasDelta = false;
+    ReferencedPathtracingLightSelectionContext
+        previousLightSelectionContext =
+            (ReferencedPathtracingLightSelectionContext)0;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
     uint primaryLobeClass = 0u;
@@ -396,9 +398,10 @@ void RayGenReferencedPathtracing()
                     ReferencedPathtracingEvaluateLightingEnvironment(ray.Direction);
                 float environmentLightPdf =
                     ReferencedPathtracingEvaluateUnifiedEnvironmentLightPdf(
+                        previousLightSelectionContext,
                         ray.Direction);
                 float bsdfEstimatorWeight =
-                    ReferencedPathtracingGetEnvironmentBsdfEstimatorWeight(
+                    ReferencedPathtracingGetBsdfEstimatorWeight(
                         previousBsdfPdf,
                         environmentLightPdf,
                         previousBsdfWasDelta);
@@ -416,6 +419,10 @@ void RayGenReferencedPathtracing()
                         specularRadiance += environmentContribution;
                         indirectEnvironmentRadiance += environmentContribution;
                     }
+                }
+                else
+                {
+                    invalidSampleMask.z = 1.0;
                 }
             }
 
@@ -448,25 +455,48 @@ void RayGenReferencedPathtracing()
             }
         }
 
+        if (bounceIndex == 0u
+            && !hasNeeTransportDiagnostic
+            && payload.neeSelectionPdf > 0.0)
+        {
+            float diagnosticLightEstimatorWeight =
+                GetReferencedPathtracingNEELightEstimatorWeight(
+                    payload.neeFlags,
+                    payload.neeSelectionPdf,
+                    payload.neeSolidAnglePdf,
+                    payload.neeBsdfPdf);
+            neeTransportDiagnostic = float4(
+                payload.neeSelectionPdf,
+                payload.neeSolidAnglePdf,
+                payload.neeBsdfPdf,
+                diagnosticLightEstimatorWeight);
+            neeLightIdentityDiagnostic = float3(
+                (float)(payload.neeLightIndex + 1u),
+                (float)payload.neeLightType,
+                (float)payload.neeFlags);
+            hasNeeTransportDiagnostic = true;
+            neeTransportContributionValid = payload.neeValid != 0u;
+        }
+
         if (payload.neeValid != 0u
             && (any(payload.neeDiffuseRadiance > 0.0)
                 || any(payload.neeSpecularRadiance > 0.0)))
         {
             float lightEstimatorWeight =
                 GetReferencedPathtracingNEELightEstimatorWeight(
-                    payload.neeLightType,
                     payload.neeFlags,
                     payload.neeSelectionPdf,
                     payload.neeSolidAnglePdf,
                     payload.neeBsdfPdf);
             float3 neeDirectionWS = normalize(payload.neeDirectionWS);
-            float visibility =
-                TraceReferencedPathtracingCandidateVisibility(
+            float visibility = lightEstimatorWeight > 0.0
+                ? TraceReferencedPathtracingCandidateVisibility(
                     payload.positionWS,
                     normalize(payload.faceNormalWS),
                     neeDirectionWS,
                     payload.neeDistance,
-                    payload.neeShadowStrength);
+                    payload.neeShadowStrength)
+                : 0.0;
             float3 directDiffuse = throughput
                 * payload.neeDiffuseRadiance
                 * lightEstimatorWeight
@@ -479,6 +509,12 @@ void RayGenReferencedPathtracing()
             bool finiteContributions =
                 IsFiniteReferencedPathtracingRadiance(directDiffuse)
                 && IsFiniteReferencedPathtracingRadiance(directSpecular);
+            if (!finiteContributions
+                || any(directDiffuse < -1e-6)
+                || any(directSpecular < -1e-6))
+            {
+                invalidSampleMask.x = 1.0;
+            }
             if (finiteContributions
                 && payload.neeLightType
                     == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
@@ -566,19 +602,44 @@ void RayGenReferencedPathtracing()
         if (payload.nextPdf > 0.0
             && any(payload.nextThroughputWeight > 0.0))
         {
-            ReferencedPathTracingLightListParameters lightListParameters =
-                _ReferencedLightListParameters[0];
-            for (uint lightIndex = 0u;
-                 lightIndex < lightListParameters.lightCount;
-                 ++lightIndex)
+            ReferencedPathtracingLightSelectionContext selectionContext =
+                ReferencedPathtracingCreateLightSelectionContext(
+                    payload.positionWS,
+                    payload.faceNormalWS);
+            previousLightSelectionContext = selectionContext;
+            uint contextLightCount =
+                ReferencedPathtracingGetContextLightCount(
+                    selectionContext);
+            if (bounceIndex == 0u)
             {
+                lightSpatialIndexDiagnostic = float3(
+                    (float)contextLightCount,
+                    selectionContext.spatialAxis != 0xffffffffu
+                        ? (float)(selectionContext.spatialAxis + 1u)
+                        : 0.0,
+                    (float)selectionContext.spatialFlags);
+            }
+            for (uint contextLightIndex = 0u;
+                 contextLightIndex < contextLightCount;
+                 ++contextLightIndex)
+            {
+                uint lightIndex =
+                    ReferencedPathtracingGetContextLightIndex(
+                        selectionContext,
+                        contextLightIndex);
                 ReferencedPathTracingLightRecord light =
                     ReferencedPathtracingLoadReferenceLight(lightIndex);
+                float lightSelectionPdf =
+                    ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
+                        selectionContext,
+                        lightIndex,
+                        light);
                 ReferencedPathtracingSegmentLightHit segmentLightHit;
                 if (!ReferencedPathtracingEvaluateSegmentLight(
                         payload.positionWS,
                         payload.nextDirectionWS,
                         lightIndex,
+                        lightSelectionPdf,
                         light,
                         segmentLightHit))
                 {
@@ -589,12 +650,23 @@ void RayGenReferencedPathtracing()
                     segmentLightHit.selectionPdf
                     * segmentLightHit.solidAnglePdf;
                 float bsdfEstimatorWeight =
-                    payload.nextLobeIsDelta != 0u
-                        || fullLightPdf <= 0.0
-                        ? 1.0
-                        : ReferencedPathtracingPowerHeuristic(
-                            payload.nextPdf,
-                            fullLightPdf);
+                    ReferencedPathtracingGetBsdfEstimatorWeight(
+                        payload.nextPdf,
+                        fullLightPdf,
+                        payload.nextLobeIsDelta != 0u);
+                if (bounceIndex == 0u
+                    && !hasSegmentTransportDiagnostic)
+                {
+                    segmentTransportDiagnostic = float4(
+                        segmentLightHit.selectionPdf,
+                        segmentLightHit.solidAnglePdf,
+                        payload.nextPdf,
+                        bsdfEstimatorWeight);
+                    hasSegmentTransportDiagnostic = true;
+                }
+                if (bsdfEstimatorWeight <= 0.0)
+                    continue;
+
                 float visibility =
                     TraceReferencedPathtracingCandidateVisibility(
                         payload.positionWS,
@@ -611,8 +683,11 @@ void RayGenReferencedPathtracing()
                 if (!IsFiniteReferencedPathtracingRadiance(
                         bsdfSampledDirect))
                 {
+                    invalidSampleMask.y = 1.0;
                     continue;
                 }
+                if (any(bsdfSampledDirect < -1e-6))
+                    invalidSampleMask.y = 1.0;
 
                 if (segmentLightHit.lightType
                     == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
@@ -684,6 +759,8 @@ void RayGenReferencedPathtracing()
         if (!IsFiniteReferencedPathtracingRadiance(throughput)
             || MaxReferencedPathtracingComponent(throughput) <= 0.0)
         {
+            if (!IsFiniteReferencedPathtracingRadiance(throughput))
+                invalidSampleMask.z = 1.0;
             break;
         }
 
@@ -710,30 +787,61 @@ void RayGenReferencedPathtracing()
         ray.TMax = _RayMaxDistance;
     }
 
+    if (any(diffuseRadiance < -1e-6)
+        || any(specularRadiance < -1e-6)
+        || any(directLightingRadiance < -1e-6)
+        || any(emissionRadiance < -1e-6))
+    {
+        invalidSampleMask.z = 1.0;
+    }
+
     if (!IsFiniteReferencedPathtracingRadiance(diffuseRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         diffuseRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(specularRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         specularRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(directLightingRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         directLightingRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(
             primaryDenoiserMainLightDiffuseRadiance))
     {
+        invalidSampleMask.z = 1.0;
         primaryDenoiserMainLightDiffuseRadiance = 0.0;
     }
     if (!IsFiniteReferencedPathtracingRadiance(
             primaryDenoiserMainLightSpecularRadiance))
     {
+        invalidSampleMask.z = 1.0;
         primaryDenoiserMainLightSpecularRadiance = 0.0;
     }
     if (!IsFiniteReferencedPathtracingRadiance(emissionRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         emissionRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(environmentNeeRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         environmentNeeRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(environmentDirectDiffuseRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         environmentDirectDiffuseRadiance = 0.0;
+    }
     if (!IsFiniteReferencedPathtracingRadiance(environmentDirectSpecularRadiance))
+    {
+        invalidSampleMask.z = 1.0;
         environmentDirectSpecularRadiance = 0.0;
+    }
 
     // A sampled directional emitter is represented at the visibility endpoint. Combining
     // that source distance with the existing indirect sample prevents direct sunlight from
@@ -764,10 +872,12 @@ void RayGenReferencedPathtracing()
         : 0.0;
     float3 surfaceRadiance =
         diffuseRadiance + specularRadiance + directLightingRadiance + emissionRadiance;
-    float3 radiance = surfaceRadiance + cameraBackgroundRadiance;
+    float3 physicalRadiance =
+        surfaceRadiance + cameraBackgroundRadiance;
+    float3 debugRadiance = physicalRadiance;
     if (_ReferencedEnvironmentDebugMode == kReferencedEnvironmentDebugEnvironmentOnly)
     {
-        radiance =
+        debugRadiance =
             primaryEnvironmentBackgroundRadiance
             + indirectEnvironmentRadiance
             + environmentNeeRadiance;
@@ -775,16 +885,69 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedEnvironmentDebugMode
         == kReferencedEnvironmentDebugPrimaryBackgroundOnly)
     {
-        radiance = cameraBackgroundRadiance;
+        debugRadiance = cameraBackgroundRadiance;
     }
     else if (_ReferencedEnvironmentDebugMode
         == kReferencedEnvironmentDebugIndirectMissOnly)
     {
-        radiance = indirectEnvironmentRadiance;
+        debugRadiance = indirectEnvironmentRadiance;
     }
 
-    float outputAlpha = primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
-    _WorldPositionTexture[pixelCoord] = float4(radiance, outputAlpha);
+    if (_ReferencedTransportDebugMode == kReferencedTransportDebugNeePdfs)
+    {
+        debugRadiance = neeTransportDiagnostic.xyz;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugNeeMisWeight)
+    {
+        debugRadiance = float3(
+            neeTransportDiagnostic.w,
+            neeTransportContributionValid ? 1.0 : 0.0,
+            0.0);
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugBsdfSegmentPdfs)
+    {
+        debugRadiance = segmentTransportDiagnostic.xyz;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugBsdfSegmentMisWeight)
+    {
+        debugRadiance = float3(
+            segmentTransportDiagnostic.w,
+            hasSegmentTransportDiagnostic ? 1.0 : 0.0,
+            0.0);
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugNeeLightIdentity)
+    {
+        debugRadiance = neeLightIdentityDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugInvalidSampleMask)
+    {
+        debugRadiance = invalidSampleMask;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugLightSpatialIndex)
+    {
+        // R: traversal candidate count, G: selected axis + 1,
+        // B: context flags (indexed/fallback/outside/overflow).
+        debugRadiance = lightSpatialIndexDiagnostic;
+    }
+
+    float physicalOutputAlpha =
+        primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
+    float debugOutputAlpha =
+        _ReferencedTransportDebugMode != kReferencedTransportDebugCombined
+            || _ReferencedEnvironmentDebugMode
+                != kReferencedEnvironmentDebugCombined
+            ? 1.0
+            : physicalOutputAlpha;
+    _WorldPositionTexture[pixelCoord] =
+        float4(physicalRadiance, physicalOutputAlpha);
+    _ReferencedPathTracingDebugTexture[pixelCoord] =
+        float4(debugRadiance, debugOutputAlpha);
     _ReferencedPathTracingDirectLighting[pixelCoord] =
         float4(directLightingRadiance, primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingEmission[pixelCoord] = float4(emissionRadiance, primaryHit != 0u ? 1.0 : 0.0);

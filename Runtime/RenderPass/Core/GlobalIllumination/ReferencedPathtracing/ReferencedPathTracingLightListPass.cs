@@ -33,8 +33,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingLightRecord.Stride);
             m_ReferenceLightListParameters = RenderGraphBuffer.CreateStructured(
                 "ReferenceLightListParameters",
-                1,
-                ReferencedPathTracingLightListParameters.Stride);
+                ReferencedPathTracingLightSpatialIndexBuilder
+                    .EmptyStorageBlockCount,
+                ReferencedPathTracingLightListStorageBlock.Stride);
         }
 
         public override void Create()
@@ -57,8 +58,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 "ReferenceLightList");
             ConfigureBuffer(
                 m_ReferenceLightListParameters,
-                1,
-                ReferencedPathTracingLightListParameters.Stride,
+                Mathf.Max(m_BuildResult.storageBlocks.Length, 1),
+                ReferencedPathTracingLightListStorageBlock.Stride,
                 "ReferenceLightListParameters");
             m_ReferenceLightList.EnsureImportedBuffer();
             m_ReferenceLightListParameters.EnsureImportedBuffer();
@@ -67,7 +68,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? m_BuildResult.records
                     : s_EmptyLightUpload);
             m_ReferenceLightListParameters.SetData(
-                new[] { m_BuildResult.parameters });
+                m_BuildResult.storageBlocks);
         }
 
         public override void Record(ComputePassContext context)

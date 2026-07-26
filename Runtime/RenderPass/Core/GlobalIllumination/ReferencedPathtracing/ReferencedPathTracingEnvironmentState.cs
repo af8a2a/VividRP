@@ -15,7 +15,6 @@ namespace VividRP.Runtime.RenderPass.Core
             bool cameraVisible,
             ReferencedPathTracingEnvironmentSamplingMode samplingMode,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
-            ReferencedPathTracingEnvironmentDebugMode debugMode,
             Color tint,
             float intensityMultiplier,
             float rotation,
@@ -31,7 +30,6 @@ namespace VividRP.Runtime.RenderPass.Core
             this.cameraVisible = cameraVisible;
             this.samplingMode = samplingMode;
             this.estimatorMode = estimatorMode;
-            this.debugMode = debugMode;
             importanceSamplingEnabled =
                 lightingEnabled
                 && samplingMode
@@ -57,7 +55,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraVisible,
                 samplingMode,
                 estimatorMode,
-                debugMode,
                 tint,
                 intensityMultiplier,
                 rotation,
@@ -68,7 +65,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 lightingResolution,
                 textureIdentityHash);
             // The distribution cache only tracks inputs that alter radiance or its directional
-            // density. Camera visibility, background resolution, debug/estimator modes, and
+            // density. Camera visibility, background resolution, estimator mode, and
             // display exposure must not cause a CDF rebuild.
             samplingSignature = ComputeSamplingSignature(
                 hasHdri,
@@ -90,7 +87,6 @@ namespace VividRP.Runtime.RenderPass.Core
         internal bool neeEnabled { get; }
         internal ReferencedPathTracingEnvironmentSamplingMode samplingMode { get; }
         internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
-        internal ReferencedPathTracingEnvironmentDebugMode debugMode { get; }
         internal Color tint { get; }
         internal float intensityMultiplier { get; }
         internal float rotation { get; }
@@ -122,10 +118,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var estimatorMode = useVolumeSettings
                 ? SanitizeEstimatorMode(settings.environmentEstimatorMode.value)
                 : ReferencedPathTracingEnvironmentEstimatorMode.Mis;
-            var debugMode = useVolumeSettings
-                ? SanitizeDebugMode(settings.environmentDebugMode.value)
-                : ReferencedPathTracingEnvironmentDebugMode.Combined;
-
             var hasHdri = skyData != null
                 && skyData.activeSkyType == SkyType.HDRI
                 && SkyManager.HasValidSkyTexture(skyData.specularCubemap);
@@ -137,7 +129,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     false,
                     samplingMode,
                     estimatorMode,
-                    debugMode,
                     Color.white,
                     0.0f,
                     0.0f,
@@ -172,7 +163,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraVisibilityRequested,
                 samplingMode,
                 estimatorMode,
-                debugMode,
                 tint,
                 intensityMultiplier,
                 rotation,
@@ -209,20 +199,6 @@ namespace VividRP.Runtime.RenderPass.Core
                     return mode;
                 default:
                     return ReferencedPathTracingEnvironmentSamplingMode.ImportanceSampling;
-            }
-        }
-
-        private static ReferencedPathTracingEnvironmentDebugMode SanitizeDebugMode(
-            ReferencedPathTracingEnvironmentDebugMode mode)
-        {
-            switch (mode)
-            {
-                case ReferencedPathTracingEnvironmentDebugMode.EnvironmentOnly:
-                case ReferencedPathTracingEnvironmentDebugMode.PrimaryBackgroundOnly:
-                case ReferencedPathTracingEnvironmentDebugMode.IndirectMissOnly:
-                    return mode;
-                default:
-                    return ReferencedPathTracingEnvironmentDebugMode.Combined;
             }
         }
 
@@ -264,7 +240,6 @@ namespace VividRP.Runtime.RenderPass.Core
             bool cameraVisible,
             ReferencedPathTracingEnvironmentSamplingMode samplingMode,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
-            ReferencedPathTracingEnvironmentDebugMode debugMode,
             Color tint,
             float intensityMultiplier,
             float rotation,
@@ -281,7 +256,6 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, cameraVisible);
             Hash(ref hash, (uint)samplingMode);
             Hash(ref hash, (uint)estimatorMode);
-            Hash(ref hash, (uint)debugMode);
             Hash(ref hash, tint.r);
             Hash(ref hash, tint.g);
             Hash(ref hash, tint.b);
@@ -349,7 +323,7 @@ namespace VividRP.Runtime.RenderPass.Core
     [Serializable]
     public sealed class ReferencedPathTracingEnvironmentMetadata
     {
-        internal const int ContractVersion = 1;
+        internal const int ContractVersion = 2;
 
         public int contractVersion;
         public string assetName;
@@ -364,6 +338,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public float physicalIntensityMultiplier;
         public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
         public ReferencedPathTracingEnvironmentEstimatorMode estimatorMode;
+        public ReferencedPathTracingEnvironmentDebugMode debugMode;
         public int pdfVersion;
         public bool rawRadianceIsPreExposed;
 
@@ -391,6 +366,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 physicalIntensityMultiplier = state.intensityMultiplier,
                 samplingMode = state.samplingMode,
                 estimatorMode = state.estimatorMode,
+                debugMode =
+                    ReferencedPathTracingEnvironmentDebugMode.Combined,
                 pdfVersion =
                     ReferencedPathTracingEnvironmentImportanceLayout.Version,
                 rawRadianceIsPreExposed = false

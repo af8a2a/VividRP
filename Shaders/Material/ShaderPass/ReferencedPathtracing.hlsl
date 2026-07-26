@@ -88,13 +88,15 @@ void StandardLitReferencedPathtracingClosestHit(
         computeTargetTextureLOD(_BumpMap, textureBaseLambda) + kReferencedPathtracingTextureLodBias,
         0.0);
 #endif
-    VividReferencedPathtracingMaterial material = VividReferencedPathtracingResolveStandardLitOpenPBR(
+    float3 viewDirectionWS = normalize(-WorldRayDirection());
+    VividReferencedPathtracingMaterial material =
+        VividReferencedPathtracingResolveStandardLitOpenPBR(
         geometry,
         textureBaseLambda,
         baseTextureLod,
-        normalTextureLod);
+        normalTextureLod,
+        viewDirectionWS);
 
-    float3 viewDirectionWS = normalize(-WorldRayDirection());
     OpenPBR_PreparedBsdf preparedBsdf = openpbr_prepare(
         material.openPbrInputs,
         max(payload.pathThroughput, 0.0),
@@ -126,6 +128,14 @@ void StandardLitReferencedPathtracingClosestHit(
     payload.linearRoughness = material.openPbrInputs.specular_roughness;
     payload.hitDistance = geometry.hitDistance;
     payload.nextLobeClass = 0u;
+    payload.shadingNormalDiagnostics = float3(
+        saturate(dot(
+            material.unadjustedShadingNormalWS,
+            geometry.faceNormalWS)),
+        saturate(dot(
+            material.shadingNormalWS,
+            geometry.faceNormalWS)),
+        1.0);
 
     ReferencedPathtracingNEECandidate neeCandidate;
     bool validNeeCandidate =
@@ -150,7 +160,10 @@ void StandardLitReferencedPathtracingClosestHit(
     }
 
     if (validNeeCandidate
-        && dot(neeCandidate.directionWS, geometry.faceNormalWS) > 0.0)
+        && ReferencedPathtracingIsValidOpaqueReflectionDirection(
+            neeCandidate.directionWS,
+            geometry.faceNormalWS,
+            material.shadingNormalWS))
     {
         OpenPBR_DiffuseSpecular neeResponse = openpbr_eval(
             preparedBsdf,
@@ -162,6 +175,15 @@ void StandardLitReferencedPathtracingClosestHit(
             openpbr_extract_diffuse_from_diffuse_specular(neeResponse);
         float3 neeSpecularBsdf =
             openpbr_extract_specular_from_diffuse_specular(neeResponse);
+        float diffuseShadowTerminator =
+            ReferencedPathtracingEvaluateDiffuseShadowTerminator(
+                neeCandidate.directionWS,
+                material.shadingNormalWS,
+                geometry.normalWS);
+        neeDiffuseBsdf *= diffuseShadowTerminator;
+        payload.shadingNormalDiagnostics.z = min(
+            payload.shadingNormalDiagnostics.z,
+            diffuseShadowTerminator);
         if (VividReferencedPathtracingIsFinite(neeDiffuseBsdf)
             && VividReferencedPathtracingIsFinite(neeSpecularBsdf)
             && VividReferencedPathtracingIsFinite(neeBsdfPdf)
@@ -192,11 +214,27 @@ void StandardLitReferencedPathtracingClosestHit(
 
     if (sampledPdf > 0.0
         && VividReferencedPathtracingIsFinite(sampledPdf)
-        && VividReferencedPathtracingIsFinite(sampledDirectionWS))
+        && VividReferencedPathtracingIsFinite(sampledDirectionWS)
+        && ReferencedPathtracingIsValidOpaqueReflectionDirection(
+            sampledDirectionWS,
+            geometry.faceNormalWS,
+            material.shadingNormalWS))
     {
+        float diffuseShadowTerminator =
+            ReferencedPathtracingEvaluateDiffuseShadowTerminator(
+                sampledDirectionWS,
+                material.shadingNormalWS,
+                geometry.normalWS);
+        openpbr_set_diffuse_in_diffuse_specular(
+            sampledWeight,
+            openpbr_extract_diffuse_from_diffuse_specular(sampledWeight)
+                * diffuseShadowTerminator);
+        payload.shadingNormalDiagnostics.z = min(
+            payload.shadingNormalDiagnostics.z,
+            diffuseShadowTerminator);
         float3 nextThroughputWeight = openpbr_get_sum_of_diffuse_specular(sampledWeight);
         if (VividReferencedPathtracingIsFinite(nextThroughputWeight)
-            && dot(sampledDirectionWS, geometry.faceNormalWS) > 0.000001)
+            && any(nextThroughputWeight > 0.0))
         {
             payload.nextDirectionWS = normalize(sampledDirectionWS);
             payload.nextThroughputWeight = max(nextThroughputWeight, 0.0);

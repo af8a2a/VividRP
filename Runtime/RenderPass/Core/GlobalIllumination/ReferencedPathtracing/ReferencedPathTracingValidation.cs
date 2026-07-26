@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 7;
+        internal const int Version = 8;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -65,6 +65,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingSamplingContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingShadingNormalContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -226,6 +229,117 @@ namespace VividRP.Runtime.RenderPass.Core
             return BounceBaseDimension
                 + bounceIndex * BounceDimensionStride
                 + dimensionOffset;
+        }
+    }
+
+    internal static class ReferencedPathTracingShadingNormalContract
+    {
+        internal const int Version = 1;
+        internal const float ViewCosineThreshold = 0.1f;
+        internal const float ReflectionHorizonEpsilon = 0.001f;
+        private const float DirectionEpsilon = 0.000001f;
+
+        internal static Vector3 ComputeConsistentNormal(
+            Vector3 viewDirection,
+            Vector3 geometricNormal,
+            Vector3 shadingNormal)
+        {
+            viewDirection = NormalizeOrFallback(
+                viewDirection,
+                Vector3.forward);
+            geometricNormal = NormalizeOrFallback(
+                geometricNormal,
+                Vector3.up);
+            shadingNormal = NormalizeOrFallback(
+                shadingNormal,
+                geometricNormal);
+
+            if (Vector3.Dot(shadingNormal, geometricNormal) < 0.0f)
+                shadingNormal = -shadingNormal;
+
+            var viewCosine = Vector3.Dot(viewDirection, shadingNormal);
+            if (viewCosine <= ViewCosineThreshold)
+            {
+                var blend = Mathf.Clamp01(
+                    Mathf.Max(viewCosine, 0.0f)
+                    / ViewCosineThreshold);
+                shadingNormal = NormalizeOrFallback(
+                    Vector3.Lerp(geometricNormal, shadingNormal, blend),
+                    geometricNormal);
+            }
+
+            var reflectedDirection = Vector3.Reflect(
+                -viewDirection,
+                shadingNormal);
+            var reflectedGeometricCosine =
+                Vector3.Dot(reflectedDirection, geometricNormal);
+            if (reflectedGeometricCosine
+                < ReflectionHorizonEpsilon)
+            {
+                reflectedDirection = NormalizeOrFallback(
+                    reflectedDirection
+                    - reflectedGeometricCosine * geometricNormal
+                    + ReflectionHorizonEpsilon * geometricNormal,
+                    geometricNormal);
+                shadingNormal = NormalizeOrFallback(
+                    viewDirection + reflectedDirection,
+                    geometricNormal);
+            }
+
+            return Vector3.Dot(shadingNormal, viewDirection)
+                        > DirectionEpsilon
+                    && Vector3.Dot(shadingNormal, geometricNormal)
+                        > DirectionEpsilon
+                ? shadingNormal
+                : geometricNormal;
+        }
+
+        internal static float EvaluateDiffuseShadowTerminator(
+            Vector3 direction,
+            Vector3 shadingNormal,
+            Vector3 interpolatedNormal)
+        {
+            direction = NormalizeOrFallback(direction, Vector3.forward);
+            shadingNormal = NormalizeOrFallback(
+                shadingNormal,
+                Vector3.up);
+            interpolatedNormal = NormalizeOrFallback(
+                interpolatedNormal,
+                shadingNormal);
+            if (Vector3.Dot(interpolatedNormal, shadingNormal) < 0.0f)
+                interpolatedNormal = -interpolatedNormal;
+
+            var normalCosine = Mathf.Clamp01(
+                Mathf.Abs(Vector3.Dot(
+                    interpolatedNormal,
+                    shadingNormal)));
+            var tangentSquared =
+                (1.0f - normalCosine * normalCosine)
+                / (normalCosine * normalCosine + DirectionEpsilon);
+            var alphaSquared = Mathf.Clamp01(0.125f * tangentSquared);
+            var lightCosine = Mathf.Clamp01(
+                Vector3.Dot(interpolatedNormal, direction));
+            if (lightCosine <= 0.0f)
+                return 0.0f;
+
+            var lightTangentSquared =
+                (1.0f - lightCosine * lightCosine)
+                / (lightCosine * lightCosine + DirectionEpsilon);
+            return Mathf.Clamp01(
+                2.0f
+                / (1.0f
+                    + Mathf.Sqrt(
+                        1.0f
+                        + alphaSquared * lightTangentSquared)));
+        }
+
+        private static Vector3 NormalizeOrFallback(
+            Vector3 value,
+            Vector3 fallback)
+        {
+            return value.sqrMagnitude > DirectionEpsilon
+                ? value.normalized
+                : fallback.normalized;
         }
     }
 
@@ -908,6 +1022,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public int fixedSeed;
         public ReferencedPathTracingSamplingMode pathSamplingMode;
         public int samplingContractVersion;
+        public int shadingNormalContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ulong integratorSignature;
@@ -1038,7 +1153,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 6;
+        public const int ContractVersion = 7;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -1096,6 +1211,14 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Path sampling contract does not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.shadingNormalContractVersion
+                != ReferencedPathTracingShadingNormalContract.Version)
+            {
+                return Fail(
+                    "Shading-normal transport contract does not match the corpus.",
                     out failure);
             }
 
@@ -1353,6 +1476,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     pathTracingData?.isValid == true
                         ? pathTracingData.samplingContractVersion
                         : 0,
+                shadingNormalContractVersion =
+                    ReferencedPathTracingShadingNormalContract.Version,
                 maxBounceCount = integratorState.maxBounceCount,
                 russianRouletteStartBounce =
                     integratorState.russianRouletteStartBounce,
@@ -1403,7 +1528,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     status = ReferencedPathTracingValidationStatus.NotRun,
                     notes =
-                        "Pending estimator-mean, proposal on/off, light-selection, and PDF-consistency validation."
+                        "Pending estimator-mean, proposal on/off, light-selection, PDF-consistency, and shading-normal grazing-angle validation."
                 }
             };
         }

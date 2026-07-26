@@ -319,6 +319,7 @@ void RayGenReferencedPathtracing()
     float4 segmentTransportDiagnostic = 0.0;
     float3 neeLightIdentityDiagnostic = 0.0;
     float3 lightSpatialIndexDiagnostic = 0.0;
+    float3 shadingNormalDiagnostic = 0.0;
     float3 pathSampleDiagnostic = float3(
         filmSample,
         ReferencedPathtracingGetPathSample(
@@ -446,6 +447,7 @@ void RayGenReferencedPathtracing()
                 _ReferencedWorldToView,
                 float4(payload.positionWS, 1.0)).z);
             primaryLinearRoughness = saturate(payload.linearRoughness);
+            shadingNormalDiagnostic = payload.shadingNormalDiagnostics;
             emissionRadiance += throughput * payload.emission;
         }
         else
@@ -959,6 +961,12 @@ void RayGenReferencedPathtracing()
     {
         // R/G: film dimensions 0/1. B: bounce-zero RR dimension.
         debugRadiance = pathSampleDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugShadingNormal)
+    {
+        // R/G: original/consistent Ns dot Ng. B: diffuse terminator factor.
+        debugRadiance = shadingNormalDiagnostic;
     }
 
     float physicalOutputAlpha =

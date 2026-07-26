@@ -153,7 +153,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(7));
+                    Is.EqualTo(8));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -200,6 +200,58 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(volume);
             }
+        }
+
+        [Test]
+        public void ShadingNormalContract_KeepsOpaqueReflectionAboveGeometry()
+        {
+            var viewDirection = new Vector3(0.995f, 0.1f, 0.0f).normalized;
+            var geometricNormal = Vector3.up;
+            var shadingNormal = new Vector3(1.0f, 0.01f, 0.0f).normalized;
+
+            var consistentNormal =
+                ReferencedPathTracingShadingNormalContract
+                    .ComputeConsistentNormal(
+                        viewDirection,
+                        geometricNormal,
+                        shadingNormal);
+            var reflectedDirection = Vector3.Reflect(
+                -viewDirection,
+                consistentNormal);
+
+            Assert.That(
+                Vector3.Dot(consistentNormal, viewDirection),
+                Is.GreaterThan(0.0f));
+            Assert.That(
+                Vector3.Dot(consistentNormal, geometricNormal),
+                Is.GreaterThan(0.0f));
+            Assert.That(
+                Vector3.Dot(reflectedDirection, geometricNormal),
+                Is.GreaterThanOrEqualTo(
+                    ReferencedPathTracingShadingNormalContract
+                        .ReflectionHorizonEpsilon
+                    - 1e-5f));
+        }
+
+        [Test]
+        public void ShadingNormalContract_SoftensOnlyDivergentDiffuseTerminator()
+        {
+            var aligned =
+                ReferencedPathTracingShadingNormalContract
+                    .EvaluateDiffuseShadowTerminator(
+                        Vector3.up,
+                        Vector3.up,
+                        Vector3.up);
+            var divergent =
+                ReferencedPathTracingShadingNormalContract
+                    .EvaluateDiffuseShadowTerminator(
+                        new Vector3(1.0f, 0.02f, 0.0f),
+                        Vector3.up,
+                        new Vector3(0.8f, 0.6f, 0.0f));
+
+            Assert.That(aligned, Is.EqualTo(1.0f).Within(1e-5f));
+            Assert.That(divergent, Is.InRange(0.0f, 1.0f));
+            Assert.That(divergent, Is.LessThan(aligned));
         }
 
         [Test]

@@ -1054,6 +1054,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void V1FreezeGate_RejectsNonCanonicalShadingNormalContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+            capture.shadingNormalContractVersion = 0;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("Shading-normal transport contract"));
+        }
+
+        [Test]
         public void EnvironmentState_DisablesUnsupportedSkyAndSanitizesInvalidValues()
         {
             var cubemap = new Cubemap(1, TextureFormat.RGBAHalf, false);
@@ -1341,6 +1358,8 @@ namespace VividRP.Editor.Tests
                 pathSamplingMode = corpusCase.pathSamplingMode,
                 samplingContractVersion =
                     ReferencedPathTracingSamplingContract.Version,
+                shadingNormalContractVersion =
+                    ReferencedPathTracingShadingNormalContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

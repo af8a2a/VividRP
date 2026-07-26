@@ -55,7 +55,9 @@ namespace VividRP.Runtime
         [InspectorName("Light Spatial Index")]
         LightSpatialIndex = 7,
         [InspectorName("Path Samples")]
-        PathSamples = 8
+        PathSamples = 8,
+        [InspectorName("Shading Normal")]
+        ShadingNormal = 9
     }
 
     [Serializable]

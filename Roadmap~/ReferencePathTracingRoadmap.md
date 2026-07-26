@@ -1081,6 +1081,27 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   MIS PDF 布局保持不变。Phase 4.7A emissive geometry inventory 按当前决策暂缓；
   emissive mesh 仍只在路径命中时计入，不进入 NEE。
 
+### Phase 4.9 checkpoint: Shading-normal Transport Conformance (2026-07-26)
+
+- StandardLit OpenPBR adapter 现在同时保留未调整 shading normal 与 view-consistent
+  shading normal。先按 RTXPT 在 `Ns·V <= 0.1` 时向 oriented triangle normal 混合，再按
+  Unreal/HDRP 将会穿过 geometric horizon 的理想反射方向投影回 horizon 上方，并重建
+  shading normal/basis；Raytracing GBuffer guide 使用同一调整结果。
+- oriented triangle normal 继续独占 opaque surface sidedness、shadow/continuation ray
+  offset 与 visibility；NEE 和 BSDF continuation 只有同时位于 geometric/shading
+  hemisphere 上方才有效。当前 StandardLit contract 禁用 transmission，因此该规则不会
+  混用 reflection 与 medium-boundary 语义。
+- OpenPBR `eval` 已包含 shading-normal cosine，`sample` 已返回 `BSDF*cos/pdf`；Phase 4.9
+  不重复乘 cosine，也不修改 BSDF/MIS PDF。相机发出的单向路径采用 radiance transport，
+  不套只属于 adjoint/importance transport 的 shading-normal Jacobian。
+- diffuse eval/sample weight 共享 Unreal Imageworks-style shadow-terminator factor，
+  specular value 与所有 PDF 保持原 OpenPBR contract。该因子只缓和 normal-map/smooth-normal
+  与几何可见性边界的突变，不放宽 triangle-normal 的硬半球支持域。
+- integrator/capture freeze contract 已升级并记录 `shadingNormalContractVersion`。
+  Rendering Debugger 新增 `Shading Normal` transport view：R/G 分别为调整前/后的
+  `Ns·Ng`，B 为该 vertex 的最小 diffuse terminator factor；diagnostic 仍只写
+  pass-owned `DebugTexture`。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

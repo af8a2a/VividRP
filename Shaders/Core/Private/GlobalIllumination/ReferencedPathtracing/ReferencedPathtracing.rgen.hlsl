@@ -4,6 +4,14 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
+#if defined(VIVID_REFERENCE_PT_SER)
+// This slot must match ReferencedPathTracingPass.ShaderExecutionReorderingUavSlot.
+// u31 stays clear of the pass's nine automatically allocated output UAVs.
+#define NV_SHADER_EXTN_SLOT u31
+#define NV_HITOBJECT_USE_MACRO_API
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NVAPI/nvHLSLExtns.h"
+#endif
+
 RaytracingAccelerationStructure _AccelerationStructure;
 RWTexture2D<float4> _WorldPositionTexture;
 RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
@@ -194,6 +202,37 @@ float TraceReferencedPathtracingCandidateVisibility(
     return lerp(1.0, tracedVisibility, shadowStrength);
 }
 
+void TraceReferencedPathtracingSurface(
+    RayDesc ray,
+    inout ReferencedPathtracingPayload payload)
+{
+#if defined(VIVID_REFERENCE_PT_SER)
+    NvHitObject hitObject;
+    NvTraceRayHitObject(
+        _AccelerationStructure,
+        RAY_FLAG_NONE,
+        0xFF,
+        0,
+        1,
+        0,
+        ray,
+        payload,
+        hitObject);
+    NvReorderThread(hitObject);
+    NvInvokeHitObject(_AccelerationStructure, hitObject, payload);
+#else
+    TraceRay(
+        _AccelerationStructure,
+        RAY_FLAG_NONE,
+        0xFF,
+        0,
+        1,
+        0,
+        ray,
+        payload);
+#endif
+}
+
 float GetReferencedPathtracingNEELightEstimatorWeight(
     uint lightType,
     uint lightFlags,
@@ -330,15 +369,9 @@ void RayGenReferencedPathtracing()
             NextReferencedPathtracingRngFloat(rngState));
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
-        TraceRay(
-            _AccelerationStructure,
-            RAY_FLAG_NONE,
-            0xFF,
-            0,
-            1,
-            0,
-            ray,
-            payload);
+        // SER is useful around the material-heavy closest-hit path. Shadow rays
+        // skip closest-hit shading and retain the lower-overhead standard TraceRay.
+        TraceReferencedPathtracingSurface(ray, payload);
 
         if (payload.hit == 0u)
         {

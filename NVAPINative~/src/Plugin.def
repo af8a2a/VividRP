@@ -1,0 +1,6 @@
+EXPORTS
+   UnityPluginLoad
+   UnityPluginUnload
+   NvAPI_IsShaderExecutionReorderingAPISupported
+   NvAPI_IsShaderExecutionReorderingSupportedByGPU
+   NvAPI_SetNvShaderExtnSlot

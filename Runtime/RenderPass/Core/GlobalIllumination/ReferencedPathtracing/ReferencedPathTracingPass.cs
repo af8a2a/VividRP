@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.Plugin;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -17,10 +18,16 @@ namespace VividRP.Runtime.RenderPass.Core
     {
         internal const string MaterialShaderPassName = "ReferencedPathtracingDXR";
         internal const string RayGenerationShaderName = "RayGenReferencedPathtracing";
+        internal const string ShaderExecutionReorderingKeywordName =
+            "VIVID_REFERENCE_PT_SER";
+        internal const uint ShaderExecutionReorderingUavSlot = 31;
 
         private const string AccelerationStructureName = "_AccelerationStructure";
+        private const int NvidiaShaderExtensionStructStride = 256;
 
         private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
+        private static readonly int NvidiaShaderExtensionBufferId =
+            Shader.PropertyToID("g_NvidiaExt");
         private static readonly int DiffuseRadianceHitDistanceId =
             Shader.PropertyToID("_ReferencedDiffuseRadianceHitDistance");
         private static readonly int SpecularRadianceHitDistanceId =
@@ -164,7 +171,13 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphTexture m_SpecularRayDirectionHitDistance;
 
         private RayTracingShader m_RayTracingShader;
+        private GraphicsBuffer m_NvidiaShaderExtensionBuffer;
+        private LocalKeyword m_ShaderExecutionReorderingKeyword;
         private bool m_SupportsRayTracing;
+        private bool m_ShaderExecutionReorderingAvailable;
+        private bool m_UseShaderExecutionReordering;
+        private bool m_ShaderExecutionReorderingWarningIssued;
+        private string m_ShaderExecutionReorderingFailureReason;
         private bool m_ShouldSkipExecution;
         private int m_Width = 1;
         private int m_Height = 1;
@@ -249,6 +262,20 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             SkyManager.Initialize();
             m_SupportsRayTracing = SystemInfo.supportsRayTracing;
+            if (m_SupportsRayTracing)
+            {
+                m_ShaderExecutionReorderingAvailable =
+                    NvApiSer.TryInitializeShaderExecutionReordering(
+                        ShaderExecutionReorderingUavSlot,
+                        out m_ShaderExecutionReorderingFailureReason);
+            }
+            else
+            {
+                m_ShaderExecutionReorderingAvailable = false;
+                m_ShaderExecutionReorderingFailureReason =
+                    "ray tracing is unavailable on the active graphics device";
+            }
+
             m_RayTracingShader = PipelineResourceManager
                 .Get<VividRPCoreResources>()
                 ?.ReferencedPathtracingRayTracing;
@@ -257,7 +284,13 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 Debug.LogWarning(
                     $"[VividRP] Could not find the ray-tracing shader resource for {nameof(ReferencedPathTracingPass)}.");
+                return;
             }
+
+            m_ShaderExecutionReorderingKeyword = new LocalKeyword(
+                m_RayTracingShader,
+                ShaderExecutionReorderingKeywordName);
+            PrepareShaderExecutionReorderingBuffer();
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -278,6 +311,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
+            PrepareShaderExecutionReorderingState();
             var reblurSettings = ReferencedPathTracingReblurSettingsResolver.Resolve();
             m_ReblurHitDistanceParameters = reblurSettings.hitDistanceParameters;
             m_ReblurCheckerboardMode = reblurSettings.enabled
@@ -339,6 +373,28 @@ namespace VividRP.Runtime.RenderPass.Core
             var cmd = context.GetNativeCommandBuffer();
             using (new ProfilingScope(cmd, profilingSampler))
             {
+                if (m_ShaderExecutionReorderingKeyword.isValid)
+                {
+                    cmd.SetKeyword(
+                        m_RayTracingShader,
+                        m_ShaderExecutionReorderingKeyword,
+                        m_UseShaderExecutionReordering);
+                }
+
+                if (m_UseShaderExecutionReordering)
+                {
+                    // Unity validates every declared ray-tracing resource before dispatch.
+                    // NVAPI consumes this UAV as its instruction channel, but it must still
+                    // be backed by a counter-capable structured buffer.
+                    cmd.SetBufferCounterValue(
+                        m_NvidiaShaderExtensionBuffer,
+                        0);
+                    cmd.SetRayTracingBufferParam(
+                        m_RayTracingShader,
+                        NvidiaShaderExtensionBufferId,
+                        m_NvidiaShaderExtensionBuffer);
+                }
+
                 cmd.SetRayTracingShaderPass(m_RayTracingShader, MaterialShaderPassName);
                 cmd.SetRayTracingAccelerationStructure(
                     m_RayTracingShader,
@@ -412,8 +468,15 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            m_NvidiaShaderExtensionBuffer?.Dispose();
+            m_NvidiaShaderExtensionBuffer = null;
             m_RayTracingShader = null;
+            m_ShaderExecutionReorderingKeyword = default;
             m_SupportsRayTracing = false;
+            m_ShaderExecutionReorderingAvailable = false;
+            m_UseShaderExecutionReordering = false;
+            m_ShaderExecutionReorderingWarningIssued = false;
+            m_ShaderExecutionReorderingFailureReason = null;
             m_ShouldSkipExecution = false;
             m_Width = 1;
             m_Height = 1;
@@ -437,6 +500,63 @@ namespace VividRP.Runtime.RenderPass.Core
             m_FrameIndex = 0;
             m_Seed = 0;
             ReferencedPathTracingSampleSequence.Dispose();
+        }
+
+        private void PrepareShaderExecutionReorderingState()
+        {
+            var requested =
+                m_IntegratorState.enableShaderExecutionReordering;
+            var keywordAvailable =
+                m_ShaderExecutionReorderingKeyword.isValid;
+            m_UseShaderExecutionReordering =
+                requested
+                && m_ShaderExecutionReorderingAvailable
+                && keywordAvailable
+                && m_NvidiaShaderExtensionBuffer != null;
+
+            if (!requested
+                || m_UseShaderExecutionReordering
+                || m_ShaderExecutionReorderingWarningIssued)
+            {
+                return;
+            }
+
+            var failureReason = keywordAvailable
+                ? m_ShaderExecutionReorderingFailureReason
+                : "the SER shader variant is unavailable";
+            Debug.LogWarning(
+                $"[VividRP] Reference Path Tracing requested NVIDIA Shader Execution " +
+                $"Reordering, but {failureReason ?? "initialization failed"}. " +
+                "The standard TraceRay variant will be used.");
+            m_ShaderExecutionReorderingWarningIssued = true;
+        }
+
+        private void PrepareShaderExecutionReorderingBuffer()
+        {
+            m_NvidiaShaderExtensionBuffer?.Dispose();
+            m_NvidiaShaderExtensionBuffer = null;
+            if (!m_ShaderExecutionReorderingAvailable)
+                return;
+
+            try
+            {
+                m_NvidiaShaderExtensionBuffer = new GraphicsBuffer(
+                    GraphicsBuffer.Target.Counter,
+                    1,
+                    NvidiaShaderExtensionStructStride)
+                {
+                    name = "VividRP NVIDIA Shader Extension"
+                };
+                m_NvidiaShaderExtensionBuffer.SetCounterValue(0);
+            }
+            catch (System.Exception exception)
+            {
+                m_ShaderExecutionReorderingAvailable = false;
+                m_ShaderExecutionReorderingFailureReason =
+                    $"the NVIDIA shader-extension UAV could not be created ({exception.Message})";
+                m_NvidiaShaderExtensionBuffer?.Dispose();
+                m_NvidiaShaderExtensionBuffer = null;
+            }
         }
 
         private void ConfigureOutputs(int width, int height)

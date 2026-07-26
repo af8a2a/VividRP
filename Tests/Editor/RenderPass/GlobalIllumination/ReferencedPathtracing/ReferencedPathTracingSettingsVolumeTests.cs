@@ -21,6 +21,9 @@ namespace VividRP.Editor.Tests
                     volume.russianRouletteStartBounce.value,
                     Is.EqualTo(3));
                 Assert.That(volume.enableReGIR.value, Is.True);
+                Assert.That(
+                    volume.enableShaderExecutionReordering.value,
+                    Is.False);
                 Assert.That(volume.targetSampleCount.value, Is.EqualTo(2048));
                 Assert.That(volume.environmentLighting.value, Is.True);
                 Assert.That(volume.environmentCameraVisible.value, Is.True);
@@ -55,12 +58,16 @@ namespace VividRP.Editor.Tests
                 volume.maxBounceCount.value = 6;
                 volume.russianRouletteStartBounce.value = 5;
                 volume.enableReGIR.value = false;
+                volume.enableShaderExecutionReordering.value = false;
                 volume.targetSampleCount.value = 1024;
                 var original =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
 
                 volume.targetSampleCount.value = 4096;
                 var captureTargetChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.enableShaderExecutionReordering.value = true;
+                var shaderExecutionReorderingChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
                 volume.fixedSeed.value = 12346;
                 var seedChanged =
@@ -73,12 +80,22 @@ namespace VividRP.Editor.Tests
                     original.russianRouletteStartBounce,
                     Is.EqualTo(5));
                 Assert.That(original.enableReGIR, Is.False);
+                Assert.That(
+                    original.enableShaderExecutionReordering,
+                    Is.False);
+                Assert.That(
+                    shaderExecutionReorderingChanged
+                        .enableShaderExecutionReordering,
+                    Is.True);
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
                     Is.EqualTo(2));
                 Assert.That(
                     captureTargetChanged.signature,
+                    Is.EqualTo(original.signature));
+                Assert.That(
+                    shaderExecutionReorderingChanged.signature,
                     Is.EqualTo(original.signature));
                 Assert.That(
                     seedChanged.signature,

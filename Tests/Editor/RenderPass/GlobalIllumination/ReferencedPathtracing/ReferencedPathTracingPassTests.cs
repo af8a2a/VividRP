@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
+using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -27,6 +28,131 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 typeof(IAllowGlobalStateModificationPass).IsAssignableFrom(typeof(ReferencedPathTracingPass)),
+                Is.True);
+        }
+
+        [Test]
+        public void ShaderExecutionReorderingVariant_VendorsNativePluginAndWrapsSurfaceTrace()
+        {
+            var passSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "RenderPass",
+                "Core",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathTracingPass.cs"));
+            var rayTracingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.raytrace"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var nvApiHeader = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "NVAPI",
+                "nvHLSLExtns.h"));
+            var managedBinding = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "Plugin",
+                "NVAPI",
+                "NvApiSer.cs"));
+
+            Assert.That(
+                ReferencedPathTracingPass
+                    .ShaderExecutionReorderingKeywordName,
+                Is.EqualTo("VIVID_REFERENCE_PT_SER"));
+            Assert.That(
+                ReferencedPathTracingPass
+                    .ShaderExecutionReorderingUavSlot,
+                Is.EqualTo(31u));
+            Assert.That(
+                passSource,
+                Does.Contain("Shader.PropertyToID(\"g_NvidiaExt\")"));
+            Assert.That(
+                passSource,
+                Does.Contain("GraphicsBuffer.Target.Counter"));
+            Assert.That(
+                passSource,
+                Does.Contain("NvidiaShaderExtensionStructStride = 256"));
+            Assert.That(
+                passSource,
+                Does.Contain("SetRayTracingBufferParam("));
+            Assert.That(
+                rayTracingSource,
+                Does.Contain(
+                    "#pragma multi_compile_local _ VIVID_REFERENCE_PT_SER"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("#define NV_SHADER_EXTN_SLOT u31"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("NvTraceRayHitObject("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("NvReorderThread(hitObject);"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("NvInvokeHitObject("));
+            Assert.That(
+                nvApiHeader,
+                Does.Contain("void NvReorderThread(NvHitObject HitObj)"));
+            Assert.That(
+                managedBinding,
+                Does.Contain("private const string DllName = \"Unity_NVAPI\";"));
+            Assert.That(
+                managedBinding,
+                Does.Contain("MarshalAs(UnmanagedType.I1)"));
+            Assert.That(
+                File.Exists(GetPackageFilePath(
+                    "Runtime",
+                    "SubSystem",
+                    "Plugin",
+                    "NVAPI",
+                    "Plugins",
+                    "x86_64",
+                    "Unity_NVAPI.dll")),
+                Is.True);
+            var pluginImporter = AssetImporter.GetAtPath(
+                    "Packages/com.vivid.render-pipelines/Runtime/SubSystem/Plugin/" +
+                    "NVAPI/Plugins/x86_64/Unity_NVAPI.dll")
+                as PluginImporter;
+            Assert.That(pluginImporter, Is.Not.Null);
+            Assert.That(
+                pluginImporter.GetCompatibleWithAnyPlatform(),
+                Is.False);
+            Assert.That(
+                pluginImporter.GetCompatibleWithEditor(),
+                Is.True);
+            Assert.That(
+                pluginImporter.GetEditorData("OS"),
+                Is.EqualTo("Windows"));
+            Assert.That(
+                pluginImporter.GetCompatibleWithPlatform(
+                    BuildTarget.StandaloneWindows64),
+                Is.True);
+            Assert.That(
+                File.Exists(GetPackageFilePath(
+                    "NVAPINative~",
+                    "src",
+                    "Plugin.cpp")),
+                Is.True);
+            Assert.That(
+                File.Exists(GetPackageFilePath(
+                    "NVAPINative~",
+                    "External",
+                    "NVAPI",
+                    "nvapi.h")),
                 Is.True);
         }
 

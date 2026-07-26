@@ -33,6 +33,84 @@ SOFTWARE.
 
 ---------
 
+Component Name: Unity_NVAPI
+
+Source: https://github.com/af8a2a/Unity_NVAPI
+
+Version / Revision: 45ed387cac3eed9de313a4864c6ccf00947292b4
+
+License Type: MIT (as declared by the upstream README)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---------
+
+Component Name: NVIDIA NVAPI
+
+Source: https://github.com/NVIDIA/nvapi
+
+Version / Revision: 9b181ea572f680327fe01a14a0f1f41c78034104
+
+License Type: MIT
+
+SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: MIT
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"),
+to deal in the Software without restriction, including without limitation
+the rights to use, copy, modify, merge, publish, distribute, sublicense,
+and/or sell copies of the Software, and to permit persons to whom the
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
+THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
+
+---------
+
+Component Name: Unity Native Plugin API headers
+
+Source: https://github.com/Unity-Technologies/NativeRenderingPlugin
+
+License Type: Unity Companion License
+
+Unity Native Plugin API copyright © 2015 Unity Technologies ApS
+
+Licensed under the Unity Companion License for Unity-dependent projects:
+http://www.unity3d.com/legal/licenses/Unity_Companion_License
+
+Unless expressly provided otherwise, the Software under this license is made
+available strictly on an “AS IS” BASIS WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED. Please review the license for details on these and other terms and
+conditions.
+
+---------
+
 Component Name: DirectX-Graphics-Samples Software Ray Sorting
 
 Source: https://github.com/microsoft/DirectX-Graphics-Samples/tree/master/Samples/Desktop/D3D12Raytracing/src/D3D12RaytracingRealTimeDenoisedAmbientOcclusion/RTAO/Shaders/Ray%20sorting

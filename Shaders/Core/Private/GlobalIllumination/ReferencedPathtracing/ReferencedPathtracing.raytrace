@@ -1,1 +1,3 @@
+#pragma multi_compile_local _ VIVID_REFERENCE_PT_SER
+
 #include_with_pragmas "ReferencedPathtracing.rgen.hlsl"

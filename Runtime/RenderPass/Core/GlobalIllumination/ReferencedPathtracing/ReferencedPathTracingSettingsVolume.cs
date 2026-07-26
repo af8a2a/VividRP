@@ -98,6 +98,11 @@ namespace VividRP.Runtime
         public BoolParameter enableReGIR = new(true);
 
         [Tooltip(
+            "Uses NVIDIA Shader Execution Reordering for surface rays when running Direct3D 12 " +
+            "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
+        public BoolParameter enableShaderExecutionReordering = new(false);
+
+        [Tooltip(
             "Target accumulated samples used by canonical capture tooling. Interactive " +
             "accumulation remains unbounded.")]
         public ClampedIntParameter targetSampleCount =
@@ -139,6 +144,7 @@ namespace VividRP.Runtime
             russianRouletteStartBounce ??=
                 new ClampedIntParameter(3, 1, MaximumSupportedBounceCount);
             enableReGIR ??= new BoolParameter(true);
+            enableShaderExecutionReordering ??= new BoolParameter(false);
             targetSampleCount ??=
                 new ClampedIntParameter(
                     2048,

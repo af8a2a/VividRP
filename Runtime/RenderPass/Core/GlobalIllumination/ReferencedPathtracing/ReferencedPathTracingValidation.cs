@@ -16,6 +16,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int maxBounceCount,
             int russianRouletteStartBounce,
             bool enableReGIR,
+            bool enableShaderExecutionReordering,
             int targetSampleCount)
         {
             this.deterministicSampling = deterministicSampling;
@@ -29,6 +30,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 1,
                 ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount);
             this.enableReGIR = enableReGIR;
+            this.enableShaderExecutionReordering =
+                enableShaderExecutionReordering;
             this.targetSampleCount = Mathf.Clamp(
                 targetSampleCount,
                 1,
@@ -45,6 +48,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 ref hash,
                 this.russianRouletteStartBounce);
             ReferencedPathTracingStableHash.Add(ref hash, enableReGIR);
+            // SER only changes execution scheduling; it must not invalidate a
+            // mathematically identical reference accumulation.
             signature = hash;
         }
 
@@ -53,6 +58,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal int maxBounceCount { get; }
         internal int russianRouletteStartBounce { get; }
         internal bool enableReGIR { get; }
+        internal bool enableShaderExecutionReordering { get; }
         internal int targetSampleCount { get; }
         internal ulong signature { get; }
 
@@ -70,6 +76,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? settings.russianRouletteStartBounce.value
                     : 3,
                 !useVolumeSettings || settings.enableReGIR.value,
+                useVolumeSettings
+                    && settings.enableShaderExecutionReordering.value,
                 useVolumeSettings ? settings.targetSampleCount.value : 2048);
         }
 

@@ -930,8 +930,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   避免静默改变 reference scene。
 - 每条记录保存 power-proxy selection weight、归一化 selection PDF 与单调 CDF。rectangle/disc 使用
   area measure，tube 使用 line measure；delta/continuous、infinite、one-sided、BSDF-reachable 和
-  shadow capability 由 flags 固化。当前只有显式有限方向光模型标记为 BSDF-reachable；解析面积灯尚未
-  进入 RTAS，不能声明不存在的 BSDF 反向策略。
+  shadow capability 由 flags 固化。Phase 4.1 当时只有显式有限方向光模型标记为
+  BSDF-reachable；解析面积灯的合成 BSDF segment 相交由 Phase 4.3 补齐。
 - 参数 buffer 保存 light/active/rejected 数量、总权重、逆总权重、distribution/version 以及对排序后
   完整记录计算的 64-bit deterministic signature。空场景、全黑灯光和未连接 RenderGraph 输入都绑定
   versioned zero fallback，不读取未初始化 GPU 资源。
@@ -951,11 +951,31 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   shadow visibility、delta/BSDF-reachable gate、power-heuristic MIS 和 AOV 路由。环境 miss 的
   BSDF-side PDF 也乘相同的全局 environment selection PDF，避免 light/BSDF 两侧使用不同 proposal。
 - finite directional 的 BSDF 反向策略遍历 Reference Light List，并使用
-  `selectionPdf × conditional solid-angle PDF` 参与 MIS。rectangle/disc 仍是 light-only；
-  等 emissive geometry 进入 RTAS 后再开启其 BSDF-reachable flag 和反向 PDF。
+  `selectionPdf × conditional solid-angle PDF` 参与 MIS。Phase 4.2 的 rectangle/disc
+  仍是 light-only，后续由 Phase 4.3 的解析 segment intersection 开启反向策略。
 - Reference PT 已移除对 ReGIR light/grid/reservoir RenderGraph 输入的依赖。为兼容已序列化 Volume，
   `enableReGIR` 字段暂时保留，但运行时只作为本地解析灯 NEE 开关；积累失效签名改用完整
   Reference Light List signature，不再受 ReGIR collection volume 或相机位置影响。
+
+### Phase 4.3 checkpoint: BSDF-segment Light Evaluation (2026-07-26)
+
+- 新增 `ReferencedPathtracingSegmentLightHit` 和解析 light tracing contract。raygen 对
+  OpenPBR 采样出的 BSDF 方向遍历 `BSDF_REACHABLE` 灯光，计算沿该方向的虚拟 emitter
+  intersection、未遮挡 radiance、命中距离以及与 NEE 完全一致的条件 solid-angle PDF。
+- finite directional 继续使用圆盘方向域；rectangle 使用与 NEE 相同的 shading-point
+  barn-door clipping、ray-plane intersection 和面积到立体角 Jacobian；disc 使用 one-sided
+  ray-plane/disc intersection 与 `distance² / (cosTheta × area)` PDF。解析灯无需把 display mesh
+  加入 RTAS，visibility 仍由 alpha-aware shadow ray 和逐灯 shadow strength 决定。
+- rectangle/disc 现在标记为 `BSDF_REACHABLE`。其 BSDF estimator 使用
+  `PowerHeuristic(bsdfPdf, selectionPdf × solidAnglePdf)`；light-sampled candidate 使用相反顺序，
+  两侧共享 Phase 4.2 的全局光源选择域。关闭本地灯 NEE 时 selection PDF 为 0，BSDF 命中自动以
+  权重 1 保留完整 support。
+- point/spot 仍是 delta 事件，tube 仍是 line-measure 零面积事件，因此不会被连续 BSDF 方向命中；
+  它们继续只通过 NEE 积分。environment 仍只在实际 BSDF miss 时求值，避免在场景几何之前错误加入
+  无限远辐亮度。
+- primary BSDF segment 命中的 area light 按采样 lobe 路由到 diffuse/specular REBLUR signal，
+  使用解析 emitter hit distance；finite directional 继续保留 FP32 direct AOV 与 finite-sun
+  denoiser copy。
 
 ## Milestone 4: Progressive Accumulation and Capture
 

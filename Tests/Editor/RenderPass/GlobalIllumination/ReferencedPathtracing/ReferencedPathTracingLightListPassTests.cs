@@ -160,7 +160,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 discFlags
                 & ReferencedPathTracingLightFlags.BsdfReachable,
-                Is.EqualTo(ReferencedPathTracingLightFlags.None));
+                Is.Not.EqualTo(ReferencedPathTracingLightFlags.None));
         }
 
         [Test]

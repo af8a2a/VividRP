@@ -913,6 +913,28 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - 单灯采样频率与声明 PDF 一致。
 - Russian roulette 开启前后的高 SPP 均值在统计误差内一致。
 
+### Phase 4.1 checkpoint: Reference Light List (2026-07-26)
+
+- 新增独立 `ReferencedPathTracingLightListPass`。它直接消费
+  `VividLightRenderDatabase.sceneLightData` 的完整 active scene snapshot，不依赖 camera
+  visible-light 列表，也不继承 ReGIR 的 collection box，因此 reference inventory 不随相机位置裁剪。
+- V1 GPU record 覆盖 directional、point、spot、rectangle、tube 与 disc，并为未来的
+  environment/emissive-triangle 类型保留稳定枚举值。位置、正交基、range、shape、spot attenuation、
+  barn door、rendering layers、shadow strength 和源灯光的 scene-linear physical color 均显式入表。
+- `EntityId` 被拆成 64-bit stable key 并用于确定性排序；缺少或重复 stable ID 的
+  external/particle light 暂不进入 canonical list，而是在 parameters 中累计
+  `unstableLightCount`。不支持或无效的 active light 通过 `unsupportedLightCount` 暴露，
+  避免静默改变 reference scene。
+- 每条记录保存 power-proxy selection weight、归一化 selection PDF 与单调 CDF。rectangle/disc 使用
+  area measure，tube 使用 line measure；delta/continuous、infinite、one-sided、BSDF-reachable 和
+  shadow capability 由 flags 固化，Phase 4.2 可据此选择正确的条件 PDF/MIS 分支而无需修改 buffer ABI。
+- 参数 buffer 保存 light/active/rejected 数量、总权重、逆总权重、distribution/version 以及对排序后
+  完整记录计算的 64-bit deterministic signature。空场景、全黑灯光和未连接 RenderGraph 输入都绑定
+  versioned zero fallback，不读取未初始化 GPU 资源。
+- `ReferencedPathTracingPass` 已声明并绑定 `ReferenceLightList` 与
+  `ReferenceLightListParameters` 输入；Phase 4.1 只建立 inventory/distribution contract，
+  当前 directional/environment/ReGIR NEE 路径尚未切换到该列表，因此本阶段预期不改变 beauty 结果。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

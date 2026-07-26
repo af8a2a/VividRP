@@ -135,6 +135,9 @@ namespace VividRP.Editor.RenderGraph.Generated
     internal sealed class ReferencedPathTracingEnvironmentSamplingPass : RenderPassNodeData { }
 
     [Serializable]
+    internal sealed class ReferencedPathTracingLightListPass : RenderPassNodeData { }
+
+    [Serializable]
     internal sealed class ReferencedPathTracingPass : RenderPassNodeData { }
 
     [Serializable]

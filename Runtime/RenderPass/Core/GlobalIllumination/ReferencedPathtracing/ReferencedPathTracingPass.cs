@@ -56,6 +56,10 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
         private static readonly int ReblurCheckerboardModeId =
             Shader.PropertyToID("_ReferencedReblurCheckerboardMode");
+        private static readonly int ReferenceLightListId =
+            Shader.PropertyToID("_ReferencedLightList");
+        private static readonly int ReferenceLightListParametersId =
+            Shader.PropertyToID("_ReferencedLightListParameters");
         private static readonly int ReGIRLightsId = Shader.PropertyToID("_ReGIRLights");
         private static readonly int ReGIRParametersId = Shader.PropertyToID("_ReGIRParameters");
         private static readonly int ReGIRReservoirsId = Shader.PropertyToID("_ReGIRReservoirs");
@@ -92,6 +96,14 @@ namespace VividRP.Runtime.RenderPass.Core
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
+
+        [RenderGraphResource(Name = "ReferenceLightList", Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_ReferenceLightList;
+
+        [RenderGraphResource(
+            Name = "ReferenceLightListParameters",
+            Access = AccessFlags.Read)]
+        private RenderGraphBuffer m_ReferenceLightListParameters;
 
         [RenderGraphResource(Name = "ReGIRLights", Access = AccessFlags.Read)]
         private RenderGraphBuffer m_ReGIRLightBuffer;
@@ -193,6 +205,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
+        private readonly RenderGraphBuffer m_DefaultReferenceLightList;
+        private readonly RenderGraphBuffer m_DefaultReferenceLightListParameters;
+        private bool m_DefaultReferenceLightListInitialized;
         private readonly RenderGraphBuffer m_DefaultEnvironmentImportanceDistribution;
         private bool m_DefaultEnvironmentImportanceDistributionInitialized;
         private int m_FrameIndex;
@@ -202,6 +217,18 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             profilingSampler = new ProfilingSampler(nameof(ReferencedPathTracingPass));
             m_SceneAccelerationStructure = CreateSceneAccelerationStructure();
+            m_DefaultReferenceLightList = RenderGraphBuffer.CreateStructured(
+                "ReferenceLightListFallback",
+                1,
+                ReferencedPathTracingLightRecord.Stride);
+            m_DefaultReferenceLightListParameters =
+                RenderGraphBuffer.CreateStructured(
+                    "ReferenceLightListParametersFallback",
+                    1,
+                    ReferencedPathTracingLightListParameters.Stride);
+            m_ReferenceLightList = m_DefaultReferenceLightList;
+            m_ReferenceLightListParameters =
+                m_DefaultReferenceLightListParameters;
             m_ReGIRLightBuffer = RenderGraphBuffer.CreateStructured(
                 "ReGIRLights",
                 VividReGIRLightData.Stride);
@@ -282,6 +309,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 Screen.height);
 
             ConfigureOutputs(m_Width, m_Height);
+            PrepareReferenceLightListFallback();
             PrepareEnvironmentImportanceDistributionFallback();
             var lightData = frameData.GetOrCreate<VividLightData>();
             PrepareMainDirectionalLight(lightData);
@@ -414,6 +442,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     ReblurCheckerboardModeId,
                     (int)m_ReblurCheckerboardMode);
+                BindReferenceLightList(cmd);
                 BindEnvironment(cmd);
                 var hasValidReGIRResources =
                     m_IntegratorState.enableReGIR
@@ -457,6 +486,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnvironmentState = default;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
+            m_DefaultReferenceLightList?.ClearImportedBuffer();
+            m_DefaultReferenceLightListParameters?.ClearImportedBuffer();
+            m_DefaultReferenceLightListInitialized = false;
             m_DefaultEnvironmentImportanceDistribution?.ClearImportedBuffer();
             m_DefaultEnvironmentImportanceDistributionInitialized = false;
             m_FrameIndex = 0;
@@ -802,6 +834,58 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DefaultEnvironmentImportanceDistribution.SetData(
                 new float[ReferencedPathTracingEnvironmentImportanceLayout.ElementCount]);
             m_DefaultEnvironmentImportanceDistributionInitialized = true;
+        }
+
+        private void PrepareReferenceLightListFallback()
+        {
+            if (!ReferenceEquals(
+                    m_ReferenceLightList,
+                    m_DefaultReferenceLightList)
+                && !ReferenceEquals(
+                    m_ReferenceLightListParameters,
+                    m_DefaultReferenceLightListParameters))
+            {
+                return;
+            }
+
+            m_DefaultReferenceLightList.EnsureImportedBuffer();
+            m_DefaultReferenceLightListParameters.EnsureImportedBuffer();
+            if (m_DefaultReferenceLightListInitialized)
+                return;
+
+            m_DefaultReferenceLightList.SetData(
+                new ReferencedPathTracingLightRecord[1]);
+            m_DefaultReferenceLightListParameters.SetData(
+                new[]
+                {
+                    ReferencedPathTracingLightListParameters.CreateEmpty(),
+                });
+            m_DefaultReferenceLightListInitialized = true;
+        }
+
+        private void BindReferenceLightList(CommandBuffer cmd)
+        {
+            if (m_ReferenceLightList?.innerHandle.IsValid() != true
+                || m_ReferenceLightListParameters?.innerHandle.IsValid()
+                    != true)
+            {
+                return;
+            }
+
+            cmd.SetGlobalBuffer(
+                ReferenceLightListId,
+                m_ReferenceLightList.innerHandle);
+            cmd.SetGlobalBuffer(
+                ReferenceLightListParametersId,
+                m_ReferenceLightListParameters.innerHandle);
+            cmd.SetRayTracingBufferParam(
+                m_RayTracingShader,
+                ReferenceLightListId,
+                m_ReferenceLightList.innerHandle);
+            cmd.SetRayTracingBufferParam(
+                m_RayTracingShader,
+                ReferenceLightListParametersId,
+                m_ReferenceLightListParameters.innerHandle);
         }
 
         private void PrepareMainDirectionalLight(VividLightData lightData)

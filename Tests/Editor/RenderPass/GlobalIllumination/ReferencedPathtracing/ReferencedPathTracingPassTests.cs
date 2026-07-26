@@ -52,12 +52,16 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_RegistersSceneRtasReGIRInputsAndReblurOutputs()
+        public void Initialize_RegistersReferenceLightReGIRInputsAndReblurOutputs()
         {
             IRenderPass renderPass = new ReferencedPathTracingPass();
 
             var resources = renderPass.Initialize();
             var accelerationStructure = resources.AccelerationStructures.Single();
+            var referenceLightList = resources.Buffers.Single(
+                resource => resource.Name == "ReferenceLightList");
+            var referenceLightListParameters = resources.Buffers.Single(
+                resource => resource.Name == "ReferenceLightListParameters");
             var reGIRLights = resources.Buffers.Single(resource => resource.Name == "ReGIRLights");
             var reGIRParameters = resources.Buffers.Single(
                 resource => resource.Name == "ReGIRParameters");
@@ -89,12 +93,20 @@ namespace VividRP.Editor.Tests
                 resources.Buffers.Select(resource => resource.Name),
                 Is.EquivalentTo(new[]
                 {
+                    "ReferenceLightList",
+                    "ReferenceLightListParameters",
                     "ReGIRLights",
                     "ReGIRParameters",
                     "ReGIRReservoirs",
                     "EnvironmentImportanceDistribution"
                 }));
             Assert.That(resources.Buffers.All(resource => resource.Access == AccessFlags.Read), Is.True);
+            Assert.That(
+                referenceLightList.Buffer.desc.Stride,
+                Is.EqualTo(ReferencedPathTracingLightRecord.Stride));
+            Assert.That(
+                referenceLightListParameters.Buffer.desc.Stride,
+                Is.EqualTo(ReferencedPathTracingLightListParameters.Stride));
             Assert.That(reGIRLights.Buffer.desc.Stride, Is.EqualTo(VividReGIRLightData.Stride));
             Assert.That(reGIRParameters.Buffer.desc.Stride, Is.EqualTo(VividReGIRParameters.Stride));
             Assert.That(reGIRReservoirs.Buffer.desc.Stride, Is.EqualTo(VividReGIRReservoir.Stride));
@@ -351,7 +363,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RenderGraphNode_DefinesSceneRtasReGIRInputsAndReblurOutputs()
+        public void RenderGraphNode_DefinesReferenceLightReGIRInputsAndReblurOutputs()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -361,6 +373,12 @@ namespace VividRP.Editor.Tests
                 RenderGraphTestUtility.AddTestNode(graph, node);
 
                 Assert.That(node.GetInputPortByName("m_SceneAccelerationStructure"), Is.Not.Null);
+                Assert.That(
+                    node.GetInputPortByName("m_ReferenceLightList"),
+                    Is.Not.Null);
+                Assert.That(
+                    node.GetInputPortByName("m_ReferenceLightListParameters"),
+                    Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_ReGIRLightBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_ReGIRParameterBuffer"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_ReGIRReservoirBuffer"), Is.Not.Null);

@@ -521,7 +521,7 @@ namespace VividRP.Runtime
                 ReferencedPathTracingTransportDebugMode value)
         {
             return value is >= ReferencedPathTracingTransportDebugMode.NeePdfs
-                and <= ReferencedPathTracingTransportDebugMode.ShadingNormal
+                and <= ReferencedPathTracingTransportDebugMode.PhysicalCamera
                     ? value
                     : ReferencedPathTracingTransportDebugMode.Combined;
         }

@@ -43,6 +43,7 @@ static const int kReferencedTransportDebugInvalidSampleMask = 6;
 static const int kReferencedTransportDebugLightSpatialIndex = 7;
 static const int kReferencedTransportDebugPathSamples = 8;
 static const int kReferencedTransportDebugShadingNormal = 9;
+static const int kReferencedTransportDebugPhysicalCamera = 10;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;

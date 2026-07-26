@@ -188,7 +188,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 1;
+        internal const int Version = 2;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -352,7 +352,8 @@ namespace VividRP.Runtime.RenderPass.Core
             int height,
             ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
-            ReferencedPathTracingCameraBackgroundState cameraBackgroundState)
+            ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
+            ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
             var hash = ReferencedPathTracingStableHash.OffsetBasis;
             ReferencedPathTracingStableHash.Add(ref hash, width);
@@ -366,6 +367,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 cameraBackgroundState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                physicalCameraState.signature);
 
             if (cameraData != null)
             {
@@ -1022,6 +1026,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public int fixedSeed;
         public ReferencedPathTracingSamplingMode pathSamplingMode;
         public int samplingContractVersion;
+        public int physicalCameraContractVersion;
+        public bool usesPhysicalCameraDof;
         public int shadingNormalContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
@@ -1211,6 +1217,15 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Path sampling contract does not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.physicalCameraContractVersion
+                    != ReferencedPathTracingPhysicalCameraState.Version
+                || metadata.usesPhysicalCameraDof)
+            {
+                return Fail(
+                    "V1 canonical captures require pinhole camera transport.",
                     out failure);
             }
 
@@ -1476,6 +1491,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     pathTracingData?.isValid == true
                         ? pathTracingData.samplingContractVersion
                         : 0,
+                physicalCameraContractVersion =
+                    ReferencedPathTracingPhysicalCameraState.Version,
+                usesPhysicalCameraDof =
+                    pathTracingData?.isValid == true
+                    && pathTracingData.physicalCameraDofEnabled,
                 shadingNormalContractVersion =
                     ReferencedPathTracingShadingNormalContract.Version,
                 maxBounceCount = integratorState.maxBounceCount,

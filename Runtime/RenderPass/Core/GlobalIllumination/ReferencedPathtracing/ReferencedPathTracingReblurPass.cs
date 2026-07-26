@@ -279,6 +279,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingReblurSettings m_Settings =
             ReferencedPathTracingReblurSettings.CreateDefault();
         private int m_MainLightInSignals;
+        private bool m_ResolveRawForPhysicalCameraDof;
 
         public ReferencedPathTracingReblurPass()
         {
@@ -439,6 +440,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 && pathTracingData.mainLightInDenoiserSignals
                 ? 1
                 : 0;
+            m_ResolveRawForPhysicalCameraDof =
+                pathTracingData.isValid
+                && pathTracingData.physicalCameraDofEnabled;
+            if (m_ResolveRawForPhysicalCameraDof)
+            {
+                m_Settings.checkerboardMode =
+                    ReferencedPathTracingReblurCheckerboardMode.Off;
+            }
 
             ResizeFullResolutionTextures();
             ResizeTexture(m_Tiles, CoreUtils.DivRoundUp(m_Width, 16), CoreUtils.DivRoundUp(m_Height, 16));
@@ -520,6 +529,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Settings,
                 pathTracingData);
             m_HasValidHistory = m_Settings.enabled
+                && !m_ResolveRawForPhysicalCameraDof
                 && temporalData != null
                 && !temporalData.isFirstFrame
                 && settingsMatch
@@ -556,7 +566,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             using (new ProfilingScope(cmd, profilingSampler))
             {
-                if (!m_Settings.enabled || !CanExecute())
+                if (m_ResolveRawForPhysicalCameraDof
+                    || !m_Settings.enabled
+                    || !CanExecute())
                 {
                     DispatchResolveRaw(cmd);
                     return;
@@ -805,6 +817,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_Height = 1;
             m_Settings = ReferencedPathTracingReblurSettings.CreateDefault();
             m_MainLightInSignals = 0;
+            m_ResolveRawForPhysicalCameraDof = false;
         }
 
         private bool UpdateCameraSettings(

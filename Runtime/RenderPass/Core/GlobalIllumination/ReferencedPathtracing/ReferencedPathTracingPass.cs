@@ -96,6 +96,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CameraPositionId = Shader.PropertyToID("_CameraPositionWS");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int WorldToViewId = Shader.PropertyToID("_ReferencedWorldToView");
+        private static readonly int CameraRightWSId =
+            Shader.PropertyToID("_ReferencedCameraRightWS");
+        private static readonly int CameraUpWSId =
+            Shader.PropertyToID("_ReferencedCameraUpWS");
+        private static readonly int CameraForwardWSId =
+            Shader.PropertyToID("_ReferencedCameraForwardWS");
+        private static readonly int PhysicalCameraParametersId =
+            Shader.PropertyToID("_ReferencedPhysicalCameraParameters");
         private static readonly int RayMinDistanceId = Shader.PropertyToID("_RayMinDistance");
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
         private static readonly int MaxBounceCountId = Shader.PropertyToID("_ReferencedMaxBounceCount");
@@ -268,6 +276,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_CameraPositionWS;
         private Matrix4x4 m_PixelCoordToViewDirWS = Matrix4x4.identity;
         private Matrix4x4 m_WorldToView = Matrix4x4.identity;
+        private Vector4 m_CameraRightWS =
+            new(1.0f, 0.0f, 0.0f, 0.0f);
+        private Vector4 m_CameraUpWS =
+            new(0.0f, 1.0f, 0.0f, 0.0f);
+        private Vector4 m_CameraForwardWS =
+            new(0.0f, 0.0f, 1.0f, 0.0f);
+        private ReferencedPathTracingPhysicalCameraState
+            m_PhysicalCameraState =
+                ReferencedPathTracingPhysicalCameraState.Disabled;
         private float m_RayMinDistance = 0.01f;
         private float m_RayMaxDistance = 1000.0f;
         private bool m_HasFiniteDirectionalLight;
@@ -441,6 +458,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CameraPositionWS = Vector4.zero;
                 m_PixelCoordToViewDirWS = Matrix4x4.identity;
                 m_WorldToView = Matrix4x4.identity;
+                m_CameraRightWS =
+                    new Vector4(1.0f, 0.0f, 0.0f, 0.0f);
+                m_CameraUpWS =
+                    new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+                m_CameraForwardWS =
+                    new Vector4(0.0f, 0.0f, 1.0f, 0.0f);
+                m_PhysicalCameraState =
+                    ReferencedPathTracingPhysicalCameraState.Disabled;
                 m_RayMinDistance = 0.01f;
                 m_RayMaxDistance = 1000.0f;
                 m_FrameIndex = 0;
@@ -454,8 +479,23 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraPositionWS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
             m_WorldToView = cameraData.GetViewMatrix();
+            m_CameraRightWS = camera.transform.right;
+            m_CameraUpWS = camera.transform.up;
+            m_CameraForwardWS = camera.transform.forward;
+            m_PhysicalCameraState =
+                ReferencedPathTracingPhysicalCameraState.Resolve(
+                    camera,
+                    DepthOfFieldSettingsResolver
+                        .ResolveForReferencePathTracing());
             m_RayMinDistance = Mathf.Max(camera.nearClipPlane, 0.0001f);
             m_RayMaxDistance = Mathf.Max(camera.farClipPlane, m_RayMinDistance + 0.0001f);
+            if (m_PhysicalCameraState.enabled)
+            {
+                // REBLUR assumes a stable pinhole primary surface and cannot
+                // interpret stochastic aperture visibility or checkerboarding.
+                m_ReblurCheckerboardMode =
+                    ReferencedPathTracingReblurCheckerboardMode.Off;
+            }
             PrepareSampleSequence(
                 frameData,
                 cameraData,
@@ -543,6 +583,22 @@ namespace VividRP.Runtime.RenderPass.Core
                     PixelCoordToViewDirWSId,
                     m_PixelCoordToViewDirWS);
                 cmd.SetRayTracingMatrixParam(m_RayTracingShader, WorldToViewId, m_WorldToView);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    CameraRightWSId,
+                    m_CameraRightWS);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    CameraUpWSId,
+                    m_CameraUpWS);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    CameraForwardWSId,
+                    m_CameraForwardWS);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    PhysicalCameraParametersId,
+                    m_PhysicalCameraState.shaderParameters);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMinDistanceId, m_RayMinDistance);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
                 cmd.SetRayTracingIntParam(
@@ -639,6 +695,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraPositionWS = Vector4.zero;
             m_PixelCoordToViewDirWS = Matrix4x4.identity;
             m_WorldToView = Matrix4x4.identity;
+            m_CameraRightWS =
+                new Vector4(1.0f, 0.0f, 0.0f, 0.0f);
+            m_CameraUpWS =
+                new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+            m_CameraForwardWS =
+                new Vector4(0.0f, 0.0f, 1.0f, 0.0f);
+            m_PhysicalCameraState =
+                ReferencedPathTracingPhysicalCameraState.Disabled;
             m_RayMinDistance = 0.01f;
             m_RayMaxDistance = 1000.0f;
             m_HasFiniteDirectionalLight = false;
@@ -937,7 +1001,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_Height,
                     effectiveIntegratorSignature,
                     m_EnvironmentState,
-                    m_CameraBackgroundState);
+                    m_CameraBackgroundState,
+                    m_PhysicalCameraState);
             var temporalData = frameData.Contains<VividTemporalData>()
                 ? frameData.Get<VividTemporalData>()
                 : null;
@@ -966,6 +1031,8 @@ namespace VividRP.Runtime.RenderPass.Core
             pathTracingData.accumulatedSampleCount = 0;
             pathTracingData.mainLightInDenoiserSignals =
                 m_HasFiniteDirectionalLight;
+            pathTracingData.physicalCameraDofEnabled =
+                m_PhysicalCameraState.enabled;
         }
 
         private void ResolvePathSamplingMode()

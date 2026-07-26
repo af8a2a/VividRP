@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 1
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 2
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -20,6 +20,31 @@ static const uint kReferencedPathtracingRussianRouletteDimensionOffset = 6u;
 static const uint kReferencedPathtracingStochasticAlphaDimensionOffset = 7u;
 static const uint kReferencedPathtracingVolumeDimensionOffset = 8u;
 static const uint kReferencedPathtracingFutureDimensionOffset = 12u;
+
+float2 ReferencedPathtracingSampleConcentricDisk(float2 sample)
+{
+    float2 offset = 2.0 * sample - 1.0;
+    if (all(abs(offset) < 1e-7))
+        return 0.0;
+
+    float radius;
+    float theta;
+    if (abs(offset.x) > abs(offset.y))
+    {
+        radius = offset.x;
+        theta = (3.14159265358979323846 / 4.0)
+            * (offset.y / offset.x);
+    }
+    else
+    {
+        radius = offset.y;
+        theta = (3.14159265358979323846 / 2.0)
+            - (3.14159265358979323846 / 4.0)
+                * (offset.x / offset.y);
+    }
+
+    return radius * float2(cos(theta), sin(theta));
+}
 
 uint ReferencedPathtracingHash(uint value)
 {

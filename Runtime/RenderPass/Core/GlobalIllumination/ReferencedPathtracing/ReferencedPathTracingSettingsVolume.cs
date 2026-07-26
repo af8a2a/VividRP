@@ -57,7 +57,9 @@ namespace VividRP.Runtime
         [InspectorName("Path Samples")]
         PathSamples = 8,
         [InspectorName("Shading Normal")]
-        ShadingNormal = 9
+        ShadingNormal = 9,
+        [InspectorName("Physical Camera")]
+        PhysicalCamera = 10
     }
 
     [Serializable]

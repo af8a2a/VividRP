@@ -41,6 +41,7 @@ namespace VividRP.Runtime
         internal ulong integratorSignature;
         internal ulong accumulatedSampleCount;
         internal bool mainLightInDenoiserSignals;
+        internal bool physicalCameraDofEnabled;
 
         public override void Reset()
         {
@@ -53,6 +54,7 @@ namespace VividRP.Runtime
             integratorSignature = 0;
             accumulatedSampleCount = 0;
             mainLightInDenoiserSignals = false;
+            physicalCameraDofEnabled = false;
         }
     }
 }

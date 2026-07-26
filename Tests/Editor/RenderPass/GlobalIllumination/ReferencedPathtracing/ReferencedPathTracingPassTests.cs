@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 1"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 2"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -775,6 +775,105 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PhysicalCamera_UsesThinLensSamplingAndReservedDimensions()
+        {
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var samplingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSampling.hlsl"));
+
+            Assert.That(
+                samplingSource,
+                Does.Contain(
+                    "ReferencedPathtracingSampleConcentricDisk"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingLensDimension"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "GetReferencedPathtracingPhysicalCameraRay"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("focusPoint - rayOrigin"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_RayMinDistance / cameraForwardProjection"));
+        }
+
+        [Test]
+        public void PhysicalCameraState_UsesPhysicalUnitsAndFocusSource()
+        {
+            var cameraObject = new GameObject(
+                "ReferencedPathTracingPassTests.PhysicalCamera");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.focalLength = 50.0f;
+            camera.aperture = 2.0f;
+            camera.focusDistance = 7.0f;
+            camera.anamorphism = 0.0f;
+            var settings = DepthOfFieldSettingsData.CreateDefault();
+            settings.enabled = true;
+            settings.focusMode = DepthOfFieldMode.UsePhysicalCamera;
+            settings.focusDistanceMode = FocusDistanceMode.Volume;
+            settings.focusDistance = 12.0f;
+
+            try
+            {
+                var volumeFocus =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(volumeFocus.enabled, Is.True);
+                Assert.That(
+                    volumeFocus.focusDistance,
+                    Is.EqualTo(12.0f).Within(1e-6f));
+                Assert.That(
+                    volumeFocus.lensRadius.x,
+                    Is.EqualTo(0.0125f).Within(1e-6f));
+                Assert.That(
+                    volumeFocus.lensRadius.y,
+                    Is.EqualTo(0.0125f).Within(1e-6f));
+
+                settings.focusDistanceMode = FocusDistanceMode.Camera;
+                var cameraFocus =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    cameraFocus.focusDistance,
+                    Is.EqualTo(7.0f).Within(1e-6f));
+
+                camera.aperture = 4.0f;
+                var stoppedDown =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    stoppedDown.lensRadius.x,
+                    Is.EqualTo(0.00625f).Within(1e-6f));
+                Assert.That(
+                    stoppedDown.signature,
+                    Is.Not.EqualTo(cameraFocus.signature));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
         public void EnvironmentState_ResolvesHdriVisibilityLightingAndSamplingIndependently()
         {
             var cubemap = new Cubemap(4, TextureFormat.RGBAHalf, true);
@@ -1099,6 +1198,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void V1FreezeGate_RejectsPhysicalCameraDofCapture()
+        {
+            var capture = CreateValidFrozenCapture(
+                ReferencedPathTracingV1Corpus.Cases[0]);
+            capture.usesPhysicalCameraDof = true;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate
+                    .ValidateCaptureContract(
+                        capture,
+                        out var failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("pinhole camera"));
+        }
+
+        [Test]
         public void V1FreezeGate_RejectsNonCanonicalShadingNormalContract()
         {
             var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
@@ -1403,6 +1518,9 @@ namespace VividRP.Editor.Tests
                 pathSamplingMode = corpusCase.pathSamplingMode,
                 samplingContractVersion =
                     ReferencedPathTracingSamplingContract.Version,
+                physicalCameraContractVersion =
+                    ReferencedPathTracingPhysicalCameraState.Version,
+                usesPhysicalCameraDof = false,
                 shadingNormalContractVersion =
                     ReferencedPathTracingShadingNormalContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,

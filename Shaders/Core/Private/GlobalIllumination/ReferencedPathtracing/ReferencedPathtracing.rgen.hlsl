@@ -31,6 +31,12 @@ RWTexture2D<float4> _ReferencedSpecularRayDirectionHitDistance;
 float4 _CameraPositionWS;
 float4x4 _PixelCoordToViewDirWS;
 float4x4 _ReferencedWorldToView;
+float4 _ReferencedCameraRightWS;
+float4 _ReferencedCameraUpWS;
+float4 _ReferencedCameraForwardWS;
+// xy: anamorphic lens radii in world units, z: focus-plane distance,
+// w: thin-lens transport enabled.
+float4 _ReferencedPhysicalCameraParameters;
 float _RayMinDistance;
 float _RayMaxDistance;
 int _ReferencedMaxBounceCount;
@@ -51,6 +57,38 @@ float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
 {
     float4 viewDirectionWS = mul(float4(pixelCoord, 1.0, 1.0), _PixelCoordToViewDirWS);
     return -normalize(viewDirectionWS.xyz);
+}
+
+void GetReferencedPathtracingPhysicalCameraRay(
+    float2 pixelCoord,
+    float2 lensDiskSample,
+    out float3 rayOrigin,
+    out float3 rayDirection)
+{
+    rayOrigin = _CameraPositionWS.xyz;
+    rayDirection =
+        GetReferencedPathtracingPrimaryRayDirectionWS(pixelCoord);
+    if (_ReferencedPhysicalCameraParameters.w < 0.5)
+        return;
+
+    float3 cameraForward = normalize(_ReferencedCameraForwardWS.xyz);
+    float focusProjection = dot(rayDirection, cameraForward);
+    if (focusProjection <= 1e-6)
+        return;
+
+    float focusRayDistance =
+        _ReferencedPhysicalCameraParameters.z / focusProjection;
+    float3 focusPoint =
+        _CameraPositionWS.xyz + rayDirection * focusRayDistance;
+    float3 lensOffset =
+        normalize(_ReferencedCameraRightWS.xyz)
+            * lensDiskSample.x
+            * _ReferencedPhysicalCameraParameters.x
+        + normalize(_ReferencedCameraUpWS.xyz)
+            * lensDiskSample.y
+            * _ReferencedPhysicalCameraParameters.y;
+    rayOrigin += lensOffset;
+    rayDirection = normalize(focusPoint - rayOrigin);
 }
 
 bool IsFiniteReferencedPathtracingRadiance(float3 value)
@@ -291,16 +329,55 @@ void RayGenReferencedPathtracing()
             kReferencedPathtracingFilmDimension + 1u,
             sampleSeed,
             pathSamplingMode));
+    float2 lensUniformSample = float2(
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingLensDimension,
+            sampleSeed,
+            pathSamplingMode),
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingLensDimension + 1u,
+            sampleSeed,
+            pathSamplingMode));
+    float2 lensDiskSample =
+        ReferencedPathtracingSampleConcentricDisk(lensUniformSample);
 
     RayDesc ray;
-    ray.Origin = _CameraPositionWS.xyz;
     float2 pixelCenter = (float2)pixelCoord + filmSample;
-    ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter);
-    ray.TMin = _RayMinDistance;
-    ray.TMax = _RayMaxDistance;
+    GetReferencedPathtracingPhysicalCameraRay(
+        pixelCenter,
+        lensDiskSample,
+        ray.Origin,
+        ray.Direction);
+    float cameraForwardProjection = max(
+        dot(
+            ray.Direction,
+            normalize(_ReferencedCameraForwardWS.xyz)),
+        1e-6);
+    ray.TMin = _ReferencedPhysicalCameraParameters.w > 0.5
+        ? _RayMinDistance / cameraForwardProjection
+        : _RayMinDistance;
+    ray.TMax = _ReferencedPhysicalCameraParameters.w > 0.5
+        ? _RayMaxDistance / cameraForwardProjection
+        : _RayMaxDistance;
 
-    float3 rayDirectionDx = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter + float2(1.0, 0.0));
-    float3 rayDirectionDy = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter + float2(0.0, 1.0));
+    float3 rayOriginDx;
+    float3 rayDirectionDx;
+    GetReferencedPathtracingPhysicalCameraRay(
+        pixelCenter + float2(1.0, 0.0),
+        lensDiskSample,
+        rayOriginDx,
+        rayDirectionDx);
+    float3 rayOriginDy;
+    float3 rayDirectionDy;
+    GetReferencedPathtracingPhysicalCameraRay(
+        pixelCenter + float2(0.0, 1.0),
+        lensDiskSample,
+        rayOriginDy,
+        rayDirectionDy);
     float rayConeSpreadAngle = max(
         length(rayDirectionDx - ray.Direction),
         length(rayDirectionDy - ray.Direction));
@@ -334,6 +411,9 @@ void RayGenReferencedPathtracing()
                 kReferencedPathtracingRussianRouletteDimensionOffset),
             sampleSeed,
             pathSamplingMode));
+    float3 physicalCameraDiagnostic = float3(
+        lensDiskSample * 0.5 + 0.5,
+        _ReferencedPhysicalCameraParameters.w > 0.5 ? 1.0 : 0.0);
     float3 invalidSampleMask = 0.0;
     bool hasNeeTransportDiagnostic = false;
     bool neeTransportContributionValid = false;
@@ -973,6 +1053,12 @@ void RayGenReferencedPathtracing()
     {
         // R/G: original/consistent Ns dot Ng. B: diffuse terminator factor.
         debugRadiance = shadingNormalDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugPhysicalCamera)
+    {
+        // R/G: concentric aperture sample mapped to [0, 1]. B: DOF enabled.
+        debugRadiance = physicalCameraDiagnostic;
     }
 
     float physicalOutputAlpha =

@@ -1075,7 +1075,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   BND 分层与任意 sample index 随机访问，但不宣称跨 block 的全局 Sobol discrepancy 保证。
 - 实际生效的 BND/Hash 模式与 sampling contract version 已进入 integrator/frame/
   accumulation signature 和 capture metadata。BND 资源失效导致的 Hash fallback 会使历史
-  自动失效；V1 canonical freeze gate 只接受 contract V1 的 Indexed BND capture。
+  自动失效；该 checkpoint 当时的 V1 canonical freeze gate 只接受 contract V1 的
+  Indexed BND capture，Phase 4.10 消费预留 lens 维度后已将当前 contract 升级为 V2。
 - Rendering Debugger 新增 `Path Samples` transport view，通过 pass-owned `DebugTexture`
   输出 film dimensions 0/1 与 bounce-zero roulette dimension，主 radiance、payload 和
   MIS PDF 布局保持不变。Phase 4.7A emissive geometry inventory 按当前决策暂缓；
@@ -1127,6 +1128,36 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - 本 checkpoint 只冻结 DOF 所需的 reference-denoising 端口和 feature 语义，尚未修改
   primary camera ray。raw FP32 radiance 仍是 canonical ground truth；OIDN 输出只用于
   reference preview，不替代 capture baseline。
+
+### Phase 4.10 checkpoint: Physical Camera / DOF (2026-07-26)
+
+- Reference Path Tracing 现按 HDRP/RTXPT 的 thin-lens contract 生成 primary ray：
+  pinhole ray 与 camera forward 的交点定义 focus plane，光圈样本偏移 ray origin，
+  continuation direction 再指向同一 focus point。DOF 不是 screen-space post effect，
+  遮挡、反射、高光和 environment 均由实际 aperture ray 积分。
+- `Depth Of Field/Physical Camera` 是 path-traced DOF 的显式开关；focus distance 可以来自
+  Volume 或 Camera。光圈半径使用 HDRP 同一单位换算
+  `0.5 * focalLength(mm) * 0.001 / aperture(f-number)`。Scene View 与 orthographic
+  camera 保持 pinhole/unsupported，避免编辑视口导航引入随机 primary visibility。
+- sample dimension ABI 从 V1 升级为 V2。此前保留的 lens 2/3 维现在通过 Shirley-Chiu
+  concentric mapping 均匀采样单位圆盘；Unity camera anamorphism 以面积保持的线性变换
+  形成椭圆光圈。中心 ray 与 x/y pixel differential 复用同一 lens sample，因此
+  ray-cone spread 不会混入随机 aperture 差异。blade count、curvature 与 barrel clipping
+  尚未进入 reference lens model，避免以非均匀面积采样伪装物理支持。
+- DOF ray 的 near/far clip distance 按新方向投影到 camera-forward clip plane，与
+  Unreal/RTXPT 的 thin-lens clipping 语义一致；pinhole 路径保留原有射线区间，避免关闭
+  DOF 时改变冻结基线。
+- physical-camera contract signature 包含 enable、focus distance 与两个 lens radius，
+  并进入完整 frame signature。调整焦点、f-number、focal length 或 anamorphism 会清空
+  progressive accumulation、废弃在途 OIDN 结果，并重置 per-camera sample sequence。
+- REBLUR 不支持随机 aperture primary visibility。DOF 开启时 producer 强制关闭
+  checkerboard，REBLUR pass 明确跳过时域/空间滤波并执行 full-resolution raw resolve；
+  reference preview 可继续连接非时域 OIDN 支线。V1 canonical corpus 仍定义 pinhole
+  baseline，capture metadata 记录 physical-camera contract 并拒绝把 DOF capture 混入
+  V1 freeze gate。
+- Rendering Debugger 的 Reference Path Tracing/Transport 新增 `Physical Camera`：
+  R/G 显示映射到 `[0, 1]` 的 concentric aperture sample，B 表示本帧 thin-lens transport
+  是否启用；诊断仅写 pass-owned `DebugTexture`。
 
 ## Milestone 4: Progressive Accumulation and Capture
 

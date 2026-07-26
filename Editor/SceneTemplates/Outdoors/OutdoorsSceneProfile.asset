@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: VividRP.Runtime::VividRP.Runtime.PhysicallyBasedSkyVolume
   active: 1
   type:
-    m_OverrideState: 0
+    m_OverrideState: 1
     m_Value: 2
   atmosphericScattering:
     m_OverrideState: 1
@@ -947,7 +947,7 @@ MonoBehaviour:
     m_Value: 0
   generatedCubemapQuality:
     m_OverrideState: 1
-    m_Value: 0
+    m_Value: 2
   renderingSpace:
     m_OverrideState: 1
     m_Value: 1

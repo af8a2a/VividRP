@@ -1023,6 +1023,36 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   填充 proposal on/off evidence。只有均值一致且局部 proposal 显示预期方差收益后，才把 4.5
   标记为 GPU-validated。
 
+### Phase 4.6 checkpoint: Reference Light Spatial Index (2026-07-26)
+
+- Reference Light List builder 现在基于每个 finite light 的 conservative influence AABB 构建
+  camera-independent 三轴投影空间索引。XY、XZ、YZ cell 分别保存稳定 light index；shading
+  point 查询三个投影并选择未溢出且候选最少的轴。directional 和其他无法建立有限 influence
+  bound 的记录进入独立 unbounded 集合。
+- 索引采用固定 `32 × 32 × 3` cell、每 cell 64 个候选。area/tube 的 shape extent 与
+  range window 一起扩张 influence bound；自定义 range attenuation 会反解其最远非零距离，
+  避免只使用 `Light.range` 造成 emitter 漏检。cell index 按 Reference Light List 的 stable
+  order 写入，因此同一 light signature 生成完全一致的 buffer。
+- 为保持 `.vrdg` 与 payload ABI 不变，空间 header、cell header 和 packed light indices
+  追加在现有 `ReferenceLightListParameters` structured buffer 尾部；首个 48-byte block 仍保留
+  light-list parameters ABI。light-list contract 升级为 V2，ray payload 没有变化。
+- Phase 4.5 selection context 现在缓存 unbounded range、spatial candidate range、选中的轴和
+  fallback flags。local proposal 只在该完整候选域内归一化；global NEE 命中候选域外灯时，
+  local PDF 分量精确为 0，最终仍由 global support floor 保持完整支持。sample/evaluate 和
+  BSDF-side MIS 通过相同的 stable-index membership query 观察同一个 mixture PDF。
+- BSDF-segment analytic emitter traversal 与 NEE 复用同一 context。任一完整投影可用时只遍历
+  unbounded + cell candidates；三个投影同时 overflow、索引关闭或 header 无效时回退完整
+  Reference Light List。shading point 位于所有 finite influence bounds 之外时只遍历 unbounded
+  lights，不会把容量截断作为 correctness authority。
+- 新增 `Light Spatial Index` Volume 开关与 transport debug view。debug RGB 分别输出 traversal
+  candidate count、selected axis + 1 和 context flags（indexed/fallback/outside/overflow）。
+  integrator contract 升级为 V5，V1 freeze contract 升级为 V4，并在 capture metadata 中记录
+  index version、resolution 和 cell capacity。
+- `VividRP.Runtime.csproj` 与 `VividRP.Editor.Tests.csproj` 的 .NET 编译已通过，light-list HLSL
+  也通过 DXC `lib_6_6` 编译；新增 deterministic packing、stable-order 和 overflow behavior
+  tests。实际 Unity shader import、DX12 debug view 和 spatial-index OFF/ON 高 SPP 均值对比
+  仍是 GPU validation gate。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

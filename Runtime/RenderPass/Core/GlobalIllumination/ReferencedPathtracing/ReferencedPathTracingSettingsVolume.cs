@@ -43,7 +43,9 @@ namespace VividRP.Runtime
         [InspectorName("NEE Light Identity")]
         NeeLightIdentity = 5,
         [InspectorName("Invalid Sample Mask")]
-        InvalidSampleMask = 6
+        InvalidSampleMask = 6,
+        [InspectorName("Light Spatial Index")]
+        LightSpatialIndex = 7
     }
 
     [Serializable]
@@ -139,6 +141,12 @@ namespace VividRP.Runtime
             new(0.25f, 0.05f, 1.0f);
 
         [Tooltip(
+            "Uses the deterministic Reference Light Spatial Index to bound shading-point " +
+            "light selection and analytic emitter traversal. Overflowed cells fall back to " +
+            "the complete Reference Light List.")]
+        public BoolParameter lightSpatialIndex = new(true);
+
+        [Tooltip(
             "Uses NVIDIA Shader Execution Reordering for surface rays when running Direct3D 12 " +
             "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
         public BoolParameter enableShaderExecutionReordering = new(false);
@@ -197,6 +205,7 @@ namespace VividRP.Runtime
             shadingPointLightSelection ??= new BoolParameter(true);
             globalLightProposalProbability ??=
                 new ClampedFloatParameter(0.25f, 0.05f, 1.0f);
+            lightSpatialIndex ??= new BoolParameter(true);
             enableShaderExecutionReordering ??= new BoolParameter(false);
             targetSampleCount ??=
                 new ClampedIntParameter(

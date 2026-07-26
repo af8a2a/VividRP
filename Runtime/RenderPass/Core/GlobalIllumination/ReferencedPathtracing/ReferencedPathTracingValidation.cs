@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 4;
+        internal const int Version = 5;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -18,6 +18,7 @@ namespace VividRP.Runtime.RenderPass.Core
             bool enableReGIR,
             bool shadingPointLightSelection,
             float globalLightProposalProbability,
+            bool lightSpatialIndex,
             bool enableShaderExecutionReordering,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
             ReferencedPathTracingTransportDebugMode transportDebugMode,
@@ -41,6 +42,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         globalLightProposalProbability,
                         ReferencedPathTracingLightProposalPolicy
                             .DefaultGlobalProposalProbability);
+            this.lightSpatialIndex = lightSpatialIndex;
             this.enableShaderExecutionReordering =
                 enableShaderExecutionReordering;
             this.estimatorMode = SanitizeEstimatorMode(estimatorMode);
@@ -70,6 +72,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 this.globalLightProposalProbability);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
+                lightSpatialIndex);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
                 (int)this.estimatorMode);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -86,6 +91,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal bool enableReGIR { get; }
         internal bool shadingPointLightSelection { get; }
         internal float globalLightProposalProbability { get; }
+        internal bool lightSpatialIndex { get; }
         internal bool enableShaderExecutionReordering { get; }
         internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
         internal ReferencedPathTracingTransportDebugMode transportDebugMode { get; }
@@ -112,6 +118,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? settings.globalLightProposalProbability.value
                     : ReferencedPathTracingLightProposalPolicy
                         .DefaultGlobalProposalProbability,
+                !useVolumeSettings || settings.lightSpatialIndex.value,
                 useVolumeSettings
                     && settings.enableShaderExecutionReordering.value,
                 useVolumeSettings
@@ -138,7 +145,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingTransportDebugMode mode)
         {
             return mode is >= ReferencedPathTracingTransportDebugMode.NeePdfs
-                and <= ReferencedPathTracingTransportDebugMode.InvalidSampleMask
+                and <= ReferencedPathTracingTransportDebugMode.LightSpatialIndex
                     ? mode
                     : ReferencedPathTracingTransportDebugMode.Combined;
         }
@@ -844,6 +851,10 @@ namespace VividRP.Runtime.RenderPass.Core
         public ReferencedPathTracingTransportDebugMode transportDebugMode;
         public bool usesShadingPointLightSelection;
         public float globalLightProposalProbability;
+        public bool usesLightSpatialIndex;
+        public int lightSpatialIndexVersion;
+        public int lightSpatialIndexResolution;
+        public int lightSpatialIndexCellCapacity;
         public bool usesReGIR;
         public bool usesDenoiser;
         public bool usesRasterGI;
@@ -874,6 +885,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public ReferencedPathTracingEnvironmentEstimatorMode estimatorMode;
         public bool usesShadingPointLightSelection;
         public float globalLightProposalProbability;
+        public bool usesLightSpatialIndex;
 
         internal ReferencedPathTracingV1CorpusCase(
             string id,
@@ -895,6 +907,7 @@ namespace VividRP.Runtime.RenderPass.Core
             globalLightProposalProbability =
                 ReferencedPathTracingLightProposalPolicy
                     .DefaultGlobalProposalProbability;
+            usesLightSpatialIndex = true;
         }
     }
 
@@ -958,7 +971,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 3;
+        public const int ContractVersion = 4;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -1032,6 +1045,22 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Light-proposal settings do not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.usesLightSpatialIndex
+                    != corpusCase.usesLightSpatialIndex
+                || metadata.lightSpatialIndexVersion
+                    != ReferencedPathTracingLightSpatialIndexBuilder.Version
+                || metadata.lightSpatialIndexResolution
+                    != ReferencedPathTracingLightSpatialIndexBuilder
+                        .GridResolution
+                || metadata.lightSpatialIndexCellCapacity
+                    != ReferencedPathTracingLightSpatialIndexBuilder
+                        .CellCapacity)
+            {
+                return Fail(
+                    "Reference Light Spatial Index settings do not match the corpus.",
                     out failure);
             }
 
@@ -1250,6 +1279,16 @@ namespace VividRP.Runtime.RenderPass.Core
                     integratorState.shadingPointLightSelection,
                 globalLightProposalProbability =
                     integratorState.globalLightProposalProbability,
+                usesLightSpatialIndex =
+                    integratorState.lightSpatialIndex,
+                lightSpatialIndexVersion =
+                    (int)ReferencedPathTracingLightSpatialIndexBuilder.Version,
+                lightSpatialIndexResolution =
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .GridResolution,
+                lightSpatialIndexCellCapacity =
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .CellCapacity,
                 usesReGIR = integratorState.enableReGIR,
                 usesDenoiser = false,
                 usesRasterGI = false,

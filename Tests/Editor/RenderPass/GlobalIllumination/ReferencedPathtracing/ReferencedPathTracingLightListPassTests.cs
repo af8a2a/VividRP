@@ -42,7 +42,11 @@ namespace VividRP.Editor.Tests
                 lightList.Buffer.desc.Target,
                 Is.EqualTo(GraphicsBuffer.Target.Structured));
             Assert.That(parameters.Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(parameters.Buffer.desc.Count, Is.EqualTo(1));
+            Assert.That(
+                parameters.Buffer.desc.Count,
+                Is.EqualTo(
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .EmptyStorageBlockCount));
             Assert.That(
                 parameters.Buffer.desc.Stride,
                 Is.EqualTo(ReferencedPathTracingLightListParameters.Stride));
@@ -60,6 +64,17 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 Marshal.SizeOf<ReferencedPathTracingLightListParameters>(),
                 Is.EqualTo(ReferencedPathTracingLightListParameters.Stride));
+            Assert.That(
+                Marshal.SizeOf<ReferencedPathTracingLightListStorageBlock>(),
+                Is.EqualTo(ReferencedPathTracingLightListStorageBlock.Stride));
+            Assert.That(
+                ReferencedPathTracingLightListBuilder
+                    .Build(null)
+                    .storageBlocks
+                    .Length,
+                Is.EqualTo(
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .EmptyStorageBlockCount));
         }
 
         [Test]
@@ -107,6 +122,98 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 forward.parameters.signatureHigh,
                 Is.EqualTo(reversed.parameters.signatureHigh));
+            CollectionAssert.AreEqual(
+                forward.spatialIndex.words,
+                reversed.spatialIndex.words);
+            Assert.That(
+                forward.storageBlocks[0].word0,
+                Is.EqualTo(forward.parameters.lightCount));
+            Assert.That(
+                forward.storageBlocks[0].word8,
+                Is.EqualTo(ReferencedPathTracingLightListParameters.Version));
+        }
+
+        [Test]
+        public void Build_CreatesDeterministicProjectedSpatialIndex()
+        {
+            var directional = CreateLight(
+                1,
+                LightType.Directional,
+                Vector3.one);
+            var point = CreateLight(2, LightType.Point, Vector3.one);
+            point.positionWS = new Vector3(10.0f, -2.0f, 4.0f);
+            point.range = 3.0f;
+            point.rangeAttenuationScale = 1.0f / 9.0f;
+            var disc = CreateLight(3, LightType.Disc, Vector3.one);
+            disc.positionWS = new Vector3(-5.0f, 1.0f, 2.0f);
+            disc.range = 2.0f;
+            disc.rangeAttenuationScale = 0.25f;
+            disc.shapeRadius = 0.5f;
+
+            var forward = ReferencedPathTracingLightListBuilder.Build(
+                new[] { disc, directional, point });
+            var reversed = ReferencedPathTracingLightListBuilder.Build(
+                new[] { point, directional, disc });
+
+            Assert.That(
+                forward.spatialIndex.finiteLightCount,
+                Is.EqualTo(2));
+            Assert.That(
+                forward.spatialIndex.unboundedLightCount,
+                Is.EqualTo(1));
+            Assert.That(
+                forward.spatialIndex.overflowCellCount,
+                Is.Zero);
+            Assert.That(
+                forward.spatialIndex.inverseBoundsExtent.x,
+                Is.GreaterThan(0.0f));
+            Assert.That(
+                forward.spatialIndex.inverseBoundsExtent.y,
+                Is.GreaterThan(0.0f));
+            Assert.That(
+                forward.spatialIndex.inverseBoundsExtent.z,
+                Is.GreaterThan(0.0f));
+            CollectionAssert.AreEqual(
+                forward.spatialIndex.words,
+                reversed.spatialIndex.words);
+            Assert.That(
+                forward.storageBlocks.Length,
+                Is.GreaterThan(1));
+        }
+
+        [Test]
+        public void Build_MarksSpatialCellOverflowForCompleteScanFallback()
+        {
+            var lights = Enumerable.Range(
+                    0,
+                    ReferencedPathTracingLightSpatialIndexBuilder.CellCapacity
+                        + 1)
+                .Select(index =>
+                {
+                    var light = CreateLight(
+                        (ulong)(index + 1),
+                        LightType.Point,
+                        Vector3.one);
+                    light.positionWS = Vector3.zero;
+                    light.range = 10.0f;
+                    light.rangeAttenuationScale = 0.01f;
+                    return light;
+                })
+                .ToArray();
+
+            var result =
+                ReferencedPathTracingLightListBuilder.Build(lights);
+
+            Assert.That(
+                result.spatialIndex.overflowCellCount,
+                Is.GreaterThan(0));
+            Assert.That(
+                result.spatialIndex.finiteLightCount,
+                Is.EqualTo(lights.Length));
+            Assert.That(
+                result.spatialIndex.words[7],
+                Is.EqualTo(
+                    (uint)result.spatialIndex.overflowCellCount));
         }
 
         [Test]

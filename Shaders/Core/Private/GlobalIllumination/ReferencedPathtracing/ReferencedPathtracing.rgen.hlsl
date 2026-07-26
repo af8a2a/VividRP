@@ -329,6 +329,7 @@ void RayGenReferencedPathtracing()
     float4 neeTransportDiagnostic = 0.0;
     float4 segmentTransportDiagnostic = 0.0;
     float3 neeLightIdentityDiagnostic = 0.0;
+    float3 lightSpatialIndexDiagnostic = 0.0;
     float3 invalidSampleMask = 0.0;
     bool hasNeeTransportDiagnostic = false;
     bool neeTransportContributionValid = false;
@@ -605,17 +606,32 @@ void RayGenReferencedPathtracing()
                     payload.positionWS,
                     payload.faceNormalWS);
             previousLightSelectionContext = selectionContext;
-            ReferencedPathTracingLightListParameters lightListParameters =
-                _ReferencedLightListParameters[0];
-            for (uint lightIndex = 0u;
-                 lightIndex < lightListParameters.lightCount;
-                 ++lightIndex)
+            uint contextLightCount =
+                ReferencedPathtracingGetContextLightCount(
+                    selectionContext);
+            if (bounceIndex == 0u)
             {
+                lightSpatialIndexDiagnostic = float3(
+                    (float)contextLightCount,
+                    selectionContext.spatialAxis != 0xffffffffu
+                        ? (float)(selectionContext.spatialAxis + 1u)
+                        : 0.0,
+                    (float)selectionContext.spatialFlags);
+            }
+            for (uint contextLightIndex = 0u;
+                 contextLightIndex < contextLightCount;
+                 ++contextLightIndex)
+            {
+                uint lightIndex =
+                    ReferencedPathtracingGetContextLightIndex(
+                        selectionContext,
+                        contextLightIndex);
                 ReferencedPathTracingLightRecord light =
                     ReferencedPathtracingLoadReferenceLight(lightIndex);
                 float lightSelectionPdf =
                     ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
                         selectionContext,
+                        lightIndex,
                         light);
                 ReferencedPathtracingSegmentLightHit segmentLightHit;
                 if (!ReferencedPathtracingEvaluateSegmentLight(
@@ -908,6 +924,13 @@ void RayGenReferencedPathtracing()
         == kReferencedTransportDebugInvalidSampleMask)
     {
         radiance = invalidSampleMask;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugLightSpatialIndex)
+    {
+        // R: traversal candidate count, G: selected axis + 1,
+        // B: context flags (indexed/fallback/outside/overflow).
+        radiance = lightSpatialIndexDiagnostic;
     }
 
     float outputAlpha =

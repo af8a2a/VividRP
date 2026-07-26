@@ -16,6 +16,10 @@ namespace VividRP.Runtime.RenderPass.Core
     /// </summary>
     public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
     {
+        private static readonly ReferencedPathTracingLightListStorageBlock[]
+            s_EmptyReferenceLightListStorage =
+                ReferencedPathTracingLightListBuilder.Build(null).storageBlocks;
+
         internal const string MaterialShaderPassName = "ReferencedPathtracingDXR";
         internal const string RayGenerationShaderName = "RayGenReferencedPathtracing";
         internal const string ShaderExecutionReorderingKeywordName =
@@ -69,6 +73,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int GlobalLightProposalProbabilityId =
             Shader.PropertyToID(
                 "_ReferencedGlobalLightProposalProbability");
+        private static readonly int LightSpatialIndexEnabledId =
+            Shader.PropertyToID("_ReferencedLightSpatialIndexEnabled");
         private static readonly int EnvironmentTextureId =
             Shader.PropertyToID("_ReferencedEnvironmentTexture");
         private static readonly int EnvironmentBackgroundTextureId =
@@ -222,8 +228,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DefaultReferenceLightListParameters =
                 RenderGraphBuffer.CreateStructured(
                     "ReferenceLightListParametersFallback",
-                    1,
-                    ReferencedPathTracingLightListParameters.Stride);
+                    Mathf.Max(
+                        s_EmptyReferenceLightListStorage.Length,
+                        1),
+                    ReferencedPathTracingLightListStorageBlock.Stride);
             m_ReferenceLightList = m_DefaultReferenceLightList;
             m_ReferenceLightListParameters =
                 m_DefaultReferenceLightListParameters;
@@ -484,6 +492,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     GlobalLightProposalProbabilityId,
                     m_IntegratorState.globalLightProposalProbability);
+                var lightSpatialIndexEnabled =
+                    m_IntegratorState.lightSpatialIndex;
+                cmd.SetGlobalInt(
+                    LightSpatialIndexEnabledId,
+                    lightSpatialIndexEnabled ? 1 : 0);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    LightSpatialIndexEnabledId,
+                    lightSpatialIndexEnabled ? 1 : 0);
                 cmd.DispatchRays(
                     m_RayTracingShader,
                     RayGenerationShaderName,
@@ -971,6 +988,12 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             m_DefaultReferenceLightList.EnsureImportedBuffer();
+            m_DefaultReferenceLightListParameters.desc.Count =
+                Mathf.Max(s_EmptyReferenceLightListStorage.Length, 1);
+            m_DefaultReferenceLightListParameters.desc.Stride =
+                ReferencedPathTracingLightListStorageBlock.Stride;
+            m_DefaultReferenceLightListParameters.desc.Target =
+                GraphicsBuffer.Target.Structured;
             m_DefaultReferenceLightListParameters.EnsureImportedBuffer();
             if (m_DefaultReferenceLightListInitialized)
                 return;
@@ -978,10 +1001,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DefaultReferenceLightList.SetData(
                 new ReferencedPathTracingLightRecord[1]);
             m_DefaultReferenceLightListParameters.SetData(
-                new[]
-                {
-                    ReferencedPathTracingLightListParameters.CreateEmpty(),
-                });
+                s_EmptyReferenceLightListStorage);
             m_DefaultReferenceLightListInitialized = true;
         }
 

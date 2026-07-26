@@ -393,6 +393,9 @@ namespace VividRP.Editor.Tests
             Assert.That(commonSource, Does.Contain("uint neeLightType;"));
             Assert.That(
                 commonSource,
+                Does.Contain("int _ReferencedLightSpatialIndexEnabled;"));
+            Assert.That(
+                commonSource,
                 Does.Contain(
                     "ReferencedPathtracingGetDirectionalLightSolidAnglePdf"));
             Assert.That(
@@ -418,6 +421,14 @@ namespace VividRP.Editor.Tests
                 lightListSource,
                 Does.Contain(
                     "ReferencedPathtracingGetUnifiedEnvironmentSelectionPdf"));
+            Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "ReferencedPathtracingResolveLightSpatialCandidateSet"));
+            Assert.That(
+                lightListSource,
+                Does.Contain(
+                    "REFERENCED_LIGHT_CONTEXT_FULL_SCAN_FALLBACK"));
             Assert.That(
                 candidateSource,
                 Does.Contain("struct ReferencedPathtracingNEECandidate"));
@@ -476,6 +487,13 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "ReferencedPathtracingEvaluateSegmentLight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingGetContextLightIndex"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("lightSpatialIndexDiagnostic"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain("neeTransportDiagnostic"));
@@ -841,6 +859,15 @@ namespace VividRP.Editor.Tests
                     capture,
                     out _),
                 Is.False);
+
+            capture.globalLightProposalProbability =
+                corpusCase.globalLightProposalProbability;
+            capture.usesLightSpatialIndex = false;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out _),
+                Is.False);
         }
 
         [Test]
@@ -1152,6 +1179,16 @@ namespace VividRP.Editor.Tests
                     corpusCase.usesShadingPointLightSelection,
                 globalLightProposalProbability =
                     corpusCase.globalLightProposalProbability,
+                usesLightSpatialIndex =
+                    corpusCase.usesLightSpatialIndex,
+                lightSpatialIndexVersion =
+                    (int)ReferencedPathTracingLightSpatialIndexBuilder.Version,
+                lightSpatialIndexResolution =
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .GridResolution,
+                lightSpatialIndexCellCapacity =
+                    ReferencedPathTracingLightSpatialIndexBuilder
+                        .CellCapacity,
                 usesReGIR = false,
                 usesDenoiser = false,
                 usesRasterGI = false,

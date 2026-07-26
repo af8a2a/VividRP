@@ -4,6 +4,7 @@
 int _ReferencedLocalLightNeeEnabled;
 int _ReferencedShadingPointLightSelectionEnabled;
 float _ReferencedGlobalLightProposalProbability;
+int _ReferencedLightSpatialIndexEnabled;
 
 // Lower-resolution lighting cubemap shared by BSDF miss, distribution build, and NEE.
 TextureCube<float4> _ReferencedEnvironmentTexture;
@@ -39,6 +40,7 @@ static const int kReferencedTransportDebugBsdfSegmentPdfs = 3;
 static const int kReferencedTransportDebugBsdfSegmentMisWeight = 4;
 static const int kReferencedTransportDebugNeeLightIdentity = 5;
 static const int kReferencedTransportDebugInvalidSampleMask = 6;
+static const int kReferencedTransportDebugLightSpatialIndex = 7;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;

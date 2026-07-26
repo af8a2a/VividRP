@@ -27,6 +27,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     volume.globalLightProposalProbability.value,
                     Is.EqualTo(0.25f));
+                Assert.That(volume.lightSpatialIndex.value, Is.True);
                 Assert.That(
                     volume.enableShaderExecutionReordering.value,
                     Is.False);
@@ -69,6 +70,7 @@ namespace VividRP.Editor.Tests
                 volume.enableReGIR.value = false;
                 volume.shadingPointLightSelection.value = true;
                 volume.globalLightProposalProbability.value = 0.25f;
+                volume.lightSpatialIndex.value = true;
                 volume.enableShaderExecutionReordering.value = false;
                 volume.targetSampleCount.value = 1024;
                 var original =
@@ -103,6 +105,10 @@ namespace VividRP.Editor.Tests
                 volume.globalLightProposalProbability.value = 0.5f;
                 var lightProposalProbabilityChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.globalLightProposalProbability.value = 0.25f;
+                volume.lightSpatialIndex.value = false;
+                var lightSpatialIndexChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
 
                 Assert.That(original.deterministicSampling, Is.True);
                 Assert.That(original.fixedSeed, Is.EqualTo(12345));
@@ -117,6 +123,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     original.globalLightProposalProbability,
                     Is.EqualTo(0.25f));
+                Assert.That(original.lightSpatialIndex, Is.True);
                 Assert.That(
                     original.enableShaderExecutionReordering,
                     Is.False);
@@ -135,7 +142,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(4));
+                    Is.EqualTo(5));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -156,6 +163,9 @@ namespace VividRP.Editor.Tests
                     Is.Not.EqualTo(original.signature));
                 Assert.That(
                     lightProposalProbabilityChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    lightSpatialIndexChanged.signature,
                     Is.Not.EqualTo(original.signature));
             }
             finally

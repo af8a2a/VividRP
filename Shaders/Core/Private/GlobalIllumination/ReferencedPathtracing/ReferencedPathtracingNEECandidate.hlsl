@@ -1,6 +1,8 @@
 #ifndef VIVIDRP_REFERENCED_PATH_TRACING_NEE_CANDIDATE_INCLUDED
 #define VIVIDRP_REFERENCED_PATH_TRACING_NEE_CANDIDATE_INCLUDED
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
+
 // RTXPT-style canonical light sample. incidentRadianceOverPdf already contains
 // both the discrete light-selection and conditional shape/direction PDFs.
 struct ReferencedPathtracingNEECandidate
@@ -23,97 +25,6 @@ void ReferencedPathtracingInitializeNEECandidate(
     candidate = (ReferencedPathtracingNEECandidate)0;
     candidate.lightIndex = 0xffffffffu;
     candidate.lightType = REFERENCED_LIGHT_TYPE_INVALID;
-}
-
-bool ReferencedPathtracingResolveRectangleBarnDoor(
-    ReferencedPathTracingLightRecord light,
-    float3 positionWS,
-    out float3 lightCenterWS,
-    out float2 lightSize,
-    out float3 lightRightWS,
-    out float3 lightUpWS,
-    out float3 lightForwardWS)
-{
-    lightCenterWS = light.positionWS;
-    lightSize = max(light.areaSize, 0.0);
-    lightRightWS = 0.0;
-    lightUpWS = 0.0;
-    lightForwardWS = 0.0;
-
-    float rightLengthSquared = dot(light.rightWS, light.rightWS);
-    float upLengthSquared = dot(light.upWS, light.upWS);
-    float forwardLengthSquared = dot(light.forwardWS, light.forwardWS);
-    if (light.lightType != REFERENCED_LIGHT_TYPE_RECTANGLE
-        || any(lightSize <= 1e-6)
-        || rightLengthSquared <= 1e-8
-        || upLengthSquared <= 1e-8
-        || forwardLengthSquared <= 1e-8)
-    {
-        return false;
-    }
-
-    lightRightWS = light.rightWS * rsqrt(rightLengthSquared);
-    lightUpWS = light.upWS * rsqrt(upLengthSquared);
-    lightForwardWS = light.forwardWS * rsqrt(forwardLengthSquared);
-
-    // Match the existing Vivid/HDRP barn-door convention.
-    float cosBarnDoorAngle = saturate(light.barnDoorCosAngle);
-    float barnDoorLength = max(light.barnDoorLength, 0.0);
-    if (cosBarnDoorAngle <= 0.017 || barnDoorLength <= 0.05)
-        return true;
-
-    float2 halfSize = 0.5 * lightSize;
-    float3 lightRelativePosition = positionWS - light.positionWS;
-    float3 pointLS = float3(
-        dot(lightRelativePosition, lightRightWS),
-        dot(lightRelativePosition, lightUpWS),
-        dot(lightRelativePosition, lightForwardWS));
-
-    float maxDepth = cosBarnDoorAngle * barnDoorLength;
-    float pointDepth = min(pointLS.z, maxDepth);
-    float pointDepthRatio = pointDepth / max(maxDepth, 1e-5);
-    float sinTheta =
-        sqrt(saturate(1.0 - cosBarnDoorAngle * cosBarnDoorAngle));
-    float barnDoorProjection =
-        sinTheta * barnDoorLength * pointDepthRatio;
-
-    float2 pointSign = sign(pointLS.xy);
-    pointLS.xy = pointSign
-        * max(abs(pointLS.xy), halfSize + barnDoorProjection.xx);
-
-    float3 closestLightCorner = float3(
-        pointSign.x * (halfSize.x + barnDoorProjection),
-        pointSign.y * (halfSize.y + barnDoorProjection),
-        pointDepth);
-    float3 pointProjection = pointLS - closestLightCorner;
-    float cosPhi = max(0.0, pointProjection.z);
-    float2 tanPhi = cosPhi > 0.001
-        ? abs(pointProjection.xy) / cosPhi
-        : float2(99999.0, 99999.0);
-    float2 projectionDistance = pointDepth * tanPhi;
-
-    float2 horizontalBounds = float2(-halfSize.x, halfSize.x);
-    float2 verticalBounds = float2(-halfSize.y, halfSize.y);
-    horizontalBounds += (projectionDistance.x - barnDoorProjection)
-        * float2(max(0.0, -pointSign.x), -max(0.0, pointSign.x));
-    verticalBounds += (projectionDistance.y - barnDoorProjection)
-        * float2(max(0.0, -pointSign.y), -max(0.0, pointSign.y));
-    horizontalBounds =
-        clamp(horizontalBounds, -halfSize.x, halfSize.x);
-    verticalBounds =
-        clamp(verticalBounds, -halfSize.y, halfSize.y);
-
-    float2 lightCenterOffset = 0.5 * float2(
-        horizontalBounds.x + horizontalBounds.y,
-        verticalBounds.x + verticalBounds.y);
-    lightSize = max(
-        float2(
-            horizontalBounds.y - horizontalBounds.x,
-            verticalBounds.y - verticalBounds.x),
-        0.0);
-    lightCenterWS += lightRightWS * lightCenterOffset.x
-        + lightUpWS * lightCenterOffset.y;
-    return all(lightSize > 1e-6);
 }
 
 bool ReferencedPathtracingSampleDirectionalCandidate(

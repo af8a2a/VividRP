@@ -337,7 +337,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void UnifiedNeeCandidate_PreservesProposalPdfsAndDirectionalMis()
+        public void UnifiedNeeCandidate_PreservesProposalPdfsAndSegmentLightMis()
         {
             var commonSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
@@ -365,6 +365,13 @@ namespace VividRP.Editor.Tests
                 "GlobalIllumination",
                 "ReferencedPathtracing",
                 "ReferencedPathtracingNEECandidate.hlsl"));
+            var segmentLightSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSegmentLight.hlsl"));
             var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Core",
@@ -432,12 +439,34 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf"));
             Assert.That(
-                rayGenerationSource,
+                segmentLightSource,
                 Does.Contain(
                     "ReferencedPathtracingEvaluateDirectionalLightPdf"));
             Assert.That(
+                segmentLightSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateRectangleSegmentLight"));
+            Assert.That(
+                segmentLightSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateDiscSegmentLight"));
+            Assert.That(
+                segmentLightSource,
+                Does.Contain(
+                    "distanceSquared / (lightFacingCosine * sampleArea)"));
+            Assert.That(
+                segmentLightSource,
+                Does.Not.Contain("REFERENCED_LIGHT_TYPE_POINT"));
+            Assert.That(
+                segmentLightSource,
+                Does.Not.Contain("REFERENCED_LIGHT_TYPE_TUBE"));
+            Assert.That(
                 rayGenerationSource,
                 Does.Contain("payload.nextThroughputWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateSegmentLight"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(

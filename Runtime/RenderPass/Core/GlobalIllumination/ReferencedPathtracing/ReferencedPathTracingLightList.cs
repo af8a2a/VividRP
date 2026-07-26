@@ -385,7 +385,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     break;
                 case ReferencedPathTracingLightType.Rectangle:
                 case ReferencedPathTracingLightType.Disc:
-                    flags |= ReferencedPathTracingLightFlags.OneSided
+                    flags |= ReferencedPathTracingLightFlags.BsdfReachable
+                        | ReferencedPathTracingLightFlags.OneSided
                         | ReferencedPathTracingLightFlags.UsesAreaMeasure;
                     break;
                 case ReferencedPathTracingLightType.Tube:

@@ -2,6 +2,7 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
 #if defined(VIVID_REFERENCE_PT_SER)
@@ -559,9 +560,9 @@ void RayGenReferencedPathtracing()
             }
         }
 
-        // Analytic finite directionals are the only Reference Light List entries with an
-        // explicit BSDF-side strategy. Area-light geometry is not in the RTAS yet, so it
-        // intentionally remains light-sampled-only.
+        // HDRP/Unreal-style BSDF-segment light evaluation. Analytic emitters are
+        // intersected along the sampled direction even though their display meshes are
+        // not present in the RTAS. Punctual and tube lights remain zero-measure events.
         if (payload.nextPdf > 0.0
             && any(payload.nextThroughputWeight > 0.0))
         {
@@ -573,62 +574,38 @@ void RayGenReferencedPathtracing()
             {
                 ReferencedPathTracingLightRecord light =
                     ReferencedPathtracingLoadReferenceLight(lightIndex);
-                if (light.lightType != REFERENCED_LIGHT_TYPE_DIRECTIONAL
-                    || (light.flags
-                        & REFERENCED_LIGHT_FLAG_BSDF_REACHABLE) == 0u)
-                {
-                    continue;
-                }
-
-                float forwardLengthSquared =
-                    dot(light.forwardWS, light.forwardWS);
-                if (forwardLengthSquared <= 1e-8)
-                    continue;
-
-                float conditionalLightPdf;
-                if (!ReferencedPathtracingEvaluateDirectionalLightPdf(
-                        -light.forwardWS * rsqrt(forwardLengthSquared),
-                        light.angularDiameter,
+                ReferencedPathtracingSegmentLightHit segmentLightHit;
+                if (!ReferencedPathtracingEvaluateSegmentLight(
+                        payload.positionWS,
                         payload.nextDirectionWS,
-                        conditionalLightPdf))
+                        lightIndex,
+                        light,
+                        segmentLightHit))
                 {
                     continue;
                 }
 
-                float selectionPdf =
-                    ReferencedPathtracingGetUnifiedReferenceLightSelectionPdf(
-                        light);
                 float fullLightPdf =
-                    selectionPdf * conditionalLightPdf;
-                if (fullLightPdf <= 0.0)
-                    continue;
-
+                    segmentLightHit.selectionPdf
+                    * segmentLightHit.solidAnglePdf;
                 float bsdfEstimatorWeight =
                     payload.nextLobeIsDelta != 0u
+                        || fullLightPdf <= 0.0
                         ? 1.0
                         : ReferencedPathtracingPowerHeuristic(
                             payload.nextPdf,
                             fullLightPdf);
-                float shadowStrength =
-                    (light.flags
-                        & REFERENCED_LIGHT_FLAG_CASTS_SHADOWS) != 0u
-                            ? light.shadowStrength
-                            : 0.0;
                 float visibility =
                     TraceReferencedPathtracingCandidateVisibility(
                         payload.positionWS,
                         normalize(payload.faceNormalWS),
                         normalize(payload.nextDirectionWS),
-                        kReferencedPathtracingInfiniteDistance,
-                        shadowStrength);
-                // Directional RGB is illuminance; uniform disk radiance is E / solidAngle.
-                float3 directionalRadiance =
-                    max(light.radiometricColor, 0.0)
-                    * conditionalLightPdf;
+                        segmentLightHit.distance,
+                        segmentLightHit.shadowStrength);
                 float3 bsdfSampledDirect =
                     throughput
                     * payload.nextThroughputWeight
-                    * directionalRadiance
+                    * segmentLightHit.radiance
                     * bsdfEstimatorWeight
                     * visibility;
                 if (!IsFiniteReferencedPathtracingRadiance(
@@ -637,17 +614,55 @@ void RayGenReferencedPathtracing()
                     continue;
                 }
 
-                AccumulateReferencedPathtracingMainLightRadiance(
-                    bsdfSampledDirect,
-                    payload.nextLobeClass,
-                    bounceIndex,
-                    primaryLobeClass,
-                    true,
-                    directLightingRadiance,
-                    diffuseRadiance,
-                    specularRadiance,
-                    primaryDenoiserMainLightDiffuseRadiance,
-                    primaryDenoiserMainLightSpecularRadiance);
+                if (segmentLightHit.lightType
+                    == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                {
+                    AccumulateReferencedPathtracingMainLightRadiance(
+                        bsdfSampledDirect,
+                        payload.nextLobeClass,
+                        bounceIndex,
+                        primaryLobeClass,
+                        true,
+                        directLightingRadiance,
+                        diffuseRadiance,
+                        specularRadiance,
+                        primaryDenoiserMainLightDiffuseRadiance,
+                        primaryDenoiserMainLightSpecularRadiance);
+                }
+                else if (bounceIndex == 0u
+                    && payload.nextLobeClass == 1u)
+                {
+                    diffuseHitDistance =
+                        CombineReferencedPathtracingDenoiserHitDistance(
+                            diffuseRadiance,
+                            diffuseHitDistance,
+                            bsdfSampledDirect,
+                            segmentLightHit.distance);
+                    diffuseRadiance += bsdfSampledDirect;
+                    diffuseRayDirectionWS =
+                        normalize(payload.nextDirectionWS);
+                }
+                else if (bounceIndex == 0u
+                    && payload.nextLobeClass == 2u)
+                {
+                    specularHitDistance =
+                        CombineReferencedPathtracingDenoiserHitDistance(
+                            specularRadiance,
+                            specularHitDistance,
+                            bsdfSampledDirect,
+                            segmentLightHit.distance);
+                    specularRadiance += bsdfSampledDirect;
+                    specularRayDirectionWS =
+                        normalize(payload.nextDirectionWS);
+                }
+                else if (primaryLobeClass == 1u)
+                {
+                    diffuseRadiance += bsdfSampledDirect;
+                }
+                else if (primaryLobeClass == 2u)
+                {
+                    specularRadiance += bsdfSampledDirect;
+                }
             }
         }
 

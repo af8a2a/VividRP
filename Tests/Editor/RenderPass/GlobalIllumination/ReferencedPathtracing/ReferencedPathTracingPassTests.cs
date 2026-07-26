@@ -814,7 +814,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PhysicalCameraState_UsesPhysicalUnitsAndFocusSource()
+        public void PhysicalCameraState_UsesOnlyCameraOpticalSettings()
         {
             var cameraObject = new GameObject(
                 "ReferencedPathTracingPassTests.PhysicalCamera");
@@ -831,29 +831,42 @@ namespace VividRP.Editor.Tests
 
             try
             {
-                var volumeFocus =
-                    ReferencedPathTracingPhysicalCameraState.Resolve(
-                        camera,
-                        settings);
-                Assert.That(volumeFocus.enabled, Is.True);
-                Assert.That(
-                    volumeFocus.focusDistance,
-                    Is.EqualTo(12.0f).Within(1e-6f));
-                Assert.That(
-                    volumeFocus.lensRadius.x,
-                    Is.EqualTo(0.0125f).Within(1e-6f));
-                Assert.That(
-                    volumeFocus.lensRadius.y,
-                    Is.EqualTo(0.0125f).Within(1e-6f));
-
-                settings.focusDistanceMode = FocusDistanceMode.Camera;
                 var cameraFocus =
                     ReferencedPathTracingPhysicalCameraState.Resolve(
                         camera,
                         settings);
+                Assert.That(cameraFocus.enabled, Is.True);
                 Assert.That(
                     cameraFocus.focusDistance,
                     Is.EqualTo(7.0f).Within(1e-6f));
+                Assert.That(
+                    cameraFocus.lensRadius.x,
+                    Is.EqualTo(0.0125f).Within(1e-6f));
+                Assert.That(
+                    cameraFocus.lensRadius.y,
+                    Is.EqualTo(0.0125f).Within(1e-6f));
+
+                settings.focusDistanceMode = FocusDistanceMode.Camera;
+                settings.focusDistance = 30.0f;
+                var changedVolumeFocus =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    changedVolumeFocus.signature,
+                    Is.EqualTo(cameraFocus.signature));
+
+                camera.focusDistance = 9.0f;
+                var refocused =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    refocused.focusDistance,
+                    Is.EqualTo(9.0f).Within(1e-6f));
+                Assert.That(
+                    refocused.signature,
+                    Is.Not.EqualTo(cameraFocus.signature));
 
                 camera.aperture = 4.0f;
                 var stoppedDown =
@@ -865,7 +878,7 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(0.00625f).Within(1e-6f));
                 Assert.That(
                     stoppedDown.signature,
-                    Is.Not.EqualTo(cameraFocus.signature));
+                    Is.Not.EqualTo(refocused.signature));
             }
             finally
             {

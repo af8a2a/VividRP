@@ -75,11 +75,11 @@ namespace VividRP.Runtime.RenderPass.Core
             var aperture = Mathf.Max(
                 camera.aperture,
                 Camera.kMinAperture);
+            // Physical Camera mode uses the Camera as the sole optical source.
+            // The Volume only enables the mode; its focus-distance source and
+            // value belong to the screen-space DOF implementation.
             var focusDistance = Mathf.Max(
-                depthOfFieldSettings.focusDistanceMode
-                    == FocusDistanceMode.Camera
-                    ? camera.focusDistance
-                    : depthOfFieldSettings.focusDistance,
+                camera.focusDistance,
                 MinimumTransportDistance);
 
             // Unity focal length is millimetres while scene/world distance is

@@ -1135,8 +1135,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   pinhole ray 与 camera forward 的交点定义 focus plane，光圈样本偏移 ray origin，
   continuation direction 再指向同一 focus point。DOF 不是 screen-space post effect，
   遮挡、反射、高光和 environment 均由实际 aperture ray 积分。
-- `Depth Of Field/Physical Camera` 是 path-traced DOF 的显式开关；focus distance 可以来自
-  Volume 或 Camera。光圈半径使用 HDRP 同一单位换算
+- `Depth Of Field/Physical Camera` 只作为 path-traced DOF 的显式开关；focal length、
+  f-number、focus distance 与 anamorphism 全部直接来自 Camera，Volume 的
+  `focusDistanceMode/focusDistance` 仅属于 screen-space DOF，不参与 reference transport。
+  光圈半径使用 HDRP 同一单位换算
   `0.5 * focalLength(mm) * 0.001 / aperture(f-number)`。Scene View 与 orthographic
   camera 保持 pinhole/unsupported，避免编辑视口导航引入随机 primary visibility。
 - sample dimension ABI 从 V1 升级为 V2。此前保留的 lens 2/3 维现在通过 Shirley-Chiu

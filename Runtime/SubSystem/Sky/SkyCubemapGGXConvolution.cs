@@ -59,7 +59,9 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            var maxMipLevel = GetConvolutionMipLevel(source);
+            var maxMipLevel = Mathf.Min(
+                GetConvolutionMipLevel(source),
+                GetConvolutionMipLevel(target));
             m_PropertyBlock.Clear();
             m_PropertyBlock.SetTexture(MainTexId, source);
             m_PropertyBlock.SetTexture(GgxIblSamplesId, m_GgxIblSampleData);
@@ -67,7 +69,7 @@ namespace VividRP.Runtime
 
             using (new ProfilingScope(cmd, s_CopyMipZeroSampler))
             {
-                RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);
+                RenderCubemapLevel(cmd, target, 0, CopyMipZeroPassIndex);
             }
 
             if (maxMipLevel <= 0)
@@ -76,7 +78,7 @@ namespace VividRP.Runtime
             using (new ProfilingScope(cmd, s_RenderCubemapGGXConvolutionSampler))
             {
                 for (var mipLevel = 1; mipLevel <= maxMipLevel; mipLevel++)
-                    RenderCubemapLevel(cmd, source, target, mipLevel, GgxConvolutionPassIndex);
+                    RenderCubemapLevel(cmd, target, mipLevel, GgxConvolutionPassIndex);
             }
 
             return true;
@@ -263,9 +265,9 @@ namespace VividRP.Runtime
             return source is not RenderTexture renderTexture || renderTexture.IsCreated();
         }
 
-        private void RenderCubemapLevel(CommandBuffer cmd, Texture source, RenderTexture target, int mipLevel, int passIndex)
+        private void RenderCubemapLevel(CommandBuffer cmd, RenderTexture target, int mipLevel, int passIndex)
         {
-            var faceSize = Mathf.Max(1, source.width >> mipLevel);
+            var faceSize = Mathf.Max(1, target.width >> mipLevel);
             m_PropertyBlock.SetFloat(LevelId, mipLevel);
 
             for (var faceIndex = 0; faceIndex < SkyDiffuseSHUtility.ValidCubemapFaces.Length; faceIndex++)

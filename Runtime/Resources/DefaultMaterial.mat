@@ -11,11 +11,10 @@ Material:
   m_Shader: {fileID: 4800000, guid: 6bdfd222b85296d48b7290da4927c3bb, type: 3}
   m_Parent: {fileID: 0}
   m_ModifiedSerializedProperties: 0
-  m_ValidKeywords:
-  - _EMISSION
+  m_ValidKeywords: []
   m_InvalidKeywords:
   - _RECEIVE_SHADOWS_OFF
-  m_LightmapFlags: 0
+  m_LightmapFlags: 4
   m_EnableInstancingVariants: 1
   m_DoubleSidedGI: 0
   m_CustomRenderQueue: 2000
@@ -35,7 +34,7 @@ Material:
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _EmissionMap:
-        m_Texture: {fileID: 10307, guid: 0000000000000000f000000000000000, type: 0}
+        m_Texture: {fileID: 0}
         m_Scale: {x: 1, y: 1}
         m_Offset: {x: 0, y: 0}
     - _MainTex:
@@ -69,10 +68,10 @@ Material:
     - _ClearCoatMask: 0
     - _ClearCoatSmoothness: 1
     - _Cull: 2
-    - _Cutoff: 0.204
+    - _Cutoff: 0
     - _DstBlend: 0
     - _DstBlendAlpha: 0
-    - _Metallic: 0
+    - _Metallic: 1
     - _MetallicRemap: 1
     - _MetallicRemapMax: 1
     - _MetallicRemapMin: 0
@@ -81,7 +80,7 @@ Material:
     - _ReceiveDecals: 1
     - _ReceiveSSR: 1
     - _ReceiveShadows: 0
-    - _Smoothness: 0
+    - _Smoothness: 1
     - _SmoothnessRemap: 1
     - _SmoothnessRemapMax: 1
     - _SmoothnessRemapMin: 0
@@ -96,6 +95,6 @@ Material:
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
-    - _EmissionColor: {r: 103.79968, g: 0, b: 1024, a: 1}
+    - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

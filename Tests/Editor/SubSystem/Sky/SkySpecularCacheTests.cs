@@ -56,13 +56,23 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("internal const string GGXConvolutionShaderName = \"Hidden/VividRP/Sky/GGXConvolve\";"));
             Assert.That(source, Does.Contain("SkyCubemapGGXConvolution.RenderCubemapGGXConvolution"));
-            Assert.That(source, Does.Contain("RenderCubemapLevel(cmd, source, target, 0, CopyMipZeroPassIndex);"));
-            Assert.That(source, Does.Contain("RenderCubemapLevel(cmd, source, target, mipLevel, GgxConvolutionPassIndex);"));
+            Assert.That(source, Does.Contain("RenderCubemapLevel(cmd, target, 0, CopyMipZeroPassIndex);"));
+            Assert.That(source, Does.Contain("RenderCubemapLevel(cmd, target, mipLevel, GgxConvolutionPassIndex);"));
             Assert.That(source, Does.Contain("CoreUtils.DrawFullScreen(cmd, m_ConvolutionMaterial, m_PropertyBlock, passIndex);"));
             Assert.That(source, Does.Not.Contain("cmd.CopyTexture(source, faceIndex, 0, target, faceIndex, 0);"));
             Assert.That(source, Does.Not.Contain("TryCopyCubemapMipZero"));
             Assert.That(source, Does.Contain("GetIBLRuntimeFilterSampleCount"));
             Assert.That(source, Does.Contain("BuildGgxIblSampleDataTexture()"));
+        }
+
+        [Test]
+        public void SkyCubemapGGXConvolution_UsesTargetMipDimensionsForFaceProjection()
+        {
+            var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyCubemapGGXConvolution.cs"));
+
+            Assert.That(source, Does.Contain("GetConvolutionMipLevel(target)"));
+            Assert.That(source, Does.Contain("var faceSize = Mathf.Max(1, target.width >> mipLevel);"));
+            Assert.That(source, Does.Not.Contain("var faceSize = Mathf.Max(1, source.width >> mipLevel);"));
         }
 
         [Test]

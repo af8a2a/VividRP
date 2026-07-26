@@ -34,6 +34,12 @@ namespace VividRP.Editor.Tests
         }
 
         [System.Serializable]
+        private sealed class AutoRegisteredHZBGeneratePassNode : RenderPassNodeData
+        {
+            internal override System.Type GetRegisteredPassType() => typeof(HZBGeneratePass);
+        }
+
+        [System.Serializable]
         private sealed class AutoRegisteredDeferredLightingPassNode : RenderPassNodeData
         {
             internal override System.Type GetRegisteredPassType() => typeof(DeferredLightingPass);
@@ -115,15 +121,14 @@ namespace VividRP.Editor.Tests
 
             Assert.That(textureEntries.Select(entry => entry.Name), Is.EqualTo(new[]
             {
-                "Depth",
                 "GBuffer1",
                 "GTAOTexture",
                 "GTAOWorkingAOTerm",
                 "GTAOWorkingAOTermPong",
-                "GTAOWorkingDepth",
-                "GTAOWorkingEdges"
+                "GTAOWorkingEdges",
+                "HZB"
             }));
-            Assert.That(textureEntries.Single(entry => entry.Name == "Depth").Access, Is.EqualTo(AccessFlags.Read));
+            Assert.That(textureEntries.Single(entry => entry.Name == "HZB").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "GBuffer1").Access, Is.EqualTo(AccessFlags.Read));
             Assert.That(textureEntries.Single(entry => entry.Name == "GTAOTexture").Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(
@@ -145,18 +150,18 @@ namespace VividRP.Editor.Tests
 
             pass.Prepare(frameData);
 
+            AssertTextureSize(pass, "m_HzbTexture", 320, 180);
             AssertTextureSize(pass, "m_GTAOTexture", 320, 180);
-            AssertTextureSize(pass, "m_WorkingDepthTexture", 320, 180);
             AssertTextureSize(pass, "m_WorkingAOTermTexture", 320, 180);
             AssertTextureSize(pass, "m_WorkingAOTermPongTexture", 320, 180);
             AssertTextureSize(pass, "m_WorkingEdgesTexture", 320, 180);
 
-            var workingDepth = GetFieldValue<RenderGraphTexture>(pass, "m_WorkingDepthTexture");
+            var hzb = GetFieldValue<RenderGraphTexture>(pass, "m_HzbTexture");
             var output = GetFieldValue<RenderGraphTexture>(pass, "m_GTAOTexture");
 
-            Assert.That(workingDepth.desc.UseMipMap, Is.True);
-            Assert.That(workingDepth.desc.MipCount, Is.EqualTo(5));
-            Assert.That(workingDepth.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
+            Assert.That(hzb.desc.UseMipMap, Is.True);
+            Assert.That(hzb.desc.MipCount, Is.EqualTo(6));
+            Assert.That(hzb.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16_SFloat));
             Assert.That(output.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R8_UNorm));
             Assert.That(output.desc.ClearColor, Is.EqualTo(Color.white));
         }
@@ -189,7 +194,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Compile_OrdersGTAOBeforeDeferredLighting_WhenGTAOTextureIsConnected()
+        public void Compile_OrdersHZBBeforeGTAO_WhenSharedHZBIsConnected()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -199,18 +204,23 @@ namespace VividRP.Editor.Tests
                 var gtaoNode = new AutoRegisteredGTAOPassNode();
                 var gbufferNode = new AutoRegisteredGBufferPassNode();
                 var copyDepthNode = new AutoRegisteredCopyDepthPassNode();
+                var hzbNode = new AutoRegisteredHZBGeneratePassNode();
 
                 RenderGraphTestUtility.AddTestNode(graph, deferredNode);
                 RenderGraphTestUtility.AddTestNode(graph, gtaoNode);
                 RenderGraphTestUtility.AddTestNode(graph, gbufferNode);
                 RenderGraphTestUtility.AddTestNode(graph, copyDepthNode);
+                RenderGraphTestUtility.AddTestNode(graph, hzbNode);
 
                 Assert.That(graph.Connect(
                     gbufferNode.GetOutputPortByName("m_GBuffer1"),
                     gtaoNode.GetInputPortByName("m_GBuffer1")), Is.True);
                 Assert.That(graph.Connect(
                     copyDepthNode.GetOutputPortByName("m_DepthTexture"),
-                    gtaoNode.GetInputPortByName("m_DepthTexture")), Is.True);
+                    hzbNode.GetInputPortByName("m_DepthTexture")), Is.True);
+                Assert.That(graph.Connect(
+                    hzbNode.GetOutputPortByName("m_HzbTexture"),
+                    gtaoNode.GetInputPortByName("m_HzbTexture")), Is.True);
                 Assert.That(graph.Connect(
                     gtaoNode.GetOutputPortByName("m_GTAOTexture"),
                     deferredNode.GetInputPortByName("m_GTAOTexture")), Is.True);
@@ -219,8 +229,10 @@ namespace VividRP.Editor.Tests
                 var executionOrder = result.ExecutionOrder.Select(pass => pass.PassTypeName).ToList();
 
                 Assert.That(executionOrder.IndexOf(nameof(GTAOPass)), Is.GreaterThanOrEqualTo(0));
+                Assert.That(executionOrder.IndexOf(nameof(HZBGeneratePass)), Is.GreaterThanOrEqualTo(0));
                 Assert.That(executionOrder.IndexOf(nameof(DeferredLightingPass)), Is.GreaterThanOrEqualTo(0));
-                Assert.That(executionOrder.IndexOf(nameof(CopyDepthPass)), Is.LessThan(executionOrder.IndexOf(nameof(GTAOPass))));
+                Assert.That(executionOrder.IndexOf(nameof(CopyDepthPass)), Is.LessThan(executionOrder.IndexOf(nameof(HZBGeneratePass))));
+                Assert.That(executionOrder.IndexOf(nameof(HZBGeneratePass)), Is.LessThan(executionOrder.IndexOf(nameof(GTAOPass))));
                 Assert.That(executionOrder.IndexOf(nameof(GBufferPass)), Is.LessThan(executionOrder.IndexOf(nameof(GTAOPass))));
                 Assert.That(executionOrder.IndexOf(nameof(GTAOPass)), Is.LessThan(executionOrder.IndexOf(nameof(DeferredLightingPass))));
             }
@@ -234,26 +246,29 @@ namespace VividRP.Editor.Tests
         public void GTAOShaderSources_UseVividNormalDecodeAndUnormFinalResolve()
         {
             var computeSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "GTAO", "GTAO.compute"));
-            var hlsliSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "GTAO", "XeGTAO.hlsli"));
+            var hlslSource = File.ReadAllText(GetPackageFilePath("Shaders", "Core", "Private", "GTAO", "XeGTAO.hlsl"));
 
-            Assert.That(computeSource, Does.Contain("#pragma kernel CSPrefilterDepths16x16"));
+            Assert.That(computeSource, Does.Not.Contain("#pragma kernel CSPrefilterDepths16x16"));
             Assert.That(computeSource, Does.Contain("#pragma kernel CSGTAOHigh"));
             Assert.That(computeSource, Does.Contain("#pragma kernel CSDenoiseLastPass"));
+            Assert.That(computeSource, Does.Contain("Texture2D<float> _HZBTexture;"));
+            Assert.That(computeSource, Does.Not.Contain("_WorkingDepth"));
             Assert.That(computeSource, Does.Contain("DecodeVividNormalOct"));
             Assert.That(computeSource, Does.Contain("GetLeftHandedViewSpaceMatrices"));
             Assert.That(computeSource, Does.Contain("RWTexture2D<unorm float> _GTAOTexture;"));
             Assert.That(computeSource, Does.Contain("XeGTAO_MainPass("));
             Assert.That(computeSource, Does.Contain("XeGTAO_Denoise("));
-            Assert.That(hlsliSource, Does.Contain("return LinearEyeDepth( screenDepth, _ZBufferParams );"));
-            Assert.That(hlsliSource, Does.Contain("RWTexture2D<unorm float> outputTexture"));
-            Assert.That(hlsliSource, Does.Not.Contain("VA_SATURATE"));
-            Assert.That(hlsliSource, Does.Not.Contain("#include \"vaShared.hlsl\""));
+            Assert.That(hlslSource, Does.Contain("return LinearEyeDepth( screenDepth, _ZBufferParams );"));
+            Assert.That(hlslSource, Does.Contain("sourceDepthPyramid.SampleLevel("));
+            Assert.That(hlslSource, Does.Contain("RWTexture2D<unorm float> outputTexture"));
+            Assert.That(hlslSource, Does.Not.Contain("VA_SATURATE"));
+            Assert.That(hlslSource, Does.Not.Contain("#include \"vaShared.hlsl\""));
         }
 
         [Test]
         public void ActiveRenderGraph_WiresGTAOIntoDeferredLighting()
         {
-            var graphSource = File.ReadAllText(GetAssetFilePath("Assets", "Vivid Render Graph 1.vrdg"));
+            var graphSource = File.ReadAllText(GetAssetFilePath("Assets", "Standard Vivid Render Graph 1.vrdg"));
 
             Assert.That(graphSource, Does.Contain("type: {class: GTAOPass, ns: VividRP.Editor.RenderGraph.Generated, asm: VividRP.Editor}"));
             AssertWireExists(graphSource, "m_GTAOTexture", "GTAOTexture");

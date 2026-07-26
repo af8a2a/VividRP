@@ -1,7 +1,6 @@
 #pragma use_dxc
 #pragma require Native16Bit
 
-#pragma kernel CSPrefilterDepths16x16
 #pragma kernel CSGTAOLow
 #pragma kernel CSGTAOMedium
 #pragma kernel CSGTAOHigh
@@ -21,17 +20,11 @@ cbuffer GTAOConstantBuffer
 
 
 
-Texture2D<float> _DepthTexture;
+Texture2D<float> _HZBTexture;
 Texture2D<float4> _GBuffer1;
-Texture2D<lpfloat> _WorkingDepth;
 Texture2D<uint> _SourceAOTerm;
 Texture2D<lpfloat> _SourceEdges;
 
-RWTexture2D<lpfloat> _WorkingDepthMIP0;
-RWTexture2D<lpfloat> _WorkingDepthMIP1;
-RWTexture2D<lpfloat> _WorkingDepthMIP2;
-RWTexture2D<lpfloat> _WorkingDepthMIP3;
-RWTexture2D<lpfloat> _WorkingDepthMIP4;
 RWTexture2D<uint> _WorkingAOTerm;
 RWTexture2D<unorm float> _WorkingEdges;
 RWTexture2D<uint> _DenoiseAOTerm;
@@ -55,22 +48,6 @@ lpfloat2 SpatioTemporalNoise( uint2 pixCoord, uint temporalIndex )
     return lpfloat2( frac( 0.5 + index * float2( 0.75487766624669276005, 0.5698402909980532659114 ) ) );
 }
 
-[numthreads(8, 8, 1)]
-void CSPrefilterDepths16x16( uint2 dispatchThreadID : SV_DispatchThreadID, uint2 groupThreadID : SV_GroupThreadID )
-{
-    XeGTAO_PrefilterDepths16x16(
-        dispatchThreadID,
-        groupThreadID,
-        g_GTAOConsts,
-        _DepthTexture,
-        sampler_PointClamp,
-        _WorkingDepthMIP0,
-        _WorkingDepthMIP1,
-        _WorkingDepthMIP2,
-        _WorkingDepthMIP3,
-        _WorkingDepthMIP4 );
-}
-
 [numthreads(XE_GTAO_NUMTHREADS_X, XE_GTAO_NUMTHREADS_Y, 1)]
 void CSGTAOLow( uint2 pixCoord : SV_DispatchThreadID )
 {
@@ -81,7 +58,7 @@ void CSGTAOLow( uint2 pixCoord : SV_DispatchThreadID )
         SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
         LoadNormal( pixCoord ),
         g_GTAOConsts,
-        _WorkingDepth,
+        _HZBTexture,
         sampler_PointClamp,
         _WorkingAOTerm,
         _WorkingEdges );
@@ -97,7 +74,7 @@ void CSGTAOMedium( uint2 pixCoord : SV_DispatchThreadID )
         SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
         LoadNormal( pixCoord ),
         g_GTAOConsts,
-        _WorkingDepth,
+        _HZBTexture,
         sampler_PointClamp,
         _WorkingAOTerm,
         _WorkingEdges );
@@ -113,7 +90,7 @@ void CSGTAOHigh( uint2 pixCoord : SV_DispatchThreadID )
         SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
         LoadNormal( pixCoord ),
         g_GTAOConsts,
-        _WorkingDepth,
+        _HZBTexture,
         sampler_PointClamp,
         _WorkingAOTerm,
         _WorkingEdges );
@@ -129,7 +106,7 @@ void CSGTAOUltra( uint2 pixCoord : SV_DispatchThreadID )
         SpatioTemporalNoise( pixCoord, g_GTAOConsts.NoiseIndex ),
         LoadNormal( pixCoord ),
         g_GTAOConsts,
-        _WorkingDepth,
+        _HZBTexture,
         sampler_PointClamp,
         _WorkingAOTerm,
         _WorkingEdges );

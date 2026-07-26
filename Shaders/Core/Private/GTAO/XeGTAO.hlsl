@@ -195,6 +195,15 @@ float XeGTAO_ScreenSpaceToViewSpaceDepth( const float screenDepth, const GTAOCon
     return LinearEyeDepth( screenDepth, _ZBufferParams );
 }
 
+lpfloat XeGTAO_ScreenSpaceToClampedViewSpaceDepth( const float screenDepth, const GTAOConstants consts )
+{
+#ifdef XE_GTAO_USE_HALF_FLOAT_PRECISION
+    return (lpfloat)clamp( XeGTAO_ScreenSpaceToViewSpaceDepth( screenDepth, consts ), 0.0, 65504.0 );
+#else
+    return clamp( XeGTAO_ScreenSpaceToViewSpaceDepth( screenDepth, consts ), 0.0, 3.402823466e+38 );
+#endif
+}
+
 lpfloat4 XeGTAO_CalculateEdges( const lpfloat centerZ, const lpfloat leftZ, const lpfloat rightZ, const lpfloat topZ, const lpfloat bottomZ )
 {
     lpfloat4 edgesLRTB = lpfloat4( leftZ, rightZ, topZ, bottomZ ) - (lpfloat)centerZ;
@@ -321,21 +330,21 @@ lpfloat3x3 XeGTAO_RotFromToMatrix( lpfloat3 from, lpfloat3 to )
 }
 
 void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPerSlice, const lpfloat2 localNoise, lpfloat3 viewspaceNormal, const GTAOConstants consts, 
-    Texture2D<lpfloat> sourceViewspaceDepth, SamplerState depthSampler, RWTexture2D<uint> outWorkingAOTerm, RWTexture2D<unorm float> outWorkingEdges )
+    Texture2D<float> sourceDepthPyramid, SamplerState depthSampler, RWTexture2D<uint> outWorkingAOTerm, RWTexture2D<unorm float> outWorkingEdges )
 {                                                                       
     float2 normalizedScreenPos = (pixCoord + 0.5.xx) * consts.ViewportPixelSize;
 
-    lpfloat4 valuesUL   = sourceViewspaceDepth.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize )               );
-    lpfloat4 valuesBR   = sourceViewspaceDepth.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize ), int2( 1, 1 ) );
+    float4 valuesUL   = sourceDepthPyramid.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize )               );
+    float4 valuesBR   = sourceDepthPyramid.GatherRed( depthSampler, float2( pixCoord * consts.ViewportPixelSize ), int2( 1, 1 ) );
 
     // viewspace Z at the center
-    lpfloat viewspaceZ  = valuesUL.y; //sourceViewspaceDepth.SampleLevel( depthSampler, normalizedScreenPos, 0 ).x; 
+    lpfloat viewspaceZ  = XeGTAO_ScreenSpaceToClampedViewSpaceDepth( valuesUL.y, consts );
 
     // viewspace Zs left top right bottom
-    const lpfloat pixLZ = valuesUL.x;
-    const lpfloat pixTZ = valuesUL.z;
-    const lpfloat pixRZ = valuesBR.z;
-    const lpfloat pixBZ = valuesBR.x;
+    const lpfloat pixLZ = XeGTAO_ScreenSpaceToClampedViewSpaceDepth( valuesUL.x, consts );
+    const lpfloat pixTZ = XeGTAO_ScreenSpaceToClampedViewSpaceDepth( valuesUL.z, consts );
+    const lpfloat pixRZ = XeGTAO_ScreenSpaceToClampedViewSpaceDepth( valuesBR.z, consts );
+    const lpfloat pixBZ = XeGTAO_ScreenSpaceToClampedViewSpaceDepth( valuesBR.x, consts );
 
     lpfloat4 edgesLRTB  = XeGTAO_CalculateEdges( (lpfloat)viewspaceZ, (lpfloat)pixLZ, (lpfloat)pixRZ, (lpfloat)pixTZ, (lpfloat)pixBZ );
     outWorkingEdges[pixCoord] = XeGTAO_PackEdges(edgesLRTB);
@@ -534,11 +543,15 @@ void XeGTAO_MainPass( const uint2 pixCoord, lpfloat sliceCount, lpfloat stepsPer
 #endif
 
                 float2 sampleScreenPos0 = normalizedScreenPos + sampleOffset;
-                float  SZ0 = sourceViewspaceDepth.SampleLevel( depthSampler, sampleScreenPos0, mipLevel ).x;
+                float  SZ0 = XeGTAO_ScreenSpaceToClampedViewSpaceDepth(
+                    sourceDepthPyramid.SampleLevel( depthSampler, sampleScreenPos0, mipLevel ).x,
+                    consts );
                 float3 samplePos0 = XeGTAO_ComputeViewspacePosition( sampleScreenPos0, SZ0, consts );
 
                 float2 sampleScreenPos1 = normalizedScreenPos - sampleOffset;
-                float  SZ1 = sourceViewspaceDepth.SampleLevel( depthSampler, sampleScreenPos1, mipLevel ).x;
+                float  SZ1 = XeGTAO_ScreenSpaceToClampedViewSpaceDepth(
+                    sourceDepthPyramid.SampleLevel( depthSampler, sampleScreenPos1, mipLevel ).x,
+                    consts );
                 float3 samplePos1 = XeGTAO_ComputeViewspacePosition( sampleScreenPos1, SZ1, consts );
 
                 float3 sampleDelta0     = (samplePos0 - float3(pixCenterPos)); // using lpfloat for sampleDelta causes precision issues

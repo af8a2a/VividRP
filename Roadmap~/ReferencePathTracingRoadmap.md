@@ -1102,6 +1102,32 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   `Ns·Ng`，B 为该 vertex 的最小 diffuse terminator factor；diagnostic 仍只写
   pass-owned `DebugTexture`。
 
+### Phase 4.10 prerequisite checkpoint: Reference Denoiser AOV Contract (2026-07-26)
+
+- 在引入 physical camera / aperture sampling 前先拆分 reference denoiser 与 REBLUR：
+  REBLUR 继续服务稳定 primary visibility 的交互预览，不作为景深 reference 输出的
+  降噪路径；`ReferencedPathTracingDenoisingPass` 继续作为异步、非时域的 OIDN 支线。
+- `ReferencedPathTracingPass` 原 `WorldPosition` 输出实际保存的是 scene-linear beauty，
+  从未包含 world position。该误导端口现已由 `PathTracingRadiance` 取代，并通过
+  `FormerlySerializedAs("m_WorldPositionTexture")` 保留旧编译绑定解析；当前
+  `PTGraph.vrdg` 未连接旧端口，因此不需要修改 authoring asset。
+- path tracer 新增 FP32 `PathTracingAlbedo` 与 `PathTracingNormal` 输出。Albedo 遵循 HDRP
+  path-tracing AOV 的 diffuse-reflectance 语义，即
+  `base_color * (1 - base_metalness)`；normal 使用与 OpenPBR eval/sample 及
+  Raytracing GBuffer 一致的 view-consistent world-space shading normal。primary miss
+  输出零 feature 和无效 alpha。
+- reference denoiser 现在显式接收 `PathTracingRadiance`、`PathTracingAlbedo`、
+  `PathTracingNormal`，并向 Unity `CommandBufferDenoiser` 依次提交 OIDN `color`、
+  `albedo`、`normal` request。三路资源固定使用 `R32G32B32A32_SFloat`，避免 package
+  的 `Vector4` async-readback contract 对半精度资源产生错误解释。
+- 异步请求未完成、backend 不可用或 pass inactive 时，输出稳定回退到原 scene-linear
+  radiance；AOV 尺寸不匹配时不启动请求。camera、light、integrator 或完整 path-tracing
+  frame signature 变化都会废弃在途/历史 OIDN 结果，为后续 aperture、focus distance
+  纳入 frame signature 预留正确的 reset 边界。
+- 本 checkpoint 只冻结 DOF 所需的 reference-denoising 端口和 feature 语义，尚未修改
+  primary camera ray。raw FP32 radiance 仍是 canonical ground truth；OIDN 输出只用于
+  reference preview，不替代 capture baseline。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal
@@ -1120,9 +1146,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   重投影、邻域裁剪或亮度 clamp，保持静态 reference accumulation 的无偏性质。
 - 样本计数按 camera 隔离；分辨率、view/projection matrix、主方向光方向或颜色变化时自动从 1 spp 重置。
 - ray generation 已把帧序号混入 RNG，并加入逐帧 sub-pixel jitter，避免重复累积完全相同的路径样本。
-- 已通过 `com.unity.rendering.denoising` 的 `CommandBufferDenoiser` 接入 Intel Open Image Denoise color-only
-  preview。OIDN 使用异步 readback/CPU worker，不在 RenderGraph pass 内 flush 或 submit command buffer；结果未就绪、
-  package 宏不可用、非 64 位桌面平台或 native backend 不支持时，输出稳定回退到 raw accumulation。
+- 已通过 `com.unity.rendering.denoising` 的 `CommandBufferDenoiser` 接入 Intel Open Image Denoise
+  beauty + diffuse-albedo + shading-normal preview。OIDN 使用异步 readback/CPU worker，不在
+  RenderGraph pass 内 flush 或 submit command buffer；结果未就绪、package 宏不可用、非 64 位
+  桌面平台或 native backend 不支持时，输出稳定回退到输入的 scene-linear radiance。
 - OIDN 结果按 camera 隔离；分辨率、view/projection matrix 或主方向光变化时废弃旧请求结果。
 - package API 被隔离在 `IReferencedPathTracingDenoiserBackend` 适配边界之后；Unity 6.7+ 切换为预编译 package
   时不需要把实现迁入 VividRP，只需维护 adapter 和程序集引用。

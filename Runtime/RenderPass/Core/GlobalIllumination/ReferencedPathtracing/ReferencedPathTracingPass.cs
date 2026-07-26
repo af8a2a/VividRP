@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Serialization;
 using VividRP.Runtime.Plugin;
 
 namespace VividRP.Runtime.RenderPass.Core
@@ -67,7 +68,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private const string AccelerationStructureName = "_AccelerationStructure";
         private const int NvidiaShaderExtensionStructStride = 256;
 
-        private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
+        private static readonly int PathTracingRadianceId =
+            Shader.PropertyToID("_ReferencedPathTracingRadiance");
+        private static readonly int PathTracingAlbedoId =
+            Shader.PropertyToID("_ReferencedPathTracingAlbedo");
+        private static readonly int PathTracingNormalId =
+            Shader.PropertyToID("_ReferencedPathTracingNormal");
         private static readonly int DebugTextureId =
             Shader.PropertyToID("_ReferencedPathTracingDebugTexture");
         private static readonly int NvidiaShaderExtensionBufferId =
@@ -173,10 +179,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphBuffer m_EnvironmentImportanceDistribution;
 
         [RenderGraphResource(
-            Name = "WorldPosition",
+            Name = "PathTracingRadiance",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
-        private RenderGraphTexture m_WorldPositionTexture;
+        [FormerlySerializedAs("m_WorldPositionTexture")]
+        private RenderGraphTexture m_PathTracingRadiance;
+
+        [RenderGraphResource(
+            Name = "PathTracingAlbedo",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_PathTracingAlbedo;
+
+        [RenderGraphResource(
+            Name = "PathTracingNormal",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_PathTracingNormal;
 
         [RenderGraphResource(
             Name = "DebugTexture",
@@ -299,8 +318,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     ReferencedPathTracingEnvironmentImportanceLayout.ElementStride);
             m_EnvironmentImportanceDistribution =
                 m_DefaultEnvironmentImportanceDistribution;
-            m_WorldPositionTexture = RenderGraphTexture.CreateOutput(
-                "WorldPosition",
+            m_PathTracingRadiance = RenderGraphTexture.CreateOutput(
+                "PathTracingRadiance",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_PathTracingAlbedo = RenderGraphTexture.CreateOutput(
+                "PathTracingAlbedo",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_PathTracingNormal = RenderGraphTexture.CreateOutput(
+                "PathTracingNormal",
                 GraphicsFormat.R32G32B32A32_SFloat);
             m_DebugTexture = RenderGraphTexture.CreateOutput(
                 "ReferencedPathTracingDebug",
@@ -493,8 +518,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     accelerationStructure);
                 cmd.SetRayTracingTextureParam(
                     m_RayTracingShader,
-                    WorldPositionTextureId,
-                    m_WorldPositionTexture.innerHandle);
+                    PathTracingRadianceId,
+                    m_PathTracingRadiance.innerHandle);
+                BindOutput(cmd, PathTracingAlbedoId, m_PathTracingAlbedo);
+                BindOutput(cmd, PathTracingNormalId, m_PathTracingNormal);
                 BindOutput(cmd, DebugTextureId, m_DebugTexture);
                 BindOutput(cmd, DiffuseRadianceHitDistanceId, m_DiffuseRadianceHitDistance);
                 BindOutput(cmd, SpecularRadianceHitDistanceId, m_SpecularRadianceHitDistance);
@@ -720,11 +747,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private void ConfigureOutputs(int width, int height)
         {
             ConfigureOutput(
-                m_WorldPositionTexture,
+                m_PathTracingRadiance,
                 width,
                 height,
                 GraphicsFormat.R32G32B32A32_SFloat,
-                "WorldPosition");
+                "PathTracingRadiance");
+            ConfigureOutput(
+                m_PathTracingAlbedo,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "PathTracingAlbedo");
+            ConfigureOutput(
+                m_PathTracingNormal,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "PathTracingNormal");
             ConfigureOutput(
                 m_DebugTexture,
                 width,
@@ -809,7 +848,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool HaveValidOutputs()
         {
-            return IsValid(m_WorldPositionTexture)
+            return IsValid(m_PathTracingRadiance)
+                && IsValid(m_PathTracingAlbedo)
+                && IsValid(m_PathTracingNormal)
                 && IsValid(m_DebugTexture)
                 && IsValid(m_DiffuseRadianceHitDistance)
                 && IsValid(m_SpecularRadianceHitDistance)

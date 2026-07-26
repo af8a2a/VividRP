@@ -3,24 +3,34 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Serialization;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
-    /// Asynchronously denoises the progressively accumulated reference path-tracing color through
-    /// Unity's Open Image Denoise package. Until a request completes, the accumulated input is used.
+    /// Asynchronously denoises reference path-tracing radiance through Unity's Open Image Denoise
+    /// package, using primary diffuse-albedo and shading-normal AOVs from the path tracer. Until a
+    /// request completes, the scene-linear radiance input is used.
     /// </summary>
     public sealed class ReferencedPathTracingDenoisingPass : UnsafePass, IRenderGraphSideEffectPass
     {
         private const float MatrixResetEpsilon = 1e-6f;
         private const float LightResetEpsilon = 1e-6f;
 
-        [RenderGraphResource(Name = "PathTracingAccumulatedColor", Access = AccessFlags.Read)]
-        private RenderGraphTexture m_AccumulatedColor;
+        [RenderGraphResource(Name = "PathTracingRadiance", Access = AccessFlags.Read)]
+        [FormerlySerializedAs("m_AccumulatedColor")]
+        private RenderGraphTexture m_Radiance;
 
-        [RenderGraphResource(Name = "PathTracingDenoisedColor", Access = AccessFlags.WriteAll)]
-        [PassBypass(nameof(m_AccumulatedColor))]
-        private RenderGraphTexture m_DenoisedColor;
+        [RenderGraphResource(Name = "PathTracingAlbedo", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Albedo;
+
+        [RenderGraphResource(Name = "PathTracingNormal", Access = AccessFlags.Read)]
+        private RenderGraphTexture m_Normal;
+
+        [RenderGraphResource(Name = "PathTracingDenoisedRadiance", Access = AccessFlags.WriteAll)]
+        [PassBypass(nameof(m_Radiance))]
+        [FormerlySerializedAs("m_DenoisedColor")]
+        private RenderGraphTexture m_DenoisedRadiance;
 
         private sealed class DenoisingState : CameraRelativeState
         {
@@ -35,6 +45,8 @@ namespace VividRP.Runtime.RenderPass.Core
             public float MainLightAngularDiameter;
             public float MainLightShadowStrength;
             public ulong LocalLightSignature;
+            public ulong IntegratorSignature;
+            public ulong FrameSignature;
 
             public override void Dispose()
             {
@@ -62,11 +74,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 ?? throw new ArgumentNullException(nameof(backendFactory));
             profilingSampler = new ProfilingSampler(nameof(ReferencedPathTracingDenoisingPass));
 
-            m_AccumulatedColor = RenderGraphTexture.CreateInput(
-                "PathTracingAccumulatedColor",
+            m_Radiance = RenderGraphTexture.CreateInput(
+                "PathTracingRadiance",
                 GraphicsFormat.R32G32B32A32_SFloat);
-            m_DenoisedColor = RenderGraphTexture.CreateOutput(
-                "PathTracingDenoisedColor",
+            m_Albedo = RenderGraphTexture.CreateInput(
+                "PathTracingAlbedo",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_Normal = RenderGraphTexture.CreateInput(
+                "PathTracingNormal",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_DenoisedRadiance = RenderGraphTexture.CreateOutput(
+                "PathTracingDenoisedRadiance",
                 GraphicsFormat.R32G32B32A32_SFloat);
             ConfigureOutputDescriptor();
         }
@@ -92,7 +110,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 cameraData?.pixelHeight ?? 0,
                 Screen.height);
 
-            m_DenoisedColor.Resize(m_Width, m_Height);
+            m_DenoisedRadiance.Resize(m_Width, m_Height);
             ConfigureOutputDescriptor();
             PrepareDenoisingState(frameData, cameraData);
             m_DenoisingStates.PurgeDestroyedCameras();
@@ -100,18 +118,25 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Record(UnsafePassContext context)
         {
-            if (m_AccumulatedColor?.innerHandle.IsValid() != true
-                || m_DenoisedColor?.innerHandle.IsValid() != true)
+            if (m_Radiance?.innerHandle.IsValid() != true
+                || m_Albedo?.innerHandle.IsValid() != true
+                || m_Normal?.innerHandle.IsValid() != true
+                || m_DenoisedRadiance?.innerHandle.IsValid() != true)
             {
                 return;
             }
 
-            var source = (RenderTexture)m_AccumulatedColor;
-            var destination = (RenderTexture)m_DenoisedColor;
-            if (source == null
+            var radiance = (RenderTexture)m_Radiance;
+            var albedo = (RenderTexture)m_Albedo;
+            var normal = (RenderTexture)m_Normal;
+            var destination = (RenderTexture)m_DenoisedRadiance;
+            if (radiance == null
+                || albedo == null
+                || normal == null
                 || destination == null
-                || source.width != destination.width
-                || source.height != destination.height)
+                || !HasMatchingDimensions(radiance, destination)
+                || !HasMatchingDimensions(albedo, destination)
+                || !HasMatchingDimensions(normal, destination))
             {
                 return;
             }
@@ -120,10 +145,12 @@ namespace VividRP.Runtime.RenderPass.Core
             using (new ProfilingScope(commandBuffer, profilingSampler))
             {
                 // The pass always has a deterministic output while OIDN readback/CPU work is pending.
-                commandBuffer.CopyTexture(source, destination);
+                commandBuffer.CopyTexture(radiance, destination);
                 m_CurrentState?.Backend?.Process(
                     commandBuffer,
-                    source,
+                    radiance,
+                    albedo,
+                    normal,
                     destination,
                     m_Width,
                     m_Height);
@@ -159,6 +186,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 out var lightAngularDiameter,
                 out var lightShadowStrength,
                 out var localLightSignature);
+            var pathTracingData =
+                frameData.GetOrCreate<VividReferencedPathTracingData>();
 
             var signatureMatches = state.HasSignature
                 && state.Width == m_Width
@@ -171,7 +200,12 @@ namespace VividRP.Runtime.RenderPass.Core
                     <= LightResetEpsilon
                 && Mathf.Abs(state.MainLightShadowStrength - lightShadowStrength)
                     <= LightResetEpsilon
-                && state.LocalLightSignature == localLightSignature;
+                && state.LocalLightSignature == localLightSignature
+                && (!pathTracingData.isValid
+                    || (state.IntegratorSignature
+                            == pathTracingData.integratorSignature
+                        && state.FrameSignature
+                            == pathTracingData.frameSignature));
 
             if (!signatureMatches)
                 state.Backend?.Invalidate();
@@ -186,12 +220,18 @@ namespace VividRP.Runtime.RenderPass.Core
             state.MainLightAngularDiameter = lightAngularDiameter;
             state.MainLightShadowStrength = lightShadowStrength;
             state.LocalLightSignature = localLightSignature;
+            state.IntegratorSignature = pathTracingData.isValid
+                ? pathTracingData.integratorSignature
+                : 0ul;
+            state.FrameSignature = pathTracingData.isValid
+                ? pathTracingData.frameSignature
+                : 0ul;
             m_CurrentState = state;
         }
 
         private void ConfigureOutputDescriptor()
         {
-            var descriptor = m_DenoisedColor.desc;
+            var descriptor = m_DenoisedRadiance.desc;
             descriptor.ColorFormat = GraphicsFormat.R32G32B32A32_SFloat;
             descriptor.DepthBufferBits = DepthBits.None;
             descriptor.MsaaSamples = MSAASamples.None;
@@ -202,7 +242,15 @@ namespace VividRP.Runtime.RenderPass.Core
             descriptor.UseMipMap = false;
             descriptor.AutoGenerateMips = false;
             descriptor.MipCount = 1;
-            descriptor.Name = "PathTracingDenoisedColor";
+            descriptor.Name = "PathTracingDenoisedRadiance";
+        }
+
+        private static bool HasMatchingDimensions(
+            RenderTexture texture,
+            RenderTexture reference)
+        {
+            return texture.width == reference.width
+                && texture.height == reference.height;
         }
 
         private static bool MatricesApproximatelyEqual(Matrix4x4 lhs, Matrix4x4 rhs, float epsilon)

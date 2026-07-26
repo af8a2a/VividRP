@@ -581,6 +581,10 @@ struct ReferencedPathtracingPayload
     float nextPdf;
     float linearRoughness;
     float hitDistance;
+    // Primary-surface OIDN features. Albedo is diffuse reflectance and the
+    // normal is the same view-consistent shading normal used by the BSDF.
+    float3 denoisingAlbedo;
+    float3 denoisingNormalWS;
     // R/G: unadjusted/consistent shading-normal agreement with the geometric
     // normal. B: minimum diffuse shadow-terminator factor for this vertex.
     float3 shadingNormalDiagnostics;
@@ -616,6 +620,8 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.nextPdf = 0.0;
     payload.linearRoughness = 1.0;
     payload.hitDistance = 0.0;
+    payload.denoisingAlbedo = 0.0;
+    payload.denoisingNormalWS = 0.0;
     payload.shadingNormalDiagnostics = 0.0;
     payload.nextLobeClass = 0u;
     payload.nextLobeIsDelta = 0u;

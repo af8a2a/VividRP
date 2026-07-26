@@ -251,7 +251,12 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "ReferenceLightListParameters");
             var environmentImportanceDistribution = resources.Buffers.Single(
                 resource => resource.Name == "EnvironmentImportanceDistribution");
-            var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
+            var pathTracingRadiance = resources.Textures.Single(
+                resource => resource.Name == "PathTracingRadiance");
+            var pathTracingAlbedo = resources.Textures.Single(
+                resource => resource.Name == "PathTracingAlbedo");
+            var pathTracingNormal = resources.Textures.Single(
+                resource => resource.Name == "PathTracingNormal");
             var debugTexture = resources.Textures.Single(
                 resource => resource.Name == "DebugTexture");
             var environmentTexture = resources.Textures.Single(
@@ -309,11 +314,23 @@ namespace VividRP.Editor.Tests
                 environmentBackgroundTexture.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(environmentBackgroundTexture.Texture.desc.UseMipMap, Is.True);
-            Assert.That(worldPosition.Name, Is.EqualTo("WorldPosition"));
-            Assert.That(worldPosition.Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(worldPosition.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
-            Assert.That(worldPosition.Texture.desc.EnableRandomWrite, Is.True);
-            Assert.That(worldPosition.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(pathTracingRadiance.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(pathTracingAlbedo.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(pathTracingNormal.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                new[]
+                {
+                    pathTracingRadiance,
+                    pathTracingAlbedo,
+                    pathTracingNormal
+                }.All(resource =>
+                    resource.Texture.desc.ColorFormat
+                        == GraphicsFormat.R32G32B32A32_SFloat),
+                Is.True);
+            Assert.That(pathTracingRadiance.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(pathTracingAlbedo.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(pathTracingNormal.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(pathTracingRadiance.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(debugTexture.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(
                 debugTexture.Texture.desc.ColorFormat,
@@ -345,7 +362,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_ResizesWorldPositionOutputToCameraDimensions()
+        public void Prepare_ResizesReferenceDenoisingOutputsToCameraDimensions()
         {
             var pass = new ReferencedPathTracingPass();
             var frameData = new ContextContainer();
@@ -355,7 +372,9 @@ namespace VividRP.Editor.Tests
 
             pass.Prepare(frameData);
 
-            var output = GetField<RenderGraphTexture>(pass, "m_WorldPositionTexture");
+            var output = GetField<RenderGraphTexture>(pass, "m_PathTracingRadiance");
+            var albedo = GetField<RenderGraphTexture>(pass, "m_PathTracingAlbedo");
+            var normal = GetField<RenderGraphTexture>(pass, "m_PathTracingNormal");
             var debugTexture = GetField<RenderGraphTexture>(
                 pass,
                 "m_DebugTexture");
@@ -369,6 +388,10 @@ namespace VividRP.Editor.Tests
             Assert.That(output.desc.Height, Is.EqualTo(540));
             Assert.That(output.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(output.desc.EnableRandomWrite, Is.True);
+            Assert.That(albedo.desc.Width, Is.EqualTo(960));
+            Assert.That(albedo.desc.Height, Is.EqualTo(540));
+            Assert.That(normal.desc.Width, Is.EqualTo(960));
+            Assert.That(normal.desc.Height, Is.EqualTo(540));
             Assert.That(debugTexture.desc.Width, Is.EqualTo(960));
             Assert.That(debugTexture.desc.Height, Is.EqualTo(540));
             Assert.That(debugTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
@@ -581,11 +604,19 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "_WorldPositionTexture[pixelCoord] ="));
+                    "_ReferencedPathTracingRadiance[pixelCoord] ="));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
                     "float4(physicalRadiance, physicalOutputAlpha)"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedPathTracingAlbedo[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedPathTracingNormal[pixelCoord] ="));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
@@ -654,7 +685,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     node.GetInputPortByName("m_EnvironmentImportanceDistribution"),
                     Is.Not.Null);
-                Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_PathTracingRadiance"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_PathTracingAlbedo"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_PathTracingNormal"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
@@ -672,6 +706,17 @@ namespace VividRP.Editor.Tests
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
+        }
+
+        [Test]
+        public void LegacyWorldPositionBinding_ResolvesToPathTracingRadiance()
+        {
+            var field = RenderGraphPassReflectionUtility.GetInstanceField(
+                typeof(ReferencedPathTracingPass),
+                "m_WorldPositionTexture");
+
+            Assert.That(field, Is.Not.Null);
+            Assert.That(field.Name, Is.EqualTo("m_PathTracingRadiance"));
         }
 
         [Test]

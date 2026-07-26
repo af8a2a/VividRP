@@ -127,6 +127,12 @@ void StandardLitReferencedPathtracingClosestHit(
     payload.nextPdf = 0.0;
     payload.linearRoughness = material.openPbrInputs.specular_roughness;
     payload.hitDistance = geometry.hitDistance;
+    // Match HDRP's reference-denoising AOV contract: diffuse reflectance and
+    // the actual shading normal, both evaluated at primary visibility.
+    payload.denoisingAlbedo = saturate(
+        material.openPbrInputs.base_color
+        * (1.0 - material.openPbrInputs.base_metalness));
+    payload.denoisingNormalWS = material.shadingNormalWS;
     payload.nextLobeClass = 0u;
     payload.shadingNormalDiagnostics = float3(
         saturate(dot(

@@ -8,14 +8,16 @@
 
 #if defined(VIVID_REFERENCE_PT_SER)
 // This slot must match ReferencedPathTracingPass.ShaderExecutionReorderingUavSlot.
-// u31 stays clear of the pass's ten automatically allocated output UAVs.
+// u31 stays clear of the pass's twelve automatically allocated output UAVs.
 #define NV_SHADER_EXTN_SLOT u31
 #define NV_HITOBJECT_USE_MACRO_API
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NVAPI/nvHLSLExtns.h"
 #endif
 
 RaytracingAccelerationStructure _AccelerationStructure;
-RWTexture2D<float4> _WorldPositionTexture;
+RWTexture2D<float4> _ReferencedPathTracingRadiance;
+RWTexture2D<float4> _ReferencedPathTracingAlbedo;
+RWTexture2D<float4> _ReferencedPathTracingNormal;
 RWTexture2D<float4> _ReferencedPathTracingDebugTexture;
 RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
@@ -320,6 +322,8 @@ void RayGenReferencedPathtracing()
     float3 neeLightIdentityDiagnostic = 0.0;
     float3 lightSpatialIndexDiagnostic = 0.0;
     float3 shadingNormalDiagnostic = 0.0;
+    float3 primaryDenoisingAlbedo = 0.0;
+    float3 primaryDenoisingNormalWS = 0.0;
     float3 pathSampleDiagnostic = float3(
         filmSample,
         ReferencedPathtracingGetPathSample(
@@ -448,6 +452,8 @@ void RayGenReferencedPathtracing()
                 float4(payload.positionWS, 1.0)).z);
             primaryLinearRoughness = saturate(payload.linearRoughness);
             shadingNormalDiagnostic = payload.shadingNormalDiagnostics;
+            primaryDenoisingAlbedo = payload.denoisingAlbedo;
+            primaryDenoisingNormalWS = payload.denoisingNormalWS;
             emissionRadiance += throughput * payload.emission;
         }
         else
@@ -977,8 +983,14 @@ void RayGenReferencedPathtracing()
                 != kReferencedEnvironmentDebugCombined
             ? 1.0
             : physicalOutputAlpha;
-    _WorldPositionTexture[pixelCoord] =
+    _ReferencedPathTracingRadiance[pixelCoord] =
         float4(physicalRadiance, physicalOutputAlpha);
+    _ReferencedPathTracingAlbedo[pixelCoord] = float4(
+        primaryDenoisingAlbedo,
+        primaryHit != 0u ? 1.0 : 0.0);
+    _ReferencedPathTracingNormal[pixelCoord] = float4(
+        primaryDenoisingNormalWS,
+        primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingDebugTexture[pixelCoord] =
         float4(debugRadiance, debugOutputAlpha);
     _ReferencedPathTracingDirectLighting[pixelCoord] =

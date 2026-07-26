@@ -284,15 +284,19 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_MinEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_MaxEV100", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ManualEV100", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_MeteringMode", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_AdaptationMode", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_TargetMidGray", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ApplyPhysicalCameraExposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensationCurve", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_CurveMap", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
-                Assert.That(editorType.GetField("m_MeterMask", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPMeteringMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPAdaptationMode", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPTargetMidGray", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPCurveMap", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPWeightTextureMask", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPProceduralCenter", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPProceduralRadii", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_HDRPProceduralSoftness", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_SelectedPreset", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_StatsPreviewMaterial", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramPreviewSamples", flags)?.GetValue(editor), Is.Not.Null);
@@ -309,7 +313,13 @@ namespace VividRP.Editor.Tests
         [Test]
         public void AutoExposureEditor_UsesHdrpStyleExposureLabelsAndSections()
         {
-            var source = File.ReadAllText(GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
+            var commonSource = File.ReadAllText(
+                GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.cs"));
+            var hdrpSource = File.ReadAllText(
+                GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.HDRP.cs"));
+            var unrealSource = File.ReadAllText(
+                GetPackageFilePath("Editor", "VolumeEditor", "AutoExposureEditor.Unreal.cs"));
+            var source = commonSource + hdrpSource + unrealSource;
 
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Mode\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Preset\")"));
@@ -322,7 +332,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Curve Map\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Metering Mode\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Adaptation Mode\")"));
-            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Target Mid Gray\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Target Mid Grey\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Weight Texture Mask\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Low Percent\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"High Percent\")"));
@@ -331,17 +341,22 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram Percentages\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Histogram EV100 Range\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Presets\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Metering\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Automatic Histogram\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Curve Mapping\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Fixed\")"));
-            Assert.That(source, Does.Contain("DrawSectionHeader(\"Physical Camera\")"));
+            Assert.That(source, Does.Contain("DrawSectionHeader(\"Procedural Mask\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Adaptation\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Histogram\")"));
             Assert.That(source, Does.Contain("DrawSectionHeader(\"Monitor\")"));
-            Assert.That(source, Does.Contain("Curve Mapping now uses HDRP-style curve remapping at runtime."));
-            Assert.That(source, Does.Contain("Automatic Histogram now runs through a dedicated HDRP histogram path."));
+            Assert.That(source, Does.Contain("DrawHDRPInspector()"));
+            Assert.That(source, Does.Contain("DrawUnrealInspector()"));
+            Assert.That(source, Does.Contain("ResolveEditorImplementation()"));
+            Assert.That(source, Does.Contain("AutoExposureMeteringMode.ProceduralMask"));
+            Assert.That(commonSource, Does.Not.Contain("private SerializedDataParameter m_Mode;"));
+            Assert.That(
+                commonSource,
+                Does.Not.Contain("private SerializedDataParameter m_HDRPMode;"));
+            Assert.That(hdrpSource, Does.Not.Contain("private SerializedDataParameter m_Mode;"));
+            Assert.That(
+                unrealSource,
+                Does.Not.Contain("private SerializedDataParameter m_HDRPMode;"));
             Assert.That(source, Does.Contain("AutoExposureCommonPresets.Get(m_SelectedPreset)"));
             Assert.That(source, Does.Contain("ApplySelectedPreset()"));
             Assert.That(

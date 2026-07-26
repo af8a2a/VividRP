@@ -45,7 +45,7 @@ namespace VividRP.Runtime.RenderPass
                 : m_ExposureData.defaultExposureBuffer;
             var previousExposureTexture = m_ExposureData.previousExposureTexture;
             var currentExposureTexture = m_ExposureData.currentExposureTexture;
-            var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)
+            var evaluateMode = UsesHDRPCurveRemapping()
                 ? 2u
                 : 0u;
 
@@ -219,6 +219,13 @@ namespace VividRP.Runtime.RenderPass
                 out var histogramScaleBias,
                 out var meteringMode,
                 out var adaptationMode);
+            AutoExposureSettingsResolver.ResolveHDRPProceduralMeteringParameters(
+                m_AutoExposureSettings,
+                m_Camera,
+                m_AutoExposureWidth,
+                m_AutoExposureHeight,
+                out var proceduralMaskParams,
+                out var proceduralMaskParams2);
 
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -255,11 +262,11 @@ namespace VividRP.Runtime.RenderPass
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpProceduralMaskParamsId,
-                Vector4.zero);
+                proceduralMaskParams);
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpProceduralMaskParams2Id,
-                Vector4.zero);
+                proceduralMaskParams2);
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpHistogramExposureParamsId,
@@ -293,6 +300,13 @@ namespace VividRP.Runtime.RenderPass
                 out var histogramScaleBias,
                 out var meteringMode,
                 out var adaptationMode);
+            AutoExposureSettingsResolver.ResolveHDRPProceduralMeteringParameters(
+                m_AutoExposureSettings,
+                m_Camera,
+                m_AutoExposureWidth,
+                m_AutoExposureHeight,
+                out var proceduralMaskParams,
+                out var proceduralMaskParams2);
 
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
@@ -321,11 +335,11 @@ namespace VividRP.Runtime.RenderPass
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpProceduralMaskParamsId,
-                Vector4.zero);
+                proceduralMaskParams);
             cmd.SetComputeVectorParam(
                 m_AutoExposureCompute,
                 HdrpProceduralMaskParams2Id,
-                Vector4.zero);
+                proceduralMaskParams2);
             SetHDRPVariants(cmd, meteringMode, adaptationMode, 0);
         }
 
@@ -448,7 +462,7 @@ namespace VividRP.Runtime.RenderPass
 
         private Texture ResolveHDRPExposureCurveTexture()
         {
-            if (AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode))
+            if (UsesHDRPCurveRemapping())
             {
                 if (m_AutoExposureSettings.curveMapTexture != null)
                     return m_AutoExposureSettings.curveMapTexture;
@@ -461,9 +475,16 @@ namespace VividRP.Runtime.RenderPass
                         .maxAverageLuminance)).texture;
             }
 
-            return m_AutoExposureSettings.exposureCompensationCurveTexture != null
-                ? m_AutoExposureSettings.exposureCompensationCurveTexture
-                : Texture2D.blackTexture;
+            return Texture2D.blackTexture;
+        }
+
+        private bool UsesHDRPCurveRemapping()
+        {
+            return AutoExposureExposureModeUtility.UsesCurveRemapping(
+                    m_AutoExposureSettings.exposureMode)
+                || (m_AutoExposureSettings.exposureMode
+                    == AutoExposureExposureMode.AutomaticHistogram
+                    && m_AutoExposureSettings.histogramUseCurveRemapping);
         }
 
         private int ResolveHDRPMeteringMode()
@@ -476,6 +497,8 @@ namespace VividRP.Runtime.RenderPass
                     return 2;
                 case AutoExposureMeteringMode.MaskWeighted:
                     return m_AutoExposureSettings.meterMask != null ? 3 : 0;
+                case AutoExposureMeteringMode.ProceduralMask:
+                    return 4;
                 default:
                     return 0;
             }
@@ -497,7 +520,7 @@ namespace VividRP.Runtime.RenderPass
             maxExposureEV100 = AutoExposureSettingsResolver.ResolveAverageSceneEV100FromLuminance(
                 m_AutoExposureSettings.maxAverageLuminance);
 
-            var usesCurveRemapping = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode);
+            var usesCurveRemapping = UsesHDRPCurveRemapping();
             curveMinEV100 = usesCurveRemapping ? m_AutoExposureSettings.curveMapMinEV100 : 0f;
             curveMaxEV100 = usesCurveRemapping
                 ? Mathf.Max(m_AutoExposureSettings.curveMapMaxEV100, curveMinEV100 + 1e-4f)

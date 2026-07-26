@@ -211,6 +211,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 frameData.GetOrCreate<VividReferencedPathTracingData>();
             var integratorState =
                 ReferencedPathTracingIntegratorState.Resolve();
+            var effectiveIntegratorSignature = pathTracingData.isValid
+                ? pathTracingData.integratorSignature
+                : integratorState.ResolveEffectiveSignature(
+                    integratorState.pathSamplingMode);
             var viewMatrix = cameraData.GetViewMatrix();
             var projectionMatrix = cameraData.GetProjectionMatrixNoJitter();
             ReferencedPathTracingLightSignatureUtility.Resolve(
@@ -242,22 +246,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 && state.LocalLightSignature == localLightSignature
                 && state.EnvironmentSignature == environmentState.signature
                 && state.CameraBackgroundSignature == cameraBackgroundState.signature
-                && state.IntegratorSignature == integratorState.signature
+                && state.IntegratorSignature
+                    == effectiveIntegratorSignature
                 && (!pathTracingData.isValid
                     || state.FrameSignature
                         == pathTracingData.frameSignature);
-            var deterministicSequenceMatches =
+            var sampleSequenceMatches =
                 !pathTracingData.isValid
-                || !pathTracingData.deterministicSampling
                 || pathTracingData.sampleIndex == state.SampleCount;
 
             m_UseHistory = m_HasValidHistory
                 && signatureMatches
-                && deterministicSequenceMatches
+                && sampleSequenceMatches
                 && (temporalData == null || !temporalData.isFirstFrame);
 
-            if (pathTracingData.isValid
-                && pathTracingData.deterministicSampling)
+            if (pathTracingData.isValid)
             {
                 if (!m_HasValidHistory && pathTracingData.sampleIndex > 0)
                     ReferencedPathTracingSampleSequence.RequestReset(camera);
@@ -288,7 +291,7 @@ namespace VividRP.Runtime.RenderPass.Core
             state.LocalLightSignature = localLightSignature;
             state.EnvironmentSignature = environmentState.signature;
             state.CameraBackgroundSignature = cameraBackgroundState.signature;
-            state.IntegratorSignature = integratorState.signature;
+            state.IntegratorSignature = effectiveIntegratorSignature;
             state.FrameSignature = pathTracingData.isValid
                 ? pathTracingData.frameSignature
                 : 0ul;

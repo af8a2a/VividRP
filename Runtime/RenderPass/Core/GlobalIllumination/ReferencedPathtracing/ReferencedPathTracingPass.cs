@@ -47,7 +47,10 @@ namespace VividRP.Runtime.RenderPass.Core
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
-    public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
+    public sealed class ReferencedPathTracingPass
+        : UnsafePass,
+          IAllowGlobalStateModificationPass,
+          IBlueNoiseConsumerPass
     {
         private static readonly ReferencedPathTracingLightListStorageBlock[]
             s_EmptyReferenceLightListStorage =
@@ -57,6 +60,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string RayGenerationShaderName = "RayGenReferencedPathtracing";
         internal const string ShaderExecutionReorderingKeywordName =
             "VIVID_REFERENCE_PT_SER";
+        internal const string IndexedBndKeywordName =
+            "VIVID_REFERENCE_PT_INDEXED_BND";
         internal const uint ShaderExecutionReorderingUavSlot = 31;
 
         private const string AccelerationStructureName = "_AccelerationStructure";
@@ -92,6 +97,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
         private static readonly int FrameIndexId = Shader.PropertyToID("_ReferencedFrameIndex");
         private static readonly int SeedId = Shader.PropertyToID("_ReferencedSeed");
+        private static readonly int PathSamplingModeId =
+            Shader.PropertyToID("_ReferencedPathSamplingMode");
         private static readonly int ReblurHitDistanceParametersId =
             Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
         private static readonly int ReblurCheckerboardModeId =
@@ -229,6 +236,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private GraphicsBuffer m_NvidiaShaderExtensionBuffer;
         private LocalKeyword m_ShaderExecutionReorderingKeyword;
         private bool m_ShaderExecutionReorderingKeywordAvailable;
+        private LocalKeyword m_IndexedBndKeyword;
+        private bool m_IndexedBndKeywordAvailable;
         private bool m_SupportsRayTracing;
         private bool m_ShaderExecutionReorderingAvailable;
         private bool m_UseShaderExecutionReordering;
@@ -250,7 +259,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
+        private ReferencedPathTracingSamplingMode m_ResolvedPathSamplingMode =
+            ReferencedPathTracingSamplingMode.IndexedBnd;
         private ReferencedPathTracingDebugSettings m_DebugSettings;
+        private bool m_SamplingFallbackWarningIssued;
         private readonly RenderGraphBuffer m_DefaultReferenceLightList;
         private readonly RenderGraphBuffer m_DefaultReferenceLightListParameters;
         private bool m_DefaultReferenceLightListInitialized;
@@ -350,6 +362,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             RefreshShaderExecutionReorderingKeyword();
+            RefreshIndexedBndKeyword();
             PrepareShaderExecutionReorderingBuffer();
         }
 
@@ -371,6 +384,8 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
+            RefreshIndexedBndKeyword();
+            ResolvePathSamplingMode();
             m_DebugSettings = ReferencedPathTracingDebugSettings.Resolve(
                 VividRenderingDebugDisplaySettings.Data);
             // A RayTracingShader reimport invalidates LocalKeyword handles while
@@ -448,6 +463,15 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_UseShaderExecutionReordering);
                 }
 
+                if (m_IndexedBndKeywordAvailable)
+                {
+                    cmd.SetKeyword(
+                        m_RayTracingShader,
+                        m_IndexedBndKeyword,
+                        m_ResolvedPathSamplingMode
+                            == ReferencedPathTracingSamplingMode.IndexedBnd);
+                }
+
                 if (m_UseShaderExecutionReordering)
                 {
                     // Unity validates every declared ray-tracing resource before dispatch.
@@ -504,6 +528,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_IntegratorState.russianRouletteStartBounce);
                 cmd.SetRayTracingIntParam(m_RayTracingShader, FrameIndexId, m_FrameIndex);
                 cmd.SetRayTracingIntParam(m_RayTracingShader, SeedId, m_Seed);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    PathSamplingModeId,
+                    (int)m_ResolvedPathSamplingMode);
+                if (m_ResolvedPathSamplingMode
+                    == ReferencedPathTracingSamplingMode.IndexedBnd)
+                {
+                    BlueNoise.Instance?.Bind(cmd, m_RayTracingShader);
+                }
                 cmd.SetRayTracingVectorParam(
                     m_RayTracingShader,
                     ReblurHitDistanceParametersId,
@@ -566,6 +599,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RayTracingShader = null;
             m_ShaderExecutionReorderingKeyword = default;
             m_ShaderExecutionReorderingKeywordAvailable = false;
+            m_IndexedBndKeyword = default;
+            m_IndexedBndKeywordAvailable = false;
             m_SupportsRayTracing = false;
             m_ShaderExecutionReorderingAvailable = false;
             m_UseShaderExecutionReordering = false;
@@ -586,7 +621,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnvironmentState = default;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
+            m_ResolvedPathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedBnd;
             m_DebugSettings = default;
+            m_SamplingFallbackWarningIssued = false;
             m_DefaultReferenceLightList?.ClearImportedBuffer();
             m_DefaultReferenceLightListParameters?.ClearImportedBuffer();
             m_DefaultReferenceLightListInitialized = false;
@@ -847,25 +885,27 @@ namespace VividRP.Runtime.RenderPass.Core
             var renderFrameIndex = cameraData.frameIndex >= 0
                 ? cameraData.frameIndex
                 : Time.frameCount;
+            var effectiveIntegratorSignature =
+                m_IntegratorState.ResolveEffectiveSignature(
+                    m_ResolvedPathSamplingMode);
             var frameSignature =
                 ReferencedPathTracingFrameSignatureUtility.Compute(
                     frameData,
                     cameraData,
                     m_Width,
                     m_Height,
-                    m_IntegratorState,
+                    effectiveIntegratorSignature,
                     m_EnvironmentState,
                     m_CameraBackgroundState);
             var temporalData = frameData.Contains<VividTemporalData>()
                 ? frameData.Get<VividTemporalData>()
                 : null;
-            var sampleIndex = m_IntegratorState.deterministicSampling
-                ? ReferencedPathTracingSampleSequence.Resolve(
+            var sampleIndex =
+                ReferencedPathTracingSampleSequence.Resolve(
                     cameraData.camera,
                     renderFrameIndex,
                     frameSignature,
-                    temporalData == null || temporalData.isFirstFrame)
-                : (uint)Mathf.Max(renderFrameIndex, 0);
+                    temporalData == null || temporalData.isFirstFrame);
 
             m_FrameIndex = unchecked((int)sampleIndex);
             m_Seed = m_IntegratorState.deterministicSampling
@@ -875,12 +915,63 @@ namespace VividRP.Runtime.RenderPass.Core
             pathTracingData.deterministicSampling =
                 m_IntegratorState.deterministicSampling;
             pathTracingData.sampleIndex = sampleIndex;
+            pathTracingData.pathSamplingMode =
+                m_ResolvedPathSamplingMode;
+            pathTracingData.samplingContractVersion =
+                ReferencedPathTracingSamplingContract.Version;
             pathTracingData.frameSignature = frameSignature;
             pathTracingData.integratorSignature =
-                m_IntegratorState.signature;
+                effectiveIntegratorSignature;
             pathTracingData.accumulatedSampleCount = 0;
             pathTracingData.mainLightInDenoiserSignals =
                 m_HasFiniteDirectionalLight;
+        }
+
+        private void ResolvePathSamplingMode()
+        {
+            m_ResolvedPathSamplingMode = m_IntegratorState.pathSamplingMode;
+            if (m_ResolvedPathSamplingMode
+                != ReferencedPathTracingSamplingMode.IndexedBnd)
+                return;
+            if (m_IndexedBndKeywordAvailable
+                && BlueNoise.Instance?.SupportsBnd256 == true)
+                return;
+
+            m_ResolvedPathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedHash;
+            if (m_SamplingFallbackWarningIssued)
+                return;
+
+            Debug.LogWarning(
+                "[VividRP] Reference Path Tracing could not bind the 256-SPP " +
+                "Owen-Sobol blue-noise set. Falling back to the fixed-dimension " +
+                "indexed hash sampler; canonical BND captures will be rejected.");
+            m_SamplingFallbackWarningIssued = true;
+        }
+
+        private void RefreshIndexedBndKeyword()
+        {
+            m_IndexedBndKeyword = default;
+            m_IndexedBndKeywordAvailable = false;
+            if (m_RayTracingShader == null)
+                return;
+
+            try
+            {
+                var keyword = new LocalKeyword(
+                    m_RayTracingShader,
+                    IndexedBndKeywordName);
+                if (!keyword.isValid)
+                    return;
+
+                m_IndexedBndKeyword = keyword;
+                m_IndexedBndKeywordAvailable = true;
+            }
+            catch (System.Exception)
+            {
+                // ResolvePathSamplingMode selects the resource-free indexed
+                // hash variant when the keyword cannot be refreshed.
+            }
         }
 
         private void BindEnvironment(CommandBuffer cmd)

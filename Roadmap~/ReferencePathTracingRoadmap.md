@@ -1059,6 +1059,28 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   tests。实际 Unity shader import、DX12 debug view 和 spatial-index OFF/ON 高 SPP 均值对比
   仍是 GPU validation gate。
 
+### Phase 4.8 checkpoint: Reference Sampling Conformance (2026-07-26)
+
+- 路径采样从依赖控制流消费顺序的 PCG stream 改为随机访问接口
+  `(pixel, sampleIndex, dimension, seed)`。默认使用 renderer 已有的 256-SPP
+  Owen-Sobol blue-noise set；缺少 keyword 或资源时显式回退 Indexed Hash，而不是在同一
+  shader variant 中保留未绑定 BND 资源。canonical 与 interactive 路径都由 per-camera
+  accumulation-relative sequence 提供 sample index，不再直接用渲染帧号作为 global sample。
+- sample dimension ABI 固定为 film 0-1、lens 2-3、camera reserve 4-7，以及每 bounce
+  16 个维度：BSDF 0-2、NEE 3-5、Russian roulette 6、stochastic alpha 7、
+  volume 8-11、future 12-15。当前最多 8 bounce，最高维度 135，保持在 256 维
+  Owen-Sobol 资源容量内；控制流跳过某一 estimator 不会再改变后续 bounce 的随机数。
+- 超过 256 SPP 时按 256 样本分块。每个 block 使用确定性的 pixel/dimension permutation
+  和 Cranley-Patterson rotation，避免 255→256、511→512 边界复用同一 BND lookup；该策略保留块内
+  BND 分层与任意 sample index 随机访问，但不宣称跨 block 的全局 Sobol discrepancy 保证。
+- 实际生效的 BND/Hash 模式与 sampling contract version 已进入 integrator/frame/
+  accumulation signature 和 capture metadata。BND 资源失效导致的 Hash fallback 会使历史
+  自动失效；V1 canonical freeze gate 只接受 contract V1 的 Indexed BND capture。
+- Rendering Debugger 新增 `Path Samples` transport view，通过 pass-owned `DebugTexture`
+  输出 film dimensions 0/1 与 bounce-zero roulette dimension，主 radiance、payload 和
+  MIS PDF 布局保持不变。Phase 4.7A emissive geometry inventory 按当前决策暂缓；
+  emissive mesh 仍只在路径命中时计入，不进入 NEE。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

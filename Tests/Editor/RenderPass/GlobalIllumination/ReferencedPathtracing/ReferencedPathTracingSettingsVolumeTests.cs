@@ -16,6 +16,10 @@ namespace VividRP.Editor.Tests
             {
                 Assert.That(volume.deterministicSampling.value, Is.False);
                 Assert.That(volume.fixedSeed.value, Is.EqualTo(0x13579B));
+                Assert.That(
+                    volume.pathSamplingMode.value,
+                    Is.EqualTo(
+                        ReferencedPathTracingSamplingMode.IndexedBnd));
                 Assert.That(volume.maxBounceCount.value, Is.EqualTo(4));
                 Assert.That(
                     volume.russianRouletteStartBounce.value,
@@ -67,6 +71,8 @@ namespace VividRP.Editor.Tests
                 volume.active = true;
                 volume.deterministicSampling.value = true;
                 volume.fixedSeed.value = 12345;
+                volume.pathSamplingMode.value =
+                    ReferencedPathTracingSamplingMode.IndexedBnd;
                 volume.maxBounceCount.value = 6;
                 volume.russianRouletteStartBounce.value = 5;
                 volume.enableReGIR.value = false;
@@ -105,9 +111,22 @@ namespace VividRP.Editor.Tests
                 volume.lightSpatialIndex.value = false;
                 var lightSpatialIndexChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.lightSpatialIndex.value = true;
+                volume.pathSamplingMode.value =
+                    ReferencedPathTracingSamplingMode.IndexedHash;
+                var pathSamplingModeChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.pathSamplingMode.value =
+                    (ReferencedPathTracingSamplingMode)999;
+                var invalidPathSamplingMode =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
 
                 Assert.That(original.deterministicSampling, Is.True);
                 Assert.That(original.fixedSeed, Is.EqualTo(12345));
+                Assert.That(
+                    original.pathSamplingMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingSamplingMode.IndexedBnd));
                 Assert.That(original.maxBounceCount, Is.EqualTo(6));
                 Assert.That(
                     original.russianRouletteStartBounce,
@@ -134,7 +153,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(6));
+                    Is.EqualTo(7));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -156,11 +175,87 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     lightSpatialIndexChanged.signature,
                     Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    pathSamplingModeChanged.pathSamplingMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingSamplingMode.IndexedHash));
+                Assert.That(
+                    pathSamplingModeChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    invalidPathSamplingMode.pathSamplingMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingSamplingMode.IndexedBnd));
+                Assert.That(
+                    invalidPathSamplingMode.signature,
+                    Is.EqualTo(original.signature));
+                Assert.That(
+                    original.ResolveEffectiveSignature(
+                        ReferencedPathTracingSamplingMode.IndexedBnd),
+                    Is.Not.EqualTo(
+                        original.ResolveEffectiveSignature(
+                            ReferencedPathTracingSamplingMode.IndexedHash)));
             }
             finally
             {
                 Object.DestroyImmediate(volume);
             }
+        }
+
+        [Test]
+        public void SamplingContract_UsesStableNonOverlappingDimensions()
+        {
+            Assert.That(
+                ReferencedPathTracingSamplingContract.Version,
+                Is.EqualTo(1));
+            Assert.That(
+                ReferencedPathTracingSamplingContract.FilmDimension,
+                Is.EqualTo(0));
+            Assert.That(
+                ReferencedPathTracingSamplingContract.LensDimension,
+                Is.EqualTo(2));
+            Assert.That(
+                ReferencedPathTracingSamplingContract.BounceBaseDimension,
+                Is.EqualTo(8));
+            Assert.That(
+                ReferencedPathTracingSamplingContract.BounceDimensionStride,
+                Is.EqualTo(16));
+
+            var usedDimensions = new System.Collections.Generic.HashSet<int>();
+            for (var bounceIndex = 0;
+                 bounceIndex
+                    < ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount;
+                 bounceIndex++)
+            {
+                for (var offset = 0;
+                     offset
+                        < ReferencedPathTracingSamplingContract
+                            .BounceDimensionStride;
+                     offset++)
+                {
+                    Assert.That(
+                        usedDimensions.Add(
+                            ReferencedPathTracingSamplingContract
+                                .GetBounceDimension(
+                                    bounceIndex,
+                                    offset)),
+                        Is.True);
+                }
+            }
+
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .MaximumUsedDimension,
+                Is.LessThan(
+                    ReferencedPathTracingSamplingContract
+                        .DimensionCapacity));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetBounceDimension(-1, 0));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetBounceDimension(0, 16));
         }
 
         [Test]

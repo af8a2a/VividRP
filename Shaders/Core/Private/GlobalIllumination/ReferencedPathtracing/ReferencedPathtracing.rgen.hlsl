@@ -3,6 +3,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSampling.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
 #if defined(VIVID_REFERENCE_PT_SER)
@@ -34,6 +35,7 @@ int _ReferencedMaxBounceCount;
 int _ReferencedRussianRouletteStartBounce;
 int _ReferencedFrameIndex;
 int _ReferencedSeed;
+int _ReferencedPathSamplingMode;
 float4 _ReferencedReblurHitDistanceParameters;
 int _ReferencedReblurCheckerboardMode;
 
@@ -47,28 +49,6 @@ float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
 {
     float4 viewDirectionWS = mul(float4(pixelCoord, 1.0, 1.0), _PixelCoordToViewDirWS);
     return -normalize(viewDirectionWS.xyz);
-}
-
-uint HashReferencedPathtracingRng(uint value)
-{
-    value ^= value >> 16u;
-    value *= 0x7feb352du;
-    value ^= value >> 15u;
-    value *= 0x846ca68bu;
-    value ^= value >> 16u;
-    return value;
-}
-
-uint NextReferencedPathtracingRngUint(inout uint rngState)
-{
-    rngState = rngState * 747796405u + 2891336453u;
-    uint word = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
-    return (word >> 22u) ^ word;
-}
-
-float NextReferencedPathtracingRngFloat(inout uint rngState)
-{
-    return (float)(NextReferencedPathtracingRngUint(rngState) >> 8u) * (1.0 / 16777216.0);
 }
 
 bool IsFiniteReferencedPathtracingRadiance(float3 value)
@@ -293,18 +273,26 @@ void RayGenReferencedPathtracing()
     uint2 launchDimensions = DispatchRaysDimensions().xy;
     uint2 pixelCoord = uint2(launchIndex.x, launchDimensions.y - launchIndex.y - 1u);
 
-    uint pixelIndex = pixelCoord.x + pixelCoord.y * launchDimensions.x;
-    uint frameHash = HashReferencedPathtracingRng(
-        (uint)_ReferencedFrameIndex
-        ^ HashReferencedPathtracingRng((uint)_ReferencedSeed)
-        ^ 0xa511e9b3u);
-    uint rngState = HashReferencedPathtracingRng(pixelIndex ^ frameHash);
+    uint sampleIndex = (uint)_ReferencedFrameIndex;
+    uint sampleSeed = (uint)_ReferencedSeed;
+    uint pathSamplingMode = (uint)max(_ReferencedPathSamplingMode, 0);
+    float2 filmSample = float2(
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingFilmDimension,
+            sampleSeed,
+            pathSamplingMode),
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingFilmDimension + 1u,
+            sampleSeed,
+            pathSamplingMode));
 
     RayDesc ray;
     ray.Origin = _CameraPositionWS.xyz;
-    float2 pixelCenter = (float2)pixelCoord + float2(
-        NextReferencedPathtracingRngFloat(rngState),
-        NextReferencedPathtracingRngFloat(rngState));
+    float2 pixelCenter = (float2)pixelCoord + filmSample;
     ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter);
     ray.TMin = _RayMinDistance;
     ray.TMax = _RayMaxDistance;
@@ -331,6 +319,16 @@ void RayGenReferencedPathtracing()
     float4 segmentTransportDiagnostic = 0.0;
     float3 neeLightIdentityDiagnostic = 0.0;
     float3 lightSpatialIndexDiagnostic = 0.0;
+    float3 pathSampleDiagnostic = float3(
+        filmSample,
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            ReferencedPathtracingGetBounceSampleDimension(
+                0u,
+                kReferencedPathtracingRussianRouletteDimensionOffset),
+            sampleSeed,
+            pathSamplingMode));
     float3 invalidSampleMask = 0.0;
     bool hasNeeTransportDiagnostic = false;
     bool neeTransportContributionValid = false;
@@ -360,16 +358,28 @@ void RayGenReferencedPathtracing()
         ReferencedPathtracingPayload payload;
         InitializeReferencedPathtracingPayload(payload);
         payload.pathThroughput = throughput;
-        payload.bsdfRandom = float3(
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState));
+        uint bounceSampleDimension =
+            ReferencedPathtracingGetBounceSampleDimension(
+                bounceIndex,
+                0u);
+        payload.bsdfRandom =
+            ReferencedPathtracingGetPathSample3D(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingBsdfDimensionOffset,
+                sampleSeed,
+                pathSamplingMode);
         // A single dimension selects the source and the remaining pair samples its
         // conditional shape or direction.
-        payload.directLightRandom = float3(
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState));
+        payload.directLightRandom =
+            ReferencedPathtracingGetPathSample3D(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingNeeDimensionOffset,
+                sampleSeed,
+                pathSamplingMode);
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
         // SER is useful around the material-heavy closest-hit path. Shadow rays
@@ -770,7 +780,16 @@ void RayGenReferencedPathtracing()
                 MaxReferencedPathtracingComponent(throughput),
                 0.05,
                 0.95);
-            if (NextReferencedPathtracingRngFloat(rngState) >= survivalProbability)
+            float russianRouletteSample =
+                ReferencedPathtracingGetPathSample(
+                    pixelCoord,
+                    sampleIndex,
+                    ReferencedPathtracingGetBounceSampleDimension(
+                        bounceIndex,
+                        kReferencedPathtracingRussianRouletteDimensionOffset),
+                    sampleSeed,
+                    pathSamplingMode);
+            if (russianRouletteSample >= survivalProbability)
                 break;
             throughput /= survivalProbability;
         }
@@ -934,6 +953,12 @@ void RayGenReferencedPathtracing()
         // R: traversal candidate count, G: selected axis + 1,
         // B: context flags (indexed/fallback/outside/overflow).
         debugRadiance = lightSpatialIndexDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugPathSamples)
+    {
+        // R/G: film dimensions 0/1. B: bounce-zero RR dimension.
+        debugRadiance = pathSampleDiagnostic;
     }
 
     float physicalOutputAlpha =

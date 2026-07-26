@@ -8,11 +8,12 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 6;
+        internal const int Version = 7;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
             int fixedSeed,
+            ReferencedPathTracingSamplingMode pathSamplingMode,
             int maxBounceCount,
             int russianRouletteStartBounce,
             bool enableReGIR,
@@ -25,6 +26,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             this.deterministicSampling = deterministicSampling;
             this.fixedSeed = Mathf.Max(0, fixedSeed);
+            this.pathSamplingMode =
+                SanitizePathSamplingMode(pathSamplingMode);
             this.maxBounceCount = Mathf.Clamp(
                 maxBounceCount,
                 1,
@@ -56,6 +59,12 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 deterministicSampling ? this.fixedSeed : 0);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                (int)this.pathSamplingMode);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSamplingContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -80,6 +89,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal bool deterministicSampling { get; }
         internal int fixedSeed { get; }
+        internal ReferencedPathTracingSamplingMode pathSamplingMode { get; }
         internal int maxBounceCount { get; }
         internal int russianRouletteStartBounce { get; }
         internal bool enableReGIR { get; }
@@ -91,6 +101,20 @@ namespace VividRP.Runtime.RenderPass.Core
         internal int targetSampleCount { get; }
         internal ulong signature { get; }
 
+        internal ulong ResolveEffectiveSignature(
+            ReferencedPathTracingSamplingMode effectiveSamplingMode)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            ReferencedPathTracingStableHash.Add(ref hash, signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                (int)effectiveSamplingMode);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSamplingContract.Version);
+            return hash;
+        }
+
         internal static ReferencedPathTracingIntegratorState Resolve(
             ReferencedPathTracingSettingsVolume settings = null)
         {
@@ -100,6 +124,9 @@ namespace VividRP.Runtime.RenderPass.Core
             return new ReferencedPathTracingIntegratorState(
                 useVolumeSettings && settings.deterministicSampling.value,
                 useVolumeSettings ? settings.fixedSeed.value : 0x13579B,
+                useVolumeSettings
+                    ? settings.pathSamplingMode.value
+                    : ReferencedPathTracingSamplingMode.IndexedBnd,
                 useVolumeSettings ? settings.maxBounceCount.value : 4,
                 useVolumeSettings
                     ? settings.russianRouletteStartBounce.value
@@ -118,6 +145,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? settings.environmentEstimatorMode.value
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis,
                 useVolumeSettings ? settings.targetSampleCount.value : 2048);
+        }
+
+        private static ReferencedPathTracingSamplingMode
+            SanitizePathSamplingMode(
+                ReferencedPathTracingSamplingMode mode)
+        {
+            return mode == ReferencedPathTracingSamplingMode.IndexedHash
+                ? ReferencedPathTracingSamplingMode.IndexedHash
+                : ReferencedPathTracingSamplingMode.IndexedBnd;
         }
 
         private static ReferencedPathTracingEnvironmentEstimatorMode
@@ -147,6 +183,52 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    internal static class ReferencedPathTracingSamplingContract
+    {
+        internal const int Version = 1;
+        internal const int DimensionCapacity = 256;
+        internal const int FilmDimension = 0;
+        internal const int LensDimension = 2;
+        internal const int CameraReservedDimension = 4;
+        internal const int BounceBaseDimension = 8;
+        internal const int BounceDimensionStride = 16;
+        internal const int BsdfDimensionOffset = 0;
+        internal const int NeeDimensionOffset = 3;
+        internal const int RussianRouletteDimensionOffset = 6;
+        internal const int StochasticAlphaDimensionOffset = 7;
+        internal const int VolumeDimensionOffset = 8;
+        internal const int FutureDimensionOffset = 12;
+        internal const int MaximumUsedDimension =
+            BounceBaseDimension
+            + ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount
+                * BounceDimensionStride
+            - 1;
+
+        internal static int GetBounceDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= BounceDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return BounceBaseDimension
+                + bounceIndex * BounceDimensionStride
+                + dimensionOffset;
+        }
+    }
+
     internal static class ReferencedPathTracingFrameSignatureUtility
     {
         internal static ulong Compute(
@@ -154,7 +236,7 @@ namespace VividRP.Runtime.RenderPass.Core
             VividCameraData cameraData,
             int width,
             int height,
-            ReferencedPathTracingIntegratorState integratorState,
+            ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
             ReferencedPathTracingCameraBackgroundState cameraBackgroundState)
         {
@@ -163,7 +245,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(ref hash, height);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
-                integratorState.signature);
+                effectiveIntegratorSignature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 environmentState.signature);
@@ -824,6 +906,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public ulong accumulatedSampleCount;
         public bool deterministicSampling;
         public int fixedSeed;
+        public ReferencedPathTracingSamplingMode pathSamplingMode;
+        public int samplingContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ulong integratorSignature;
@@ -859,6 +943,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public int height;
         public int targetSampleCount;
         public int fixedSeed;
+        public ReferencedPathTracingSamplingMode pathSamplingMode;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
@@ -877,6 +962,8 @@ namespace VividRP.Runtime.RenderPass.Core
             height = 512;
             targetSampleCount = 2048;
             fixedSeed = 0x13579B;
+            pathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedBnd;
             maxBounceCount = 4;
             russianRouletteStartBounce = 3;
             samplingMode =
@@ -951,7 +1038,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 5;
+        public const int ContractVersion = 6;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -998,6 +1085,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 || metadata.integratorSignature == 0)
             {
                 return Fail("Canonical deterministic seed is not active.", out failure);
+            }
+
+            if (metadata.pathSamplingMode
+                    != corpusCase.pathSamplingMode
+                || metadata.pathSamplingMode
+                    != ReferencedPathTracingSamplingMode.IndexedBnd
+                || metadata.samplingContractVersion
+                    != ReferencedPathTracingSamplingContract.Version)
+            {
+                return Fail(
+                    "Path sampling contract does not match the corpus.",
+                    out failure);
             }
 
             if (metadata.maxBounceCount != corpusCase.maxBounceCount
@@ -1247,6 +1346,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 deterministicSampling =
                     integratorState.deterministicSampling,
                 fixedSeed = integratorState.fixedSeed,
+                pathSamplingMode = pathTracingData?.isValid == true
+                    ? pathTracingData.pathSamplingMode
+                    : integratorState.pathSamplingMode,
+                samplingContractVersion =
+                    pathTracingData?.isValid == true
+                        ? pathTracingData.samplingContractVersion
+                        : 0,
                 maxBounceCount = integratorState.maxBounceCount,
                 russianRouletteStartBounce =
                     integratorState.russianRouletteStartBounce,

@@ -24,11 +24,72 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Pass_AllowsGlobalStateModification()
+        public void Pass_DeclaresRequiredRecorderCapabilities()
         {
             Assert.That(
                 typeof(IAllowGlobalStateModificationPass).IsAssignableFrom(typeof(ReferencedPathTracingPass)),
                 Is.True);
+            Assert.That(
+                typeof(IBlueNoiseConsumerPass).IsAssignableFrom(
+                    typeof(ReferencedPathTracingPass)),
+                Is.True);
+        }
+
+        [Test]
+        public void SamplingShader_UsesIndexedStableDimensionContract()
+        {
+            var rayTracingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.raytrace"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var samplingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSampling.hlsl"));
+
+            Assert.That(
+                ReferencedPathTracingPass.IndexedBndKeywordName,
+                Is.EqualTo("VIVID_REFERENCE_PT_INDEXED_BND"));
+            Assert.That(
+                rayTracingSource,
+                Does.Contain(
+                    "#pragma multi_compile_local _ " +
+                    "VIVID_REFERENCE_PT_INDEXED_BND"));
+            Assert.That(
+                samplingSource,
+                Does.Contain(
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 1"));
+            Assert.That(
+                samplingSource,
+                Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
+            Assert.That(
+                samplingSource,
+                Does.Contain("uint sampleInBlock = sampleIndex & 255u;"));
+            Assert.That(
+                samplingSource,
+                Does.Contain("GetBNDSequenceSample256SPP("));
+            Assert.That(
+                samplingSource,
+                Does.Contain("ReferencedPathtracingGetIndexedHashSample("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("ReferencedPathtracingGetPathSample3D("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain("NextReferencedPathtracingRng"));
         }
 
         [Test]
@@ -789,7 +850,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DeterministicSampleSequence_AdvancesOncePerFrameAndResetsOnSignature()
+        public void SampleSequence_AdvancesOncePerFrameAndResetsOnSignature()
         {
             var gameObject =
                 new GameObject("ReferencedPathTracingSampleSequenceTests.Camera");
@@ -961,6 +1022,35 @@ namespace VividRP.Editor.Tests
                     capture,
                     out _),
                 Is.False);
+        }
+
+        [Test]
+        public void V1FreezeGate_RejectsNonCanonicalPathSamplingContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+
+            capture.pathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedHash;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var fallbackFailure),
+                Is.False);
+            Assert.That(
+                fallbackFailure,
+                Does.Contain("Path sampling contract"));
+
+            capture.pathSamplingMode = corpusCase.pathSamplingMode;
+            capture.samplingContractVersion = 0;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var versionFailure),
+                Is.False);
+            Assert.That(
+                versionFailure,
+                Does.Contain("Path sampling contract"));
         }
 
         [Test]
@@ -1248,6 +1338,9 @@ namespace VividRP.Editor.Tests
                     (ulong)corpusCase.targetSampleCount,
                 deterministicSampling = true,
                 fixedSeed = corpusCase.fixedSeed,
+                pathSamplingMode = corpusCase.pathSamplingMode,
+                samplingContractVersion =
+                    ReferencedPathTracingSamplingContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

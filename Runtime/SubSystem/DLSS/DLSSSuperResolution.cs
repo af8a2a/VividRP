@@ -238,7 +238,7 @@ namespace VividRP.Runtime
 
                     case DLSSFeatureStatus.Ready:
                         m_initialized = true;
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if DEBUG || UNITY_EDITOR
                         Debug.Log($"[DLSSSuperResolution] Initialized: {m_inputWidth}x{m_inputHeight} -> {m_outputWidth}x{m_outputHeight}, Quality={m_qualityValue}");
 #endif
                         return true;

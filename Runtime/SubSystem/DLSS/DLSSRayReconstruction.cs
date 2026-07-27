@@ -1,11 +1,11 @@
+#if DLSS_PLUGIN_INTEGRATE
+
 //------------------------------------------------------------------------------
 // DLSSRayReconstruction.cs - DLSS Ray Reconstruction Implementation
 //------------------------------------------------------------------------------
 // Simplified wrapper for DLSS-RR integration following the reference pattern.
 // Manages DLSS-RR feature lifecycle and execution via CommandBuffer.
 //------------------------------------------------------------------------------
-
-#if DLSS_PLUGIN_INTEGRATE
 
 using System;
 using UnityEngine;
@@ -64,12 +64,12 @@ namespace VividRP.Runtime
     /// </summary>
     public class DLSSRayReconstruction : IDisposable
     {
+#if DLSS_PLUGIN_INTEGRATE
         private int m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
-        private IntPtr m_dlssParameters = IntPtr.Zero;
         private bool m_initialized = false;
+        private bool m_createFailed = false;
         private bool m_disposed = false;
 
-        
         // Create params tracking for recreation
         private uint m_inputWidth;
         private uint m_inputHeight;
@@ -80,8 +80,17 @@ namespace VividRP.Runtime
         private bool m_createParamsChanged = false;
 
         // Cached extension reference
+        private DLSSExtension m_Extension;
 
-        private DLSSExtension Extension => DLSSExtension.Instance;
+        private DLSSExtension Extension
+        {
+            get
+            {
+                if (m_Extension == null)
+                    m_Extension = DLSSExtension.Instance;
+                return m_Extension;
+            }
+        }
 
         /// <summary>
         /// Denoise mode for RR.
@@ -112,7 +121,7 @@ namespace VividRP.Runtime
 
         private DenoiseMode m_denoiseMode = DenoiseMode.DLUnified;
         private DepthType m_depthType = DepthType.Hardware;
-        private RoughnessMode m_roughnessMode = RoughnessMode.PackedInNormalsW;
+        private RoughnessMode m_roughnessMode = RoughnessMode.Unpacked;
 
         /// <summary>
         /// Create a new DLSS-RR instance.
@@ -125,7 +134,7 @@ namespace VividRP.Runtime
             NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
             NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
             DepthType depthType = DepthType.Hardware,
-            RoughnessMode roughnessMode = RoughnessMode.PackedInNormalsW)
+            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
         {
             m_featureFlags = featureFlags;
             m_qualityValue = qualityValue;
@@ -174,13 +183,15 @@ namespace VividRP.Runtime
         /// <param name="rayInputs">Ray tracing inputs (direction, hit distance)</param>
         /// <param name="worldToView">World to view matrix</param>
         /// <param name="viewToClip">View to clip (projection) matrix</param>
-        /// <param name="jitterX">Jitter X in render pixels</param>
-        /// <param name="jitterY">Jitter Y in render pixels</param>
-        /// <param name="mvScaleX">Motion vector scale X</param>
-        /// <param name="mvScaleY">Motion vector scale Y</param>
+        /// <param name="jitterOffset">Jitter offset explicitly converted to input/render pixels</param>
+        /// <param name="motionVectorEncoding">Units and direction encoded in the motion-vector texture</param>
+        /// <param name="exposure">Explicit per-frame pre-exposure, exposure scale, and optional final-exposure texture</param>
         /// <param name="reset">Reset temporal history</param>
         /// <param name="frameTimeDeltaMs">Frame time delta in milliseconds</param>
-        /// <returns>True if successful</returns>
+        /// <returns>
+        /// True only when the native feature is ready and evaluation was queued.
+        /// Returns false while asynchronous creation is pending or after it fails.
+        /// </returns>
         public bool Render(
             CommandBuffer cmd,
             RenderTexture colorInput,
@@ -191,22 +202,30 @@ namespace VividRP.Runtime
             DLSSRRRayInputs rayInputs,
             Matrix4x4 worldToView,
             Matrix4x4 viewToClip,
-            float jitterX,
-            float jitterY,
-            float mvScaleX,
-            float mvScaleY,
+            DLSSJitterOffset jitterOffset,
+            DLSSMotionVectorEncoding motionVectorEncoding,
+            DLSSExposure exposure,
             bool reset = false,
             float frameTimeDeltaMs = 0.0f)
         {
             if (!IsSupported || Extension == null)
             {
                 Debug.LogError("[DLSSRayReconstruction] DLSS-RR is not supported");
+                RecordFallback(cmd, colorInput, colorOutput);
                 return false;
             }
 
             // Validate required inputs
             if (!ValidateInputs(colorInput, colorOutput, depth, motionVectors, gbuffer, rayInputs))
             {
+                RecordFallback(cmd, colorInput, colorOutput);
+                return false;
+            }
+
+            if (!exposure.TryValidate(out string exposureError))
+            {
+                Debug.LogError($"[DLSSRayReconstruction] Invalid exposure contract: {exposureError}");
+                RecordFallback(cmd, colorInput, colorOutput);
                 return false;
             }
 
@@ -215,6 +234,10 @@ namespace VividRP.Runtime
             uint inputH = (uint)colorInput.height;
             uint outputW = (uint)colorOutput.width;
             uint outputH = (uint)colorOutput.height;
+            Vector2 jitterPixels = jitterOffset.RenderPixels;
+            Vector2 motionVectorScale = motionVectorEncoding.GetNGXPixelScale(
+                colorInput.width,
+                colorInput.height);
 
             if (m_inputWidth != inputW || m_inputHeight != inputH ||
                 m_outputWidth != outputW || m_outputHeight != outputH)
@@ -229,30 +252,70 @@ namespace VividRP.Runtime
             // Recreate feature if params changed
             if (m_createParamsChanged)
             {
-                DisposeResources(cmd);
-                m_createParamsChanged = false;
-            }
-
-            // Initialize if needed
-            if (!m_initialized)
-            {
-                if (!Initialize(cmd))
+                if (!DisposeResources(cmd))
                 {
+                    RecordFallback(cmd, colorInput, colorOutput);
                     return false;
                 }
+                m_createParamsChanged = false;
+                m_createFailed = false;
             }
 
-            // Set evaluation parameters
-            SetupEvalParams(
-                colorInput, colorOutput, depth, motionVectors,
-                gbuffer, rayInputs,
-                worldToView, viewToClip,
-                jitterX, jitterY, mvScaleX, mvScaleY,
-                reset, frameTimeDeltaMs);
+            // Queue creation on the first call, then wait for the render-thread
+            // result before publishing an evaluation command.
+            if (!EnsureInitialized(cmd))
+            {
+                RecordFallback(cmd, colorInput, colorOutput);
+                return false;
+            }
 
             // Execute
-            Extension.EvaluateFeature(cmd, m_dlssHandle, m_dlssParameters);
-            return true;
+            if (Extension.EvaluateRayReconstructionFeature(
+                    cmd,
+                    m_dlssHandle,
+                    colorInput,
+                    colorOutput,
+                    depth,
+                    motionVectors,
+                    exposure,
+                    gbuffer.DiffuseAlbedo,
+                    gbuffer.SpecularAlbedo,
+                    gbuffer.Normals,
+                    gbuffer.Roughness,
+                    gbuffer.Emissive,
+                    rayInputs.DiffuseRayDirection,
+                    rayInputs.DiffuseHitDistance,
+                    rayInputs.DiffuseRayDirectionHitDistance,
+                    rayInputs.SpecularRayDirection,
+                    rayInputs.SpecularHitDistance,
+                    rayInputs.SpecularRayDirectionHitDistance,
+                    worldToView,
+                    viewToClip,
+                    jitterPixels.x,
+                    jitterPixels.y,
+                    motionVectorScale.x,
+                    motionVectorScale.y,
+                    reset,
+                    m_inputWidth,
+                    m_inputHeight,
+                    frameTimeDeltaMs))
+            {
+                return true;
+            }
+
+            RecordFallback(cmd, colorInput, colorOutput);
+            return false;
+        }
+
+        private static void RecordFallback(
+            CommandBuffer cmd,
+            RenderTexture colorInput,
+            RenderTexture colorOutput)
+        {
+            if (cmd != null && colorInput != null && colorOutput != null)
+            {
+                cmd.Blit(colorInput, colorOutput);
+            }
         }
 
         private bool ValidateInputs(
@@ -296,10 +359,13 @@ namespace VividRP.Runtime
             return true;
         }
 
-        private bool Initialize(CommandBuffer cmd)
+        private bool EnsureInitialized(CommandBuffer cmd)
         {
             if (m_initialized)
                 return true;
+
+            if (m_createFailed)
+                return false;
 
             var ext = Extension;
             if (ext == null)
@@ -308,8 +374,49 @@ namespace VividRP.Runtime
                 return false;
             }
 
+            if (m_dlssHandle != DLSSExtension.DLSS_INVALID_FEATURE_HANDLE)
+            {
+                var status = ext.GetFeatureStatus(m_dlssHandle, out var createResult);
+                switch (status)
+                {
+                    case DLSSFeatureStatus.Pending:
+                        return false;
+
+                    case DLSSFeatureStatus.Ready:
+                        m_initialized = true;
+#if DEVELOPMENT_BUILD || UNITY_EDITOR
+                        Debug.Log($"[DLSSRayReconstruction] Initialized: {m_inputWidth}x{m_inputHeight} -> {m_outputWidth}x{m_outputHeight}, Quality={m_qualityValue}");
+#endif
+                        return true;
+
+                    case DLSSFeatureStatus.Failed:
+                        Debug.LogError($"[DLSSRayReconstruction] Native DLSS-RR creation failed: {createResult}");
+                        DiscardFailedInitialization(ext, true);
+                        return false;
+
+                    default:
+                        Debug.LogError("[DLSSRayReconstruction] Native DLSS-RR feature handle became invalid");
+                        DiscardFailedInitialization(ext, false);
+                        return false;
+                }
+            }
+
+            if (!BeginInitialize(cmd))
+            {
+                m_createFailed = true;
+            }
+
+            // Creation executes asynchronously on the render thread. Evaluation
+            // starts on a later call only after the status becomes Ready.
+            return false;
+        }
+
+        private bool BeginInitialize(CommandBuffer cmd)
+        {
+            var ext = Extension;
+
             // Allocate parameters
-            var result = ext.AllocateParameters(out m_dlssParameters);
+            var result = ext.AllocateParameters(out IntPtr parameters);
             if (DLSSExtension.NVSDK_NGX_FAILED(result))
             {
                 Debug.LogError($"[DLSSRayReconstruction] Failed to allocate parameters: {result}");
@@ -317,155 +424,80 @@ namespace VividRP.Runtime
             }
 
             // Set creation parameters
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_CreationNodeMask, 1);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_VisibilityNodeMask, 1);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Width, m_inputWidth);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Height, m_inputHeight);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_OutWidth, m_outputWidth);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_OutHeight, m_outputHeight);
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_PerfQualityValue, (int)m_qualityValue);
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, (int)m_featureFlags);
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0);
+            ext.SetParameterUI(parameters, DLSSExtension.NVSDK_NGX_Parameter_CreationNodeMask, 1);
+            ext.SetParameterUI(parameters, DLSSExtension.NVSDK_NGX_Parameter_VisibilityNodeMask, 1);
+            ext.SetParameterUI(parameters, DLSSExtension.NVSDK_NGX_Parameter_Width, m_inputWidth);
+            ext.SetParameterUI(parameters, DLSSExtension.NVSDK_NGX_Parameter_Height, m_inputHeight);
+            ext.SetParameterUI(parameters, DLSSExtension.NVSDK_NGX_Parameter_OutWidth, m_outputWidth);
+            ext.SetParameterUI(parameters, DLSSExtension.NVSDK_NGX_Parameter_OutHeight, m_outputHeight);
+            ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_PerfQualityValue, (int)m_qualityValue);
+            ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Feature_Create_Flags, (int)m_featureFlags);
+            ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Enable_Output_Subrects, 0);
 
             // RR-specific creation parameters
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Denoise_Mode, (int)m_denoiseMode);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Use_HW_Depth, m_depthType is DepthType.Hardware ? 1u : 0);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (uint)m_roughnessMode);
+            ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Denoise_Mode, (int)m_denoiseMode);
+            ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Depth_Type, (int)m_depthType);
+            ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (int)m_roughnessMode);
 
             // Create feature
-            m_dlssHandle = ext.CreateFeature(cmd, NVSDK_NGX_Feature.NVSDK_NGX_Feature_RayReconstruction, m_dlssParameters);
+            m_dlssHandle = ext.CreateFeature(
+                cmd,
+                NVSDK_NGX_Feature.NVSDK_NGX_Feature_RayReconstruction,
+                parameters);
             if (m_dlssHandle == DLSSExtension.DLSS_INVALID_FEATURE_HANDLE)
             {
                 Debug.LogError("[DLSSRayReconstruction] Failed to create DLSS-RR feature");
-                ext.DestroyParameters(m_dlssParameters);
-                m_dlssParameters = IntPtr.Zero;
                 return false;
             }
 
-            m_initialized = true;
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
-            Debug.Log($"[DLSSRayReconstruction] Initialized: {m_inputWidth}x{m_inputHeight} -> {m_outputWidth}x{m_outputHeight}, Quality={m_qualityValue}");
-#endif
             return true;
         }
 
-        private void SetupEvalParams(
-            RenderTexture colorInput,
-            RenderTexture colorOutput,
-            RenderTexture depth,
-            RenderTexture motionVectors,
-            DLSSRRGBuffer gbuffer,
-            DLSSRRRayInputs rayInputs,
-            Matrix4x4 worldToView,
-            Matrix4x4 viewToClip,
-            float jitterX,
-            float jitterY,
-            float mvScaleX,
-            float mvScaleY,
-            bool reset,
-            float frameTimeDeltaMs)
+        private void DiscardFailedInitialization(DLSSExtension ext, bool releaseHandle)
         {
-            var ext = Extension;
-
-            // Common textures
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Color, colorInput);
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Output, colorOutput);
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Depth, depth);
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_MotionVectors, motionVectors);
-
-            // GBuffer
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseAlbedo, gbuffer.DiffuseAlbedo);
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularAlbedo, gbuffer.SpecularAlbedo);
-            ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Normals, gbuffer.Normals);
-
-            if (m_roughnessMode is RoughnessMode.Unpacked)
+            if (releaseHandle)
             {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Roughness, gbuffer.Roughness);
-            }
-            else
-            {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Roughness, gbuffer.Normals);
-
-            }
-            if (gbuffer.Emissive != null)
-            {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Emissive, gbuffer.Emissive);
+                ext.ReleaseFeatureHandle(m_dlssHandle);
             }
 
-            // Ray inputs (prefer separate direction/distance if available)
-            if (rayInputs.DiffuseRayDirection != null)
-            {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseRayDirection, rayInputs.DiffuseRayDirection);
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseHitDistance, rayInputs.DiffuseHitDistance);
-            }
-            else
-            {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DiffuseRayDirectionHitDistance, rayInputs.DiffuseRayDirectionHitDistance);
-            }
+            m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
 
-            if (rayInputs.SpecularRayDirection != null)
-            {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularRayDirection, rayInputs.SpecularRayDirection);
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularHitDistance, rayInputs.SpecularHitDistance);
-            }
-            else
-            {
-                ext.SetParameterRenderTexture(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_SpecularRayDirectionHitDistance, rayInputs.SpecularRayDirectionHitDistance);
-            }
-
-            // Matrices (required for RR)
-            ext.SetParameterMatrix4x4(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_WorldToViewMatrix, worldToView);
-            ext.SetParameterMatrix4x4(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_ViewToClipMatrix, viewToClip);
-
-            // Jitter
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Jitter_Offset_X, jitterX);
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Jitter_Offset_Y, jitterY);
-
-            // Motion vector scale
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_MV_Scale_X, mvScaleX == 0 ? 1.0f : mvScaleX);
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_MV_Scale_Y, mvScaleY == 0 ? 1.0f : mvScaleY);
-
-            // Reset flag
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_Reset, reset ? 1 : 0);
-
-            // Render subrect dimensions
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Width, m_inputWidth);
-            ext.SetParameterUI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Render_Subrect_Dimensions_Height, m_inputHeight);
-
-            // Frame time delta
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_FrameTimeDeltaInMsec, frameTimeDeltaMs);
-
-            // Exposure defaults
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Pre_Exposure, 1.0f);
-            ext.SetParameterF(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Exposure_Scale, 1.0f);
-
-            // Y-axis inversion for Unity
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Indicator_Invert_Y_Axis, 1);
-            ext.SetParameterI(m_dlssParameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Indicator_Invert_X_Axis, 0);
+            m_initialized = false;
+            m_createFailed = true;
         }
 
-        private void DisposeResources(CommandBuffer cmd)
+        private bool DisposeResources(CommandBuffer cmd)
         {
-            if (m_initialized)
+            var ext = Extension;
+            if (ext == null)
             {
-                var ext = Extension;
-                if (ext != null)
-                {
-                    if (m_dlssHandle != DLSSExtension.DLSS_INVALID_FEATURE_HANDLE)
-                    {
-                        ext.DestroyFeature(cmd, m_dlssHandle);
-                        m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
-                    }
+                return m_dlssHandle == DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
+            }
 
-                    if (m_dlssParameters != IntPtr.Zero)
+            if (m_dlssHandle != DLSSExtension.DLSS_INVALID_FEATURE_HANDLE)
+            {
+                var status = ext.GetFeatureStatus(m_dlssHandle, out _);
+                if (status == DLSSFeatureStatus.Pending ||
+                    status == DLSSFeatureStatus.Ready)
+                {
+                    if (!ext.DestroyFeature(cmd, m_dlssHandle))
                     {
-                        ext.DestroyParameters(m_dlssParameters);
-                        m_dlssParameters = IntPtr.Zero;
+                        return false;
                     }
                 }
+                else
+                {
+                    if (status == DLSSFeatureStatus.Failed)
+                    {
+                        ext.ReleaseFeatureHandle(m_dlssHandle);
+                    }
 
-                m_initialized = false;
+                }
+
+                m_dlssHandle = DLSSExtension.DLSS_INVALID_FEATURE_HANDLE;
             }
+            m_initialized = false;
+            return true;
         }
 
         public void Dispose()
@@ -494,9 +526,49 @@ namespace VividRP.Runtime
 
         ~DLSSRayReconstruction()
         {
-            
             Dispose(false);
         }
+#else
+        public enum DenoiseMode : int { Off = 0, DLUnified = 1 }
+        public enum DepthType : int { Linear = 0, Hardware = 1 }
+        public enum RoughnessMode : int { Unpacked = 0, PackedInNormalsW = 1 }
+
+        public DLSSRayReconstruction(
+            NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
+            NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
+            DepthType depthType = DepthType.Hardware,
+            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
+        {
+        }
+
+        public bool IsSupported => false;
+
+        public void SetQuality(NVSDK_NGX_PerfQuality_Value quality) { }
+
+        public void SetFeatureFlags(NVSDK_NGX_DLSS_Feature_Flags flags) { }
+
+        public bool Render(
+            CommandBuffer cmd,
+            RenderTexture colorInput,
+            RenderTexture colorOutput,
+            RenderTexture depth,
+            RenderTexture motionVectors,
+            DLSSRRGBuffer gbuffer,
+            DLSSRRRayInputs rayInputs,
+            Matrix4x4 worldToView,
+            Matrix4x4 viewToClip,
+            DLSSJitterOffset jitterOffset,
+            DLSSMotionVectorEncoding motionVectorEncoding,
+            DLSSExposure exposure,
+            bool reset = false,
+            float frameTimeDeltaMs = 0.0f)
+        {
+            return false;
+        }
+
+        public void Dispose() { }
+#endif
     }
 }
+
 #endif

@@ -83,7 +83,11 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.base_diffuse_roughness = saturate(1.0 - metallicSmoothness.y);
     inputs.specular_roughness = max(1.0 - metallicSmoothness.y, 0.001);
     inputs.geometry_opacity = saturate(baseSample.a);
-    inputs.geometry_thin_walled = false;
+    inputs.geometry_thin_walled = _ThinWalledTransmission > 0.5;
+    float specularIor = _SpecularIOR;
+    if (isnan(specularIor) || isinf(specularIor))
+        specularIor = 1.5;
+    inputs.specular_ior = clamp(specularIor, 1.0, 3.0);
 
 #if defined(_CLEARCOAT)
     inputs.coat_weight = saturate(_ClearCoatMask);
@@ -95,7 +99,10 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.emission_luminance = any(material.emission > 0.0) ? 1.0 : 0.0;
     inputs.emission_color = material.emission;
     inputs.subsurface_weight = 0.0;
-    inputs.transmission_weight = 0.0;
+    inputs.transmission_weight = inputs.geometry_thin_walled
+        ? saturate(_TransmissionWeight)
+        : 0.0;
+    inputs.transmission_color = saturate(_TransmissionColor.rgb);
     inputs.fuzz_weight = 0.0;
     inputs.thin_film_weight = 0.0;
 

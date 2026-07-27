@@ -301,11 +301,89 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ThinWalledTransmissionContract_PreservesBothSupportedHemispheres()
+        {
+            var geometricNormal = Vector3.up;
+            var shadingNormal = new Vector3(0.1f, 0.99f, 0.0f).normalized;
+            var reflectionDirection = new Vector3(0.2f, 1.0f, 0.0f).normalized;
+            var transmissionDirection =
+                new Vector3(-0.2f, -1.0f, 0.0f).normalized;
+
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .IsDirectionSupported(
+                        reflectionDirection,
+                        geometricNormal,
+                        shadingNormal,
+                        false),
+                Is.True);
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .IsDirectionSupported(
+                        transmissionDirection,
+                        geometricNormal,
+                        shadingNormal,
+                        false),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .IsDirectionSupported(
+                        transmissionDirection,
+                        geometricNormal,
+                        shadingNormal,
+                        true),
+                Is.True);
+        }
+
+        [Test]
+        public void ThinWalledTransmissionContract_MatchesMetalAndLightProposalRules()
+        {
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .ResolveEffectiveWeight(true, 0.8f, 0.25f),
+                Is.EqualTo(0.6f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .ResolveEffectiveWeight(false, 1.0f, 0.0f),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .ResolveEffectiveWeight(true, 1.0f, 1.0f),
+                Is.Zero);
+
+            var backLightDirection = -Vector3.up;
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .EvaluateSelectionCosine(
+                        Vector3.up,
+                        backLightDirection,
+                        false),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .EvaluateSelectionCosine(
+                        Vector3.up,
+                        backLightDirection,
+                        true),
+                Is.EqualTo(1.0f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .ResolveIor(float.NaN),
+                Is.EqualTo(1.5f));
+            Assert.That(
+                ReferencedPathTracingThinWalledTransmissionContract
+                    .ResolveIor(10.0f),
+                Is.EqualTo(
+                    ReferencedPathTracingThinWalledTransmissionContract
+                        .MaximumIor));
+        }
+
+        [Test]
         public void SamplingContract_UsesStableNonOverlappingDimensions()
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(4));
+                Is.EqualTo(5));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -318,6 +396,10 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 ReferencedPathTracingSamplingContract.BounceDimensionStride,
                 Is.EqualTo(20));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .StochasticAlphaDimensionOffset,
+                Is.EqualTo(7));
             Assert.That(
                 ReferencedPathTracingSamplingContract
                     .AtmosphereSunDimensionOffset,

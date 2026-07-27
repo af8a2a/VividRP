@@ -85,7 +85,11 @@ namespace VividRP.Runtime
         [InspectorName("Physical Camera")]
         PhysicalCamera = 10,
         [InspectorName("Atmosphere Transport")]
-        AtmosphereTransport = 11
+        AtmosphereTransport = 11,
+        [InspectorName("Thin-Walled Transmission")]
+        ThinWalledTransmission = 12,
+        [InspectorName("Stochastic Transparency")]
+        StochasticTransparency = 13
     }
 
     [Serializable]

@@ -52,7 +52,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Layout_PacksHdriCdfsAndAtmosphereOpticalDepthWithoutOverlap()
+        public void Layout_PacksHdriAtmosphereAndCloudAccelerationWithoutOverlap()
         {
             Assert.That(
                 ReferencedPathTracingEnvironmentImportanceLayout.MarginalOffset,
@@ -89,7 +89,8 @@ namespace VividRP.Editor.Tests
                     + ReferencedPathTracingEnvironmentImportanceLayout
                         .AtmosphereHeaderElementCount));
             Assert.That(
-                ReferencedPathTracingEnvironmentImportanceLayout.ElementCount,
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereElementCount,
                 Is.EqualTo(
                     ReferencedPathTracingEnvironmentImportanceLayout
                         .AtmosphereDataOffset
@@ -99,6 +100,27 @@ namespace VividRP.Editor.Tests
                         .AtmosphereZenithResolution
                     * ReferencedPathTracingEnvironmentImportanceLayout
                         .AtmosphereChannelCount));
+            Assert.That(
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .CloudValidOffset,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereElementCount));
+            Assert.That(
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .CloudDataOffset,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereElementCount
+                    + ReferencedPathTracingEnvironmentImportanceLayout
+                        .CloudHeaderElementCount));
+            Assert.That(
+                ReferencedPathTracingEnvironmentImportanceLayout.ElementCount,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .CloudDataOffset
+                    + ReferencedPathTracingEnvironmentImportanceLayout
+                        .CloudRadialResolution));
         }
 
         [Test]
@@ -137,6 +159,10 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 computeSource,
                 Does.Contain(
+                    "#pragma kernel ComputeCloudDensityMajorant"));
+            Assert.That(
+                computeSource,
+                Does.Contain(
                     "ReferencedPathtracingIntegrateAtmosphereDensityReference"));
             Assert.That(
                 commonSource,
@@ -157,7 +183,19 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 commonSource,
                 Does.Contain(
+                    "ReferencedPathtracingResolveAtmosphereLocalSegmentSampleCount"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_MAX_SAMPLE_COUNT"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
                     "ReferencedPathtracingEvaluateAtmosphereTransmittanceRelativeError"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "REFERENCED_CLOUD_ACCELERATION_DATA_OFFSET"));
         }
 
         [Test]

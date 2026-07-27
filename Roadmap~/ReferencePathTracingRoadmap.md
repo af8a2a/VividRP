@@ -762,6 +762,76 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** 关闭 clouds 时与 A3 完全一致；cloud shadow 对 surface 和 atmosphere scatter 使用同一透射契约。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- 新增完全独立于 raster cloud color/depth/shadow/history 的 PT-only spherical cloud
+  shell。Ray generation 在 surface、virtual ground 之前分别对 atmosphere 与 cloud
+  free-flight 采样并选取最近 medium event；cloud event 使用 atmosphere
+  `T_rgb / T_hero` 修正到事件距离，关闭 clouds 时 cloud sampler 是严格 no-op，
+  A3 estimator 与输出保持不变。
+- 云材质边界集中在 `ReferencedPathtracingCloud.hlsl`：确定性四 octave procedural
+  density、coverage remap、垂直 profile、achromatic extinction、spectral
+  single-scattering albedo 和 Henyey-Greenstein phase 不依赖 VividRP raster sky
+  子系统。Delta tracking 使用保守 majorant 与独立 bounce sample dimensions，
+  tracking overflow 显式终止无效样本，避免静默产生有偏亮点。
+- `ReferencedPathTracingEnvironmentSamplingPass` 在原 HDRI CDF 与 atmosphere
+  optical-depth LUT 后追加 versioned 64-bin radial density-majorant acceleration
+  map。分辨率、版本和 96-step deterministic shadow reference budget 均写入
+  metadata，后续可以在不改变 RenderGraph wiring 的前提下替换为更高阶 3D
+  acceleration structure。
+- Cloud scatter vertex 已接入主太阳 finite/delta NEE、Henyey-Greenstein phase
+  continuation、双向 MIS、max-depth 与 Russian roulette。Camera visibility/holdout、
+  direct finite sun、atmosphere exit 和 virtual-ground 语义沿用 A3 contract。
+- Surface、atmosphere scatter、cloud scatter 与 virtual ground 的候选光源可见性统一
+  经过 planet occlusion、geometry shadow、atmosphere transmittance 和 cloud
+  96-step deterministic transmittance；因此 cloud shadow 不再存在独立的
+  surface-only 分支。该固定步长积分的近似状态由
+  `cloudShadowUsesDeterministicApproximation` 与 sample count 显式写入 metadata。
+- 默认 multiple scattering 由显式 cloud phase path bounce 表达，不启用经验补偿。
+  可选 `EnergyCompensation` 仅作为有偏预览模式，其 mode/strength 与
+  `cloudTransportUsesBiasedApproximation` 已写入 capture metadata。当前固定步长
+  cloud shadow 同样使该总 transport 标记保持为 biased，A5 应以此 gate 分离
+  unbiased reference 与 preview approximation。
+- Atmosphere/environment contract 升级到 version 4；path sampling contract 同步
+  升级到 version 4、每 bounce stride 20，并固定 offset 14～17 给 cloud
+  free-flight/phase sample。新增测试覆盖关闭 gate、metadata bias 标记、HG phase
+  normalization、event ordering、共享 visibility 以及 acceleration layout。
+- Unity 6000.7 当前 Editor 会话已完成 Runtime/Editor assembly 编译；environment
+  compute 与 PT ray-tracing shader 强制重导入后的 compiler message 均为 0。由于
+  Editor 正在运行，按仓库约束未启动 batch EditMode Tests。
+
+**Post-A4 Atmosphere Continuity Fix (2026-07-27)**
+
+- 修复近地面有限 atmosphere segment 使用两个巨大 boundary optical depth 做差时的
+  cancellation。该误差会把 LUT 的 radial cell 分层投影为稳定的世界高度/屏幕水平
+  条纹，并且增加 sample count 也不会消失。
+- 短段现在根据 Rayleigh、Mie、ozone 最小 profile scale 自适应执行 midpoint
+  reference integration；最多 256 steps，局部阈值同时受 profile scale、LUT radial
+  footprint 与 sample budget 限制。到太阳或 atmosphere boundary 的长段继续使用
+  bilinear optical-depth LUT，不牺牲 E5 cache contract。
+- 回归 witness 在标准地球参数下覆盖离地 2 m、长度 20 m 的 finite segment：旧 LUT
+  subtraction 的 density-depth relative error 大于 1，而新 local integration 相对
+  4096-step reference 小于 `1e-4`。Atmosphere/environment contract 升级到 version
+  5，optical-depth policy contract 升级到 version 2，并在 capture metadata 中记录
+  local integration budget。
+
+**Camera-relative Ground Precedence Fix (2026-07-27)**
+
+- `Rendering Space = Camera` 会把 virtual planet center 锚定为 camera position 减去
+  planet radius，因此相机位于 virtual ground 的切平面。Raster sky 只在没有真实
+  geometry depth 的 background pixel 评估该 ground；PT 若让 spherical ground 与
+  RTAS surface 竞争，则所有朝下 primary ray 都会先在距离 0 命中 ground，形成稳定的
+  屏幕水平截断带。
+- Atmosphere state 新增 `CameraRelativeRenderingSpace` flag，capture metadata 明确记录
+  该模式。Raygen 在已有 RTAS surface hit 时关闭 virtual-ground boundary，只对有限
+  scene segment 做 atmosphere/cloud transport；只有 surface miss 才允许 Camera-relative
+  ground 作为 background closure。World rendering space 继续使用真实 spherical
+  planet occlusion，atmosphere/cloud/ground scatter vertex 也保留原有 ground policy。
+- Surface NEE 与 BSDF-sampled light visibility 使用同一 scene-hit 优先策略，避免 shadow
+  ray 被 Camera-relative ground 误判遮挡；禁用 ground 时的 segment transmittance 使用
+  direct reference integration，不读取只对 bottom-radius 外部定义的 optical-depth LUT。
+  Atmosphere/environment contract 升级到 version 6，使旧 accumulation/capture 自动失效。
+
 #### A5: Reference Atmosphere Validation and Optimization
 
 - 与高采样数 CPU/offline reference 或已验证的 Unreal reference scene 对照。

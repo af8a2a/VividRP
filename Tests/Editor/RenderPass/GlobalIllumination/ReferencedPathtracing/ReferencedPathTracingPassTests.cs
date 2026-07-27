@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 3"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 4"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -1124,6 +1124,7 @@ namespace VividRP.Editor.Tests
                     ReferencedPathTracingAtmosphereMetadata.Capture(state);
 
                 Assert.That(state.active, Is.True);
+                Assert.That(state.cloudsActive, Is.True);
                 Assert.That(state.skyHash, Is.EqualTo(123));
                 Assert.That(
                     (state.flags
@@ -1151,6 +1152,61 @@ namespace VividRP.Editor.Tests
                             .GroundCameraVisible) != 0,
                     Is.False);
                 Assert.That(metadata.active, Is.True);
+                Assert.That(
+                    metadata.cloudContractVersion,
+                    Is.EqualTo(
+                        ReferencedPathTracingAtmosphereState
+                            .CloudContractVersion));
+                Assert.That(
+                    metadata.cloudBottomRadius,
+                    Is.EqualTo(11500.0f));
+                Assert.That(
+                    metadata.cloudTopRadius,
+                    Is.EqualTo(metadata.topRadius));
+                Assert.That(
+                    metadata.cloudCoverage,
+                    Is.EqualTo(0.55f));
+                Assert.That(
+                    metadata.cloudAccelerationVersion,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudVersion));
+                Assert.That(
+                    metadata.cloudAccelerationResolution,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudRadialResolution));
+                Assert.That(
+                    metadata.cloudShadowReferenceSampleCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudShadowReferenceSampleCount));
+                Assert.That(
+                    metadata.cloudShadowUsesDeterministicApproximation,
+                    Is.True);
+                Assert.That(
+                    metadata.cloudTransportUsesBiasedApproximation,
+                    Is.True);
+                Assert.That(
+                    metadata.opticalDepthContractVersion,
+                    Is.EqualTo(
+                        ReferencedPathTracingAtmosphereState
+                            .OpticalDepthContractVersion));
+                Assert.That(
+                    metadata.localSegmentMaximumSampleCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .AtmosphereLocalSegmentMaximumSampleCount));
+                Assert.That(
+                    metadata.localSegmentSamplesPerProfileScale,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .AtmosphereLocalSegmentSamplesPerProfileScale));
+                Assert.That(
+                    metadata.localSegmentProfileScaleCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .AtmosphereLocalSegmentProfileScaleCount));
                 Assert.That(metadata.bottomRadius, Is.EqualTo(10000.0f));
                 Assert.That(metadata.topRadius, Is.GreaterThan(10000.0f));
                 Assert.That(
@@ -1184,6 +1240,8 @@ namespace VividRP.Editor.Tests
                 var originalSignature = state.signature;
                 var originalOpticalDepthSignature =
                     state.opticalDepthSignature;
+                var originalCloudSignature =
+                    state.cloudSignature;
                 lightData.directionalLights[0].color =
                     new Vector3(200.0f, 180.0f, 160.0f);
                 state = ReferencedPathTracingAtmosphereState.Resolve(
@@ -1198,6 +1256,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     state.opticalDepthSignature,
                     Is.EqualTo(originalOpticalDepthSignature));
+                Assert.That(
+                    state.cloudSignature,
+                    Is.EqualTo(originalCloudSignature));
                 lightData.directionalLights[0].color =
                     new Vector3(100.0f, 90.0f, 80.0f);
                 skyData.skyHash = 124;
@@ -1223,11 +1284,99 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     state.opticalDepthSignature,
                     Is.Not.EqualTo(originalOpticalDepthSignature));
+                var radiusAdjustedCloudSignature =
+                    state.cloudSignature;
+                settings.referenceCloudCoverage.value = 0.75f;
+                state = ReferencedPathTracingAtmosphereState.Resolve(
+                    skyData,
+                    skyVolume,
+                    null,
+                    lightData,
+                    settings);
+                Assert.That(
+                    state.cloudSignature,
+                    Is.Not.EqualTo(radiusAdjustedCloudSignature));
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(skyVolume);
                 UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
+        public void ReferenceAtmosphereState_CapturesCameraRelativeGroundPolicy()
+        {
+            var settings =
+                ScriptableObject.CreateInstance<
+                    ReferencedPathTracingSettingsVolume>();
+            var skyVolume =
+                ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+            var skySettings =
+                ScriptableObject.CreateInstance<SkySettingsVolume>();
+
+            try
+            {
+                settings.active = true;
+                settings.environmentMode.value =
+                    ReferencedPathTracingEnvironmentMode.ReferenceAtmosphere;
+                var skyData = new VividSkyData
+                {
+                    activeSkyType = SkyType.PhysicallyBased
+                };
+
+                skySettings.renderingSpace.value = RenderingSpace.Camera;
+                var cameraRelativeState =
+                    ReferencedPathTracingAtmosphereState.Resolve(
+                        skyData,
+                        skyVolume,
+                        null,
+                        null,
+                        settings,
+                        skySettings);
+                var cameraRelativeMetadata =
+                    ReferencedPathTracingAtmosphereMetadata.Capture(
+                        cameraRelativeState);
+
+                Assert.That(
+                    (cameraRelativeState.flags
+                        & ReferencedPathTracingAtmosphereFlags
+                            .CameraRelativeRenderingSpace) != 0,
+                    Is.True);
+                Assert.That(
+                    cameraRelativeMetadata.cameraRelativeRenderingSpace,
+                    Is.True);
+
+                skySettings.renderingSpace.value = RenderingSpace.World;
+                var worldState =
+                    ReferencedPathTracingAtmosphereState.Resolve(
+                        skyData,
+                        skyVolume,
+                        null,
+                        null,
+                        settings,
+                        skySettings);
+                var worldMetadata =
+                    ReferencedPathTracingAtmosphereMetadata.Capture(
+                        worldState);
+
+                Assert.That(
+                    (worldState.flags
+                        & ReferencedPathTracingAtmosphereFlags
+                            .CameraRelativeRenderingSpace) != 0,
+                    Is.False);
+                Assert.That(
+                    worldMetadata.cameraRelativeRenderingSpace,
+                    Is.False);
+                Assert.That(
+                    cameraRelativeState.signature,
+                    Is.Not.EqualTo(worldState.signature));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(settings);
+                UnityEngine.Object.DestroyImmediate(skyVolume);
+                UnityEngine.Object.DestroyImmediate(skySettings);
             }
         }
 

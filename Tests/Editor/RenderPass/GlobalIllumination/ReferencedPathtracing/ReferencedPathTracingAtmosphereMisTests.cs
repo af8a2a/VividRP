@@ -78,10 +78,10 @@ namespace VividRP.Editor.Tests
                     "kReferencedPathtracingAtmosphereSunDimensionOffset = 12u"));
             Assert.That(
                 ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(3));
+                Is.EqualTo(6));
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(3));
+                Is.EqualTo(4));
         }
 
         [Test]

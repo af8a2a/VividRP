@@ -51,7 +51,21 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "ReferencedPathtracingEvaluateAtmosphereTransmittance("));
+                    "ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "!ReferencedPathtracingUsesCameraRelativeAtmosphere()"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("|| payload.hit == 0u"));
+            Assert.That(
+                atmosphereSource,
+                Does.Contain("bool includeVirtualGround"));
+            Assert.That(
+                atmosphereSource,
+                Does.Contain(
+                    "ReferencedPathtracingIntersectAtmosphereWithGroundPolicy("));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
@@ -82,7 +96,7 @@ namespace VividRP.Editor.Tests
                     "Reference Atmosphere has no emissive skydome"));
             Assert.That(
                 ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(3));
+                Is.EqualTo(6));
         }
 
         [Test]

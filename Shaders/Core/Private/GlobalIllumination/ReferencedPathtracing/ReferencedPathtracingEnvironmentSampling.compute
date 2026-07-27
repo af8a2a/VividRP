@@ -1,6 +1,7 @@
 #pragma kernel ComputeConditional
 #pragma kernel ComputeMarginal
 #pragma kernel ComputeAtmosphereOpticalDepth
+#pragma kernel ComputeCloudDensityMajorant
 #pragma only_renderers d3d11 vulkan metal
 
 #define REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD
@@ -228,5 +229,46 @@ void ComputeAtmosphereOpticalDepth(
             REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT;
         _ReferencedEnvironmentImportanceDistribution[
             REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RESERVED_OFFSET] = 0.0;
+    }
+}
+
+[numthreads(REFERENCED_CLOUD_ACCELERATION_RADIAL_RESOLUTION, 1, 1)]
+void ComputeCloudDensityMajorant(
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint radialIndex = dispatchThreadId.x;
+    if (radialIndex
+        >= REFERENCED_CLOUD_ACCELERATION_RADIAL_RESOLUTION)
+    {
+        return;
+    }
+
+    float inverseResolution =
+        rcp((float)REFERENCED_CLOUD_ACCELERATION_RADIAL_RESOLUTION);
+    float lowerHeight = radialIndex * inverseResolution;
+    float upperHeight = (radialIndex + 1u) * inverseResolution;
+    float majorant = max(
+        ReferencedPathtracingEvaluateCloudHeightEnvelope(lowerHeight),
+        ReferencedPathtracingEvaluateCloudHeightEnvelope(upperHeight));
+    if (upperHeight >= 0.15 && lowerHeight <= 0.8)
+        majorant = 1.0;
+
+    _ReferencedEnvironmentImportanceDistribution[
+        REFERENCED_CLOUD_ACCELERATION_DATA_OFFSET + radialIndex] =
+            saturate(majorant);
+
+    if (radialIndex == 0u)
+    {
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_CLOUD_ACCELERATION_VALID_OFFSET] = 1.0;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_CLOUD_ACCELERATION_VERSION_OFFSET] =
+                REFERENCED_CLOUD_ACCELERATION_VERSION;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_CLOUD_ACCELERATION_RESOLUTION_OFFSET] =
+                REFERENCED_CLOUD_ACCELERATION_RADIAL_RESOLUTION;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_CLOUD_ACCELERATION_SHADOW_SAMPLE_COUNT_OFFSET] =
+                REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT;
     }
 }

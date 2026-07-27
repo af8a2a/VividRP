@@ -55,6 +55,35 @@ namespace VividRP.Editor.Tests
                 Assert.That(volume.referenceClouds.value, Is.False);
                 Assert.That(volume.referenceCloudsCameraVisible.value, Is.True);
                 Assert.That(volume.referenceCloudsHoldout.value, Is.False);
+                Assert.That(
+                    volume.referenceCloudBottomAltitude.value,
+                    Is.EqualTo(1500.0f));
+                Assert.That(
+                    volume.referenceCloudThickness.value,
+                    Is.EqualTo(4000.0f));
+                Assert.That(
+                    volume.referenceCloudCoverage.value,
+                    Is.EqualTo(0.55f));
+                Assert.That(
+                    volume.referenceCloudExtinction.value,
+                    Is.EqualTo(0.001f));
+                Assert.That(
+                    volume.referenceCloudAnisotropy.value,
+                    Is.EqualTo(0.7f));
+                Assert.That(
+                    volume.referenceCloudNoiseScale.value,
+                    Is.EqualTo(8000.0f));
+                Assert.That(
+                    volume.referenceCloudNoiseSeed.value,
+                    Is.EqualTo(1337));
+                Assert.That(
+                    volume.referenceCloudMultipleScatteringMode.value,
+                    Is.EqualTo(
+                        ReferencedPathTracingCloudMultipleScatteringMode
+                            .Off));
+                Assert.That(
+                    volume.referenceCloudMultipleScatteringStrength.value,
+                    Is.EqualTo(0.5f));
                 Assert.That(volume.referenceGroundCameraVisible.value, Is.True);
                 Assert.That(volume.referenceGroundHoldout.value, Is.False);
                 Assert.That(
@@ -271,7 +300,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(3));
+                Is.EqualTo(4));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -283,14 +312,18 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(8));
             Assert.That(
                 ReferencedPathTracingSamplingContract.BounceDimensionStride,
-                Is.EqualTo(16));
+                Is.EqualTo(20));
             Assert.That(
                 ReferencedPathTracingSamplingContract
                     .AtmosphereSunDimensionOffset,
                 Is.EqualTo(12));
             Assert.That(
-                ReferencedPathTracingSamplingContract.FutureDimensionOffset,
+                ReferencedPathTracingSamplingContract
+                    .CloudDimensionOffset,
                 Is.EqualTo(14));
+            Assert.That(
+                ReferencedPathTracingSamplingContract.FutureDimensionOffset,
+                Is.EqualTo(18));
 
             var usedDimensions = new System.Collections.Generic.HashSet<int>();
             for (var bounceIndex = 0;
@@ -326,7 +359,7 @@ namespace VividRP.Editor.Tests
                     .GetBounceDimension(-1, 0));
             Assert.Throws<System.ArgumentOutOfRangeException>(
                 () => ReferencedPathTracingSamplingContract
-                    .GetBounceDimension(0, 16));
+                    .GetBounceDimension(0, 20));
         }
 
         [Test]

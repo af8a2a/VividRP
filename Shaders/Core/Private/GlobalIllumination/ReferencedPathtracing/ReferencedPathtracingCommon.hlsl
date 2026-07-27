@@ -49,6 +49,14 @@ float4 _ReferencedAtmosphereSunDirection;
 // rgb: physical main-light illuminance, w: shadow strength.
 float4 _ReferencedAtmosphereSunIlluminance;
 int _ReferencedAtmosphereHasSun;
+// x: cloud bottom radius, y: cloud top radius, z: coverage,
+// w: full-density extinction in inverse meters.
+float4 _ReferencedCloudLayerParameters;
+// rgb: scattering albedo, w: Henyey-Greenstein anisotropy.
+float4 _ReferencedCloudMaterialParameters;
+// x: procedural noise scale in meters, y: stable seed,
+// z: multiple-scattering approximation mode, w: approximation strength.
+float4 _ReferencedCloudNoiseParameters;
 
 static const int kReferencedEnvironmentModeHdri = 0;
 static const int kReferencedEnvironmentModeReferenceAtmosphere = 1;
@@ -61,6 +69,8 @@ static const int kReferencedAtmosphereFlagCloudsCameraVisible = 1 << 5;
 static const int kReferencedAtmosphereFlagCloudsHoldout = 1 << 6;
 static const int kReferencedAtmosphereFlagGroundCameraVisible = 1 << 7;
 static const int kReferencedAtmosphereFlagGroundHoldout = 1 << 8;
+static const int kReferencedAtmosphereFlagCameraRelativeRenderingSpace =
+    1 << 9;
 
 static const int kReferencedEnvironmentSamplingBsdfOnly = 0;
 static const int kReferencedEnvironmentSamplingImportance = 1;
@@ -124,6 +134,37 @@ static const float kReferencedPathtracingPi = 3.14159265358979323846;
     (REFERENCED_ENVIRONMENT_ELEMENT_COUNT \
         + REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_HEADER_ELEMENT_COUNT)
 #define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT 256u
+// Finite local segments must not be evaluated by subtracting two large
+// boundary optical depths. Near the ground that cancellation exposes the
+// radial LUT cells as horizontal bands. Integrate segments that fit within a
+// few minimum density-profile scale heights directly instead.
+#define REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_MAX_SAMPLE_COUNT 256u
+#define REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_SAMPLES_PER_PROFILE_SCALE 16.0
+#define REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_PROFILE_SCALE_COUNT 4.0
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ELEMENT_COUNT \
+    (REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_DATA_OFFSET \
+        + REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION \
+        * REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION \
+        * REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_CHANNEL_COUNT)
+
+// A4 appends a conservative radial cloud-density majorant map. The procedural
+// material remains authoritative; this map is acceleration metadata and never
+// supplies camera radiance or a raster-cloud history.
+#define REFERENCED_CLOUD_ACCELERATION_VERSION 1
+#define REFERENCED_CLOUD_ACCELERATION_HEADER_ELEMENT_COUNT 4u
+#define REFERENCED_CLOUD_ACCELERATION_VALID_OFFSET \
+    REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ELEMENT_COUNT
+#define REFERENCED_CLOUD_ACCELERATION_VERSION_OFFSET \
+    (REFERENCED_CLOUD_ACCELERATION_VALID_OFFSET + 1u)
+#define REFERENCED_CLOUD_ACCELERATION_RESOLUTION_OFFSET \
+    (REFERENCED_CLOUD_ACCELERATION_VERSION_OFFSET + 1u)
+#define REFERENCED_CLOUD_ACCELERATION_SHADOW_SAMPLE_COUNT_OFFSET \
+    (REFERENCED_CLOUD_ACCELERATION_RESOLUTION_OFFSET + 1u)
+#define REFERENCED_CLOUD_ACCELERATION_RADIAL_RESOLUTION 64u
+#define REFERENCED_CLOUD_ACCELERATION_DATA_OFFSET \
+    (REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ELEMENT_COUNT \
+        + REFERENCED_CLOUD_ACCELERATION_HEADER_ELEMENT_COUNT)
+#define REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT 96u
 
 #if defined(REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD)
 RWStructuredBuffer<float> _ReferencedEnvironmentImportanceDistribution;
@@ -142,6 +183,33 @@ bool ReferencedPathtracingHasReferenceAtmosphere()
     return _ReferencedEnvironmentMode
             == kReferencedEnvironmentModeReferenceAtmosphere
         && (_ReferencedAtmosphereFlags & kReferencedAtmosphereFlagActive) != 0;
+}
+
+bool ReferencedPathtracingUsesCameraRelativeAtmosphere()
+{
+    return ReferencedPathtracingHasReferenceAtmosphere()
+        && (_ReferencedAtmosphereFlags
+            & kReferencedAtmosphereFlagCameraRelativeRenderingSpace) != 0;
+}
+
+bool ReferencedPathtracingHasReferenceClouds()
+{
+    return ReferencedPathtracingHasReferenceAtmosphere()
+        && (_ReferencedAtmosphereFlags
+            & kReferencedAtmosphereFlagCloudsEnabled) != 0
+        && _ReferencedCloudLayerParameters.y
+            > _ReferencedCloudLayerParameters.x
+        && _ReferencedCloudLayerParameters.z > 0.0
+        && _ReferencedCloudLayerParameters.w > 0.0;
+}
+
+float ReferencedPathtracingEvaluateCloudHeightEnvelope(
+    float normalizedHeight)
+{
+    normalizedHeight = saturate(normalizedHeight);
+    float lowerRamp = saturate(normalizedHeight / 0.15);
+    float upperRamp = saturate((1.0 - normalizedHeight) / 0.2);
+    return min(lowerRamp, upperRamp);
 }
 
 struct ReferencedPathtracingAtmosphereRayInterval
@@ -214,10 +282,11 @@ bool ReferencedPathtracingIntersectAtmosphereSphere(
         && !any(isinf(intersection));
 }
 
-bool ReferencedPathtracingIntersectAtmospherePlanetSpace(
+bool ReferencedPathtracingIntersectAtmospherePlanetSpaceWithGroundPolicy(
     float3 rayOriginPS,
     float3 rayDirectionPS,
     float maximumDistance,
+    bool includeVirtualGround,
     out ReferencedPathtracingAtmosphereRayInterval interval)
 {
     interval = (ReferencedPathtracingAtmosphereRayInterval)0;
@@ -232,7 +301,8 @@ bool ReferencedPathtracingIntersectAtmospherePlanetSpace(
         dot(rayDirectionPS, rayDirectionPS);
     if (bottomRadius <= 0.0
         || topRadius <= bottomRadius
-        || radialDistance < bottomRadius - 0.01
+        || (includeVirtualGround
+            && radialDistance < bottomRadius - 0.01)
         || directionLengthSquared <= 1e-12)
     {
         return false;
@@ -261,12 +331,13 @@ bool ReferencedPathtracingIntersectAtmospherePlanetSpace(
     float boundaryTolerance = max(bottomRadius * 1e-7, 0.01);
     float radialDirection = dot(rayOriginPS, direction);
     bool startsOnGroundTowardPlanet =
-        radialDistance <= bottomRadius + boundaryTolerance
+        includeVirtualGround
+        && radialDistance <= bottomRadius + boundaryTolerance
         && radialDirection < 0.0;
     float groundDistance =
         startsOnGroundTowardPlanet ? 0.0 : -1.0;
 
-    if (!startsOnGroundTowardPlanet)
+    if (includeVirtualGround && !startsOnGroundTowardPlanet)
     {
         float2 groundIntersection;
         if (ReferencedPathtracingIntersectAtmosphereSphere(
@@ -305,19 +376,49 @@ bool ReferencedPathtracingIntersectAtmospherePlanetSpace(
     return true;
 }
 
+bool ReferencedPathtracingIntersectAtmospherePlanetSpace(
+    float3 rayOriginPS,
+    float3 rayDirectionPS,
+    float maximumDistance,
+    out ReferencedPathtracingAtmosphereRayInterval interval)
+{
+    return ReferencedPathtracingIntersectAtmospherePlanetSpaceWithGroundPolicy(
+        rayOriginPS,
+        rayDirectionPS,
+        maximumDistance,
+        true,
+        interval);
+}
+
+bool ReferencedPathtracingIntersectAtmosphereWithGroundPolicy(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    bool includeVirtualGround,
+    out ReferencedPathtracingAtmosphereRayInterval interval)
+{
+    float3 rayOriginPS =
+        rayOriginWS
+        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
+    return ReferencedPathtracingIntersectAtmospherePlanetSpaceWithGroundPolicy(
+        rayOriginPS,
+        rayDirectionWS,
+        maximumDistance,
+        includeVirtualGround,
+        interval);
+}
+
 bool ReferencedPathtracingIntersectAtmosphere(
     float3 rayOriginWS,
     float3 rayDirectionWS,
     float maximumDistance,
     out ReferencedPathtracingAtmosphereRayInterval interval)
 {
-    float3 rayOriginPS =
-        rayOriginWS
-        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
-    return ReferencedPathtracingIntersectAtmospherePlanetSpace(
-        rayOriginPS,
+    return ReferencedPathtracingIntersectAtmosphereWithGroundPolicy(
+        rayOriginWS,
         rayDirectionWS,
         maximumDistance,
+        true,
         interval);
 }
 
@@ -460,17 +561,19 @@ float3 ReferencedPathtracingEvaluateAtmosphereScattering(
         0.0);
 }
 
-float3 ReferencedPathtracingIntegrateAtmosphereDensityReference(
+float3 ReferencedPathtracingIntegrateAtmosphereDensityReferenceWithGroundPolicy(
     float3 rayOriginPS,
     float3 rayDirectionPS,
     float maximumDistance,
-    uint sampleCount)
+    uint sampleCount,
+    bool includeVirtualGround)
 {
     ReferencedPathtracingAtmosphereRayInterval interval;
-    if (!ReferencedPathtracingIntersectAtmospherePlanetSpace(
+    if (!ReferencedPathtracingIntersectAtmospherePlanetSpaceWithGroundPolicy(
             rayOriginPS,
             rayDirectionPS,
             maximumDistance,
+            includeVirtualGround,
             interval))
     {
         return 0.0;
@@ -501,6 +604,20 @@ float3 ReferencedPathtracingIntegrateAtmosphereDensityReference(
     }
 
     return max(densityOpticalDepth * stepLength, 0.0);
+}
+
+float3 ReferencedPathtracingIntegrateAtmosphereDensityReference(
+    float3 rayOriginPS,
+    float3 rayDirectionPS,
+    float maximumDistance,
+    uint sampleCount)
+{
+    return ReferencedPathtracingIntegrateAtmosphereDensityReferenceWithGroundPolicy(
+        rayOriginPS,
+        rayDirectionPS,
+        maximumDistance,
+        sampleCount,
+        true);
 }
 
 uint ReferencedPathtracingGetAtmosphereOpticalDepthAddress(
@@ -642,20 +759,36 @@ float3 ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthLut(
     return max(startOpticalDepth - endOpticalDepth, 0.0);
 }
 
+float3 ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReferenceWithGroundPolicy(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    uint sampleCount,
+    bool includeVirtualGround)
+{
+    float3 originPS =
+        rayOriginWS
+        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
+    return ReferencedPathtracingIntegrateAtmosphereDensityReferenceWithGroundPolicy(
+        originPS,
+        rayDirectionWS,
+        maximumDistance,
+        sampleCount,
+        includeVirtualGround);
+}
+
 float3 ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReference(
     float3 rayOriginWS,
     float3 rayDirectionWS,
     float maximumDistance,
     uint sampleCount)
 {
-    float3 originPS =
-        rayOriginWS
-        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
-    return ReferencedPathtracingIntegrateAtmosphereDensityReference(
-        originPS,
+    return ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReferenceWithGroundPolicy(
+        rayOriginWS,
         rayDirectionWS,
         maximumDistance,
-        sampleCount);
+        sampleCount,
+        true);
 }
 
 float3 ReferencedPathtracingAtmosphereTransmittanceFromDensityDepth(
@@ -683,27 +816,147 @@ float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceLut(
             maximumDistance));
 }
 
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceReferenceWithGroundPolicy(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    uint sampleCount,
+    bool includeVirtualGround)
+{
+    return ReferencedPathtracingAtmosphereTransmittanceFromDensityDepth(
+        ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReferenceWithGroundPolicy(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            sampleCount,
+            includeVirtualGround));
+}
+
 float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceReference(
     float3 rayOriginWS,
     float3 rayDirectionWS,
     float maximumDistance,
     uint sampleCount)
 {
-    return ReferencedPathtracingAtmosphereTransmittanceFromDensityDepth(
-        ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReference(
+    return ReferencedPathtracingEvaluateAtmosphereTransmittanceReferenceWithGroundPolicy(
+        rayOriginWS,
+        rayDirectionWS,
+        maximumDistance,
+        sampleCount,
+        true);
+}
+
+bool ReferencedPathtracingResolveAtmosphereLocalSegmentSampleCountWithGroundPolicy(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    bool includeVirtualGround,
+    out uint sampleCount)
+{
+    sampleCount = 1u;
+    ReferencedPathtracingAtmosphereRayInterval interval;
+    if (!ReferencedPathtracingIntersectAtmosphereWithGroundPolicy(
             rayOriginWS,
             rayDirectionWS,
             maximumDistance,
-            sampleCount));
+            includeVirtualGround,
+            interval))
+    {
+        return false;
+    }
+
+    float segmentLength =
+        max(interval.exitDistance - interval.entryDistance, 0.0);
+    if (segmentLength <= 0.0)
+        return false;
+
+    float minimumProfileScale = max(
+        min(
+            min(
+                _ReferencedAtmosphereRayleighScattering.w,
+                _ReferencedAtmosphereMieScattering.w),
+            _ReferencedAtmosphereOzoneLayer.y),
+        1.0);
+    float targetStepLength = max(
+        minimumProfileScale
+            / REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_SAMPLES_PER_PROFILE_SCALE,
+        1.0);
+    float atmosphereDepth = max(
+        _ReferencedAtmosphereTopRadiusMieAnisotropy.x
+            - _ReferencedAtmospherePlanetCenterBottomRadius.w,
+        1.0);
+    float desiredThreshold = max(
+        minimumProfileScale
+            * REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_PROFILE_SCALE_COUNT,
+        atmosphereDepth
+            / REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION);
+    float maximumResolvedLength =
+        targetStepLength
+        * REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_MAX_SAMPLE_COUNT;
+    float localSegmentThreshold = min(
+        desiredThreshold,
+        maximumResolvedLength);
+    if (segmentLength > localSegmentThreshold)
+        return false;
+
+    sampleCount = (uint)clamp(
+        ceil(segmentLength / targetStepLength),
+        1.0,
+        (float)REFERENCED_ATMOSPHERE_LOCAL_SEGMENT_MAX_SAMPLE_COUNT);
+    return true;
 }
 
-float3 ReferencedPathtracingEvaluateAtmosphereTransmittance(
+bool ReferencedPathtracingResolveAtmosphereLocalSegmentSampleCount(
     float3 rayOriginWS,
     float3 rayDirectionWS,
-    float maximumDistance)
+    float maximumDistance,
+    out uint sampleCount)
 {
+    return ReferencedPathtracingResolveAtmosphereLocalSegmentSampleCountWithGroundPolicy(
+        rayOriginWS,
+        rayDirectionWS,
+        maximumDistance,
+        true,
+        sampleCount);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    bool includeVirtualGround)
+{
+    uint localSegmentSampleCount;
+    bool usesLocalSegmentIntegration =
+        ReferencedPathtracingResolveAtmosphereLocalSegmentSampleCountWithGroundPolicy(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            includeVirtualGround,
+            localSegmentSampleCount);
+    if (!includeVirtualGround)
+    {
+        return ReferencedPathtracingEvaluateAtmosphereTransmittanceReferenceWithGroundPolicy(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            usesLocalSegmentIntegration
+                ? localSegmentSampleCount
+                : REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT,
+            false);
+    }
+
     if (ReferencedPathtracingHasAtmosphereOpticalDepthLut())
     {
+        if (usesLocalSegmentIntegration)
+        {
+            return ReferencedPathtracingEvaluateAtmosphereTransmittanceReference(
+                rayOriginWS,
+                rayDirectionWS,
+                maximumDistance,
+                localSegmentSampleCount);
+        }
+
         return ReferencedPathtracingEvaluateAtmosphereTransmittanceLut(
             rayOriginWS,
             rayDirectionWS,
@@ -715,6 +968,18 @@ float3 ReferencedPathtracingEvaluateAtmosphereTransmittance(
         rayDirectionWS,
         maximumDistance,
         REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittance(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance)
+{
+    return ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
+        rayOriginWS,
+        rayDirectionWS,
+        maximumDistance,
+        true);
 }
 
 float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceRelativeError(

@@ -188,20 +188,21 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 3;
+        internal const int Version = 4;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
         internal const int CameraReservedDimension = 4;
         internal const int BounceBaseDimension = 8;
-        internal const int BounceDimensionStride = 16;
+        internal const int BounceDimensionStride = 20;
         internal const int BsdfDimensionOffset = 0;
         internal const int NeeDimensionOffset = 3;
         internal const int RussianRouletteDimensionOffset = 6;
         internal const int StochasticAlphaDimensionOffset = 7;
         internal const int VolumeDimensionOffset = 8;
         internal const int AtmosphereSunDimensionOffset = 12;
-        internal const int FutureDimensionOffset = 14;
+        internal const int CloudDimensionOffset = 14;
+        internal const int FutureDimensionOffset = 18;
         internal const int MaximumUsedDimension =
             BounceBaseDimension
             + ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount

@@ -116,6 +116,7 @@ bool ReferencedPathtracingSampleAtmosphereMedium(
     float3 rayOriginWS,
     float3 rayDirectionWS,
     float maximumDistance,
+    bool includeVirtualGround,
     float4 randomValue,
     out ReferencedPathtracingAtmosphereMediumSample mediumSample)
 {
@@ -132,10 +133,11 @@ bool ReferencedPathtracingSampleAtmosphereMedium(
     float3 direction =
         rayDirectionWS * rsqrt(directionLengthSquared);
     ReferencedPathtracingAtmosphereRayInterval interval;
-    if (!ReferencedPathtracingIntersectAtmosphere(
+    if (!ReferencedPathtracingIntersectAtmosphereWithGroundPolicy(
             rayOriginWS,
             direction,
             maximumDistance,
+            includeVirtualGround,
             interval))
     {
         return false;
@@ -158,10 +160,11 @@ bool ReferencedPathtracingSampleAtmosphereMedium(
     if (heroMajorant <= 1e-12)
     {
         float3 transmittance =
-            ReferencedPathtracingEvaluateAtmosphereTransmittance(
+            ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
                 rayOriginWS,
                 direction,
-                interval.exitDistance);
+                interval.exitDistance,
+                includeVirtualGround);
         mediumSample.transmittanceRatio =
             ReferencedPathtracingGetAtmosphereTransmittanceRatio(
                 transmittance,
@@ -187,10 +190,11 @@ bool ReferencedPathtracingSampleAtmosphereMedium(
         if (candidateDistance >= interval.exitDistance)
         {
             float3 transmittance =
-                ReferencedPathtracingEvaluateAtmosphereTransmittance(
+                ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
                     rayOriginWS,
                     direction,
-                    interval.exitDistance);
+                    interval.exitDistance,
+                    includeVirtualGround);
             mediumSample.transmittanceRatio =
                 ReferencedPathtracingGetAtmosphereTransmittanceRatio(
                     transmittance,
@@ -251,10 +255,11 @@ bool ReferencedPathtracingSampleAtmosphereMedium(
         }
 
         float3 transmittance =
-            ReferencedPathtracingEvaluateAtmosphereTransmittance(
+            ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
                 rayOriginWS,
                 direction,
-                candidateDistance);
+                candidateDistance,
+                includeVirtualGround);
         mediumSample.transmittanceRatio =
             ReferencedPathtracingGetAtmosphereTransmittanceRatio(
                 transmittance,

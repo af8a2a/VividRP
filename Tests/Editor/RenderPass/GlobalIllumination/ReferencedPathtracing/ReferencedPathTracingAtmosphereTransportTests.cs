@@ -16,6 +16,9 @@ namespace VividRP.Editor.Tests
         private const int RadialResolution = 64;
         private const int LutSampleCount = 256;
         private const int ReferenceSampleCount = 4096;
+        private const int LocalSegmentMaximumSampleCount = 256;
+        private const double LocalSegmentSamplesPerProfileScale = 16.0;
+        private const double LocalSegmentProfileScaleCount = 4.0;
 
         private static readonly DensityDepth RayleighExtinction =
             new(5.8e-6, 13.5e-6, 33.1e-6);
@@ -56,6 +59,31 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 atmosphereIntersection.far,
                 Is.EqualTo(expectedExit).Within(1e-6));
+        }
+
+        [Test]
+        public void CameraRelativeGroundPolicy_PreservesFiniteSceneHit()
+        {
+            const double sceneHitDistance = 12.0;
+            const double downwardCosine = -0.25;
+
+            var virtualGroundDistance = BoundaryDistance(
+                BottomRadius,
+                downwardCosine,
+                true);
+            var sceneSegmentDistance = Math.Min(
+                BoundaryDistance(
+                    BottomRadius,
+                    downwardCosine,
+                    false),
+                sceneHitDistance);
+
+            Assert.That(
+                virtualGroundDistance,
+                Is.EqualTo(0.0).Within(1e-9));
+            Assert.That(
+                sceneSegmentDistance,
+                Is.EqualTo(sceneHitDistance).Within(1e-9));
         }
 
         [Test]
@@ -125,6 +153,57 @@ namespace VividRP.Editor.Tests
                 Is.LessThan(0.02),
                 "A1 optical-depth LUT exceeded the two-percent absolute " +
                 "transmittance error gate across the height/zenith matrix.");
+        }
+
+        [Test]
+        public void LocalFiniteSegment_AvoidsBoundaryLutCancellationBands()
+        {
+            const double segmentLength = 20.0;
+            var radius = BottomRadius + 2.0;
+            const double cosineZenith = 0.1;
+            ResolveSegmentEnd(
+                radius,
+                cosineZenith,
+                segmentLength,
+                out var endRadius,
+                out var endCosineZenith);
+
+            var texelCache = new Dictionary<long, DensityDepth>();
+            var lutSegmentDepth = PositiveDifference(
+                SampleLut(radius, cosineZenith, texelCache),
+                SampleLut(
+                    endRadius,
+                    endCosineZenith,
+                    texelCache));
+            var referenceDepth = IntegrateDensitySegment(
+                radius,
+                cosineZenith,
+                segmentLength,
+                ReferenceSampleCount);
+            var lutRelativeError =
+                MaxComponent(Abs(lutSegmentDepth - referenceDepth))
+                / Math.Max(MaxComponent(referenceDepth), 1e-9);
+
+            Assert.That(
+                lutRelativeError,
+                Is.GreaterThan(1.0),
+                "The regression witness must expose the short-segment " +
+                "cancellation that produced radial LUT bands.");
+            Assert.That(
+                TryResolveLocalSegmentSampleCount(
+                    segmentLength,
+                    out var localSampleCount),
+                Is.True);
+            var localDepth = IntegrateDensitySegment(
+                radius,
+                cosineZenith,
+                segmentLength,
+                localSampleCount);
+            var localRelativeError =
+                MaxComponent(Abs(localDepth - referenceDepth))
+                / Math.Max(MaxComponent(referenceDepth), 1e-9);
+            Assert.That(localSampleCount, Is.EqualTo(1));
+            Assert.That(localRelativeError, Is.LessThan(1e-4));
         }
 
         private static DensityDepth SampleLut(
@@ -252,7 +331,20 @@ namespace VividRP.Editor.Tests
         {
             var segmentLength =
                 BoundaryDistance(radius, cosineZenith);
-            if (segmentLength <= 0.01)
+            return IntegrateDensitySegment(
+                radius,
+                cosineZenith,
+                segmentLength,
+                sampleCount);
+        }
+
+        private static DensityDepth IntegrateDensitySegment(
+            double radius,
+            double cosineZenith,
+            double segmentLength,
+            int sampleCount)
+        {
+            if (segmentLength <= 0.01 || sampleCount <= 0)
                 return default;
 
             var stepLength = segmentLength / sampleCount;
@@ -273,9 +365,65 @@ namespace VividRP.Editor.Tests
             return densityDepth * stepLength;
         }
 
+        private static bool TryResolveLocalSegmentSampleCount(
+            double segmentLength,
+            out int sampleCount)
+        {
+            sampleCount = 1;
+            if (segmentLength <= 0.0)
+                return false;
+
+            var minimumProfileScale = Math.Max(
+                Math.Min(
+                    Math.Min(
+                        RayleighScaleHeight,
+                        MieScaleHeight),
+                    OzoneLayerWidth),
+                1.0);
+            var targetStepLength = Math.Max(
+                minimumProfileScale
+                    / LocalSegmentSamplesPerProfileScale,
+                1.0);
+            var desiredThreshold = Math.Max(
+                minimumProfileScale
+                    * LocalSegmentProfileScaleCount,
+                (TopRadius - BottomRadius) / RadialResolution);
+            var maximumResolvedLength =
+                targetStepLength * LocalSegmentMaximumSampleCount;
+            var localSegmentThreshold = Math.Min(
+                desiredThreshold,
+                maximumResolvedLength);
+            if (segmentLength > localSegmentThreshold)
+                return false;
+
+            sampleCount = Clamp(
+                (int)Math.Ceiling(segmentLength / targetStepLength),
+                1,
+                LocalSegmentMaximumSampleCount);
+            return true;
+        }
+
+        private static void ResolveSegmentEnd(
+            double radius,
+            double cosineZenith,
+            double segmentLength,
+            out double endRadius,
+            out double endCosineZenith)
+        {
+            endRadius = Math.Sqrt(
+                radius * radius
+                + segmentLength
+                    * (2.0 * radius * cosineZenith
+                        + segmentLength));
+            endCosineZenith =
+                (radius * cosineZenith + segmentLength)
+                / endRadius;
+        }
+
         private static double BoundaryDistance(
             double radius,
-            double cosineZenith)
+            double cosineZenith,
+            bool includeVirtualGround = true)
         {
             if (!TryIntersectSphere(
                     radius,
@@ -287,34 +435,37 @@ namespace VividRP.Editor.Tests
                 return 0.0;
             }
 
-            var boundaryTolerance =
-                Math.Max(BottomRadius * 1e-7, 0.01);
-            if (radius <= BottomRadius + boundaryTolerance
-                && cosineZenith < 0.0)
-            {
-                return 0.0;
-            }
-
             var distance = atmosphereIntersection.far;
-            if (TryIntersectSphere(
-                    radius,
-                    cosineZenith,
-                    BottomRadius,
-                    out var groundIntersection))
+            if (includeVirtualGround)
             {
-                var groundDistance = -1.0;
-                if (groundIntersection.near >= 0.0)
-                    groundDistance = groundIntersection.near;
-                else if (groundIntersection.far >= 0.0
-                    && radius > BottomRadius + boundaryTolerance)
+                var boundaryTolerance =
+                    Math.Max(BottomRadius * 1e-7, 0.01);
+                if (radius <= BottomRadius + boundaryTolerance
+                    && cosineZenith < 0.0)
                 {
-                    groundDistance = groundIntersection.far;
+                    return 0.0;
                 }
 
-                if (groundDistance >= 0.0
-                    && groundDistance <= distance)
+                if (TryIntersectSphere(
+                        radius,
+                        cosineZenith,
+                        BottomRadius,
+                        out var groundIntersection))
                 {
-                    distance = groundDistance;
+                    var groundDistance = -1.0;
+                    if (groundIntersection.near >= 0.0)
+                        groundDistance = groundIntersection.near;
+                    else if (groundIntersection.far >= 0.0
+                        && radius > BottomRadius + boundaryTolerance)
+                    {
+                        groundDistance = groundIntersection.far;
+                    }
+
+                    if (groundDistance >= 0.0
+                        && groundDistance <= distance)
+                    {
+                        distance = groundDistance;
+                    }
                 }
             }
 
@@ -413,6 +564,16 @@ namespace VividRP.Editor.Tests
                 Math.Abs(value.x),
                 Math.Abs(value.y),
                 Math.Abs(value.z));
+        }
+
+        private static DensityDepth PositiveDifference(
+            DensityDepth first,
+            DensityDepth second)
+        {
+            return new DensityDepth(
+                Math.Max(first.x - second.x, 0.0),
+                Math.Max(first.y - second.y, 0.0),
+                Math.Max(first.z - second.z, 0.0));
         }
 
         private static double MaxComponent(DensityDepth value)

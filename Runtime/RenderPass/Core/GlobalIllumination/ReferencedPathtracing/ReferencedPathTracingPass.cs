@@ -46,8 +46,8 @@ namespace VividRP.Runtime.RenderPass.Core
     /// plus the active HDRI environment at every hit. Environment NEE, finite directional lights,
     /// and BSDF paths are combined with power-heuristic MIS and delta-aware gates. Reference
     /// Atmosphere mode inserts hero-channel delta tracking, physical phase scattering, a finite
-    /// solar-disk MIS pair, and a Lambertian virtual planet ground before surface or miss
-    /// evaluation without consuming raster sky data.
+    /// solar-disk MIS pair, a Lambertian virtual planet ground, and an optional PT-only procedural
+    /// cloud shell before surface or miss evaluation without consuming raster sky data.
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
@@ -194,6 +194,12 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedAtmosphereSunIlluminance");
         private static readonly int AtmosphereHasSunId =
             Shader.PropertyToID("_ReferencedAtmosphereHasSun");
+        private static readonly int CloudLayerParametersId =
+            Shader.PropertyToID("_ReferencedCloudLayerParameters");
+        private static readonly int CloudMaterialParametersId =
+            Shader.PropertyToID("_ReferencedCloudMaterialParameters");
+        private static readonly int CloudNoiseParametersId =
+            Shader.PropertyToID("_ReferencedCloudNoiseParameters");
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -1326,6 +1332,22 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_AtmosphereState.sunIlluminance.y,
                 m_AtmosphereState.sunIlluminance.z,
                 m_AtmosphereState.sunShadowStrength);
+            var clouds = m_AtmosphereState.cloudParameters;
+            var cloudLayerParameters = new Vector4(
+                clouds.bottomRadius,
+                clouds.topRadius,
+                clouds.coverage,
+                clouds.extinction);
+            var cloudMaterialParameters = new Vector4(
+                clouds.scatteringAlbedo.x,
+                clouds.scatteringAlbedo.y,
+                clouds.scatteringAlbedo.z,
+                clouds.anisotropy);
+            var cloudNoiseParameters = new Vector4(
+                clouds.noiseScale,
+                clouds.noiseSeed,
+                (int)clouds.multipleScatteringMode,
+                clouds.multipleScatteringStrength);
             var flags = (int)m_AtmosphereState.flags;
             var hasSun = m_AtmosphereState.hasSun ? 1 : 0;
 
@@ -1354,6 +1376,15 @@ namespace VividRP.Runtime.RenderPass.Core
                 AtmosphereSunIlluminanceId,
                 sunIlluminance);
             cmd.SetGlobalInt(AtmosphereHasSunId, hasSun);
+            cmd.SetGlobalVector(
+                CloudLayerParametersId,
+                cloudLayerParameters);
+            cmd.SetGlobalVector(
+                CloudMaterialParametersId,
+                cloudMaterialParameters);
+            cmd.SetGlobalVector(
+                CloudNoiseParametersId,
+                cloudNoiseParameters);
 
             cmd.SetRayTracingIntParam(
                 m_RayTracingShader,
@@ -1407,6 +1438,18 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 AtmosphereHasSunId,
                 hasSun);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                CloudLayerParametersId,
+                cloudLayerParameters);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                CloudMaterialParametersId,
+                cloudMaterialParameters);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                CloudNoiseParametersId,
+                cloudNoiseParameters);
         }
 
         private void PrepareEnvironmentImportanceDistributionFallback()

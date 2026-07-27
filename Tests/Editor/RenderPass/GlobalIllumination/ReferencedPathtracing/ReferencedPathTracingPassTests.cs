@@ -1182,6 +1182,24 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(0.75f));
 
                 var originalSignature = state.signature;
+                var originalOpticalDepthSignature =
+                    state.opticalDepthSignature;
+                lightData.directionalLights[0].color =
+                    new Vector3(200.0f, 180.0f, 160.0f);
+                state = ReferencedPathTracingAtmosphereState.Resolve(
+                    skyData,
+                    skyVolume,
+                    null,
+                    lightData,
+                    settings);
+                Assert.That(
+                    state.signature,
+                    Is.Not.EqualTo(originalSignature));
+                Assert.That(
+                    state.opticalDepthSignature,
+                    Is.EqualTo(originalOpticalDepthSignature));
+                lightData.directionalLights[0].color =
+                    new Vector3(100.0f, 90.0f, 80.0f);
                 skyData.skyHash = 124;
                 state = ReferencedPathTracingAtmosphereState.Resolve(
                     skyData,
@@ -1202,6 +1220,9 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     state.signature,
                     Is.Not.EqualTo(originalSignature));
+                Assert.That(
+                    state.opticalDepthSignature,
+                    Is.Not.EqualTo(originalOpticalDepthSignature));
             }
             finally
             {

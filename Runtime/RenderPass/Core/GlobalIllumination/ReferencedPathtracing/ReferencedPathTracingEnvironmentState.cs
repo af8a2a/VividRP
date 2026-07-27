@@ -382,6 +382,7 @@ namespace VividRP.Runtime.RenderPass.Core
         : IEquatable<ReferencedPathTracingAtmosphereState>
     {
         internal const int ContractVersion = 1;
+        internal const int OpticalDepthContractVersion = 1;
 
         private ReferencedPathTracingAtmosphereState(
             ReferencedPathTracingAtmosphereFlags flags,
@@ -403,6 +404,8 @@ namespace VividRP.Runtime.RenderPass.Core
             this.sunIlluminance = sunIlluminance;
             this.sunAngularDiameter = sunAngularDiameter;
             this.sunShadowStrength = sunShadowStrength;
+            opticalDepthSignature =
+                ComputeOpticalDepthSignature(parameters);
             signature = ComputeSignature(
                 flags,
                 parameters,
@@ -425,6 +428,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal Vector3 sunIlluminance { get; }
         internal float sunAngularDiameter { get; }
         internal float sunShadowStrength { get; }
+        internal ulong opticalDepthSignature { get; }
         internal ulong signature { get; }
 
         internal static ReferencedPathTracingAtmosphereState Resolve(
@@ -704,6 +708,50 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 sunShadowStrength);
+            return hash;
+        }
+
+        private static ulong ComputeOpticalDepthSignature(
+            in ReferencedPathTracingAtmosphereParameters parameters)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                OpticalDepthContractVersion);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereVersion);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereRadialResolution);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereZenithResolution);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereReferenceSampleCount);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                parameters.bottomRadius);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                parameters.topRadius);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                parameters.rayleighScaleHeight);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                parameters.mieScaleHeight);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                parameters.ozoneLayerStart);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                parameters.ozoneLayerWidth);
             return hash;
         }
 

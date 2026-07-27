@@ -637,6 +637,36 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** LUT 与高采样数 reference transmittance 在高度/天顶角测试矩阵中一致。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- `ReferencedPathtracingCommon.hlsl` 已建立独立于 raster sky 的球形大气几何层。
+  Sphere intersection 使用 camera-relative planet-space origin、difference-of-squares
+  与稳定二次根求解，输出 atmosphere entry/exit interval；同一查询还会裁剪到可选
+  planet-ground virtual hit，并正确区分位于 ground/top boundary 上的 inward/outward ray。
+- Rayleigh 与 Mie 使用各自 scale height 的指数密度，ozone 使用由 physical sky
+  minimum altitude/width 定义的三角密度层。公共接口同时提供 point density、
+  density-column optical depth、RGB extinction transmittance 与后续 A2 可复用的
+  reference ray-march 基础。
+- 现有 `EnvironmentImportanceDistribution` buffer 保持 HDRI header、marginal CDF 与
+  conditional CDF 的 version/offset 不变，在尾部追加 versioned atmosphere transport
+  区域。LUT 为 `128 zenith × 64 radial × float3`，存储 Rayleigh/Mie/ozone 的米制
+  density-column；radial 轴使用 quadratic-height mapping，zenith 轴在 geometric
+  horizon 两侧独立参数化，避免插值跨越 ground discontinuity。
+- `ReferencedPathTracingEnvironmentSamplingPass` 在 Reference Atmosphere active 且
+  radial-density signature 变化时，以 256-step midpoint reference integration 重建
+  optical-depth LUT。它复用已经连接到 PT pass 的 buffer 与 RenderGraph dependency，
+  因此不增加 graph port，也不让 A1 重新依赖 raster atmosphere LUT/cubemap。
+- Shader 侧已提供 LUT segment transmittance、可配置 sample count 的 reference
+  ray-marched transmittance，以及两者的 relative-error compare 接口。A1 只冻结几何
+  与透射层；camera/surface/shadow/BSDF-miss 上的实际介质应用仍留给 A2，避免在
+  participating-medium path integration 完成前产生部分天空辐亮度。
+- 新增地球尺度数值测试：验证离地 2 m 的 ground hit 与水平 atmosphere exit 精度，
+  并在 8 个高度层、7 个 horizon-relative zenith 方向上比较 LUT 与 4096-step
+  reference 的最终 RGB transmittance，absolute-error gate 为 2%。Unity 6000.7
+  当前 Editor 会话已完成 Runtime/Editor assembly 编译；新增 compute kernel 可加载，
+  PT ray-tracing shader compiler message 为 0。由于 Editor 正在运行，按仓库约束未启动
+  batch EditMode Tests。
+
 #### A2: Participating-medium Path Integration
 
 - 在 path loop 中加入 atmosphere interval、free-flight/delta tracking 和 phase-function sampling。

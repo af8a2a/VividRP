@@ -1,5 +1,6 @@
 #pragma kernel ComputeConditional
 #pragma kernel ComputeMarginal
+#pragma kernel ComputeAtmosphereOpticalDepth
 #pragma only_renderers d3d11 vulkan metal
 
 #define REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD
@@ -168,5 +169,64 @@ void ComputeMarginal(uint3 dispatchThreadId : SV_DispatchThreadID)
         _ReferencedEnvironmentImportanceDistribution[
             REFERENCED_ENVIRONMENT_VERSION_OFFSET] =
             REFERENCED_ENVIRONMENT_DISTRIBUTION_VERSION;
+    }
+}
+
+[numthreads(8, 8, 1)]
+void ComputeAtmosphereOpticalDepth(
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 coordinate = dispatchThreadId.xy;
+    if (coordinate.x
+            >= REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION
+        || coordinate.y
+            >= REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION)
+    {
+        return;
+    }
+
+    float2 uv =
+        (coordinate + 0.5)
+        / float2(
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION,
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION);
+    float2 radialCosine =
+        ReferencedPathtracingUnmapAtmosphereOpticalDepthLut(uv);
+    float radialDistance = radialCosine.x;
+    float cosineZenith = radialCosine.y;
+    float sineZenith =
+        sqrt(saturate(1.0 - cosineZenith * cosineZenith));
+    float3 rayOriginPS = float3(0.0, radialDistance, 0.0);
+    float3 rayDirectionPS =
+        float3(sineZenith, cosineZenith, 0.0);
+    float3 densityOpticalDepth =
+        ReferencedPathtracingIntegrateAtmosphereDensityReference(
+            rayOriginPS,
+            rayDirectionPS,
+            3.402823466e+38,
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT);
+
+    uint address =
+        ReferencedPathtracingGetAtmosphereOpticalDepthAddress(
+            coordinate);
+    _ReferencedEnvironmentImportanceDistribution[address] =
+        densityOpticalDepth.x;
+    _ReferencedEnvironmentImportanceDistribution[address + 1u] =
+        densityOpticalDepth.y;
+    _ReferencedEnvironmentImportanceDistribution[address + 2u] =
+        densityOpticalDepth.z;
+
+    if (all(coordinate == 0u))
+    {
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VALID_OFFSET] = 1.0;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION_OFFSET] =
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_SAMPLE_COUNT_OFFSET] =
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT;
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RESERVED_OFFSET] = 0.0;
     }
 }

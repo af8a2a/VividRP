@@ -98,7 +98,32 @@ static const float kReferencedPathtracingPi = 3.14159265358979323846;
 #define REFERENCED_ENVIRONMENT_CONDITIONAL_OFFSET \
     (REFERENCED_ENVIRONMENT_MARGINAL_OFFSET \
         + REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION)
+#define REFERENCED_ENVIRONMENT_ELEMENT_COUNT \
+    (REFERENCED_ENVIRONMENT_CONDITIONAL_OFFSET \
+        + REFERENCED_ENVIRONMENT_CONDITIONAL_RESOLUTION \
+        * REFERENCED_ENVIRONMENT_MARGINAL_RESOLUTION)
 #define REFERENCED_ENVIRONMENT_MIN_LUMINANCE 1e-12
+
+// A1 appends a density-column LUT after the frozen HDRI CDF layout. Each texel
+// stores Rayleigh, Mie, and ozone path lengths in meters; extinction remains a
+// runtime coefficient so A2 can reuse the same transport contract.
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION 1
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_HEADER_ELEMENT_COUNT 4u
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VALID_OFFSET \
+    REFERENCED_ENVIRONMENT_ELEMENT_COUNT
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION_OFFSET \
+    (REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VALID_OFFSET + 1u)
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_SAMPLE_COUNT_OFFSET \
+    (REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION_OFFSET + 1u)
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RESERVED_OFFSET \
+    (REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_SAMPLE_COUNT_OFFSET + 1u)
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION 64u
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION 128u
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_CHANNEL_COUNT 3u
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_DATA_OFFSET \
+    (REFERENCED_ENVIRONMENT_ELEMENT_COUNT \
+        + REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_HEADER_ELEMENT_COUNT)
+#define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT 256u
 
 #if defined(REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD)
 RWStructuredBuffer<float> _ReferencedEnvironmentImportanceDistribution;
@@ -117,6 +142,600 @@ bool ReferencedPathtracingHasReferenceAtmosphere()
     return _ReferencedEnvironmentMode
             == kReferencedEnvironmentModeReferenceAtmosphere
         && (_ReferencedAtmosphereFlags & kReferencedAtmosphereFlagActive) != 0;
+}
+
+struct ReferencedPathtracingAtmosphereRayInterval
+{
+    float entryDistance;
+    float exitDistance;
+    float groundDistance;
+    uint intersectsAtmosphere;
+    uint hitsGround;
+};
+
+float ReferencedPathtracingDifferenceOfSquares(float a, float b)
+{
+    return (a - b) * (a + b);
+}
+
+bool ReferencedPathtracingIntersectAtmosphereSphere(
+    float3 rayOriginPS,
+    float3 rayDirectionPS,
+    float sphereRadius,
+    out float2 intersection)
+{
+    intersection = -1.0;
+    float directionLengthSquared =
+        dot(rayDirectionPS, rayDirectionPS);
+    float radialDistanceSquared =
+        dot(rayOriginPS, rayOriginPS);
+    if (directionLengthSquared <= 1e-12
+        || radialDistanceSquared <= 1e-12
+        || sphereRadius <= 0.0
+        || isnan(directionLengthSquared)
+        || isinf(directionLengthSquared)
+        || isnan(radialDistanceSquared)
+        || isinf(radialDistanceSquared))
+    {
+        return false;
+    }
+
+    float3 direction =
+        rayDirectionPS * rsqrt(directionLengthSquared);
+    float radialDistance = sqrt(radialDistanceSquared);
+    float b = dot(rayOriginPS, direction);
+    float c = ReferencedPathtracingDifferenceOfSquares(
+        radialDistance,
+        sphereRadius);
+    float discriminant = b * b - c;
+    if (discriminant < 0.0)
+        return false;
+
+    float rootDiscriminant = sqrt(max(discriminant, 0.0));
+    float q = -b
+        - (b >= 0.0 ? rootDiscriminant : -rootDiscriminant);
+    float first;
+    float second;
+    if (abs(q) > 1e-8)
+    {
+        first = q;
+        second = c / q;
+    }
+    else
+    {
+        first = -b - rootDiscriminant;
+        second = -b + rootDiscriminant;
+    }
+
+    intersection = first <= second
+        ? float2(first, second)
+        : float2(second, first);
+    return !any(isnan(intersection))
+        && !any(isinf(intersection));
+}
+
+bool ReferencedPathtracingIntersectAtmospherePlanetSpace(
+    float3 rayOriginPS,
+    float3 rayDirectionPS,
+    float maximumDistance,
+    out ReferencedPathtracingAtmosphereRayInterval interval)
+{
+    interval = (ReferencedPathtracingAtmosphereRayInterval)0;
+    interval.groundDistance = -1.0;
+
+    float bottomRadius =
+        _ReferencedAtmospherePlanetCenterBottomRadius.w;
+    float topRadius =
+        _ReferencedAtmosphereTopRadiusMieAnisotropy.x;
+    float radialDistance = length(rayOriginPS);
+    float directionLengthSquared =
+        dot(rayDirectionPS, rayDirectionPS);
+    if (bottomRadius <= 0.0
+        || topRadius <= bottomRadius
+        || radialDistance < bottomRadius - 0.01
+        || directionLengthSquared <= 1e-12)
+    {
+        return false;
+    }
+
+    float3 direction =
+        rayDirectionPS * rsqrt(directionLengthSquared);
+    float2 atmosphereIntersection;
+    if (!ReferencedPathtracingIntersectAtmosphereSphere(
+            rayOriginPS,
+            direction,
+            topRadius,
+            atmosphereIntersection)
+        || atmosphereIntersection.y < 0.0)
+    {
+        return false;
+    }
+
+    float entryDistance = max(atmosphereIntersection.x, 0.0);
+    float exitDistance = min(
+        atmosphereIntersection.y,
+        max(maximumDistance, 0.0));
+    if (exitDistance < entryDistance)
+        return false;
+
+    float boundaryTolerance = max(bottomRadius * 1e-7, 0.01);
+    float radialDirection = dot(rayOriginPS, direction);
+    bool startsOnGroundTowardPlanet =
+        radialDistance <= bottomRadius + boundaryTolerance
+        && radialDirection < 0.0;
+    float groundDistance =
+        startsOnGroundTowardPlanet ? 0.0 : -1.0;
+
+    if (!startsOnGroundTowardPlanet)
+    {
+        float2 groundIntersection;
+        if (ReferencedPathtracingIntersectAtmosphereSphere(
+                rayOriginPS,
+                direction,
+                bottomRadius,
+                groundIntersection))
+        {
+            if (groundIntersection.x >= entryDistance
+                && groundIntersection.x >= 0.0)
+            {
+                groundDistance = groundIntersection.x;
+            }
+            else if (groundIntersection.y >= entryDistance
+                && groundIntersection.y >= 0.0
+                && radialDistance > bottomRadius + boundaryTolerance)
+            {
+                groundDistance = groundIntersection.y;
+            }
+        }
+    }
+
+    bool hitsGround =
+        groundDistance >= entryDistance
+        && groundDistance <= exitDistance;
+    if (hitsGround)
+        exitDistance = groundDistance;
+
+    interval.entryDistance = entryDistance;
+    interval.exitDistance = exitDistance;
+    interval.groundDistance = hitsGround
+        ? groundDistance
+        : -1.0;
+    interval.intersectsAtmosphere = 1u;
+    interval.hitsGround = hitsGround ? 1u : 0u;
+    return true;
+}
+
+bool ReferencedPathtracingIntersectAtmosphere(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    out ReferencedPathtracingAtmosphereRayInterval interval)
+{
+    float3 rayOriginPS =
+        rayOriginWS
+        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
+    return ReferencedPathtracingIntersectAtmospherePlanetSpace(
+        rayOriginPS,
+        rayDirectionWS,
+        maximumDistance,
+        interval);
+}
+
+float ReferencedPathtracingAtmosphereHorizonCosine(
+    float radialDistance)
+{
+    float bottomRadius =
+        _ReferencedAtmospherePlanetCenterBottomRadius.w;
+    float radiusRatio =
+        bottomRadius / max(radialDistance, bottomRadius);
+    return -sqrt(saturate(1.0 - radiusRatio * radiusRatio));
+}
+
+float2 ReferencedPathtracingMapAtmosphereOpticalDepthLut(
+    float radialDistance,
+    float cosineZenith)
+{
+    float bottomRadius =
+        _ReferencedAtmospherePlanetCenterBottomRadius.w;
+    float topRadius =
+        _ReferencedAtmosphereTopRadiusMieAnisotropy.x;
+    float atmosphereDepth = max(topRadius - bottomRadius, 1.0);
+    float normalizedHeight = saturate(
+        (radialDistance - bottomRadius) / atmosphereDepth);
+    float v = sqrt(normalizedHeight);
+
+    float horizonCosine =
+        ReferencedPathtracingAtmosphereHorizonCosine(
+            radialDistance);
+    bool aboveHorizon = cosineZenith >= horizonCosine;
+    float denominator = aboveHorizon
+        ? max(1.0 - horizonCosine, 1e-6)
+        : max(1.0 + horizonCosine, 1e-6);
+    float horizonDistance = aboveHorizon
+        ? max(cosineZenith - horizonCosine, 0.0)
+        : max(horizonCosine - cosineZenith, 0.0);
+    float mappedCosine = sqrt(saturate(
+        horizonDistance / denominator));
+    float u = aboveHorizon
+        ? 0.5 + 0.5 * mappedCosine
+        : 0.5 - 0.5 * mappedCosine;
+
+    float2 inverseResolution = rcp(float2(
+        REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION,
+        REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION));
+    float halfTexelU = 0.5 * inverseResolution.x;
+    u = aboveHorizon
+        ? clamp(u, 0.5 + halfTexelU, 1.0 - halfTexelU)
+        : clamp(u, halfTexelU, 0.5 - halfTexelU);
+    v = clamp(v, 0.5 * inverseResolution.y, 1.0 - 0.5 * inverseResolution.y);
+    return float2(u, v);
+}
+
+float2 ReferencedPathtracingUnmapAtmosphereOpticalDepthLut(
+    float2 uv)
+{
+    float bottomRadius =
+        _ReferencedAtmospherePlanetCenterBottomRadius.w;
+    float topRadius =
+        _ReferencedAtmosphereTopRadiusMieAnisotropy.x;
+    float atmosphereDepth = max(topRadius - bottomRadius, 1.0);
+    float radialDistance =
+        bottomRadius + uv.y * uv.y * atmosphereDepth;
+    float horizonCosine =
+        ReferencedPathtracingAtmosphereHorizonCosine(
+            radialDistance);
+    float mappedCosine = uv.x * 2.0 - 1.0;
+    float hemisphereSign = mappedCosine >= 0.0 ? 1.0 : -1.0;
+    float cosineZenith =
+        horizonCosine
+        + hemisphereSign
+        * mappedCosine
+        * mappedCosine
+        * (1.0 - hemisphereSign * horizonCosine);
+    return float2(
+        radialDistance,
+        clamp(cosineZenith, -1.0, 1.0));
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereDensity(
+    float radialDistance)
+{
+    float bottomRadius =
+        _ReferencedAtmospherePlanetCenterBottomRadius.w;
+    float height = max(radialDistance - bottomRadius, 0.0);
+    float rayleighScaleHeight = max(
+        _ReferencedAtmosphereRayleighScattering.w,
+        1.0);
+    float mieScaleHeight = max(
+        _ReferencedAtmosphereMieScattering.w,
+        1.0);
+    float rayleighDensity =
+        exp(-height / rayleighScaleHeight);
+    float mieDensity =
+        exp(-height / mieScaleHeight);
+
+    float ozoneLayerStart =
+        _ReferencedAtmosphereOzoneLayer.x;
+    float ozoneLayerWidth = max(
+        _ReferencedAtmosphereOzoneLayer.y,
+        1.0);
+    float ozoneCoordinate =
+        (radialDistance - ozoneLayerStart)
+        / ozoneLayerWidth;
+    float ozoneDensity = saturate(
+        1.0 - abs(ozoneCoordinate * 2.0 - 1.0));
+    return float3(
+        rayleighDensity,
+        mieDensity,
+        ozoneDensity);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereExtinction(
+    float radialDistance)
+{
+    float3 density =
+        ReferencedPathtracingEvaluateAtmosphereDensity(
+            radialDistance);
+    return max(
+        density.x
+            * max(_ReferencedAtmosphereRayleighExtinction.rgb, 0.0)
+        + density.y
+            * max(_ReferencedAtmosphereMieExtinction.rgb, 0.0)
+        + density.z
+            * max(_ReferencedAtmosphereOzoneExtinction.rgb, 0.0),
+        0.0);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereScattering(
+    float radialDistance)
+{
+    float3 density =
+        ReferencedPathtracingEvaluateAtmosphereDensity(
+            radialDistance);
+    return max(
+        density.x
+            * max(_ReferencedAtmosphereRayleighScattering.rgb, 0.0)
+        + density.y
+            * max(_ReferencedAtmosphereMieScattering.rgb, 0.0),
+        0.0);
+}
+
+float3 ReferencedPathtracingIntegrateAtmosphereDensityReference(
+    float3 rayOriginPS,
+    float3 rayDirectionPS,
+    float maximumDistance,
+    uint sampleCount)
+{
+    ReferencedPathtracingAtmosphereRayInterval interval;
+    if (!ReferencedPathtracingIntersectAtmospherePlanetSpace(
+            rayOriginPS,
+            rayDirectionPS,
+            maximumDistance,
+            interval))
+    {
+        return 0.0;
+    }
+
+    float segmentLength =
+        max(interval.exitDistance - interval.entryDistance, 0.0);
+    if (segmentLength <= 0.0)
+        return 0.0;
+
+    float3 direction = normalize(rayDirectionPS);
+    sampleCount = clamp(sampleCount, 1u, 4096u);
+    float stepLength = segmentLength / sampleCount;
+    float3 densityOpticalDepth = 0.0;
+    [loop]
+    for (uint sampleIndex = 0u;
+        sampleIndex < sampleCount;
+        ++sampleIndex)
+    {
+        float sampleDistance =
+            interval.entryDistance
+            + (sampleIndex + 0.5) * stepLength;
+        float radialDistance = length(
+            rayOriginPS + direction * sampleDistance);
+        densityOpticalDepth +=
+            ReferencedPathtracingEvaluateAtmosphereDensity(
+                radialDistance);
+    }
+
+    return max(densityOpticalDepth * stepLength, 0.0);
+}
+
+uint ReferencedPathtracingGetAtmosphereOpticalDepthAddress(
+    uint2 coordinate)
+{
+    uint texelIndex =
+        coordinate.y
+            * REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION
+        + coordinate.x;
+    return REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_DATA_OFFSET
+        + texelIndex
+            * REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_CHANNEL_COUNT;
+}
+
+float3 ReferencedPathtracingReadAtmosphereOpticalDepth(
+    uint2 coordinate)
+{
+    uint address =
+        ReferencedPathtracingGetAtmosphereOpticalDepthAddress(
+            coordinate);
+    return float3(
+        _ReferencedEnvironmentImportanceDistribution[address],
+        _ReferencedEnvironmentImportanceDistribution[address + 1u],
+        _ReferencedEnvironmentImportanceDistribution[address + 2u]);
+}
+
+bool ReferencedPathtracingHasAtmosphereOpticalDepthLut()
+{
+    float valid =
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VALID_OFFSET];
+    float version =
+        _ReferencedEnvironmentImportanceDistribution[
+            REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION_OFFSET];
+    return ReferencedPathtracingHasReferenceAtmosphere()
+        && valid > 0.5
+        && abs(
+            version
+            - REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_VERSION) < 0.5;
+}
+
+float3 ReferencedPathtracingSampleAtmosphereOpticalDepthLut(
+    float3 positionPS,
+    float3 directionPS)
+{
+    if (!ReferencedPathtracingHasAtmosphereOpticalDepthLut())
+        return 0.0;
+
+    float radialDistance = length(positionPS);
+    float directionLengthSquared =
+        dot(directionPS, directionPS);
+    if (radialDistance <= 0.0
+        || directionLengthSquared <= 1e-12)
+    {
+        return 0.0;
+    }
+
+    float3 direction =
+        directionPS * rsqrt(directionLengthSquared);
+    ReferencedPathtracingAtmosphereRayInterval boundaryInterval;
+    if (!ReferencedPathtracingIntersectAtmospherePlanetSpace(
+            positionPS,
+            direction,
+            3.402823466e+38,
+            boundaryInterval)
+        || boundaryInterval.exitDistance <= 0.01)
+    {
+        return 0.0;
+    }
+
+    float cosineZenith =
+        dot(positionPS, direction) / radialDistance;
+    float2 uv =
+        ReferencedPathtracingMapAtmosphereOpticalDepthLut(
+            radialDistance,
+            cosineZenith);
+    float2 resolution = float2(
+        REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ZENITH_RESOLUTION,
+        REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_RADIAL_RESOLUTION);
+    float2 texelCoordinate = uv * resolution - 0.5;
+    int2 lowerCoordinate = (int2)floor(texelCoordinate);
+    float2 interpolation = frac(texelCoordinate);
+    uint2 lower = (uint2)clamp(
+        lowerCoordinate,
+        int2(0, 0),
+        (int2)resolution - 1);
+    uint2 upper = min(
+        lower + 1u,
+        (uint2)resolution - 1u);
+
+    float3 lowerRow = lerp(
+        ReferencedPathtracingReadAtmosphereOpticalDepth(
+            uint2(lower.x, lower.y)),
+        ReferencedPathtracingReadAtmosphereOpticalDepth(
+            uint2(upper.x, lower.y)),
+        interpolation.x);
+    float3 upperRow = lerp(
+        ReferencedPathtracingReadAtmosphereOpticalDepth(
+            uint2(lower.x, upper.y)),
+        ReferencedPathtracingReadAtmosphereOpticalDepth(
+            uint2(upper.x, upper.y)),
+        interpolation.x);
+    return max(
+        lerp(lowerRow, upperRow, interpolation.y),
+        0.0);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthLut(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance)
+{
+    ReferencedPathtracingAtmosphereRayInterval interval;
+    if (!ReferencedPathtracingIntersectAtmosphere(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            interval))
+    {
+        return 0.0;
+    }
+
+    float3 direction = normalize(rayDirectionWS);
+    float3 originPS =
+        rayOriginWS
+        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
+    float3 startPS =
+        originPS + direction * interval.entryDistance;
+    float3 endPS =
+        originPS + direction * interval.exitDistance;
+    float3 startOpticalDepth =
+        ReferencedPathtracingSampleAtmosphereOpticalDepthLut(
+            startPS,
+            direction);
+    float3 endOpticalDepth =
+        ReferencedPathtracingSampleAtmosphereOpticalDepthLut(
+            endPS,
+            direction);
+    return max(startOpticalDepth - endOpticalDepth, 0.0);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReference(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    uint sampleCount)
+{
+    float3 originPS =
+        rayOriginWS
+        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz;
+    return ReferencedPathtracingIntegrateAtmosphereDensityReference(
+        originPS,
+        rayDirectionWS,
+        maximumDistance,
+        sampleCount);
+}
+
+float3 ReferencedPathtracingAtmosphereTransmittanceFromDensityDepth(
+    float3 densityOpticalDepth)
+{
+    float3 extinctionOpticalDepth =
+        densityOpticalDepth.x
+            * max(_ReferencedAtmosphereRayleighExtinction.rgb, 0.0)
+        + densityOpticalDepth.y
+            * max(_ReferencedAtmosphereMieExtinction.rgb, 0.0)
+        + densityOpticalDepth.z
+            * max(_ReferencedAtmosphereOzoneExtinction.rgb, 0.0);
+    return exp(-min(max(extinctionOpticalDepth, 0.0), 80.0));
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceLut(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance)
+{
+    return ReferencedPathtracingAtmosphereTransmittanceFromDensityDepth(
+        ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthLut(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance));
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceReference(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    uint sampleCount)
+{
+    return ReferencedPathtracingAtmosphereTransmittanceFromDensityDepth(
+        ReferencedPathtracingEvaluateAtmosphereSegmentOpticalDepthReference(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            sampleCount));
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittance(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance)
+{
+    if (ReferencedPathtracingHasAtmosphereOpticalDepthLut())
+    {
+        return ReferencedPathtracingEvaluateAtmosphereTransmittanceLut(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance);
+    }
+
+    return ReferencedPathtracingEvaluateAtmosphereTransmittanceReference(
+        rayOriginWS,
+        rayDirectionWS,
+        maximumDistance,
+        REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceRelativeError(
+    float3 rayOriginWS,
+    float3 rayDirectionWS,
+    float maximumDistance,
+    uint referenceSampleCount)
+{
+    float3 lutTransmittance =
+        ReferencedPathtracingEvaluateAtmosphereTransmittanceLut(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance);
+    float3 referenceTransmittance =
+        ReferencedPathtracingEvaluateAtmosphereTransmittanceReference(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            referenceSampleCount);
+    return abs(lutTransmittance - referenceTransmittance)
+        / max(referenceTransmittance, 1e-4);
 }
 
 float ReferencedPathtracingEnvironmentLuminance(float3 radiance)

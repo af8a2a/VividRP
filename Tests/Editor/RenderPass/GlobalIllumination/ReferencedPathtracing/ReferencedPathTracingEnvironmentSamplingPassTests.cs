@@ -52,7 +52,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Layout_PacksMetadataMarginalAndConditionalCdfsWithoutOverlap()
+        public void Layout_PacksHdriCdfsAndAtmosphereOpticalDepthWithoutOverlap()
         {
             Assert.That(
                 ReferencedPathTracingEnvironmentImportanceLayout.MarginalOffset,
@@ -64,7 +64,8 @@ namespace VividRP.Editor.Tests
                     ReferencedPathTracingEnvironmentImportanceLayout.MarginalOffset
                     + ReferencedPathTracingEnvironmentImportanceLayout.MarginalResolution));
             Assert.That(
-                ReferencedPathTracingEnvironmentImportanceLayout.ElementCount,
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .EnvironmentElementCount,
                 Is.EqualTo(
                     ReferencedPathTracingEnvironmentImportanceLayout.ConditionalOffset
                     + ReferencedPathTracingEnvironmentImportanceLayout.ConditionalResolution
@@ -73,6 +74,90 @@ namespace VividRP.Editor.Tests
                 ReferencedPathTracingEnvironmentImportanceLayout.ConditionalResolution,
                 Is.EqualTo(
                     ReferencedPathTracingEnvironmentImportanceLayout.MarginalResolution * 2));
+            Assert.That(
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereValidOffset,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .EnvironmentElementCount));
+            Assert.That(
+                ReferencedPathTracingEnvironmentImportanceLayout
+                    .AtmosphereDataOffset,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .EnvironmentElementCount
+                    + ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereHeaderElementCount));
+            Assert.That(
+                ReferencedPathTracingEnvironmentImportanceLayout.ElementCount,
+                Is.EqualTo(
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereDataOffset
+                    + ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereRadialResolution
+                    * ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereZenithResolution
+                    * ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereChannelCount));
+        }
+
+        [Test]
+        public void ShaderContract_BuildsReferenceAtmosphereOpticalDepthLut()
+        {
+            var packageInfo =
+                UnityEditor.PackageManager.PackageInfo.FindForAssembly(
+                    typeof(
+                        ReferencedPathTracingEnvironmentSamplingPass)
+                        .Assembly);
+            Assert.That(packageInfo, Is.Not.Null);
+            var packageRoot = packageInfo.resolvedPath;
+            var computeSource = System.IO.File.ReadAllText(
+                System.IO.Path.Combine(
+                    packageRoot,
+                    "Shaders",
+                    "Core",
+                    "Private",
+                    "GlobalIllumination",
+                    "ReferencedPathtracing",
+                    "ReferencedPathtracingEnvironmentSampling.compute"));
+            var commonSource = System.IO.File.ReadAllText(
+                System.IO.Path.Combine(
+                    packageRoot,
+                    "Shaders",
+                    "Core",
+                    "Private",
+                    "GlobalIllumination",
+                    "ReferencedPathtracing",
+                    "ReferencedPathtracingCommon.hlsl"));
+
+            Assert.That(
+                computeSource,
+                Does.Contain(
+                    "#pragma kernel ComputeAtmosphereOpticalDepth"));
+            Assert.That(
+                computeSource,
+                Does.Contain(
+                    "ReferencedPathtracingIntegrateAtmosphereDensityReference"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingIntersectAtmospherePlanetSpace"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateAtmosphereDensity"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateAtmosphereTransmittanceLut"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateAtmosphereTransmittanceReference"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateAtmosphereTransmittanceRelativeError"));
         }
 
         [Test]

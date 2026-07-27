@@ -377,6 +377,37 @@ float3 ReferencedPathtracingEvaluateAtmosphereDirectWeight(
         / max(mediumSample.heroScattering, 1e-20);
 }
 
+float ReferencedPathtracingEvaluateAtmospherePhasePdf(
+    ReferencedPathtracingAtmosphereMediumSample mediumSample,
+    float3 currentDirectionWS,
+    float3 sampledDirectionWS)
+{
+    if (mediumSample.eventType
+            != REFERENCED_ATMOSPHERE_MEDIUM_EVENT_SCATTER
+        || mediumSample.heroScattering <= 1e-20)
+    {
+        return 0.0;
+    }
+
+    float cosineTheta = dot(
+        normalize(currentDirectionWS),
+        normalize(sampledDirectionWS));
+    float3 phaseScattering =
+        ReferencedPathtracingEvaluateAtmospherePhaseScattering(
+            mediumSample,
+            cosineTheta);
+    float heroPhaseScattering =
+        ReferencedPathtracingGetAtmosphereChannel(
+            phaseScattering,
+            mediumSample.heroChannel);
+    float phasePdf =
+        heroPhaseScattering
+        / max(mediumSample.heroScattering, 1e-20);
+    return !isnan(phasePdf) && !isinf(phasePdf)
+        ? max(phasePdf, 0.0)
+        : 0.0;
+}
+
 bool ReferencedPathtracingSampleAtmospherePhase(
     ReferencedPathtracingAtmosphereMediumSample mediumSample,
     float3 currentDirectionWS,
@@ -479,6 +510,130 @@ bool ReferencedPathtracingHasAtmosphereSun()
             _ReferencedAtmosphereSunDirection.xyz,
             _ReferencedAtmosphereSunDirection.xyz) > 1e-8
         && any(_ReferencedAtmosphereSunIlluminance.rgb > 0.0);
+}
+
+struct ReferencedPathtracingAtmosphereSunSample
+{
+    float3 directionWS;
+    float solidAnglePdf;
+    uint isDelta;
+    uint valid;
+};
+
+bool ReferencedPathtracingSampleAtmosphereSun(
+    float2 randomValue,
+    out ReferencedPathtracingAtmosphereSunSample sunSample)
+{
+    sunSample = (ReferencedPathtracingAtmosphereSunSample)0;
+    if (!ReferencedPathtracingHasAtmosphereSun())
+        return false;
+
+    float3 centerDirectionWS =
+        normalize(_ReferencedAtmosphereSunDirection.xyz);
+    ReferencedPathtracingSampleDirectionalLight(
+        centerDirectionWS,
+        2.0 * max(_ReferencedAtmosphereSunDirection.w, 0.0),
+        randomValue,
+        sunSample.directionWS,
+        sunSample.solidAnglePdf,
+        sunSample.isDelta);
+    sunSample.valid =
+        dot(sunSample.directionWS, sunSample.directionWS) > 1e-8
+            ? 1u
+            : 0u;
+    return sunSample.valid != 0u;
+}
+
+bool ReferencedPathtracingEvaluateAtmosphereSunDiskRadiance(
+    float3 directionWS,
+    out float3 radiance,
+    out float solidAnglePdf)
+{
+    radiance = 0.0;
+    solidAnglePdf = 0.0;
+    if (!ReferencedPathtracingHasAtmosphereSun())
+        return false;
+
+    float3 centerDirectionWS =
+        normalize(_ReferencedAtmosphereSunDirection.xyz);
+    if (!ReferencedPathtracingEvaluateDirectionalLightPdf(
+            centerDirectionWS,
+            2.0 * max(_ReferencedAtmosphereSunDirection.w, 0.0),
+            directionWS,
+            solidAnglePdf))
+    {
+        return false;
+    }
+
+    // The directional-light contract stores irradiance/illuminance integrated
+    // over the disk. A uniform cone therefore has L = E / omega = E * p_omega.
+    radiance =
+        max(_ReferencedAtmosphereSunIlluminance.rgb, 0.0)
+        * solidAnglePdf;
+    return solidAnglePdf > 0.0
+        && !any(isnan(radiance))
+        && !any(isinf(radiance))
+        && any(radiance > 0.0);
+}
+
+float3 ReferencedPathtracingEvaluateAtmosphereGroundDirectWeight(
+    float3 groundNormalWS,
+    float3 lightDirectionWS)
+{
+    float cosineLight = max(
+        dot(
+            normalize(groundNormalWS),
+            normalize(lightDirectionWS)),
+        0.0);
+    return saturate(_ReferencedAtmosphereGroundAlbedo.rgb)
+        * (cosineLight / kReferencedPathtracingPi);
+}
+
+bool ReferencedPathtracingSampleAtmosphereGround(
+    float3 groundNormalWS,
+    float2 randomValue,
+    out float3 sampledDirectionWS,
+    out float3 throughputWeight,
+    out float groundPdf)
+{
+    sampledDirectionWS = 0.0;
+    throughputWeight = 0.0;
+    groundPdf = 0.0;
+
+    float normalLengthSquared =
+        dot(groundNormalWS, groundNormalWS);
+    if (normalLengthSquared <= 1e-8)
+        return false;
+
+    float3 normalWS =
+        groundNormalWS * rsqrt(normalLengthSquared);
+    float radialSample = sqrt(saturate(randomValue.x));
+    float azimuth =
+        2.0
+        * kReferencedPathtracingPi
+        * saturate(randomValue.y);
+    float sineAzimuth;
+    float cosineAzimuth;
+    sincos(azimuth, sineAzimuth, cosineAzimuth);
+    float3 basisX;
+    float3 basisY;
+    ReferencedPathtracingBuildDirectionalBasis(
+        normalWS,
+        basisX,
+        basisY);
+    float cosineTheta =
+        sqrt(max(1.0 - radialSample * radialSample, 0.0));
+    sampledDirectionWS = normalize(
+        basisX * (radialSample * cosineAzimuth)
+        + basisY * (radialSample * sineAzimuth)
+        + normalWS * cosineTheta);
+    groundPdf = cosineTheta / kReferencedPathtracingPi;
+    throughputWeight =
+        saturate(_ReferencedAtmosphereGroundAlbedo.rgb);
+    return groundPdf > 0.0
+        && any(throughputWeight > 0.0)
+        && !any(isnan(sampledDirectionWS))
+        && !any(isinf(sampledDirectionWS));
 }
 
 #endif

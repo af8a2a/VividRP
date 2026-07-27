@@ -271,7 +271,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(2));
+                Is.EqualTo(3));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -284,6 +284,13 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 ReferencedPathTracingSamplingContract.BounceDimensionStride,
                 Is.EqualTo(16));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .AtmosphereSunDimensionOffset,
+                Is.EqualTo(12));
+            Assert.That(
+                ReferencedPathTracingSamplingContract.FutureDimensionOffset,
+                Is.EqualTo(14));
 
             var usedDimensions = new System.Collections.Generic.HashSet<int>();
             for (var bounceIndex = 0;

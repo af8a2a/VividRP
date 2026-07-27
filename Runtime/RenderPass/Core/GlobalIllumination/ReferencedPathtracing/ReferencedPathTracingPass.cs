@@ -45,8 +45,9 @@ namespace VividRP.Runtime.RenderPass.Core
     /// path and samples one canonical next-event candidate from the stable Reference Light List
     /// plus the active HDRI environment at every hit. Environment NEE, finite directional lights,
     /// and BSDF paths are combined with power-heuristic MIS and delta-aware gates. Reference
-    /// Atmosphere mode inserts hero-channel delta tracking, physical phase scattering, and
-    /// segment transmittance before surface or miss evaluation without consuming raster sky data.
+    /// Atmosphere mode inserts hero-channel delta tracking, physical phase scattering, a finite
+    /// solar-disk MIS pair, and a Lambertian virtual planet ground before surface or miss
+    /// evaluation without consuming raster sky data.
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>

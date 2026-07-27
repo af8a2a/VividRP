@@ -82,7 +82,7 @@ namespace VividRP.Editor.Tests
                     "Reference Atmosphere has no emissive skydome"));
             Assert.That(
                 ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(2));
+                Is.EqualTo(3));
         }
 
         [Test]

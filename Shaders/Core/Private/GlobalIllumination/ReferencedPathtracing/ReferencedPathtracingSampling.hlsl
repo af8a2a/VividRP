@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 2
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 3
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -19,7 +19,8 @@ static const uint kReferencedPathtracingNeeDimensionOffset = 3u;
 static const uint kReferencedPathtracingRussianRouletteDimensionOffset = 6u;
 static const uint kReferencedPathtracingStochasticAlphaDimensionOffset = 7u;
 static const uint kReferencedPathtracingVolumeDimensionOffset = 8u;
-static const uint kReferencedPathtracingFutureDimensionOffset = 12u;
+static const uint kReferencedPathtracingAtmosphereSunDimensionOffset = 12u;
+static const uint kReferencedPathtracingFutureDimensionOffset = 14u;
 
 float2 ReferencedPathtracingSampleConcentricDisk(float2 sample)
 {

@@ -721,6 +721,39 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** 不与 HDRI 太阳盘或额外 skydome double count；太阳、天空和地面能量单位一致。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- Atmosphere sun 继续以 `VividLightData.mainDirectionalLight` 的物理 RGB
+  illuminance、方向、角直径与 shadow strength 为唯一 source of truth。零角直径保持
+  directional delta event；有限角直径以 uniform solid-angle cone 采样，太阳盘 radiance
+  使用 `L = E / solidAngle`，从而 NEE 的 `Li / pDirection` 与 directional illuminance
+  完全一致。
+- Medium scatter 的 solar NEE 已从 center-direction estimator 升级为有限太阳盘采样。
+  Rayleigh/Mie hero-channel phase PDF 与 sun solid-angle PDF 使用 power heuristic MIS；
+  phase-sampled continuation 命中太阳盘时在 atmosphere exit 补齐 BSDF/phase 一侧
+  estimator。delta sun 只走 NEE，finite sun 同时支持两侧 estimator，并遵循现有
+  `MIS` / `LightOnly` / `BsdfOnly` gate。
+- Camera ray 可以直接观察有限太阳盘，辐亮度应用相同的 atmosphere no-collision
+  transmittance estimator、camera visibility 和 holdout contract；outer space 仍为黑。
+  只有 camera ray 或明确由 atmosphere phase / planet-ground BSDF 产生的方向可以进入
+  atmosphere sun miss evaluation，StandardLit surface 仍由 Reference Light List 的
+  directional segment evaluator 负责，因此不会对同一个主光源重复计数。
+- Virtual planet ground 已成为 Lambert path vertex：使用 physical-sky ground albedo
+  输出 primary albedo/normal/hit-distance AOV，对太阳执行 finite/delta NEE 与 cosine
+  BSDF MIS，并以 cosine hemisphere continuation 把 ground bounce 重新送回 atmosphere
+  delta tracking。由此 ground-sun、ground-atmosphere 与 atmosphere-ground-atmosphere
+  多次散射都参加正常 max-depth、Russian roulette 和 accumulation contract。
+- Shadow contract 增加 virtual ground occlusion。surface、medium 与 ground 的太阳
+  visibility 都先检测 planet intersection，再应用 geometry shadow-strength 和同一
+  atmosphere transmittance，太阳位于局部地平线以下时不再穿透虚拟行星。
+- Path sampling contract 升级到 version 3，在每 bounce 的 offset 12/13 固定保留
+  atmosphere-sun sample，避免与 volume free-flight/phase sample 相关；atmosphere
+  contract 同步升级到 version 3，旧 accumulation/capture 会按版本失配重启。
+- 新增 A3 source-contract、太阳盘 illuminance/radiance、双向 MIS 权重互补与 Lambert
+  ground 能量测试。Unity 6000.7 当前 Editor 会话已完成 Runtime/Editor assembly 编译；
+  `ReferencedPathtracing.raytrace` 强制重导入后的 compiler message 为 0。由于 Editor
+  正在运行，按仓库约束未启动 batch EditMode Tests。
+
 #### A4: Reference Volumetric Clouds
 
 - 在 atmosphere 稳定后再加入 cloud shell intersection、density majorant 和 callable/material sampling 边界。

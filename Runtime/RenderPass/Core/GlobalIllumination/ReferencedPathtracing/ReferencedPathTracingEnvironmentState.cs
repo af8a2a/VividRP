@@ -374,14 +374,14 @@ namespace VividRP.Runtime.RenderPass.Core
     }
 
     /// <summary>
-    /// Resource-independent Phase 2 atmosphere snapshot. A0 captures only physical parameters
-    /// and policy flags; no raster sky cubemap, precomputed LUT, or atmosphere radiance is
-    /// consumed by the reference integrator until the later atmosphere milestones.
+    /// Resource-independent Phase 2 atmosphere snapshot. The contract captures physical
+    /// medium, solar-disk, virtual-ground, and visibility parameters without consuming a raster
+    /// sky cubemap or raster atmosphere radiance.
     /// </summary>
     internal readonly struct ReferencedPathTracingAtmosphereState
         : IEquatable<ReferencedPathTracingAtmosphereState>
     {
-        internal const int ContractVersion = 2;
+        internal const int ContractVersion = 3;
         internal const int OpticalDepthContractVersion = 1;
 
         private ReferencedPathTracingAtmosphereState(

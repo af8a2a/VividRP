@@ -28,8 +28,8 @@ int _ReferencedEnvironmentDebugMode;
 float4 _ReferencedCameraClearColor;
 int _ReferencedCameraSkyEnabled;
 
-// Resource-independent Phase 2 atmosphere snapshot. A0 binds the complete physical
-// contract but intentionally performs no atmosphere radiance evaluation.
+// Resource-independent Phase 2 atmosphere snapshot shared by spherical medium,
+// solar-disk, virtual-ground, and visibility transport.
 int _ReferencedAtmosphereFlags;
 // xyz: planet center in world space, w: bottom radius in meters.
 float4 _ReferencedAtmospherePlanetCenterBottomRadius;
@@ -1209,8 +1209,8 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
                 & kReferencedAtmosphereFlagHoldout) != 0
                 ? 0.0
                 : 1.0;
-        // Reference Atmosphere has no emissive skydome. A2 radiance is
-        // accumulated only at physical scattering events; outer space is black.
+        // Reference Atmosphere has no emissive skydome. A3 evaluates the finite
+        // solar disk separately; outer space itself remains black.
         return float4(0.0, 0.0, 0.0, atmosphereAlpha);
     }
 

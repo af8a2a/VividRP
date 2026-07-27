@@ -381,7 +381,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingAtmosphereState
         : IEquatable<ReferencedPathTracingAtmosphereState>
     {
-        internal const int ContractVersion = 1;
+        internal const int ContractVersion = 2;
         internal const int OpticalDepthContractVersion = 1;
 
         private ReferencedPathTracingAtmosphereState(

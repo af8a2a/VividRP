@@ -676,6 +676,42 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** 无太阳时大气无自发光；启用太阳后天空辐亮度随密度、相函数和观察高度合理变化。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- 新增 `ReferencedPathtracingAtmosphere.hlsl` 作为 PT-only participating-medium
+  transport 层。每个 path segment 先取得 A1 atmosphere/ground interval，再以 RGB
+  三通道等概率 hero-channel、sea-level extinction majorant 和最多 1024 次
+  null-collision step 执行 delta tracking，显式区分 no-collision、scatter、absorb
+  与 tracking-overflow 终态。
+- No-collision 与 real-scatter event 都使用 A1 optical-depth transmittance 计算
+  `T_rgb / T_hero` 权重；scatter continuation 进一步使用
+  `phaseScattering_rgb / phaseScattering_hero`。该谱权重保证对 hero channel 求期望后
+  恢复 RGB transmittance 与 scattering transport，而不是把三个波段压成单一灰度
+  extinction。
+- Rayleigh 使用归一化 `3(1+cos²θ)/(16π)` phase 与解析反演采样；Mie 使用
+  `PhysicallyBasedSkyVolume` anisotropy 驱动的 Henyey-Greenstein phase。Rayleigh/Mie
+  lobe 以 hero-channel local scattering coefficient 组成 mixture，scatter event
+  消耗正常 bounce，参加 max-depth、Russian roulette、throughput、ray cone 与
+  primary denoising AOV contract。
+- Surface trace 仍先求最近几何交点，但 surface/miss shading 前会以其 hit distance
+  裁剪 atmosphere segment。无 medium event 时，camera-to-surface、BSDF miss 与
+  emission/NEE throughput 都先应用 hero-corrected transmittance；所有 surface/area/
+  directional shadow visibility 则应用同一 A1 RGB transmittance，且 medium
+  attenuation 不受 light shadow-strength 开关影响。
+- Reference Atmosphere 不再回退 camera clear-color 作为天空能量：outer space 为黑，
+  无太阳且无其他 emissive transport 时没有自发光。Virtual planet ground 在 A2
+  只终止 path 并执行 camera visibility/holdout alpha；ground albedo/radiance 留给 A3。
+- 为满足 A2 sky-radiance gate，medium scatter event 已使用主 directional light 的
+  physical illuminance 执行 center-direction single-scatter NEE，并同时追踪 geometry
+  shadow 与 atmosphere transmittance。Phase-sampled continuation 当前不会再次命中
+  atmosphere sun emission，因此没有 double count；finite solar disk、phase/light
+  bidirectional MIS、太阳盘 camera visibility 与 ground coupling 仍明确留给 A3。
+- `ReferencedPathTracingAtmosphereState.ContractVersion` 升级到 2。新增测试覆盖 phase
+  normalization、hero-channel RGB estimator identity、medium-before-surface ordering、
+  shadow transmittance 和 no-emissive-skydome contract。Unity 6000.7 当前 Editor
+  会话已完成 Runtime/Editor assembly 编译，PT ray-tracing shader compiler message
+  为 0；由于 Editor 正在运行，按仓库约束未启动 batch EditMode Tests。
+
 #### A3: Sun, Ground and Atmosphere MIS
 
 - 使用 VividRP directional light 的物理 illuminance/角直径契约表示太阳。

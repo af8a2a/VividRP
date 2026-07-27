@@ -4,6 +4,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSampling.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAtmosphere.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
 #if defined(VIVID_REFERENCE_PT_SER)
@@ -205,7 +206,7 @@ float TraceReferencedPathtracingVisibility(
     return visibilityPayload.hit == 0u ? 1.0 : 0.0;
 }
 
-float TraceReferencedPathtracingCandidateVisibility(
+float3 TraceReferencedPathtracingCandidateVisibility(
     float3 positionWS,
     float3 faceNormalWS,
     float3 lightDirectionWS,
@@ -213,15 +214,35 @@ float TraceReferencedPathtracingCandidateVisibility(
     float shadowStrength)
 {
     shadowStrength = saturate(shadowStrength);
-    if (shadowStrength <= 0.0)
-        return 1.0;
+    float tracedVisibility = shadowStrength > 0.0
+        ? TraceReferencedPathtracingVisibility(
+            positionWS,
+            faceNormalWS,
+            lightDirectionWS,
+            lightDistance)
+        : 1.0;
+    float geometryVisibility =
+        lerp(1.0, tracedVisibility, shadowStrength);
 
-    float tracedVisibility = TraceReferencedPathtracingVisibility(
-        positionWS,
-        faceNormalWS,
-        lightDirectionWS,
-        lightDistance);
-    return lerp(1.0, tracedVisibility, shadowStrength);
+    float shadowBias;
+    float3 shadowOriginWS =
+        OffsetReferencedPathtracingRayOrigin(
+            positionWS,
+            faceNormalWS,
+            lightDirectionWS,
+            shadowBias);
+    float3 atmosphereTransmittance = 1.0;
+    if (ReferencedPathtracingHasReferenceAtmosphere())
+    {
+        atmosphereTransmittance =
+            ReferencedPathtracingEvaluateAtmosphereTransmittance(
+                shadowOriginWS,
+                lightDirectionWS,
+                max(
+                    lightDistance - shadowBias,
+                    shadowBias));
+    }
+    return atmosphereTransmittance * geometryVisibility;
 }
 
 void TraceReferencedPathtracingSurface(
@@ -427,6 +448,7 @@ void RayGenReferencedPathtracing()
             (ReferencedPathtracingLightSelectionContext)0;
     float rayConeWidth = 0.0;
     uint primaryHit = 0u;
+    uint primaryAtmosphereHit = 0u;
     uint primaryLobeClass = 0u;
     float primaryViewZ = 1.0;
     float primaryLinearRoughness = 1.0;
@@ -470,6 +492,269 @@ void RayGenReferencedPathtracing()
         // SER is useful around the material-heavy closest-hit path. Shadow rays
         // skip closest-hit shading and retain the lower-overhead standard TraceRay.
         TraceReferencedPathtracingSurface(ray, payload);
+
+        float4 volumeRandom = float4(
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingVolumeDimensionOffset,
+                sampleSeed,
+                pathSamplingMode),
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingVolumeDimensionOffset
+                    + 1u,
+                sampleSeed,
+                pathSamplingMode),
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingVolumeDimensionOffset
+                    + 2u,
+                sampleSeed,
+                pathSamplingMode),
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingVolumeDimensionOffset
+                    + 3u,
+                sampleSeed,
+                pathSamplingMode));
+        float segmentStartDistance = max(ray.TMin, 0.0);
+        float3 atmosphereRayOriginWS =
+            ray.Origin
+            + normalize(ray.Direction) * segmentStartDistance;
+        float atmosphereMaximumDistance = payload.hit != 0u
+            ? max(payload.hitDistance - segmentStartDistance, 0.0)
+            : kReferencedPathtracingInfiniteDistance;
+        ReferencedPathtracingAtmosphereMediumSample
+            atmosphereMediumSample;
+        bool intersectsAtmosphere =
+            ReferencedPathtracingSampleAtmosphereMedium(
+                atmosphereRayOriginWS,
+                ray.Direction,
+                atmosphereMaximumDistance,
+                volumeRandom,
+                atmosphereMediumSample);
+        if (intersectsAtmosphere)
+        {
+            if (atmosphereMediumSample.eventType
+                == REFERENCED_ATMOSPHERE_MEDIUM_EVENT_TRACKING_OVERFLOW)
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
+
+            bool primaryAtmosphereVisible =
+                (_ReferencedAtmosphereFlags
+                    & kReferencedAtmosphereFlagCameraVisible) != 0;
+            bool primaryAtmosphereHoldout =
+                (_ReferencedAtmosphereFlags
+                    & kReferencedAtmosphereFlagHoldout) != 0;
+            if (atmosphereMediumSample.eventType
+                == REFERENCED_ATMOSPHERE_MEDIUM_EVENT_ABSORB)
+            {
+                if (bounceIndex == 0u)
+                {
+                    cameraBackgroundAlpha =
+                        primaryAtmosphereVisible
+                        && !primaryAtmosphereHoldout
+                            ? 1.0
+                            : 0.0;
+                }
+                break;
+            }
+
+            if (atmosphereMediumSample.eventType
+                == REFERENCED_ATMOSPHERE_MEDIUM_EVENT_SCATTER)
+            {
+                bool scatterVisible =
+                    bounceIndex > 0u
+                    || primaryAtmosphereVisible;
+                if (!scatterVisible)
+                    break;
+
+                if (bounceIndex == 0u)
+                {
+                    primaryHit = 1u;
+                    primaryAtmosphereHit = 1u;
+                    primaryLobeClass = 1u;
+                    primaryViewZ = abs(mul(
+                        _ReferencedWorldToView,
+                        float4(
+                            atmosphereMediumSample.positionWS,
+                            1.0)).z);
+                    primaryLinearRoughness = 1.0;
+                    float radialDistance = length(
+                        atmosphereMediumSample.positionWS
+                        - _ReferencedAtmospherePlanetCenterBottomRadius.xyz);
+                    float3 localExtinction =
+                        ReferencedPathtracingEvaluateAtmosphereExtinction(
+                            radialDistance);
+                    primaryDenoisingAlbedo = saturate(
+                        (atmosphereMediumSample.rayleighScattering
+                            + atmosphereMediumSample.mieScattering)
+                        / max(localExtinction, 1e-20));
+                    primaryDenoisingNormalWS =
+                        -normalize(ray.Direction);
+                    diffuseHitDistance =
+                        atmosphereMediumSample.distance
+                        + segmentStartDistance;
+                    cameraBackgroundAlpha =
+                        primaryAtmosphereHoldout ? 0.0 : 1.0;
+                }
+
+                if (ReferencedPathtracingHasAtmosphereSun())
+                {
+                    float3 sunDirectionWS = normalize(
+                        _ReferencedAtmosphereSunDirection.xyz);
+                    float3 atmosphereDirectWeight =
+                        ReferencedPathtracingEvaluateAtmosphereDirectWeight(
+                            atmosphereMediumSample,
+                            ray.Direction,
+                            sunDirectionWS);
+                    float3 sunVisibility =
+                        TraceReferencedPathtracingCandidateVisibility(
+                            atmosphereMediumSample.positionWS,
+                            sunDirectionWS,
+                            sunDirectionWS,
+                            kReferencedPathtracingInfiniteDistance,
+                            _ReferencedAtmosphereSunIlluminance.w);
+                    float3 atmosphereDirectRadiance =
+                        throughput
+                        * atmosphereDirectWeight
+                        * max(
+                            _ReferencedAtmosphereSunIlluminance.rgb,
+                            0.0)
+                        * sunVisibility;
+                    if (IsFiniteReferencedPathtracingRadiance(
+                            atmosphereDirectRadiance)
+                        && !any(atmosphereDirectRadiance < -1e-6))
+                    {
+                        AccumulateReferencedPathtracingMainLightRadiance(
+                            atmosphereDirectRadiance,
+                            1u,
+                            bounceIndex,
+                            primaryLobeClass,
+                            true,
+                            directLightingRadiance,
+                            diffuseRadiance,
+                            specularRadiance,
+                            primaryDenoiserMainLightDiffuseRadiance,
+                            primaryDenoiserMainLightSpecularRadiance);
+                    }
+                    else
+                    {
+                        invalidSampleMask.z = 1.0;
+                    }
+                }
+
+                if (bounceIndex + 1u >= maxBounceCount)
+                    break;
+
+                float3 atmosphereNextDirectionWS;
+                float3 atmosphereThroughputWeight;
+                float atmospherePhasePdf;
+                if (!ReferencedPathtracingSampleAtmospherePhase(
+                        atmosphereMediumSample,
+                        ray.Direction,
+                        volumeRandom.zw,
+                        atmosphereNextDirectionWS,
+                        atmosphereThroughputWeight,
+                        atmospherePhasePdf))
+                {
+                    break;
+                }
+
+                throughput *= atmosphereThroughputWeight;
+                if (!IsFiniteReferencedPathtracingRadiance(throughput)
+                    || MaxReferencedPathtracingComponent(throughput)
+                        <= 0.0)
+                {
+                    invalidSampleMask.z = 1.0;
+                    break;
+                }
+
+                if ((int)(bounceIndex + 1u)
+                    >= _ReferencedRussianRouletteStartBounce)
+                {
+                    float survivalProbability = clamp(
+                        MaxReferencedPathtracingComponent(throughput),
+                        0.05,
+                        0.95);
+                    float russianRouletteSample =
+                        ReferencedPathtracingGetPathSample(
+                            pixelCoord,
+                            sampleIndex,
+                            ReferencedPathtracingGetBounceSampleDimension(
+                                bounceIndex,
+                                kReferencedPathtracingRussianRouletteDimensionOffset),
+                            sampleSeed,
+                            pathSamplingMode);
+                    if (russianRouletteSample >= survivalProbability)
+                        break;
+                    throughput /= survivalProbability;
+                }
+
+                if (bounceIndex == 0u)
+                    diffuseRayDirectionWS =
+                        normalize(atmosphereNextDirectionWS);
+                previousBsdfPdf = atmospherePhasePdf;
+                previousBsdfWasDelta = false;
+                previousLightSelectionContext =
+                    (ReferencedPathtracingLightSelectionContext)0;
+                rayConeWidth = max(
+                    rayConeWidth
+                    + atmosphereMediumSample.distance
+                        * rayConeSpreadAngle,
+                    0.0);
+                ray.Direction =
+                    normalize(atmosphereNextDirectionWS);
+                ray.Origin =
+                    atmosphereMediumSample.positionWS
+                    + ray.Direction
+                        * kReferencedPathtracingShadowMinBias;
+                ray.TMin = kReferencedPathtracingShadowMinBias;
+                ray.TMax = _RayMaxDistance;
+                continue;
+            }
+
+            throughput *=
+                atmosphereMediumSample.transmittanceRatio;
+            if (!IsFiniteReferencedPathtracingRadiance(throughput)
+                || MaxReferencedPathtracingComponent(throughput)
+                    <= 0.0)
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
+
+            if (payload.hit == 0u
+                && atmosphereMediumSample.hitsGround != 0u)
+            {
+                if (bounceIndex == 0u)
+                {
+                    bool groundVisible =
+                        (_ReferencedAtmosphereFlags
+                            & kReferencedAtmosphereFlagGroundCameraVisible)
+                            != 0;
+                    bool groundHoldout =
+                        (_ReferencedAtmosphereFlags
+                            & kReferencedAtmosphereFlagGroundHoldout)
+                            != 0;
+                    cameraBackgroundAlpha =
+                        groundVisible && !groundHoldout
+                            ? 1.0
+                            : 0.0;
+                }
+                break;
+            }
+        }
 
         if (payload.hit == 0u)
         {
@@ -587,7 +872,7 @@ void RayGenReferencedPathtracing()
                     payload.neeSolidAnglePdf,
                     payload.neeBsdfPdf);
             float3 neeDirectionWS = normalize(payload.neeDirectionWS);
-            float visibility = lightEstimatorWeight > 0.0
+            float3 visibility = lightEstimatorWeight > 0.0
                 ? TraceReferencedPathtracingCandidateVisibility(
                     payload.positionWS,
                     normalize(payload.faceNormalWS),
@@ -765,7 +1050,7 @@ void RayGenReferencedPathtracing()
                 if (bsdfEstimatorWeight <= 0.0)
                     continue;
 
-                float visibility =
+                float3 visibility =
                     TraceReferencedPathtracingCandidateVisibility(
                         payload.positionWS,
                         normalize(payload.faceNormalWS),
@@ -1062,7 +1347,9 @@ void RayGenReferencedPathtracing()
     }
 
     float physicalOutputAlpha =
-        primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
+        primaryAtmosphereHit != 0u
+            ? cameraBackgroundAlpha
+            : (primaryHit != 0u ? 1.0 : cameraBackgroundAlpha);
     float debugOutputAlpha =
         _ReferencedTransportDebugMode != kReferencedTransportDebugCombined
             || _ReferencedEnvironmentDebugMode

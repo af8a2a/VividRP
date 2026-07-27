@@ -189,9 +189,8 @@ namespace VividRP.Runtime
         [Header("Environment")]
         [Tooltip(
             "Selects the mutually exclusive reference environment. HDRI preserves the V1 " +
-            "infinite-light path. Reference Atmosphere captures physical sky parameters without " +
-            "consuming raster sky cubemaps or LUTs; atmospheric radiance is introduced by later " +
-            "Phase 2 milestones.")]
+            "infinite-light path. Reference Atmosphere evaluates spherical participating-medium " +
+            "transport directly without consuming raster sky cubemaps or atmosphere LUTs.")]
         public ReferencedPathTracingEnvironmentModeParameter environmentMode =
             new(ReferencedPathTracingEnvironmentMode.Hdri);
 
@@ -220,13 +219,13 @@ namespace VividRP.Runtime
 
         [Header("Reference Atmosphere Contract")]
         [Tooltip(
-            "Allows the atmosphere medium to be visible to camera rays. This is reserved by " +
-            "A0 and becomes active when atmospheric transport is implemented.")]
+            "Allows camera rays to accumulate physical atmosphere scattering. Disabling it " +
+            "retains atmosphere attenuation for surface transport.")]
         public BoolParameter referenceAtmosphereCameraVisible = new(true);
 
         [Tooltip(
             "Treats the atmosphere as a camera holdout while retaining its transport contribution. " +
-            "This flag is reserved by the Phase 2 contract.")]
+            "The physical radiance is preserved while camera alpha is cleared.")]
         public BoolParameter referenceAtmosphereHoldout = new(false);
 
         [Tooltip(

@@ -1200,6 +1200,21 @@ float ReferencedPathtracingGetBsdfEstimatorWeight(
 float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 {
     if (_ReferencedCameraSkyEnabled != 0
+        && ReferencedPathtracingHasReferenceAtmosphere()
+        && (_ReferencedAtmosphereFlags
+            & kReferencedAtmosphereFlagCameraVisible) != 0)
+    {
+        float atmosphereAlpha =
+            (_ReferencedAtmosphereFlags
+                & kReferencedAtmosphereFlagHoldout) != 0
+                ? 0.0
+                : 1.0;
+        // Reference Atmosphere has no emissive skydome. A2 radiance is
+        // accumulated only at physical scattering events; outer space is black.
+        return float4(0.0, 0.0, 0.0, atmosphereAlpha);
+    }
+
+    if (_ReferencedCameraSkyEnabled != 0
         && _ReferencedEnvironmentCameraVisible != 0
         && ReferencedPathtracingHasEnvironment())
     {

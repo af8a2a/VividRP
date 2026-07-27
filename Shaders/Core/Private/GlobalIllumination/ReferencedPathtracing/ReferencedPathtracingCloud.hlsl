@@ -6,7 +6,8 @@
 #define REFERENCED_CLOUD_EVENT_ABSORB 2u
 #define REFERENCED_CLOUD_EVENT_TRACKING_OVERFLOW 3u
 
-static const uint kReferencedCloudMaximumTrackingSteps = 1024u;
+static const uint kReferencedCloudMaximumTrackingSteps =
+    REFERENCED_CLOUD_MAXIMUM_TRACKING_STEP_COUNT;
 static const float kReferencedCloudTrackingEpsilon = 1e-7;
 
 struct ReferencedPathtracingCloudRayInterval
@@ -525,13 +526,15 @@ float3 ReferencedPathtracingEvaluateCloudTransmittance(
     float3 direction = normalize(rayDirectionWS);
     float segmentLength =
         interval.exitDistance - interval.entryDistance;
-    float stepLength =
-        segmentLength
-        / REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT;
+    uint sampleCount =
+        ReferencedPathtracingUsesOptimizedAtmosphereTransport()
+            ? REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT
+            : REFERENCED_CLOUD_SHADOW_NUMERICAL_REFERENCE_SAMPLE_COUNT;
+    float stepLength = segmentLength / sampleCount;
     float opticalDepth = 0.0;
     [loop]
     for (uint sampleIndex = 0u;
-        sampleIndex < REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT;
+        sampleIndex < sampleCount;
         ++sampleIndex)
     {
         float distance =
@@ -542,6 +545,11 @@ float3 ReferencedPathtracingEvaluateCloudTransmittance(
             rayOriginWS + direction * distance,
             materialSample);
         opticalDepth += materialSample.extinction * stepLength;
+        if (opticalDepth >= 80.0)
+        {
+            opticalDepth = 80.0;
+            break;
+        }
     }
     float transmittance = exp(-min(max(opticalDepth, 0.0), 80.0));
     return transmittance.xxx;

@@ -49,6 +49,11 @@ namespace VividRP.Editor.Tests
                     volume.environmentEstimatorMode.value,
                     Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
                 Assert.That(
+                    volume.referenceAtmosphereTransportMode.value,
+                    Is.EqualTo(
+                        ReferencedPathTracingAtmosphereTransportMode
+                            .NumericalReference));
+                Assert.That(
                     volume.referenceAtmosphereCameraVisible.value,
                     Is.True);
                 Assert.That(volume.referenceAtmosphereHoldout.value, Is.False);

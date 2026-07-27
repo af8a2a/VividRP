@@ -71,6 +71,7 @@ static const int kReferencedAtmosphereFlagGroundCameraVisible = 1 << 7;
 static const int kReferencedAtmosphereFlagGroundHoldout = 1 << 8;
 static const int kReferencedAtmosphereFlagCameraRelativeRenderingSpace =
     1 << 9;
+static const int kReferencedAtmosphereFlagOptimizedTransport = 1 << 10;
 
 static const int kReferencedEnvironmentSamplingBsdfOnly = 0;
 static const int kReferencedEnvironmentSamplingImportance = 1;
@@ -89,6 +90,7 @@ static const int kReferencedTransportDebugLightSpatialIndex = 7;
 static const int kReferencedTransportDebugPathSamples = 8;
 static const int kReferencedTransportDebugShadingNormal = 9;
 static const int kReferencedTransportDebugPhysicalCamera = 10;
+static const int kReferencedTransportDebugAtmosphereTransport = 11;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
@@ -134,6 +136,7 @@ static const float kReferencedPathtracingPi = 3.14159265358979323846;
     (REFERENCED_ENVIRONMENT_ELEMENT_COUNT \
         + REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_HEADER_ELEMENT_COUNT)
 #define REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT 256u
+#define REFERENCED_ATMOSPHERE_TRANSPORT_REFERENCE_SAMPLE_COUNT 1024u
 // Finite local segments must not be evaluated by subtracting two large
 // boundary optical depths. Near the ground that cancellation exposes the
 // radial LUT cells as horizontal bands. Integrate segments that fit within a
@@ -165,6 +168,9 @@ static const float kReferencedPathtracingPi = 3.14159265358979323846;
     (REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_ELEMENT_COUNT \
         + REFERENCED_CLOUD_ACCELERATION_HEADER_ELEMENT_COUNT)
 #define REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT 96u
+#define REFERENCED_CLOUD_SHADOW_NUMERICAL_REFERENCE_SAMPLE_COUNT 512u
+#define REFERENCED_ATMOSPHERE_MAXIMUM_TRACKING_STEP_COUNT 1024u
+#define REFERENCED_CLOUD_MAXIMUM_TRACKING_STEP_COUNT 1024u
 
 #if defined(REFERENCED_ENVIRONMENT_DISTRIBUTION_BUILD)
 RWStructuredBuffer<float> _ReferencedEnvironmentImportanceDistribution;
@@ -190,6 +196,13 @@ bool ReferencedPathtracingUsesCameraRelativeAtmosphere()
     return ReferencedPathtracingHasReferenceAtmosphere()
         && (_ReferencedAtmosphereFlags
             & kReferencedAtmosphereFlagCameraRelativeRenderingSpace) != 0;
+}
+
+bool ReferencedPathtracingUsesOptimizedAtmosphereTransport()
+{
+    return ReferencedPathtracingHasReferenceAtmosphere()
+        && (_ReferencedAtmosphereFlags
+            & kReferencedAtmosphereFlagOptimizedTransport) != 0;
 }
 
 bool ReferencedPathtracingHasReferenceClouds()
@@ -934,6 +947,18 @@ float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
             maximumDistance,
             includeVirtualGround,
             localSegmentSampleCount);
+    if (!ReferencedPathtracingUsesOptimizedAtmosphereTransport())
+    {
+        return ReferencedPathtracingEvaluateAtmosphereTransmittanceReferenceWithGroundPolicy(
+            rayOriginWS,
+            rayDirectionWS,
+            maximumDistance,
+            usesLocalSegmentIntegration
+                ? localSegmentSampleCount
+                : REFERENCED_ATMOSPHERE_TRANSPORT_REFERENCE_SAMPLE_COUNT,
+            includeVirtualGround);
+    }
+
     if (!includeVirtualGround)
     {
         return ReferencedPathtracingEvaluateAtmosphereTransmittanceReferenceWithGroundPolicy(
@@ -942,7 +967,7 @@ float3 ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
             maximumDistance,
             usesLocalSegmentIntegration
                 ? localSegmentSampleCount
-                : REFERENCED_ATMOSPHERE_OPTICAL_DEPTH_REFERENCE_SAMPLE_COUNT,
+                : REFERENCED_ATMOSPHERE_TRANSPORT_REFERENCE_SAMPLE_COUNT,
             false);
     }
 

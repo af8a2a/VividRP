@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
+using VividRP.Runtime;
+using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
 {
@@ -87,6 +90,156 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void A5ValidationCorpus_CoversAltitudeSunGroundCloudAndSpaceModes()
+        {
+            var cases =
+                ReferencedPathTracingAtmosphereValidationCorpus.Cases;
+
+            Assert.That(
+                cases.Select(validationCase => validationCase.id).Distinct()
+                    .Count(),
+                Is.EqualTo(cases.Count));
+            Assert.That(cases.Any(item => item.cameraAltitude <= 2.0f), Is.True);
+            Assert.That(
+                cases.Any(item =>
+                    item.cameraAltitude >= 10000.0f
+                    && item.cameraAltitude < 80000.0f),
+                Is.True);
+            Assert.That(
+                cases.Any(item => item.cameraAltitude > 80000.0f),
+                Is.True);
+            Assert.That(
+                cases.Any(item => item.sunElevationDegrees < 1.0f),
+                Is.True);
+            Assert.That(
+                cases.Any(item => item.sunElevationDegrees >= 89.0f),
+                Is.True);
+            Assert.That(
+                cases.Any(item => !item.groundCameraVisible),
+                Is.True);
+            Assert.That(cases.Any(item => item.cloudsEnabled), Is.True);
+            Assert.That(
+                cases.Any(item => item.renderingSpace == RenderingSpace.Camera),
+                Is.True);
+            Assert.That(
+                cases.Any(item =>
+                    item.transportMode
+                        == ReferencedPathTracingAtmosphereTransportMode
+                            .NumericalReference),
+                Is.True);
+            Assert.That(
+                cases.Any(item =>
+                    item.transportMode
+                        == ReferencedPathTracingAtmosphereTransportMode
+                            .OptimizedPreview),
+                Is.True);
+        }
+
+        [Test]
+        public void A5ValidationGate_AcceptsCompleteCorpusAndRejectsOverflow()
+        {
+            var evidence =
+                ReferencedPathTracingAtmosphereValidationCorpus.Cases
+                    .Select(CreateValidEvidence)
+                    .ToArray();
+
+            Assert.That(
+                ReferencedPathTracingAtmosphereValidationGate.ValidateCorpus(
+                    evidence,
+                    out var failure),
+                Is.True,
+                failure);
+
+            evidence[0].atmosphereTrackingOverflowFraction = 0.001f;
+            Assert.That(
+                ReferencedPathTracingAtmosphereValidationGate.ValidateCorpus(
+                    evidence,
+                    out failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("overflow"));
+        }
+
+        [Test]
+        public void A5MetadataGate_SeparatesNumericalReferenceAndPreview()
+        {
+            foreach (var validationCase
+                in ReferencedPathTracingAtmosphereValidationCorpus.Cases)
+            {
+                var optimized =
+                    validationCase.transportMode
+                        == ReferencedPathTracingAtmosphereTransportMode
+                            .OptimizedPreview;
+                var environment =
+                    new ReferencedPathTracingEnvironmentMetadata
+                    {
+                        contractVersion =
+                            ReferencedPathTracingEnvironmentMetadata
+                                .ContractVersion,
+                        mode =
+                            ReferencedPathTracingEnvironmentMode
+                                .ReferenceAtmosphere,
+                        atmosphere =
+                            new ReferencedPathTracingAtmosphereMetadata
+                            {
+                                contractVersion =
+                                    ReferencedPathTracingAtmosphereState
+                                        .ContractVersion,
+                                validationContractVersion =
+                                    ReferencedPathTracingAtmosphereValidationGate
+                                        .ContractVersion,
+                                active = true,
+                                transportMode =
+                                    validationCase.transportMode,
+                                cloudsEnabled =
+                                    validationCase.cloudsEnabled,
+                                groundCameraVisible =
+                                    validationCase.groundCameraVisible,
+                                observerAltitude =
+                                    validationCase.cameraAltitude,
+                                sunElevationDegrees =
+                                    validationCase.sunElevationDegrees,
+                                cameraRelativeRenderingSpace =
+                                    validationCase.renderingSpace
+                                        == RenderingSpace.Camera,
+                                usesOpticalDepthLutApproximation =
+                                    optimized,
+                                numericalReferenceEligible =
+                                    !optimized
+                                    && !validationCase.cloudsEnabled,
+                                cloudMultipleScatteringMode =
+                                    ReferencedPathTracingCloudMultipleScatteringMode
+                                        .Off
+                            }
+                    };
+
+                Assert.That(
+                    ReferencedPathTracingAtmosphereValidationGate
+                        .ValidateMetadata(
+                            validationCase.id,
+                            environment,
+                            out var failure),
+                    Is.True,
+                    failure);
+            }
+        }
+
+        [Test]
+        public void A5ValidationGate_RejectsOutOfRangeFractions()
+        {
+            var validationCase =
+                ReferencedPathTracingAtmosphereValidationCorpus.Cases[0];
+            var evidence = CreateValidEvidence(validationCase);
+            evidence.finitePixelFraction = 1.01f;
+
+            Assert.That(
+                ReferencedPathTracingAtmosphereValidationGate.ValidateEvidence(
+                    evidence,
+                    out var failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("finite"));
+        }
+
+        [Test]
         public void OpticalDepthLut_AgreesWithHighSampleReferenceMatrix()
         {
             var texelCache = new Dictionary<long, DensityDepth>();
@@ -153,6 +306,71 @@ namespace VividRP.Editor.Tests
                 Is.LessThan(0.02),
                 "A1 optical-depth LUT exceeded the two-percent absolute " +
                 "transmittance error gate across the height/zenith matrix.");
+        }
+
+        [Test]
+        public void NumericalReferenceBudget_AgreesWithHighSampleClearSkyMatrix()
+        {
+            var heights = new[] { 2.0, 12000.0, 60000.0 };
+            var relativeCosines = new[] { 0.02, 0.25, 1.0 };
+            var maximumAbsoluteError = 0.0;
+
+            foreach (var height in heights)
+            {
+                var radius = BottomRadius + height;
+                var horizonCosine = HorizonCosine(radius);
+                foreach (var relativeCosine in relativeCosines)
+                {
+                    var cosineZenith =
+                        horizonCosine
+                        + relativeCosine
+                            * (1.0 - horizonCosine);
+                    var numericalReference =
+                        EvaluateTransmittance(
+                            IntegrateDensity(
+                                radius,
+                                cosineZenith,
+                                ReferencedPathTracingEnvironmentImportanceLayout
+                                    .AtmosphereTransportReferenceSampleCount));
+                    var highSampleReference =
+                        EvaluateTransmittance(
+                            IntegrateDensity(
+                                radius,
+                                cosineZenith,
+                                ReferenceSampleCount));
+                    maximumAbsoluteError = Math.Max(
+                        maximumAbsoluteError,
+                        MaxComponent(
+                            Abs(
+                                numericalReference
+                                - highSampleReference)));
+                }
+            }
+
+            Assert.That(maximumAbsoluteError, Is.LessThan(0.01));
+        }
+
+        [Test]
+        public void ExtremePlanetScaleIntersections_RemainFinite()
+        {
+            var radii = new[] { 1000.0, 6371000.0, 100000000.0 };
+            foreach (var radius in radii)
+            {
+                var originRadius = radius + Math.Max(radius * 1e-5, 1.0);
+                Assert.That(
+                    TryIntersectSphere(
+                        originRadius,
+                        -1.0,
+                        radius,
+                        out var intersection),
+                    Is.True);
+                Assert.That(double.IsNaN(intersection.near), Is.False);
+                Assert.That(double.IsInfinity(intersection.near), Is.False);
+                Assert.That(double.IsNaN(intersection.far), Is.False);
+                Assert.That(double.IsInfinity(intersection.far), Is.False);
+                Assert.That(intersection.near, Is.GreaterThanOrEqualTo(0.0));
+                Assert.That(intersection.far, Is.GreaterThan(intersection.near));
+            }
         }
 
         [Test]
@@ -239,6 +457,40 @@ namespace VividRP.Editor.Tests
                 GetLutTexel(upperX, upperY, texelCache),
                 fractionX);
             return Lerp(lowerRow, upperRow, fractionY);
+        }
+
+        private static ReferencedPathTracingAtmosphereValidationEvidence
+            CreateValidEvidence(
+                ReferencedPathTracingAtmosphereValidationCase validationCase)
+        {
+            return new ReferencedPathTracingAtmosphereValidationEvidence
+            {
+                contractVersion =
+                    ReferencedPathTracingAtmosphereValidationGate
+                        .ContractVersion,
+                corpusVersion =
+                    ReferencedPathTracingAtmosphereValidationCorpus.Version,
+                caseId = validationCase.id,
+                status = ReferencedPathTracingValidationStatus.Passed,
+                timedOut = false,
+                accumulatedSampleCount =
+                    validationCase.targetSampleCount,
+                finitePixelFraction = 1.0f,
+                negativeRadianceFraction = 0.0f,
+                atmosphereTrackingOverflowFraction = 0.0f,
+                cloudTrackingOverflowFraction = 0.0f,
+                maximumAtmosphereTrackingStepCount = 128,
+                maximumCloudTrackingStepCount =
+                    validationCase.cloudsEnabled ? 128 : 0,
+                relativeMeanError =
+                    validationCase.transportMode
+                        == ReferencedPathTracingAtmosphereTransportMode
+                            .NumericalReference
+                        ? 0.01f
+                        : 0.04f,
+                gpuMilliseconds = 1.0f,
+                referenceImageSha256 = new string('a', 64)
+            };
         }
 
         private static DensityDepth GetLutTexel(

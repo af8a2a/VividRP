@@ -6,7 +6,8 @@
 #define REFERENCED_ATMOSPHERE_MEDIUM_EVENT_ABSORB 2u
 #define REFERENCED_ATMOSPHERE_MEDIUM_EVENT_TRACKING_OVERFLOW 3u
 
-static const uint kReferencedAtmosphereMaximumTrackingSteps = 1024u;
+static const uint kReferencedAtmosphereMaximumTrackingSteps =
+    REFERENCED_ATMOSPHERE_MAXIMUM_TRACKING_STEP_COUNT;
 static const float kReferencedAtmosphereTrackingEpsilon = 1e-7;
 
 struct ReferencedPathtracingAtmosphereMediumSample

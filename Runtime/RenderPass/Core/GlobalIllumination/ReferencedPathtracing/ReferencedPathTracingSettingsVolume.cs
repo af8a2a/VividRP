@@ -53,6 +53,14 @@ namespace VividRP.Runtime
         EnergyCompensation = 1
     }
 
+    public enum ReferencedPathTracingAtmosphereTransportMode
+    {
+        [InspectorName("Numerical Reference")]
+        NumericalReference = 0,
+        [InspectorName("Optimized Preview")]
+        OptimizedPreview = 1
+    }
+
     public enum ReferencedPathTracingTransportDebugMode
     {
         Combined = 0,
@@ -75,7 +83,9 @@ namespace VividRP.Runtime
         [InspectorName("Shading Normal")]
         ShadingNormal = 9,
         [InspectorName("Physical Camera")]
-        PhysicalCamera = 10
+        PhysicalCamera = 10,
+        [InspectorName("Atmosphere Transport")]
+        AtmosphereTransport = 11
     }
 
     [Serializable]
@@ -132,6 +142,18 @@ namespace VividRP.Runtime
     {
         public ReferencedPathTracingCloudMultipleScatteringModeParameter(
             ReferencedPathTracingCloudMultipleScatteringMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingAtmosphereTransportModeParameter
+        : VolumeParameter<ReferencedPathTracingAtmosphereTransportMode>
+    {
+        public ReferencedPathTracingAtmosphereTransportModeParameter(
+            ReferencedPathTracingAtmosphereTransportMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -238,6 +260,17 @@ namespace VividRP.Runtime
             new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
 
         [Header("Reference Atmosphere Contract")]
+        [Tooltip(
+            "Numerical Reference bypasses the atmosphere optical-depth LUT, uses the " +
+            "high-accuracy transmittance and cloud-shadow budgets, and disables empirical " +
+            "cloud energy compensation. Optimized Preview enables cached LUT transport and " +
+            "the lower cloud-shadow budget; approximation state is recorded in capture metadata.")]
+        public ReferencedPathTracingAtmosphereTransportModeParameter
+            referenceAtmosphereTransportMode =
+                new(
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference);
+
         [Tooltip(
             "Allows camera rays to accumulate physical atmosphere scattering. Disabling it " +
             "retains atmosphere attenuation for surface transport.")]
@@ -350,6 +383,10 @@ namespace VividRP.Runtime
             environmentEstimatorMode ??=
                 new ReferencedPathTracingEnvironmentEstimatorModeParameter(
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+            referenceAtmosphereTransportMode ??=
+                new ReferencedPathTracingAtmosphereTransportModeParameter(
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference);
             referenceAtmosphereCameraVisible ??= new BoolParameter(true);
             referenceAtmosphereHoldout ??= new BoolParameter(false);
             referenceClouds ??= new BoolParameter(false);

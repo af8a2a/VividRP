@@ -77,7 +77,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 atmosphereSource,
                 Does.Contain(
-                    "kReferencedAtmosphereMaximumTrackingSteps = 1024u"));
+                    "REFERENCED_ATMOSPHERE_MAXIMUM_TRACKING_STEP_COUNT"));
             Assert.That(
                 atmosphereSource,
                 Does.Contain(
@@ -95,8 +95,16 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "Reference Atmosphere has no emissive skydome"));
             Assert.That(
+                commonSource,
+                Does.Contain(
+                    "ReferencedPathtracingUsesOptimizedAtmosphereTransport()"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "REFERENCED_ATMOSPHERE_TRANSPORT_REFERENCE_SAMPLE_COUNT"));
+            Assert.That(
                 ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(6));
+                Is.EqualTo(7));
         }
 
         [Test]

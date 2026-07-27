@@ -447,6 +447,7 @@ void RayGenReferencedPathtracing()
     float3 neeLightIdentityDiagnostic = 0.0;
     float3 lightSpatialIndexDiagnostic = 0.0;
     float3 shadingNormalDiagnostic = 0.0;
+    float3 atmosphereTransportDiagnostic = 0.0;
     float3 primaryDenoisingAlbedo = 0.0;
     float3 primaryDenoisingNormalWS = 0.0;
     float3 pathSampleDiagnostic = float3(
@@ -636,6 +637,20 @@ void RayGenReferencedPathtracing()
                 cloudMaximumDistance,
                 cloudRandom,
                 cloudMediumSample);
+        if (intersectsAtmosphere)
+        {
+            atmosphereTransportDiagnostic.x = max(
+                atmosphereTransportDiagnostic.x,
+                (float)atmosphereMediumSample.trackingStepCount
+                    / REFERENCED_ATMOSPHERE_MAXIMUM_TRACKING_STEP_COUNT);
+        }
+        if (intersectsCloud)
+        {
+            atmosphereTransportDiagnostic.y = max(
+                atmosphereTransportDiagnostic.y,
+                (float)cloudMediumSample.trackingStepCount
+                    / REFERENCED_CLOUD_MAXIMUM_TRACKING_STEP_COUNT);
+        }
         if ((intersectsAtmosphere
                 && atmosphereMediumSample.eventType
                     == REFERENCED_ATMOSPHERE_MEDIUM_EVENT_TRACKING_OVERFLOW)
@@ -643,6 +658,7 @@ void RayGenReferencedPathtracing()
                 && cloudMediumSample.eventType
                     == REFERENCED_CLOUD_EVENT_TRACKING_OVERFLOW))
         {
+            atmosphereTransportDiagnostic.z = 1.0;
             invalidSampleMask.z = 1.0;
             break;
         }
@@ -1872,6 +1888,13 @@ void RayGenReferencedPathtracing()
     {
         // R/G: concentric aperture sample mapped to [0, 1]. B: DOF enabled.
         debugRadiance = physicalCameraDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugAtmosphereTransport)
+    {
+        // R/G: maximum atmosphere/cloud tracking budget fraction.
+        // B: tracking overflow occurred.
+        debugRadiance = atmosphereTransportDiagnostic;
     }
 
     float physicalOutputAlpha =

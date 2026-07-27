@@ -60,14 +60,21 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 cloudSource,
                 Does.Contain(
-                    "kReferencedCloudMaximumTrackingSteps = 1024u"));
+                    "REFERENCED_CLOUD_MAXIMUM_TRACKING_STEP_COUNT"));
             Assert.That(
                 cloudSource,
                 Does.Contain(
                     "REFERENCED_CLOUD_SHADOW_REFERENCE_SAMPLE_COUNT"));
             Assert.That(
+                cloudSource,
+                Does.Contain(
+                    "REFERENCED_CLOUD_SHADOW_NUMERICAL_REFERENCE_SAMPLE_COUNT"));
+            Assert.That(
+                cloudSource,
+                Does.Contain("if (opticalDepth >= 80.0)"));
+            Assert.That(
                 ReferencedPathTracingAtmosphereState.ContractVersion,
-                Is.EqualTo(6));
+                Is.EqualTo(7));
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
                 Is.EqualTo(4));
@@ -150,6 +157,9 @@ namespace VividRP.Editor.Tests
                 settings.active = true;
                 settings.environmentMode.value =
                     ReferencedPathTracingEnvironmentMode.ReferenceAtmosphere;
+                settings.referenceAtmosphereTransportMode.value =
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .OptimizedPreview;
                 settings.referenceClouds.value = true;
                 settings.referenceCloudMultipleScatteringMode.value =
                     ReferencedPathTracingCloudMultipleScatteringMode
@@ -179,6 +189,103 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     metadata.cloudTransportUsesBiasedApproximation,
                     Is.True);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(skyVolume);
+                UnityEngine.Object.DestroyImmediate(settings);
+            }
+        }
+
+        [Test]
+        public void NumericalReference_DisablesPreviewOnlyApproximations()
+        {
+            var settings =
+                ScriptableObject.CreateInstance<
+                    ReferencedPathTracingSettingsVolume>();
+            var skyVolume =
+                ScriptableObject.CreateInstance<PhysicallyBasedSkyVolume>();
+
+            try
+            {
+                settings.active = true;
+                settings.environmentMode.value =
+                    ReferencedPathTracingEnvironmentMode.ReferenceAtmosphere;
+                settings.referenceClouds.value = true;
+                settings.referenceAtmosphereTransportMode.value =
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference;
+                settings.referenceCloudMultipleScatteringMode.value =
+                    ReferencedPathTracingCloudMultipleScatteringMode
+                        .EnergyCompensation;
+                skyVolume.airMaximumAltitude.value = 12000.0f;
+
+                var numericalState =
+                    ReferencedPathTracingAtmosphereState.Resolve(
+                        new VividSkyData
+                        {
+                            activeSkyType = SkyType.PhysicallyBased
+                        },
+                        skyVolume,
+                        null,
+                        null,
+                        settings);
+                var numericalMetadata =
+                    ReferencedPathTracingAtmosphereMetadata.Capture(
+                        numericalState);
+
+                Assert.That(
+                    numericalMetadata.transportMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingAtmosphereTransportMode
+                            .NumericalReference));
+                Assert.That(
+                    numericalMetadata.usesOpticalDepthLutApproximation,
+                    Is.False);
+                Assert.That(
+                    numericalMetadata.cloudMultipleScatteringMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingCloudMultipleScatteringMode
+                            .Off));
+                Assert.That(
+                    numericalMetadata.cloudShadowReferenceSampleCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudShadowNumericalReferenceSampleCount));
+
+                settings.referenceAtmosphereTransportMode.value =
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .OptimizedPreview;
+                var previewState =
+                    ReferencedPathTracingAtmosphereState.Resolve(
+                        new VividSkyData
+                        {
+                            activeSkyType = SkyType.PhysicallyBased
+                        },
+                        skyVolume,
+                        null,
+                        null,
+                        settings);
+                var previewMetadata =
+                    ReferencedPathTracingAtmosphereMetadata.Capture(
+                        previewState);
+
+                Assert.That(
+                    previewMetadata.usesOpticalDepthLutApproximation,
+                    Is.True);
+                Assert.That(
+                    previewMetadata.cloudMultipleScatteringMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingCloudMultipleScatteringMode
+                            .EnergyCompensation));
+                Assert.That(
+                    previewMetadata.cloudShadowReferenceSampleCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudShadowReferenceSampleCount));
+                Assert.That(
+                    previewState.signature,
+                    Is.Not.EqualTo(numericalState.signature));
             }
             finally
             {

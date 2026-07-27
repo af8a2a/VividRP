@@ -839,6 +839,41 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 - 分离无偏 reference mode 与 analytic/LUT/multiple-scattering approximation mode。
 - 完成 GPU timeout、max ray-march steps、NaN/Inf 和极端尺度测试。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- Atmosphere transport 现在具有显式的 `Numerical Reference` 与 `Optimized Preview`
+  contract；默认使用 Numerical Reference，mode 进入 environment signature，因此切换
+  approximation policy 会使旧 accumulation 自动失效。Atmosphere/environment metadata
+  contract 升级到 version 7。
+- Numerical Reference 不再构建或读取 optical-depth LUT：长段 transmittance 使用
+  1024-step midpoint reference integration，已经满足局部误差条件的短 finite segment
+  仍复用经过 4096-step witness 验证的 adaptive direct integration。云阴影使用
+  512-step deterministic quadrature，且强制关闭 preview-only multiple-scattering
+  energy compensation。
+- Optimized Preview 保留 E5 的 optical-depth LUT、96-step cloud shadow quadrature 和
+  可选 energy compensation。所有 approximation 均由同一个 transport mode gate 控制，
+  不允许静默混入 Numerical Reference capture。由于当前 cloud shadow quadrature 仍为
+  deterministic biased estimator，`Numerical Reference + Clouds` 不标记为 canonical
+  reference eligible，云场景通过独立 preview validation case 管理。
+- 新增 version 1 validation corpus 与 evidence gate。固定七个 8192-SPP case，覆盖
+  sea-level/high-altitude/space、sunrise/noon、World/Camera rendering space、
+  ground on/off 和 cloud on/off；每个 capture 必须记录 scene/settings SHA-256、
+  实际 observer altitude/sun elevation、finite/negative/overflow pixel fraction、
+  atmosphere/cloud max steps、GPU 时间、timeout 状态与相对 offline-reference mean
+  error。高度/太阳角 gate 分别为 1 m/0.25°，Numerical Reference 图像 gate 为 2%，
+  Optimized Preview gate 为 5%。
+- Atmosphere 与 cloud tracking 均设置 1024-step hard cap；`Atmosphere Transport` debug
+  AOV 的 R/G 分别显示 atmosphere/cloud step-budget 使用率，B 显示 overflow。validation
+  gate 拒绝 timeout、NaN/Inf、负 radiance、overflow 或缺少 reproducibility hash 的
+  capture。极端尺度单元测试覆盖 1 km、Earth-scale 与 100 Mm planet sphere intersection。
+- 保守优化仅包含不改变 reference estimator 的路径：短 finite segment 使用已验证的
+  adaptive direct integration；cloud optical depth 达到 `exp(-80)` 的既有数值饱和点后
+  提前结束。LUT 与 multiple-scattering approximation 只属于 Optimized Preview。
+- A5 的代码与 deterministic validation contract 已落地，但 `Reference Atmosphere V2`
+  冻结仍要求在目标 DXR GPU 上跑完全部七个 case，并附 offline/Unreal reference 图像、
+  GPU timing 和 SHA-256 evidence；在 corpus evidence 全部通过前，本 checkpoint 不宣称
+  完成视觉 baseline freeze。
+
 Reference Atmosphere 在 A0～A5 完成前不进入 GI Baseline V1 的 Definition of Done，也不能替代 HDRI
 canonical corpus。它完成后应形成独立的 `Reference Atmosphere V2` baseline/version。
 

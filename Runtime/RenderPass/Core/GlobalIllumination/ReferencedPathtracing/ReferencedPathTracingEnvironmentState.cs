@@ -352,7 +352,8 @@ namespace VividRP.Runtime.RenderPass.Core
         CloudsHoldout = 1 << 6,
         GroundCameraVisible = 1 << 7,
         GroundHoldout = 1 << 8,
-        CameraRelativeRenderingSpace = 1 << 9
+        CameraRelativeRenderingSpace = 1 << 9,
+        OptimizedTransport = 1 << 10
     }
 
     internal struct ReferencedPathTracingAtmosphereParameters
@@ -397,7 +398,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingAtmosphereState
         : IEquatable<ReferencedPathTracingAtmosphereState>
     {
-        internal const int ContractVersion = 6;
+        internal const int ContractVersion = 7;
         internal const int OpticalDepthContractVersion = 2;
         internal const int CloudContractVersion = 1;
 
@@ -411,7 +412,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Vector3 sunDirection,
             Vector3 sunIlluminance,
             float sunAngularDiameter,
-            float sunShadowStrength)
+            float sunShadowStrength,
+            float observerAltitude,
+            float sunElevationDegrees)
         {
             this.flags = flags;
             this.skyHash = skyHash;
@@ -423,6 +426,8 @@ namespace VividRP.Runtime.RenderPass.Core
             this.sunIlluminance = sunIlluminance;
             this.sunAngularDiameter = sunAngularDiameter;
             this.sunShadowStrength = sunShadowStrength;
+            this.observerAltitude = observerAltitude;
+            this.sunElevationDegrees = sunElevationDegrees;
             opticalDepthSignature =
                 ComputeOpticalDepthSignature(parameters);
             cloudSignature = ComputeCloudSignature(cloudParameters);
@@ -451,11 +456,23 @@ namespace VividRP.Runtime.RenderPass.Core
             && cloudParameters.topRadius > cloudParameters.bottomRadius
             && cloudParameters.coverage > 0.0f
             && cloudParameters.extinction > 0.0f;
+        internal ReferencedPathTracingAtmosphereTransportMode transportMode =>
+            (flags & ReferencedPathTracingAtmosphereFlags.OptimizedTransport)
+                != 0
+                ? ReferencedPathTracingAtmosphereTransportMode.OptimizedPreview
+                : ReferencedPathTracingAtmosphereTransportMode
+                    .NumericalReference;
+        internal bool usesOptimizedTransport =>
+            transportMode
+                == ReferencedPathTracingAtmosphereTransportMode
+                    .OptimizedPreview;
         internal ulong sunLightEntityId { get; }
         internal Vector3 sunDirection { get; }
         internal Vector3 sunIlluminance { get; }
         internal float sunAngularDiameter { get; }
         internal float sunShadowStrength { get; }
+        internal float observerAltitude { get; }
+        internal float sunElevationDegrees { get; }
         internal ulong opticalDepthSignature { get; }
         internal ulong cloudSignature { get; }
         internal ulong signature { get; }
@@ -552,6 +569,24 @@ namespace VividRP.Runtime.RenderPass.Core
             var sunShadowStrength = hasSun
                 ? Mathf.Clamp01(SanitizeNonNegative(sunLight.shadowStrength))
                 : 0.0f;
+            var observerPosition = cameraData?.camera != null
+                ? cameraData.camera.transform.position
+                : Vector3.zero;
+            var observerOffset = observerPosition - parameters.planetCenter;
+            var observerDistance = observerOffset.magnitude;
+            var observerAltitude = hasPhysicalSky
+                ? Mathf.Max(observerDistance - parameters.bottomRadius, 0.0f)
+                : 0.0f;
+            var localUp = observerDistance > 1e-4f
+                ? observerOffset / observerDistance
+                : Vector3.up;
+            var sunElevationDegrees = hasSun
+                ? Mathf.Asin(
+                    Mathf.Clamp(
+                        Vector3.Dot(localUp, sunDirection),
+                        -1.0f,
+                        1.0f)) * Mathf.Rad2Deg
+                : 0.0f;
 
             return new ReferencedPathTracingAtmosphereState(
                 flags,
@@ -563,7 +598,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 sunDirection,
                 sunIlluminance,
                 sunAngularDiameter,
-                sunShadowStrength);
+                sunShadowStrength,
+                observerAltitude,
+                sunElevationDegrees);
         }
 
         public bool Equals(ReferencedPathTracingAtmosphereState other)
@@ -624,6 +661,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 flags |= ReferencedPathTracingAtmosphereFlags.GroundCameraVisible;
             if (useVolumeSettings && settings.referenceGroundHoldout.value)
                 flags |= ReferencedPathTracingAtmosphereFlags.GroundHoldout;
+            if (useVolumeSettings
+                && settings.referenceAtmosphereTransportMode.value
+                    == ReferencedPathTracingAtmosphereTransportMode
+                        .OptimizedPreview)
+            {
+                flags |=
+                    ReferencedPathTracingAtmosphereFlags.OptimizedTransport;
+            }
             return flags;
         }
 
@@ -730,9 +775,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 1.0f,
                 maximumThickness);
             var albedo = settings.referenceCloudScatteringAlbedo.value.linear;
-            var mode = settings.referenceCloudMultipleScatteringMode.value
-                == ReferencedPathTracingCloudMultipleScatteringMode
-                    .EnergyCompensation
+            var optimizedTransport =
+                settings.referenceAtmosphereTransportMode.value
+                    == ReferencedPathTracingAtmosphereTransportMode
+                        .OptimizedPreview;
+            var mode = optimizedTransport
+                && settings.referenceCloudMultipleScatteringMode.value
+                    == ReferencedPathTracingCloudMultipleScatteringMode
+                        .EnergyCompensation
                 ? ReferencedPathTracingCloudMultipleScatteringMode
                     .EnergyCompensation
                 : ReferencedPathTracingCloudMultipleScatteringMode.Off;
@@ -974,8 +1024,15 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class ReferencedPathTracingAtmosphereMetadata
     {
         public int contractVersion;
+        public int validationContractVersion;
         public bool active;
         public int flags;
+        public ReferencedPathTracingAtmosphereTransportMode transportMode;
+        public bool usesOpticalDepthLutApproximation;
+        public bool numericalReferenceEligible;
+        public int atmosphereTransmittanceSampleCount;
+        public int maximumAtmosphereTrackingStepCount;
+        public int maximumCloudTrackingStepCount;
         public bool lightingEnabled;
         public bool atmosphereCameraVisible;
         public bool atmosphereHoldout;
@@ -1025,6 +1082,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public bool hasSun;
         public string sunLightEntityId;
         public Vector3 sunDirection;
+        public float observerAltitude;
+        public float sunElevationDegrees;
         public Vector3 sunIlluminance;
         public float sunAngularDiameter;
         public float sunShadowStrength;
@@ -1038,8 +1097,29 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 contractVersion =
                     ReferencedPathTracingAtmosphereState.ContractVersion,
+                validationContractVersion =
+                    ReferencedPathTracingAtmosphereValidationGate
+                        .ContractVersion,
                 active = state.active,
                 flags = (int)state.flags,
+                transportMode = state.transportMode,
+                usesOpticalDepthLutApproximation =
+                    state.usesOptimizedTransport,
+                numericalReferenceEligible =
+                    !state.usesOptimizedTransport
+                    && !state.cloudsActive,
+                atmosphereTransmittanceSampleCount =
+                    state.usesOptimizedTransport
+                        ? ReferencedPathTracingEnvironmentImportanceLayout
+                            .AtmosphereReferenceSampleCount
+                        : ReferencedPathTracingEnvironmentImportanceLayout
+                            .AtmosphereTransportReferenceSampleCount,
+                maximumAtmosphereTrackingStepCount =
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .MaximumAtmosphereTrackingStepCount,
+                maximumCloudTrackingStepCount =
+                    ReferencedPathTracingEnvironmentImportanceLayout
+                        .MaximumCloudTrackingStepCount,
                 lightingEnabled = HasFlag(
                     state.flags,
                     ReferencedPathTracingAtmosphereFlags.LightingEnabled),
@@ -1092,8 +1172,11 @@ namespace VividRP.Runtime.RenderPass.Core
                     ReferencedPathTracingEnvironmentImportanceLayout
                         .CloudRadialResolution,
                 cloudShadowReferenceSampleCount =
-                    ReferencedPathTracingEnvironmentImportanceLayout
-                        .CloudShadowReferenceSampleCount,
+                    state.usesOptimizedTransport
+                        ? ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudShadowReferenceSampleCount
+                        : ReferencedPathTracingEnvironmentImportanceLayout
+                            .CloudShadowNumericalReferenceSampleCount,
                 groundCameraVisible = HasFlag(
                     state.flags,
                     ReferencedPathTracingAtmosphereFlags.GroundCameraVisible),
@@ -1140,6 +1223,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 hasSun = state.hasSun,
                 sunLightEntityId = state.sunLightEntityId.ToString(),
                 sunDirection = state.sunDirection,
+                observerAltitude = state.observerAltitude,
+                sunElevationDegrees = state.sunElevationDegrees,
                 sunIlluminance = state.sunIlluminance,
                 sunAngularDiameter = state.sunAngularDiameter,
                 sunShadowStrength = state.sunShadowStrength
@@ -1162,7 +1247,7 @@ namespace VividRP.Runtime.RenderPass.Core
     [Serializable]
     public sealed class ReferencedPathTracingEnvironmentMetadata
     {
-        internal const int ContractVersion = 6;
+        internal const int ContractVersion = 7;
 
         public int contractVersion;
         public ReferencedPathTracingEnvironmentMode mode;

@@ -1153,6 +1153,37 @@ namespace VividRP.Editor.Tests
                     Is.False);
                 Assert.That(metadata.active, Is.True);
                 Assert.That(
+                    metadata.validationContractVersion,
+                    Is.EqualTo(
+                        ReferencedPathTracingAtmosphereValidationGate
+                            .ContractVersion));
+                Assert.That(
+                    metadata.transportMode,
+                    Is.EqualTo(
+                        ReferencedPathTracingAtmosphereTransportMode
+                            .NumericalReference));
+                Assert.That(
+                    metadata.usesOpticalDepthLutApproximation,
+                    Is.False);
+                Assert.That(
+                    metadata.numericalReferenceEligible,
+                    Is.False);
+                Assert.That(
+                    metadata.atmosphereTransmittanceSampleCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .AtmosphereTransportReferenceSampleCount));
+                Assert.That(
+                    metadata.maximumAtmosphereTrackingStepCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .MaximumAtmosphereTrackingStepCount));
+                Assert.That(
+                    metadata.maximumCloudTrackingStepCount,
+                    Is.EqualTo(
+                        ReferencedPathTracingEnvironmentImportanceLayout
+                            .MaximumCloudTrackingStepCount));
+                Assert.That(
                     metadata.cloudContractVersion,
                     Is.EqualTo(
                         ReferencedPathTracingAtmosphereState
@@ -1180,7 +1211,7 @@ namespace VividRP.Editor.Tests
                     metadata.cloudShadowReferenceSampleCount,
                     Is.EqualTo(
                         ReferencedPathTracingEnvironmentImportanceLayout
-                            .CloudShadowReferenceSampleCount));
+                            .CloudShadowNumericalReferenceSampleCount));
                 Assert.That(
                     metadata.cloudShadowUsesDeterministicApproximation,
                     Is.True);

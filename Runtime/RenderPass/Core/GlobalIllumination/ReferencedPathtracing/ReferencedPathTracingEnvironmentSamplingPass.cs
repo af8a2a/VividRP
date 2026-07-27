@@ -32,6 +32,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int AtmosphereDataOffset =
             EnvironmentElementCount + AtmosphereHeaderElementCount;
         internal const int AtmosphereReferenceSampleCount = 256;
+        internal const int AtmosphereTransportReferenceSampleCount = 1024;
         internal const int AtmosphereLocalSegmentMaximumSampleCount = 256;
         internal const float AtmosphereLocalSegmentSamplesPerProfileScale =
             16.0f;
@@ -52,6 +53,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int CloudDataOffset =
             AtmosphereElementCount + CloudHeaderElementCount;
         internal const int CloudShadowReferenceSampleCount = 96;
+        internal const int CloudShadowNumericalReferenceSampleCount = 512;
+        internal const int MaximumAtmosphereTrackingStepCount = 1024;
+        internal const int MaximumCloudTrackingStepCount = 1024;
         internal const int ElementCount =
             CloudDataOffset + CloudRadialResolution;
         internal const int ElementStride = sizeof(float);
@@ -204,6 +208,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_ComputeShader != null
                 && m_AtmosphereOpticalDepthKernel >= 0
                 && m_AtmosphereState.active
+                && m_AtmosphereState.usesOptimizedTransport
                 && (!m_HasBuiltAtmosphereOpticalDepth
                     || m_LastBuiltAtmosphereOpticalDepthSignature
                         != m_AtmosphereState.opticalDepthSignature);

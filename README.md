@@ -35,13 +35,13 @@ Pass 通过 `[RenderGraphResource]` 标记的字段自动生成端口。运行�
 | --- | --- |
 | 基础渲染 | 预深度、GBuffer、延迟光照、Motion Vector、HZB、通用物体绘制、Color Pyramid |
 | 阴影与光照 | CSM / PCSS、簇状光照、方向光 DXR 阴影与 SIGMA 降噪、天空与大气散射 |
-| 后处理 | 自动曝光、Bloom（Mip Scattering 与 FFT 卷积核模式）、色彩分级、景深、GTAO、镜头光晕、SSR（含 REBLUR：Checkerboard 交织、时域稳定、Hit-Distance 重建、可配置降噪与分离直接光照）、局部曝光、最终合成 |
+| 后处理 | 自动曝光（Unity、HDRP、Unreal 预设 Inspector）、Bloom（Mip Scattering 与 FFT 卷积核模式）、色彩分级、景深、环境光遮蔽（XeGTAO 或 FidelityFX CACAO）、镜头光晕、SSR（含 REBLUR：Checkerboard 交织、时域稳定、Hit-Distance 重建、可配置降噪与分离直接光照）、局部曝光、最终合成 |
 | 抗锯齿与超分 | CMAA2、TAA、TSR、FSR3；DLSS Super Resolution / Ray Reconstruction 需额外插件集成 |
 | NVIDIA 集成 | NVAPI Shader Execution Reordering（SER） |
 | 体积效果 | 全局及局部体积雾、VBuffer、体积光照和 Max-Z 生成 |
 | GPU Driven | Meshlet 导入与渲染、Visibility Buffer、对象调度、调试 Overlay、Bindless 描述符支持 |
 | Ray Tracing | 可序列化 RTAS 描述符、RTAS 构建、方向光光追阴影与相关调试 Pass |
-| 参考路径追踪 | 基于 OpenPBR 的多反弹 DXR 原型，含 MIS 主光源采样、HDRI 环境重要性采样与 Next-Event Estimation、ReGIR Proposal NEE + Shape Sampling、确定性像素捕获、REBLUR 信号路由（有限太阳光照）、NRD REBLUR 预览降噪与 Unity Open Image Denoise 后端 |
+| 参考路径追踪 | 基于 OpenPBR 的多反弹 DXR 原型，含解析光源与 HDRI 的 MIS / Next-Event Estimation、rectangle / disc 的 BSDF 段命中评估、着色点感知的混合光源选择与空间索引、Rendering Debugger 传输视图、确定性像素捕获、REBLUR 信号路由（有限太阳光照）、NRD REBLUR 预览降噪与 Unity Open Image Denoise 后端 |
 | 资源与子系统 | 虚拟纹理（含 SVT）、DBuffer Decal、LTC 面光源、反射探针图集、ReGIR、天空管理 |
 | Per-Object Buffer | 不依赖 `MaterialPropertyBlock` 的逐 Renderer Shader 数据、子系统生命周期集成、集中生成的 HLSL 布局、颜色示例与 MPB CPU 对比基准 |
 | 实验性粒子 | 基于 ECS 页式存储的粒子模拟、裁剪、排序、Billboard / Mesh / Stretch 渲染、Trail、碰撞和子发射器 |
@@ -104,6 +104,8 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 - [Acceleration Structure 支持](Documentation~/AccelerationStructureSupport.md)
 - [Bindless 设置](Documentation~/Bindless.md)
 - [Local Exposure](Documentation~/LocalExposure.md)
+- [环境光遮蔽（XeGTAO / FidelityFX CACAO）](Documentation~/AmbientOcclusion.md)
+- [FFT 卷积 Bloom](Documentation~/FFTBloom.md)
 - [NVIDIA Shader Execution Reordering](Documentation~/NVAPIShaderExecutionReordering.md)
 - [Virtual Texture 架构](Documentation~/VirtualTextureCoreArchitecture.md)
 - [Per-Object Buffer](Documentation~/PerObjectBuffer.md)

@@ -35,12 +35,12 @@ The modules below have implementations in the current package. Availability stil
 | --- | --- |
 | Core rendering | Pre-depth, GBuffer, deferred lighting, motion vectors, HZB, general object drawing, and color pyramids |
 | Shadows and lighting | CSM / PCSS, clustered lighting, directional DXR shadows with SIGMA denoising, sky, and atmospheric scattering |
-| Post processing | Auto exposure, bloom with mip-scattering and FFT-convolution modes, color grading, depth of field, GTAO, lens flares, SSR with ReBlur, local exposure, and final compositing |
+| Post processing | Auto exposure with Unity, HDRP, and Unreal preset Inspectors; bloom with mip-scattering and FFT-convolution modes; color grading; depth of field; ambient occlusion with XeGTAO or FidelityFX CACAO; lens flares; SSR with ReBlur; local exposure; and final compositing |
 | Anti-aliasing and upscaling | CMAA2, TAA, TSR, and FSR3; DLSS Super Resolution / Ray Reconstruction require additional plugin integration |
 | Volumetrics | Global and local volumetric fog, VBuffer, volumetric lighting, and Max-Z generation |
 | GPU Driven | Meshlet import and rendering, Visibility Buffer, object dispatch, debug overlay, and bindless descriptor support |
 | Ray Tracing | Serializable RTAS descriptors, RTAS construction, directional ray-traced shadows, and related debug passes |
-| Reference path tracing | OpenPBR-based multi-bounce DXR prototype, accumulation, ray-tracing G-buffer, NRD REBLUR preview denoising, and a Unity Open Image Denoise backend |
+| Reference path tracing | OpenPBR-based multi-bounce DXR prototype with analytic-light and HDRI MIS / next-event estimation, rectangle / disc BSDF-segment evaluation, shading-point-aware mixed light selection and a spatial index, Rendering Debugger transport views, deterministic pixel capture, REBLUR signal routing for finite sun lighting, NRD REBLUR preview denoising, and a Unity Open Image Denoise backend |
 | Resources and subsystems | Virtual Texturing with SVT, DBuffer Decals, LTC area lights, reflection-probe atlas, ReGIR, and sky management |
 | Per-Object Buffer | Per-renderer shader data without `MaterialPropertyBlock`, centralized generated HLSL layouts, a color example, and an MPB CPU benchmark |
 | Experimental particles | ECS paged-storage simulation, culling, sorting, Billboard / Mesh / Stretch rendering, trails, collisions, and sub-emitters |
@@ -101,6 +101,8 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 - [Acceleration Structure Support](Documentation~/AccelerationStructureSupport.md)
 - [Bindless Setup](Documentation~/Bindless.md)
 - [Local Exposure](Documentation~/LocalExposure.md)
+- [Ambient Occlusion (XeGTAO / FidelityFX CACAO)](Documentation~/AmbientOcclusion.md)
+- [FFT Convolution Bloom](Documentation~/FFTBloom.md)
 - [Virtual Texture Architecture](Documentation~/VirtualTextureCoreArchitecture.md)
 - [Per-Object Buffer](Documentation~/PerObjectBuffer.md)
 - Roadmaps: [Shadow](Roadmap~/Shadow.md), [Sky](Roadmap~/Sky.md), [Virtual Texture](Roadmap~/VirtualTextureSystem.md), [SVT](Roadmap~/SVTRoadmap.md), and [Reference Path Tracing](Roadmap~/ReferencePathTracingRoadmap.md)

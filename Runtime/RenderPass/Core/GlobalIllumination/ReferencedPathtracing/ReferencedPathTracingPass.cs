@@ -141,6 +141,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedEnvironmentTint");
         private static readonly int EnvironmentParametersId =
             Shader.PropertyToID("_ReferencedEnvironmentParameters");
+        private static readonly int EnvironmentModeId =
+            Shader.PropertyToID("_ReferencedEnvironmentMode");
         private static readonly int EnvironmentLightingEnabledId =
             Shader.PropertyToID("_ReferencedEnvironmentLightingEnabled");
         private static readonly int EnvironmentCameraVisibleId =
@@ -161,6 +163,34 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedCameraClearColor");
         private static readonly int CameraSkyEnabledId =
             Shader.PropertyToID("_ReferencedCameraSkyEnabled");
+        private static readonly int AtmosphereFlagsId =
+            Shader.PropertyToID("_ReferencedAtmosphereFlags");
+        private static readonly int AtmospherePlanetCenterBottomRadiusId =
+            Shader.PropertyToID(
+                "_ReferencedAtmospherePlanetCenterBottomRadius");
+        private static readonly int AtmosphereTopRadiusMieAnisotropyId =
+            Shader.PropertyToID(
+                "_ReferencedAtmosphereTopRadiusMieAnisotropy");
+        private static readonly int AtmosphereGroundAlbedoId =
+            Shader.PropertyToID("_ReferencedAtmosphereGroundAlbedo");
+        private static readonly int AtmosphereRayleighScatteringId =
+            Shader.PropertyToID("_ReferencedAtmosphereRayleighScattering");
+        private static readonly int AtmosphereRayleighExtinctionId =
+            Shader.PropertyToID("_ReferencedAtmosphereRayleighExtinction");
+        private static readonly int AtmosphereMieScatteringId =
+            Shader.PropertyToID("_ReferencedAtmosphereMieScattering");
+        private static readonly int AtmosphereMieExtinctionId =
+            Shader.PropertyToID("_ReferencedAtmosphereMieExtinction");
+        private static readonly int AtmosphereOzoneExtinctionId =
+            Shader.PropertyToID("_ReferencedAtmosphereOzoneExtinction");
+        private static readonly int AtmosphereOzoneLayerId =
+            Shader.PropertyToID("_ReferencedAtmosphereOzoneLayer");
+        private static readonly int AtmosphereSunDirectionId =
+            Shader.PropertyToID("_ReferencedAtmosphereSunDirection");
+        private static readonly int AtmosphereSunIlluminanceId =
+            Shader.PropertyToID("_ReferencedAtmosphereSunIlluminance");
+        private static readonly int AtmosphereHasSunId =
+            Shader.PropertyToID("_ReferencedAtmosphereHasSun");
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -293,6 +323,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingReblurCheckerboardMode m_ReblurCheckerboardMode =
             ReferencedPathTracingReblurCheckerboardMode.Off;
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
+        private ReferencedPathTracingAtmosphereState m_AtmosphereState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
         private ReferencedPathTracingSamplingMode m_ResolvedPathSamplingMode =
@@ -424,7 +455,7 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareReferenceLightListFallback();
             PrepareEnvironmentImportanceDistributionFallback();
             PrepareDirectionalDenoiserState();
-            PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
+            PrepareEnvironment(frameData, cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
             RefreshIndexedBndKeyword();
             ResolvePathSamplingMode();
@@ -710,6 +741,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingReblurSettings.CreateDefault().hitDistanceParameters;
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
             m_EnvironmentState = default;
+            m_AtmosphereState = default;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
             m_ResolvedPathSamplingMode =
@@ -964,16 +996,30 @@ namespace VividRP.Runtime.RenderPass.Core
             };
         }
 
-        private void PrepareEnvironment(VividSkyData skyData, VividCameraData cameraData)
+        private void PrepareEnvironment(
+            ContextContainer frameData,
+            VividCameraData cameraData)
         {
+            var skyData = frameData.GetOrCreate<VividSkyData>();
+            var settings =
+                VividVolumeManagerUtility
+                    .GetReferencedPathTracingSettingsVolume();
             m_EnvironmentTexture.ClearImportedHandle();
             m_EnvironmentBackgroundTexture.ClearImportedHandle();
-            m_EnvironmentState = ReferencedPathTracingEnvironmentState.Resolve(skyData);
+            m_EnvironmentState =
+                ReferencedPathTracingEnvironmentState.Resolve(
+                    skyData,
+                    settings);
+            m_AtmosphereState =
+                ReferencedPathTracingAtmosphereState.Resolve(
+                    frameData,
+                    settings);
             m_CameraBackgroundState =
                 ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
 
-            // Reference Path Tracing V1 only accepts HDRI Sky. Passing null deliberately imports
-            // SkyManager's black cubemap for disabled, missing, or unsupported sky types.
+            // HDRI and Reference Atmosphere are mutually exclusive. Reference Atmosphere A0
+            // captures only a physical parameter snapshot, so the cubemap ports deliberately
+            // receive the black fallback and cannot leak raster sky radiance into the path.
             SkyManager.ImportSpecularCubemap(
                 m_EnvironmentTexture,
                 m_EnvironmentState.hasHdri ? skyData : null);
@@ -1001,6 +1047,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_Height,
                     effectiveIntegratorSignature,
                     m_EnvironmentState,
+                    m_AtmosphereState,
                     m_CameraBackgroundState,
                     m_PhysicalCameraState);
             var temporalData = frameData.Contains<VividTemporalData>()
@@ -1126,6 +1173,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_EnvironmentState.rotation,
                 m_EnvironmentState.maxMipLevel,
                 hasEnvironmentBinding && m_EnvironmentState.hasHdri ? 1.0f : 0.0f);
+            var environmentMode = (int)m_EnvironmentState.mode;
             var lightingEnabled =
                 hasEnvironmentBinding && m_EnvironmentState.lightingEnabled ? 1 : 0;
             var cameraVisible =
@@ -1148,6 +1196,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
             cmd.SetGlobalVector(EnvironmentTintId, environmentTint);
             cmd.SetGlobalVector(EnvironmentParametersId, environmentParameters);
+            cmd.SetGlobalInt(EnvironmentModeId, environmentMode);
             cmd.SetGlobalInt(EnvironmentLightingEnabledId, lightingEnabled);
             cmd.SetGlobalInt(EnvironmentCameraVisibleId, cameraVisible);
             cmd.SetGlobalInt(
@@ -1169,6 +1218,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 EnvironmentParametersId,
                 environmentParameters);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                EnvironmentModeId,
+                environmentMode);
             cmd.SetRayTracingIntParam(
                 m_RayTracingShader,
                 EnvironmentLightingEnabledId,
@@ -1209,6 +1262,148 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 CameraSkyEnabledId,
                 cameraSkyEnabled);
+            BindAtmosphereContract(cmd);
+        }
+
+        private void BindAtmosphereContract(CommandBuffer cmd)
+        {
+            var parameters = m_AtmosphereState.parameters;
+            var planetCenterBottomRadius = new Vector4(
+                parameters.planetCenter.x,
+                parameters.planetCenter.y,
+                parameters.planetCenter.z,
+                parameters.bottomRadius);
+            var topRadiusMieAnisotropy = new Vector4(
+                parameters.topRadius,
+                parameters.mieAnisotropy,
+                parameters.intensityMultiplier,
+                0.0f);
+            var groundAlbedo = new Vector4(
+                parameters.groundAlbedo.x,
+                parameters.groundAlbedo.y,
+                parameters.groundAlbedo.z,
+                0.0f);
+            var rayleighScattering = new Vector4(
+                parameters.rayleighScattering.x,
+                parameters.rayleighScattering.y,
+                parameters.rayleighScattering.z,
+                parameters.rayleighScaleHeight);
+            var rayleighExtinction = new Vector4(
+                parameters.rayleighExtinction.x,
+                parameters.rayleighExtinction.y,
+                parameters.rayleighExtinction.z,
+                0.0f);
+            var mieScattering = new Vector4(
+                parameters.mieScattering.x,
+                parameters.mieScattering.y,
+                parameters.mieScattering.z,
+                parameters.mieScaleHeight);
+            var mieExtinction = new Vector4(
+                parameters.mieExtinction.x,
+                parameters.mieExtinction.y,
+                parameters.mieExtinction.z,
+                0.0f);
+            var ozoneExtinction = new Vector4(
+                parameters.ozoneExtinction.x,
+                parameters.ozoneExtinction.y,
+                parameters.ozoneExtinction.z,
+                0.0f);
+            var ozoneLayer = new Vector4(
+                parameters.ozoneLayerStart,
+                parameters.ozoneLayerWidth,
+                0.0f,
+                0.0f);
+            var sunDirection = new Vector4(
+                m_AtmosphereState.sunDirection.x,
+                m_AtmosphereState.sunDirection.y,
+                m_AtmosphereState.sunDirection.z,
+                0.5f * m_AtmosphereState.sunAngularDiameter);
+            var sunIlluminance = new Vector4(
+                m_AtmosphereState.sunIlluminance.x,
+                m_AtmosphereState.sunIlluminance.y,
+                m_AtmosphereState.sunIlluminance.z,
+                m_AtmosphereState.sunShadowStrength);
+            var flags = (int)m_AtmosphereState.flags;
+            var hasSun = m_AtmosphereState.hasSun ? 1 : 0;
+
+            cmd.SetGlobalInt(AtmosphereFlagsId, flags);
+            cmd.SetGlobalVector(
+                AtmospherePlanetCenterBottomRadiusId,
+                planetCenterBottomRadius);
+            cmd.SetGlobalVector(
+                AtmosphereTopRadiusMieAnisotropyId,
+                topRadiusMieAnisotropy);
+            cmd.SetGlobalVector(AtmosphereGroundAlbedoId, groundAlbedo);
+            cmd.SetGlobalVector(
+                AtmosphereRayleighScatteringId,
+                rayleighScattering);
+            cmd.SetGlobalVector(
+                AtmosphereRayleighExtinctionId,
+                rayleighExtinction);
+            cmd.SetGlobalVector(AtmosphereMieScatteringId, mieScattering);
+            cmd.SetGlobalVector(AtmosphereMieExtinctionId, mieExtinction);
+            cmd.SetGlobalVector(
+                AtmosphereOzoneExtinctionId,
+                ozoneExtinction);
+            cmd.SetGlobalVector(AtmosphereOzoneLayerId, ozoneLayer);
+            cmd.SetGlobalVector(AtmosphereSunDirectionId, sunDirection);
+            cmd.SetGlobalVector(
+                AtmosphereSunIlluminanceId,
+                sunIlluminance);
+            cmd.SetGlobalInt(AtmosphereHasSunId, hasSun);
+
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                AtmosphereFlagsId,
+                flags);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmospherePlanetCenterBottomRadiusId,
+                planetCenterBottomRadius);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereTopRadiusMieAnisotropyId,
+                topRadiusMieAnisotropy);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereGroundAlbedoId,
+                groundAlbedo);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereRayleighScatteringId,
+                rayleighScattering);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereRayleighExtinctionId,
+                rayleighExtinction);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereMieScatteringId,
+                mieScattering);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereMieExtinctionId,
+                mieExtinction);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereOzoneExtinctionId,
+                ozoneExtinction);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereOzoneLayerId,
+                ozoneLayer);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereSunDirectionId,
+                sunDirection);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                AtmosphereSunIlluminanceId,
+                sunIlluminance);
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                AtmosphereHasSunId,
+                hasSun);
         }
 
         private void PrepareEnvironmentImportanceDistributionFallback()

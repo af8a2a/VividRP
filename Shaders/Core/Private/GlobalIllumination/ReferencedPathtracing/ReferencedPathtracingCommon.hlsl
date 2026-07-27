@@ -16,6 +16,7 @@ float4 _ReferencedEnvironmentTint;
 // x: scene-linear intensity multiplier, y: rotation in degrees,
 // z: maximum available mip, w: valid HDRI source.
 float4 _ReferencedEnvironmentParameters;
+int _ReferencedEnvironmentMode;
 int _ReferencedEnvironmentLightingEnabled;
 int _ReferencedEnvironmentCameraVisible;
 int _ReferencedEnvironmentImportanceSamplingEnabled;
@@ -26,6 +27,40 @@ int _ReferencedTransportDebugMode;
 int _ReferencedEnvironmentDebugMode;
 float4 _ReferencedCameraClearColor;
 int _ReferencedCameraSkyEnabled;
+
+// Resource-independent Phase 2 atmosphere snapshot. A0 binds the complete physical
+// contract but intentionally performs no atmosphere radiance evaluation.
+int _ReferencedAtmosphereFlags;
+// xyz: planet center in world space, w: bottom radius in meters.
+float4 _ReferencedAtmospherePlanetCenterBottomRadius;
+// x: top radius in meters, y: Mie anisotropy, z: physical sky intensity.
+float4 _ReferencedAtmosphereTopRadiusMieAnisotropy;
+float4 _ReferencedAtmosphereGroundAlbedo;
+// rgb: sea-level coefficient, w: density scale height in meters.
+float4 _ReferencedAtmosphereRayleighScattering;
+float4 _ReferencedAtmosphereRayleighExtinction;
+float4 _ReferencedAtmosphereMieScattering;
+float4 _ReferencedAtmosphereMieExtinction;
+float4 _ReferencedAtmosphereOzoneExtinction;
+// x: layer start radius, y: layer width, in meters.
+float4 _ReferencedAtmosphereOzoneLayer;
+// xyz: main directional-light direction, w: angular radius in radians.
+float4 _ReferencedAtmosphereSunDirection;
+// rgb: physical main-light illuminance, w: shadow strength.
+float4 _ReferencedAtmosphereSunIlluminance;
+int _ReferencedAtmosphereHasSun;
+
+static const int kReferencedEnvironmentModeHdri = 0;
+static const int kReferencedEnvironmentModeReferenceAtmosphere = 1;
+static const int kReferencedAtmosphereFlagActive = 1 << 0;
+static const int kReferencedAtmosphereFlagLightingEnabled = 1 << 1;
+static const int kReferencedAtmosphereFlagCameraVisible = 1 << 2;
+static const int kReferencedAtmosphereFlagHoldout = 1 << 3;
+static const int kReferencedAtmosphereFlagCloudsEnabled = 1 << 4;
+static const int kReferencedAtmosphereFlagCloudsCameraVisible = 1 << 5;
+static const int kReferencedAtmosphereFlagCloudsHoldout = 1 << 6;
+static const int kReferencedAtmosphereFlagGroundCameraVisible = 1 << 7;
+static const int kReferencedAtmosphereFlagGroundHoldout = 1 << 8;
 
 static const int kReferencedEnvironmentSamplingBsdfOnly = 0;
 static const int kReferencedEnvironmentSamplingImportance = 1;
@@ -73,7 +108,15 @@ StructuredBuffer<float> _ReferencedEnvironmentImportanceDistribution;
 
 bool ReferencedPathtracingHasEnvironment()
 {
-    return _ReferencedEnvironmentParameters.w > 0.5;
+    return _ReferencedEnvironmentMode == kReferencedEnvironmentModeHdri
+        && _ReferencedEnvironmentParameters.w > 0.5;
+}
+
+bool ReferencedPathtracingHasReferenceAtmosphere()
+{
+    return _ReferencedEnvironmentMode
+            == kReferencedEnvironmentModeReferenceAtmosphere
+        && (_ReferencedAtmosphereFlags & kReferencedAtmosphereFlagActive) != 0;
 }
 
 float ReferencedPathtracingEnvironmentLuminance(float3 radiance)

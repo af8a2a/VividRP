@@ -601,6 +601,33 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Gate:** 只有 E6 完成后才能开始；模式切换必须清空 accumulation 并写入 capture metadata。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- `ReferencedPathTracingSettingsVolume` 已加入互斥的 `HDRI` /
+  `ReferenceAtmosphere` mode，默认保持 HDRI V1。Reference Atmosphere 还预留了
+  atmosphere、cloud 与 planet ground 各自的 camera visibility / holdout policy；
+  cloud enable 独立保留给 A4。
+- `ReferencedPathTracingAtmosphereState` 从 active `PhysicallyBasedSkyVolume` 与
+  `VividLightData.mainDirectionalLight` 建立 resource-independent frame snapshot，记录
+  planet center、bottom/top radius、ground albedo、Rayleigh/Mie/ozone 系数与 scale
+  height、物理 intensity、太阳 entity identity、方向、illuminance、角直径与 shadow
+  strength。该提取路径不调用 raster sky renderer/material parameter builder，也不读取
+  atmosphere LUT、sky cubemap、celestial-body bindless texture 或 raster pass 输出。
+- Reference Atmosphere mode 下，HDRI state 强制 `hasHdri=false`，environment sampling
+  pass 不再 build/import HDRI distribution，path tracing pass 的 cubemap ports 只绑定
+  black fallback。Shader 侧 `_ReferencedEnvironmentMode` 还会再次 gate
+  `ReferencedPathtracingHasEnvironment()`，因此 HDRI infinite-light NEE、BSDF miss
+  emission 与 camera background 均不能跨 mode 泄漏能量。A0 只绑定物理 atmosphere
+  contract，不提前实现 A1/A2 radiance evaluation。
+- Atmosphere snapshot 与 environment mode 均进入 frame/sample/FP32 accumulation
+  signature；模式、物理大气参数、太阳或 visibility/holdout policy 变化都会从 sample 0
+  重启。Capture environment contract 升级到 version 3，记录 mode 与完整 atmosphere
+  metadata；HDRI V1 freeze gate 显式拒绝 Reference Atmosphere capture，保持两个
+  baseline 隔离。
+- Runtime 与 Editor Tests assembly 已通过编译；Unity 6000.7 当前 Editor 会话已成功
+  导入 A0 HLSL contract，未出现新增 shader error。由于 Editor 正在运行，按仓库约束
+  未启动 batch EditMode Tests。
+
 #### A1: Spherical Atmosphere Intersection and Transmittance
 
 - 使用高精度 camera-relative planet/atmosphere sphere intersection。

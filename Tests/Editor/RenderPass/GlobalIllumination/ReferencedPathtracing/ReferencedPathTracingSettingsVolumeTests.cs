@@ -36,6 +36,9 @@ namespace VividRP.Editor.Tests
                     volume.enableShaderExecutionReordering.value,
                     Is.False);
                 Assert.That(volume.targetSampleCount.value, Is.EqualTo(2048));
+                Assert.That(
+                    volume.environmentMode.value,
+                    Is.EqualTo(ReferencedPathTracingEnvironmentMode.Hdri));
                 Assert.That(volume.environmentLighting.value, Is.True);
                 Assert.That(volume.environmentCameraVisible.value, Is.True);
                 Assert.That(
@@ -45,6 +48,15 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     volume.environmentEstimatorMode.value,
                     Is.EqualTo(ReferencedPathTracingEnvironmentEstimatorMode.Mis));
+                Assert.That(
+                    volume.referenceAtmosphereCameraVisible.value,
+                    Is.True);
+                Assert.That(volume.referenceAtmosphereHoldout.value, Is.False);
+                Assert.That(volume.referenceClouds.value, Is.False);
+                Assert.That(volume.referenceCloudsCameraVisible.value, Is.True);
+                Assert.That(volume.referenceCloudsHoldout.value, Is.False);
+                Assert.That(volume.referenceGroundCameraVisible.value, Is.True);
+                Assert.That(volume.referenceGroundHoldout.value, Is.False);
                 Assert.That(
                     typeof(ReferencedPathTracingSettingsVolume)
                         .GetField("transportDebugMode"),

@@ -352,6 +352,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int height,
             ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
+            ReferencedPathTracingAtmosphereState atmosphereState,
             ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
             ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
@@ -364,6 +365,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 environmentState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                atmosphereState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 cameraBackgroundState.signature);
@@ -1308,6 +1312,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (metadata.environment == null
                 || metadata.environment.contractVersion
                     != ReferencedPathTracingEnvironmentMetadata.ContractVersion
+                || metadata.environment.mode
+                    != ReferencedPathTracingEnvironmentMode.Hdri
+                || metadata.environment.atmosphere != null
                 || metadata.environment.contentHash == 0
                 || metadata.environment.pdfVersion
                     != ReferencedPathTracingEnvironmentImportanceLayout.Version
@@ -1534,7 +1541,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 imageOriginBottomLeft = true,
                 environment =
                     ReferencedPathTracingEnvironmentMetadata.Capture(
-                        frameData?.GetOrCreate<VividSkyData>()),
+                        frameData),
                 validation = new ReferencedPathTracingValidationEvidence
                 {
                     status = ReferencedPathTracingValidationStatus.NotRun,

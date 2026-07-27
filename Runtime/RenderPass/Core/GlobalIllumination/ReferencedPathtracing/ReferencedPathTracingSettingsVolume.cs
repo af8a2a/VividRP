@@ -19,6 +19,14 @@ namespace VividRP.Runtime
         UniformSphere = 2
     }
 
+    public enum ReferencedPathTracingEnvironmentMode
+    {
+        [InspectorName("HDRI")]
+        Hdri = 0,
+        [InspectorName("Reference Atmosphere")]
+        ReferenceAtmosphere = 1
+    }
+
     public enum ReferencedPathTracingEnvironmentDebugMode
     {
         Combined = 0,
@@ -68,6 +76,18 @@ namespace VividRP.Runtime
     {
         public ReferencedPathTracingEnvironmentSamplingModeParameter(
             ReferencedPathTracingEnvironmentSamplingMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingEnvironmentModeParameter
+        : VolumeParameter<ReferencedPathTracingEnvironmentMode>
+    {
+        public ReferencedPathTracingEnvironmentModeParameter(
+            ReferencedPathTracingEnvironmentMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -166,11 +186,20 @@ namespace VividRP.Runtime
         public ClampedIntParameter targetSampleCount =
             new(2048, 1, MaximumTargetSampleCount);
 
-        [Tooltip("Allows the active HDRI Sky to contribute scene-linear environment lighting.")]
+        [Header("Environment")]
+        [Tooltip(
+            "Selects the mutually exclusive reference environment. HDRI preserves the V1 " +
+            "infinite-light path. Reference Atmosphere captures physical sky parameters without " +
+            "consuming raster sky cubemaps or LUTs; atmospheric radiance is introduced by later " +
+            "Phase 2 milestones.")]
+        public ReferencedPathTracingEnvironmentModeParameter environmentMode =
+            new(ReferencedPathTracingEnvironmentMode.Hdri);
+
+        [Tooltip("Allows the selected environment to contribute scene-linear lighting.")]
         public BoolParameter environmentLighting = new(true);
 
         [Tooltip(
-            "Allows primary camera rays to see the active HDRI Sky. " +
+            "Allows primary camera rays to see the selected environment. " +
             "This does not disable environment lighting.")]
         public BoolParameter environmentCameraVisible = new(true);
 
@@ -188,6 +217,41 @@ namespace VividRP.Runtime
             "The serialized field name is retained for existing Volume assets.")]
         public ReferencedPathTracingEnvironmentEstimatorModeParameter environmentEstimatorMode =
             new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+
+        [Header("Reference Atmosphere Contract")]
+        [Tooltip(
+            "Allows the atmosphere medium to be visible to camera rays. This is reserved by " +
+            "A0 and becomes active when atmospheric transport is implemented.")]
+        public BoolParameter referenceAtmosphereCameraVisible = new(true);
+
+        [Tooltip(
+            "Treats the atmosphere as a camera holdout while retaining its transport contribution. " +
+            "This flag is reserved by the Phase 2 contract.")]
+        public BoolParameter referenceAtmosphereHoldout = new(false);
+
+        [Tooltip(
+            "Enables the reference cloud layer contract. Cloud transport is introduced by A4.")]
+        public BoolParameter referenceClouds = new(false);
+
+        [Tooltip(
+            "Allows reference clouds to be visible to camera rays. This is independent from " +
+            "whether clouds contribute to reference transport.")]
+        public BoolParameter referenceCloudsCameraVisible = new(true);
+
+        [Tooltip(
+            "Treats reference clouds as a camera holdout while retaining their transport " +
+            "contribution. This flag is reserved by the Phase 2 contract.")]
+        public BoolParameter referenceCloudsHoldout = new(false);
+
+        [Tooltip(
+            "Allows the virtual planet ground to be visible to camera rays. Ground remains part " +
+            "of atmosphere transport independently of this camera-visibility flag.")]
+        public BoolParameter referenceGroundCameraVisible = new(true);
+
+        [Tooltip(
+            "Treats the virtual planet ground as a camera holdout while retaining its atmosphere " +
+            "transport contribution. This flag is reserved by the Phase 2 contract.")]
+        public BoolParameter referenceGroundHoldout = new(false);
 
         protected override void OnEnable()
         {
@@ -211,6 +275,9 @@ namespace VividRP.Runtime
                     2048,
                     1,
                     MaximumTargetSampleCount);
+            environmentMode ??=
+                new ReferencedPathTracingEnvironmentModeParameter(
+                    ReferencedPathTracingEnvironmentMode.Hdri);
             environmentLighting ??= new BoolParameter(true);
             environmentCameraVisible ??= new BoolParameter(true);
             environmentSamplingMode ??=
@@ -219,6 +286,13 @@ namespace VividRP.Runtime
             environmentEstimatorMode ??=
                 new ReferencedPathTracingEnvironmentEstimatorModeParameter(
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+            referenceAtmosphereCameraVisible ??= new BoolParameter(true);
+            referenceAtmosphereHoldout ??= new BoolParameter(false);
+            referenceClouds ??= new BoolParameter(false);
+            referenceCloudsCameraVisible ??= new BoolParameter(true);
+            referenceCloudsHoldout ??= new BoolParameter(false);
+            referenceGroundCameraVisible ??= new BoolParameter(true);
+            referenceGroundHoldout ??= new BoolParameter(false);
             base.OnEnable();
         }
     }

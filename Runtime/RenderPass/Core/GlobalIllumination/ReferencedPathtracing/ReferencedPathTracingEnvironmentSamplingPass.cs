@@ -98,7 +98,11 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnvironmentState = ReferencedPathTracingEnvironmentState.Resolve(skyData);
             SkyManager.ImportSpecularCubemap(
                 m_EnvironmentTexture,
-                m_EnvironmentState.hasHdri ? skyData : null);
+                m_EnvironmentState.mode
+                        == ReferencedPathTracingEnvironmentMode.Hdri
+                    && m_EnvironmentState.hasHdri
+                    ? skyData
+                    : null);
 
             ConfigureDistributionBuffer();
             EnsureDistributionBufferInitialized();
@@ -108,6 +112,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 && m_ConditionalKernel >= 0
                 && m_MarginalKernel >= 0
                 && m_EnvironmentState.lightingEnabled
+                && m_EnvironmentState.mode
+                    == ReferencedPathTracingEnvironmentMode.Hdri
                 && m_EnvironmentState.hasHdri
                 && m_EnvironmentState.samplingMode
                     != ReferencedPathTracingEnvironmentSamplingMode.BsdfOnly

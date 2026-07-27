@@ -39,16 +39,24 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public bool Process(
             CommandBuffer commandBuffer,
-            RenderTexture source,
+            RenderTexture radiance,
+            RenderTexture albedo,
+            RenderTexture normal,
             RenderTexture destination,
             int width,
             int height)
         {
             if (commandBuffer == null
-                || source == null
+                || radiance == null
+                || albedo == null
+                || normal == null
                 || destination == null
                 || width <= 0
                 || height <= 0
+                || !HasDimensions(radiance, width, height)
+                || !HasDimensions(albedo, width, height)
+                || !HasDimensions(normal, width, height)
+                || !HasDimensions(destination, width, height)
                 || !IsSupported)
             {
                 return false;
@@ -59,7 +67,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 CompleteFinishedRequest(commandBuffer);
 
                 if (!m_RequestActive)
-                    BeginRequest(commandBuffer, source, width, height);
+                    BeginRequest(
+                        commandBuffer,
+                        radiance,
+                        albedo,
+                        normal,
+                        width,
+                        height);
 
                 if (!m_HasValidResult
                     || m_ResultTexture == null
@@ -115,7 +129,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     Debug.LogWarning(
                         "[VividRP] Intel Open Image Denoise is not supported on the current platform. "
-                        + "The reference path tracer will display its accumulated input without denoising.");
+                        + "The reference path tracer will display its scene-linear radiance input without denoising.");
                 }
             }
             catch (Exception exception)
@@ -141,12 +155,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_DiscardActiveResult = false;
 
             if (!m_HasValidResult && completion == Denoiser.State.Failure)
-                LogFailure("Open Image Denoise failed to process the accumulated path-tracing frame.");
+                LogFailure("Open Image Denoise failed to process the path-tracing frame.");
         }
 
         private void BeginRequest(
             CommandBuffer commandBuffer,
-            RenderTexture source,
+            RenderTexture radiance,
+            RenderTexture albedo,
+            RenderTexture normal,
             int width,
             int height)
         {
@@ -160,9 +176,24 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
             }
 
-            if (m_Denoiser.DenoiseRequest(commandBuffer, "color", source) != Denoiser.State.Success)
+            if (m_Denoiser.DenoiseRequest(commandBuffer, "color", radiance)
+                != Denoiser.State.Success)
             {
                 LogFailure("Open Image Denoise rejected the path-tracing color input.");
+                return;
+            }
+
+            if (m_Denoiser.DenoiseRequest(commandBuffer, "albedo", albedo)
+                != Denoiser.State.Success)
+            {
+                LogFailure("Open Image Denoise rejected the path-tracing albedo AOV.");
+                return;
+            }
+
+            if (m_Denoiser.DenoiseRequest(commandBuffer, "normal", normal)
+                != Denoiser.State.Success)
+            {
+                LogFailure("Open Image Denoise rejected the path-tracing normal AOV.");
                 return;
             }
 
@@ -229,7 +260,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 return;
 
             m_HasLoggedFailure = true;
-            Debug.LogWarning($"[VividRP] {message} Falling back to the accumulated path-tracing input.");
+            Debug.LogWarning(
+                $"[VividRP] {message} Falling back to the scene-linear path-tracing radiance input.");
+        }
+
+        private static bool HasDimensions(
+            RenderTexture texture,
+            int width,
+            int height)
+        {
+            return texture.width == width
+                && texture.height == height;
         }
     }
 }

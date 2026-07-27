@@ -8,11 +8,12 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 6;
+        internal const int Version = 8;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
             int fixedSeed,
+            ReferencedPathTracingSamplingMode pathSamplingMode,
             int maxBounceCount,
             int russianRouletteStartBounce,
             bool enableReGIR,
@@ -25,6 +26,8 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             this.deterministicSampling = deterministicSampling;
             this.fixedSeed = Mathf.Max(0, fixedSeed);
+            this.pathSamplingMode =
+                SanitizePathSamplingMode(pathSamplingMode);
             this.maxBounceCount = Mathf.Clamp(
                 maxBounceCount,
                 1,
@@ -56,6 +59,15 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 deterministicSampling ? this.fixedSeed : 0);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                (int)this.pathSamplingMode);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSamplingContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingShadingNormalContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -80,6 +92,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
         internal bool deterministicSampling { get; }
         internal int fixedSeed { get; }
+        internal ReferencedPathTracingSamplingMode pathSamplingMode { get; }
         internal int maxBounceCount { get; }
         internal int russianRouletteStartBounce { get; }
         internal bool enableReGIR { get; }
@@ -91,6 +104,20 @@ namespace VividRP.Runtime.RenderPass.Core
         internal int targetSampleCount { get; }
         internal ulong signature { get; }
 
+        internal ulong ResolveEffectiveSignature(
+            ReferencedPathTracingSamplingMode effectiveSamplingMode)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            ReferencedPathTracingStableHash.Add(ref hash, signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                (int)effectiveSamplingMode);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSamplingContract.Version);
+            return hash;
+        }
+
         internal static ReferencedPathTracingIntegratorState Resolve(
             ReferencedPathTracingSettingsVolume settings = null)
         {
@@ -100,6 +127,9 @@ namespace VividRP.Runtime.RenderPass.Core
             return new ReferencedPathTracingIntegratorState(
                 useVolumeSettings && settings.deterministicSampling.value,
                 useVolumeSettings ? settings.fixedSeed.value : 0x13579B,
+                useVolumeSettings
+                    ? settings.pathSamplingMode.value
+                    : ReferencedPathTracingSamplingMode.IndexedBnd,
                 useVolumeSettings ? settings.maxBounceCount.value : 4,
                 useVolumeSettings
                     ? settings.russianRouletteStartBounce.value
@@ -118,6 +148,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     ? settings.environmentEstimatorMode.value
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis,
                 useVolumeSettings ? settings.targetSampleCount.value : 2048);
+        }
+
+        private static ReferencedPathTracingSamplingMode
+            SanitizePathSamplingMode(
+                ReferencedPathTracingSamplingMode mode)
+        {
+            return mode == ReferencedPathTracingSamplingMode.IndexedHash
+                ? ReferencedPathTracingSamplingMode.IndexedHash
+                : ReferencedPathTracingSamplingMode.IndexedBnd;
         }
 
         private static ReferencedPathTracingEnvironmentEstimatorMode
@@ -147,6 +186,163 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    internal static class ReferencedPathTracingSamplingContract
+    {
+        internal const int Version = 2;
+        internal const int DimensionCapacity = 256;
+        internal const int FilmDimension = 0;
+        internal const int LensDimension = 2;
+        internal const int CameraReservedDimension = 4;
+        internal const int BounceBaseDimension = 8;
+        internal const int BounceDimensionStride = 16;
+        internal const int BsdfDimensionOffset = 0;
+        internal const int NeeDimensionOffset = 3;
+        internal const int RussianRouletteDimensionOffset = 6;
+        internal const int StochasticAlphaDimensionOffset = 7;
+        internal const int VolumeDimensionOffset = 8;
+        internal const int FutureDimensionOffset = 12;
+        internal const int MaximumUsedDimension =
+            BounceBaseDimension
+            + ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount
+                * BounceDimensionStride
+            - 1;
+
+        internal static int GetBounceDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= BounceDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return BounceBaseDimension
+                + bounceIndex * BounceDimensionStride
+                + dimensionOffset;
+        }
+    }
+
+    internal static class ReferencedPathTracingShadingNormalContract
+    {
+        internal const int Version = 1;
+        internal const float ViewCosineThreshold = 0.1f;
+        internal const float ReflectionHorizonEpsilon = 0.001f;
+        private const float DirectionEpsilon = 0.000001f;
+
+        internal static Vector3 ComputeConsistentNormal(
+            Vector3 viewDirection,
+            Vector3 geometricNormal,
+            Vector3 shadingNormal)
+        {
+            viewDirection = NormalizeOrFallback(
+                viewDirection,
+                Vector3.forward);
+            geometricNormal = NormalizeOrFallback(
+                geometricNormal,
+                Vector3.up);
+            shadingNormal = NormalizeOrFallback(
+                shadingNormal,
+                geometricNormal);
+
+            if (Vector3.Dot(shadingNormal, geometricNormal) < 0.0f)
+                shadingNormal = -shadingNormal;
+
+            var viewCosine = Vector3.Dot(viewDirection, shadingNormal);
+            if (viewCosine <= ViewCosineThreshold)
+            {
+                var blend = Mathf.Clamp01(
+                    Mathf.Max(viewCosine, 0.0f)
+                    / ViewCosineThreshold);
+                shadingNormal = NormalizeOrFallback(
+                    Vector3.Lerp(geometricNormal, shadingNormal, blend),
+                    geometricNormal);
+            }
+
+            var reflectedDirection = Vector3.Reflect(
+                -viewDirection,
+                shadingNormal);
+            var reflectedGeometricCosine =
+                Vector3.Dot(reflectedDirection, geometricNormal);
+            if (reflectedGeometricCosine
+                < ReflectionHorizonEpsilon)
+            {
+                reflectedDirection = NormalizeOrFallback(
+                    reflectedDirection
+                    - reflectedGeometricCosine * geometricNormal
+                    + ReflectionHorizonEpsilon * geometricNormal,
+                    geometricNormal);
+                shadingNormal = NormalizeOrFallback(
+                    viewDirection + reflectedDirection,
+                    geometricNormal);
+            }
+
+            return Vector3.Dot(shadingNormal, viewDirection)
+                        > DirectionEpsilon
+                    && Vector3.Dot(shadingNormal, geometricNormal)
+                        > DirectionEpsilon
+                ? shadingNormal
+                : geometricNormal;
+        }
+
+        internal static float EvaluateDiffuseShadowTerminator(
+            Vector3 direction,
+            Vector3 shadingNormal,
+            Vector3 interpolatedNormal)
+        {
+            direction = NormalizeOrFallback(direction, Vector3.forward);
+            shadingNormal = NormalizeOrFallback(
+                shadingNormal,
+                Vector3.up);
+            interpolatedNormal = NormalizeOrFallback(
+                interpolatedNormal,
+                shadingNormal);
+            if (Vector3.Dot(interpolatedNormal, shadingNormal) < 0.0f)
+                interpolatedNormal = -interpolatedNormal;
+
+            var normalCosine = Mathf.Clamp01(
+                Mathf.Abs(Vector3.Dot(
+                    interpolatedNormal,
+                    shadingNormal)));
+            var tangentSquared =
+                (1.0f - normalCosine * normalCosine)
+                / (normalCosine * normalCosine + DirectionEpsilon);
+            var alphaSquared = Mathf.Clamp01(0.125f * tangentSquared);
+            var lightCosine = Mathf.Clamp01(
+                Vector3.Dot(interpolatedNormal, direction));
+            if (lightCosine <= 0.0f)
+                return 0.0f;
+
+            var lightTangentSquared =
+                (1.0f - lightCosine * lightCosine)
+                / (lightCosine * lightCosine + DirectionEpsilon);
+            return Mathf.Clamp01(
+                2.0f
+                / (1.0f
+                    + Mathf.Sqrt(
+                        1.0f
+                        + alphaSquared * lightTangentSquared)));
+        }
+
+        private static Vector3 NormalizeOrFallback(
+            Vector3 value,
+            Vector3 fallback)
+        {
+            return value.sqrMagnitude > DirectionEpsilon
+                ? value.normalized
+                : fallback.normalized;
+        }
+    }
+
     internal static class ReferencedPathTracingFrameSignatureUtility
     {
         internal static ulong Compute(
@@ -154,22 +350,26 @@ namespace VividRP.Runtime.RenderPass.Core
             VividCameraData cameraData,
             int width,
             int height,
-            ReferencedPathTracingIntegratorState integratorState,
+            ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
-            ReferencedPathTracingCameraBackgroundState cameraBackgroundState)
+            ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
+            ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
             var hash = ReferencedPathTracingStableHash.OffsetBasis;
             ReferencedPathTracingStableHash.Add(ref hash, width);
             ReferencedPathTracingStableHash.Add(ref hash, height);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
-                integratorState.signature);
+                effectiveIntegratorSignature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 environmentState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 cameraBackgroundState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                physicalCameraState.signature);
 
             if (cameraData != null)
             {
@@ -824,6 +1024,11 @@ namespace VividRP.Runtime.RenderPass.Core
         public ulong accumulatedSampleCount;
         public bool deterministicSampling;
         public int fixedSeed;
+        public ReferencedPathTracingSamplingMode pathSamplingMode;
+        public int samplingContractVersion;
+        public int physicalCameraContractVersion;
+        public bool usesPhysicalCameraDof;
+        public int shadingNormalContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ulong integratorSignature;
@@ -859,6 +1064,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public int height;
         public int targetSampleCount;
         public int fixedSeed;
+        public ReferencedPathTracingSamplingMode pathSamplingMode;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ReferencedPathTracingEnvironmentSamplingMode samplingMode;
@@ -877,6 +1083,8 @@ namespace VividRP.Runtime.RenderPass.Core
             height = 512;
             targetSampleCount = 2048;
             fixedSeed = 0x13579B;
+            pathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedBnd;
             maxBounceCount = 4;
             russianRouletteStartBounce = 3;
             samplingMode =
@@ -951,7 +1159,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 5;
+        public const int ContractVersion = 7;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -998,6 +1206,35 @@ namespace VividRP.Runtime.RenderPass.Core
                 || metadata.integratorSignature == 0)
             {
                 return Fail("Canonical deterministic seed is not active.", out failure);
+            }
+
+            if (metadata.pathSamplingMode
+                    != corpusCase.pathSamplingMode
+                || metadata.pathSamplingMode
+                    != ReferencedPathTracingSamplingMode.IndexedBnd
+                || metadata.samplingContractVersion
+                    != ReferencedPathTracingSamplingContract.Version)
+            {
+                return Fail(
+                    "Path sampling contract does not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.physicalCameraContractVersion
+                    != ReferencedPathTracingPhysicalCameraState.Version
+                || metadata.usesPhysicalCameraDof)
+            {
+                return Fail(
+                    "V1 canonical captures require pinhole camera transport.",
+                    out failure);
+            }
+
+            if (metadata.shadingNormalContractVersion
+                != ReferencedPathTracingShadingNormalContract.Version)
+            {
+                return Fail(
+                    "Shading-normal transport contract does not match the corpus.",
+                    out failure);
             }
 
             if (metadata.maxBounceCount != corpusCase.maxBounceCount
@@ -1247,6 +1484,20 @@ namespace VividRP.Runtime.RenderPass.Core
                 deterministicSampling =
                     integratorState.deterministicSampling,
                 fixedSeed = integratorState.fixedSeed,
+                pathSamplingMode = pathTracingData?.isValid == true
+                    ? pathTracingData.pathSamplingMode
+                    : integratorState.pathSamplingMode,
+                samplingContractVersion =
+                    pathTracingData?.isValid == true
+                        ? pathTracingData.samplingContractVersion
+                        : 0,
+                physicalCameraContractVersion =
+                    ReferencedPathTracingPhysicalCameraState.Version,
+                usesPhysicalCameraDof =
+                    pathTracingData?.isValid == true
+                    && pathTracingData.physicalCameraDofEnabled,
+                shadingNormalContractVersion =
+                    ReferencedPathTracingShadingNormalContract.Version,
                 maxBounceCount = integratorState.maxBounceCount,
                 russianRouletteStartBounce =
                     integratorState.russianRouletteStartBounce,
@@ -1297,7 +1548,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 {
                     status = ReferencedPathTracingValidationStatus.NotRun,
                     notes =
-                        "Pending estimator-mean, proposal on/off, light-selection, and PDF-consistency validation."
+                        "Pending estimator-mean, proposal on/off, light-selection, PDF-consistency, and shading-normal grazing-angle validation."
                 }
             };
         }

@@ -2,10 +2,12 @@
 #define VIVIDRP_STANDARD_LIT_OPENPBR_ADAPTER_INCLUDED
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/OpenPBR/OpenPBR.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingShadingNormal.hlsl"
 
 struct VividReferencedPathtracingMaterial
 {
     OpenPBR_ResolvedInputs openPbrInputs;
+    float3 unadjustedShadingNormalWS;
     float3 shadingNormalWS;
     float3 emission;
 };
@@ -43,7 +45,8 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     VividIndirectDiffuseHitGeometry geometry,
     float textureBaseLambda,
     float baseTextureLod,
-    float normalTextureLod)
+    float normalTextureLod,
+    float3 viewDirectionWS)
 {
     VividReferencedPathtracingMaterial material;
 
@@ -64,9 +67,15 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     emissionTextureLod = max(computeTargetTextureLOD(_EmissionMap, textureBaseLambda), 0.0);
 #endif
     material.emission = SampleEmission(geometry.uv, emissionTextureLod);
-    material.shadingNormalWS = VividReferencedPathtracingConstrainShadingNormal(
+    material.unadjustedShadingNormalWS =
+        VividReferencedPathtracingConstrainShadingNormal(
         VividIndirectDiffuseSampleNormalWS(geometry, normalTextureLod),
         geometry.faceNormalWS);
+    material.shadingNormalWS =
+        ReferencedPathtracingComputeConsistentShadingNormal(
+            viewDirectionWS,
+            geometry.faceNormalWS,
+            material.unadjustedShadingNormalWS);
 
     OpenPBR_ResolvedInputs inputs = openpbr_make_default_resolved_inputs();
     inputs.base_color = saturate(baseSample.rgb);

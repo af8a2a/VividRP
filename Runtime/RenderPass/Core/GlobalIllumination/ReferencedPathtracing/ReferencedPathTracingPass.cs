@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using UnityEngine.Serialization;
 using VividRP.Runtime.Plugin;
 
 namespace VividRP.Runtime.RenderPass.Core
@@ -47,7 +48,10 @@ namespace VividRP.Runtime.RenderPass.Core
     /// The resolved sample stores scene-linear radiance and camera-background opacity. Denoising
     /// AOV alpha channels continue to use primary-hit validity.
     /// </summary>
-    public sealed class ReferencedPathTracingPass : UnsafePass, IAllowGlobalStateModificationPass
+    public sealed class ReferencedPathTracingPass
+        : UnsafePass,
+          IAllowGlobalStateModificationPass,
+          IBlueNoiseConsumerPass
     {
         private static readonly ReferencedPathTracingLightListStorageBlock[]
             s_EmptyReferenceLightListStorage =
@@ -57,12 +61,19 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string RayGenerationShaderName = "RayGenReferencedPathtracing";
         internal const string ShaderExecutionReorderingKeywordName =
             "VIVID_REFERENCE_PT_SER";
+        internal const string IndexedBndKeywordName =
+            "VIVID_REFERENCE_PT_INDEXED_BND";
         internal const uint ShaderExecutionReorderingUavSlot = 31;
 
         private const string AccelerationStructureName = "_AccelerationStructure";
         private const int NvidiaShaderExtensionStructStride = 256;
 
-        private static readonly int WorldPositionTextureId = Shader.PropertyToID("_WorldPositionTexture");
+        private static readonly int PathTracingRadianceId =
+            Shader.PropertyToID("_ReferencedPathTracingRadiance");
+        private static readonly int PathTracingAlbedoId =
+            Shader.PropertyToID("_ReferencedPathTracingAlbedo");
+        private static readonly int PathTracingNormalId =
+            Shader.PropertyToID("_ReferencedPathTracingNormal");
         private static readonly int DebugTextureId =
             Shader.PropertyToID("_ReferencedPathTracingDebugTexture");
         private static readonly int NvidiaShaderExtensionBufferId =
@@ -85,6 +96,14 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int CameraPositionId = Shader.PropertyToID("_CameraPositionWS");
         private static readonly int PixelCoordToViewDirWSId = Shader.PropertyToID("_PixelCoordToViewDirWS");
         private static readonly int WorldToViewId = Shader.PropertyToID("_ReferencedWorldToView");
+        private static readonly int CameraRightWSId =
+            Shader.PropertyToID("_ReferencedCameraRightWS");
+        private static readonly int CameraUpWSId =
+            Shader.PropertyToID("_ReferencedCameraUpWS");
+        private static readonly int CameraForwardWSId =
+            Shader.PropertyToID("_ReferencedCameraForwardWS");
+        private static readonly int PhysicalCameraParametersId =
+            Shader.PropertyToID("_ReferencedPhysicalCameraParameters");
         private static readonly int RayMinDistanceId = Shader.PropertyToID("_RayMinDistance");
         private static readonly int RayMaxDistanceId = Shader.PropertyToID("_RayMaxDistance");
         private static readonly int MaxBounceCountId = Shader.PropertyToID("_ReferencedMaxBounceCount");
@@ -92,6 +111,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedRussianRouletteStartBounce");
         private static readonly int FrameIndexId = Shader.PropertyToID("_ReferencedFrameIndex");
         private static readonly int SeedId = Shader.PropertyToID("_ReferencedSeed");
+        private static readonly int PathSamplingModeId =
+            Shader.PropertyToID("_ReferencedPathSamplingMode");
         private static readonly int ReblurHitDistanceParametersId =
             Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
         private static readonly int ReblurCheckerboardModeId =
@@ -166,10 +187,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private RenderGraphBuffer m_EnvironmentImportanceDistribution;
 
         [RenderGraphResource(
-            Name = "WorldPosition",
+            Name = "PathTracingRadiance",
             Access = AccessFlags.Write,
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
-        private RenderGraphTexture m_WorldPositionTexture;
+        [FormerlySerializedAs("m_WorldPositionTexture")]
+        private RenderGraphTexture m_PathTracingRadiance;
+
+        [RenderGraphResource(
+            Name = "PathTracingAlbedo",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_PathTracingAlbedo;
+
+        [RenderGraphResource(
+            Name = "PathTracingNormal",
+            Access = AccessFlags.Write,
+            BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
+        private RenderGraphTexture m_PathTracingNormal;
 
         [RenderGraphResource(
             Name = "DebugTexture",
@@ -229,6 +263,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private GraphicsBuffer m_NvidiaShaderExtensionBuffer;
         private LocalKeyword m_ShaderExecutionReorderingKeyword;
         private bool m_ShaderExecutionReorderingKeywordAvailable;
+        private LocalKeyword m_IndexedBndKeyword;
+        private bool m_IndexedBndKeywordAvailable;
         private bool m_SupportsRayTracing;
         private bool m_ShaderExecutionReorderingAvailable;
         private bool m_UseShaderExecutionReordering;
@@ -240,6 +276,15 @@ namespace VividRP.Runtime.RenderPass.Core
         private Vector4 m_CameraPositionWS;
         private Matrix4x4 m_PixelCoordToViewDirWS = Matrix4x4.identity;
         private Matrix4x4 m_WorldToView = Matrix4x4.identity;
+        private Vector4 m_CameraRightWS =
+            new(1.0f, 0.0f, 0.0f, 0.0f);
+        private Vector4 m_CameraUpWS =
+            new(0.0f, 1.0f, 0.0f, 0.0f);
+        private Vector4 m_CameraForwardWS =
+            new(0.0f, 0.0f, 1.0f, 0.0f);
+        private ReferencedPathTracingPhysicalCameraState
+            m_PhysicalCameraState =
+                ReferencedPathTracingPhysicalCameraState.Disabled;
         private float m_RayMinDistance = 0.01f;
         private float m_RayMaxDistance = 1000.0f;
         private bool m_HasFiniteDirectionalLight;
@@ -250,7 +295,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
+        private ReferencedPathTracingSamplingMode m_ResolvedPathSamplingMode =
+            ReferencedPathTracingSamplingMode.IndexedBnd;
         private ReferencedPathTracingDebugSettings m_DebugSettings;
+        private bool m_SamplingFallbackWarningIssued;
         private readonly RenderGraphBuffer m_DefaultReferenceLightList;
         private readonly RenderGraphBuffer m_DefaultReferenceLightListParameters;
         private bool m_DefaultReferenceLightListInitialized;
@@ -287,8 +335,14 @@ namespace VividRP.Runtime.RenderPass.Core
                     ReferencedPathTracingEnvironmentImportanceLayout.ElementStride);
             m_EnvironmentImportanceDistribution =
                 m_DefaultEnvironmentImportanceDistribution;
-            m_WorldPositionTexture = RenderGraphTexture.CreateOutput(
-                "WorldPosition",
+            m_PathTracingRadiance = RenderGraphTexture.CreateOutput(
+                "PathTracingRadiance",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_PathTracingAlbedo = RenderGraphTexture.CreateOutput(
+                "PathTracingAlbedo",
+                GraphicsFormat.R32G32B32A32_SFloat);
+            m_PathTracingNormal = RenderGraphTexture.CreateOutput(
+                "PathTracingNormal",
                 GraphicsFormat.R32G32B32A32_SFloat);
             m_DebugTexture = RenderGraphTexture.CreateOutput(
                 "ReferencedPathTracingDebug",
@@ -350,6 +404,7 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             RefreshShaderExecutionReorderingKeyword();
+            RefreshIndexedBndKeyword();
             PrepareShaderExecutionReorderingBuffer();
         }
 
@@ -371,6 +426,8 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData.GetOrCreate<VividSkyData>(), cameraData);
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
+            RefreshIndexedBndKeyword();
+            ResolvePathSamplingMode();
             m_DebugSettings = ReferencedPathTracingDebugSettings.Resolve(
                 VividRenderingDebugDisplaySettings.Data);
             // A RayTracingShader reimport invalidates LocalKeyword handles while
@@ -401,6 +458,14 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_CameraPositionWS = Vector4.zero;
                 m_PixelCoordToViewDirWS = Matrix4x4.identity;
                 m_WorldToView = Matrix4x4.identity;
+                m_CameraRightWS =
+                    new Vector4(1.0f, 0.0f, 0.0f, 0.0f);
+                m_CameraUpWS =
+                    new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+                m_CameraForwardWS =
+                    new Vector4(0.0f, 0.0f, 1.0f, 0.0f);
+                m_PhysicalCameraState =
+                    ReferencedPathTracingPhysicalCameraState.Disabled;
                 m_RayMinDistance = 0.01f;
                 m_RayMaxDistance = 1000.0f;
                 m_FrameIndex = 0;
@@ -414,8 +479,23 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraPositionWS = new Vector4(cameraPosition.x, cameraPosition.y, cameraPosition.z, 1.0f);
             m_PixelCoordToViewDirWS = cameraData.GetPixelCoordToViewDirWSMatrix();
             m_WorldToView = cameraData.GetViewMatrix();
+            m_CameraRightWS = camera.transform.right;
+            m_CameraUpWS = camera.transform.up;
+            m_CameraForwardWS = camera.transform.forward;
+            m_PhysicalCameraState =
+                ReferencedPathTracingPhysicalCameraState.Resolve(
+                    camera,
+                    DepthOfFieldSettingsResolver
+                        .ResolveForReferencePathTracing());
             m_RayMinDistance = Mathf.Max(camera.nearClipPlane, 0.0001f);
             m_RayMaxDistance = Mathf.Max(camera.farClipPlane, m_RayMinDistance + 0.0001f);
+            if (m_PhysicalCameraState.enabled)
+            {
+                // REBLUR assumes a stable pinhole primary surface and cannot
+                // interpret stochastic aperture visibility or checkerboarding.
+                m_ReblurCheckerboardMode =
+                    ReferencedPathTracingReblurCheckerboardMode.Off;
+            }
             PrepareSampleSequence(
                 frameData,
                 cameraData,
@@ -448,6 +528,15 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_UseShaderExecutionReordering);
                 }
 
+                if (m_IndexedBndKeywordAvailable)
+                {
+                    cmd.SetKeyword(
+                        m_RayTracingShader,
+                        m_IndexedBndKeyword,
+                        m_ResolvedPathSamplingMode
+                            == ReferencedPathTracingSamplingMode.IndexedBnd);
+                }
+
                 if (m_UseShaderExecutionReordering)
                 {
                     // Unity validates every declared ray-tracing resource before dispatch.
@@ -469,8 +558,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     accelerationStructure);
                 cmd.SetRayTracingTextureParam(
                     m_RayTracingShader,
-                    WorldPositionTextureId,
-                    m_WorldPositionTexture.innerHandle);
+                    PathTracingRadianceId,
+                    m_PathTracingRadiance.innerHandle);
+                BindOutput(cmd, PathTracingAlbedoId, m_PathTracingAlbedo);
+                BindOutput(cmd, PathTracingNormalId, m_PathTracingNormal);
                 BindOutput(cmd, DebugTextureId, m_DebugTexture);
                 BindOutput(cmd, DiffuseRadianceHitDistanceId, m_DiffuseRadianceHitDistance);
                 BindOutput(cmd, SpecularRadianceHitDistanceId, m_SpecularRadianceHitDistance);
@@ -492,6 +583,22 @@ namespace VividRP.Runtime.RenderPass.Core
                     PixelCoordToViewDirWSId,
                     m_PixelCoordToViewDirWS);
                 cmd.SetRayTracingMatrixParam(m_RayTracingShader, WorldToViewId, m_WorldToView);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    CameraRightWSId,
+                    m_CameraRightWS);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    CameraUpWSId,
+                    m_CameraUpWS);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    CameraForwardWSId,
+                    m_CameraForwardWS);
+                cmd.SetRayTracingVectorParam(
+                    m_RayTracingShader,
+                    PhysicalCameraParametersId,
+                    m_PhysicalCameraState.shaderParameters);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMinDistanceId, m_RayMinDistance);
                 cmd.SetRayTracingFloatParam(m_RayTracingShader, RayMaxDistanceId, m_RayMaxDistance);
                 cmd.SetRayTracingIntParam(
@@ -504,6 +611,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_IntegratorState.russianRouletteStartBounce);
                 cmd.SetRayTracingIntParam(m_RayTracingShader, FrameIndexId, m_FrameIndex);
                 cmd.SetRayTracingIntParam(m_RayTracingShader, SeedId, m_Seed);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    PathSamplingModeId,
+                    (int)m_ResolvedPathSamplingMode);
+                if (m_ResolvedPathSamplingMode
+                    == ReferencedPathTracingSamplingMode.IndexedBnd)
+                {
+                    BlueNoise.Instance?.Bind(cmd, m_RayTracingShader);
+                }
                 cmd.SetRayTracingVectorParam(
                     m_RayTracingShader,
                     ReblurHitDistanceParametersId,
@@ -566,6 +682,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_RayTracingShader = null;
             m_ShaderExecutionReorderingKeyword = default;
             m_ShaderExecutionReorderingKeywordAvailable = false;
+            m_IndexedBndKeyword = default;
+            m_IndexedBndKeywordAvailable = false;
             m_SupportsRayTracing = false;
             m_ShaderExecutionReorderingAvailable = false;
             m_UseShaderExecutionReordering = false;
@@ -577,6 +695,14 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraPositionWS = Vector4.zero;
             m_PixelCoordToViewDirWS = Matrix4x4.identity;
             m_WorldToView = Matrix4x4.identity;
+            m_CameraRightWS =
+                new Vector4(1.0f, 0.0f, 0.0f, 0.0f);
+            m_CameraUpWS =
+                new Vector4(0.0f, 1.0f, 0.0f, 0.0f);
+            m_CameraForwardWS =
+                new Vector4(0.0f, 0.0f, 1.0f, 0.0f);
+            m_PhysicalCameraState =
+                ReferencedPathTracingPhysicalCameraState.Disabled;
             m_RayMinDistance = 0.01f;
             m_RayMaxDistance = 1000.0f;
             m_HasFiniteDirectionalLight = false;
@@ -586,7 +712,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnvironmentState = default;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
+            m_ResolvedPathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedBnd;
             m_DebugSettings = default;
+            m_SamplingFallbackWarningIssued = false;
             m_DefaultReferenceLightList?.ClearImportedBuffer();
             m_DefaultReferenceLightListParameters?.ClearImportedBuffer();
             m_DefaultReferenceLightListInitialized = false;
@@ -682,11 +811,23 @@ namespace VividRP.Runtime.RenderPass.Core
         private void ConfigureOutputs(int width, int height)
         {
             ConfigureOutput(
-                m_WorldPositionTexture,
+                m_PathTracingRadiance,
                 width,
                 height,
                 GraphicsFormat.R32G32B32A32_SFloat,
-                "WorldPosition");
+                "PathTracingRadiance");
+            ConfigureOutput(
+                m_PathTracingAlbedo,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "PathTracingAlbedo");
+            ConfigureOutput(
+                m_PathTracingNormal,
+                width,
+                height,
+                GraphicsFormat.R32G32B32A32_SFloat,
+                "PathTracingNormal");
             ConfigureOutput(
                 m_DebugTexture,
                 width,
@@ -771,7 +912,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private bool HaveValidOutputs()
         {
-            return IsValid(m_WorldPositionTexture)
+            return IsValid(m_PathTracingRadiance)
+                && IsValid(m_PathTracingAlbedo)
+                && IsValid(m_PathTracingNormal)
                 && IsValid(m_DebugTexture)
                 && IsValid(m_DiffuseRadianceHitDistance)
                 && IsValid(m_SpecularRadianceHitDistance)
@@ -847,25 +990,28 @@ namespace VividRP.Runtime.RenderPass.Core
             var renderFrameIndex = cameraData.frameIndex >= 0
                 ? cameraData.frameIndex
                 : Time.frameCount;
+            var effectiveIntegratorSignature =
+                m_IntegratorState.ResolveEffectiveSignature(
+                    m_ResolvedPathSamplingMode);
             var frameSignature =
                 ReferencedPathTracingFrameSignatureUtility.Compute(
                     frameData,
                     cameraData,
                     m_Width,
                     m_Height,
-                    m_IntegratorState,
+                    effectiveIntegratorSignature,
                     m_EnvironmentState,
-                    m_CameraBackgroundState);
+                    m_CameraBackgroundState,
+                    m_PhysicalCameraState);
             var temporalData = frameData.Contains<VividTemporalData>()
                 ? frameData.Get<VividTemporalData>()
                 : null;
-            var sampleIndex = m_IntegratorState.deterministicSampling
-                ? ReferencedPathTracingSampleSequence.Resolve(
+            var sampleIndex =
+                ReferencedPathTracingSampleSequence.Resolve(
                     cameraData.camera,
                     renderFrameIndex,
                     frameSignature,
-                    temporalData == null || temporalData.isFirstFrame)
-                : (uint)Mathf.Max(renderFrameIndex, 0);
+                    temporalData == null || temporalData.isFirstFrame);
 
             m_FrameIndex = unchecked((int)sampleIndex);
             m_Seed = m_IntegratorState.deterministicSampling
@@ -875,12 +1021,65 @@ namespace VividRP.Runtime.RenderPass.Core
             pathTracingData.deterministicSampling =
                 m_IntegratorState.deterministicSampling;
             pathTracingData.sampleIndex = sampleIndex;
+            pathTracingData.pathSamplingMode =
+                m_ResolvedPathSamplingMode;
+            pathTracingData.samplingContractVersion =
+                ReferencedPathTracingSamplingContract.Version;
             pathTracingData.frameSignature = frameSignature;
             pathTracingData.integratorSignature =
-                m_IntegratorState.signature;
+                effectiveIntegratorSignature;
             pathTracingData.accumulatedSampleCount = 0;
             pathTracingData.mainLightInDenoiserSignals =
                 m_HasFiniteDirectionalLight;
+            pathTracingData.physicalCameraDofEnabled =
+                m_PhysicalCameraState.enabled;
+        }
+
+        private void ResolvePathSamplingMode()
+        {
+            m_ResolvedPathSamplingMode = m_IntegratorState.pathSamplingMode;
+            if (m_ResolvedPathSamplingMode
+                != ReferencedPathTracingSamplingMode.IndexedBnd)
+                return;
+            if (m_IndexedBndKeywordAvailable
+                && BlueNoise.Instance?.SupportsBnd256 == true)
+                return;
+
+            m_ResolvedPathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedHash;
+            if (m_SamplingFallbackWarningIssued)
+                return;
+
+            Debug.LogWarning(
+                "[VividRP] Reference Path Tracing could not bind the 256-SPP " +
+                "Owen-Sobol blue-noise set. Falling back to the fixed-dimension " +
+                "indexed hash sampler; canonical BND captures will be rejected.");
+            m_SamplingFallbackWarningIssued = true;
+        }
+
+        private void RefreshIndexedBndKeyword()
+        {
+            m_IndexedBndKeyword = default;
+            m_IndexedBndKeywordAvailable = false;
+            if (m_RayTracingShader == null)
+                return;
+
+            try
+            {
+                var keyword = new LocalKeyword(
+                    m_RayTracingShader,
+                    IndexedBndKeywordName);
+                if (!keyword.isValid)
+                    return;
+
+                m_IndexedBndKeyword = keyword;
+                m_IndexedBndKeywordAvailable = true;
+            }
+            catch (System.Exception)
+            {
+                // ResolvePathSamplingMode selects the resource-free indexed
+                // hash variant when the keyword cannot be refreshed.
+            }
         }
 
         private void BindEnvironment(CommandBuffer cmd)

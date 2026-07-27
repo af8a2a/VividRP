@@ -84,6 +84,22 @@ namespace VividRP.Editor.Tests
                 reblurSource,
                 Does.Not.Contain(
                     "out var mainLightAngularDiameter"));
+            Assert.That(
+                reblurSource,
+                Does.Contain(
+                    "pathTracingData.physicalCameraDofEnabled"));
+            Assert.That(
+                reblurSource,
+                Does.Contain(
+                    "m_ResolveRawForPhysicalCameraDof"));
+            Assert.That(
+                reblurSource,
+                Does.Contain(
+                    "m_Settings.checkerboardMode ="));
+            Assert.That(
+                reblurSource,
+                Does.Contain(
+                    "DispatchResolveRaw(cmd);"));
         }
 
         [Test]

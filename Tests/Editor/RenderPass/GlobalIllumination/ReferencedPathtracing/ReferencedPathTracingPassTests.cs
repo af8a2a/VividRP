@@ -24,11 +24,72 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Pass_AllowsGlobalStateModification()
+        public void Pass_DeclaresRequiredRecorderCapabilities()
         {
             Assert.That(
                 typeof(IAllowGlobalStateModificationPass).IsAssignableFrom(typeof(ReferencedPathTracingPass)),
                 Is.True);
+            Assert.That(
+                typeof(IBlueNoiseConsumerPass).IsAssignableFrom(
+                    typeof(ReferencedPathTracingPass)),
+                Is.True);
+        }
+
+        [Test]
+        public void SamplingShader_UsesIndexedStableDimensionContract()
+        {
+            var rayTracingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.raytrace"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var samplingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSampling.hlsl"));
+
+            Assert.That(
+                ReferencedPathTracingPass.IndexedBndKeywordName,
+                Is.EqualTo("VIVID_REFERENCE_PT_INDEXED_BND"));
+            Assert.That(
+                rayTracingSource,
+                Does.Contain(
+                    "#pragma multi_compile_local _ " +
+                    "VIVID_REFERENCE_PT_INDEXED_BND"));
+            Assert.That(
+                samplingSource,
+                Does.Contain(
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 2"));
+            Assert.That(
+                samplingSource,
+                Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
+            Assert.That(
+                samplingSource,
+                Does.Contain("uint sampleInBlock = sampleIndex & 255u;"));
+            Assert.That(
+                samplingSource,
+                Does.Contain("GetBNDSequenceSample256SPP("));
+            Assert.That(
+                samplingSource,
+                Does.Contain("ReferencedPathtracingGetIndexedHashSample("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("ReferencedPathtracingGetPathSample3D("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain("NextReferencedPathtracingRng"));
         }
 
         [Test]
@@ -190,7 +251,12 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "ReferenceLightListParameters");
             var environmentImportanceDistribution = resources.Buffers.Single(
                 resource => resource.Name == "EnvironmentImportanceDistribution");
-            var worldPosition = resources.Textures.Single(resource => resource.Name == "WorldPosition");
+            var pathTracingRadiance = resources.Textures.Single(
+                resource => resource.Name == "PathTracingRadiance");
+            var pathTracingAlbedo = resources.Textures.Single(
+                resource => resource.Name == "PathTracingAlbedo");
+            var pathTracingNormal = resources.Textures.Single(
+                resource => resource.Name == "PathTracingNormal");
             var debugTexture = resources.Textures.Single(
                 resource => resource.Name == "DebugTexture");
             var environmentTexture = resources.Textures.Single(
@@ -248,11 +314,23 @@ namespace VividRP.Editor.Tests
                 environmentBackgroundTexture.Texture.desc.ColorFormat,
                 Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
             Assert.That(environmentBackgroundTexture.Texture.desc.UseMipMap, Is.True);
-            Assert.That(worldPosition.Name, Is.EqualTo("WorldPosition"));
-            Assert.That(worldPosition.Access, Is.EqualTo(AccessFlags.Write));
-            Assert.That(worldPosition.Texture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
-            Assert.That(worldPosition.Texture.desc.EnableRandomWrite, Is.True);
-            Assert.That(worldPosition.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
+            Assert.That(pathTracingRadiance.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(pathTracingAlbedo.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(pathTracingNormal.Access, Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                new[]
+                {
+                    pathTracingRadiance,
+                    pathTracingAlbedo,
+                    pathTracingNormal
+                }.All(resource =>
+                    resource.Texture.desc.ColorFormat
+                        == GraphicsFormat.R32G32B32A32_SFloat),
+                Is.True);
+            Assert.That(pathTracingRadiance.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(pathTracingAlbedo.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(pathTracingNormal.Texture.desc.EnableRandomWrite, Is.True);
+            Assert.That(pathTracingRadiance.Texture.desc.ClearColor, Is.EqualTo(Color.clear));
             Assert.That(debugTexture.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(
                 debugTexture.Texture.desc.ColorFormat,
@@ -284,7 +362,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Prepare_ResizesWorldPositionOutputToCameraDimensions()
+        public void Prepare_ResizesReferenceDenoisingOutputsToCameraDimensions()
         {
             var pass = new ReferencedPathTracingPass();
             var frameData = new ContextContainer();
@@ -294,7 +372,9 @@ namespace VividRP.Editor.Tests
 
             pass.Prepare(frameData);
 
-            var output = GetField<RenderGraphTexture>(pass, "m_WorldPositionTexture");
+            var output = GetField<RenderGraphTexture>(pass, "m_PathTracingRadiance");
+            var albedo = GetField<RenderGraphTexture>(pass, "m_PathTracingAlbedo");
+            var normal = GetField<RenderGraphTexture>(pass, "m_PathTracingNormal");
             var debugTexture = GetField<RenderGraphTexture>(
                 pass,
                 "m_DebugTexture");
@@ -308,6 +388,10 @@ namespace VividRP.Editor.Tests
             Assert.That(output.desc.Height, Is.EqualTo(540));
             Assert.That(output.desc.FilterMode, Is.EqualTo(FilterMode.Point));
             Assert.That(output.desc.EnableRandomWrite, Is.True);
+            Assert.That(albedo.desc.Width, Is.EqualTo(960));
+            Assert.That(albedo.desc.Height, Is.EqualTo(540));
+            Assert.That(normal.desc.Width, Is.EqualTo(960));
+            Assert.That(normal.desc.Height, Is.EqualTo(540));
             Assert.That(debugTexture.desc.Width, Is.EqualTo(960));
             Assert.That(debugTexture.desc.Height, Is.EqualTo(540));
             Assert.That(debugTexture.desc.FilterMode, Is.EqualTo(FilterMode.Point));
@@ -520,11 +604,19 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "_WorldPositionTexture[pixelCoord] ="));
+                    "_ReferencedPathTracingRadiance[pixelCoord] ="));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
                     "float4(physicalRadiance, physicalOutputAlpha)"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedPathTracingAlbedo[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedPathTracingNormal[pixelCoord] ="));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
@@ -593,7 +685,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     node.GetInputPortByName("m_EnvironmentImportanceDistribution"),
                     Is.Not.Null);
-                Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_PathTracingRadiance"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_PathTracingAlbedo"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_PathTracingNormal"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_WorldPositionTexture"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DebugTexture"), Is.Not.Null);
                 Assert.That(node.GetInputPortByName("m_DebugTexture"), Is.Null);
                 Assert.That(node.GetOutputPortByName("m_DiffuseRadianceHitDistance"), Is.Not.Null);
@@ -611,6 +706,17 @@ namespace VividRP.Editor.Tests
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
+        }
+
+        [Test]
+        public void LegacyWorldPositionBinding_ResolvesToPathTracingRadiance()
+        {
+            var field = RenderGraphPassReflectionUtility.GetInstanceField(
+                typeof(ReferencedPathTracingPass),
+                "m_WorldPositionTexture");
+
+            Assert.That(field, Is.Not.Null);
+            Assert.That(field.Name, Is.EqualTo("m_PathTracingRadiance"));
         }
 
         [Test]
@@ -666,6 +772,118 @@ namespace VividRP.Editor.Tests
                 settings.environmentMode,
                 Is.EqualTo(
                     ReferencedPathTracingEnvironmentDebugMode.Combined));
+        }
+
+        [Test]
+        public void PhysicalCamera_UsesThinLensSamplingAndReservedDimensions()
+        {
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var samplingSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSampling.hlsl"));
+
+            Assert.That(
+                samplingSource,
+                Does.Contain(
+                    "ReferencedPathtracingSampleConcentricDisk"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingLensDimension"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "GetReferencedPathtracingPhysicalCameraRay"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("focusPoint - rayOrigin"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_RayMinDistance / cameraForwardProjection"));
+        }
+
+        [Test]
+        public void PhysicalCameraState_UsesOnlyCameraOpticalSettings()
+        {
+            var cameraObject = new GameObject(
+                "ReferencedPathTracingPassTests.PhysicalCamera");
+            var camera = cameraObject.AddComponent<Camera>();
+            camera.focalLength = 50.0f;
+            camera.aperture = 2.0f;
+            camera.focusDistance = 7.0f;
+            camera.anamorphism = 0.0f;
+            var settings = DepthOfFieldSettingsData.CreateDefault();
+            settings.enabled = true;
+            settings.focusMode = DepthOfFieldMode.UsePhysicalCamera;
+            settings.focusDistanceMode = FocusDistanceMode.Volume;
+            settings.focusDistance = 12.0f;
+
+            try
+            {
+                var cameraFocus =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(cameraFocus.enabled, Is.True);
+                Assert.That(
+                    cameraFocus.focusDistance,
+                    Is.EqualTo(7.0f).Within(1e-6f));
+                Assert.That(
+                    cameraFocus.lensRadius.x,
+                    Is.EqualTo(0.0125f).Within(1e-6f));
+                Assert.That(
+                    cameraFocus.lensRadius.y,
+                    Is.EqualTo(0.0125f).Within(1e-6f));
+
+                settings.focusDistanceMode = FocusDistanceMode.Camera;
+                settings.focusDistance = 30.0f;
+                var changedVolumeFocus =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    changedVolumeFocus.signature,
+                    Is.EqualTo(cameraFocus.signature));
+
+                camera.focusDistance = 9.0f;
+                var refocused =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    refocused.focusDistance,
+                    Is.EqualTo(9.0f).Within(1e-6f));
+                Assert.That(
+                    refocused.signature,
+                    Is.Not.EqualTo(cameraFocus.signature));
+
+                camera.aperture = 4.0f;
+                var stoppedDown =
+                    ReferencedPathTracingPhysicalCameraState.Resolve(
+                        camera,
+                        settings);
+                Assert.That(
+                    stoppedDown.lensRadius.x,
+                    Is.EqualTo(0.00625f).Within(1e-6f));
+                Assert.That(
+                    stoppedDown.signature,
+                    Is.Not.EqualTo(refocused.signature));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
         }
 
         [Test]
@@ -789,7 +1007,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void DeterministicSampleSequence_AdvancesOncePerFrameAndResetsOnSignature()
+        public void SampleSequence_AdvancesOncePerFrameAndResetsOnSignature()
         {
             var gameObject =
                 new GameObject("ReferencedPathTracingSampleSequenceTests.Camera");
@@ -961,6 +1179,68 @@ namespace VividRP.Editor.Tests
                     capture,
                     out _),
                 Is.False);
+        }
+
+        [Test]
+        public void V1FreezeGate_RejectsNonCanonicalPathSamplingContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+
+            capture.pathSamplingMode =
+                ReferencedPathTracingSamplingMode.IndexedHash;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var fallbackFailure),
+                Is.False);
+            Assert.That(
+                fallbackFailure,
+                Does.Contain("Path sampling contract"));
+
+            capture.pathSamplingMode = corpusCase.pathSamplingMode;
+            capture.samplingContractVersion = 0;
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var versionFailure),
+                Is.False);
+            Assert.That(
+                versionFailure,
+                Does.Contain("Path sampling contract"));
+        }
+
+        [Test]
+        public void V1FreezeGate_RejectsPhysicalCameraDofCapture()
+        {
+            var capture = CreateValidFrozenCapture(
+                ReferencedPathTracingV1Corpus.Cases[0]);
+            capture.usesPhysicalCameraDof = true;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate
+                    .ValidateCaptureContract(
+                        capture,
+                        out var failure),
+                Is.False);
+            Assert.That(failure, Does.Contain("pinhole camera"));
+        }
+
+        [Test]
+        public void V1FreezeGate_RejectsNonCanonicalShadingNormalContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+            capture.shadingNormalContractVersion = 0;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("Shading-normal transport contract"));
         }
 
         [Test]
@@ -1248,6 +1528,14 @@ namespace VividRP.Editor.Tests
                     (ulong)corpusCase.targetSampleCount,
                 deterministicSampling = true,
                 fixedSeed = corpusCase.fixedSeed,
+                pathSamplingMode = corpusCase.pathSamplingMode,
+                samplingContractVersion =
+                    ReferencedPathTracingSamplingContract.Version,
+                physicalCameraContractVersion =
+                    ReferencedPathTracingPhysicalCameraState.Version,
+                usesPhysicalCameraDof = false,
+                shadingNormalContractVersion =
+                    ReferencedPathTracingShadingNormalContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

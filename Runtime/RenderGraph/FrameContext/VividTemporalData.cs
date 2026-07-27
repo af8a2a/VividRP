@@ -35,20 +35,26 @@ namespace VividRP.Runtime
         internal bool isValid;
         internal bool deterministicSampling;
         internal uint sampleIndex;
+        internal ReferencedPathTracingSamplingMode pathSamplingMode;
+        internal int samplingContractVersion;
         internal ulong frameSignature;
         internal ulong integratorSignature;
         internal ulong accumulatedSampleCount;
         internal bool mainLightInDenoiserSignals;
+        internal bool physicalCameraDofEnabled;
 
         public override void Reset()
         {
             isValid = false;
             deterministicSampling = false;
             sampleIndex = 0;
+            pathSamplingMode = ReferencedPathTracingSamplingMode.IndexedBnd;
+            samplingContractVersion = 0;
             frameSignature = 0;
             integratorSignature = 0;
             accumulatedSampleCount = 0;
             mainLightInDenoiserSignals = false;
+            physicalCameraDofEnabled = false;
         }
     }
 }

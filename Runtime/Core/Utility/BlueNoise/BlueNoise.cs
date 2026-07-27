@@ -12,6 +12,10 @@ namespace VividRP.Runtime
         static BlueNoise s_Instance;
 
         public static BlueNoise Instance => s_Instance;
+        public bool SupportsBnd256 =>
+            m_ScramblingTile != null
+            && m_RankingTile != null
+            && m_OwenScrambledSequence != null;
 
         static readonly int s_ScramblingTileId = Shader.PropertyToID("_SobolScramblingTile");
         static readonly int s_RankingTileId = Shader.PropertyToID("_SobolRankingTile");
@@ -159,6 +163,89 @@ namespace VividRP.Runtime
                 cmd.SetGlobalTexture(s_OwenScrambledSequenceId, m_OwenScrambledSequence);
             if (m_SobolMatricesBuffer != null)
                 cmd.SetGlobalBuffer(s_SobolMatricesBufferId, m_SobolMatricesBuffer);
+        }
+
+        public void Bind(CommandBuffer cmd, RayTracingShader shader)
+        {
+            if (cmd == null || shader == null)
+                return;
+
+            var scramblingTile1Spp =
+                m_ScramblingTile1SPP ?? m_ScramblingTile;
+            var rankingTile1Spp =
+                m_RankingTile1SPP ?? m_RankingTile;
+            var scramblingTile8Spp =
+                m_ScramblingTile8SPP ?? m_ScramblingTile;
+            var rankingTile8Spp =
+                m_RankingTile8SPP ?? m_RankingTile;
+            if (scramblingTile1Spp != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_ScramblingTile1SPPId,
+                    scramblingTile1Spp);
+            }
+            if (rankingTile1Spp != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_RankingTile1SPPId,
+                    rankingTile1Spp);
+            }
+            if (scramblingTile8Spp != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_ScramblingTile8SPPId,
+                    scramblingTile8Spp);
+            }
+            if (rankingTile8Spp != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_RankingTile8SPPId,
+                    rankingTile8Spp);
+            }
+
+            if (m_ScramblingTile != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_ScramblingTileId,
+                    m_ScramblingTile);
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_ScramblingTile256SPPId,
+                    m_ScramblingTile);
+            }
+
+            if (m_RankingTile != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_RankingTileId,
+                    m_RankingTile);
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_RankingTile256SPPId,
+                    m_RankingTile);
+            }
+
+            if (m_OwenScrambledSequence != null)
+            {
+                cmd.SetRayTracingTextureParam(
+                    shader,
+                    s_OwenScrambledSequenceId,
+                    m_OwenScrambledSequence);
+            }
+
+            if (m_SobolMatricesBuffer != null)
+            {
+                cmd.SetRayTracingBufferParam(
+                    shader,
+                    s_SobolMatricesBufferId,
+                    m_SobolMatricesBuffer);
+            }
         }
 
         public void Bind(ComputeCommandBuffer cmd)

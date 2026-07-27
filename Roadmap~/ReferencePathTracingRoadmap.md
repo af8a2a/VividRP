@@ -1059,6 +1059,108 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   tests。实际 Unity shader import、DX12 debug view 和 spatial-index OFF/ON 高 SPP 均值对比
   仍是 GPU validation gate。
 
+### Phase 4.8 checkpoint: Reference Sampling Conformance (2026-07-26)
+
+- 路径采样从依赖控制流消费顺序的 PCG stream 改为随机访问接口
+  `(pixel, sampleIndex, dimension, seed)`。默认使用 renderer 已有的 256-SPP
+  Owen-Sobol blue-noise set；缺少 keyword 或资源时显式回退 Indexed Hash，而不是在同一
+  shader variant 中保留未绑定 BND 资源。canonical 与 interactive 路径都由 per-camera
+  accumulation-relative sequence 提供 sample index，不再直接用渲染帧号作为 global sample。
+- sample dimension ABI 固定为 film 0-1、lens 2-3、camera reserve 4-7，以及每 bounce
+  16 个维度：BSDF 0-2、NEE 3-5、Russian roulette 6、stochastic alpha 7、
+  volume 8-11、future 12-15。当前最多 8 bounce，最高维度 135，保持在 256 维
+  Owen-Sobol 资源容量内；控制流跳过某一 estimator 不会再改变后续 bounce 的随机数。
+- 超过 256 SPP 时按 256 样本分块。每个 block 使用确定性的 pixel/dimension permutation
+  和 Cranley-Patterson rotation，避免 255→256、511→512 边界复用同一 BND lookup；该策略保留块内
+  BND 分层与任意 sample index 随机访问，但不宣称跨 block 的全局 Sobol discrepancy 保证。
+- 实际生效的 BND/Hash 模式与 sampling contract version 已进入 integrator/frame/
+  accumulation signature 和 capture metadata。BND 资源失效导致的 Hash fallback 会使历史
+  自动失效；该 checkpoint 当时的 V1 canonical freeze gate 只接受 contract V1 的
+  Indexed BND capture，Phase 4.10 消费预留 lens 维度后已将当前 contract 升级为 V2。
+- Rendering Debugger 新增 `Path Samples` transport view，通过 pass-owned `DebugTexture`
+  输出 film dimensions 0/1 与 bounce-zero roulette dimension，主 radiance、payload 和
+  MIS PDF 布局保持不变。Phase 4.7A emissive geometry inventory 按当前决策暂缓；
+  emissive mesh 仍只在路径命中时计入，不进入 NEE。
+
+### Phase 4.9 checkpoint: Shading-normal Transport Conformance (2026-07-26)
+
+- StandardLit OpenPBR adapter 现在同时保留未调整 shading normal 与 view-consistent
+  shading normal。先按 RTXPT 在 `Ns·V <= 0.1` 时向 oriented triangle normal 混合，再按
+  Unreal/HDRP 将会穿过 geometric horizon 的理想反射方向投影回 horizon 上方，并重建
+  shading normal/basis；Raytracing GBuffer guide 使用同一调整结果。
+- oriented triangle normal 继续独占 opaque surface sidedness、shadow/continuation ray
+  offset 与 visibility；NEE 和 BSDF continuation 只有同时位于 geometric/shading
+  hemisphere 上方才有效。当前 StandardLit contract 禁用 transmission，因此该规则不会
+  混用 reflection 与 medium-boundary 语义。
+- OpenPBR `eval` 已包含 shading-normal cosine，`sample` 已返回 `BSDF*cos/pdf`；Phase 4.9
+  不重复乘 cosine，也不修改 BSDF/MIS PDF。相机发出的单向路径采用 radiance transport，
+  不套只属于 adjoint/importance transport 的 shading-normal Jacobian。
+- diffuse eval/sample weight 共享 Unreal Imageworks-style shadow-terminator factor，
+  specular value 与所有 PDF 保持原 OpenPBR contract。该因子只缓和 normal-map/smooth-normal
+  与几何可见性边界的突变，不放宽 triangle-normal 的硬半球支持域。
+- integrator/capture freeze contract 已升级并记录 `shadingNormalContractVersion`。
+  Rendering Debugger 新增 `Shading Normal` transport view：R/G 分别为调整前/后的
+  `Ns·Ng`，B 为该 vertex 的最小 diffuse terminator factor；diagnostic 仍只写
+  pass-owned `DebugTexture`。
+
+### Phase 4.10 prerequisite checkpoint: Reference Denoiser AOV Contract (2026-07-26)
+
+- 在引入 physical camera / aperture sampling 前先拆分 reference denoiser 与 REBLUR：
+  REBLUR 继续服务稳定 primary visibility 的交互预览，不作为景深 reference 输出的
+  降噪路径；`ReferencedPathTracingDenoisingPass` 继续作为异步、非时域的 OIDN 支线。
+- `ReferencedPathTracingPass` 原 `WorldPosition` 输出实际保存的是 scene-linear beauty，
+  从未包含 world position。该误导端口现已由 `PathTracingRadiance` 取代，并通过
+  `FormerlySerializedAs("m_WorldPositionTexture")` 保留旧编译绑定解析；当前
+  `PTGraph.vrdg` 未连接旧端口，因此不需要修改 authoring asset。
+- path tracer 新增 FP32 `PathTracingAlbedo` 与 `PathTracingNormal` 输出。Albedo 遵循 HDRP
+  path-tracing AOV 的 diffuse-reflectance 语义，即
+  `base_color * (1 - base_metalness)`；normal 使用与 OpenPBR eval/sample 及
+  Raytracing GBuffer 一致的 view-consistent world-space shading normal。primary miss
+  输出零 feature 和无效 alpha。
+- reference denoiser 现在显式接收 `PathTracingRadiance`、`PathTracingAlbedo`、
+  `PathTracingNormal`，并向 Unity `CommandBufferDenoiser` 依次提交 OIDN `color`、
+  `albedo`、`normal` request。三路资源固定使用 `R32G32B32A32_SFloat`，避免 package
+  的 `Vector4` async-readback contract 对半精度资源产生错误解释。
+- 异步请求未完成、backend 不可用或 pass inactive 时，输出稳定回退到原 scene-linear
+  radiance；AOV 尺寸不匹配时不启动请求。camera、light、integrator 或完整 path-tracing
+  frame signature 变化都会废弃在途/历史 OIDN 结果，为后续 aperture、focus distance
+  纳入 frame signature 预留正确的 reset 边界。
+- 本 checkpoint 只冻结 DOF 所需的 reference-denoising 端口和 feature 语义，尚未修改
+  primary camera ray。raw FP32 radiance 仍是 canonical ground truth；OIDN 输出只用于
+  reference preview，不替代 capture baseline。
+
+### Phase 4.10 checkpoint: Physical Camera / DOF (2026-07-26)
+
+- Reference Path Tracing 现按 HDRP/RTXPT 的 thin-lens contract 生成 primary ray：
+  pinhole ray 与 camera forward 的交点定义 focus plane，光圈样本偏移 ray origin，
+  continuation direction 再指向同一 focus point。DOF 不是 screen-space post effect，
+  遮挡、反射、高光和 environment 均由实际 aperture ray 积分。
+- `Depth Of Field/Physical Camera` 只作为 path-traced DOF 的显式开关；focal length、
+  f-number、focus distance 与 anamorphism 全部直接来自 Camera，Volume 的
+  `focusDistanceMode/focusDistance` 仅属于 screen-space DOF，不参与 reference transport。
+  光圈半径使用 HDRP 同一单位换算
+  `0.5 * focalLength(mm) * 0.001 / aperture(f-number)`。Scene View 与 orthographic
+  camera 保持 pinhole/unsupported，避免编辑视口导航引入随机 primary visibility。
+- sample dimension ABI 从 V1 升级为 V2。此前保留的 lens 2/3 维现在通过 Shirley-Chiu
+  concentric mapping 均匀采样单位圆盘；Unity camera anamorphism 以面积保持的线性变换
+  形成椭圆光圈。中心 ray 与 x/y pixel differential 复用同一 lens sample，因此
+  ray-cone spread 不会混入随机 aperture 差异。blade count、curvature 与 barrel clipping
+  尚未进入 reference lens model，避免以非均匀面积采样伪装物理支持。
+- DOF ray 的 near/far clip distance 按新方向投影到 camera-forward clip plane，与
+  Unreal/RTXPT 的 thin-lens clipping 语义一致；pinhole 路径保留原有射线区间，避免关闭
+  DOF 时改变冻结基线。
+- physical-camera contract signature 包含 enable、focus distance 与两个 lens radius，
+  并进入完整 frame signature。调整焦点、f-number、focal length 或 anamorphism 会清空
+  progressive accumulation、废弃在途 OIDN 结果，并重置 per-camera sample sequence。
+- REBLUR 不支持随机 aperture primary visibility。DOF 开启时 producer 强制关闭
+  checkerboard，REBLUR pass 明确跳过时域/空间滤波并执行 full-resolution raw resolve；
+  reference preview 可继续连接非时域 OIDN 支线。V1 canonical corpus 仍定义 pinhole
+  baseline，capture metadata 记录 physical-camera contract 并拒绝把 DOF capture 混入
+  V1 freeze gate。
+- Rendering Debugger 的 Reference Path Tracing/Transport 新增 `Physical Camera`：
+  R/G 显示映射到 `[0, 1]` 的 concentric aperture sample，B 表示本帧 thin-lens transport
+  是否启用；诊断仅写 pass-owned `DebugTexture`。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal
@@ -1077,9 +1179,10 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   重投影、邻域裁剪或亮度 clamp，保持静态 reference accumulation 的无偏性质。
 - 样本计数按 camera 隔离；分辨率、view/projection matrix、主方向光方向或颜色变化时自动从 1 spp 重置。
 - ray generation 已把帧序号混入 RNG，并加入逐帧 sub-pixel jitter，避免重复累积完全相同的路径样本。
-- 已通过 `com.unity.rendering.denoising` 的 `CommandBufferDenoiser` 接入 Intel Open Image Denoise color-only
-  preview。OIDN 使用异步 readback/CPU worker，不在 RenderGraph pass 内 flush 或 submit command buffer；结果未就绪、
-  package 宏不可用、非 64 位桌面平台或 native backend 不支持时，输出稳定回退到 raw accumulation。
+- 已通过 `com.unity.rendering.denoising` 的 `CommandBufferDenoiser` 接入 Intel Open Image Denoise
+  beauty + diffuse-albedo + shading-normal preview。OIDN 使用异步 readback/CPU worker，不在
+  RenderGraph pass 内 flush 或 submit command buffer；结果未就绪、package 宏不可用、非 64 位
+  桌面平台或 native backend 不支持时，输出稳定回退到输入的 scene-linear radiance。
 - OIDN 结果按 camera 隔离；分辨率、view/projection matrix 或主方向光变化时废弃旧请求结果。
 - package API 被隔离在 `IReferencedPathTracingDenoiserBackend` 适配边界之后；Unity 6.7+ 切换为预编译 package
   时不需要把实现迁入 VividRP，只需维护 adapter 和程序集引用。

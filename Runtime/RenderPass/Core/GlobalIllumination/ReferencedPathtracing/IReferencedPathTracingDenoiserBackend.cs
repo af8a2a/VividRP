@@ -17,7 +17,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         bool Process(
             CommandBuffer commandBuffer,
-            RenderTexture source,
+            RenderTexture radiance,
+            RenderTexture albedo,
+            RenderTexture normal,
             RenderTexture destination,
             int width,
             int height);
@@ -55,7 +57,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
             public bool Process(
                 CommandBuffer commandBuffer,
-                RenderTexture source,
+                RenderTexture radiance,
+                RenderTexture albedo,
+                RenderTexture normal,
                 RenderTexture destination,
                 int width,
                 int height)

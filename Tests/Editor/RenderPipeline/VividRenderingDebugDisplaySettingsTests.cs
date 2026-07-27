@@ -316,7 +316,7 @@ namespace VividRP.Editor.Tests
             var transportIndex = Array.IndexOf(
                 transportWidget.enumValues,
                 (int)ReferencedPathTracingTransportDebugMode
-                    .LightSpatialIndex);
+                    .PhysicalCamera);
             var environmentIndex = Array.IndexOf(
                 environmentWidget.enumValues,
                 (int)ReferencedPathTracingEnvironmentDebugMode
@@ -332,7 +332,7 @@ namespace VividRP.Editor.Tests
                     .referencedPathTracingTransportDebugMode,
                 Is.EqualTo(
                     ReferencedPathTracingTransportDebugMode
-                        .LightSpatialIndex));
+                        .PhysicalCamera));
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data
                     .referencedPathTracingEnvironmentDebugMode,

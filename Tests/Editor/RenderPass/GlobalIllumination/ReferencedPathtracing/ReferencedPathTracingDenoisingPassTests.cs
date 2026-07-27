@@ -33,7 +33,9 @@ namespace VividRP.Editor.Tests
 
             public bool Process(
                 CommandBuffer commandBuffer,
-                RenderTexture source,
+                RenderTexture radiance,
+                RenderTexture albedo,
+                RenderTexture normal,
                 RenderTexture destination,
                 int width,
                 int height)
@@ -56,7 +58,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Initialize_DefinesFp32InputOutputAndInactiveBypass()
+        public void Initialize_DefinesFp32RadianceFeatureInputsAndInactiveBypass()
         {
             IRenderPass renderPass = new ReferencedPathTracingDenoisingPass();
 
@@ -66,8 +68,10 @@ namespace VividRP.Editor.Tests
                 resources.Textures.Select(resource => resource.Name),
                 Is.EquivalentTo(new[]
                 {
-                    "PathTracingAccumulatedColor",
-                    "PathTracingDenoisedColor"
+                    "PathTracingRadiance",
+                    "PathTracingAlbedo",
+                    "PathTracingNormal",
+                    "PathTracingDenoisedRadiance"
                 }));
             Assert.That(
                 resources.Textures.All(resource =>
@@ -75,15 +79,23 @@ namespace VividRP.Editor.Tests
                 Is.True);
             Assert.That(
                 resources.Textures.Single(resource =>
-                    resource.Name == "PathTracingAccumulatedColor").Access,
+                    resource.Name == "PathTracingRadiance").Access,
                 Is.EqualTo(AccessFlags.Read));
             Assert.That(
                 resources.Textures.Single(resource =>
-                    resource.Name == "PathTracingDenoisedColor").Access,
+                    resource.Name == "PathTracingAlbedo").Access,
+                Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                resources.Textures.Single(resource =>
+                    resource.Name == "PathTracingNormal").Access,
+                Is.EqualTo(AccessFlags.Read));
+            Assert.That(
+                resources.Textures.Single(resource =>
+                    resource.Name == "PathTracingDenoisedRadiance").Access,
                 Is.EqualTo(AccessFlags.WriteAll));
             Assert.That(resources.BypassRules, Has.Length.EqualTo(1));
-            Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("m_AccumulatedColor"));
-            Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("m_DenoisedColor"));
+            Assert.That(resources.BypassRules[0].SourceFieldName, Is.EqualTo("m_Radiance"));
+            Assert.That(resources.BypassRules[0].OutputFieldName, Is.EqualTo("m_DenoisedRadiance"));
         }
 
         [Test]
@@ -101,13 +113,22 @@ namespace VividRP.Editor.Tests
                 cameraData.SetCamera(camera);
                 cameraData.actualWidth = 640;
                 cameraData.actualHeight = 360;
+                var pathTracingData =
+                    frameData.GetOrCreate<VividReferencedPathTracingData>();
+                pathTracingData.isValid = true;
+                pathTracingData.integratorSignature = 11ul;
+                pathTracingData.frameSignature = 22ul;
 
                 pass.Prepare(frameData);
 
-                var denoisedColor = GetField<RenderGraphTexture>(pass, "m_DenoisedColor");
-                Assert.That(denoisedColor.desc.Width, Is.EqualTo(640));
-                Assert.That(denoisedColor.desc.Height, Is.EqualTo(360));
-                Assert.That(denoisedColor.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
+                var denoisedRadiance = GetField<RenderGraphTexture>(
+                    pass,
+                    "m_DenoisedRadiance");
+                Assert.That(denoisedRadiance.desc.Width, Is.EqualTo(640));
+                Assert.That(denoisedRadiance.desc.Height, Is.EqualTo(360));
+                Assert.That(
+                    denoisedRadiance.desc.ColorFormat,
+                    Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
                 Assert.That(backend.InvalidationCount, Is.EqualTo(1));
 
                 pass.Prepare(frameData);
@@ -116,6 +137,10 @@ namespace VividRP.Editor.Tests
                 camera.transform.position = Vector3.right;
                 pass.Prepare(frameData);
                 Assert.That(backend.InvalidationCount, Is.EqualTo(2));
+
+                pathTracingData.frameSignature++;
+                pass.Prepare(frameData);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(3));
 
                 pass.Dispose();
             }
@@ -126,7 +151,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void RenderGraphNode_DefinesAccumulatedInputAndDenoisedOutput()
+        public void RenderGraphNode_DefinesPathTracingAovInputsAndDenoisedOutput()
         {
             var graph = RenderGraphTestUtility.CreateGraph();
 
@@ -135,13 +160,29 @@ namespace VividRP.Editor.Tests
                 var node = new AutoRegisteredDenoisingPassNode();
                 RenderGraphTestUtility.AddTestNode(graph, node);
 
-                Assert.That(node.GetInputPortByName("m_AccumulatedColor"), Is.Not.Null);
-                Assert.That(node.GetOutputPortByName("m_DenoisedColor"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_Radiance"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_Albedo"), Is.Not.Null);
+                Assert.That(node.GetInputPortByName("m_Normal"), Is.Not.Null);
+                Assert.That(node.GetOutputPortByName("m_DenoisedRadiance"), Is.Not.Null);
             }
             finally
             {
                 RenderGraphTestUtility.DeleteGraph(graph);
             }
+        }
+
+        [Test]
+        public void LegacyDenoisingBindings_ResolveToRadiancePorts()
+        {
+            var input = RenderGraphPassReflectionUtility.GetInstanceField(
+                typeof(ReferencedPathTracingDenoisingPass),
+                "m_AccumulatedColor");
+            var output = RenderGraphPassReflectionUtility.GetInstanceField(
+                typeof(ReferencedPathTracingDenoisingPass),
+                "m_DenoisedColor");
+
+            Assert.That(input?.Name, Is.EqualTo("m_Radiance"));
+            Assert.That(output?.Name, Is.EqualTo("m_DenoisedRadiance"));
         }
 
         private static T GetField<T>(ReferencedPathTracingDenoisingPass pass, string fieldName)

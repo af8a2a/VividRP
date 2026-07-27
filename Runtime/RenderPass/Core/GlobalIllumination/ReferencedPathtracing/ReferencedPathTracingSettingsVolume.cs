@@ -4,6 +4,14 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum ReferencedPathTracingSamplingMode
+    {
+        [InspectorName("Indexed BND (Owen-Sobol)")]
+        IndexedBnd = 0,
+        [InspectorName("Indexed Hash")]
+        IndexedHash = 1
+    }
+
     public enum ReferencedPathTracingEnvironmentSamplingMode
     {
         BsdfOnly = 0,
@@ -45,7 +53,13 @@ namespace VividRP.Runtime
         [InspectorName("Invalid Sample Mask")]
         InvalidSampleMask = 6,
         [InspectorName("Light Spatial Index")]
-        LightSpatialIndex = 7
+        LightSpatialIndex = 7,
+        [InspectorName("Path Samples")]
+        PathSamples = 8,
+        [InspectorName("Shading Normal")]
+        ShadingNormal = 9,
+        [InspectorName("Physical Camera")]
+        PhysicalCamera = 10
     }
 
     [Serializable]
@@ -54,6 +68,18 @@ namespace VividRP.Runtime
     {
         public ReferencedPathTracingEnvironmentSamplingModeParameter(
             ReferencedPathTracingEnvironmentSamplingMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingSamplingModeParameter
+        : VolumeParameter<ReferencedPathTracingSamplingMode>
+    {
+        public ReferencedPathTracingSamplingModeParameter(
+            ReferencedPathTracingSamplingMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -80,13 +106,20 @@ namespace VividRP.Runtime
         internal const int MaximumTargetSampleCount = 1048576;
 
         [Tooltip(
-            "Uses an accumulation-relative sample index and the fixed seed below. " +
-            "Enable this for canonical reference captures.")]
+            "Uses the fixed seed below and marks the accumulation-relative sample " +
+            "sequence as reproducible. Enable this for canonical reference captures.")]
         public BoolParameter deterministicSampling = new(false);
 
         [Tooltip("Fixed random seed used by deterministic reference captures.")]
         public ClampedIntParameter fixedSeed =
             new(0x13579B, 0, int.MaxValue);
+
+        [Tooltip(
+            "Selects the random-access path sampler. Indexed BND uses the Owen-Sobol " +
+            "blue-noise resources; Indexed Hash is a deterministic validation fallback. " +
+            "Both modes use the same fixed sample-dimension layout.")]
+        public ReferencedPathTracingSamplingModeParameter pathSamplingMode =
+            new(ReferencedPathTracingSamplingMode.IndexedBnd);
 
         [Tooltip("Maximum number of path segments evaluated by the reference integrator.")]
         public ClampedIntParameter maxBounceCount =
@@ -160,6 +193,9 @@ namespace VividRP.Runtime
         {
             deterministicSampling ??= new BoolParameter(false);
             fixedSeed ??= new ClampedIntParameter(0x13579B, 0, int.MaxValue);
+            pathSamplingMode ??=
+                new ReferencedPathTracingSamplingModeParameter(
+                    ReferencedPathTracingSamplingMode.IndexedBnd);
             maxBounceCount ??=
                 new ClampedIntParameter(4, 1, MaximumSupportedBounceCount);
             russianRouletteStartBounce ??=

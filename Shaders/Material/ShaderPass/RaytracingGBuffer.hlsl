@@ -72,11 +72,13 @@ void StandardLitRaytracingGBufferClosestHit(
         0.0);
 #endif
 
-    VividReferencedPathtracingMaterial material = VividReferencedPathtracingResolveStandardLitOpenPBR(
+    VividReferencedPathtracingMaterial material =
+        VividReferencedPathtracingResolveStandardLitOpenPBR(
         geometry,
         textureBaseLambda,
         baseTextureLod,
-        normalTextureLod);
+        normalTextureLod,
+        normalize(-WorldRayDirection()));
 
     payload.rayConeWidth = hitConeWidth;
     payload.positionWS = geometry.positionWS;

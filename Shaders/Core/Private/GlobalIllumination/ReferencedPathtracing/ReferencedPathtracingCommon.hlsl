@@ -41,6 +41,9 @@ static const int kReferencedTransportDebugBsdfSegmentMisWeight = 4;
 static const int kReferencedTransportDebugNeeLightIdentity = 5;
 static const int kReferencedTransportDebugInvalidSampleMask = 6;
 static const int kReferencedTransportDebugLightSpatialIndex = 7;
+static const int kReferencedTransportDebugPathSamples = 8;
+static const int kReferencedTransportDebugShadingNormal = 9;
+static const int kReferencedTransportDebugPhysicalCamera = 10;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
@@ -579,6 +582,13 @@ struct ReferencedPathtracingPayload
     float nextPdf;
     float linearRoughness;
     float hitDistance;
+    // Primary-surface OIDN features. Albedo is diffuse reflectance and the
+    // normal is the same view-consistent shading normal used by the BSDF.
+    float3 denoisingAlbedo;
+    float3 denoisingNormalWS;
+    // R/G: unadjusted/consistent shading-normal agreement with the geometric
+    // normal. B: minimum diffuse shadow-terminator factor for this vertex.
+    float3 shadingNormalDiagnostics;
     uint nextLobeClass;
     uint nextLobeIsDelta;
     uint hit;
@@ -611,6 +621,9 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.nextPdf = 0.0;
     payload.linearRoughness = 1.0;
     payload.hitDistance = 0.0;
+    payload.denoisingAlbedo = 0.0;
+    payload.denoisingNormalWS = 0.0;
+    payload.shadingNormalDiagnostics = 0.0;
     payload.nextLobeClass = 0u;
     payload.nextLobeIsDelta = 0u;
     payload.hit = 0u;

@@ -3,18 +3,21 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSampling.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
 
 #if defined(VIVID_REFERENCE_PT_SER)
 // This slot must match ReferencedPathTracingPass.ShaderExecutionReorderingUavSlot.
-// u31 stays clear of the pass's ten automatically allocated output UAVs.
+// u31 stays clear of the pass's twelve automatically allocated output UAVs.
 #define NV_SHADER_EXTN_SLOT u31
 #define NV_HITOBJECT_USE_MACRO_API
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NVAPI/nvHLSLExtns.h"
 #endif
 
 RaytracingAccelerationStructure _AccelerationStructure;
-RWTexture2D<float4> _WorldPositionTexture;
+RWTexture2D<float4> _ReferencedPathTracingRadiance;
+RWTexture2D<float4> _ReferencedPathTracingAlbedo;
+RWTexture2D<float4> _ReferencedPathTracingNormal;
 RWTexture2D<float4> _ReferencedPathTracingDebugTexture;
 RWTexture2D<float4> _ReferencedDiffuseRadianceHitDistance;
 RWTexture2D<float4> _ReferencedSpecularRadianceHitDistance;
@@ -28,12 +31,19 @@ RWTexture2D<float4> _ReferencedSpecularRayDirectionHitDistance;
 float4 _CameraPositionWS;
 float4x4 _PixelCoordToViewDirWS;
 float4x4 _ReferencedWorldToView;
+float4 _ReferencedCameraRightWS;
+float4 _ReferencedCameraUpWS;
+float4 _ReferencedCameraForwardWS;
+// xy: anamorphic lens radii in world units, z: focus-plane distance,
+// w: thin-lens transport enabled.
+float4 _ReferencedPhysicalCameraParameters;
 float _RayMinDistance;
 float _RayMaxDistance;
 int _ReferencedMaxBounceCount;
 int _ReferencedRussianRouletteStartBounce;
 int _ReferencedFrameIndex;
 int _ReferencedSeed;
+int _ReferencedPathSamplingMode;
 float4 _ReferencedReblurHitDistanceParameters;
 int _ReferencedReblurCheckerboardMode;
 
@@ -49,26 +59,36 @@ float3 GetReferencedPathtracingPrimaryRayDirectionWS(float2 pixelCoord)
     return -normalize(viewDirectionWS.xyz);
 }
 
-uint HashReferencedPathtracingRng(uint value)
+void GetReferencedPathtracingPhysicalCameraRay(
+    float2 pixelCoord,
+    float2 lensDiskSample,
+    out float3 rayOrigin,
+    out float3 rayDirection)
 {
-    value ^= value >> 16u;
-    value *= 0x7feb352du;
-    value ^= value >> 15u;
-    value *= 0x846ca68bu;
-    value ^= value >> 16u;
-    return value;
-}
+    rayOrigin = _CameraPositionWS.xyz;
+    rayDirection =
+        GetReferencedPathtracingPrimaryRayDirectionWS(pixelCoord);
+    if (_ReferencedPhysicalCameraParameters.w < 0.5)
+        return;
 
-uint NextReferencedPathtracingRngUint(inout uint rngState)
-{
-    rngState = rngState * 747796405u + 2891336453u;
-    uint word = ((rngState >> ((rngState >> 28u) + 4u)) ^ rngState) * 277803737u;
-    return (word >> 22u) ^ word;
-}
+    float3 cameraForward = normalize(_ReferencedCameraForwardWS.xyz);
+    float focusProjection = dot(rayDirection, cameraForward);
+    if (focusProjection <= 1e-6)
+        return;
 
-float NextReferencedPathtracingRngFloat(inout uint rngState)
-{
-    return (float)(NextReferencedPathtracingRngUint(rngState) >> 8u) * (1.0 / 16777216.0);
+    float focusRayDistance =
+        _ReferencedPhysicalCameraParameters.z / focusProjection;
+    float3 focusPoint =
+        _CameraPositionWS.xyz + rayDirection * focusRayDistance;
+    float3 lensOffset =
+        normalize(_ReferencedCameraRightWS.xyz)
+            * lensDiskSample.x
+            * _ReferencedPhysicalCameraParameters.x
+        + normalize(_ReferencedCameraUpWS.xyz)
+            * lensDiskSample.y
+            * _ReferencedPhysicalCameraParameters.y;
+    rayOrigin += lensOffset;
+    rayDirection = normalize(focusPoint - rayOrigin);
 }
 
 bool IsFiniteReferencedPathtracingRadiance(float3 value)
@@ -293,24 +313,71 @@ void RayGenReferencedPathtracing()
     uint2 launchDimensions = DispatchRaysDimensions().xy;
     uint2 pixelCoord = uint2(launchIndex.x, launchDimensions.y - launchIndex.y - 1u);
 
-    uint pixelIndex = pixelCoord.x + pixelCoord.y * launchDimensions.x;
-    uint frameHash = HashReferencedPathtracingRng(
-        (uint)_ReferencedFrameIndex
-        ^ HashReferencedPathtracingRng((uint)_ReferencedSeed)
-        ^ 0xa511e9b3u);
-    uint rngState = HashReferencedPathtracingRng(pixelIndex ^ frameHash);
+    uint sampleIndex = (uint)_ReferencedFrameIndex;
+    uint sampleSeed = (uint)_ReferencedSeed;
+    uint pathSamplingMode = (uint)max(_ReferencedPathSamplingMode, 0);
+    float2 filmSample = float2(
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingFilmDimension,
+            sampleSeed,
+            pathSamplingMode),
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingFilmDimension + 1u,
+            sampleSeed,
+            pathSamplingMode));
+    float2 lensUniformSample = float2(
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingLensDimension,
+            sampleSeed,
+            pathSamplingMode),
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            kReferencedPathtracingLensDimension + 1u,
+            sampleSeed,
+            pathSamplingMode));
+    float2 lensDiskSample =
+        ReferencedPathtracingSampleConcentricDisk(lensUniformSample);
 
     RayDesc ray;
-    ray.Origin = _CameraPositionWS.xyz;
-    float2 pixelCenter = (float2)pixelCoord + float2(
-        NextReferencedPathtracingRngFloat(rngState),
-        NextReferencedPathtracingRngFloat(rngState));
-    ray.Direction = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter);
-    ray.TMin = _RayMinDistance;
-    ray.TMax = _RayMaxDistance;
+    float2 pixelCenter = (float2)pixelCoord + filmSample;
+    GetReferencedPathtracingPhysicalCameraRay(
+        pixelCenter,
+        lensDiskSample,
+        ray.Origin,
+        ray.Direction);
+    float cameraForwardProjection = max(
+        dot(
+            ray.Direction,
+            normalize(_ReferencedCameraForwardWS.xyz)),
+        1e-6);
+    ray.TMin = _ReferencedPhysicalCameraParameters.w > 0.5
+        ? _RayMinDistance / cameraForwardProjection
+        : _RayMinDistance;
+    ray.TMax = _ReferencedPhysicalCameraParameters.w > 0.5
+        ? _RayMaxDistance / cameraForwardProjection
+        : _RayMaxDistance;
 
-    float3 rayDirectionDx = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter + float2(1.0, 0.0));
-    float3 rayDirectionDy = GetReferencedPathtracingPrimaryRayDirectionWS(pixelCenter + float2(0.0, 1.0));
+    float3 rayOriginDx;
+    float3 rayDirectionDx;
+    GetReferencedPathtracingPhysicalCameraRay(
+        pixelCenter + float2(1.0, 0.0),
+        lensDiskSample,
+        rayOriginDx,
+        rayDirectionDx);
+    float3 rayOriginDy;
+    float3 rayDirectionDy;
+    GetReferencedPathtracingPhysicalCameraRay(
+        pixelCenter + float2(0.0, 1.0),
+        lensDiskSample,
+        rayOriginDy,
+        rayDirectionDy);
     float rayConeSpreadAngle = max(
         length(rayDirectionDx - ray.Direction),
         length(rayDirectionDy - ray.Direction));
@@ -331,6 +398,22 @@ void RayGenReferencedPathtracing()
     float4 segmentTransportDiagnostic = 0.0;
     float3 neeLightIdentityDiagnostic = 0.0;
     float3 lightSpatialIndexDiagnostic = 0.0;
+    float3 shadingNormalDiagnostic = 0.0;
+    float3 primaryDenoisingAlbedo = 0.0;
+    float3 primaryDenoisingNormalWS = 0.0;
+    float3 pathSampleDiagnostic = float3(
+        filmSample,
+        ReferencedPathtracingGetPathSample(
+            pixelCoord,
+            sampleIndex,
+            ReferencedPathtracingGetBounceSampleDimension(
+                0u,
+                kReferencedPathtracingRussianRouletteDimensionOffset),
+            sampleSeed,
+            pathSamplingMode));
+    float3 physicalCameraDiagnostic = float3(
+        lensDiskSample * 0.5 + 0.5,
+        _ReferencedPhysicalCameraParameters.w > 0.5 ? 1.0 : 0.0);
     float3 invalidSampleMask = 0.0;
     bool hasNeeTransportDiagnostic = false;
     bool neeTransportContributionValid = false;
@@ -360,16 +443,28 @@ void RayGenReferencedPathtracing()
         ReferencedPathtracingPayload payload;
         InitializeReferencedPathtracingPayload(payload);
         payload.pathThroughput = throughput;
-        payload.bsdfRandom = float3(
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState));
+        uint bounceSampleDimension =
+            ReferencedPathtracingGetBounceSampleDimension(
+                bounceIndex,
+                0u);
+        payload.bsdfRandom =
+            ReferencedPathtracingGetPathSample3D(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingBsdfDimensionOffset,
+                sampleSeed,
+                pathSamplingMode);
         // A single dimension selects the source and the remaining pair samples its
         // conditional shape or direction.
-        payload.directLightRandom = float3(
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState),
-            NextReferencedPathtracingRngFloat(rngState));
+        payload.directLightRandom =
+            ReferencedPathtracingGetPathSample3D(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingNeeDimensionOffset,
+                sampleSeed,
+                pathSamplingMode);
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
         // SER is useful around the material-heavy closest-hit path. Shadow rays
@@ -436,6 +531,9 @@ void RayGenReferencedPathtracing()
                 _ReferencedWorldToView,
                 float4(payload.positionWS, 1.0)).z);
             primaryLinearRoughness = saturate(payload.linearRoughness);
+            shadingNormalDiagnostic = payload.shadingNormalDiagnostics;
+            primaryDenoisingAlbedo = payload.denoisingAlbedo;
+            primaryDenoisingNormalWS = payload.denoisingNormalWS;
             emissionRadiance += throughput * payload.emission;
         }
         else
@@ -770,7 +868,16 @@ void RayGenReferencedPathtracing()
                 MaxReferencedPathtracingComponent(throughput),
                 0.05,
                 0.95);
-            if (NextReferencedPathtracingRngFloat(rngState) >= survivalProbability)
+            float russianRouletteSample =
+                ReferencedPathtracingGetPathSample(
+                    pixelCoord,
+                    sampleIndex,
+                    ReferencedPathtracingGetBounceSampleDimension(
+                        bounceIndex,
+                        kReferencedPathtracingRussianRouletteDimensionOffset),
+                    sampleSeed,
+                    pathSamplingMode);
+            if (russianRouletteSample >= survivalProbability)
                 break;
             throughput /= survivalProbability;
         }
@@ -935,6 +1042,24 @@ void RayGenReferencedPathtracing()
         // B: context flags (indexed/fallback/outside/overflow).
         debugRadiance = lightSpatialIndexDiagnostic;
     }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugPathSamples)
+    {
+        // R/G: film dimensions 0/1. B: bounce-zero RR dimension.
+        debugRadiance = pathSampleDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugShadingNormal)
+    {
+        // R/G: original/consistent Ns dot Ng. B: diffuse terminator factor.
+        debugRadiance = shadingNormalDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugPhysicalCamera)
+    {
+        // R/G: concentric aperture sample mapped to [0, 1]. B: DOF enabled.
+        debugRadiance = physicalCameraDiagnostic;
+    }
 
     float physicalOutputAlpha =
         primaryHit != 0u ? 1.0 : cameraBackgroundAlpha;
@@ -944,8 +1069,14 @@ void RayGenReferencedPathtracing()
                 != kReferencedEnvironmentDebugCombined
             ? 1.0
             : physicalOutputAlpha;
-    _WorldPositionTexture[pixelCoord] =
+    _ReferencedPathTracingRadiance[pixelCoord] =
         float4(physicalRadiance, physicalOutputAlpha);
+    _ReferencedPathTracingAlbedo[pixelCoord] = float4(
+        primaryDenoisingAlbedo,
+        primaryHit != 0u ? 1.0 : 0.0);
+    _ReferencedPathTracingNormal[pixelCoord] = float4(
+        primaryDenoisingNormalWS,
+        primaryHit != 0u ? 1.0 : 0.0);
     _ReferencedPathTracingDebugTexture[pixelCoord] =
         float4(debugRadiance, debugOutputAlpha);
     _ReferencedPathTracingDirectLighting[pixelCoord] =

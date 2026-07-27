@@ -53,15 +53,42 @@ namespace VividRP.Runtime
     {
         internal static DepthOfFieldSettingsData Resolve()
         {
-            var settings = DepthOfFieldSettingsData.CreateDefault();
             var stack = VolumeManager.instance.stack;
             if (stack == null)
-                return settings;
+                return DepthOfFieldSettingsData.CreateDefault();
 
             var depthOfField = stack.GetComponent<DepthOfField>();
             if (depthOfField == null || !depthOfField.IsActive())
-                return settings;
+                return DepthOfFieldSettingsData.CreateDefault();
 
+            return Resolve(depthOfField);
+        }
+
+        internal static DepthOfFieldSettingsData
+            ResolveForReferencePathTracing()
+        {
+            var stack = VolumeManager.instance.stack;
+            if (stack == null)
+                return DepthOfFieldSettingsData.CreateDefault();
+
+            var depthOfField = stack.GetComponent<DepthOfField>();
+            if (depthOfField == null
+                || depthOfField.focusMode.value
+                    != DepthOfFieldMode.UsePhysicalCamera)
+            {
+                return DepthOfFieldSettingsData.CreateDefault();
+            }
+
+            // A physical camera integrates over the lens aperture itself. The
+            // post-process near/far blur-radius switches therefore must not
+            // silently disable thin-lens transport.
+            return Resolve(depthOfField);
+        }
+
+        private static DepthOfFieldSettingsData Resolve(
+            DepthOfField depthOfField)
+        {
+            var settings = DepthOfFieldSettingsData.CreateDefault();
             settings.enabled = true;
             settings.physicallyBased = depthOfField.physicallyBased;
             settings.focusMode = depthOfField.focusMode.value;

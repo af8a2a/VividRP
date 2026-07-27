@@ -1,3 +1,4 @@
 #pragma multi_compile_local _ VIVID_REFERENCE_PT_SER
+#pragma multi_compile_local _ VIVID_REFERENCE_PT_INDEXED_BND
 
 #include_with_pragmas "ReferencedPathtracing.rgen.hlsl"

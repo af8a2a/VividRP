@@ -287,6 +287,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(editorType.GetField("m_ApplyPhysicalCameraExposure", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensation", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_ExposureCompensationCurve", flags)?.GetValue(editor), Is.Not.Null);
+                Assert.That(editorType.GetField("m_ExposureMeteringMask", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HistogramLogRange", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HDRPMode", flags)?.GetValue(editor), Is.Not.Null);
                 Assert.That(editorType.GetField("m_HDRPMeteringMode", flags)?.GetValue(editor), Is.Not.Null);
@@ -334,6 +335,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Adaptation Mode\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Target Mid Grey\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Weight Texture Mask\")"));
+            Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Exposure Metering Mask\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Low Percent\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"High Percent\")"));
             Assert.That(source, Does.Contain("EditorGUIUtility.TrTextContent(\"Speed Dark to Light\")"));
@@ -361,7 +363,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("ApplySelectedPreset()"));
             Assert.That(
                 File.ReadAllText(GetPackageFilePath("Runtime", "RenderPass", "Core", "PostProcessing", "AutoExposure", "AutoExposurePresets.cs")),
-                Does.Contain("public const float VolumeSafeMinEV100 = -5f;"));
+                Does.Contain("public const float VolumeSafeMinEV100 = -10f;"));
             Assert.That(source, Does.Contain("DrawStatsPreview();"));
             Assert.That(source, Does.Contain("AutoExposureStatsReadbackBridge.TouchInspectorRequest();"));
             Assert.That(source, Does.Contain("BuildLiveStatsPreviewData(snapshot)"));

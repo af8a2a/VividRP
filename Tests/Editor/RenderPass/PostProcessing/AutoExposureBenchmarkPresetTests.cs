@@ -48,6 +48,12 @@ namespace VividRP.Editor.Tests
 
             Assert.That(preset.Percent.x, Is.EqualTo(10f).Within(1e-5f));
             Assert.That(preset.Percent.y, Is.EqualTo(90f).Within(1e-5f));
+            Assert.That(preset.MinEV100, Is.EqualTo(-10f).Within(1e-5f));
+            Assert.That(preset.MaxEV100, Is.EqualTo(20f).Within(1e-5f));
+            Assert.That(
+                preset.HistogramLogRangeEV100,
+                Is.EqualTo(new Vector2(-10f, 20f)));
+            Assert.That(preset.ApplyPhysicalCameraExposure, Is.True);
             Assert.That(preset.ExposureCompensation, Is.EqualTo(1f).Within(1e-5f));
         }
 

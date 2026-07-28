@@ -167,6 +167,25 @@ namespace VividRP.Runtime
         private bool m_RenderIntoTexture;
         private bool m_HasStoredMatrixData;
 
+        [NonSerialized]
+        private bool m_ResetPostProcessingHistoryRequested;
+
+        /// <summary>
+        /// Requests a one-frame reset of post-processing history for this camera.
+        /// Call this when gameplay performs a camera cut or an equivalent discontinuity.
+        /// </summary>
+        public void ResetPostProcessingHistory()
+        {
+            m_ResetPostProcessingHistoryRequested = true;
+        }
+
+        internal bool ConsumePostProcessingHistoryResetRequest()
+        {
+            var requested = m_ResetPostProcessingHistoryRequested;
+            m_ResetPostProcessingHistoryRequested = false;
+            return requested;
+        }
+
         internal void UpdateCameraMatrices(bool renderIntoTexture)
         {
             m_RenderIntoTexture = renderIntoTexture;
@@ -199,6 +218,7 @@ namespace VividRP.Runtime
             ResetTsrJitterData();
             m_RenderIntoTexture = false;
             m_HasStoredMatrixData = false;
+            ResetPostProcessingHistory();
         }
 
         internal void SetViewAndProjectionMatrix(Matrix4x4 viewMatrix, Matrix4x4 projectionMatrix)

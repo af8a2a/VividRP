@@ -128,8 +128,8 @@ namespace VividRP.Runtime
 
     public static class AutoExposureCommonPresets
     {
-        public const float VolumeSafeMinEV100 = -5f;
-        public const float VolumeSafeMaxEV100 = 15f;
+        public const float VolumeSafeMinEV100 = -10f;
+        public const float VolumeSafeMaxEV100 = 20f;
 
         public static IEnumerable<AutoExposurePresetDefinition> All
         {
@@ -171,16 +171,16 @@ namespace VividRP.Runtime
                     return new AutoExposurePresetDefinition(
                         preset,
                         "Histogram Balanced",
-                        "UE-style 10-90 histogram baseline with a +1 EV HDRI-friendly bias.",
+                        "UE 5.6 histogram defaults: 10-90%, -10 to 20 EV100, physical camera exposure, and +1 EV compensation.",
                         AutoExposureMode.Histogram,
                         new Vector2(10f, 90f),
-                        VolumeSafeMinEV100,
-                        1f,
-                        new Vector2(-10f, 6f),
+                        -10f,
+                        20f,
+                        new Vector2(-10f, 20f),
                         3f,
                         1f,
                         0f,
-                        false,
+                        true,
                         1f,
                         CreateNeutralCurve);
 

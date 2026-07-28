@@ -24,10 +24,13 @@ namespace VividRP.Runtime
 
             VividCameraData cameraData;
             CameraTemporalData temporalData;
+            bool resetPostProcessingHistory;
             using (RenderPassProfilingUtility.PrepareFrameContextResolveDataMarker.Auto())
             {
                 cameraData = frameData.Get<VividCameraData>();
                 temporalData = GetOrCreate(cameraData.camera);
+                resetPostProcessingHistory =
+                    cameraData.additionalData?.ConsumePostProcessingHistoryResetRequest() == true;
             }
 
             // 1. Advance temporal state
@@ -48,6 +51,7 @@ namespace VividRP.Runtime
                 vividTemporalData.jitter = temporalData.Jitter;
                 vividTemporalData.previousJitter = temporalData.PreviousJitter;
                 vividTemporalData.isFirstFrame = temporalData.IsFirstFrame;
+                vividTemporalData.resetPostProcessingHistory = resetPostProcessingHistory;
             }
 
             using (RenderPassProfilingUtility.PrepareFrameContextSubsystemPreRenderMarker.Auto())

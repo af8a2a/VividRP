@@ -36,8 +36,8 @@ namespace VividRP.Runtime.RenderPass
                 return false;
             }
 
-            var meterMask = m_AutoExposureSettings.meterMask != null
-                ? m_AutoExposureSettings.meterMask
+            var meterMask = m_AutoExposureSettings.hdrpWeightTextureMask != null
+                ? m_AutoExposureSettings.hdrpWeightTextureMask
                 : Texture2D.whiteTexture;
             var curveTexture = ResolveHDRPExposureCurveTexture();
             var previousExposureBuffer = m_ExposureData.hasValidHistory
@@ -105,11 +105,11 @@ namespace VividRP.Runtime.RenderPass
             // if (m_HDRPPrePassTexture == null || m_HDRPReductionTexture == null)
             //     return false;
             //
-            // var meterMask = m_AutoExposureSettings.meterMask != null
-            //     ? m_AutoExposureSettings.meterMask
+            // var meterMask = m_AutoExposureSettings.hdrpWeightTextureMask != null
+            //     ? m_AutoExposureSettings.hdrpWeightTextureMask
             //     : Texture2D.whiteTexture;
             // var curveTexture = ResolveHDRPExposureCurveTexture();
-            // var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.exposureMode)
+            // var evaluateMode = AutoExposureExposureModeUtility.UsesCurveRemapping(m_AutoExposureSettings.hdrpExposureMode)
             //     ? 2u
             //     : 1u;
             // var previousExposureTexture = m_ExposureData.previousExposureTexture;
@@ -464,8 +464,8 @@ namespace VividRP.Runtime.RenderPass
         {
             if (UsesHDRPCurveRemapping())
             {
-                if (m_AutoExposureSettings.curveMapTexture != null)
-                    return m_AutoExposureSettings.curveMapTexture;
+                if (m_AutoExposureSettings.hdrpCurveMapTexture != null)
+                    return m_AutoExposureSettings.hdrpCurveMapTexture;
 
                 return AutoExposureCurveMapUtility.Resolve(
                     null,
@@ -481,22 +481,22 @@ namespace VividRP.Runtime.RenderPass
         private bool UsesHDRPCurveRemapping()
         {
             return AutoExposureExposureModeUtility.UsesCurveRemapping(
-                    m_AutoExposureSettings.exposureMode)
-                || (m_AutoExposureSettings.exposureMode
+                    m_AutoExposureSettings.hdrpExposureMode)
+                || (m_AutoExposureSettings.hdrpExposureMode
                     == AutoExposureExposureMode.AutomaticHistogram
-                    && m_AutoExposureSettings.histogramUseCurveRemapping);
+                    && m_AutoExposureSettings.hdrpHistogramUseCurveRemapping);
         }
 
         private int ResolveHDRPMeteringMode()
         {
-            switch (m_AutoExposureSettings.meteringMode)
+            switch (m_AutoExposureSettings.hdrpMeteringMode)
             {
                 case AutoExposureMeteringMode.Spot:
                     return 1;
                 case AutoExposureMeteringMode.CenterWeighted:
                     return 2;
                 case AutoExposureMeteringMode.MaskWeighted:
-                    return m_AutoExposureSettings.meterMask != null ? 3 : 0;
+                    return m_AutoExposureSettings.hdrpWeightTextureMask != null ? 3 : 0;
                 case AutoExposureMeteringMode.ProceduralMask:
                     return 4;
                 default:
@@ -521,13 +521,13 @@ namespace VividRP.Runtime.RenderPass
                 m_AutoExposureSettings.maxAverageLuminance);
 
             var usesCurveRemapping = UsesHDRPCurveRemapping();
-            curveMinEV100 = usesCurveRemapping ? m_AutoExposureSettings.curveMapMinEV100 : 0f;
+            curveMinEV100 = usesCurveRemapping ? m_AutoExposureSettings.hdrpCurveMapMinEV100 : 0f;
             curveMaxEV100 = usesCurveRemapping
-                ? Mathf.Max(m_AutoExposureSettings.curveMapMaxEV100, curveMinEV100 + 1e-4f)
+                ? Mathf.Max(m_AutoExposureSettings.hdrpCurveMapMaxEV100, curveMinEV100 + 1e-4f)
                 : 0f;
             histogramScaleBias = ResolveHDRPHistogramScaleBias(minExposureEV100, maxExposureEV100);
             meteringMode = ResolveHDRPMeteringMode();
-            adaptationMode = m_AutoExposureSettings.adaptationMode == AutoExposureAdaptationMode.Progressive
+            adaptationMode = m_AutoExposureSettings.hdrpAdaptationMode == AutoExposureAdaptationMode.Progressive
                              && m_AutoExposureSettings.forceTarget <= 0.5f
                 ? 1
                 : 0;

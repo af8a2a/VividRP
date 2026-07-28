@@ -95,6 +95,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_ConsumesPostProcessingHistoryResetRequestOnce()
+        {
+            var frameData = new ContextContainer();
+            var cameraData = frameData.GetOrCreate<VividCameraData>();
+            cameraData.camera = m_Camera;
+            cameraData.actualWidth = 1920;
+            cameraData.actualHeight = 1080;
+            cameraData.pixelWidth = 1920;
+            cameraData.pixelHeight = 1080;
+            cameraData.additionalData = m_Camera.GetVividAdditionalCameraData();
+            cameraData.additionalData.UpdateCameraMatrices(false);
+            cameraData.additionalData.ResetPostProcessingHistory();
+
+            using var cmd = new CommandBuffer();
+            FrameContextSystem.Update(frameData, cmd);
+
+            Assert.That(
+                frameData.Get<VividTemporalData>().resetPostProcessingHistory,
+                Is.True);
+
+            cameraData.frameIndex++;
+            FrameContextSystem.Update(frameData, cmd);
+
+            Assert.That(
+                frameData.Get<VividTemporalData>().resetPostProcessingHistory,
+                Is.False);
+        }
+
+        [Test]
         public void ExecutePostRender_InvokesSubsystemPostRenderCallbacks()
         {
             var frameData = new ContextContainer();

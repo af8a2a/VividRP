@@ -8,10 +8,11 @@ namespace VividRP.Runtime
     internal struct AutoExposureSettingsData
     {
         public bool enabled;
-        public AutoExposureExposureMode exposureMode;
+        public AutoExposureImplementationPath implementation;
         public AutoExposureMode mode;
-        public AutoExposureMeteringMode meteringMode;
-        public AutoExposureAdaptationMode adaptationMode;
+        public AutoExposureExposureMode hdrpExposureMode;
+        public AutoExposureMeteringMode hdrpMeteringMode;
+        public AutoExposureAdaptationMode hdrpAdaptationMode;
         public float exposureLowPercent;
         public float exposureHighPercent;
         public float minAverageLuminance;
@@ -38,32 +39,35 @@ namespace VividRP.Runtime
         public float exposureCompensationCurveInvRange;
         public bool exposureCompensationCurveEnabled;
         public float targetMidGray;
-        public Texture curveMapTexture;
-        public float curveMapMinEV100;
-        public float curveMapMaxEV100;
-        public Texture meterMask;
-        public bool histogramUseCurveRemapping;
-        public bool centerAroundExposureTarget;
-        public Vector2 proceduralCenter;
-        public Vector2 proceduralRadii;
-        public float proceduralSoftness;
-        public float maskMinIntensity;
-        public float maskMaxIntensity;
+        public Texture unrealExposureMeteringMask;
+        public float unrealBlackHistogramBucketInfluence;
+        public Texture hdrpCurveMapTexture;
+        public float hdrpCurveMapMinEV100;
+        public float hdrpCurveMapMaxEV100;
+        public Texture hdrpWeightTextureMask;
+        public bool hdrpHistogramUseCurveRemapping;
+        public bool hdrpCenterAroundExposureTarget;
+        public Vector2 hdrpProceduralCenter;
+        public Vector2 hdrpProceduralRadii;
+        public float hdrpProceduralSoftness;
+        public float hdrpMaskMinIntensity;
+        public float hdrpMaskMaxIntensity;
 
         public static AutoExposureSettingsData CreateDefault()
         {
-            var histogramScaleBias = AutoExposureSettingsResolver.BuildHistogramScaleBiasFromEV100(-10f, 6f);
-            var histogramLogRange = AutoExposureSettingsResolver.ResolveHistogramLogRangeFromEV100(-10f, 6f);
+            var histogramScaleBias = AutoExposureSettingsResolver.BuildHistogramScaleBiasFromEV100(-10f, 20f);
+            var histogramLogRange = AutoExposureSettingsResolver.ResolveHistogramLogRangeFromEV100(-10f, 20f);
 
             return new AutoExposureSettingsData
             {
                 enabled = false,
-                exposureMode = AutoExposureExposureMode.Automatic,
+                implementation = AutoExposureImplementationPath.Unreal,
                 mode = AutoExposureMode.Histogram,
-                meteringMode = AutoExposureMeteringMode.Average,
-                adaptationMode = AutoExposureAdaptationMode.Progressive,
-                exposureLowPercent = 0.8f,
-                exposureHighPercent = 0.95f,
+                hdrpExposureMode = AutoExposureExposureMode.Automatic,
+                hdrpMeteringMode = AutoExposureMeteringMode.Average,
+                hdrpAdaptationMode = AutoExposureAdaptationMode.Progressive,
+                exposureLowPercent = 0.1f,
+                exposureHighPercent = 0.9f,
                 minAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
                 maxAverageLuminance = AutoExposureSettingsResolver.MiddleGrey,
                 applyPhysicalCameraExposure = false,
@@ -88,17 +92,19 @@ namespace VividRP.Runtime
                 exposureCompensationCurveInvRange = 1f / AutoExposureCompensationCurveUtility.DefaultCurveRange,
                 exposureCompensationCurveEnabled = false,
                 targetMidGray = AutoExposureSettingsResolver.MiddleGrey,
-                curveMapTexture = null,
-                curveMapMinEV100 = AutoExposureCurveMapUtility.DefaultCurveMinEV100,
-                curveMapMaxEV100 = AutoExposureCurveMapUtility.DefaultCurveMaxEV100,
-                meterMask = null,
-                histogramUseCurveRemapping = false,
-                centerAroundExposureTarget = false,
-                proceduralCenter = new Vector2(0.5f, 0.5f),
-                proceduralRadii = new Vector2(0.5f, 0.5f),
-                proceduralSoftness = 1f,
-                maskMinIntensity = -30f,
-                maskMaxIntensity = 30f,
+                unrealExposureMeteringMask = null,
+                unrealBlackHistogramBucketInfluence = 0f,
+                hdrpCurveMapTexture = null,
+                hdrpCurveMapMinEV100 = AutoExposureCurveMapUtility.DefaultCurveMinEV100,
+                hdrpCurveMapMaxEV100 = AutoExposureCurveMapUtility.DefaultCurveMaxEV100,
+                hdrpWeightTextureMask = null,
+                hdrpHistogramUseCurveRemapping = false,
+                hdrpCenterAroundExposureTarget = false,
+                hdrpProceduralCenter = new Vector2(0.5f, 0.5f),
+                hdrpProceduralRadii = new Vector2(0.5f, 0.5f),
+                hdrpProceduralSoftness = 1f,
+                hdrpMaskMinIntensity = -30f,
+                hdrpMaskMaxIntensity = 30f,
             };
         }
     }
@@ -245,20 +251,21 @@ namespace VividRP.Runtime
                 ? AutoExposureSettingsResolver.Resolve(
                     camera,
                     temporalData != null && temporalData.isFirstFrame,
+                    temporalData != null && temporalData.resetPostProcessingHistory,
                     implementation)
                 : AutoExposureSettingsData.CreateDefault();
+            settings.implementation = implementation;
             settings = AutoExposureSettingsResolver.ResolvePhysicalCameraFallback(settings, camera);
             var hasAutoExposureCompute = AutoExposureImplementationUtility.SupportsDispatch(
                 autoExposureCompute,
-                implementation,
-                settings.exposureMode);
+                settings);
 
             var exposureEnabled = postProcessingAllowed
                 && settings.enabled
                 && camera != null
                 && (settings.mode == AutoExposureMode.Manual || hasAutoExposureCompute);
             var autoExposureEnabled = exposureEnabled
-                && settings.mode == AutoExposureMode.Histogram
+                && settings.mode != AutoExposureMode.Manual
                 && hasAutoExposureCompute;
 
             AutoExposureHistoryState state = null;
@@ -269,7 +276,8 @@ namespace VividRP.Runtime
 
                 if (!state.wasEnabledLastFrame
                     || state.lastMode != settings.mode
-                    || state.lastImplementation != implementation)
+                    || state.lastImplementation != implementation
+                    || (temporalData != null && temporalData.resetPostProcessingHistory))
                 {
                     state.hasValidHistory = false;
                     settings.forceTarget = 1f;
@@ -488,7 +496,17 @@ namespace VividRP.Runtime
             bool isFirstFrame,
             AutoExposureImplementationPath implementation)
         {
+            return Resolve(camera, isFirstFrame, false, implementation);
+        }
+
+        internal static AutoExposureSettingsData Resolve(
+            Camera camera,
+            bool isFirstFrame,
+            bool resetHistory,
+            AutoExposureImplementationPath implementation)
+        {
             var settings = AutoExposureSettingsData.CreateDefault();
+            settings.implementation = implementation;
             var stack = VolumeManager.instance.stack;
             if (stack == null)
                 return settings;
@@ -498,8 +516,8 @@ namespace VividRP.Runtime
                 return settings;
 
             return implementation == AutoExposureImplementationPath.HDRP
-                ? ResolveHDRP(autoExposure, camera, isFirstFrame)
-                : ResolveUnreal(autoExposure, camera, isFirstFrame);
+                ? ResolveHDRP(autoExposure, camera, isFirstFrame || resetHistory)
+                : ResolveUnreal(autoExposure, camera, isFirstFrame || resetHistory);
         }
 
         internal static float ResolveExposureCompensation(float compensationStops)
@@ -526,10 +544,13 @@ namespace VividRP.Runtime
                 return settings;
 
             settings.enabled = true;
-            settings.exposureMode = AutoExposureExposureMode.UsePhysicalCamera;
             settings.mode = AutoExposureMode.Manual;
-            settings.meteringMode = AutoExposureMeteringMode.Average;
-            settings.adaptationMode = AutoExposureAdaptationMode.Fixed;
+            if (settings.implementation == AutoExposureImplementationPath.HDRP)
+            {
+                settings.hdrpExposureMode = AutoExposureExposureMode.UsePhysicalCamera;
+                settings.hdrpMeteringMode = AutoExposureMeteringMode.Average;
+                settings.hdrpAdaptationMode = AutoExposureAdaptationMode.Fixed;
+            }
             settings.applyPhysicalCameraExposure = true;
             settings.manualEV100 = ResolvePhysicalCameraEV100(camera);
             settings.exposureCompensationSettings = 1f;

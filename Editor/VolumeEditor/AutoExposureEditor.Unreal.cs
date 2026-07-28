@@ -16,6 +16,7 @@ namespace VividRP.Editor
         private SerializedDataParameter m_ApplyPhysicalCameraExposure;
         private SerializedDataParameter m_ExposureCompensation;
         private SerializedDataParameter m_ExposureCompensationCurve;
+        private SerializedDataParameter m_ExposureMeteringMask;
         private SerializedDataParameter m_HistogramLogRange;
 
         private void InitializeUnrealProperties(PropertyFetcher<AutoExposure> properties)
@@ -33,6 +34,8 @@ namespace VividRP.Editor
                 properties.Find(x => x.exposureCompensation));
             m_ExposureCompensationCurve = Unpack(
                 properties.Find(x => x.exposureCompensationCurve));
+            m_ExposureMeteringMask = Unpack(
+                properties.Find(x => x.exposureMeteringMask));
             m_HistogramLogRange = Unpack(properties.Find(x => x.histogramLogRange));
         }
 
@@ -52,9 +55,12 @@ namespace VividRP.Editor
                 return;
             }
 
+            PropertyField(m_ExposureMeteringMask, s_ExposureMeteringMaskLabel);
+
             EditorGUILayout.Space();
-            DrawSectionHeader("Histogram");
-            PropertyField(m_Percent, s_HistogramPercentagesLabel);
+            DrawSectionHeader(mode == AutoExposureMode.Basic ? "Basic" : "Histogram");
+            if (mode == AutoExposureMode.Histogram)
+                PropertyField(m_Percent, s_HistogramPercentagesLabel);
             DoExposurePropertyField(m_MinEV100, s_LimitMinLabel);
             DoExposurePropertyField(m_MaxEV100, s_LimitMaxLabel);
             PropertyField(m_HistogramLogRange, s_HistogramEv100RangeLabel);

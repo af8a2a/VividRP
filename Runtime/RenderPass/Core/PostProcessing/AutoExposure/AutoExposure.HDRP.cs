@@ -1,9 +1,105 @@
+using System;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Serialization;
 
 namespace VividRP.Runtime
 {
+    public enum AutoExposureExposureMode
+    {
+        Automatic,
+        AutomaticHistogram,
+        CurveMapping,
+        Fixed,
+        UsePhysicalCamera,
+    }
+
+    public enum AutoExposureMeteringMode
+    {
+        Average,
+        Spot,
+        CenterWeighted,
+        MaskWeighted,
+        ProceduralMask,
+    }
+
+    public enum AutoExposureAdaptationMode
+    {
+        Fixed,
+        Progressive,
+    }
+
+    [Serializable]
+    public sealed class AutoExposureExposureModeParameter : VolumeParameter<AutoExposureExposureMode>
+    {
+        public AutoExposureExposureModeParameter(AutoExposureExposureMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class AutoExposureMeteringModeParameter : VolumeParameter<AutoExposureMeteringMode>
+    {
+        public AutoExposureMeteringModeParameter(AutoExposureMeteringMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class AutoExposureAdaptationModeParameter : VolumeParameter<AutoExposureAdaptationMode>
+    {
+        public AutoExposureAdaptationModeParameter(AutoExposureAdaptationMode value, bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    /// <summary>
+    /// The target grey value used by HDRP exposure metering.
+    /// </summary>
+    public enum TargetMidGray
+    {
+        [InspectorName("Grey 12.5%")]
+        Grey125,
+        [InspectorName("Grey 14.0%")]
+        Grey14,
+        [InspectorName("Grey 18.0%")]
+        Grey18,
+    }
+
+    public static class AutoExposureExposureModeUtility
+    {
+        public static bool UsesManualSettings(AutoExposureExposureMode mode)
+        {
+            return mode == AutoExposureExposureMode.Fixed
+                || mode == AutoExposureExposureMode.UsePhysicalCamera;
+        }
+
+        public static bool UsesPhysicalCamera(AutoExposureExposureMode mode)
+        {
+            return mode == AutoExposureExposureMode.UsePhysicalCamera;
+        }
+
+        public static bool UsesHistogramSettings(AutoExposureExposureMode mode)
+        {
+            return mode == AutoExposureExposureMode.AutomaticHistogram;
+        }
+
+        public static bool UsesCurveRemapping(AutoExposureExposureMode mode)
+        {
+            return mode == AutoExposureExposureMode.CurveMapping;
+        }
+
+        public static AutoExposureMode ResolveRuntimeMode(AutoExposureExposureMode mode)
+        {
+            return UsesManualSettings(mode)
+                ? AutoExposureMode.Manual
+                : AutoExposureMode.Histogram;
+        }
+    }
+
     public sealed partial class AutoExposure
     {
         private const int CurrentHDRPSettingsVersion = 1;

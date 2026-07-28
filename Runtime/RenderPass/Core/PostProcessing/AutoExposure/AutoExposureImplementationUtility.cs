@@ -7,6 +7,7 @@ namespace VividRP.Runtime
         private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
+        private const string ResolveBasicExposureKernelName = "ResolveBasicExposure";
         private const string HdrpHistogramClearKernelName = "KHistogramClear";
         private const string HdrpHistogramGenKernelName = "KHistogramGen";
         private const string HdrpHistogramReduceKernelName = "KHistogramReduce";
@@ -42,13 +43,13 @@ namespace VividRP.Runtime
 
         internal static bool SupportsDispatch(
             ComputeShader computeShader,
-            AutoExposureImplementationPath implementation,
-            AutoExposureExposureMode exposureMode)
+            in AutoExposureSettingsData settings)
         {
-            if (implementation != AutoExposureImplementationPath.HDRP)
+            if (settings.implementation != AutoExposureImplementationPath.HDRP)
                 return SupportsUnrealDispatch(computeShader);
 
-            return AutoExposureExposureModeUtility.UsesHistogramSettings(exposureMode)
+            return AutoExposureExposureModeUtility.UsesHistogramSettings(
+                    settings.hdrpExposureMode)
                 ? SupportsHdrpHistogramDispatch(computeShader)
                 : SupportsHdrpPrePassDispatch(computeShader);
         }
@@ -58,7 +59,8 @@ namespace VividRP.Runtime
             return computeShader != null
                 && computeShader.HasKernel(ClearHistogramKernelName)
                 && computeShader.HasKernel(BuildHistogramKernelName)
-                && computeShader.HasKernel(ResolveExposureKernelName);
+                && computeShader.HasKernel(ResolveExposureKernelName)
+                && computeShader.HasKernel(ResolveBasicExposureKernelName);
         }
 
         internal static bool SupportsHdrpDispatch(ComputeShader computeShader)

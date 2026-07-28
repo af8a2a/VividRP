@@ -172,11 +172,12 @@ namespace VividRP.Runtime.RenderPass.Core
             var histogramAvailable = m_ExposureData != null
                 && m_ExposureData.autoExposureEnabled
                 && m_ExposureData.histogramBuffer != null;
+            var meterMask = ResolveExposureMeterMask(exposureSettings);
 
             m_ExposureDebugState = new Vector4(
                 m_ExposureData != null && m_ExposureData.exposureEnabled ? 1f : 0f,
                 histogramAvailable ? 1f : 0f,
-                exposureSettings.meterMask != null ? 1f : 0f,
+                meterMask != null ? 1f : 0f,
                 m_ExposureData != null && m_ExposureData.autoExposureEnabled ? 1f : 0f);
             m_ExposureDebugViewParams = new Vector4(
                 m_ResolvedSettings.debugExposure,
@@ -191,7 +192,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ExposureDebugHistogramTransform = ResolveAutoExposureDebugHistogramTransform(exposureSettings);
             m_ExposureDebugMeteringParams = new Vector4(
                 m_ResolvedSettings.displayMaskOnly ? 1f : 0f,
-                (float)exposureSettings.meteringMode,
+                (float)ResolveExposureDebugMeteringMode(exposureSettings),
                 0f,
                 0f);
             m_MousePixelCoord = ResolveMousePixelCoordinate(width, height);
@@ -226,8 +227,9 @@ namespace VividRP.Runtime.RenderPass.Core
                 : AutoExposureSettingsData.CreateDefault();
             var currentExposureBuffer = ResolveCurrentExposureBuffer();
             var histogramBuffer = ResolveHistogramBuffer();
-            var meterMask = exposureSettings.meterMask != null
-                ? exposureSettings.meterMask
+            var resolvedMeterMask = ResolveExposureMeterMask(exposureSettings);
+            var meterMask = resolvedMeterMask != null
+                ? resolvedMeterMask
                 : Texture2D.whiteTexture;
 
             m_Material.SetBuffer(AutoExposureHistogramBufferId, histogramBuffer);
@@ -260,6 +262,25 @@ namespace VividRP.Runtime.RenderPass.Core
 
             nativeCmd.SetRenderTarget(m_OutputTexture);
             CoreUtils.DrawFullScreen(nativeCmd, m_Material, mpb, ResolvePassIndex(m_ResolvedSettings.mode));
+        }
+
+        private static Texture ResolveExposureMeterMask(
+            in AutoExposureSettingsData settings)
+        {
+            return settings.implementation == AutoExposureImplementationPath.HDRP
+                ? settings.hdrpWeightTextureMask
+                : settings.unrealExposureMeteringMask;
+        }
+
+        private static AutoExposureMeteringMode ResolveExposureDebugMeteringMode(
+            in AutoExposureSettingsData settings)
+        {
+            if (settings.implementation == AutoExposureImplementationPath.HDRP)
+                return settings.hdrpMeteringMode;
+
+            return settings.unrealExposureMeteringMask != null
+                ? AutoExposureMeteringMode.MaskWeighted
+                : AutoExposureMeteringMode.Average;
         }
 
         public override void Dispose()

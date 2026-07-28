@@ -39,6 +39,8 @@ namespace VividRP.Editor
         private static readonly GUIContent s_AdaptationModeLabel = EditorGUIUtility.TrTextContent("Adaptation Mode");
         private static readonly GUIContent s_TargetMidGrayLabel = EditorGUIUtility.TrTextContent("Target Mid Grey");
         private static readonly GUIContent s_WeightTextureMaskLabel = EditorGUIUtility.TrTextContent("Weight Texture Mask");
+        private static readonly GUIContent s_ExposureMeteringMaskLabel =
+            EditorGUIUtility.TrTextContent("Exposure Metering Mask");
         private static readonly GUIContent s_SpeedDarkToLightLabel = EditorGUIUtility.TrTextContent("Speed Dark to Light");
         private static readonly GUIContent s_SpeedLightToDarkLabel = EditorGUIUtility.TrTextContent("Speed Light to Dark");
         private static readonly GUIContent s_HistogramPercentagesLabel = EditorGUIUtility.TrTextContent("Histogram Percentages");
@@ -73,7 +75,7 @@ namespace VividRP.Editor
             public readonly bool hasLiveHistogram;
             public readonly bool active;
             public readonly bool enabled;
-            public readonly AutoExposureExposureMode mode;
+            public readonly bool usesManualSettings;
             public readonly bool applyPhysicalCameraExposure;
             public readonly bool hasPhysicalCameraPreview;
             public readonly bool meterMaskAssigned;
@@ -111,7 +113,7 @@ namespace VividRP.Editor
                 bool hasLiveHistogram,
                 bool active,
                 bool enabled,
-                AutoExposureExposureMode mode,
+                bool usesManualSettings,
                 bool applyPhysicalCameraExposure,
                 bool hasPhysicalCameraPreview,
                 bool meterMaskAssigned,
@@ -148,7 +150,7 @@ namespace VividRP.Editor
                 this.hasLiveHistogram = hasLiveHistogram;
                 this.active = active;
                 this.enabled = enabled;
-                this.mode = mode;
+                this.usesManualSettings = usesManualSettings;
                 this.applyPhysicalCameraExposure = applyPhysicalCameraExposure;
                 this.hasPhysicalCameraPreview = hasPhysicalCameraPreview;
                 this.meterMaskAssigned = meterMaskAssigned;
@@ -279,7 +281,7 @@ namespace VividRP.Editor
                 Color.clear,
                 EditorGUIUtility.isProSkin ? new Color(1f, 1f, 1f, 0.18f) : new Color(0f, 0f, 0f, 0.18f));
 
-            if (!AutoExposureExposureModeUtility.UsesManualSettings(previewData.mode))
+            if (!previewData.usesManualSettings)
                 DrawHistogramRangeLabels(previewData);
 
             DrawStatsSummary(previewData);
@@ -297,7 +299,9 @@ namespace VividRP.Editor
         private AutoExposureStatsPreviewData BuildLiveStatsPreviewData(AutoExposureStatsReadbackSnapshot snapshot)
         {
             var settings = snapshot.settings;
-            var mode = settings.exposureMode;
+            var usesManualSettings = settings.mode == AutoExposureMode.Manual;
+            var usesPhysicalCamera = usesManualSettings
+                && settings.applyPhysicalCameraExposure;
             var lowPercent = Mathf.Clamp01(settings.exposureLowPercent);
             var highPercent = Mathf.Clamp(Mathf.Max(lowPercent, settings.exposureHighPercent), 0f, 1f);
 
@@ -307,10 +311,10 @@ namespace VividRP.Editor
             var minEV100 = ResolveEv100FromAverageSceneLuminance(minAverageLuminance);
             var maxEV100 = ResolveEv100FromAverageSceneLuminance(maxAverageLuminance);
 
-            var fallbackAverageLuminance = AutoExposureExposureModeUtility.UsesManualSettings(mode)
+            var fallbackAverageLuminance = usesManualSettings
                 ? Mathf.Max(settings.manualAverageSceneLuminance, 1e-4f)
                 : Mathf.Max(0.5f * (minAverageLuminance + maxAverageLuminance), 1e-4f);
-            var fallbackExposureScale = AutoExposureExposureModeUtility.UsesManualSettings(mode)
+            var fallbackExposureScale = usesManualSettings
                 ? Mathf.Max(settings.fixedExposureScale, 1e-4f)
                 : 1f;
             var exposureState = snapshot.hasExposureState
@@ -357,10 +361,10 @@ namespace VividRP.Editor
                 snapshot.hasHistogram,
                 snapshot.exposureEnabled,
                 settings.enabled,
-                mode,
-                AutoExposureExposureModeUtility.UsesPhysicalCamera(mode),
-                AutoExposureExposureModeUtility.UsesPhysicalCamera(mode),
-                settings.meterMask != null,
+                usesManualSettings,
+                usesPhysicalCamera,
+                usesPhysicalCamera,
+                ResolvePreviewMeterMask(settings) != null,
                 snapshot.hasValidHistory,
                 lowPercent,
                 highPercent,
@@ -396,26 +400,32 @@ namespace VividRP.Editor
             var autoExposure = (AutoExposure)target;
             var implementation = ResolveEditorImplementation();
             var usesHDRP = implementation == AutoExposureImplementationPath.HDRP;
-            var mode = usesHDRP
+            var hdrpExposureMode = usesHDRP
                 ? autoExposure.ResolveExposureMode()
-                : autoExposure.mode.value == AutoExposureMode.Manual
-                    ? autoExposure.applyPhysicalCameraExposure.value
-                        ? AutoExposureExposureMode.UsePhysicalCamera
-                        : AutoExposureExposureMode.Fixed
-                    : AutoExposureExposureMode.AutomaticHistogram;
+                : default;
+            var usesManualSettings = usesHDRP
+                ? AutoExposureExposureModeUtility.UsesManualSettings(hdrpExposureMode)
+                : autoExposure.mode.value == AutoExposureMode.Manual;
             var enabled = autoExposure.enabled.value;
             var active = autoExposure.IsActive(implementation);
-            var applyPhysicalCameraExposure = AutoExposureExposureModeUtility.UsesPhysicalCamera(mode);
+            var applyPhysicalCameraExposure = usesHDRP
+                ? AutoExposureExposureModeUtility.UsesPhysicalCamera(hdrpExposureMode)
+                : usesManualSettings
+                    && autoExposure.applyPhysicalCameraExposure.value;
             var previewCamera = ResolvePreviewCamera();
             var hasPhysicalCameraPreview = applyPhysicalCameraExposure
                 && previewCamera != null
                 && previewCamera.usePhysicalProperties;
 
+            var usesPercentiles = usesHDRP
+                || autoExposure.mode.value == AutoExposureMode.Histogram;
             var histogramPercentages = usesHDRP
                 ? autoExposure.histogramPercentages.value
-                : autoExposure.percent.value;
-            var percentileMinimum = usesHDRP ? 0f : 1f;
-            var percentileMaximum = usesHDRP ? 100f : 99f;
+                : usesPercentiles
+                    ? autoExposure.percent.value
+                    : new Vector2(0f, 100f);
+            var percentileMinimum = usesHDRP || !usesPercentiles ? 0f : 1f;
+            var percentileMaximum = usesHDRP || !usesPercentiles ? 100f : 99f;
             var lowPercent = Mathf.Clamp(
                     histogramPercentages.x,
                     percentileMinimum,
@@ -437,7 +447,9 @@ namespace VividRP.Editor
             var histogramScaleBias = AutoExposureSettingsResolver.BuildHistogramScaleBias(
                 histogramLogRange.x,
                 histogramLogRange.y);
-            var luminanceMin = Mathf.Pow(2f, histogramLogRange.x);
+            var luminanceMin = !usesHDRP && autoExposure.mode.value == AutoExposureMode.Basic
+                ? 1e-4f
+                : Mathf.Pow(2f, histogramLogRange.x);
 
             var minEV100 = usesHDRP
                 ? autoExposure.limitMin.value
@@ -452,10 +464,11 @@ namespace VividRP.Editor
             var maxAverageLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(maxEV100)
                 * AutoExposureSettingsResolver.MiddleGrey;
 
-            var resolvedEV100 = AutoExposureExposureModeUtility.UsesManualSettings(mode)
+            var resolvedEV100 = usesManualSettings
                 ? ResolveManualPreviewEV100(
                     usesHDRP ? autoExposure.fixedExposure.value : autoExposure.manualEV100.value,
-                    mode,
+                    usesManualSettings,
+                    applyPhysicalCameraExposure,
                     previewCamera,
                     hasPhysicalCameraPreview)
                 : 0.5f * (minEV100 + maxEV100);
@@ -501,10 +514,12 @@ namespace VividRP.Editor
                 false,
                 active,
                 enabled,
-                mode,
+                usesManualSettings,
                 applyPhysicalCameraExposure,
                 hasPhysicalCameraPreview,
-                usesHDRP && autoExposure.weightTextureMask.value != null,
+                usesHDRP
+                    ? autoExposure.weightTextureMask.value != null
+                    : autoExposure.exposureMeteringMask.value != null,
                 false,
                 lowPercent,
                 highPercent,
@@ -533,6 +548,14 @@ namespace VividRP.Editor
                 ResolveEvGaugePosition(resolvedEV100),
                 previewCamera != null ? previewCamera.name : string.Empty,
                 0);
+        }
+
+        private static Texture ResolvePreviewMeterMask(
+            in AutoExposureSettingsData settings)
+        {
+            return settings.implementation == AutoExposureImplementationPath.HDRP
+                ? settings.hdrpWeightTextureMask
+                : settings.unrealExposureMeteringMask;
         }
 
         private void PopulateHistogramSamplesFromSnapshot(
@@ -698,7 +721,7 @@ namespace VividRP.Editor
                 PreviewStateId,
                 new Vector4(
                     GUI.enabled ? 1f : 0.45f,
-                    AutoExposureExposureModeUtility.UsesManualSettings(previewData.mode) ? 1f : 0f,
+                    previewData.usesManualSettings ? 1f : 0f,
                     EditorGUIUtility.isProSkin ? 1f : 0f,
                     0f));
             m_StatsPreviewMaterial.SetVector(
@@ -779,7 +802,7 @@ namespace VividRP.Editor
                     "Source",
                     previewData.usingLiveStats ? $"Live GPU ({previewData.liveFrameIndex})" : "Inspector Preview");
 
-                if (!AutoExposureExposureModeUtility.UsesManualSettings(previewData.mode))
+                if (!previewData.usesManualSettings)
                 {
                     DrawMetricRow(
                         "Clamp EV100",
@@ -856,7 +879,7 @@ namespace VividRP.Editor
                     EditorStyles.miniLabel);
             }
 
-            if (AutoExposureExposureModeUtility.UsesManualSettings(previewData.mode)
+            if (previewData.usesManualSettings
                 && previewData.applyPhysicalCameraExposure
                 && !previewData.hasPhysicalCameraPreview
                 && !previewData.usingLiveStats)
@@ -905,15 +928,15 @@ namespace VividRP.Editor
 
         private static float ResolveManualPreviewEV100(
             float fixedExposure,
-            AutoExposureExposureMode mode,
+            bool usesManualSettings,
+            bool usesPhysicalCamera,
             Camera previewCamera,
             bool hasPhysicalCameraPreview)
         {
-            if (!AutoExposureExposureModeUtility.UsesManualSettings(mode))
+            if (!usesManualSettings)
                 return fixedExposure;
 
-            if (!AutoExposureExposureModeUtility.UsesPhysicalCamera(mode)
-                || !hasPhysicalCameraPreview)
+            if (!usesPhysicalCamera || !hasPhysicalCameraPreview)
             {
                 return fixedExposure;
             }

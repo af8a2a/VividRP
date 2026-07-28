@@ -12,6 +12,7 @@ namespace VividRP.Runtime
         public Vector2 jitter;
         public Vector2 previousJitter;
         public bool isFirstFrame;
+        public bool resetPostProcessingHistory;
 
         public override void Reset()
         {
@@ -22,6 +23,7 @@ namespace VividRP.Runtime
             jitter = Vector2.zero;
             previousJitter = Vector2.zero;
             isFirstFrame = true;
+            resetPostProcessingHistory = false;
         }
     }
 

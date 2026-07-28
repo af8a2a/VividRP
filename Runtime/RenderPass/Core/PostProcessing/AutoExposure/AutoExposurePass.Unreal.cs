@@ -11,6 +11,7 @@ namespace VividRP.Runtime.RenderPass
         private int m_ClearHistogramKernel = -1;
         private int m_BuildHistogramKernel = -1;
         private int m_ResolveExposureKernel = -1;
+        private int m_ResolveBasicExposureKernel = -1;
 
         private bool ExecuteUnrealAutoExposure(CommandBuffer cmd)
         {
@@ -24,9 +25,12 @@ namespace VividRP.Runtime.RenderPass
                 return false;
             }
 
-            var meterMask = m_AutoExposureSettings.meterMask != null
-                ? m_AutoExposureSettings.meterMask
+            var meterMask = m_AutoExposureSettings.unrealExposureMeteringMask != null
+                ? m_AutoExposureSettings.unrealExposureMeteringMask
                 : Texture2D.whiteTexture;
+            var resolveKernel = m_AutoExposureSettings.mode == AutoExposureMode.Basic
+                ? m_ResolveBasicExposureKernel
+                : m_ResolveExposureKernel;
             var previousExposureBuffer = m_ExposureData.hasValidHistory
                 ? m_ExposureData.previousExposureBuffer
                 : m_ExposureData.defaultExposureBuffer;
@@ -54,14 +58,14 @@ namespace VividRP.Runtime.RenderPass
                 CoreUtils.DivRoundUp(m_AutoExposureHeight, AutoExposureHistogramThreadGroupSizeY),
                 1);
 
-            BindAutoExposureParameters(cmd, histogramCompute, m_ResolveExposureKernel);
-            cmd.SetComputeBufferParam(histogramCompute, m_ResolveExposureKernel, AutoExposureHistogramBufferId,
+            BindAutoExposureParameters(cmd, histogramCompute, resolveKernel);
+            cmd.SetComputeBufferParam(histogramCompute, resolveKernel, AutoExposureHistogramBufferId,
                 m_AutoExposureHistogramBuffer);
-            cmd.SetComputeBufferParam(histogramCompute, m_ResolveExposureKernel, AutoExposurePreviousBufferId,
+            cmd.SetComputeBufferParam(histogramCompute, resolveKernel, AutoExposurePreviousBufferId,
                 previousExposureBuffer);
-            cmd.SetComputeBufferParam(histogramCompute, m_ResolveExposureKernel, AutoExposureCurrentBufferId,
+            cmd.SetComputeBufferParam(histogramCompute, resolveKernel, AutoExposureCurrentBufferId,
                 m_ExposureData.currentExposureBuffer);
-            cmd.DispatchCompute(histogramCompute, m_ResolveExposureKernel, 1, 1, 1);
+            cmd.DispatchCompute(histogramCompute, resolveKernel, 1, 1, 1);
             return true;
         }
     }

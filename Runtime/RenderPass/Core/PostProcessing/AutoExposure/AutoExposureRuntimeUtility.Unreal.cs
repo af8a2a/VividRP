@@ -10,15 +10,11 @@ namespace VividRP.Runtime
             bool isFirstFrame)
         {
             var settings = AutoExposureSettingsData.CreateDefault();
+            settings.implementation = AutoExposureImplementationPath.Unreal;
             settings.mode = autoExposure.mode.value;
-            settings.exposureMode = settings.mode == AutoExposureMode.Manual
-                ? autoExposure.applyPhysicalCameraExposure.value
-                    ? AutoExposureExposureMode.UsePhysicalCamera
-                    : AutoExposureExposureMode.Fixed
-                : AutoExposureExposureMode.AutomaticHistogram;
-            settings.meteringMode = AutoExposureMeteringMode.Average;
-            settings.adaptationMode = AutoExposureAdaptationMode.Progressive;
             settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;
+            settings.unrealExposureMeteringMask = autoExposure.exposureMeteringMask.value;
+            settings.unrealBlackHistogramBucketInfluence = 0f;
             settings.manualEV100 = ResolveManualEV100(
                 camera,
                 autoExposure.manualEV100.value,
@@ -54,11 +50,15 @@ namespace VividRP.Runtime
                 return settings;
             }
 
-            var exposureHighPercent = Mathf.Clamp(autoExposure.percent.max, 1f, 99f)
-                * PercentToScale;
-            var exposureLowPercent = Mathf.Min(
-                Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * PercentToScale,
-                exposureHighPercent);
+            var usesHistogramPercentiles = settings.mode == AutoExposureMode.Histogram;
+            var exposureHighPercent = usesHistogramPercentiles
+                ? Mathf.Clamp(autoExposure.percent.max, 1f, 99f) * PercentToScale
+                : 1f;
+            var exposureLowPercent = usesHistogramPercentiles
+                ? Mathf.Min(
+                    Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * PercentToScale,
+                    exposureHighPercent)
+                : 0f;
             var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(
                 autoExposure.minEV100.value);
             var maxWhitePointLuminance = Mathf.Max(
@@ -85,7 +85,9 @@ namespace VividRP.Runtime
             settings.exposureSpeedDown = Mathf.Max(autoExposure.speedDown.value, MinSpeed);
             settings.histogramScale = histogramScaleBias.x;
             settings.histogramBias = histogramScaleBias.y;
-            settings.luminanceMin = Mathf.Pow(2f, histogramLogRange.x);
+            settings.luminanceMin = settings.mode == AutoExposureMode.Basic
+                ? 1e-4f
+                : Mathf.Pow(2f, histogramLogRange.x);
             settings.exponentialUpM = ComputeExponentialTransitionMultiplier(
                 settings.exposureSpeedUp,
                 DefaultStartDistance);

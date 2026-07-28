@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### Changed
 
+- The Bloom Volume inspector now shows only the settings used by the selected Scattering or Convolution FFT path.
+
 - Renamed the `GTAO` Volume component type to `AmbientOcclusion` and added an implementation-aware custom inspector.
 
 ## [0.1.0] - 2026-02-24

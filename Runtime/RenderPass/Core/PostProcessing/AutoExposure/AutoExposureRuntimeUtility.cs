@@ -115,6 +115,7 @@ namespace VividRP.Runtime
         public GraphicsBuffer histogramBuffer;
         public RenderTexture previousExposureTexture;
         public RenderTexture currentExposureTexture;
+        public RenderTexture dlssExposureTexture;
         public bool exposureEnabled;
         public bool autoExposureEnabled;
         public bool hasValidHistory;
@@ -132,6 +133,7 @@ namespace VividRP.Runtime
             histogramBuffer = null;
             previousExposureTexture = null;
             currentExposureTexture = null;
+            dlssExposureTexture = null;
             exposureEnabled = false;
             autoExposureEnabled = false;
             hasValidHistory = false;
@@ -353,6 +355,12 @@ namespace VividRP.Runtime
             var currentExposureTexture = exposureEnabled && textureHistory?.GetCurrent()?.rt != null
                 ? textureHistory.GetCurrent().rt
                 : null;
+            // DLSS consumes only the previous completed exposure. The current texture is the
+            // AutoExposurePass write target later in this frame; publishing it would create a
+            // hidden GPU dependency cycle when auto exposure meters the DLSS output.
+            var dlssExposureTexture = hasValidHistory && hasValidTextureHistory
+                ? previousExposureTexture
+                : null;
 
             exposureData.settings = settings;
             exposureData.implementation = implementation;
@@ -363,6 +371,7 @@ namespace VividRP.Runtime
             exposureData.preExposureBuffer = preExposureBuffer;
             exposureData.previousExposureTexture = previousExposureTexture;
             exposureData.currentExposureTexture = currentExposureTexture;
+            exposureData.dlssExposureTexture = dlssExposureTexture;
             exposureData.exposureEnabled = exposureEnabled;
             exposureData.autoExposureEnabled = autoExposureEnabled;
             exposureData.hasValidHistory = hasValidHistory;
@@ -370,13 +379,15 @@ namespace VividRP.Runtime
 
         }
 
-        internal static void CommitFrame(Camera camera)
+        internal static void CommitFrame(
+            Camera camera,
+            bool exposureTextureWritten)
         {
             if (!s_HistorySystem.TryGetBase(camera, out var state) || state == null)
                 return;
 
             state.exposureBufferHistory?.MarkWritten();
-            if (state.lastImplementation == AutoExposureImplementationPath.HDRP)
+            if (exposureTextureWritten)
                 state.exposureTextureHistory?.MarkWritten();
             state.hasValidHistory = true;
             state.wasEnabledLastFrame = true;

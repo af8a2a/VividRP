@@ -140,6 +140,7 @@ namespace VividRP.Runtime
             RenderTexture diffuseAlbedo,
             RenderTexture specularAlbedo,
             RenderTexture normalRoughness,
+            RenderTexture emissive,
             RenderTexture diffuseHitDistance,
             RenderTexture specularHitDistance,
             Vector2 jitterOffset,
@@ -165,7 +166,8 @@ namespace VividRP.Runtime
                 DiffuseAlbedo = diffuseAlbedo,
                 SpecularAlbedo = specularAlbedo,
                 Normals = normalRoughness,
-                Roughness = null  // Packed in normals.w
+                Roughness = null, // Packed in normals.w
+                Emissive = emissive
             };
 
             // Build ray inputs - hit distances from path tracer output alpha channels

@@ -109,6 +109,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 7200000, guid: 8164bbffd46662749a6398ba6b7ba0a5, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/RaytracingGBuffer.raytrace
     ResourceObject: {fileID: 4807578003741378534, guid: e7308e3e8d216f743b2ae2cb7762fc72, type: 3}
+  - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathTracingDLSSRayReconstructionResolve.compute
+    ResourceObject: {fileID: 7200000, guid: 605ec385e016e9f48b64a23eac77f0e5, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracing.raytrace
     ResourceObject: {fileID: 4807578003741378534, guid: 09f018db93d2e534ab32ce82ece5e884, type: 3}
   - ResourceName: Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAccumulation.compute

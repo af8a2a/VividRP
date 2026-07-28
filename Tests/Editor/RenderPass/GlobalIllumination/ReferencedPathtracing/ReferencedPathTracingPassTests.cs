@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 5"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 6"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -90,6 +90,61 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Not.Contain("NextReferencedPathtracingRng"));
+        }
+
+        [Test]
+        public void ColoredOpacityEstimator_WeightsCameraAndShadowTraversal()
+        {
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var indirectDiffuseSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Shaders",
+                    "Material",
+                    "ShaderPass",
+                    "IndirectDiffuse.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Contain("SampleOpenPbrGeometryOpacity("));
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Contain(
+                    "ResolveOpenPbrGeometryOpacityBranchProbability("));
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Contain(
+                    "ResolveOpenPbrGeometryOpacityBranchWeight("));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "payload.pathThroughput *= branchWeight;"));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "payload.stochasticTransparencyWeight *= branchWeight;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "throughput *= payload.stochasticTransparencyWeight;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "? visibilityPayload.stochasticTransparencyWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "throughput * cameraBackground.rgb"));
         }
 
         [Test]
@@ -1761,6 +1816,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void V1FreezeGate_RejectsNonCanonicalColoredOpacityContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+            capture.coloredOpacityContractVersion = 0;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("Colored-opacity transport contract"));
+        }
+
+        [Test]
         public void EnvironmentState_DisablesUnsupportedSkyAndSanitizesInvalidValues()
         {
             var cubemap = new Cubemap(1, TextureFormat.RGBAHalf, false);
@@ -2056,6 +2128,8 @@ namespace VividRP.Editor.Tests
                 thinWalledTransmissionContractVersion =
                     ReferencedPathTracingThinWalledTransmissionContract
                         .Version,
+                coloredOpacityContractVersion =
+                    ReferencedPathTracingColoredOpacityContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

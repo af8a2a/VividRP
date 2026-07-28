@@ -1578,9 +1578,11 @@ struct ReferencedPathtracingPayload
     float3 shadingNormalDiagnostics;
     // Effective dielectric transmission fraction after metallic suppression.
     float thinWalledTransmissionWeight;
-    // x: most recent opacity, y: ignored candidate count,
-    // z: transparent candidate count.
-    float3 stochasticTransparencyDiagnostics;
+    // Product of RGB branch importance weights produced by colored opacity
+    // any-hit decisions along the current ray segment.
+    float3 stochasticTransparencyWeight;
+    // RGB: most recent colored opacity. A: transparent candidate count.
+    float4 stochasticTransparencyDiagnostics;
     uint nextLobeClass;
     uint nextLobeIsDelta;
     uint nextLobeIsTransmission;
@@ -1619,6 +1621,7 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.denoisingNormalWS = 0.0;
     payload.shadingNormalDiagnostics = 0.0;
     payload.thinWalledTransmissionWeight = 0.0;
+    payload.stochasticTransparencyWeight = 1.0;
     payload.stochasticTransparencyDiagnostics = 0.0;
     payload.nextLobeClass = 0u;
     payload.nextLobeIsDelta = 0u;

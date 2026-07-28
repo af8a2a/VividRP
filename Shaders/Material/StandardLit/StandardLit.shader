@@ -41,6 +41,7 @@ Shader "VividRP/Material/StandardLit"
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 
         [Main(ReferencePathTracing, _, on, off)] _ReferencePathTracing("Reference Path Tracing", Float) = 1
+        [Sub(ReferencePathTracing)] _OpacityColor("Opacity Color", Color) = (1, 1, 1, 1)
         [SubToggle(ReferencePathTracing, _)] _ThinWalledTransmission("Thin-Walled Transmission", Float) = 0.0
         [Sub(ReferencePathTracing)] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
         [Sub(ReferencePathTracing)] _TransmissionColor("Transmission Color", Color) = (1, 1, 1, 1)

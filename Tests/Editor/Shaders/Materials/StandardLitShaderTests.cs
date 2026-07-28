@@ -281,6 +281,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_ExposesOpenPbrColoredOpacity()
+        {
+            UnityEngine.Material material = CreateMaterial();
+            try
+            {
+                Assert.That(material.HasProperty("_OpacityColor"), Is.True);
+                Assert.That(
+                    material.GetColor("_OpacityColor"),
+                    Is.EqualTo(Color.white));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void SetupMaterial_UpdatesAlphaClipKeywordAndQueue_WhenAlphaClipEnabled()
         {
             UnityEngine.Material material = CreateMaterial();

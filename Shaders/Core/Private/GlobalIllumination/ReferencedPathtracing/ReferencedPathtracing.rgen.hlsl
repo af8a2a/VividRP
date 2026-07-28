@@ -170,7 +170,7 @@ float3 OffsetReferencedPathtracingRayOrigin(
     return positionWS + faceNormalWS * (rayBias * offsetSign);
 }
 
-float TraceReferencedPathtracingVisibility(
+float3 TraceReferencedPathtracingVisibility(
     float3 positionWS,
     float3 faceNormalWS,
     float3 lightDirectionWS,
@@ -206,7 +206,9 @@ float TraceReferencedPathtracingVisibility(
         shadowRay,
         visibilityPayload);
 
-    return visibilityPayload.hit == 0u ? 1.0 : 0.0;
+    return visibilityPayload.hit == 0u
+        ? visibilityPayload.stochasticTransparencyWeight
+        : 0.0;
 }
 
 float3 TraceReferencedPathtracingCandidateVisibility(
@@ -219,7 +221,7 @@ float3 TraceReferencedPathtracingCandidateVisibility(
     uint stochasticAlphaSeed)
 {
     shadowStrength = saturate(shadowStrength);
-    float tracedVisibility = shadowStrength > 0.0
+    float3 tracedVisibility = shadowStrength > 0.0
         ? TraceReferencedPathtracingVisibility(
             positionWS,
             faceNormalWS,
@@ -544,14 +546,19 @@ void RayGenReferencedPathtracing()
         // SER is useful around the material-heavy closest-hit path. Shadow rays
         // skip closest-hit shading and retain the lower-overhead standard TraceRay.
         TraceReferencedPathtracingSurface(ray, payload);
-        if (bounceIndex == 0u
-            && payload.stochasticTransparencyDiagnostics.z > 0.0)
+        throughput *= payload.stochasticTransparencyWeight;
+        if (!IsFiniteReferencedPathtracingRadiance(throughput)
+            || MaxReferencedPathtracingComponent(throughput) <= 0.0)
         {
-            stochasticTransparencyDiagnostic = float3(
-                payload.stochasticTransparencyDiagnostics.x,
-                payload.stochasticTransparencyDiagnostics.y
-                    / payload.stochasticTransparencyDiagnostics.z,
-                payload.stochasticTransparencyDiagnostics.z);
+            if (!IsFiniteReferencedPathtracingRadiance(throughput))
+                invalidSampleMask.z = 1.0;
+            break;
+        }
+        if (bounceIndex == 0u
+            && payload.stochasticTransparencyDiagnostics.a > 0.0)
+        {
+            stochasticTransparencyDiagnostic =
+                payload.stochasticTransparencyDiagnostics.rgb;
         }
 
         float4 volumeRandom = float4(
@@ -1307,7 +1314,8 @@ void RayGenReferencedPathtracing()
             {
                 float4 cameraBackground =
                     ReferencedPathtracingEvaluateCameraBackground(ray.Direction);
-                cameraBackgroundRadiance = cameraBackground.rgb;
+                cameraBackgroundRadiance =
+                    throughput * cameraBackground.rgb;
                 cameraBackgroundAlpha = cameraBackground.a;
 
                 bool usesReferenceAtmosphereBackground =
@@ -1963,8 +1971,7 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugStochasticTransparency)
     {
-        // R: most recent opacity. G: ignored candidate fraction.
-        // B: transparent candidate count along primary visibility.
+        // RGB: most recent OpenPBR colored opacity along primary visibility.
         debugRadiance = stochasticTransparencyDiagnostic;
     }
 
@@ -2040,10 +2047,14 @@ void RayGenReferencedPathtracing()
 void MissReferencedPathtracing(inout ReferencedPathtracingPayload payload : SV_RayPayload)
 {
     uint stochasticAlphaSeed = payload.stochasticAlphaSeed;
-    float3 stochasticTransparencyDiagnostics =
+    float3 stochasticTransparencyWeight =
+        payload.stochasticTransparencyWeight;
+    float4 stochasticTransparencyDiagnostics =
         payload.stochasticTransparencyDiagnostics;
     InitializeReferencedPathtracingPayload(payload);
     payload.stochasticAlphaSeed = stochasticAlphaSeed;
+    payload.stochasticTransparencyWeight =
+        stochasticTransparencyWeight;
     payload.stochasticTransparencyDiagnostics =
         stochasticTransparencyDiagnostics;
 }

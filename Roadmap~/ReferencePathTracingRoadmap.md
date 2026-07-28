@@ -907,7 +907,8 @@ Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl
 
 V1 从现有 StandardLit 解析：
 
-- `_BaseColor`、`_BaseMap` -> `base_color`、`geometry_opacity`。
+- `_BaseColor`、`_BaseMap` -> `base_color` 与 geometry opacity 的 scalar alpha。
+- `_OpacityColor`、`_OpacityMap.rgb` -> host-side RGB `geometry_opacity` estimator。
 - `_Metallic`、`_MetallicGlossMap` -> `base_metalness`。
 - `_Smoothness`、roughness map/channel policy -> `specular_roughness`。
 - `_BumpMap`、`_BumpScale` -> `geometry_basis.n/t/b`。
@@ -1426,31 +1427,38 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   支线为准。运行中修改材质参数仍受现有 scene/material mutation tracking 限制，修改后需
   显式重置 accumulation。
 
-### StandardLit path-traced stochastic transparency checkpoint (2026-07-27)
+### StandardLit OpenPBR colored-opacity checkpoint (2026-07-28)
 
 - StandardLit `Surface Type = Transparent` 现在保留为透明材质，并设置 Transparent queue、
   alpha blend state、`ZWrite Off` 与 `_SURFACE_TYPE_TRANSPARENT`。当前 raster pipeline
   尚无 StandardLit transparent forward pass；该状态首先用于 reference path tracing，
   不再被 ShaderGUI 静默回退为 Opaque。
-- reference DXR any-hit 使用最终 opacity
-  `saturate(BaseMap.a * BaseColor.a * OpacityMap.r)` 做 stochastic coverage：接受交点后仍
-  评估完整 StandardLit/OpenPBR BSDF，拒绝交点则继续遍历 RTAS。这里的 opacity 是
-  surface coverage，不是 thin-wall transmission weight，也不进行第二次 throughput
-  缩放；期望值对应前景 BSDF 与后景 radiance 的 alpha 混合。
+- reference DXR any-hit 使用 OpenPBR 风格的 RGB geometry opacity：
+  `O = saturate(OpacityColor.rgb * BaseMap.a * BaseColor.a * OpacityMap.rgb)`。
+  这里的 opacity 是 surface/straight-through transport mix，不是 thin-wall transmission
+  weight。
+- 单次交点只采样 surface 或 straight-through 其中一个分支。proposal probability 使用
+  `p = (O.r + O.g + O.b) / 3`；surface 分支乘 `O / p`，straight-through 分支乘
+  `(1 - O) / (1 - p)`。因此每个 RGB 通道的期望严格等于
+  `O * L_surface + (1 - O) * L_behind`。灰度 opacity 时两个分支权重退化为 1；彩色
+  opacity 时算术平均 proposal 把任一通道权重限制在 3 以内。
 - alpha clip 先于 stochastic opacity 执行。RTAS 已对 transparent keyword 使用
   `UniqueAnyHitCalls`，而随机数由每 bounce 的既有 stochastic-alpha dimension 驱动，
   再用 instance、primitive 与 hit distance 为每个候选交点去相关，因此多层透明不会
   退化成共享阈值造成的相关 bias。
-- primary/continuation rays 与 NEE、atmosphere sun、segment-light shadow rays 使用同一
-  opacity 规则；每个 shadow estimator 从 bounce seed 派生独立子流。miss shader 保留
-  stochastic seed，透明层后命中 background/atmosphere 时不会把后续 visibility 固定到
-  零种子。
-- Rendering Debugger 新增 `Stochastic Transparency`：R 为 primary visibility 最近一个
-  transparent candidate 的 opacity，G 为被忽略候选比例，B 为候选数量。sampling、
-  integrator 与 freeze contract 已升级，旧 accumulation/capture 不会静默混用。
-- 当前不包含 colored transmittance、吸收介质、thick refraction、order-independent raster
-  transparency 或透明材质的 REBLUR guide conformance。reference 结果仍以 raw FP32
-  accumulation/OIDN 支线为准；材质修改后需显式重置 accumulation。
+- primary/continuation rays 会把 RGB 分支权重应用到 surface、background、atmosphere 和
+  后续路径 throughput。NEE、atmosphere sun 与 segment-light shadow rays 使用相同的
+  straight-through 权重，所以彩色透明遮挡不会退化为 binary 或 scalar visibility。
+  每个 shadow estimator 从 bounce seed 派生独立子流，miss shader 保留 seed、RGB 权重
+  和诊断状态。
+- Rendering Debugger 的 `Stochastic Transparency` 现在直接显示 primary visibility
+  最近一个 transparent candidate 的 RGB opacity。sampling contract 升级到 6、
+  integrator 升级到 11、freeze contract 升级到 10，并记录独立的
+  `coloredOpacityContractVersion`。
+- 当前不包含吸收介质、thick refraction、order-independent raster transparency 或透明
+  材质的 REBLUR guide conformance。输出 alpha 仍是 proposal 对应的标量 coverage；
+  reference RGB 结果以 raw FP32 accumulation/OIDN 支线为准。运行中修改材质参数后仍需
+  显式重置 accumulation。
 
 ## Milestone 4: Progressive Accumulation and Capture
 

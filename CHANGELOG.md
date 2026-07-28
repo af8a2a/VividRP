@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 - FidelityFX CACAO as a selectable alternative to the existing GTAO implementation.
 - FFT convolution bloom with user-authored kernels, padded power-of-two domains, kernel-spectrum caching, energy normalization, a Wave32/Wave64 primary path, and a 4096-point LDS fallback.
+- OpenPBR-style RGB geometry opacity for StandardLit reference path tracing, with unbiased stochastic camera and shadow transport.
 
 ### Changed
 

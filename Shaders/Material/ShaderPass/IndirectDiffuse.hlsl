@@ -37,6 +37,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _EmissionColor;
     float4 _TransmissionColor;
+    float4 _OpacityColor;
     float _Cutoff;
     float _Smoothness;
     float _SmoothnessTextureChannel;
@@ -156,6 +157,60 @@ float4 SampleBase(float2 uv, float textureLod)
 float4 SampleBase(float2 uv)
 {
     return SampleBase(uv, 0.0);
+}
+
+float3 SampleOpenPbrGeometryOpacity(float2 uv, float textureLod)
+{
+    float3 opacity =
+        saturate(_OpacityColor.rgb)
+        * saturate(
+            SAMPLE_TEXTURE2D_LOD(
+                _BaseMap,
+                sampler_BaseMap,
+                uv,
+                textureLod).a
+            * _BaseColor.a);
+#if defined(_OPACITYMAP)
+    opacity *= saturate(SAMPLE_TEXTURE2D_LOD(
+        _OpacityMap,
+        sampler_OpacityMap,
+        uv,
+        textureLod).rgb);
+#endif
+    return saturate(opacity);
+}
+
+float3 SampleOpenPbrGeometryOpacity(float2 uv)
+{
+    return SampleOpenPbrGeometryOpacity(uv, 0.0);
+}
+
+float ResolveOpenPbrGeometryOpacityBranchProbability(float3 opacity)
+{
+    opacity = saturate(opacity);
+    // The channel mean preserves p = opacity for grayscale input and bounds
+    // every RGB importance weight to three for saturated colored opacity.
+    return (opacity.r + opacity.g + opacity.b) * (1.0 / 3.0);
+}
+
+float3 ResolveOpenPbrGeometryOpacityBranchWeight(
+    float3 opacity,
+    float branchProbability,
+    bool surfaceBranch)
+{
+    opacity = saturate(opacity);
+    branchProbability = saturate(branchProbability);
+    if (surfaceBranch)
+    {
+        return branchProbability > 0.0
+            ? opacity / branchProbability
+            : 0.0;
+    }
+
+    float transmissionProbability = 1.0 - branchProbability;
+    return transmissionProbability > 0.0
+        ? (1.0 - opacity) / transmissionProbability
+        : 0.0;
 }
 
 bool VividIndirectDiffuseIsAlphaClipped(float alpha)

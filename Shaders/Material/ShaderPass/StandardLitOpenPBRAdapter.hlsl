@@ -82,7 +82,11 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.base_metalness = saturate(metallicSmoothness.x);
     inputs.base_diffuse_roughness = saturate(1.0 - metallicSmoothness.y);
     inputs.specular_roughness = max(1.0 - metallicSmoothness.y, 0.001);
-    inputs.geometry_opacity = saturate(baseSample.a);
+    inputs.geometry_opacity =
+        ResolveOpenPbrGeometryOpacityBranchProbability(
+            SampleOpenPbrGeometryOpacity(
+                geometry.uv,
+                baseTextureLod));
     inputs.geometry_thin_walled = _ThinWalledTransmission > 0.5;
     float specularIor = _SpecularIOR;
     if (isnan(specularIor) || isinf(specularIor))

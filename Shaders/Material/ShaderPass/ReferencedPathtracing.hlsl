@@ -304,8 +304,8 @@ void StandardLitReferencedPathtracingAnyHit(
 {
 #if defined(_ALPHATEST_ON) || defined(_SURFACE_TYPE_TRANSPARENT)
     float2 uv = VividIndirectDiffuseFetchUV(attributeData);
-    float opacity = saturate(SampleBase(uv).a);
 #if defined(_ALPHATEST_ON)
+    float opacity = saturate(SampleBase(uv).a);
     if (VividIndirectDiffuseIsAlphaClipped(opacity))
     {
         IgnoreHit();
@@ -314,6 +314,10 @@ void StandardLitReferencedPathtracingAnyHit(
 #endif
 
 #if defined(_SURFACE_TYPE_TRANSPARENT)
+    float3 coloredOpacity = SampleOpenPbrGeometryOpacity(uv);
+    float branchProbability =
+        ResolveOpenPbrGeometryOpacityBranchProbability(
+            coloredOpacity);
     uint candidateSeed =
         ReferencedPathtracingHashStochasticTransparency(
             payload.stochasticAlphaSeed ^ 0x9e3779b9u);
@@ -330,11 +334,18 @@ void StandardLitReferencedPathtracingAnyHit(
         ReferencedPathtracingHashStochasticTransparencyToUnitFloat(
             candidateSeed);
 
-    payload.stochasticTransparencyDiagnostics.x = opacity;
-    payload.stochasticTransparencyDiagnostics.z += 1.0;
-    if (opacityRandom >= opacity)
+    bool surfaceBranch = opacityRandom < branchProbability;
+    float3 branchWeight =
+        ResolveOpenPbrGeometryOpacityBranchWeight(
+            coloredOpacity,
+            branchProbability,
+            surfaceBranch);
+    payload.pathThroughput *= branchWeight;
+    payload.stochasticTransparencyWeight *= branchWeight;
+    payload.stochasticTransparencyDiagnostics.rgb = coloredOpacity;
+    payload.stochasticTransparencyDiagnostics.a += 1.0;
+    if (!surfaceBranch)
     {
-        payload.stochasticTransparencyDiagnostics.y += 1.0;
         IgnoreHit();
     }
 #endif

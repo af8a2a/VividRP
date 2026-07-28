@@ -24,6 +24,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _EmissionColor;
     float4 _TransmissionColor;
+    float4 _OpacityColor;
     float _Cutoff;
     float _Smoothness;
     float _SmoothnessTextureChannel;

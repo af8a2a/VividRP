@@ -199,7 +199,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(8));
+                    Is.EqualTo(11));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -379,11 +379,87 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ColoredOpacityContract_ComposesMaterialInputsPerChannel()
+        {
+            var opacity =
+                ReferencedPathTracingColoredOpacityContract.ResolveOpacity(
+                    new Vector3(1.0f, 0.25f, -1.0f),
+                    0.8f,
+                    new Vector3(0.5f, 1.0f, 2.0f));
+
+            Assert.That(opacity.x, Is.EqualTo(0.4f).Within(1e-6f));
+            Assert.That(opacity.y, Is.EqualTo(0.2f).Within(1e-6f));
+            Assert.That(opacity.z, Is.Zero);
+        }
+
+        [Test]
+        public void ColoredOpacityContract_IsUnbiasedForRgbSurfaceMix()
+        {
+            var opacity = new Vector3(0.9f, 0.3f, 0.0f);
+            var surfaceRadiance = new Vector3(8.0f, 2.0f, 1.0f);
+            var transmittedRadiance =
+                new Vector3(0.5f, 4.0f, 6.0f);
+            var expected = Vector3.Scale(
+                    opacity,
+                    surfaceRadiance)
+                + Vector3.Scale(
+                    Vector3.one - opacity,
+                    transmittedRadiance);
+            var estimate =
+                ReferencedPathTracingColoredOpacityContract
+                    .EvaluateExpectedComposite(
+                        opacity,
+                        surfaceRadiance,
+                        transmittedRadiance);
+            var surfaceWeight =
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchWeight(opacity, true);
+            var transmissionWeight =
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchWeight(opacity, false);
+
+            Assert.That(estimate.x, Is.EqualTo(expected.x).Within(1e-5f));
+            Assert.That(estimate.y, Is.EqualTo(expected.y).Within(1e-5f));
+            Assert.That(estimate.z, Is.EqualTo(expected.z).Within(1e-5f));
+            Assert.That(
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchProbability(new Vector3(0.4f, 0.4f, 0.4f)),
+                Is.EqualTo(0.4f).Within(1e-6f));
+            Assert.That(surfaceWeight.x, Is.LessThanOrEqualTo(3.0f));
+            Assert.That(surfaceWeight.y, Is.LessThanOrEqualTo(3.0f));
+            Assert.That(surfaceWeight.z, Is.LessThanOrEqualTo(3.0f));
+            Assert.That(transmissionWeight.x, Is.LessThanOrEqualTo(3.0f));
+            Assert.That(transmissionWeight.y, Is.LessThanOrEqualTo(3.0f));
+            Assert.That(transmissionWeight.z, Is.LessThanOrEqualTo(3.0f));
+        }
+
+        [Test]
+        public void ColoredOpacityContract_HandlesTransparentAndOpaqueEndpoints()
+        {
+            Assert.That(
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchProbability(Vector3.zero),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchWeight(Vector3.zero, false),
+                Is.EqualTo(Vector3.one));
+            Assert.That(
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchProbability(Vector3.one),
+                Is.EqualTo(1.0f));
+            Assert.That(
+                ReferencedPathTracingColoredOpacityContract
+                    .ResolveBranchWeight(Vector3.one, true),
+                Is.EqualTo(Vector3.one));
+        }
+
+        [Test]
         public void SamplingContract_UsesStableNonOverlappingDimensions()
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(5));
+                Is.EqualTo(6));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));

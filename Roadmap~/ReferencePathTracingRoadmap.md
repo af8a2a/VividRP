@@ -601,6 +601,33 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Gate:** 只有 E6 完成后才能开始；模式切换必须清空 accumulation 并写入 capture metadata。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- `ReferencedPathTracingSettingsVolume` 已加入互斥的 `HDRI` /
+  `ReferenceAtmosphere` mode，默认保持 HDRI V1。Reference Atmosphere 还预留了
+  atmosphere、cloud 与 planet ground 各自的 camera visibility / holdout policy；
+  cloud enable 独立保留给 A4。
+- `ReferencedPathTracingAtmosphereState` 从 active `PhysicallyBasedSkyVolume` 与
+  `VividLightData.mainDirectionalLight` 建立 resource-independent frame snapshot，记录
+  planet center、bottom/top radius、ground albedo、Rayleigh/Mie/ozone 系数与 scale
+  height、物理 intensity、太阳 entity identity、方向、illuminance、角直径与 shadow
+  strength。该提取路径不调用 raster sky renderer/material parameter builder，也不读取
+  atmosphere LUT、sky cubemap、celestial-body bindless texture 或 raster pass 输出。
+- Reference Atmosphere mode 下，HDRI state 强制 `hasHdri=false`，environment sampling
+  pass 不再 build/import HDRI distribution，path tracing pass 的 cubemap ports 只绑定
+  black fallback。Shader 侧 `_ReferencedEnvironmentMode` 还会再次 gate
+  `ReferencedPathtracingHasEnvironment()`，因此 HDRI infinite-light NEE、BSDF miss
+  emission 与 camera background 均不能跨 mode 泄漏能量。A0 只绑定物理 atmosphere
+  contract，不提前实现 A1/A2 radiance evaluation。
+- Atmosphere snapshot 与 environment mode 均进入 frame/sample/FP32 accumulation
+  signature；模式、物理大气参数、太阳或 visibility/holdout policy 变化都会从 sample 0
+  重启。Capture environment contract 升级到 version 3，记录 mode 与完整 atmosphere
+  metadata；HDRI V1 freeze gate 显式拒绝 Reference Atmosphere capture，保持两个
+  baseline 隔离。
+- Runtime 与 Editor Tests assembly 已通过编译；Unity 6000.7 当前 Editor 会话已成功
+  导入 A0 HLSL contract，未出现新增 shader error。由于 Editor 正在运行，按仓库约束
+  未启动 batch EditMode Tests。
+
 #### A1: Spherical Atmosphere Intersection and Transmittance
 
 - 使用高精度 camera-relative planet/atmosphere sphere intersection。
@@ -609,6 +636,36 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 - 构建 optical-depth LUT 加速解析 segment transmittance，并保留 reference ray-marched 对照模式。
 
 **Acceptance:** LUT 与高采样数 reference transmittance 在高度/天顶角测试矩阵中一致。
+
+**Implementation Checkpoint (2026-07-27)**
+
+- `ReferencedPathtracingCommon.hlsl` 已建立独立于 raster sky 的球形大气几何层。
+  Sphere intersection 使用 camera-relative planet-space origin、difference-of-squares
+  与稳定二次根求解，输出 atmosphere entry/exit interval；同一查询还会裁剪到可选
+  planet-ground virtual hit，并正确区分位于 ground/top boundary 上的 inward/outward ray。
+- Rayleigh 与 Mie 使用各自 scale height 的指数密度，ozone 使用由 physical sky
+  minimum altitude/width 定义的三角密度层。公共接口同时提供 point density、
+  density-column optical depth、RGB extinction transmittance 与后续 A2 可复用的
+  reference ray-march 基础。
+- 现有 `EnvironmentImportanceDistribution` buffer 保持 HDRI header、marginal CDF 与
+  conditional CDF 的 version/offset 不变，在尾部追加 versioned atmosphere transport
+  区域。LUT 为 `128 zenith × 64 radial × float3`，存储 Rayleigh/Mie/ozone 的米制
+  density-column；radial 轴使用 quadratic-height mapping，zenith 轴在 geometric
+  horizon 两侧独立参数化，避免插值跨越 ground discontinuity。
+- `ReferencedPathTracingEnvironmentSamplingPass` 在 Reference Atmosphere active 且
+  radial-density signature 变化时，以 256-step midpoint reference integration 重建
+  optical-depth LUT。它复用已经连接到 PT pass 的 buffer 与 RenderGraph dependency，
+  因此不增加 graph port，也不让 A1 重新依赖 raster atmosphere LUT/cubemap。
+- Shader 侧已提供 LUT segment transmittance、可配置 sample count 的 reference
+  ray-marched transmittance，以及两者的 relative-error compare 接口。A1 只冻结几何
+  与透射层；camera/surface/shadow/BSDF-miss 上的实际介质应用仍留给 A2，避免在
+  participating-medium path integration 完成前产生部分天空辐亮度。
+- 新增地球尺度数值测试：验证离地 2 m 的 ground hit 与水平 atmosphere exit 精度，
+  并在 8 个高度层、7 个 horizon-relative zenith 方向上比较 LUT 与 4096-step
+  reference 的最终 RGB transmittance，absolute-error gate 为 2%。Unity 6000.7
+  当前 Editor 会话已完成 Runtime/Editor assembly 编译；新增 compute kernel 可加载，
+  PT ray-tracing shader compiler message 为 0。由于 Editor 正在运行，按仓库约束未启动
+  batch EditMode Tests。
 
 #### A2: Participating-medium Path Integration
 
@@ -619,6 +676,42 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** 无太阳时大气无自发光；启用太阳后天空辐亮度随密度、相函数和观察高度合理变化。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- 新增 `ReferencedPathtracingAtmosphere.hlsl` 作为 PT-only participating-medium
+  transport 层。每个 path segment 先取得 A1 atmosphere/ground interval，再以 RGB
+  三通道等概率 hero-channel、sea-level extinction majorant 和最多 1024 次
+  null-collision step 执行 delta tracking，显式区分 no-collision、scatter、absorb
+  与 tracking-overflow 终态。
+- No-collision 与 real-scatter event 都使用 A1 optical-depth transmittance 计算
+  `T_rgb / T_hero` 权重；scatter continuation 进一步使用
+  `phaseScattering_rgb / phaseScattering_hero`。该谱权重保证对 hero channel 求期望后
+  恢复 RGB transmittance 与 scattering transport，而不是把三个波段压成单一灰度
+  extinction。
+- Rayleigh 使用归一化 `3(1+cos²θ)/(16π)` phase 与解析反演采样；Mie 使用
+  `PhysicallyBasedSkyVolume` anisotropy 驱动的 Henyey-Greenstein phase。Rayleigh/Mie
+  lobe 以 hero-channel local scattering coefficient 组成 mixture，scatter event
+  消耗正常 bounce，参加 max-depth、Russian roulette、throughput、ray cone 与
+  primary denoising AOV contract。
+- Surface trace 仍先求最近几何交点，但 surface/miss shading 前会以其 hit distance
+  裁剪 atmosphere segment。无 medium event 时，camera-to-surface、BSDF miss 与
+  emission/NEE throughput 都先应用 hero-corrected transmittance；所有 surface/area/
+  directional shadow visibility 则应用同一 A1 RGB transmittance，且 medium
+  attenuation 不受 light shadow-strength 开关影响。
+- Reference Atmosphere 不再回退 camera clear-color 作为天空能量：outer space 为黑，
+  无太阳且无其他 emissive transport 时没有自发光。Virtual planet ground 在 A2
+  只终止 path 并执行 camera visibility/holdout alpha；ground albedo/radiance 留给 A3。
+- 为满足 A2 sky-radiance gate，medium scatter event 已使用主 directional light 的
+  physical illuminance 执行 center-direction single-scatter NEE，并同时追踪 geometry
+  shadow 与 atmosphere transmittance。Phase-sampled continuation 当前不会再次命中
+  atmosphere sun emission，因此没有 double count；finite solar disk、phase/light
+  bidirectional MIS、太阳盘 camera visibility 与 ground coupling 仍明确留给 A3。
+- `ReferencedPathTracingAtmosphereState.ContractVersion` 升级到 2。新增测试覆盖 phase
+  normalization、hero-channel RGB estimator identity、medium-before-surface ordering、
+  shadow transmittance 和 no-emissive-skydome contract。Unity 6000.7 当前 Editor
+  会话已完成 Runtime/Editor assembly 编译，PT ray-tracing shader compiler message
+  为 0；由于 Editor 正在运行，按仓库约束未启动 batch EditMode Tests。
+
 #### A3: Sun, Ground and Atmosphere MIS
 
 - 使用 VividRP directional light 的物理 illuminance/角直径契约表示太阳。
@@ -628,6 +721,39 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** 不与 HDRI 太阳盘或额外 skydome double count；太阳、天空和地面能量单位一致。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- Atmosphere sun 继续以 `VividLightData.mainDirectionalLight` 的物理 RGB
+  illuminance、方向、角直径与 shadow strength 为唯一 source of truth。零角直径保持
+  directional delta event；有限角直径以 uniform solid-angle cone 采样，太阳盘 radiance
+  使用 `L = E / solidAngle`，从而 NEE 的 `Li / pDirection` 与 directional illuminance
+  完全一致。
+- Medium scatter 的 solar NEE 已从 center-direction estimator 升级为有限太阳盘采样。
+  Rayleigh/Mie hero-channel phase PDF 与 sun solid-angle PDF 使用 power heuristic MIS；
+  phase-sampled continuation 命中太阳盘时在 atmosphere exit 补齐 BSDF/phase 一侧
+  estimator。delta sun 只走 NEE，finite sun 同时支持两侧 estimator，并遵循现有
+  `MIS` / `LightOnly` / `BsdfOnly` gate。
+- Camera ray 可以直接观察有限太阳盘，辐亮度应用相同的 atmosphere no-collision
+  transmittance estimator、camera visibility 和 holdout contract；outer space 仍为黑。
+  只有 camera ray 或明确由 atmosphere phase / planet-ground BSDF 产生的方向可以进入
+  atmosphere sun miss evaluation，StandardLit surface 仍由 Reference Light List 的
+  directional segment evaluator 负责，因此不会对同一个主光源重复计数。
+- Virtual planet ground 已成为 Lambert path vertex：使用 physical-sky ground albedo
+  输出 primary albedo/normal/hit-distance AOV，对太阳执行 finite/delta NEE 与 cosine
+  BSDF MIS，并以 cosine hemisphere continuation 把 ground bounce 重新送回 atmosphere
+  delta tracking。由此 ground-sun、ground-atmosphere 与 atmosphere-ground-atmosphere
+  多次散射都参加正常 max-depth、Russian roulette 和 accumulation contract。
+- Shadow contract 增加 virtual ground occlusion。surface、medium 与 ground 的太阳
+  visibility 都先检测 planet intersection，再应用 geometry shadow-strength 和同一
+  atmosphere transmittance，太阳位于局部地平线以下时不再穿透虚拟行星。
+- Path sampling contract 升级到 version 3，在每 bounce 的 offset 12/13 固定保留
+  atmosphere-sun sample，避免与 volume free-flight/phase sample 相关；atmosphere
+  contract 同步升级到 version 3，旧 accumulation/capture 会按版本失配重启。
+- 新增 A3 source-contract、太阳盘 illuminance/radiance、双向 MIS 权重互补与 Lambert
+  ground 能量测试。Unity 6000.7 当前 Editor 会话已完成 Runtime/Editor assembly 编译；
+  `ReferencedPathtracing.raytrace` 强制重导入后的 compiler message 为 0。由于 Editor
+  正在运行，按仓库约束未启动 batch EditMode Tests。
+
 #### A4: Reference Volumetric Clouds
 
 - 在 atmosphere 稳定后再加入 cloud shell intersection、density majorant 和 callable/material sampling 边界。
@@ -636,12 +762,117 @@ Reference Atmosphere 不再把天空当作一张无限远辐亮度贴图，而�
 
 **Acceptance:** 关闭 clouds 时与 A3 完全一致；cloud shadow 对 surface 和 atmosphere scatter 使用同一透射契约。
 
+**Implementation Checkpoint (2026-07-27)**
+
+- 新增完全独立于 raster cloud color/depth/shadow/history 的 PT-only spherical cloud
+  shell。Ray generation 在 surface、virtual ground 之前分别对 atmosphere 与 cloud
+  free-flight 采样并选取最近 medium event；cloud event 使用 atmosphere
+  `T_rgb / T_hero` 修正到事件距离，关闭 clouds 时 cloud sampler 是严格 no-op，
+  A3 estimator 与输出保持不变。
+- 云材质边界集中在 `ReferencedPathtracingCloud.hlsl`：确定性四 octave procedural
+  density、coverage remap、垂直 profile、achromatic extinction、spectral
+  single-scattering albedo 和 Henyey-Greenstein phase 不依赖 VividRP raster sky
+  子系统。Delta tracking 使用保守 majorant 与独立 bounce sample dimensions，
+  tracking overflow 显式终止无效样本，避免静默产生有偏亮点。
+- `ReferencedPathTracingEnvironmentSamplingPass` 在原 HDRI CDF 与 atmosphere
+  optical-depth LUT 后追加 versioned 64-bin radial density-majorant acceleration
+  map。分辨率、版本和 96-step deterministic shadow reference budget 均写入
+  metadata，后续可以在不改变 RenderGraph wiring 的前提下替换为更高阶 3D
+  acceleration structure。
+- Cloud scatter vertex 已接入主太阳 finite/delta NEE、Henyey-Greenstein phase
+  continuation、双向 MIS、max-depth 与 Russian roulette。Camera visibility/holdout、
+  direct finite sun、atmosphere exit 和 virtual-ground 语义沿用 A3 contract。
+- Surface、atmosphere scatter、cloud scatter 与 virtual ground 的候选光源可见性统一
+  经过 planet occlusion、geometry shadow、atmosphere transmittance 和 cloud
+  96-step deterministic transmittance；因此 cloud shadow 不再存在独立的
+  surface-only 分支。该固定步长积分的近似状态由
+  `cloudShadowUsesDeterministicApproximation` 与 sample count 显式写入 metadata。
+- 默认 multiple scattering 由显式 cloud phase path bounce 表达，不启用经验补偿。
+  可选 `EnergyCompensation` 仅作为有偏预览模式，其 mode/strength 与
+  `cloudTransportUsesBiasedApproximation` 已写入 capture metadata。当前固定步长
+  cloud shadow 同样使该总 transport 标记保持为 biased，A5 应以此 gate 分离
+  unbiased reference 与 preview approximation。
+- Atmosphere/environment contract 升级到 version 4；path sampling contract 同步
+  升级到 version 4、每 bounce stride 20，并固定 offset 14～17 给 cloud
+  free-flight/phase sample。新增测试覆盖关闭 gate、metadata bias 标记、HG phase
+  normalization、event ordering、共享 visibility 以及 acceleration layout。
+- Unity 6000.7 当前 Editor 会话已完成 Runtime/Editor assembly 编译；environment
+  compute 与 PT ray-tracing shader 强制重导入后的 compiler message 均为 0。由于
+  Editor 正在运行，按仓库约束未启动 batch EditMode Tests。
+
+**Post-A4 Atmosphere Continuity Fix (2026-07-27)**
+
+- 修复近地面有限 atmosphere segment 使用两个巨大 boundary optical depth 做差时的
+  cancellation。该误差会把 LUT 的 radial cell 分层投影为稳定的世界高度/屏幕水平
+  条纹，并且增加 sample count 也不会消失。
+- 短段现在根据 Rayleigh、Mie、ozone 最小 profile scale 自适应执行 midpoint
+  reference integration；最多 256 steps，局部阈值同时受 profile scale、LUT radial
+  footprint 与 sample budget 限制。到太阳或 atmosphere boundary 的长段继续使用
+  bilinear optical-depth LUT，不牺牲 E5 cache contract。
+- 回归 witness 在标准地球参数下覆盖离地 2 m、长度 20 m 的 finite segment：旧 LUT
+  subtraction 的 density-depth relative error 大于 1，而新 local integration 相对
+  4096-step reference 小于 `1e-4`。Atmosphere/environment contract 升级到 version
+  5，optical-depth policy contract 升级到 version 2，并在 capture metadata 中记录
+  local integration budget。
+
+**Camera-relative Ground Precedence Fix (2026-07-27)**
+
+- `Rendering Space = Camera` 会把 virtual planet center 锚定为 camera position 减去
+  planet radius，因此相机位于 virtual ground 的切平面。Raster sky 只在没有真实
+  geometry depth 的 background pixel 评估该 ground；PT 若让 spherical ground 与
+  RTAS surface 竞争，则所有朝下 primary ray 都会先在距离 0 命中 ground，形成稳定的
+  屏幕水平截断带。
+- Atmosphere state 新增 `CameraRelativeRenderingSpace` flag，capture metadata 明确记录
+  该模式。Raygen 在已有 RTAS surface hit 时关闭 virtual-ground boundary，只对有限
+  scene segment 做 atmosphere/cloud transport；只有 surface miss 才允许 Camera-relative
+  ground 作为 background closure。World rendering space 继续使用真实 spherical
+  planet occlusion，atmosphere/cloud/ground scatter vertex 也保留原有 ground policy。
+- Surface NEE 与 BSDF-sampled light visibility 使用同一 scene-hit 优先策略，避免 shadow
+  ray 被 Camera-relative ground 误判遮挡；禁用 ground 时的 segment transmittance 使用
+  direct reference integration，不读取只对 bottom-radius 外部定义的 optical-depth LUT。
+  Atmosphere/environment contract 升级到 version 6，使旧 accumulation/capture 自动失效。
+
 #### A5: Reference Atmosphere Validation and Optimization
 
 - 与高采样数 CPU/offline reference 或已验证的 Unreal reference scene 对照。
 - 覆盖海平面、高空、太空视角、日出/正午、ground on/off、cloud on/off。
 - 分离无偏 reference mode 与 analytic/LUT/multiple-scattering approximation mode。
 - 完成 GPU timeout、max ray-march steps、NaN/Inf 和极端尺度测试。
+
+**Implementation Checkpoint (2026-07-27)**
+
+- Atmosphere transport 现在具有显式的 `Numerical Reference` 与 `Optimized Preview`
+  contract；默认使用 Numerical Reference，mode 进入 environment signature，因此切换
+  approximation policy 会使旧 accumulation 自动失效。Atmosphere/environment metadata
+  contract 升级到 version 7。
+- Numerical Reference 不再构建或读取 optical-depth LUT：长段 transmittance 使用
+  1024-step midpoint reference integration，已经满足局部误差条件的短 finite segment
+  仍复用经过 4096-step witness 验证的 adaptive direct integration。云阴影使用
+  512-step deterministic quadrature，且强制关闭 preview-only multiple-scattering
+  energy compensation。
+- Optimized Preview 保留 E5 的 optical-depth LUT、96-step cloud shadow quadrature 和
+  可选 energy compensation。所有 approximation 均由同一个 transport mode gate 控制，
+  不允许静默混入 Numerical Reference capture。由于当前 cloud shadow quadrature 仍为
+  deterministic biased estimator，`Numerical Reference + Clouds` 不标记为 canonical
+  reference eligible，云场景通过独立 preview validation case 管理。
+- 新增 version 1 validation corpus 与 evidence gate。固定七个 8192-SPP case，覆盖
+  sea-level/high-altitude/space、sunrise/noon、World/Camera rendering space、
+  ground on/off 和 cloud on/off；每个 capture 必须记录 scene/settings SHA-256、
+  实际 observer altitude/sun elevation、finite/negative/overflow pixel fraction、
+  atmosphere/cloud max steps、GPU 时间、timeout 状态与相对 offline-reference mean
+  error。高度/太阳角 gate 分别为 1 m/0.25°，Numerical Reference 图像 gate 为 2%，
+  Optimized Preview gate 为 5%。
+- Atmosphere 与 cloud tracking 均设置 1024-step hard cap；`Atmosphere Transport` debug
+  AOV 的 R/G 分别显示 atmosphere/cloud step-budget 使用率，B 显示 overflow。validation
+  gate 拒绝 timeout、NaN/Inf、负 radiance、overflow 或缺少 reproducibility hash 的
+  capture。极端尺度单元测试覆盖 1 km、Earth-scale 与 100 Mm planet sphere intersection。
+- 保守优化仅包含不改变 reference estimator 的路径：短 finite segment 使用已验证的
+  adaptive direct integration；cloud optical depth 达到 `exp(-80)` 的既有数值饱和点后
+  提前结束。LUT 与 multiple-scattering approximation 只属于 Optimized Preview。
+- A5 的代码与 deterministic validation contract 已落地，但 `Reference Atmosphere V2`
+  冻结仍要求在目标 DXR GPU 上跑完全部七个 case，并附 offline/Unreal reference 图像、
+  GPU timing 和 SHA-256 evidence；在 corpus evidence 全部通过前，本 checkpoint 不宣称
+  完成视觉 baseline freeze。
 
 Reference Atmosphere 在 A0～A5 完成前不进入 GI Baseline V1 的 Definition of Done，也不能替代 HDRI
 canonical corpus。它完成后应形成独立的 `Reference Atmosphere V2` baseline/version。

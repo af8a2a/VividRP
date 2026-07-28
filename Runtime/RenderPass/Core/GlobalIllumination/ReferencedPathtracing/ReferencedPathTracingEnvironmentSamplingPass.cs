@@ -16,20 +16,65 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int ConditionalResolution = MarginalResolution * 2;
         internal const int MarginalOffset = HeaderElementCount;
         internal const int ConditionalOffset = MarginalOffset + MarginalResolution;
-        internal const int ElementCount =
+        internal const int EnvironmentElementCount =
             ConditionalOffset + ConditionalResolution * MarginalResolution;
+        internal const int AtmosphereVersion = 1;
+        internal const int AtmosphereHeaderElementCount = 4;
+        internal const int AtmosphereValidOffset = EnvironmentElementCount;
+        internal const int AtmosphereVersionOffset = AtmosphereValidOffset + 1;
+        internal const int AtmosphereSampleCountOffset =
+            AtmosphereVersionOffset + 1;
+        internal const int AtmosphereReservedOffset =
+            AtmosphereSampleCountOffset + 1;
+        internal const int AtmosphereRadialResolution = 64;
+        internal const int AtmosphereZenithResolution = 128;
+        internal const int AtmosphereChannelCount = 3;
+        internal const int AtmosphereDataOffset =
+            EnvironmentElementCount + AtmosphereHeaderElementCount;
+        internal const int AtmosphereReferenceSampleCount = 256;
+        internal const int AtmosphereTransportReferenceSampleCount = 1024;
+        internal const int AtmosphereLocalSegmentMaximumSampleCount = 256;
+        internal const float AtmosphereLocalSegmentSamplesPerProfileScale =
+            16.0f;
+        internal const float AtmosphereLocalSegmentProfileScaleCount = 4.0f;
+        internal const int AtmosphereElementCount =
+            AtmosphereDataOffset
+            + AtmosphereRadialResolution
+            * AtmosphereZenithResolution
+            * AtmosphereChannelCount;
+        internal const int CloudVersion = 1;
+        internal const int CloudHeaderElementCount = 4;
+        internal const int CloudValidOffset = AtmosphereElementCount;
+        internal const int CloudVersionOffset = CloudValidOffset + 1;
+        internal const int CloudResolutionOffset = CloudVersionOffset + 1;
+        internal const int CloudShadowSampleCountOffset =
+            CloudResolutionOffset + 1;
+        internal const int CloudRadialResolution = 64;
+        internal const int CloudDataOffset =
+            AtmosphereElementCount + CloudHeaderElementCount;
+        internal const int CloudShadowReferenceSampleCount = 96;
+        internal const int CloudShadowNumericalReferenceSampleCount = 512;
+        internal const int MaximumAtmosphereTrackingStepCount = 1024;
+        internal const int MaximumCloudTrackingStepCount = 1024;
+        internal const int ElementCount =
+            CloudDataOffset + CloudRadialResolution;
         internal const int ElementStride = sizeof(float);
     }
 
     /// <summary>
-    /// Builds a persistent, equiareal HDRI importance distribution. The output packs metadata,
-    /// the marginal CDF, and all per-row conditional CDFs into one structured buffer so the
-    /// path-tracing graph only needs one explicit dependency.
+    /// Builds persistent environment transport data. The output keeps the frozen equiareal
+    /// HDRI distribution at its original offsets and appends a Reference Atmosphere optical-
+    /// depth LUT plus the procedural-cloud radial majorant map, so the path-tracing graph
+    /// retains one explicit dependency for all environment modes.
     /// </summary>
     public sealed class ReferencedPathTracingEnvironmentSamplingPass : ComputePass
     {
         private const string ConditionalKernelName = "ComputeConditional";
         private const string MarginalKernelName = "ComputeMarginal";
+        private const string AtmosphereOpticalDepthKernelName =
+            "ComputeAtmosphereOpticalDepth";
+        private const string CloudDensityMajorantKernelName =
+            "ComputeCloudDensityMajorant";
 
         private static readonly int EnvironmentTextureId =
             Shader.PropertyToID("_ReferencedEnvironmentTexture");
@@ -39,6 +84,24 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedEnvironmentParameters");
         private static readonly int EnvironmentImportanceDistributionId =
             Shader.PropertyToID("_ReferencedEnvironmentImportanceDistribution");
+        private static readonly int AtmospherePlanetCenterBottomRadiusId =
+            Shader.PropertyToID(
+                "_ReferencedAtmospherePlanetCenterBottomRadius");
+        private static readonly int AtmosphereTopRadiusMieAnisotropyId =
+            Shader.PropertyToID(
+                "_ReferencedAtmosphereTopRadiusMieAnisotropy");
+        private static readonly int AtmosphereRayleighScatteringId =
+            Shader.PropertyToID("_ReferencedAtmosphereRayleighScattering");
+        private static readonly int AtmosphereMieScatteringId =
+            Shader.PropertyToID("_ReferencedAtmosphereMieScattering");
+        private static readonly int AtmosphereOzoneLayerId =
+            Shader.PropertyToID("_ReferencedAtmosphereOzoneLayer");
+        private static readonly int CloudLayerParametersId =
+            Shader.PropertyToID("_ReferencedCloudLayerParameters");
+        private static readonly int CloudMaterialParametersId =
+            Shader.PropertyToID("_ReferencedCloudMaterialParameters");
+        private static readonly int CloudNoiseParametersId =
+            Shader.PropertyToID("_ReferencedCloudNoiseParameters");
 
         [RenderGraphResource(Name = "PathTracingEnvironment", Access = AccessFlags.Read)]
         private RenderGraphTexture m_EnvironmentTexture;
@@ -51,11 +114,20 @@ namespace VividRP.Runtime.RenderPass.Core
         private ComputeShader m_ComputeShader;
         private int m_ConditionalKernel = -1;
         private int m_MarginalKernel = -1;
+        private int m_AtmosphereOpticalDepthKernel = -1;
+        private int m_CloudDensityMajorantKernel = -1;
         private bool m_DistributionInitialized;
         private bool m_HasBuiltDistribution;
-        private bool m_ShouldBuild;
+        private bool m_HasBuiltAtmosphereOpticalDepth;
+        private bool m_HasBuiltCloudAcceleration;
+        private bool m_ShouldBuildDistribution;
+        private bool m_ShouldBuildAtmosphereOpticalDepth;
+        private bool m_ShouldBuildCloudAcceleration;
         private ulong m_LastBuiltSignature;
+        private ulong m_LastBuiltAtmosphereOpticalDepthSignature;
+        private ulong m_LastBuiltCloudSignature;
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
+        private ReferencedPathTracingAtmosphereState m_AtmosphereState;
 
         public ReferencedPathTracingEnvironmentSamplingPass()
         {
@@ -83,12 +155,23 @@ namespace VividRP.Runtime.RenderPass.Core
 
             m_ConditionalKernel = FindKernelOrLog(ConditionalKernelName);
             m_MarginalKernel = FindKernelOrLog(MarginalKernelName);
-            if (m_ConditionalKernel >= 0 && m_MarginalKernel >= 0)
+            m_AtmosphereOpticalDepthKernel =
+                FindKernelOrLog(AtmosphereOpticalDepthKernelName);
+            m_CloudDensityMajorantKernel =
+                FindKernelOrLog(CloudDensityMajorantKernelName);
+            if (m_ConditionalKernel >= 0
+                && m_MarginalKernel >= 0
+                && m_AtmosphereOpticalDepthKernel >= 0
+                && m_CloudDensityMajorantKernel >= 0)
+            {
                 return;
+            }
 
             m_ComputeShader = null;
             m_ConditionalKernel = -1;
             m_MarginalKernel = -1;
+            m_AtmosphereOpticalDepthKernel = -1;
+            m_CloudDensityMajorantKernel = -1;
         }
 
         public override void Prepare(ContextContainer frameData)
@@ -96,80 +179,65 @@ namespace VividRP.Runtime.RenderPass.Core
             m_EnvironmentTexture.ClearImportedHandle();
             var skyData = frameData.GetOrCreate<VividSkyData>();
             m_EnvironmentState = ReferencedPathTracingEnvironmentState.Resolve(skyData);
+            m_AtmosphereState =
+                ReferencedPathTracingAtmosphereState.Resolve(frameData);
             SkyManager.ImportSpecularCubemap(
                 m_EnvironmentTexture,
-                m_EnvironmentState.hasHdri ? skyData : null);
+                m_EnvironmentState.mode
+                        == ReferencedPathTracingEnvironmentMode.Hdri
+                    && m_EnvironmentState.hasHdri
+                    ? skyData
+                    : null);
 
             ConfigureDistributionBuffer();
             EnsureDistributionBufferInitialized();
 
-            m_ShouldBuild =
+            m_ShouldBuildDistribution =
                 m_ComputeShader != null
                 && m_ConditionalKernel >= 0
                 && m_MarginalKernel >= 0
                 && m_EnvironmentState.lightingEnabled
+                && m_EnvironmentState.mode
+                    == ReferencedPathTracingEnvironmentMode.Hdri
                 && m_EnvironmentState.hasHdri
                 && m_EnvironmentState.samplingMode
                     != ReferencedPathTracingEnvironmentSamplingMode.BsdfOnly
                 && (!m_HasBuiltDistribution
                     || m_LastBuiltSignature != m_EnvironmentState.samplingSignature);
+            m_ShouldBuildAtmosphereOpticalDepth =
+                m_ComputeShader != null
+                && m_AtmosphereOpticalDepthKernel >= 0
+                && m_AtmosphereState.active
+                && m_AtmosphereState.usesOptimizedTransport
+                && (!m_HasBuiltAtmosphereOpticalDepth
+                    || m_LastBuiltAtmosphereOpticalDepthSignature
+                        != m_AtmosphereState.opticalDepthSignature);
+            m_ShouldBuildCloudAcceleration =
+                m_ComputeShader != null
+                && m_CloudDensityMajorantKernel >= 0
+                && m_AtmosphereState.cloudsActive
+                && (!m_HasBuiltCloudAcceleration
+                    || m_LastBuiltCloudSignature
+                        != m_AtmosphereState.cloudSignature);
         }
 
         public override void Record(ComputePassContext context)
         {
-            if (!m_ShouldBuild
-                || m_EnvironmentTexture?.innerHandle.IsValid() != true
-                || m_EnvironmentImportanceDistribution?.innerHandle.IsValid() != true)
+            if ((!m_ShouldBuildDistribution
+                    && !m_ShouldBuildAtmosphereOpticalDepth
+                    && !m_ShouldBuildCloudAcceleration)
+                || m_EnvironmentImportanceDistribution?.innerHandle.IsValid()
+                    != true)
             {
                 return;
             }
 
             using (new ProfilingScope(context.cmd, profilingSampler))
             {
-                var tint = m_EnvironmentState.tint;
-                var environmentTint = new Vector4(tint.r, tint.g, tint.b, 1.0f);
-                var environmentParameters = new Vector4(
-                    m_EnvironmentState.intensityMultiplier,
-                    m_EnvironmentState.rotation,
-                    m_EnvironmentState.maxMipLevel,
-                    1.0f);
-
-                context.cmd.SetComputeVectorParam(
-                    m_ComputeShader,
-                    EnvironmentTintId,
-                    environmentTint);
-                context.cmd.SetComputeVectorParam(
-                    m_ComputeShader,
-                    EnvironmentParametersId,
-                    environmentParameters);
-                context.cmd.SetComputeTextureParam(
-                    m_ComputeShader,
-                    m_ConditionalKernel,
-                    EnvironmentTextureId,
-                    m_EnvironmentTexture.innerHandle);
-                context.cmd.SetComputeBufferParam(
-                    m_ComputeShader,
-                    m_ConditionalKernel,
-                    EnvironmentImportanceDistributionId,
-                    m_EnvironmentImportanceDistribution.innerHandle);
-                context.cmd.DispatchCompute(
-                    m_ComputeShader,
-                    m_ConditionalKernel,
-                    1,
-                    ReferencedPathTracingEnvironmentImportanceLayout.MarginalResolution,
-                    1);
-
-                context.cmd.SetComputeBufferParam(
-                    m_ComputeShader,
-                    m_MarginalKernel,
-                    EnvironmentImportanceDistributionId,
-                    m_EnvironmentImportanceDistribution.innerHandle);
-                context.cmd.DispatchCompute(m_ComputeShader, m_MarginalKernel, 1, 1, 1);
+                BuildEnvironmentDistribution(context);
+                BuildAtmosphereOpticalDepth(context);
+                BuildCloudAcceleration(context);
             }
-
-            m_LastBuiltSignature = m_EnvironmentState.samplingSignature;
-            m_HasBuiltDistribution = true;
-            m_ShouldBuild = false;
         }
 
         public override void Dispose()
@@ -179,11 +247,197 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ComputeShader = null;
             m_ConditionalKernel = -1;
             m_MarginalKernel = -1;
+            m_AtmosphereOpticalDepthKernel = -1;
+            m_CloudDensityMajorantKernel = -1;
             m_DistributionInitialized = false;
             m_HasBuiltDistribution = false;
-            m_ShouldBuild = false;
+            m_HasBuiltAtmosphereOpticalDepth = false;
+            m_HasBuiltCloudAcceleration = false;
+            m_ShouldBuildDistribution = false;
+            m_ShouldBuildAtmosphereOpticalDepth = false;
+            m_ShouldBuildCloudAcceleration = false;
             m_LastBuiltSignature = 0;
+            m_LastBuiltAtmosphereOpticalDepthSignature = 0;
+            m_LastBuiltCloudSignature = 0;
             m_EnvironmentState = default;
+            m_AtmosphereState = default;
+        }
+
+        private void BuildEnvironmentDistribution(ComputePassContext context)
+        {
+            if (!m_ShouldBuildDistribution
+                || m_EnvironmentTexture?.innerHandle.IsValid() != true)
+            {
+                return;
+            }
+
+            var tint = m_EnvironmentState.tint;
+            var environmentTint = new Vector4(tint.r, tint.g, tint.b, 1.0f);
+            var environmentParameters = new Vector4(
+                m_EnvironmentState.intensityMultiplier,
+                m_EnvironmentState.rotation,
+                m_EnvironmentState.maxMipLevel,
+                1.0f);
+
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                EnvironmentTintId,
+                environmentTint);
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                EnvironmentParametersId,
+                environmentParameters);
+            context.cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_ConditionalKernel,
+                EnvironmentTextureId,
+                m_EnvironmentTexture.innerHandle);
+            context.cmd.SetComputeBufferParam(
+                m_ComputeShader,
+                m_ConditionalKernel,
+                EnvironmentImportanceDistributionId,
+                m_EnvironmentImportanceDistribution.innerHandle);
+            context.cmd.DispatchCompute(
+                m_ComputeShader,
+                m_ConditionalKernel,
+                1,
+                ReferencedPathTracingEnvironmentImportanceLayout.MarginalResolution,
+                1);
+
+            context.cmd.SetComputeBufferParam(
+                m_ComputeShader,
+                m_MarginalKernel,
+                EnvironmentImportanceDistributionId,
+                m_EnvironmentImportanceDistribution.innerHandle);
+            context.cmd.DispatchCompute(
+                m_ComputeShader,
+                m_MarginalKernel,
+                1,
+                1,
+                1);
+
+            m_LastBuiltSignature = m_EnvironmentState.samplingSignature;
+            m_HasBuiltDistribution = true;
+            m_ShouldBuildDistribution = false;
+        }
+
+        private void BuildAtmosphereOpticalDepth(
+            ComputePassContext context)
+        {
+            if (!m_ShouldBuildAtmosphereOpticalDepth)
+                return;
+
+            var parameters = m_AtmosphereState.parameters;
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                AtmospherePlanetCenterBottomRadiusId,
+                new Vector4(
+                    parameters.planetCenter.x,
+                    parameters.planetCenter.y,
+                    parameters.planetCenter.z,
+                    parameters.bottomRadius));
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                AtmosphereTopRadiusMieAnisotropyId,
+                new Vector4(
+                    parameters.topRadius,
+                    parameters.mieAnisotropy,
+                    parameters.intensityMultiplier,
+                    0.0f));
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                AtmosphereRayleighScatteringId,
+                new Vector4(
+                    parameters.rayleighScattering.x,
+                    parameters.rayleighScattering.y,
+                    parameters.rayleighScattering.z,
+                    parameters.rayleighScaleHeight));
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                AtmosphereMieScatteringId,
+                new Vector4(
+                    parameters.mieScattering.x,
+                    parameters.mieScattering.y,
+                    parameters.mieScattering.z,
+                    parameters.mieScaleHeight));
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                AtmosphereOzoneLayerId,
+                new Vector4(
+                    parameters.ozoneLayerStart,
+                    parameters.ozoneLayerWidth,
+                    0.0f,
+                    0.0f));
+            context.cmd.SetComputeBufferParam(
+                m_ComputeShader,
+                m_AtmosphereOpticalDepthKernel,
+                EnvironmentImportanceDistributionId,
+                m_EnvironmentImportanceDistribution.innerHandle);
+            context.cmd.DispatchCompute(
+                m_ComputeShader,
+                m_AtmosphereOpticalDepthKernel,
+                (ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereZenithResolution
+                    + 7)
+                    / 8,
+                (ReferencedPathTracingEnvironmentImportanceLayout
+                        .AtmosphereRadialResolution
+                    + 7)
+                    / 8,
+                1);
+
+            m_LastBuiltAtmosphereOpticalDepthSignature =
+                m_AtmosphereState.opticalDepthSignature;
+            m_HasBuiltAtmosphereOpticalDepth = true;
+            m_ShouldBuildAtmosphereOpticalDepth = false;
+        }
+
+        private void BuildCloudAcceleration(ComputePassContext context)
+        {
+            if (!m_ShouldBuildCloudAcceleration)
+                return;
+
+            var clouds = m_AtmosphereState.cloudParameters;
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                CloudLayerParametersId,
+                new Vector4(
+                    clouds.bottomRadius,
+                    clouds.topRadius,
+                    clouds.coverage,
+                    clouds.extinction));
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                CloudMaterialParametersId,
+                new Vector4(
+                    clouds.scatteringAlbedo.x,
+                    clouds.scatteringAlbedo.y,
+                    clouds.scatteringAlbedo.z,
+                    clouds.anisotropy));
+            context.cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                CloudNoiseParametersId,
+                new Vector4(
+                    clouds.noiseScale,
+                    clouds.noiseSeed,
+                    (int)clouds.multipleScatteringMode,
+                    clouds.multipleScatteringStrength));
+            context.cmd.SetComputeBufferParam(
+                m_ComputeShader,
+                m_CloudDensityMajorantKernel,
+                EnvironmentImportanceDistributionId,
+                m_EnvironmentImportanceDistribution.innerHandle);
+            context.cmd.DispatchCompute(
+                m_ComputeShader,
+                m_CloudDensityMajorantKernel,
+                1,
+                1,
+                1);
+
+            m_LastBuiltCloudSignature =
+                m_AtmosphereState.cloudSignature;
+            m_HasBuiltCloudAcceleration = true;
+            m_ShouldBuildCloudAcceleration = false;
         }
 
         private int FindKernelOrLog(string kernelName)

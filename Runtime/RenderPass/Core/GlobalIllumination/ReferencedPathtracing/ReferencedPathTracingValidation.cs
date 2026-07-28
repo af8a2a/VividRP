@@ -188,19 +188,21 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 2;
+        internal const int Version = 4;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
         internal const int CameraReservedDimension = 4;
         internal const int BounceBaseDimension = 8;
-        internal const int BounceDimensionStride = 16;
+        internal const int BounceDimensionStride = 20;
         internal const int BsdfDimensionOffset = 0;
         internal const int NeeDimensionOffset = 3;
         internal const int RussianRouletteDimensionOffset = 6;
         internal const int StochasticAlphaDimensionOffset = 7;
         internal const int VolumeDimensionOffset = 8;
-        internal const int FutureDimensionOffset = 12;
+        internal const int AtmosphereSunDimensionOffset = 12;
+        internal const int CloudDimensionOffset = 14;
+        internal const int FutureDimensionOffset = 18;
         internal const int MaximumUsedDimension =
             BounceBaseDimension
             + ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount
@@ -352,6 +354,7 @@ namespace VividRP.Runtime.RenderPass.Core
             int height,
             ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
+            ReferencedPathTracingAtmosphereState atmosphereState,
             ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
             ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
@@ -364,6 +367,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 environmentState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                atmosphereState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 cameraBackgroundState.signature);
@@ -485,6 +491,432 @@ namespace VividRP.Runtime.RenderPass.Core
         NotRun = 0,
         Passed = 1,
         Failed = 2
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingAtmosphereValidationCase
+    {
+        public string id;
+        public string purpose;
+        public float cameraAltitude;
+        public float sunElevationDegrees;
+        public bool groundCameraVisible;
+        public bool cloudsEnabled;
+        public RenderingSpace renderingSpace;
+        public ReferencedPathTracingAtmosphereTransportMode transportMode;
+        public int targetSampleCount;
+    }
+
+    public static class ReferencedPathTracingAtmosphereValidationCorpus
+    {
+        public const int Version = 1;
+
+        private static readonly ReferencedPathTracingAtmosphereValidationCase[]
+            s_Cases =
+            {
+                Create(
+                    "atmosphere-sea-level-noon-clear",
+                    "Sea-level noon transport with visible spherical ground.",
+                    2.0f,
+                    90.0f,
+                    true,
+                    false,
+                    RenderingSpace.World,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference),
+                Create(
+                    "atmosphere-sea-level-sunrise-clear",
+                    "Long horizon transport at sunrise.",
+                    2.0f,
+                    0.5f,
+                    true,
+                    false,
+                    RenderingSpace.World,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference),
+                Create(
+                    "atmosphere-high-altitude-noon-clear",
+                    "High-altitude observer inside the atmosphere.",
+                    12000.0f,
+                    90.0f,
+                    true,
+                    false,
+                    RenderingSpace.World,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference),
+                Create(
+                    "atmosphere-space-noon-clear",
+                    "Observer outside the atmosphere looking through the shell.",
+                    100000.0f,
+                    90.0f,
+                    true,
+                    false,
+                    RenderingSpace.World,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference),
+                Create(
+                    "atmosphere-sea-level-noon-ground-hidden",
+                    "Ground camera visibility disabled while transport remains active.",
+                    2.0f,
+                    90.0f,
+                    false,
+                    false,
+                    RenderingSpace.World,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference),
+                Create(
+                    "atmosphere-camera-space-noon-clear",
+                    "Camera-relative planet contract with scene-hit precedence.",
+                    0.0f,
+                    90.0f,
+                    true,
+                    false,
+                    RenderingSpace.Camera,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference),
+                Create(
+                    "atmosphere-sea-level-noon-cloud-preview",
+                    "Cloud-on approximation validation against the numerical clear-sky baseline.",
+                    2.0f,
+                    90.0f,
+                    true,
+                    true,
+                    RenderingSpace.World,
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .OptimizedPreview)
+            };
+
+        public static IReadOnlyList<
+            ReferencedPathTracingAtmosphereValidationCase> Cases =>
+                s_Cases;
+
+        public static bool TryGetCase(
+            string id,
+            out ReferencedPathTracingAtmosphereValidationCase validationCase)
+        {
+            for (var index = 0; index < s_Cases.Length; index++)
+            {
+                if (string.Equals(
+                        s_Cases[index].id,
+                        id,
+                        StringComparison.Ordinal))
+                {
+                    validationCase = s_Cases[index];
+                    return true;
+                }
+            }
+
+            validationCase = null;
+            return false;
+        }
+
+        private static ReferencedPathTracingAtmosphereValidationCase Create(
+            string id,
+            string purpose,
+            float cameraAltitude,
+            float sunElevationDegrees,
+            bool groundCameraVisible,
+            bool cloudsEnabled,
+            RenderingSpace renderingSpace,
+            ReferencedPathTracingAtmosphereTransportMode transportMode)
+        {
+            return new ReferencedPathTracingAtmosphereValidationCase
+            {
+                id = id,
+                purpose = purpose,
+                cameraAltitude = cameraAltitude,
+                sunElevationDegrees = sunElevationDegrees,
+                groundCameraVisible = groundCameraVisible,
+                cloudsEnabled = cloudsEnabled,
+                renderingSpace = renderingSpace,
+                transportMode = transportMode,
+                targetSampleCount = 8192
+            };
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingAtmosphereValidationEvidence
+    {
+        public int contractVersion;
+        public int corpusVersion;
+        public string caseId;
+        public ReferencedPathTracingValidationStatus status;
+        public bool timedOut;
+        public int accumulatedSampleCount;
+        public float finitePixelFraction;
+        public float negativeRadianceFraction;
+        public float atmosphereTrackingOverflowFraction;
+        public float cloudTrackingOverflowFraction;
+        public int maximumAtmosphereTrackingStepCount;
+        public int maximumCloudTrackingStepCount;
+        public float relativeMeanError;
+        public float gpuMilliseconds;
+        public string referenceImageSha256;
+        public string notes;
+    }
+
+    public static class ReferencedPathTracingAtmosphereValidationGate
+    {
+        public const int ContractVersion = 1;
+        public const float MinimumFinitePixelFraction = 1.0f;
+        public const float MaximumNegativeRadianceFraction = 0.0f;
+        public const float MaximumTrackingOverflowFraction = 0.0f;
+        public const float MaximumNumericalReferenceRelativeMeanError = 0.02f;
+        public const float MaximumOptimizedPreviewRelativeMeanError = 0.05f;
+        public const float MaximumCameraAltitudeError = 1.0f;
+        public const float MaximumSunElevationErrorDegrees = 0.25f;
+
+        public static bool ValidateMetadata(
+            string caseId,
+            ReferencedPathTracingEnvironmentMetadata environment,
+            out string failure)
+        {
+            if (!ReferencedPathTracingAtmosphereValidationCorpus.TryGetCase(
+                    caseId,
+                    out var validationCase))
+            {
+                return Fail(
+                    $"Unknown Reference Atmosphere corpus case '{caseId}'.",
+                    out failure);
+            }
+
+            var atmosphere = environment?.atmosphere;
+            if (environment == null
+                || environment.mode
+                    != ReferencedPathTracingEnvironmentMode.ReferenceAtmosphere
+                || atmosphere == null
+                || !atmosphere.active
+                || atmosphere.contractVersion
+                    != ReferencedPathTracingAtmosphereState.ContractVersion
+                || atmosphere.validationContractVersion != ContractVersion)
+            {
+                return Fail(
+                    "Reference Atmosphere metadata contract is incomplete.",
+                    out failure);
+            }
+
+            if (atmosphere.transportMode != validationCase.transportMode
+                || atmosphere.cloudsEnabled != validationCase.cloudsEnabled
+                || atmosphere.groundCameraVisible
+                    != validationCase.groundCameraVisible
+                || atmosphere.cameraRelativeRenderingSpace
+                    != (validationCase.renderingSpace
+                        == RenderingSpace.Camera))
+            {
+                return Fail(
+                    "Reference Atmosphere mode or visibility does not match the corpus case.",
+                    out failure);
+            }
+
+            if (!IsFinite(atmosphere.observerAltitude)
+                || !IsFinite(atmosphere.sunElevationDegrees)
+                || Mathf.Abs(
+                        atmosphere.observerAltitude
+                        - validationCase.cameraAltitude)
+                    > MaximumCameraAltitudeError
+                || Mathf.Abs(
+                        atmosphere.sunElevationDegrees
+                        - validationCase.sunElevationDegrees)
+                    > MaximumSunElevationErrorDegrees)
+            {
+                return Fail(
+                    "Reference Atmosphere observer altitude or sun elevation does not match the corpus case.",
+                    out failure);
+            }
+
+            var optimized =
+                validationCase.transportMode
+                    == ReferencedPathTracingAtmosphereTransportMode
+                        .OptimizedPreview;
+            if (atmosphere.usesOpticalDepthLutApproximation != optimized)
+            {
+                return Fail(
+                    "Atmosphere approximation metadata does not match the selected transport mode.",
+                    out failure);
+            }
+
+            if (!optimized
+                && (!atmosphere.numericalReferenceEligible
+                    || atmosphere.cloudMultipleScatteringMode
+                        != ReferencedPathTracingCloudMultipleScatteringMode
+                            .Off))
+            {
+                return Fail(
+                    "Numerical Reference capture contains a preview-only approximation.",
+                    out failure);
+            }
+
+            failure = string.Empty;
+            return true;
+        }
+
+        public static bool ValidateEvidence(
+            ReferencedPathTracingAtmosphereValidationEvidence evidence,
+            out string failure)
+        {
+            if (evidence == null
+                || !ReferencedPathTracingAtmosphereValidationCorpus.TryGetCase(
+                    evidence.caseId,
+                    out var validationCase))
+            {
+                return Fail(
+                    "Reference Atmosphere validation evidence is missing or has an unknown case.",
+                    out failure);
+            }
+
+            if (evidence.contractVersion != ContractVersion
+                || evidence.corpusVersion
+                    != ReferencedPathTracingAtmosphereValidationCorpus.Version
+                || evidence.status != ReferencedPathTracingValidationStatus.Passed)
+            {
+                return Fail(
+                    "Reference Atmosphere validation version or status is invalid.",
+                    out failure);
+            }
+
+            if (evidence.timedOut
+                || evidence.accumulatedSampleCount
+                    != validationCase.targetSampleCount)
+            {
+                return Fail(
+                    "Reference Atmosphere capture timed out or has the wrong SPP.",
+                    out failure);
+            }
+
+            if (!IsFraction(evidence.finitePixelFraction)
+                || !IsFraction(evidence.negativeRadianceFraction)
+                || !IsFraction(evidence.atmosphereTrackingOverflowFraction)
+                || !IsFraction(evidence.cloudTrackingOverflowFraction)
+                || !IsFinite(evidence.relativeMeanError)
+                || !IsFinite(evidence.gpuMilliseconds)
+                || evidence.finitePixelFraction
+                    < MinimumFinitePixelFraction
+                || evidence.negativeRadianceFraction
+                    > MaximumNegativeRadianceFraction
+                || evidence.atmosphereTrackingOverflowFraction
+                    > MaximumTrackingOverflowFraction
+                || evidence.cloudTrackingOverflowFraction
+                    > MaximumTrackingOverflowFraction
+                || evidence.maximumAtmosphereTrackingStepCount < 0
+                || evidence.maximumAtmosphereTrackingStepCount
+                    > ReferencedPathTracingEnvironmentImportanceLayout
+                        .MaximumAtmosphereTrackingStepCount
+                || evidence.maximumCloudTrackingStepCount < 0
+                || evidence.maximumCloudTrackingStepCount
+                    > ReferencedPathTracingEnvironmentImportanceLayout
+                        .MaximumCloudTrackingStepCount
+                || evidence.gpuMilliseconds < 0.0f)
+            {
+                return Fail(
+                    "Reference Atmosphere finite, overflow, or timing metrics are invalid.",
+                    out failure);
+            }
+
+            var maximumRelativeError =
+                validationCase.transportMode
+                    == ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference
+                    ? MaximumNumericalReferenceRelativeMeanError
+                    : MaximumOptimizedPreviewRelativeMeanError;
+            if (evidence.relativeMeanError < 0.0f
+                || evidence.relativeMeanError > maximumRelativeError
+                || !IsSha256(evidence.referenceImageSha256))
+            {
+                return Fail(
+                    "Reference Atmosphere image comparison exceeds the case threshold.",
+                    out failure);
+            }
+
+            failure = string.Empty;
+            return true;
+        }
+
+        public static bool ValidateCorpus(
+            IEnumerable<ReferencedPathTracingAtmosphereValidationEvidence>
+                evidence,
+            out string failure)
+        {
+            if (evidence == null)
+                return Fail("Atmosphere corpus evidence is missing.", out failure);
+
+            var byId =
+                new Dictionary<
+                    string,
+                    ReferencedPathTracingAtmosphereValidationEvidence>(
+                    StringComparer.Ordinal);
+            foreach (var item in evidence)
+            {
+                if (item == null
+                    || string.IsNullOrWhiteSpace(item.caseId)
+                    || !byId.TryAdd(item.caseId, item))
+                {
+                    return Fail(
+                        "Atmosphere corpus contains null, unnamed, or duplicate evidence.",
+                        out failure);
+                }
+            }
+
+            foreach (var validationCase
+                in ReferencedPathTracingAtmosphereValidationCorpus.Cases)
+            {
+                if (!byId.TryGetValue(validationCase.id, out var item))
+                {
+                    return Fail(
+                        $"Missing atmosphere corpus case '{validationCase.id}'.",
+                        out failure);
+                }
+
+                if (!ValidateEvidence(item, out failure))
+                    return false;
+            }
+
+            if (byId.Count
+                != ReferencedPathTracingAtmosphereValidationCorpus.Cases.Count)
+            {
+                return Fail(
+                    "Unexpected atmosphere corpus evidence is present.",
+                    out failure);
+            }
+
+            failure = string.Empty;
+            return true;
+        }
+
+        private static bool IsFinite(float value)
+        {
+            return !float.IsNaN(value) && !float.IsInfinity(value);
+        }
+
+        private static bool IsFraction(float value)
+        {
+            return IsFinite(value) && value >= 0.0f && value <= 1.0f;
+        }
+
+        private static bool IsSha256(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length != 64)
+                return false;
+
+            for (var index = 0; index < value.Length; index++)
+            {
+                var character = value[index];
+                if ((character < '0' || character > '9')
+                    && (character < 'a' || character > 'f')
+                    && (character < 'A' || character > 'F'))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        private static bool Fail(string message, out string failure)
+        {
+            failure = message;
+            return false;
+        }
     }
 
     internal static class ReferencedPathTracingEstimatorPolicy
@@ -1050,6 +1482,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public bool standardLitOnly;
         public bool imageOriginBottomLeft;
         public ReferencedPathTracingEnvironmentMetadata environment;
+        public ReferencedPathTracingAtmosphereValidationEvidence
+            atmosphereValidation;
         public ReferencedPathTracingValidationEvidence validation;
         public ReferencedPathTracingTransportConformanceEvidence
             transportConformance;
@@ -1308,6 +1742,9 @@ namespace VividRP.Runtime.RenderPass.Core
             if (metadata.environment == null
                 || metadata.environment.contractVersion
                     != ReferencedPathTracingEnvironmentMetadata.ContractVersion
+                || metadata.environment.mode
+                    != ReferencedPathTracingEnvironmentMode.Hdri
+                || metadata.environment.atmosphere != null
                 || metadata.environment.contentHash == 0
                 || metadata.environment.pdfVersion
                     != ReferencedPathTracingEnvironmentImportanceLayout.Version
@@ -1534,7 +1971,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 imageOriginBottomLeft = true,
                 environment =
                     ReferencedPathTracingEnvironmentMetadata.Capture(
-                        frameData?.GetOrCreate<VividSkyData>()),
+                        frameData),
                 validation = new ReferencedPathTracingValidationEvidence
                 {
                     status = ReferencedPathTracingValidationStatus.NotRun,

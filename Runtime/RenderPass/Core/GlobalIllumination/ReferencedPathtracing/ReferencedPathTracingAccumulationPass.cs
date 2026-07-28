@@ -47,6 +47,7 @@ namespace VividRP.Runtime.RenderPass.Core
             public float MainLightShadowStrength;
             public ulong LocalLightSignature;
             public ulong EnvironmentSignature;
+            public ulong AtmosphereSignature;
             public ulong CameraBackgroundSignature;
             public ulong IntegratorSignature;
             public ulong FrameSignature;
@@ -226,6 +227,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 out var localLightSignature);
             var environmentState = ReferencedPathTracingEnvironmentState.Resolve(
                 frameData.GetOrCreate<VividSkyData>());
+            var atmosphereState =
+                ReferencedPathTracingAtmosphereState.Resolve(frameData);
             var cameraBackgroundState =
                 ReferencedPathTracingCameraBackgroundState.Resolve(cameraData);
 
@@ -245,6 +248,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     <= LightResetEpsilon
                 && state.LocalLightSignature == localLightSignature
                 && state.EnvironmentSignature == environmentState.signature
+                && state.AtmosphereSignature == atmosphereState.signature
                 && state.CameraBackgroundSignature == cameraBackgroundState.signature
                 && state.IntegratorSignature
                     == effectiveIntegratorSignature
@@ -290,6 +294,7 @@ namespace VividRP.Runtime.RenderPass.Core
             state.MainLightShadowStrength = lightShadowStrength;
             state.LocalLightSignature = localLightSignature;
             state.EnvironmentSignature = environmentState.signature;
+            state.AtmosphereSignature = atmosphereState.signature;
             state.CameraBackgroundSignature = cameraBackgroundState.signature;
             state.IntegratorSignature = effectiveIntegratorSignature;
             state.FrameSignature = pathTracingData.isValid

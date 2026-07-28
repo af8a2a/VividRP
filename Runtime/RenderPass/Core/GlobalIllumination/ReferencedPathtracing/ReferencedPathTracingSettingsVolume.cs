@@ -19,6 +19,14 @@ namespace VividRP.Runtime
         UniformSphere = 2
     }
 
+    public enum ReferencedPathTracingEnvironmentMode
+    {
+        [InspectorName("HDRI")]
+        Hdri = 0,
+        [InspectorName("Reference Atmosphere")]
+        ReferenceAtmosphere = 1
+    }
+
     public enum ReferencedPathTracingEnvironmentDebugMode
     {
         Combined = 0,
@@ -35,6 +43,22 @@ namespace VividRP.Runtime
         LightOnly = 1,
         [InspectorName("BSDF Only")]
         BsdfOnly = 2
+    }
+
+    public enum ReferencedPathTracingCloudMultipleScatteringMode
+    {
+        [InspectorName("Off (Single Scattering)")]
+        Off = 0,
+        [InspectorName("Energy Compensation")]
+        EnergyCompensation = 1
+    }
+
+    public enum ReferencedPathTracingAtmosphereTransportMode
+    {
+        [InspectorName("Numerical Reference")]
+        NumericalReference = 0,
+        [InspectorName("Optimized Preview")]
+        OptimizedPreview = 1
     }
 
     public enum ReferencedPathTracingTransportDebugMode
@@ -59,7 +83,9 @@ namespace VividRP.Runtime
         [InspectorName("Shading Normal")]
         ShadingNormal = 9,
         [InspectorName("Physical Camera")]
-        PhysicalCamera = 10
+        PhysicalCamera = 10,
+        [InspectorName("Atmosphere Transport")]
+        AtmosphereTransport = 11
     }
 
     [Serializable]
@@ -68,6 +94,18 @@ namespace VividRP.Runtime
     {
         public ReferencedPathTracingEnvironmentSamplingModeParameter(
             ReferencedPathTracingEnvironmentSamplingMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingEnvironmentModeParameter
+        : VolumeParameter<ReferencedPathTracingEnvironmentMode>
+    {
+        public ReferencedPathTracingEnvironmentModeParameter(
+            ReferencedPathTracingEnvironmentMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -92,6 +130,30 @@ namespace VividRP.Runtime
     {
         public ReferencedPathTracingEnvironmentEstimatorModeParameter(
             ReferencedPathTracingEnvironmentEstimatorMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingCloudMultipleScatteringModeParameter
+        : VolumeParameter<ReferencedPathTracingCloudMultipleScatteringMode>
+    {
+        public ReferencedPathTracingCloudMultipleScatteringModeParameter(
+            ReferencedPathTracingCloudMultipleScatteringMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
+    public sealed class ReferencedPathTracingAtmosphereTransportModeParameter
+        : VolumeParameter<ReferencedPathTracingAtmosphereTransportMode>
+    {
+        public ReferencedPathTracingAtmosphereTransportModeParameter(
+            ReferencedPathTracingAtmosphereTransportMode value,
             bool overrideState = false)
             : base(value, overrideState)
         {
@@ -166,11 +228,19 @@ namespace VividRP.Runtime
         public ClampedIntParameter targetSampleCount =
             new(2048, 1, MaximumTargetSampleCount);
 
-        [Tooltip("Allows the active HDRI Sky to contribute scene-linear environment lighting.")]
+        [Header("Environment")]
+        [Tooltip(
+            "Selects the mutually exclusive reference environment. HDRI preserves the V1 " +
+            "infinite-light path. Reference Atmosphere evaluates spherical participating-medium " +
+            "transport directly without consuming raster sky cubemaps or atmosphere LUTs.")]
+        public ReferencedPathTracingEnvironmentModeParameter environmentMode =
+            new(ReferencedPathTracingEnvironmentMode.Hdri);
+
+        [Tooltip("Allows the selected environment to contribute scene-linear lighting.")]
         public BoolParameter environmentLighting = new(true);
 
         [Tooltip(
-            "Allows primary camera rays to see the active HDRI Sky. " +
+            "Allows primary camera rays to see the selected environment. " +
             "This does not disable environment lighting.")]
         public BoolParameter environmentCameraVisible = new(true);
 
@@ -188,6 +258,97 @@ namespace VividRP.Runtime
             "The serialized field name is retained for existing Volume assets.")]
         public ReferencedPathTracingEnvironmentEstimatorModeParameter environmentEstimatorMode =
             new(ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+
+        [Header("Reference Atmosphere Contract")]
+        [Tooltip(
+            "Numerical Reference bypasses the atmosphere optical-depth LUT, uses the " +
+            "high-accuracy transmittance and cloud-shadow budgets, and disables empirical " +
+            "cloud energy compensation. Optimized Preview enables cached LUT transport and " +
+            "the lower cloud-shadow budget; approximation state is recorded in capture metadata.")]
+        public ReferencedPathTracingAtmosphereTransportModeParameter
+            referenceAtmosphereTransportMode =
+                new(
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference);
+
+        [Tooltip(
+            "Allows camera rays to accumulate physical atmosphere scattering. Disabling it " +
+            "retains atmosphere attenuation for surface transport.")]
+        public BoolParameter referenceAtmosphereCameraVisible = new(true);
+
+        [Tooltip(
+            "Treats the atmosphere as a camera holdout while retaining its transport contribution. " +
+            "The physical radiance is preserved while camera alpha is cleared.")]
+        public BoolParameter referenceAtmosphereHoldout = new(false);
+
+        [Tooltip(
+            "Enables the PT-only spherical reference cloud layer. It does not consume raster " +
+            "cloud color, depth, shadow, or history resources.")]
+        public BoolParameter referenceClouds = new(false);
+
+        [Tooltip(
+            "Allows reference clouds to be visible to camera rays. This is independent from " +
+            "whether clouds contribute to reference transport.")]
+        public BoolParameter referenceCloudsCameraVisible = new(true);
+
+        [Tooltip(
+            "Treats reference clouds as a camera holdout while retaining their transport " +
+            "contribution.")]
+        public BoolParameter referenceCloudsHoldout = new(false);
+
+        [Tooltip("Altitude in meters above the virtual planet ground where the cloud shell begins.")]
+        public ClampedFloatParameter referenceCloudBottomAltitude =
+            new(1500.0f, 0.0f, 30000.0f);
+
+        [Tooltip("Thickness in meters of the spherical reference cloud shell.")]
+        public ClampedFloatParameter referenceCloudThickness =
+            new(4000.0f, 100.0f, 30000.0f);
+
+        [Tooltip("Procedural cloud coverage. Zero is empty and one retains the full density field.")]
+        public ClampedFloatParameter referenceCloudCoverage =
+            new(0.55f, 0.0f, 1.0f);
+
+        [Tooltip("Full-density cloud extinction coefficient in inverse meters.")]
+        public ClampedFloatParameter referenceCloudExtinction =
+            new(0.001f, 0.000001f, 0.01f);
+
+        [Tooltip("Spectral single-scattering albedo of the cloud medium.")]
+        public ColorParameter referenceCloudScatteringAlbedo =
+            new(new Color(0.999f, 0.999f, 0.999f), false, false, true);
+
+        [Tooltip("Henyey-Greenstein anisotropy used by the reference cloud phase function.")]
+        public ClampedFloatParameter referenceCloudAnisotropy =
+            new(0.7f, -0.95f, 0.95f);
+
+        [Tooltip("World-space scale in meters of the deterministic procedural density field.")]
+        public ClampedFloatParameter referenceCloudNoiseScale =
+            new(8000.0f, 100.0f, 100000.0f);
+
+        [Tooltip("Stable seed for the procedural reference cloud density field.")]
+        public ClampedIntParameter referenceCloudNoiseSeed =
+            new(1337, 0, int.MaxValue);
+
+        [Tooltip(
+            "Optional biased multiple-scattering approximation. Off leaves the explicit multi-bounce " +
+            "cloud path unchanged; Energy Compensation is recorded in capture metadata.")]
+        public ReferencedPathTracingCloudMultipleScatteringModeParameter
+            referenceCloudMultipleScatteringMode =
+                new(ReferencedPathTracingCloudMultipleScatteringMode.Off);
+
+        [Tooltip(
+            "Strength of the local cloud multiple-scattering energy compensation approximation.")]
+        public ClampedFloatParameter referenceCloudMultipleScatteringStrength =
+            new(0.5f, 0.0f, 2.0f);
+
+        [Tooltip(
+            "Allows the virtual planet ground to be visible to camera rays. Ground remains part " +
+            "of atmosphere transport independently of this camera-visibility flag.")]
+        public BoolParameter referenceGroundCameraVisible = new(true);
+
+        [Tooltip(
+            "Treats the virtual planet ground as a camera holdout while retaining its atmosphere " +
+            "transport contribution. This flag is reserved by the Phase 2 contract.")]
+        public BoolParameter referenceGroundHoldout = new(false);
 
         protected override void OnEnable()
         {
@@ -211,6 +372,9 @@ namespace VividRP.Runtime
                     2048,
                     1,
                     MaximumTargetSampleCount);
+            environmentMode ??=
+                new ReferencedPathTracingEnvironmentModeParameter(
+                    ReferencedPathTracingEnvironmentMode.Hdri);
             environmentLighting ??= new BoolParameter(true);
             environmentCameraVisible ??= new BoolParameter(true);
             environmentSamplingMode ??=
@@ -219,6 +383,42 @@ namespace VividRP.Runtime
             environmentEstimatorMode ??=
                 new ReferencedPathTracingEnvironmentEstimatorModeParameter(
                     ReferencedPathTracingEnvironmentEstimatorMode.Mis);
+            referenceAtmosphereTransportMode ??=
+                new ReferencedPathTracingAtmosphereTransportModeParameter(
+                    ReferencedPathTracingAtmosphereTransportMode
+                        .NumericalReference);
+            referenceAtmosphereCameraVisible ??= new BoolParameter(true);
+            referenceAtmosphereHoldout ??= new BoolParameter(false);
+            referenceClouds ??= new BoolParameter(false);
+            referenceCloudsCameraVisible ??= new BoolParameter(true);
+            referenceCloudsHoldout ??= new BoolParameter(false);
+            referenceCloudBottomAltitude ??=
+                new ClampedFloatParameter(1500.0f, 0.0f, 30000.0f);
+            referenceCloudThickness ??=
+                new ClampedFloatParameter(4000.0f, 100.0f, 30000.0f);
+            referenceCloudCoverage ??=
+                new ClampedFloatParameter(0.55f, 0.0f, 1.0f);
+            referenceCloudExtinction ??=
+                new ClampedFloatParameter(0.001f, 0.000001f, 0.01f);
+            referenceCloudScatteringAlbedo ??=
+                new ColorParameter(
+                    new Color(0.999f, 0.999f, 0.999f),
+                    false,
+                    false,
+                    true);
+            referenceCloudAnisotropy ??=
+                new ClampedFloatParameter(0.7f, -0.95f, 0.95f);
+            referenceCloudNoiseScale ??=
+                new ClampedFloatParameter(8000.0f, 100.0f, 100000.0f);
+            referenceCloudNoiseSeed ??=
+                new ClampedIntParameter(1337, 0, int.MaxValue);
+            referenceCloudMultipleScatteringMode ??=
+                new ReferencedPathTracingCloudMultipleScatteringModeParameter(
+                    ReferencedPathTracingCloudMultipleScatteringMode.Off);
+            referenceCloudMultipleScatteringStrength ??=
+                new ClampedFloatParameter(0.5f, 0.0f, 2.0f);
+            referenceGroundCameraVisible ??= new BoolParameter(true);
+            referenceGroundHoldout ??= new BoolParameter(false);
             base.OnEnable();
         }
     }

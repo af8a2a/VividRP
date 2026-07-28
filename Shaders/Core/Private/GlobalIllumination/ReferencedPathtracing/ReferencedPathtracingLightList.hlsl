@@ -296,6 +296,7 @@ struct ReferencedPathtracingLightSelectionContext
     float globalTotalWeight;
     float localTotalWeight;
     float globalProposalProbability;
+    uint useAbsoluteCosine;
     uint unboundedLightOffset;
     uint unboundedLightCount;
     uint spatialCandidateOffset;
@@ -681,7 +682,9 @@ float ReferencedPathtracingGetLocalReferenceLightWeight(
         float3 directionToLight =
             -light.forwardWS * rsqrt(directionLengthSquared);
         importance = hasNormal
-            ? saturate(dot(normalWS, directionToLight))
+            ? (context.useAbsoluteCosine != 0u
+                ? abs(dot(normalWS, directionToLight))
+                : saturate(dot(normalWS, directionToLight)))
             : 1.0;
     }
     else
@@ -698,7 +701,9 @@ float ReferencedPathtracingGetLocalReferenceLightWeight(
         float3 directionToLight =
             surfaceToLight * rsqrt(distanceSquared);
         float surfaceCosine = hasNormal
-            ? saturate(dot(normalWS, directionToLight))
+            ? (context.useAbsoluteCosine != 0u
+                ? abs(dot(normalWS, directionToLight))
+                : saturate(dot(normalWS, directionToLight)))
             : 1.0;
         float rangeWindow =
             ReferencedPathtracingEvaluateLocalRangeWindow(
@@ -769,12 +774,14 @@ float ReferencedPathtracingGetLocalReferenceLightProposalWeight(
 ReferencedPathtracingLightSelectionContext
 ReferencedPathtracingCreateLightSelectionContext(
     float3 positionWS,
-    float3 normalWS)
+    float3 normalWS,
+    bool useAbsoluteCosine)
 {
     ReferencedPathtracingLightSelectionContext context =
         (ReferencedPathtracingLightSelectionContext)0;
     context.positionWS = positionWS;
     context.normalWS = normalWS;
+    context.useAbsoluteCosine = useAbsoluteCosine ? 1u : 0u;
     context.globalAnalyticWeight =
         ReferencedPathtracingGetReferenceLightSelectionWeight();
     context.globalEnvironmentWeight =

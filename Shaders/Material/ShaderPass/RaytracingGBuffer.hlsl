@@ -90,7 +90,10 @@ void StandardLitRaytracingGBufferClosestHit(
     payload.metalness = material.openPbrInputs.base_metalness;
     float3 baseColor = saturate(material.openPbrInputs.base_color);
     float metalness = saturate(material.openPbrInputs.base_metalness);
-    float3 diffuseAlbedo = baseColor * (1.0 - metalness);
+    float3 diffuseAlbedo =
+        baseColor
+        * (1.0 - metalness)
+        * (1.0 - material.openPbrInputs.transmission_weight);
     float3 reflectance0 = lerp(0.04.xxx, baseColor, metalness);
     NRD_MaterialFactors(
         normalize(material.shadingNormalWS),

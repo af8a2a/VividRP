@@ -19,6 +19,7 @@ namespace VividRP.Runtime.RenderPass
         private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
+        private const string ExportExposureTextureKernelName = "ExportExposureTexture";
         private const string HdrpFixedExposureKernelName = "KFixedExposure";
         private const string HdrpManualCameraExposureKernelName = "KManualCameraExposure";
         private const string HdrpHistogramClearKernelName = "KHistogramClear";
@@ -32,6 +33,7 @@ namespace VividRP.Runtime.RenderPass
         private static readonly int AutoExposureHistogramBufferId = Shader.PropertyToID("_HistogramBuffer");
         private static readonly int AutoExposurePreviousBufferId = Shader.PropertyToID("_PreviousExposureBuffer");
         private static readonly int AutoExposureCurrentBufferId = Shader.PropertyToID("_CurrentExposureBuffer");
+        private static readonly int DlssExposureTextureId = Shader.PropertyToID("_DLSSExposureTexture");
         private static readonly int AutoExposureMeterMaskId = Shader.PropertyToID("_AutoExposureMeterMask");
         private static readonly int AutoExposureCompensationCurveId = Shader.PropertyToID("_AutoExposureCompensationCurve");
         private static readonly int AutoExposureParams0Id = Shader.PropertyToID("_AutoExposureParams0");
@@ -181,15 +183,23 @@ namespace VividRP.Runtime.RenderPass
                 }
             }
             else if (m_EnableExposure
-                     && m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
                      && m_AutoExposureSettings.mode == AutoExposureMode.Manual)
             {
-                if (ExecuteHDRPManualExposure(cmd))
+                var manualExposureUpdated =
+                    m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                        ? ExecuteHDRPManualExposure(cmd)
+                        : m_ExposureData?.currentExposureBuffer != null;
+                if (manualExposureUpdated)
                 {
                     exposureBuffer = m_ExposureData?.currentExposureBuffer ?? exposureBuffer;
                     exposureUpdated = exposureBuffer != null;
                 }
             }
+
+            var exposureTextureUpdated = exposureUpdated
+                && (m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                    ? m_ExposureData?.currentExposureTexture != null
+                    : ExportDLSSExposureTexture(cmd, exposureBuffer));
 
             if (m_ExposureData != null)
             {
@@ -218,7 +228,7 @@ namespace VividRP.Runtime.RenderPass
 #endif
 
             if (exposureUpdated)
-                VividAutoExposureSystem.CommitFrame(m_Camera);
+                VividAutoExposureSystem.CommitFrame(m_Camera, exposureTextureUpdated);
         }
 
         public override void Dispose()
@@ -233,6 +243,7 @@ namespace VividRP.Runtime.RenderPass
             m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
+            m_ExportExposureTextureKernel = -1;
             m_HdrpFixedExposureKernel = -1;
             m_HdrpManualCameraExposureKernel = -1;
             m_HdrpHistogramClearKernel = -1;
@@ -396,6 +407,7 @@ namespace VividRP.Runtime.RenderPass
             m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
+            m_ExportExposureTextureKernel = -1;
             m_HdrpFixedExposureKernel = -1;
             m_HdrpManualCameraExposureKernel = -1;
             m_HdrpHistogramClearKernel = -1;
@@ -410,6 +422,11 @@ namespace VividRP.Runtime.RenderPass
                 m_ClearHistogramKernel = m_HistogramAutoExposureCompute.FindKernel(ClearHistogramKernelName);
                 m_BuildHistogramKernel = m_HistogramAutoExposureCompute.FindKernel(BuildHistogramKernelName);
                 m_ResolveExposureKernel = m_HistogramAutoExposureCompute.FindKernel(ResolveExposureKernelName);
+                if (m_HistogramAutoExposureCompute.HasKernel(ExportExposureTextureKernelName))
+                {
+                    m_ExportExposureTextureKernel =
+                        m_HistogramAutoExposureCompute.FindKernel(ExportExposureTextureKernelName);
+                }
             }
             else if (m_AutoExposureImplementation != AutoExposureImplementationPath.HDRP)
             {

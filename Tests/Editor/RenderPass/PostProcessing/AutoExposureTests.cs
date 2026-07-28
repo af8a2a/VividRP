@@ -722,6 +722,11 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
+            Assert.That(shaderSource, Does.Contain("#pragma kernel ExportExposureTexture"));
+            Assert.That(shaderSource, Does.Contain("RWTexture2D<float2> _DLSSExposureTexture;"));
+            Assert.That(
+                shaderSource,
+                Does.Contain("_DLSSExposureTexture[uint2(0, 0)] = _CurrentExposureBuffer[0].xy;"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramClear"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramGen"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramReduce"));
@@ -821,6 +826,13 @@ namespace VividRP.Editor.Tests
             Assert.That(runtimeSource, Does.Contain("VividRenderPipelineAsset.GetActiveAsset()"));
             Assert.That(runtimeSource, Does.Contain("var preExposureBuffer = exposureEnabled"));
             Assert.That(runtimeSource, Does.Contain("public AutoExposureImplementationPath implementation;"));
+            Assert.That(runtimeSource, Does.Contain("public RenderTexture dlssExposureTexture;"));
+            Assert.That(
+                runtimeSource,
+                Does.Contain("var dlssExposureTexture = hasValidHistory && hasValidTextureHistory"));
+            Assert.That(
+                runtimeSource,
+                Does.Contain("exposureData.dlssExposureTexture = dlssExposureTexture;"));
             Assert.That(implementationSource, Does.Contain("AutoExposureImplementationPath.HDRP"));
             Assert.That(implementationSource, Does.Contain("SupportsDispatch("));
             Assert.That(implementationSource, Does.Contain("SupportsUnrealDispatch"));

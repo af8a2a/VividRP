@@ -1,0 +1,27 @@
+#pragma kernel ResolveDLSSRayReconstructionPreExposure
+#pragma target 5.0
+
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
+
+Texture2D<float4> _ReferencedPathTracingDLSSRRSceneLinearColor;
+RWTexture2D<float4> _ReferencedPathTracingDLSSRRResolvedColor;
+
+// xy = render dimensions, zw = inverse render dimensions.
+float4 _ReferencedPathTracingDLSSRRScreenSize;
+
+[numthreads(8, 8, 1)]
+void ResolveDLSSRayReconstructionPreExposure(
+    uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 pixelCoord = dispatchThreadId.xy;
+    uint2 dimensions =
+        (uint2)_ReferencedPathTracingDLSSRRScreenSize.xy;
+    if (any(pixelCoord >= dimensions))
+        return;
+
+    float4 sceneLinear =
+        _ReferencedPathTracingDLSSRRSceneLinearColor[pixelCoord];
+    _ReferencedPathTracingDLSSRRResolvedColor[pixelCoord] = float4(
+        VividApplyPreExposure(max(sceneLinear.rgb, 0.0)),
+        sceneLinear.a);
+}

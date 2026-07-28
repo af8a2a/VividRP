@@ -36,7 +36,7 @@ VividRP 计划在推进实时 GI 功能前，先建立一条参考路径追踪�
 
 - `OpenPBR.hlsl` 已包含完整 `Vendor/openpbr.h`，V1 暂选自包含的 array LUT 路径。
 - 增加 Unity HLSL/DXC renderer-owned interop：处理 GLSL-style vector splat、OpenPBR struct factory、32-bit LUT element fallback，以及 legacy HLSL wrapper nominal-type tag；`Vendor/` 的窄幅可移植性补丁包括对应 hook，以及一处 HLSL struct-return 三目表达式修正。
-- `StandardLitOpenPBRAdapter.hlsl` 已映射 base color、metalness、smoothness/roughness、normal map、clear coat、opacity/alpha test 和 emission；transmission、subsurface、fuzz、dispersion 与 thin film 保持关闭。
+- `StandardLitOpenPBRAdapter.hlsl` 已映射 base color、metalness、smoothness/roughness、normal map、clear coat、opacity/alpha test、emission 和 opt-in thin-walled transmission；thick transmission、subsurface、fuzz、dispersion 与 thin film 保持关闭。
 - Closest-hit 已实际调用 `openpbr_prepare`、`openpbr_eval`、`openpbr_sample` 和 `openpbr_pdf`，并在 geometric-normal hemisphere 与 finite-value guard 后返回下一跳状态。
 - Raygen 已实现 iterative 4-bounce path loop、每次命中的主方向光 NEE、阴影 visibility ray、throughput 更新，以及从第 3 次反弹开始的 Russian roulette；DXR recursion depth 仍为 1。
 - 方向光属于 delta light，当前单灯阶段使用离散选择 PDF 1，不施加与 BSDF PDF 的 MIS 权重。ReGIR 数据不参与 radiance integration。
@@ -1321,8 +1321,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   shading normal/basis；Raytracing GBuffer guide 使用同一调整结果。
 - oriented triangle normal 继续独占 opaque surface sidedness、shadow/continuation ray
   offset 与 visibility；NEE 和 BSDF continuation 只有同时位于 geometric/shading
-  hemisphere 上方才有效。当前 StandardLit contract 禁用 transmission，因此该规则不会
-  混用 reflection 与 medium-boundary 语义。
+  hemisphere 上方才有效。该 checkpoint 当时的 StandardLit contract 禁用 transmission；
+  Phase 4.11 已按 lobe type 扩展负半球 BTDF，同时仍不混用 medium-boundary 语义。
 - OpenPBR `eval` 已包含 shading-normal cosine，`sample` 已返回 `BSDF*cos/pdf`；Phase 4.9
   不重复乘 cosine，也不修改 BSDF/MIS PDF。相机发出的单向路径采用 radiance transport，
   不套只属于 adjoint/importance transport 的 shading-normal Jacobian。
@@ -1345,7 +1345,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   `PTGraph.vrdg` 未连接旧端口，因此不需要修改 authoring asset。
 - path tracer 新增 FP32 `PathTracingAlbedo` 与 `PathTracingNormal` 输出。Albedo 遵循 HDRP
   path-tracing AOV 的 diffuse-reflectance 语义，即
-  `base_color * (1 - base_metalness)`；normal 使用与 OpenPBR eval/sample 及
+  opaque 材质为 `base_color * (1 - base_metalness)`，Phase 4.11 的薄壁材质再乘
+  `(1 - transmission_weight)`；normal 使用与 OpenPBR eval/sample 及
   Raytracing GBuffer 一致的 view-consistent world-space shading normal。primary miss
   输出零 feature 和无效 alpha。
 - reference denoiser 现在显式接收 `PathTracingRadiance`、`PathTracingAlbedo`、
@@ -1391,6 +1392,65 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - Rendering Debugger 的 Reference Path Tracing/Transport 新增 `Physical Camera`：
   R/G 显示映射到 `[0, 1]` 的 concentric aperture sample，B 表示本帧 thin-lens transport
   是否启用；诊断仅写 pass-owned `DebugTexture`。
+
+### Phase 4.11 checkpoint: Thin-Walled Transmission (2026-07-27)
+
+- StandardLit 新增 opt-in 的 `Thin-Walled Transmission`、transmission weight/color 与
+  specular IOR。默认 weight 为 0、开关关闭，因此既有 opaque/alpha-tested 材质的
+  OpenPBR resolved input 与数值基线不变。该功能是表面 BSDF，不复用 alpha blend 或
+  stochastic opacity。
+- adapter 直接启用 OpenPBR 的 `geometry_thin_walled` 与 thin-wall slab lobes。与 RTXPT
+  的 thin-surface、Unreal thin glass 一致，事件不进入 nested dielectric/medium stack；
+  光滑透射经过平行薄片后没有净折射偏转，IOR 参与前后界面 Fresnel，roughness 仍可扩展
+  transmitted lobe。metalness 会按 OpenPBR 规则压制 dielectric transmission。
+- Phase 4.9 的 sidedness 已从 opaque-only 扩展为两个互斥支持域：reflection 必须同时位于
+  geometric/shading normal 正半球，transmission 必须同时位于两者负半球。sampled lobe 的
+  `Reflection/Transmission` 标志与方向支持域共同校验；geometric normal 继续负责双侧
+  ray-origin offset，薄壁透射 continuation 会从界面另一侧出发。
+- NEE eval、BSDF continuation、environment MIS 与 Phase 4.3 segment-light evaluation
+  共用同一 thin-wall 事件分类。shading-point-aware proposal 在有效薄壁顶点使用
+  `abs(Ng·L)`，opaque 顶点仍使用 `saturate(Ng·L)`；raygen 重建的 selection context
+  保留该双侧标志，因此 sample/evaluate selection PDF 不会漂移，也不会以零概率漏掉
+  背侧方向光或局部灯。
+- transmission continuation 固定路由到 specular AOV；primary OIDN diffuse-albedo guide
+  变为 `base_color * (1 - metalness) * (1 - transmission_weight)`，避免全透射表面向
+  diffuse guide 注入不存在的反射率。integrator、freeze metadata 与独立 thin-wall contract
+  已升级，旧 accumulation/capture 不会静默混用。
+- Rendering Debugger 新增 `Thin-Walled Transmission`：R 为 metalness 抑制后的有效
+  transmission weight，G 表示本像素采到 transmission continuation，B 表示 NEE candidate
+  位于背侧半球。诊断只写 `DebugTexture`。
+- 当前 checkpoint 明确不包含 thick refraction、nested dielectric、Beer-Lambert volume、
+  dispersion、transmissive shadow-ray traversal 或 emissive-mesh NEE。被其他薄壁物体遮挡的
+  NEE 仍使用 binary visibility，透射焦散依靠 BSDF path 收敛；REBLUR 也不作为随机折射
+  primary visibility 的 reference denoiser，canonical 结果仍以 raw FP32 accumulation/OIDN
+  支线为准。运行中修改材质参数仍受现有 scene/material mutation tracking 限制，修改后需
+  显式重置 accumulation。
+
+### StandardLit path-traced stochastic transparency checkpoint (2026-07-27)
+
+- StandardLit `Surface Type = Transparent` 现在保留为透明材质，并设置 Transparent queue、
+  alpha blend state、`ZWrite Off` 与 `_SURFACE_TYPE_TRANSPARENT`。当前 raster pipeline
+  尚无 StandardLit transparent forward pass；该状态首先用于 reference path tracing，
+  不再被 ShaderGUI 静默回退为 Opaque。
+- reference DXR any-hit 使用最终 opacity
+  `saturate(BaseMap.a * BaseColor.a * OpacityMap.r)` 做 stochastic coverage：接受交点后仍
+  评估完整 StandardLit/OpenPBR BSDF，拒绝交点则继续遍历 RTAS。这里的 opacity 是
+  surface coverage，不是 thin-wall transmission weight，也不进行第二次 throughput
+  缩放；期望值对应前景 BSDF 与后景 radiance 的 alpha 混合。
+- alpha clip 先于 stochastic opacity 执行。RTAS 已对 transparent keyword 使用
+  `UniqueAnyHitCalls`，而随机数由每 bounce 的既有 stochastic-alpha dimension 驱动，
+  再用 instance、primitive 与 hit distance 为每个候选交点去相关，因此多层透明不会
+  退化成共享阈值造成的相关 bias。
+- primary/continuation rays 与 NEE、atmosphere sun、segment-light shadow rays 使用同一
+  opacity 规则；每个 shadow estimator 从 bounce seed 派生独立子流。miss shader 保留
+  stochastic seed，透明层后命中 background/atmosphere 时不会把后续 visibility 固定到
+  零种子。
+- Rendering Debugger 新增 `Stochastic Transparency`：R 为 primary visibility 最近一个
+  transparent candidate 的 opacity，G 为被忽略候选比例，B 为候选数量。sampling、
+  integrator 与 freeze contract 已升级，旧 accumulation/capture 不会静默混用。
+- 当前不包含 colored transmittance、吸收介质、thick refraction、order-independent raster
+  transparency 或透明材质的 REBLUR guide conformance。reference 结果仍以 raw FP32
+  accumulation/OIDN 支线为准；材质修改后需显式重置 accumulation。
 
 ## Milestone 4: Progressive Accumulation and Capture
 
@@ -1547,7 +1607,8 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
 - Skinned and animated geometry 的单帧 capture/reset policy。
 - GPU-driven instance material parity。
 - Terrain、SimpleLit、Unlit 和 custom material hit shaders。
-- Transparent/thin-walled transmission。
+- Thin-walled transmission 已由 Phase 4.11 覆盖；StandardLit stochastic surface
+  transparency 已覆盖，colored transmittance 与 raster transparent forward pass 仍待扩展。
 - Thick transmission 和 medium boundary tracking。
 - Homogeneous volume、subsurface random walk。
 - Dispersion 和 stochastic wavelength sampling。
@@ -1618,7 +1679,8 @@ Raster StandardLit 与 OpenPBR 并非同一 BRDF。最终 beauty 差异可能同
 只有满足以下条件，Reference Path Tracing V1 才可作为推进 GI 的正式基线：
 
 - 独立 `.vrdg` 和独立 pipeline asset，不依赖 raster GI/SSR/ReGIR output。
-- StandardLit opaque/alpha-tested OpenPBR mapping 稳定。
+- StandardLit opaque/alpha-tested/OpenPBR mapping 与 stochastic surface transparency
+  稳定。
 - Multi-bounce、NEE、visibility、MIS 和 Russian roulette 完成。
 - Directional、point、spot、area light 通过验证；HDRI environment 完成 `E0`～`E6` 并冻结 V1 contract。
 - FP32 deterministic accumulation 和可靠 history reset。
@@ -1628,6 +1690,7 @@ Raster StandardLit 与 OpenPBR 并非同一 BRDF。最终 beauty 差异可能同
 - Unsupported feature/renderer/material 可见且可统计。
 - Canonical output 无 denoiser、默认无 radiance clamp；启用 ReGIR proposal 时必须保留 correction weight、
   support floor、uniform fallback 和对应 metadata，并能与禁用 ReGIR 的直接采样结果做统计回归。
-- 测试和文档明确区分 V1 ground truth 与尚未支持的 transmission/volume/emissive-mesh feature。
+- 测试和文档明确区分 V1 opaque corpus、Phase 4.11 thin-wall coverage、stochastic
+  surface transparency 与尚未支持的 thick-transmission/volume/emissive-mesh feature。
 
 完成 V1 后，实时 GI 功能应以这些 reference scene 的 indirect AOV 为主要质量基准，并将 performance、temporal stability 和 bias 分开评估。

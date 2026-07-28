@@ -174,7 +174,8 @@ float TraceReferencedPathtracingVisibility(
     float3 positionWS,
     float3 faceNormalWS,
     float3 lightDirectionWS,
-    float maximumDistance)
+    float maximumDistance,
+    uint stochasticAlphaSeed)
 {
     RayDesc shadowRay;
     float shadowBias;
@@ -191,6 +192,7 @@ float TraceReferencedPathtracingVisibility(
 
     ReferencedPathtracingPayload visibilityPayload;
     InitializeReferencedPathtracingPayload(visibilityPayload);
+    visibilityPayload.stochasticAlphaSeed = stochasticAlphaSeed;
     // With the closest-hit shader skipped, this value survives any hit; the miss shader clears it.
     visibilityPayload.hit = 1u;
     TraceRay(
@@ -213,7 +215,8 @@ float3 TraceReferencedPathtracingCandidateVisibility(
     float3 lightDirectionWS,
     float lightDistance,
     bool includeVirtualGround,
-    float shadowStrength)
+    float shadowStrength,
+    uint stochasticAlphaSeed)
 {
     shadowStrength = saturate(shadowStrength);
     float tracedVisibility = shadowStrength > 0.0
@@ -221,7 +224,8 @@ float3 TraceReferencedPathtracingCandidateVisibility(
             positionWS,
             faceNormalWS,
             lightDirectionWS,
-            lightDistance)
+            lightDistance,
+            stochasticAlphaSeed)
         : 1.0;
     float geometryVisibility =
         lerp(1.0, tracedVisibility, shadowStrength);
@@ -448,6 +452,8 @@ void RayGenReferencedPathtracing()
     float3 lightSpatialIndexDiagnostic = 0.0;
     float3 shadingNormalDiagnostic = 0.0;
     float3 atmosphereTransportDiagnostic = 0.0;
+    float3 thinWalledTransmissionDiagnostic = 0.0;
+    float3 stochasticTransparencyDiagnostic = 0.0;
     float3 primaryDenoisingAlbedo = 0.0;
     float3 primaryDenoisingNormalWS = 0.0;
     float3 pathSampleDiagnostic = float3(
@@ -516,11 +522,37 @@ void RayGenReferencedPathtracing()
                     + kReferencedPathtracingNeeDimensionOffset,
                 sampleSeed,
                 pathSamplingMode);
+        float stochasticAlphaSample =
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingStochasticAlphaDimensionOffset,
+                sampleSeed,
+                pathSamplingMode);
+        payload.stochasticAlphaSeed =
+            ReferencedPathtracingHashStochasticTransparency(
+                asuint(stochasticAlphaSample)
+                ^ ReferencedPathtracingHashStochasticTransparency(
+                    pixelCoord.x + 0x9e3779b9u)
+                ^ ReferencedPathtracingHashStochasticTransparency(
+                    pixelCoord.y + 0x85ebca6bu)
+                ^ ReferencedPathtracingHashStochasticTransparency(
+                    sampleIndex + bounceSampleDimension));
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
         // SER is useful around the material-heavy closest-hit path. Shadow rays
         // skip closest-hit shading and retain the lower-overhead standard TraceRay.
         TraceReferencedPathtracingSurface(ray, payload);
+        if (bounceIndex == 0u
+            && payload.stochasticTransparencyDiagnostics.z > 0.0)
+        {
+            stochasticTransparencyDiagnostic = float3(
+                payload.stochasticTransparencyDiagnostics.x,
+                payload.stochasticTransparencyDiagnostics.y
+                    / payload.stochasticTransparencyDiagnostics.z,
+                payload.stochasticTransparencyDiagnostics.z);
+        }
 
         float4 volumeRandom = float4(
             ReferencedPathtracingGetPathSample(
@@ -770,7 +802,10 @@ void RayGenReferencedPathtracing()
                         cloudSunSample.directionWS,
                         kReferencedPathtracingInfiniteDistance,
                         true,
-                        _ReferencedAtmosphereSunIlluminance.w);
+                        _ReferencedAtmosphereSunIlluminance.w,
+                        ReferencedPathtracingHashStochasticTransparency(
+                            payload.stochasticAlphaSeed
+                            ^ 0x243f6a88u));
                 float3 cloudDirectRadiance =
                     throughput
                     * cloudDirectWeight
@@ -960,7 +995,10 @@ void RayGenReferencedPathtracing()
                             sunSample.directionWS,
                             kReferencedPathtracingInfiniteDistance,
                             true,
-                            _ReferencedAtmosphereSunIlluminance.w);
+                            _ReferencedAtmosphereSunIlluminance.w,
+                            ReferencedPathtracingHashStochasticTransparency(
+                                payload.stochasticAlphaSeed
+                                ^ 0x13198a2eu));
                     float3 atmosphereDirectRadiance =
                         throughput
                         * atmosphereDirectWeight
@@ -1150,7 +1188,10 @@ void RayGenReferencedPathtracing()
                             groundSunSample.directionWS,
                             kReferencedPathtracingInfiniteDistance,
                             true,
-                            _ReferencedAtmosphereSunIlluminance.w);
+                            _ReferencedAtmosphereSunIlluminance.w,
+                            ReferencedPathtracingHashStochasticTransparency(
+                                payload.stochasticAlphaSeed
+                                ^ 0xa4093822u));
                     float3 groundDirectRadiance =
                         throughput
                         * groundDirectWeight
@@ -1358,6 +1399,13 @@ void RayGenReferencedPathtracing()
                 float4(payload.positionWS, 1.0)).z);
             primaryLinearRoughness = saturate(payload.linearRoughness);
             shadingNormalDiagnostic = payload.shadingNormalDiagnostics;
+            thinWalledTransmissionDiagnostic = float3(
+                payload.thinWalledTransmissionWeight,
+                payload.nextLobeIsTransmission != 0u ? 1.0 : 0.0,
+                payload.neeSelectionPdf > 0.0
+                    && dot(payload.neeDirectionWS, payload.faceNormalWS) < 0.0
+                        ? 1.0
+                        : 0.0);
             primaryDenoisingAlbedo = payload.denoisingAlbedo;
             primaryDenoisingNormalWS = payload.denoisingNormalWS;
             emissionRadiance += throughput * payload.emission;
@@ -1420,7 +1468,11 @@ void RayGenReferencedPathtracing()
                     neeDirectionWS,
                     payload.neeDistance,
                     !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
-                    payload.neeShadowStrength)
+                    payload.neeShadowStrength,
+                    ReferencedPathtracingHashStochasticTransparency(
+                        payload.stochasticAlphaSeed
+                        ^ ReferencedPathtracingHashStochasticTransparency(
+                            payload.neeLightIndex + 0x299f31d0u)))
                 : 0.0;
             float3 directDiffuse = throughput
                 * payload.neeDiffuseRadiance
@@ -1530,7 +1582,8 @@ void RayGenReferencedPathtracing()
             ReferencedPathtracingLightSelectionContext selectionContext =
                 ReferencedPathtracingCreateLightSelectionContext(
                     payload.positionWS,
-                    payload.faceNormalWS);
+                    payload.faceNormalWS,
+                    payload.thinWalledTransmissionWeight > 0.0);
             previousLightSelectionContext = selectionContext;
             uint contextLightCount =
                 ReferencedPathtracingGetContextLightCount(
@@ -1599,7 +1652,11 @@ void RayGenReferencedPathtracing()
                         normalize(payload.nextDirectionWS),
                         segmentLightHit.distance,
                         !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
-                        segmentLightHit.shadowStrength);
+                        segmentLightHit.shadowStrength,
+                        ReferencedPathtracingHashStochasticTransparency(
+                            payload.stochasticAlphaSeed
+                            ^ ReferencedPathtracingHashStochasticTransparency(
+                                lightIndex + 0x082efa98u)));
                 float3 bsdfSampledDirect =
                     throughput
                     * payload.nextThroughputWeight
@@ -1896,6 +1953,20 @@ void RayGenReferencedPathtracing()
         // B: tracking overflow occurred.
         debugRadiance = atmosphereTransportDiagnostic;
     }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugThinWalledTransmission)
+    {
+        // R: effective transmission weight. G: sampled transmission event.
+        // B: selected NEE candidate lies in the opposite hemisphere.
+        debugRadiance = thinWalledTransmissionDiagnostic;
+    }
+    else if (_ReferencedTransportDebugMode
+        == kReferencedTransportDebugStochasticTransparency)
+    {
+        // R: most recent opacity. G: ignored candidate fraction.
+        // B: transparent candidate count along primary visibility.
+        debugRadiance = stochasticTransparencyDiagnostic;
+    }
 
     float physicalOutputAlpha =
         primaryAtmosphereHit != 0u
@@ -1968,5 +2039,11 @@ void RayGenReferencedPathtracing()
 [shader("miss")]
 void MissReferencedPathtracing(inout ReferencedPathtracingPayload payload : SV_RayPayload)
 {
+    uint stochasticAlphaSeed = payload.stochasticAlphaSeed;
+    float3 stochasticTransparencyDiagnostics =
+        payload.stochasticTransparencyDiagnostics;
     InitializeReferencedPathtracingPayload(payload);
+    payload.stochasticAlphaSeed = stochasticAlphaSeed;
+    payload.stochasticTransparencyDiagnostics =
+        stochasticTransparencyDiagnostics;
 }

@@ -115,9 +115,11 @@ namespace VividRP.Runtime
         public GraphicsBuffer histogramBuffer;
         public RenderTexture previousExposureTexture;
         public RenderTexture currentExposureTexture;
+        public RenderTexture dlssExposureTexture;
         public bool exposureEnabled;
         public bool autoExposureEnabled;
         public bool hasValidHistory;
+        public float dlssPreExposure;
 
         public override void Reset()
         {
@@ -131,9 +133,11 @@ namespace VividRP.Runtime
             histogramBuffer = null;
             previousExposureTexture = null;
             currentExposureTexture = null;
+            dlssExposureTexture = null;
             exposureEnabled = false;
             autoExposureEnabled = false;
             hasValidHistory = false;
+            dlssPreExposure = 1f;
         }
     }
 
@@ -260,6 +264,22 @@ namespace VividRP.Runtime
             var autoExposureEnabled = exposureEnabled
                 && settings.mode == AutoExposureMode.Histogram
                 && hasAutoExposureCompute;
+            var dlssActive = false;
+#if DLSS_PLUGIN_INTEGRATE
+            var antialiasingData = frameData.Get<VividAntialiasingData>();
+            dlssActive = antialiasingData?.effectiveMode
+                == VividAntialiasingMode.DeepLearningSuperSampling;
+#endif
+
+            // Histogram exposure lives only in GPU history. DLSS requires the
+            // exact scalar that was already applied to its input color, so do
+            // not apply that GPU-only pre-exposure while DLSS owns AA. Manual
+            // exposure is CPU-known and can be forwarded without ambiguity.
+            var bypassDynamicPreExposureForDlss = dlssActive && autoExposureEnabled;
+            var dlssPreExposure = exposureEnabled
+                && settings.mode == AutoExposureMode.Manual
+                    ? settings.fixedExposureScale
+                    : 1f;
 
             AutoExposureHistoryState state = null;
             if (exposureEnabled)
@@ -320,18 +340,26 @@ namespace VividRP.Runtime
                         ? previousExposureBuffer ?? defaultExposureBuffer
                         : defaultExposureBuffer
                 : defaultExposureBuffer;
-            var preExposureBuffer = exposureEnabled
+            var preExposureBuffer = bypassDynamicPreExposureForDlss
+                ? defaultExposureBuffer
+                : exposureEnabled
                 && settings.mode == AutoExposureMode.Manual
                 && bufferHistory?.GetCurrent() != null
-                ? bufferHistory.GetCurrent()
-                : hasValidHistory && bufferHistory?.GetPrevious() != null
-                    ? bufferHistory.GetPrevious()
-                    : defaultExposureBuffer;
+                    ? bufferHistory.GetCurrent()
+                    : hasValidHistory && bufferHistory?.GetPrevious() != null
+                        ? bufferHistory.GetPrevious()
+                        : defaultExposureBuffer;
             var previousExposureTexture = exposureEnabled && textureHistory?.GetPrevious()?.rt != null
                 ? textureHistory.GetPrevious().rt
                 : null;
             var currentExposureTexture = exposureEnabled && textureHistory?.GetCurrent()?.rt != null
                 ? textureHistory.GetCurrent().rt
+                : null;
+            // DLSS consumes only the previous completed exposure. The current texture is the
+            // AutoExposurePass write target later in this frame; publishing it would create a
+            // hidden GPU dependency cycle when auto exposure meters the DLSS output.
+            var dlssExposureTexture = hasValidHistory && hasValidTextureHistory
+                ? previousExposureTexture
                 : null;
 
             exposureData.settings = settings;
@@ -343,19 +371,23 @@ namespace VividRP.Runtime
             exposureData.preExposureBuffer = preExposureBuffer;
             exposureData.previousExposureTexture = previousExposureTexture;
             exposureData.currentExposureTexture = currentExposureTexture;
+            exposureData.dlssExposureTexture = dlssExposureTexture;
             exposureData.exposureEnabled = exposureEnabled;
             exposureData.autoExposureEnabled = autoExposureEnabled;
             exposureData.hasValidHistory = hasValidHistory;
+            exposureData.dlssPreExposure = dlssPreExposure;
 
         }
 
-        internal static void CommitFrame(Camera camera)
+        internal static void CommitFrame(
+            Camera camera,
+            bool exposureTextureWritten)
         {
             if (!s_HistorySystem.TryGetBase(camera, out var state) || state == null)
                 return;
 
             state.exposureBufferHistory?.MarkWritten();
-            if (state.lastImplementation == AutoExposureImplementationPath.HDRP)
+            if (exposureTextureWritten)
                 state.exposureTextureHistory?.MarkWritten();
             state.hasValidHistory = true;
             state.wasEnabledLastFrame = true;

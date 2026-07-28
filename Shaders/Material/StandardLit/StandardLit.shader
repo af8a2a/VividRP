@@ -40,6 +40,12 @@ Shader "VividRP/Material/StandardLit"
         [Sub(SurfaceInputs)] _ClearCoatMask("Clear Coat Mask", Range(0.0, 1.0)) = 0.0
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 
+        [Main(ReferencePathTracing, _, on, off)] _ReferencePathTracing("Reference Path Tracing", Float) = 1
+        [SubToggle(ReferencePathTracing, _)] _ThinWalledTransmission("Thin-Walled Transmission", Float) = 0.0
+        [Sub(ReferencePathTracing)] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
+        [Sub(ReferencePathTracing)] _TransmissionColor("Transmission Color", Color) = (1, 1, 1, 1)
+        [Sub(ReferencePathTracing)] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
+
         [HideInInspector] _Blend("__blend", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0
         [HideInInspector] _DstBlend("__dst", Float) = 0.0
@@ -346,6 +352,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma multi_compile _ INSTANCING_ON
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
                 #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_raytracing _NORMALMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP

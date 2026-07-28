@@ -437,6 +437,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (camera == null)
                 return false;
 
+            var exposureData = context.FrameData.Get<VividExposureData>();
             return m_DlssPass.Record(
                 context.RenderGraph,
                 cameraData,
@@ -446,6 +447,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 MotionVectors,
                 AntialiasingOutput,
                 context.TextureCache,
+                exposureData,
                 m_ResetHistory);
         }
 #endif

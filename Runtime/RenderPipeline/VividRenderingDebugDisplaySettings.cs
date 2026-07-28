@@ -522,7 +522,7 @@ namespace VividRP.Runtime
         {
             return value is >= ReferencedPathTracingTransportDebugMode.NeePdfs
                 and <= ReferencedPathTracingTransportDebugMode
-                    .AtmosphereTransport
+                    .StochasticTransparency
                     ? value
                     : ReferencedPathTracingTransportDebugMode.Combined;
         }

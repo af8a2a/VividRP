@@ -43,6 +43,7 @@ namespace VividRP.Runtime
             public float sharpness;
             public bool autoExposure;
             public bool isHDR;
+            public RenderTexture exposureTexture;
 
             public static Settings Default => new Settings
             {
@@ -53,7 +54,8 @@ namespace VividRP.Runtime
                 frameTimeDeltaMs = 16.67f,
                 sharpness = 0.0f,
                 autoExposure = false,
-                isHDR = true
+                isHDR = true,
+                exposureTexture = null
             };
         }
 
@@ -94,6 +96,7 @@ namespace VividRP.Runtime
             if (!needsRecreate && m_DlssRR != null)
             {
                 m_DlssRR.SetQuality(ngxQuality);
+                m_DlssRR.SetFeatureFlags(BuildFeatureFlags(isHDR, autoExposure));
                 return true;
             }
 
@@ -101,11 +104,7 @@ namespace VividRP.Runtime
             m_DlssRR?.Dispose();
 
             // Create feature flags
-            var flags = NVSDK_NGX_DLSS_Feature_Flags.DepthInverted|NVSDK_NGX_DLSS_Feature_Flags.MVLowRes;
-            if (isHDR)
-                flags |= NVSDK_NGX_DLSS_Feature_Flags.IsHDR;
-            if (autoExposure)
-                flags |= NVSDK_NGX_DLSS_Feature_Flags.AutoExposure;
+            var flags = BuildFeatureFlags(isHDR, autoExposure);
 
             // Create new wrapper - roughness packed in normals.w
             m_DlssRR = new DLSSRayReconstruction(
@@ -141,6 +140,7 @@ namespace VividRP.Runtime
             RenderTexture diffuseAlbedo,
             RenderTexture specularAlbedo,
             RenderTexture normalRoughness,
+            RenderTexture emissive,
             RenderTexture diffuseHitDistance,
             RenderTexture specularHitDistance,
             Vector2 jitterOffset,
@@ -166,7 +166,8 @@ namespace VividRP.Runtime
                 DiffuseAlbedo = diffuseAlbedo,
                 SpecularAlbedo = specularAlbedo,
                 Normals = normalRoughness,
-                Roughness = null  // Packed in normals.w
+                Roughness = null, // Packed in normals.w
+                Emissive = emissive
             };
 
             // Build ray inputs - hit distances from path tracer output alpha channels
@@ -176,7 +177,30 @@ namespace VividRP.Runtime
                 SpecularRayDirectionHitDistance = specularHitDistance
             };
 
-            // Execute via DLSSRayReconstruction wrapper
+            DLSSExposure exposure;
+            try
+            {
+                exposure = new DLSSExposure(
+                    settings.preExposure,
+                    settings.exposureScale,
+                    settings.exposureTexture);
+            }
+            catch (ArgumentException exception)
+            {
+                Debug.LogError($"[DLSSRRDenoiser] Invalid exposure contract: {exception.Message}");
+                return false;
+            }
+
+            m_DlssRR.SetQuality(settings.quality.ToNGXQuality());
+            m_DlssRR.SetFeatureFlags(BuildFeatureFlags(settings.isHDR, settings.autoExposure));
+
+            // Vivid's projection jitter is NDC, while the ray-tracing GBuffer
+            // stores current-to-previous motion in input/render pixels.
+            var dlssJitter = DLSSJitterOffset.FromProjectionNdc(
+                jitterOffset,
+                m_InputWidth,
+                m_InputHeight);
+
             return m_DlssRR.Render(
                 cmd,
                 colorInput,
@@ -187,13 +211,24 @@ namespace VividRP.Runtime
                 rayInputs,
                 worldToView,
                 viewToClip,
-                jitterOffset.x * m_InputWidth,   // Convert to pixel space
-                jitterOffset.y * m_InputHeight,
-                -(float)m_InputWidth,   // Unity convention
-                -(float)m_InputHeight,
+                dlssJitter,
+                DLSSMotionVectorEncoding.VividRayTracingPixels,
+                exposure,
                 settings.resetHistory,
-                settings.frameTimeDeltaMs
-            );
+                settings.frameTimeDeltaMs);
+        }
+
+        private static NVSDK_NGX_DLSS_Feature_Flags BuildFeatureFlags(
+            bool isHDR,
+            bool autoExposure)
+        {
+            var flags = NVSDK_NGX_DLSS_Feature_Flags.DepthInverted
+                | NVSDK_NGX_DLSS_Feature_Flags.MVLowRes;
+            if (isHDR)
+                flags |= NVSDK_NGX_DLSS_Feature_Flags.IsHDR;
+            if (autoExposure)
+                flags |= NVSDK_NGX_DLSS_Feature_Flags.AutoExposure;
+            return flags;
         }
 
         /// <summary>

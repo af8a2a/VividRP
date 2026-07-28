@@ -131,9 +131,20 @@ void StandardLitReferencedPathtracingClosestHit(
     // the actual shading normal, both evaluated at primary visibility.
     payload.denoisingAlbedo = saturate(
         material.openPbrInputs.base_color
-        * (1.0 - material.openPbrInputs.base_metalness));
+        * (1.0 - material.openPbrInputs.base_metalness)
+        * (1.0 - material.openPbrInputs.transmission_weight));
     payload.denoisingNormalWS = material.shadingNormalWS;
     payload.nextLobeClass = 0u;
+    payload.nextLobeIsDelta = 0u;
+    payload.nextLobeIsTransmission = 0u;
+    payload.thinWalledTransmissionWeight =
+        material.openPbrInputs.geometry_thin_walled
+            ? saturate(
+                material.openPbrInputs.transmission_weight
+                * (1.0 - material.openPbrInputs.base_metalness))
+            : 0.0;
+    bool allowsThinWalledTransmission =
+        payload.thinWalledTransmissionWeight > 0.0;
     payload.shadingNormalDiagnostics = float3(
         saturate(dot(
             material.unadjustedShadingNormalWS,
@@ -148,6 +159,7 @@ void StandardLitReferencedPathtracingClosestHit(
         ReferencedPathtracingSampleUnifiedNEECandidate(
             geometry.positionWS,
             geometry.faceNormalWS,
+            allowsThinWalledTransmission,
             payload.directLightRandom,
             neeCandidate);
     // Preserve the selected source and declared densities even when its
@@ -165,11 +177,17 @@ void StandardLitReferencedPathtracingClosestHit(
         payload.neeFlags = neeCandidate.flags;
     }
 
-    if (validNeeCandidate
-        && ReferencedPathtracingIsValidOpaqueReflectionDirection(
+    bool neeUsesReflectionHemisphere =
+        ReferencedPathtracingIsValidOpaqueReflectionDirection(
             neeCandidate.directionWS,
             geometry.faceNormalWS,
-            material.shadingNormalWS))
+            material.shadingNormalWS);
+    if (validNeeCandidate
+        && ReferencedPathtracingIsValidThinWalledSurfaceDirection(
+            neeCandidate.directionWS,
+            geometry.faceNormalWS,
+            material.shadingNormalWS,
+            allowsThinWalledTransmission))
     {
         OpenPBR_DiffuseSpecular neeResponse = openpbr_eval(
             preparedBsdf,
@@ -181,11 +199,12 @@ void StandardLitReferencedPathtracingClosestHit(
             openpbr_extract_diffuse_from_diffuse_specular(neeResponse);
         float3 neeSpecularBsdf =
             openpbr_extract_specular_from_diffuse_specular(neeResponse);
-        float diffuseShadowTerminator =
-            ReferencedPathtracingEvaluateDiffuseShadowTerminator(
+        float diffuseShadowTerminator = neeUsesReflectionHemisphere
+            ? ReferencedPathtracingEvaluateDiffuseShadowTerminator(
                 neeCandidate.directionWS,
                 material.shadingNormalWS,
-                geometry.normalWS);
+                geometry.normalWS)
+            : 1.0;
         neeDiffuseBsdf *= diffuseShadowTerminator;
         payload.shadingNormalDiagnostics.z = min(
             payload.shadingNormalDiagnostics.z,
@@ -218,19 +237,33 @@ void StandardLitReferencedPathtracingClosestHit(
         sampledPdf,
         sampledLobeType);
 
+    bool sampledTransmission =
+        (sampledLobeType & OpenPBR_BsdfLobeTypeTransmission) != 0u;
+    bool sampledReflection =
+        (sampledLobeType & OpenPBR_BsdfLobeTypeReflection) != 0u;
+    bool sampledDirectionIsSupported =
+        (sampledReflection
+            && ReferencedPathtracingIsValidOpaqueReflectionDirection(
+                sampledDirectionWS,
+                geometry.faceNormalWS,
+                material.shadingNormalWS))
+        || (sampledTransmission
+            && allowsThinWalledTransmission
+            && ReferencedPathtracingIsValidThinTransmissionDirection(
+                sampledDirectionWS,
+                geometry.faceNormalWS,
+                material.shadingNormalWS));
     if (sampledPdf > 0.0
         && VividReferencedPathtracingIsFinite(sampledPdf)
         && VividReferencedPathtracingIsFinite(sampledDirectionWS)
-        && ReferencedPathtracingIsValidOpaqueReflectionDirection(
-            sampledDirectionWS,
-            geometry.faceNormalWS,
-            material.shadingNormalWS))
+        && sampledDirectionIsSupported)
     {
-        float diffuseShadowTerminator =
-            ReferencedPathtracingEvaluateDiffuseShadowTerminator(
+        float diffuseShadowTerminator = sampledReflection
+            ? ReferencedPathtracingEvaluateDiffuseShadowTerminator(
                 sampledDirectionWS,
                 material.shadingNormalWS,
-                geometry.normalWS);
+                geometry.normalWS)
+            : 1.0;
         openpbr_set_diffuse_in_diffuse_specular(
             sampledWeight,
             openpbr_extract_diffuse_from_diffuse_specular(sampledWeight)
@@ -245,9 +278,13 @@ void StandardLitReferencedPathtracingClosestHit(
             payload.nextDirectionWS = normalize(sampledDirectionWS);
             payload.nextThroughputWeight = max(nextThroughputWeight, 0.0);
             payload.nextPdf = sampledPdf;
-            payload.nextLobeClass = (sampledLobeType & OpenPBR_BsdfLobeTypeDiffuse) != 0u
-                ? 1u
-                : 2u;
+            payload.nextLobeClass = sampledTransmission
+                ? 2u
+                : ((sampledLobeType & OpenPBR_BsdfLobeTypeDiffuse) != 0u
+                    ? 1u
+                    : 2u);
+            payload.nextLobeIsTransmission =
+                sampledTransmission ? 1u : 0u;
             // OpenPBR uses the Specular flag for a singular (delta) event. Glossy
             // reflection remains non-delta and competes with environment NEE.
             payload.nextLobeIsDelta =
@@ -265,10 +302,42 @@ void StandardLitReferencedPathtracingAnyHit(
     inout ReferencedPathtracingPayload payload : SV_RayPayload,
     AttributeData attributeData : SV_IntersectionAttributes)
 {
-#if defined(_ALPHATEST_ON)
+#if defined(_ALPHATEST_ON) || defined(_SURFACE_TYPE_TRANSPARENT)
     float2 uv = VividIndirectDiffuseFetchUV(attributeData);
-    if (VividIndirectDiffuseIsAlphaClipped(SampleBase(uv).a))
+    float opacity = saturate(SampleBase(uv).a);
+#if defined(_ALPHATEST_ON)
+    if (VividIndirectDiffuseIsAlphaClipped(opacity))
+    {
         IgnoreHit();
+        return;
+    }
+#endif
+
+#if defined(_SURFACE_TYPE_TRANSPARENT)
+    uint candidateSeed =
+        ReferencedPathtracingHashStochasticTransparency(
+            payload.stochasticAlphaSeed ^ 0x9e3779b9u);
+    candidateSeed ^=
+        ReferencedPathtracingHashStochasticTransparency(
+            InstanceIndex() + 0x85ebca6bu);
+    candidateSeed ^=
+        ReferencedPathtracingHashStochasticTransparency(
+            PrimitiveIndex() + 0xc2b2ae35u);
+    candidateSeed ^=
+        ReferencedPathtracingHashStochasticTransparency(
+            asuint(RayTCurrent()) + 0x27d4eb2du);
+    float opacityRandom =
+        ReferencedPathtracingHashStochasticTransparencyToUnitFloat(
+            candidateSeed);
+
+    payload.stochasticTransparencyDiagnostics.x = opacity;
+    payload.stochasticTransparencyDiagnostics.z += 1.0;
+    if (opacityRandom >= opacity)
+    {
+        payload.stochasticTransparencyDiagnostics.y += 1.0;
+        IgnoreHit();
+    }
+#endif
 #endif
 }
 

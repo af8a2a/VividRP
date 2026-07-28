@@ -67,12 +67,22 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_Height = 1;
 
 #if DLSS_PLUGIN_INTEGRATE
+        [SerializeField]
+        private DLSSRRPreset m_Preset = DLSSRRPreset.Default;
+
+        public DLSSRRPreset Preset
+        {
+            get => m_Preset;
+            set => m_Preset = value;
+        }
+
         private sealed class DLSSCameraState : CameraRelativeState
         {
             public DLSSRRDenoiser denoiser;
             public bool hasSignature;
             public int width;
             public int height;
+            public DLSSRRPreset preset;
             public ulong integratorSignature;
             public ulong frameSignature;
 
@@ -83,6 +93,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 hasSignature = false;
                 width = 0;
                 height = 0;
+                preset = DLSSRRPreset.Default;
                 integratorSignature = 0;
                 frameSignature = 0;
             }
@@ -362,6 +373,7 @@ namespace VividRP.Runtime.RenderPass.Core
             var signatureMatches = state.hasSignature
                 && state.width == m_Width
                 && state.height == m_Height
+                && state.preset == m_Preset
                 && state.integratorSignature == integratorSignature
                 && state.frameSignature == frameSignature;
 
@@ -372,6 +384,7 @@ namespace VividRP.Runtime.RenderPass.Core
             state.hasSignature = true;
             state.width = m_Width;
             state.height = m_Height;
+            state.preset = m_Preset;
             state.integratorSignature = integratorSignature;
             state.frameSignature = frameSignature;
 
@@ -389,7 +402,8 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_Height,
                     DLSSQuality.DLAA,
                     isHDR: true,
-                    autoExposure: false))
+                    autoExposure: false,
+                    renderPreset: m_Preset))
             {
                 m_CurrentState = null;
                 m_ExposureTexture = null;

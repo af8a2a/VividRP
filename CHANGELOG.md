@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Changed
 
 - The Bloom Volume inspector now shows only the settings used by the selected Scattering or Convolution FFT path.
+- DLSS Ray Reconstruction reference-path inputs now emit finite, normalized ray guides and encode secondary misses with the FP16 maximum hit-distance sentinel.
 
 - Renamed the `GTAO` Volume component type to `AmbientOcclusion` and added an implementation-aware custom inspector.
 

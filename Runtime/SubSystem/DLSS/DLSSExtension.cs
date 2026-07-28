@@ -222,6 +222,18 @@ namespace VividRP.Runtime
         public const string NVSDK_NGX_Parameter_DLSS_Denoise_Mode = "DLSS.Denoise.Mode";
         public const string NVSDK_NGX_Parameter_DLSS_Depth_Type = "DLSS.Depth.Type";
         public const string NVSDK_NGX_Parameter_DLSS_Roughness_Mode = "DLSS.Roughness.Mode";
+        public const string NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA =
+            "RayReconstruction.Hint.Render.Preset.DLAA";
+        public const string NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality =
+            "RayReconstruction.Hint.Render.Preset.Quality";
+        public const string NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced =
+            "RayReconstruction.Hint.Render.Preset.Balanced";
+        public const string NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance =
+            "RayReconstruction.Hint.Render.Preset.Performance";
+        public const string NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance =
+            "RayReconstruction.Hint.Render.Preset.UltraPerformance";
+        public const string NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraQuality =
+            "RayReconstruction.Hint.Render.Preset.UltraQuality";
 
         // GBuffer parameters
         public const string NVSDK_NGX_Parameter_DiffuseAlbedo = "DiffuseAlbedo";

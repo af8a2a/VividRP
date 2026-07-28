@@ -130,6 +130,66 @@ float4 PackReferencedPathtracingReblurSignal(float3 radiance, float normalizedHi
         normalizedHitDistance);
 }
 
+static const float kReferencedPathtracingDlssInfiniteHitDistance = 65504.0;
+
+float3 ResolveReferencedPathtracingDlssRayDirection(
+    float3 directionWS,
+    float3 fallbackDirectionWS)
+{
+    float directionLengthSquared = dot(directionWS, directionWS);
+    if (IsFiniteReferencedPathtracingRadiance(directionWS)
+        && directionLengthSquared > 1e-12)
+    {
+        return directionWS * rsqrt(directionLengthSquared);
+    }
+
+    float fallbackLengthSquared =
+        dot(fallbackDirectionWS, fallbackDirectionWS);
+    if (IsFiniteReferencedPathtracingRadiance(fallbackDirectionWS)
+        && fallbackLengthSquared > 1e-12)
+    {
+        return fallbackDirectionWS * rsqrt(fallbackLengthSquared);
+    }
+
+    return float3(0.0, 0.0, 1.0);
+}
+
+float4 PackReferencedPathtracingDlssRayDirectionHitDistance(
+    float3 directionWS,
+    float hitDistance,
+    float3 fallbackDirectionWS,
+    bool hasPrimarySurface,
+    bool hasFiniteHitDistance)
+{
+    // DLSS-RR consumes a dense world-space guide. Background pixels retain a
+    // zero direction, while an unsampled lobe or a secondary miss uses the
+    // largest representable FP16 value instead of camera far clip or zero.
+    if (!hasPrimarySurface)
+    {
+        return float4(
+            0.0,
+            0.0,
+            0.0,
+            kReferencedPathtracingDlssInfiniteHitDistance);
+    }
+
+    float3 resolvedDirectionWS =
+        ResolveReferencedPathtracingDlssRayDirection(
+            directionWS,
+            fallbackDirectionWS);
+    bool hitDistanceIsFinite =
+        !isnan(hitDistance)
+        && !isinf(hitDistance)
+        && hitDistance >= 0.0;
+    float resolvedHitDistance =
+        hasFiniteHitDistance && hitDistanceIsFinite
+            ? min(
+                hitDistance,
+                kReferencedPathtracingDlssInfiniteHitDistance)
+            : kReferencedPathtracingDlssInfiniteHitDistance;
+    return float4(resolvedDirectionWS, resolvedHitDistance);
+}
+
 float GetReferencedPathtracingDenoiserLuminance(float3 radiance)
 {
     return dot(max(radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
@@ -406,6 +466,7 @@ void RayGenReferencedPathtracing()
         lensDiskSample,
         ray.Origin,
         ray.Direction);
+    float3 primaryCameraRayDirectionWS = ray.Direction;
     float cameraForwardProjection = max(
         dot(
             ray.Direction,
@@ -491,6 +552,12 @@ void RayGenReferencedPathtracing()
     float primaryLinearRoughness = 1.0;
     float diffuseHitDistance = _RayMaxDistance;
     float specularHitDistance = _RayMaxDistance;
+    // RR requires a literal primary-surface ray distance, while REBLUR hitT
+    // may be radiance-weighted when several estimators share one signal.
+    float diffuseDlssHitDistance = 0.0;
+    float specularDlssHitDistance = 0.0;
+    bool diffuseHitDistanceValid = false;
+    bool specularHitDistanceValid = false;
     float3 diffuseRayDirectionWS = 0.0;
     float3 specularRayDirectionWS = 0.0;
     uint maxBounceCount = min(
@@ -1429,9 +1496,17 @@ void RayGenReferencedPathtracing()
             if (bounceIndex == 1u)
             {
                 if (primaryLobeClass == 1u)
+                {
                     diffuseHitDistance = payload.hitDistance;
+                    diffuseDlssHitDistance = payload.hitDistance;
+                    diffuseHitDistanceValid = true;
+                }
                 else if (primaryLobeClass == 2u)
+                {
                     specularHitDistance = payload.hitDistance;
+                    specularDlssHitDistance = payload.hitDistance;
+                    specularHitDistanceValid = true;
+                }
             }
         }
 
@@ -1562,12 +1637,16 @@ void RayGenReferencedPathtracing()
                     {
                         diffuseRayDirectionWS = neeDirectionWS;
                         diffuseHitDistance = payload.neeDistance;
+                        diffuseDlssHitDistance = payload.neeDistance;
+                        diffuseHitDistanceValid = true;
                     }
 
                     if (any(directSpecular > 0.0))
                     {
                         specularRayDirectionWS = neeDirectionWS;
                         specularHitDistance = payload.neeDistance;
+                        specularDlssHitDistance = payload.neeDistance;
+                        specularHitDistanceValid = true;
                     }
                 }
                 else if (primaryLobeClass == 1u)
@@ -1707,6 +1786,8 @@ void RayGenReferencedPathtracing()
                     diffuseRadiance += bsdfSampledDirect;
                     diffuseRayDirectionWS =
                         normalize(payload.nextDirectionWS);
+                    diffuseDlssHitDistance = segmentLightHit.distance;
+                    diffuseHitDistanceValid = true;
                 }
                 else if (bounceIndex == 0u
                     && payload.nextLobeClass == 2u)
@@ -1720,6 +1801,8 @@ void RayGenReferencedPathtracing()
                     specularRadiance += bsdfSampledDirect;
                     specularRayDirectionWS =
                         normalize(payload.nextDirectionWS);
+                    specularDlssHitDistance = segmentLightHit.distance;
+                    specularHitDistanceValid = true;
                 }
                 else if (primaryLobeClass == 1u)
                 {
@@ -2004,12 +2087,27 @@ void RayGenReferencedPathtracing()
     _ReferencedPathTracingEnvironmentDirectSpecular[pixelCoord] = float4(
         environmentDirectSpecularRadiance,
         primaryHit != 0u ? 1.0 : 0.0);
-    _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] = float4(
-        diffuseRayDirectionWS,
-        primaryHit != 0u ? diffuseHitDistance : 0.0);
-    _ReferencedSpecularRayDirectionHitDistance[pixelCoord] = float4(
-        specularRayDirectionWS,
-        primaryHit != 0u ? specularHitDistance : 0.0);
+    float3 diffuseFallbackDirectionWS =
+        ResolveReferencedPathtracingDlssRayDirection(
+            primaryDenoisingNormalWS,
+            -primaryCameraRayDirectionWS);
+    float3 specularFallbackDirectionWS = reflect(
+        primaryCameraRayDirectionWS,
+        diffuseFallbackDirectionWS);
+    _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] =
+        PackReferencedPathtracingDlssRayDirectionHitDistance(
+            diffuseRayDirectionWS,
+            diffuseDlssHitDistance,
+            diffuseFallbackDirectionWS,
+            primaryHit != 0u,
+            diffuseHitDistanceValid);
+    _ReferencedSpecularRayDirectionHitDistance[pixelCoord] =
+        PackReferencedPathtracingDlssRayDirectionHitDistance(
+            specularRayDirectionWS,
+            specularDlssHitDistance,
+            specularFallbackDirectionWS,
+            primaryHit != 0u,
+            specularHitDistanceValid);
 
     uint2 signalPixelCoord = pixelCoord;
     bool writeDiffuse = true;

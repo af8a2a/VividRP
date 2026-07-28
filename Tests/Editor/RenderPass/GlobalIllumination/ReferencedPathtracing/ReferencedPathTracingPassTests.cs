@@ -329,6 +329,10 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "EnvironmentDirectDiffuse");
             var environmentDirectSpecular = resources.Textures.Single(
                 resource => resource.Name == "EnvironmentDirectSpecular");
+            var diffuseRayDirectionHitDistance = resources.Textures.Single(
+                resource => resource.Name == "DiffuseRayDirectionHitDistance");
+            var specularRayDirectionHitDistance = resources.Textures.Single(
+                resource => resource.Name == "SpecularRayDirectionHitDistance");
 
             Assert.That(accelerationStructure.Name, Is.EqualTo("SceneRTAS"));
             Assert.That(accelerationStructure.Access, Is.EqualTo(AccessFlags.Read));
@@ -414,6 +418,30 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(environmentDirectDiffuse.Texture.desc.ClearBuffer, Is.True);
             Assert.That(environmentDirectSpecular.Texture.desc.ClearBuffer, Is.True);
+            Assert.That(
+                diffuseRayDirectionHitDistance.Access,
+                Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                specularRayDirectionHitDistance.Access,
+                Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                diffuseRayDirectionHitDistance.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                specularRayDirectionHitDistance.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                diffuseRayDirectionHitDistance.Texture.desc.ClearBuffer,
+                Is.True);
+            Assert.That(
+                specularRayDirectionHitDistance.Texture.desc.ClearBuffer,
+                Is.True);
+            Assert.That(
+                diffuseRayDirectionHitDistance.Texture.desc.ClearColor.a,
+                Is.EqualTo(ReferencedPathTracingPass.DlssInfiniteHitDistance));
+            Assert.That(
+                specularRayDirectionHitDistance.Texture.desc.ClearColor.a,
+                Is.EqualTo(ReferencedPathTracingPass.DlssInfiniteHitDistance));
         }
 
         [Test]
@@ -698,6 +726,42 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "CombineReferencedPathtracingDenoiserHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingDlssInfiniteHitDistance = 65504.0"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "PackReferencedPathtracingDlssRayDirectionHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedDiffuseRayDirectionHitDistance[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedSpecularRayDirectionHitDistance[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("diffuseHitDistanceValid"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("specularHitDistanceValid"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("diffuseDlssHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("specularDlssHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain(
+                    "primaryHit != 0u ? diffuseHitDistance : 0.0"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain(
+                    "primaryHit != 0u ? specularHitDistance : 0.0"));
             Assert.That(
                 reblurResolveSource,
                 Does.Contain("_ReblurMainLightInSignals != 0"));

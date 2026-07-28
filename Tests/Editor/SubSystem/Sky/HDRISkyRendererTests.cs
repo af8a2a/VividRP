@@ -102,6 +102,20 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SkyInitialization_WaitsForPipelineUseAndCompiledBakingPasses()
+        {
+            var managerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));
+            var rendererSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "HDRI", "HDRISkyRenderer.cs"));
+            var utilitySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyShaderCompilationUtility.cs"));
+
+            Assert.That(managerSource, Does.Not.Contain("private static void AutoInitialize()"));
+            Assert.That(managerSource, Does.Not.Contain("[UnityEditor.InitializeOnLoadMethod]"));
+            Assert.That(rendererSource, Does.Contain("SkyShaderCompilationUtility.EnsureMaterialPassReady("));
+            Assert.That(utilitySource, Does.Contain("UnityEditor.ShaderUtil.IsPassCompiled(material, passIndex)"));
+            Assert.That(utilitySource, Does.Contain("UnityEditor.ShaderUtil.CompilePass(material, passIndex);"));
+        }
+
+        [Test]
         public void SkyManager_SkipsGlobalSkyEnvironmentUpdatesForAuxiliaryCameras()
         {
             var source = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "Sky", "SkyManager.cs"));

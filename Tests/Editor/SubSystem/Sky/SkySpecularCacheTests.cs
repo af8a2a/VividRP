@@ -63,6 +63,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Not.Contain("TryCopyCubemapMipZero"));
             Assert.That(source, Does.Contain("GetIBLRuntimeFilterSampleCount"));
             Assert.That(source, Does.Contain("BuildGgxIblSampleDataTexture()"));
+            Assert.That(source, Does.Contain("SkyShaderCompilationUtility.EnsureMaterialPassReady("));
+            Assert.That(source, Does.Contain("GgxConvolutionPassIndex)"));
+            Assert.That(source, Does.Contain("CopyMipZeroPassIndex);"));
         }
 
         [Test]

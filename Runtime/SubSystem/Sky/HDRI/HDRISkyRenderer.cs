@@ -221,7 +221,9 @@ namespace VividRP.Runtime
 
         private bool CanBakeAmbientProbe()
         {
-            return m_Material != null && m_AmbientProbeBakingPass >= 0;
+            return SkyShaderCompilationUtility.EnsureMaterialPassReady(
+                m_Material,
+                m_AmbientProbeBakingPass);
         }
 
         private AmbientProbeRebuildReason ResolveAmbientProbeRebuildReason(int skyHash, int resolution)

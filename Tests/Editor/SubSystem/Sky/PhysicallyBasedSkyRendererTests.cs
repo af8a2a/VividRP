@@ -332,7 +332,11 @@ namespace VividRP.Editor.Tests
 
             Assert.That(source, Does.Contain("private bool CanBakeSky()"));
             Assert.That(source, Does.Contain("return CanBakeSky();"));
-            Assert.That(source, Does.Contain("return m_SkyMaterial != null && m_SkyBakingPass >= 0;"));
+            Assert.That(source, Does.Contain("SkyShaderCompilationUtility.EnsureMaterialPassReady("));
+            Assert.That(source, Does.Contain("m_SkyBakingPass);"));
+            Assert.That(source, Does.Contain("SkyRebuildReason.InitializationRefresh"));
+            Assert.That(source, Does.Contain("m_RuntimeCubemapNeedsInitializationRefresh = isInitialBake;"));
+            Assert.That(source, Does.Contain("RequestEditorRuntimeCubemapRefresh();"));
             Assert.That(source, Does.Contain("private Texture ResolveSkyViewTexture()"));
         }
 

@@ -24,16 +24,6 @@ namespace VividRP.Runtime
         private static int s_SkyUpdateVersion;
         private static int s_PendingSkyUpdateVersion = -1;
 
-#if UNITY_EDITOR
-        [UnityEditor.InitializeOnLoadMethod]
-#else
-        [RuntimeInitializeOnLoadMethod]
-#endif
-        private static void AutoInitialize()
-        {
-            Initialize();
-        }
-
         protected override void OnInitialize()
         {
             var resources = PipelineResourceManager.Get<VividRPCoreResources>();

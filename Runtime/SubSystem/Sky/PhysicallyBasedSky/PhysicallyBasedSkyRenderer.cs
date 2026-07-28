@@ -12,6 +12,7 @@ namespace VividRP.Runtime
             MissingTexture,
             ResolutionChanged,
             QualityChanged,
+            InitializationRefresh,
             ParametersChanged,
             FrameRefresh
         }
@@ -37,6 +38,7 @@ namespace VividRP.Runtime
         private static readonly ProfilingSampler s_RuntimeCubemapMissingTextureSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (MissingTexture)");
         private static readonly ProfilingSampler s_RuntimeCubemapResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ResolutionChanged)");
         private static readonly ProfilingSampler s_RuntimeCubemapQualityChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (QualityChanged)");
+        private static readonly ProfilingSampler s_RuntimeCubemapInitializationRefreshSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (InitializationRefresh)");
         private static readonly ProfilingSampler s_RuntimeCubemapParametersChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildRuntimeCubemap (ParametersChanged)");
         private static readonly ProfilingSampler s_AmbientProbeMissingTextureSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (MissingTexture)");
         private static readonly ProfilingSampler s_AmbientProbeResolutionChangedSampler = new("PhysicallyBasedSkyRenderer.RebuildAmbientProbe (ResolutionChanged)");
@@ -69,6 +71,8 @@ namespace VividRP.Runtime
         private RenderTexture m_MultiScatteringLut;
         private int m_RuntimeSkyHash;
         private int m_RuntimeSkyViewSampleCount;
+        private bool m_RuntimeCubemapHasCompletedInitialBake;
+        private bool m_RuntimeCubemapNeedsInitializationRefresh;
         private int m_AmbientProbeSkyHash;
         private int m_LocalSkyPrecomputationHash;
         private bool m_HasLocalSkyPrecomputation;
@@ -98,7 +102,7 @@ namespace VividRP.Runtime
 
         public void Build(VividRPCoreResources resources)
         {
-            var shader = resources.PhysicallyBasedSkyShader;
+            var shader = resources?.PhysicallyBasedSkyShader;
             m_AtmosphereLutCompute = resources?.AtmosphereLUTCompute;
             m_GroundIrradiancePrecomputationCompute = resources?.GroundIrradiancePrecomputationCompute;
             m_InScatteredRadiancePrecomputationCompute = resources?.InScatteredRadiancePrecomputationCompute;
@@ -196,9 +200,10 @@ namespace VividRP.Runtime
                         generatedCubemapViewSampleCount);
                     if (runtimeCubemapBakeSucceeded)
                     {
-                        m_RuntimeSkyHash = skyHash;
-                        m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
-                        skyData.specularCubemapDirty = true;
+                        CommitRuntimeCubemapBake(
+                            skyHash,
+                            generatedCubemapViewSampleCount,
+                            skyData);
                     }
                 }
             }
@@ -382,6 +387,8 @@ namespace VividRP.Runtime
             m_MultiScatteringKernel = -1;
             m_RuntimeSkyHash = 0;
             m_RuntimeSkyViewSampleCount = 0;
+            m_RuntimeCubemapHasCompletedInitialBake = false;
+            m_RuntimeCubemapNeedsInitializationRefresh = false;
             m_AmbientProbeSkyHash = 0;
             m_LocalSkyPrecomputationHash = 0;
             m_HasLocalSkyPrecomputation = false;
@@ -519,11 +526,12 @@ namespace VividRP.Runtime
                         cmd,
                         generatedCubemapViewSampleCount))
                 {
-                    m_RuntimeSkyHash = skyHash;
-                    m_RuntimeSkyViewSampleCount = generatedCubemapViewSampleCount;
+                    CommitRuntimeCubemapBake(
+                        skyHash,
+                        generatedCubemapViewSampleCount,
+                        skyData);
                     skyData.specularCubemap = m_RuntimeSkyCubemap;
                     skyData.skyContentHash = m_RuntimeSkyHash;
-                    skyData.specularCubemapDirty = true;
                 }
             }
         }
@@ -643,7 +651,9 @@ namespace VividRP.Runtime
 
         private bool CanBakeSky()
         {
-            return m_SkyMaterial != null && m_SkyBakingPass >= 0;
+            return SkyShaderCompilationUtility.EnsureMaterialPassReady(
+                m_SkyMaterial,
+                m_SkyBakingPass);
         }
 
         private void LogRuntimeSkyTextureBakeOnce(
@@ -687,9 +697,47 @@ namespace VividRP.Runtime
             if (m_RuntimeSkyViewSampleCount != viewSampleCount)
                 return SkyRebuildReason.QualityChanged;
 
+            if (m_RuntimeCubemapNeedsInitializationRefresh)
+                return SkyRebuildReason.InitializationRefresh;
+
             return m_RuntimeSkyHash != hash
                 ? SkyRebuildReason.ParametersChanged
                 : SkyRebuildReason.None;
+        }
+
+        private void CommitRuntimeCubemapBake(
+            int skyHash,
+            int viewSampleCount,
+            VividSkyData skyData)
+        {
+            var isInitialBake = !m_RuntimeCubemapHasCompletedInitialBake;
+            m_RuntimeCubemapHasCompletedInitialBake = true;
+#if UNITY_EDITOR
+            // The first offscreen draw after a domain/shader reload can execute before
+            // Unity has fully warmed the variant and leave the cubemap filled with NaNs.
+            // Treat that draw as transient and replace it on the next editor render.
+            m_RuntimeCubemapNeedsInitializationRefresh = isInitialBake;
+#else
+            m_RuntimeCubemapNeedsInitializationRefresh = false;
+#endif
+            m_RuntimeSkyHash = skyHash;
+            m_RuntimeSkyViewSampleCount = viewSampleCount;
+            if (skyData != null)
+                skyData.specularCubemapDirty = true;
+
+            if (m_RuntimeCubemapNeedsInitializationRefresh)
+                RequestEditorRuntimeCubemapRefresh();
+        }
+
+        private static void RequestEditorRuntimeCubemapRefresh()
+        {
+#if UNITY_EDITOR
+            if (Application.isPlaying)
+                return;
+
+            UnityEditor.EditorApplication.QueuePlayerLoopUpdate();
+            UnityEditorInternal.InternalEditorUtility.RepaintAllViews();
+#endif
         }
 
         private SkyRebuildReason ResolveAmbientProbeCubemapRebuildReason(int hash, int resolution)
@@ -1252,6 +1300,7 @@ namespace VividRP.Runtime
             {
                 SkyRebuildReason.ResolutionChanged => s_RuntimeCubemapResolutionChangedSampler,
                 SkyRebuildReason.QualityChanged => s_RuntimeCubemapQualityChangedSampler,
+                SkyRebuildReason.InitializationRefresh => s_RuntimeCubemapInitializationRefreshSampler,
                 SkyRebuildReason.ParametersChanged => s_RuntimeCubemapParametersChangedSampler,
                 _ => s_RuntimeCubemapMissingTextureSampler,
             };

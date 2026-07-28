@@ -25,7 +25,14 @@ namespace VividRP.Runtime
         private Material m_ConvolutionMaterial;
         private Texture2D m_GgxIblSampleData;
 
-        internal bool IsSupported => m_ConvolutionMaterial != null && m_GgxIblSampleData != null;
+        internal bool IsSupported =>
+            m_GgxIblSampleData != null
+            && SkyShaderCompilationUtility.EnsureMaterialPassReady(
+                m_ConvolutionMaterial,
+                GgxConvolutionPassIndex)
+            && SkyShaderCompilationUtility.EnsureMaterialPassReady(
+                m_ConvolutionMaterial,
+                CopyMipZeroPassIndex);
 
         internal void Build(VividRPCoreResources resources)
         {

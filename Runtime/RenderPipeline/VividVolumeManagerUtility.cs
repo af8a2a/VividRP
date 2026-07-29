@@ -12,7 +12,9 @@ namespace VividRP.Runtime
             if (VolumeManager.instance.isInitialized)
                 VolumeManager.instance.Deinitialize();
 
-            VolumeManager.instance.Initialize(GetDefaultVolumeProfile());
+            var defaultVolumeProfile = GetDefaultVolumeProfile();
+            UpgradeDefaultVolumeProfileValues(defaultVolumeProfile);
+            VolumeManager.instance.Initialize(defaultVolumeProfile);
         }
 
         internal static void Update(Camera camera)
@@ -68,6 +70,13 @@ namespace VividRP.Runtime
             return VividRenderPipelineGlobalSettings.instance?
                 .GetSettings<VividDefaultVolumeProfileSettings>()?
                 .volumeProfile;
+        }
+
+        internal static bool UpgradeDefaultVolumeProfileValues(VolumeProfile profile)
+        {
+            return profile != null
+                && profile.TryGet<AutoExposure>(out var autoExposure)
+                && autoExposure.UpgradeUnrealDefaultProfileValuesIfNeeded();
         }
 
         internal static HDRISkyVolume GetHDRISkyVolume()

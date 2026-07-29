@@ -42,6 +42,15 @@ namespace VividRP.Editor.RenderPipeline
             if (RenderPipelineManager.currentPipeline is VividRenderPipeline)
                 VolumeProfileUtils.UpdateGlobalDefaultVolumeProfile<VividRenderPipeline>(profile);
 
+            VividVolumeManagerUtility.UpgradeDefaultVolumeProfileValues(profile);
+            if (profile.TryGet<AutoExposure>(out var autoExposure)
+                && autoExposure.ConsumeUnrealDefaultProfileUpgradePendingSave())
+            {
+                EditorUtility.SetDirty(autoExposure);
+                EditorUtility.SetDirty(profile);
+                AssetDatabase.SaveAssetIfDirty(profile);
+            }
+
             return profile;
         }
     }

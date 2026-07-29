@@ -295,6 +295,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveUnreal_HistogramUsesSelectedPercentWindow()
+        {
+            var autoExposure = ScriptableObject.CreateInstance<AutoExposure>();
+
+            try
+            {
+                autoExposure.enabled.value = true;
+                autoExposure.mode.value = AutoExposureMode.Histogram;
+                autoExposure.percent.value = new Vector2(25f, 75f);
+
+                var settings = AutoExposureSettingsResolver.ResolveUnreal(
+                    autoExposure,
+                    null,
+                    false);
+
+                Assert.That(settings.exposureLowPercent, Is.EqualTo(0.25f).Within(1e-5f));
+                Assert.That(settings.exposureHighPercent, Is.EqualTo(0.75f).Within(1e-5f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(autoExposure);
+            }
+        }
+
+        [Test]
         public void ResolveUnreal_InvalidRangeLocksToMaximumEV100LikeUnreal()
         {
             var autoExposure = ScriptableObject.CreateInstance<AutoExposure>();

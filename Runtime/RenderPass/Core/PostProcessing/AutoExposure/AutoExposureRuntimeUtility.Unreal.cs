@@ -52,12 +52,13 @@ namespace VividRP.Runtime
             }
 
             var usesHistogramPercentiles = settings.mode == AutoExposureMode.Histogram;
+            var percentValue = autoExposure.percent.value;
             var exposureHighPercent = usesHistogramPercentiles
-                ? Mathf.Clamp(autoExposure.percent.max, 1f, 99f) * PercentToScale
+                ? Mathf.Clamp(percentValue.y, 1f, 99f) * PercentToScale
                 : 1f;
             var exposureLowPercent = usesHistogramPercentiles
                 ? Mathf.Min(
-                    Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * PercentToScale,
+                    Mathf.Clamp(percentValue.x, 1f, 99f) * PercentToScale,
                     exposureHighPercent)
                 : 0f;
             var maxWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(

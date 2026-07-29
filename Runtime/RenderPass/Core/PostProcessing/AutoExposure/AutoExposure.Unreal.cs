@@ -23,8 +23,13 @@ namespace VividRP.Runtime
     public sealed partial class AutoExposure
     {
         private const int CurrentUnrealSettingsVersion = 1;
+        private const int CurrentUnrealDefaultProfileVersion = 1;
+        private const float DefaultLowPercent = 10f;
+        private const float DefaultHighPercent = 90f;
         private const float ExposureLimitMinEV100 = -10f;
         private const float ExposureLimitMaxEV100 = 20f;
+        private const float LegacyDefaultMinEV100 = 5f;
+        private const float LegacyDefaultMaxEV100 = 13f;
         private const float DefaultHistogramLogMinEV100 = -10f;
         private const float DefaultHistogramLogMaxEV100 = 20f;
         private const float LegacyDefaultHistogramLogMaxEV100 = 6f;
@@ -34,11 +39,18 @@ namespace VividRP.Runtime
         [SerializeField, HideInInspector]
         private int m_UnrealSettingsVersion;
 
+        [SerializeField, HideInInspector]
+        private int m_UnrealDefaultProfileVersion;
+
+        [NonSerialized]
+        private bool m_UnrealDefaultProfileUpgradePendingSave;
+
         [Tooltip("Selects the Unreal exposure mode.")]
         public AutoExposureModeParameter mode = new(AutoExposureMode.Histogram);
 
         [Tooltip("Sets the lower and upper histogram percentages used to estimate exposure.")]
-        public FloatRangeParameter percent = new(new Vector2(10f, 90f), 1f, 99f);
+        public FloatRangeParameter percent =
+            new(new Vector2(DefaultLowPercent, DefaultHighPercent), 1f, 99f);
 
         [Tooltip("Legacy brightness clamp kept for backwards compatibility with older serialized assets.")]
         public MinFloatParameter minBrightness = new(0.03f, 0f);
@@ -92,7 +104,10 @@ namespace VividRP.Runtime
         private void EnsureUnrealParameters()
         {
             mode ??= new AutoExposureModeParameter(AutoExposureMode.Histogram);
-            percent ??= new FloatRangeParameter(new Vector2(10f, 90f), 1f, 99f);
+            percent ??= new FloatRangeParameter(
+                new Vector2(DefaultLowPercent, DefaultHighPercent),
+                1f,
+                99f);
             minBrightness ??= new MinFloatParameter(0.03f, 0f);
             maxBrightness ??= new MinFloatParameter(8f, 0f);
             minEV100 ??= new ClampedFloatParameter(
@@ -120,6 +135,53 @@ namespace VividRP.Runtime
 
             if (exposureCompensationCurve.value == null)
                 exposureCompensationCurve.value = CreateDefaultExposureCompensationCurve();
+        }
+
+        internal bool UpgradeUnrealDefaultProfileValuesIfNeeded()
+        {
+            if (m_UnrealDefaultProfileVersion >= CurrentUnrealDefaultProfileVersion)
+                return false;
+
+            EnsureUnrealParameters();
+
+            var percentValue = percent.value;
+            if (Mathf.Approximately(percentValue.x, 1f)
+                && Mathf.Approximately(percentValue.y, 99f))
+            {
+                percent.value = new Vector2(DefaultLowPercent, DefaultHighPercent);
+            }
+
+            if (Mathf.Approximately(minEV100.value, LegacyDefaultMinEV100)
+                && Mathf.Approximately(maxEV100.value, LegacyDefaultMaxEV100))
+            {
+                minEV100.value = ExposureLimitMinEV100;
+                maxEV100.value = ExposureLimitMaxEV100;
+            }
+
+            var histogramRange = histogramLogRange.value;
+            if (Mathf.Approximately(
+                    histogramRange.x,
+                    DefaultHistogramLogMinEV100)
+                && Mathf.Approximately(
+                    histogramRange.y,
+                    LegacyDefaultHistogramLogMaxEV100))
+            {
+                histogramLogRange.value = new Vector2(
+                    DefaultHistogramLogMinEV100,
+                    DefaultHistogramLogMaxEV100);
+            }
+
+            SyncLegacyHistogramLogRangeFields();
+            m_UnrealDefaultProfileVersion = CurrentUnrealDefaultProfileVersion;
+            m_UnrealDefaultProfileUpgradePendingSave = true;
+            return true;
+        }
+
+        internal bool ConsumeUnrealDefaultProfileUpgradePendingSave()
+        {
+            var pendingSave = m_UnrealDefaultProfileUpgradePendingSave;
+            m_UnrealDefaultProfileUpgradePendingSave = false;
+            return pendingSave;
         }
 
         private void MigrateLegacyHistogramLogRangeIfNeeded()

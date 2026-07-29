@@ -24,7 +24,6 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _EmissionColor;
     float4 _TransmissionColor;
-    float4 _OpacityColor;
     float _Cutoff;
     float _Smoothness;
     float _SmoothnessTextureChannel;
@@ -53,6 +52,8 @@ TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
 TEXTURE2D(_OpacityMap);
 SAMPLER(sampler_OpacityMap);
+TEXTURE2D(_TransmissionMap);
+SAMPLER(sampler_TransmissionMap);
 TEXTURE2D(_MetallicGlossMap);
 SAMPLER(sampler_MetallicGlossMap);
 TEXTURE2D(_RoughnessMap);

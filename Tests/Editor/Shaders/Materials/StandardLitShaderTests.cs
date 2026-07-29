@@ -261,6 +261,7 @@ namespace VividRP.Editor.Tests
                     material.HasProperty("_ThinWalledTransmission"),
                     Is.True);
                 Assert.That(material.HasProperty("_TransmissionWeight"), Is.True);
+                Assert.That(material.HasProperty("_TransmissionMap"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionColor"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionDepth"), Is.True);
                 Assert.That(material.HasProperty("_SpecularIOR"), Is.True);
@@ -283,15 +284,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void StandardLitShader_ExposesOpenPbrColoredOpacity()
+        public void StandardLitShader_DoesNotExposeDeprecatedOpacityColor()
         {
             UnityEngine.Material material = CreateMaterial();
             try
             {
-                Assert.That(material.HasProperty("_OpacityColor"), Is.True);
-                Assert.That(
-                    material.GetColor("_OpacityColor"),
-                    Is.EqualTo(Color.white));
+                Assert.That(material.HasProperty("_OpacityColor"), Is.False);
             }
             finally
             {
@@ -325,6 +323,7 @@ namespace VividRP.Editor.Tests
         {
             Material material = CreateMaterial();
             Texture2D opacityMap = CreateTexture();
+            Texture2D transmissionMap = CreateTexture();
             Texture2D normalMap = CreateTexture();
             Texture2D metallicMap = CreateTexture();
             Texture2D roughnessMap = CreateTexture();
@@ -333,6 +332,7 @@ namespace VividRP.Editor.Tests
             {
                 material.SetFloat("_AlphaClip", 1.0f);
                 material.SetTexture("_OpacityMap", opacityMap);
+                material.SetTexture("_TransmissionMap", transmissionMap);
                 material.SetTexture("_BumpMap", normalMap);
                 material.SetTexture("_MetallicGlossMap", metallicMap);
                 material.SetTexture("_RoughnessMap", roughnessMap);
@@ -345,6 +345,7 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(material.IsKeywordEnabled("_ALPHATEST_ON"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_OPACITYMAP"), Is.True);
+                Assert.That(material.IsKeywordEnabled("_TRANSMISSIONMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_NORMALMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_METALLICSPECGLOSSMAP"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_ROUGHNESSMAP"), Is.True);
@@ -356,6 +357,7 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(opacityMap);
+                Object.DestroyImmediate(transmissionMap);
                 Object.DestroyImmediate(normalMap);
                 Object.DestroyImmediate(metallicMap);
                 Object.DestroyImmediate(roughnessMap);

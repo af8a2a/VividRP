@@ -334,9 +334,10 @@ void StandardLitReferencedPathtracingAnyHit(
     inout ReferencedPathtracingPayload payload : SV_RayPayload,
     AttributeData attributeData : SV_IntersectionAttributes)
 {
+    float2 uv = VividIndirectDiffuseFetchUV(attributeData);
     bool isSolidTransmissionBoundary =
         _ThinWalledTransmission <= 0.5
-        && _TransmissionWeight > 0.0;
+        && SampleOpenPbrTransmissionWeight(uv) > 0.0;
     bool isUnmatchedNestedExit =
         isSolidTransmissionBoundary
         && HitKind() == HIT_KIND_TRIANGLE_BACK_FACE
@@ -353,7 +354,6 @@ void StandardLitReferencedPathtracingAnyHit(
     }
 
 #if defined(_ALPHATEST_ON) || defined(_SURFACE_TYPE_TRANSPARENT)
-    float2 uv = VividIndirectDiffuseFetchUV(attributeData);
 #if defined(_ALPHATEST_ON)
     float opacity = saturate(SampleBase(uv).a);
     if (VividIndirectDiffuseIsAlphaClipped(opacity))
@@ -364,10 +364,7 @@ void StandardLitReferencedPathtracingAnyHit(
 #endif
 
 #if defined(_SURFACE_TYPE_TRANSPARENT)
-    float3 coloredOpacity = SampleOpenPbrGeometryOpacity(uv);
-    float branchProbability =
-        ResolveOpenPbrGeometryOpacityBranchProbability(
-            coloredOpacity);
+    float geometryOpacity = SampleOpenPbrGeometryOpacity(uv);
     uint candidateSeed =
         ReferencedPathtracingHashStochasticTransparency(
             payload.stochasticAlphaSeed ^ 0x9e3779b9u);
@@ -384,15 +381,8 @@ void StandardLitReferencedPathtracingAnyHit(
         ReferencedPathtracingHashStochasticTransparencyToUnitFloat(
             candidateSeed);
 
-    bool surfaceBranch = opacityRandom < branchProbability;
-    float3 branchWeight =
-        ResolveOpenPbrGeometryOpacityBranchWeight(
-            coloredOpacity,
-            branchProbability,
-            surfaceBranch);
-    payload.pathThroughput *= branchWeight;
-    payload.stochasticTransparencyWeight *= branchWeight;
-    payload.stochasticTransparencyDiagnostics.rgb = coloredOpacity;
+    bool surfaceBranch = opacityRandom < geometryOpacity;
+    payload.stochasticTransparencyDiagnostics.rgb = geometryOpacity;
     payload.stochasticTransparencyDiagnostics.a += 1.0;
     if (!surfaceBranch)
     {

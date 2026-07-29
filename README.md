@@ -72,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 - Ray Tracing 需要 DXR 兼容硬件及 DX12。请在 Volume Profile 中添加 `VividRP/Ray Tracing/Settings` 并按项目需求配置。
 - DLSS 需要安装 NVIDIA 相关依赖，并定义 `DLSS_PLUGIN_INTEGRATE` 脚本符号。
 - NVIDIA Shader Execution Reordering（SER）在参考路径追踪中为 Windows x86_64 + DX12 提供可选加速，需 NVAPI 支持。
-- 参考路径追踪使用独立的 `.vrdg` 和管线资产，面向受控场景的验证，不以实时性能或完整 ground truth 为目标。`StandardLit` 除不透明 / Alpha Test 外还支持随机 RGB 几何透明度和 OpenPBR 透射：薄片应启用 `Thin-Walled Transmission`，封闭实体应关闭该选项，并可用 `Transmission Depth` 指定 `Transmission Color` 所对应的 Beer–Lambert 吸收距离；实体介质最多正确嵌套四层。OIDN 后端仅在 Editor 或 64 位 Standalone 且 `com.unity.rendering.denoising` 可用时启用。
+- 参考路径追踪使用独立的 `.vrdg` 和管线资产，面向受控场景的验证，不以实时性能或完整 ground truth 为目标。`StandardLit` 将几何覆盖与材质透射分开：随机覆盖由 `Base Color.a × Base Map.a × Opacity Map.r` 决定，`Transmission Weight × Transmission Map.r` 则控制 OpenPBR 透射，两个附加贴图都复用 Base Map UV。透射颜色由 `Transmission Color` 控制；薄片应启用 `Thin-Walled Transmission`，封闭实体应关闭该选项，并可用 `Transmission Depth` 指定该颜色对应的 Beer–Lambert 吸收距离；实体介质最多正确嵌套四层。OIDN 后端仅在 Editor 或 64 位 Standalone 且 `com.unity.rendering.denoising` 可用时启用。
 
 ## 目录导览
 

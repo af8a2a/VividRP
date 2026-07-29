@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 11;
+        internal const int Version = 12;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -73,7 +73,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingThinWalledTransmissionContract.Version);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
-                ReferencedPathTracingColoredOpacityContract.Version);
+                ReferencedPathTracingGeometryOpacityContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -524,74 +524,31 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
-    internal static class ReferencedPathTracingColoredOpacityContract
+    internal static class ReferencedPathTracingGeometryOpacityContract
     {
-        internal const int Version = 1;
+        internal const int Version = 2;
 
-        internal static Vector3 ResolveOpacity(
-            Vector3 opacityColor,
+        internal static float ResolveOpacity(
             float baseAlpha,
-            Vector3 opacityMap)
+            float opacityMapRed)
         {
-            opacityColor = Clamp01(opacityColor);
-            opacityMap = Clamp01(opacityMap);
-            return Vector3.Scale(
-                opacityColor,
-                opacityMap) * Mathf.Clamp01(baseAlpha);
+            return Mathf.Clamp01(baseAlpha)
+                * Mathf.Clamp01(opacityMapRed);
         }
 
-        internal static float ResolveBranchProbability(Vector3 opacity)
+        internal static float ResolveBranchProbability(float opacity)
         {
-            opacity = Clamp01(opacity);
-            return (opacity.x + opacity.y + opacity.z) / 3.0f;
-        }
-
-        internal static Vector3 ResolveBranchWeight(
-            Vector3 opacity,
-            bool surfaceBranch)
-        {
-            opacity = Clamp01(opacity);
-            var branchProbability =
-                ResolveBranchProbability(opacity);
-            if (surfaceBranch)
-            {
-                return branchProbability > 0.0f
-                    ? opacity / branchProbability
-                    : Vector3.zero;
-            }
-
-            var transmissionProbability =
-                1.0f - branchProbability;
-            return transmissionProbability > 0.0f
-                ? (Vector3.one - opacity)
-                    / transmissionProbability
-                : Vector3.zero;
+            return Mathf.Clamp01(opacity);
         }
 
         internal static Vector3 EvaluateExpectedComposite(
-            Vector3 opacity,
+            float opacity,
             Vector3 surfaceRadiance,
             Vector3 transmittedRadiance)
         {
-            opacity = Clamp01(opacity);
-            var branchProbability =
-                ResolveBranchProbability(opacity);
-            var surfaceEstimate = Vector3.Scale(
-                ResolveBranchWeight(opacity, true),
-                surfaceRadiance) * branchProbability;
-            var transmissionEstimate = Vector3.Scale(
-                ResolveBranchWeight(opacity, false),
-                transmittedRadiance)
-                * (1.0f - branchProbability);
-            return surfaceEstimate + transmissionEstimate;
-        }
-
-        private static Vector3 Clamp01(Vector3 value)
-        {
-            return new Vector3(
-                Mathf.Clamp01(value.x),
-                Mathf.Clamp01(value.y),
-                Mathf.Clamp01(value.z));
+            opacity = Mathf.Clamp01(opacity);
+            return surfaceRadiance * opacity
+                + transmittedRadiance * (1.0f - opacity);
         }
     }
 
@@ -1712,6 +1669,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public bool usesPhysicalCameraDof;
         public int shadingNormalContractVersion;
         public int thinWalledTransmissionContractVersion;
+        // Kept as the serialized field name for capture compatibility. Version
+        // 2 and later identify the scalar geometry-opacity contract.
         public int coloredOpacityContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
@@ -1845,7 +1804,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 10;
+        public const int ContractVersion = 11;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -1932,10 +1891,10 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             if (metadata.coloredOpacityContractVersion
-                != ReferencedPathTracingColoredOpacityContract.Version)
+                != ReferencedPathTracingGeometryOpacityContract.Version)
             {
                 return Fail(
-                    "Colored-opacity transport contract does not match the corpus.",
+                    "Geometry-opacity transport contract does not match the corpus.",
                     out failure);
             }
 
@@ -2207,7 +2166,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     ReferencedPathTracingThinWalledTransmissionContract
                         .Version,
                 coloredOpacityContractVersion =
-                    ReferencedPathTracingColoredOpacityContract.Version,
+                    ReferencedPathTracingGeometryOpacityContract.Version,
                 maxBounceCount = integratorState.maxBounceCount,
                 russianRouletteStartBounce =
                     integratorState.russianRouletteStartBounce,

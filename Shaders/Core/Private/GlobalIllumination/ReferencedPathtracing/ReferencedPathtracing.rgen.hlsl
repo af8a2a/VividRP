@@ -266,9 +266,7 @@ float3 TraceReferencedPathtracingVisibility(
         shadowRay,
         visibilityPayload);
 
-    return visibilityPayload.hit == 0u
-        ? visibilityPayload.stochasticTransparencyWeight
-        : 0.0;
+    return visibilityPayload.hit == 0u ? 1.0 : 0.0;
 }
 
 float3 TraceReferencedPathtracingCandidateVisibility(
@@ -657,9 +655,7 @@ void RayGenReferencedPathtracing()
             ReferencedPathtracingEvaluateMaterialMediumTransmittance(
                 activeMaterialMediumExtinction,
                 materialMediumDistance);
-        throughput *=
-            payload.stochasticTransparencyWeight
-            * materialMediumTransmittance;
+        throughput *= materialMediumTransmittance;
         if (!IsFiniteReferencedPathtracingRadiance(throughput)
             || MaxReferencedPathtracingComponent(throughput) <= 0.0)
         {
@@ -2149,7 +2145,7 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugStochasticTransparency)
     {
-        // RGB: most recent OpenPBR colored opacity along primary visibility.
+        // RGB: most recent scalar geometry opacity along primary visibility.
         debugRadiance = stochasticTransparencyDiagnostic;
     }
 
@@ -2240,14 +2236,10 @@ void RayGenReferencedPathtracing()
 void MissReferencedPathtracing(inout ReferencedPathtracingPayload payload : SV_RayPayload)
 {
     uint stochasticAlphaSeed = payload.stochasticAlphaSeed;
-    float3 stochasticTransparencyWeight =
-        payload.stochasticTransparencyWeight;
     float4 stochasticTransparencyDiagnostics =
         payload.stochasticTransparencyDiagnostics;
     InitializeReferencedPathtracingPayload(payload);
     payload.stochasticAlphaSeed = stochasticAlphaSeed;
-    payload.stochasticTransparencyWeight =
-        stochasticTransparencyWeight;
     payload.stochasticTransparencyDiagnostics =
         stochasticTransparencyDiagnostics;
 }

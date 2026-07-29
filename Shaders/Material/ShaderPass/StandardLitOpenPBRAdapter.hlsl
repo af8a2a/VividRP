@@ -84,11 +84,9 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.base_metalness = saturate(metallicSmoothness.x);
     inputs.base_diffuse_roughness = saturate(1.0 - metallicSmoothness.y);
     inputs.specular_roughness = max(1.0 - metallicSmoothness.y, 0.001);
-    inputs.geometry_opacity =
-        ResolveOpenPbrGeometryOpacityBranchProbability(
-            SampleOpenPbrGeometryOpacity(
-                geometry.uv,
-                baseTextureLod));
+    inputs.geometry_opacity = SampleOpenPbrGeometryOpacity(
+        geometry.uv,
+        baseTextureLod);
     inputs.geometry_thin_walled = _ThinWalledTransmission > 0.5;
     float specularIor = _SpecularIOR;
     if (isnan(specularIor) || isinf(specularIor))
@@ -105,7 +103,15 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.emission_luminance = any(material.emission > 0.0) ? 1.0 : 0.0;
     inputs.emission_color = material.emission;
     inputs.subsurface_weight = 0.0;
-    inputs.transmission_weight = saturate(_TransmissionWeight);
+    float transmissionTextureLod = baseTextureLod;
+#if defined(_TRANSMISSIONMAP)
+    transmissionTextureLod = max(
+        computeTargetTextureLOD(_TransmissionMap, textureBaseLambda),
+        0.0);
+#endif
+    inputs.transmission_weight = SampleOpenPbrTransmissionWeight(
+        geometry.uv,
+        transmissionTextureLod);
     inputs.transmission_color = saturate(_TransmissionColor.rgb);
     float transmissionDepth = _TransmissionDepth;
     if (isnan(transmissionDepth) || isinf(transmissionDepth))

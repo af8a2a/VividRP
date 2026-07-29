@@ -41,9 +41,9 @@ Shader "VividRP/Material/StandardLit"
         [Sub(SurfaceInputs)] _ClearCoatSmoothness("Clear Coat Smoothness", Range(0.0, 1.0)) = 1.0
 
         [Main(ReferencePathTracing, _, on, off)] _ReferencePathTracing("Reference Path Tracing", Float) = 1
-        [Sub(ReferencePathTracing)] _OpacityColor("Opacity Color", Color) = (1, 1, 1, 1)
         [SubToggle(ReferencePathTracing, _)] _ThinWalledTransmission("Thin-Walled Transmission", Float) = 0.0
         [Sub(ReferencePathTracing)] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
+        [NoScaleOffset] [Sub(ReferencePathTracing)] _TransmissionMap("Transmission Map (R)", 2D) = "white" {}
         [Sub(ReferencePathTracing)] _TransmissionColor("Transmission Color", Color) = (1, 1, 1, 1)
         [Sub(ReferencePathTracing)] _TransmissionDepth("Transmission Depth", Float) = 0.0
         [Sub(ReferencePathTracing)] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
@@ -354,6 +354,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma multi_compile _ INSTANCING_ON
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
                 #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
                 #pragma shader_feature_local_raytracing _SURFACE_TYPE_TRANSPARENT
                 #pragma shader_feature_local_raytracing _NORMALMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
@@ -377,6 +378,7 @@ Shader "VividRP/Material/StandardLit"
                 #pragma multi_compile _ INSTANCING_ON
                 #pragma shader_feature_local_raytracing _ALPHATEST_ON
                 #pragma shader_feature_local_raytracing _OPACITYMAP
+                #pragma shader_feature_local_raytracing _TRANSMISSIONMAP
                 #pragma shader_feature_local_raytracing _NORMALMAP
                 #pragma shader_feature_local_raytracing _METALLICSPECGLOSSMAP
                 #pragma shader_feature_local_raytracing _ROUGHNESSMAP

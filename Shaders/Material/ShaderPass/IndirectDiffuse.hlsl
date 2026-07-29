@@ -37,7 +37,6 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _EmissionColor;
     float4 _TransmissionColor;
-    float4 _OpacityColor;
     float _Cutoff;
     float _Smoothness;
     float _SmoothnessTextureChannel;
@@ -66,6 +65,8 @@ TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
 TEXTURE2D(_OpacityMap);
 SAMPLER(sampler_OpacityMap);
+TEXTURE2D(_TransmissionMap);
+SAMPLER(sampler_TransmissionMap);
 TEXTURE2D(_MetallicGlossMap);
 SAMPLER(sampler_MetallicGlossMap);
 TEXTURE2D(_RoughnessMap);
@@ -160,58 +161,46 @@ float4 SampleBase(float2 uv)
     return SampleBase(uv, 0.0);
 }
 
-float3 SampleOpenPbrGeometryOpacity(float2 uv, float textureLod)
+float SampleOpenPbrGeometryOpacity(float2 uv, float textureLod)
 {
-    float3 opacity =
-        saturate(_OpacityColor.rgb)
-        * saturate(
-            SAMPLE_TEXTURE2D_LOD(
-                _BaseMap,
-                sampler_BaseMap,
-                uv,
-                textureLod).a
-            * _BaseColor.a);
+    float opacity = saturate(
+        SAMPLE_TEXTURE2D_LOD(
+            _BaseMap,
+            sampler_BaseMap,
+            uv,
+            textureLod).a
+        * _BaseColor.a);
 #if defined(_OPACITYMAP)
     opacity *= saturate(SAMPLE_TEXTURE2D_LOD(
         _OpacityMap,
         sampler_OpacityMap,
         uv,
-        textureLod).rgb);
+        textureLod).r);
 #endif
     return saturate(opacity);
 }
 
-float3 SampleOpenPbrGeometryOpacity(float2 uv)
+float SampleOpenPbrGeometryOpacity(float2 uv)
 {
     return SampleOpenPbrGeometryOpacity(uv, 0.0);
 }
 
-float ResolveOpenPbrGeometryOpacityBranchProbability(float3 opacity)
+float SampleOpenPbrTransmissionWeight(float2 uv, float textureLod)
 {
-    opacity = saturate(opacity);
-    // The channel mean preserves p = opacity for grayscale input and bounds
-    // every RGB importance weight to three for saturated colored opacity.
-    return (opacity.r + opacity.g + opacity.b) * (1.0 / 3.0);
+    float transmissionWeight = saturate(_TransmissionWeight);
+#if defined(_TRANSMISSIONMAP)
+    transmissionWeight *= saturate(SAMPLE_TEXTURE2D_LOD(
+        _TransmissionMap,
+        sampler_TransmissionMap,
+        uv,
+        textureLod).r);
+#endif
+    return saturate(transmissionWeight);
 }
 
-float3 ResolveOpenPbrGeometryOpacityBranchWeight(
-    float3 opacity,
-    float branchProbability,
-    bool surfaceBranch)
+float SampleOpenPbrTransmissionWeight(float2 uv)
 {
-    opacity = saturate(opacity);
-    branchProbability = saturate(branchProbability);
-    if (surfaceBranch)
-    {
-        return branchProbability > 0.0
-            ? opacity / branchProbability
-            : 0.0;
-    }
-
-    float transmissionProbability = 1.0 - branchProbability;
-    return transmissionProbability > 0.0
-        ? (1.0 - opacity) / transmissionProbability
-        : 0.0;
+    return SampleOpenPbrTransmissionWeight(uv, 0.0);
 }
 
 bool VividIndirectDiffuseIsAlphaClipped(float alpha)

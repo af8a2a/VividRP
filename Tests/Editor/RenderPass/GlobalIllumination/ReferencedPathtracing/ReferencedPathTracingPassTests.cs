@@ -93,7 +93,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void ColoredOpacityEstimator_WeightsCameraAndShadowTraversal()
+        public void GeometryOpacityEstimator_UsesUnweightedScalarCoverage()
         {
             var materialSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
@@ -119,28 +119,28 @@ namespace VividRP.Editor.Tests
                 Does.Contain("SampleOpenPbrGeometryOpacity("));
             Assert.That(
                 indirectDiffuseSource,
-                Does.Contain(
-                    "ResolveOpenPbrGeometryOpacityBranchProbability("));
+                Does.Contain("float SampleOpenPbrGeometryOpacity("));
             Assert.That(
                 indirectDiffuseSource,
                 Does.Contain(
-                    "ResolveOpenPbrGeometryOpacityBranchWeight("));
+                    "textureLod).r);"));
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Not.Contain("_OpacityColor"));
             Assert.That(
                 materialSource,
                 Does.Contain(
-                    "payload.pathThroughput *= branchWeight;"));
+                    "bool surfaceBranch = opacityRandom < geometryOpacity;"));
             Assert.That(
                 materialSource,
-                Does.Contain(
-                    "payload.stochasticTransparencyWeight *= branchWeight;"));
+                Does.Not.Contain("branchWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain("stochasticTransparencyWeight"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "payload.stochasticTransparencyWeight"));
-            Assert.That(
-                rayGenerationSource,
-                Does.Contain(
-                    "? visibilityPayload.stochasticTransparencyWeight"));
+                    "return visibilityPayload.hit == 0u ? 1.0 : 0.0;"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
@@ -181,7 +181,11 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 adapterSource,
                 Does.Contain(
-                    "inputs.transmission_weight = saturate(_TransmissionWeight);"));
+                    "inputs.transmission_weight = SampleOpenPbrTransmissionWeight("));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "computeTargetTextureLOD(_TransmissionMap, textureBaseLambda)"));
             Assert.That(
                 adapterSource,
                 Does.Contain(
@@ -1942,7 +1946,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void V1FreezeGate_RejectsNonCanonicalColoredOpacityContract()
+        public void V1FreezeGate_RejectsNonCanonicalGeometryOpacityContract()
         {
             var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
             var capture = CreateValidFrozenCapture(corpusCase);
@@ -1955,7 +1959,7 @@ namespace VividRP.Editor.Tests
                 Is.False);
             Assert.That(
                 failure,
-                Does.Contain("Colored-opacity transport contract"));
+                Does.Contain("Geometry-opacity transport contract"));
         }
 
         [Test]
@@ -2255,7 +2259,7 @@ namespace VividRP.Editor.Tests
                     ReferencedPathTracingThinWalledTransmissionContract
                         .Version,
                 coloredOpacityContractVersion =
-                    ReferencedPathTracingColoredOpacityContract.Version,
+                    ReferencedPathTracingGeometryOpacityContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

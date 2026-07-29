@@ -23,11 +23,11 @@ namespace VividRP.Runtime
     public sealed partial class AutoExposure
     {
         private const int CurrentUnrealSettingsVersion = 1;
+        private const float ExposureLimitMinEV100 = -10f;
+        private const float ExposureLimitMaxEV100 = 20f;
         private const float DefaultHistogramLogMinEV100 = -10f;
         private const float DefaultHistogramLogMaxEV100 = 20f;
         private const float LegacyDefaultHistogramLogMaxEV100 = 6f;
-        private const float HistogramLogRangeLimitMinEV100 = -20f;
-        private const float HistogramLogRangeLimitMaxEV100 = 20f;
         private const float DefaultExposureCompensationCurveMinEV100 = -16f;
         private const float DefaultExposureCompensationCurveMaxEV100 = 16f;
 
@@ -47,10 +47,12 @@ namespace VividRP.Runtime
         public MinFloatParameter maxBrightness = new(8f, 0f);
 
         [Tooltip("Minimum EV100 allowed during histogram adaptation, matching Unreal's extended luminance range workflow.")]
-        public FloatParameter minEV100 = new(-10f);
+        public ClampedFloatParameter minEV100 =
+            new(ExposureLimitMinEV100, ExposureLimitMinEV100, ExposureLimitMaxEV100);
 
         [Tooltip("Maximum EV100 allowed during histogram adaptation, matching Unreal's extended luminance range workflow.")]
-        public FloatParameter maxEV100 = new(20f);
+        public ClampedFloatParameter maxEV100 =
+            new(ExposureLimitMaxEV100, ExposureLimitMinEV100, ExposureLimitMaxEV100);
 
         [Tooltip("Adaptation speed in f-stops per second when moving toward a brighter exposure.")]
         public MinFloatParameter speedUp = new(3f, 0.02f);
@@ -78,8 +80,8 @@ namespace VividRP.Runtime
         [Tooltip("Histogram EV100 range, matching Unreal's Histogram Min/Max EV100 controls.")]
         public FloatRangeParameter histogramLogRange = new(
             new Vector2(DefaultHistogramLogMinEV100, DefaultHistogramLogMaxEV100),
-            HistogramLogRangeLimitMinEV100,
-            HistogramLogRangeLimitMaxEV100);
+            ExposureLimitMinEV100,
+            ExposureLimitMaxEV100);
 
         [SerializeField, HideInInspector]
         private FloatParameter histogramLogMin = new(DefaultHistogramLogMinEV100);
@@ -93,8 +95,14 @@ namespace VividRP.Runtime
             percent ??= new FloatRangeParameter(new Vector2(10f, 90f), 1f, 99f);
             minBrightness ??= new MinFloatParameter(0.03f, 0f);
             maxBrightness ??= new MinFloatParameter(8f, 0f);
-            minEV100 ??= new FloatParameter(-10f);
-            maxEV100 ??= new FloatParameter(20f);
+            minEV100 ??= new ClampedFloatParameter(
+                ExposureLimitMinEV100,
+                ExposureLimitMinEV100,
+                ExposureLimitMaxEV100);
+            maxEV100 ??= new ClampedFloatParameter(
+                ExposureLimitMaxEV100,
+                ExposureLimitMinEV100,
+                ExposureLimitMaxEV100);
             speedUp ??= new MinFloatParameter(3f, 0.02f);
             speedDown ??= new MinFloatParameter(1f, 0.02f);
             manualEV100 ??= new FloatParameter(0f);
@@ -103,8 +111,8 @@ namespace VividRP.Runtime
             exposureMeteringMask ??= new Texture2DParameter(null);
             histogramLogRange ??= new FloatRangeParameter(
                 new Vector2(DefaultHistogramLogMinEV100, DefaultHistogramLogMaxEV100),
-                HistogramLogRangeLimitMinEV100,
-                HistogramLogRangeLimitMaxEV100);
+                ExposureLimitMinEV100,
+                ExposureLimitMaxEV100);
             histogramLogMin ??= new FloatParameter(DefaultHistogramLogMinEV100);
             histogramLogMax ??= new FloatParameter(DefaultHistogramLogMaxEV100);
             exposureCompensationCurve ??=

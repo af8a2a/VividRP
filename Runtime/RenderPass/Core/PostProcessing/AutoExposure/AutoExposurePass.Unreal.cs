@@ -54,8 +54,8 @@ namespace VividRP.Runtime.RenderPass
             cmd.DispatchCompute(
                 histogramCompute,
                 m_BuildHistogramKernel,
-                CoreUtils.DivRoundUp(m_AutoExposureWidth, AutoExposureHistogramThreadGroupSizeX),
-                CoreUtils.DivRoundUp(m_AutoExposureHeight, AutoExposureHistogramThreadGroupSizeY),
+                Mathf.Max(1, m_AutoExposureHeight),
+                1,
                 1);
 
             BindAutoExposureParameters(cmd, histogramCompute, resolveKernel);

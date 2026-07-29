@@ -15,6 +15,7 @@ namespace VividRP.Runtime
             settings.applyPhysicalCameraExposure = autoExposure.applyPhysicalCameraExposure.value;
             settings.unrealExposureMeteringMask = autoExposure.exposureMeteringMask.value;
             settings.unrealBlackHistogramBucketInfluence = 0f;
+            settings.unrealCompensationCurveHasHistory = !isFirstFrame;
             settings.manualEV100 = ResolveManualEV100(
                 camera,
                 autoExposure.manualEV100.value,
@@ -59,11 +60,11 @@ namespace VividRP.Runtime
                     Mathf.Clamp(autoExposure.percent.min, 1f, 99f) * PercentToScale,
                     exposureHighPercent)
                 : 0f;
-            var minWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(
-                autoExposure.minEV100.value);
-            var maxWhitePointLuminance = Mathf.Max(
-                minWhitePointLuminance,
-                ResolveWhitePointLuminanceFromEV100(autoExposure.maxEV100.value));
+            var maxWhitePointLuminance = ResolveWhitePointLuminanceFromEV100(
+                autoExposure.maxEV100.value);
+            var minWhitePointLuminance = Mathf.Min(
+                ResolveWhitePointLuminanceFromEV100(autoExposure.minEV100.value),
+                maxWhitePointLuminance);
             var histogramLogRangeValue = autoExposure.histogramLogRange.value;
             var histogramLogRange = ResolveHistogramLogRangeFromEV100(
                 histogramLogRangeValue.x,

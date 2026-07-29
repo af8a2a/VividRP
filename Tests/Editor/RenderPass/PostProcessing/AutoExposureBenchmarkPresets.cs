@@ -54,6 +54,7 @@ namespace VividRP.Editor.Tests
             settings.exposureCompensationCurveMinEV100 = curveTextureData.minEV100;
             settings.exposureCompensationCurveInvRange = curveTextureData.invRange;
             settings.exposureCompensationCurveEnabled = curveTextureData.enabled;
+            settings.unrealCompensationCurveHasHistory = !isFirstFrame;
 
             if (preset.Mode == AutoExposureMode.Manual)
             {

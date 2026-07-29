@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -41,6 +42,7 @@ namespace VividRP.Runtime
         public float targetMidGray;
         public Texture unrealExposureMeteringMask;
         public float unrealBlackHistogramBucketInfluence;
+        public bool unrealCompensationCurveHasHistory;
         public Texture hdrpCurveMapTexture;
         public float hdrpCurveMapMinEV100;
         public float hdrpCurveMapMaxEV100;
@@ -94,6 +96,7 @@ namespace VividRP.Runtime
                 targetMidGray = AutoExposureSettingsResolver.MiddleGrey,
                 unrealExposureMeteringMask = null,
                 unrealBlackHistogramBucketInfluence = 0f,
+                unrealCompensationCurveHasHistory = false,
                 hdrpCurveMapTexture = null,
                 hdrpCurveMapMinEV100 = AutoExposureCurveMapUtility.DefaultCurveMinEV100,
                 hdrpCurveMapMaxEV100 = AutoExposureCurveMapUtility.DefaultCurveMaxEV100,
@@ -779,7 +782,10 @@ namespace VividRP.Runtime
                 histogramSum += ResolveHistogramBucketValue(histogram, bucketIndex);
 
             if (histogramSum <= Epsilon)
-                return false;
+            {
+                averageSceneLuminance = 1f;
+                return true;
+            }
 
             var minFractionSum = histogramSum * lowPercent;
             var maxFractionSum = histogramSum * highPercent;
@@ -809,19 +815,55 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal static bool TryResolveBasicAverageSceneLuminance(
+            IReadOnlyList<uint> accumulator,
+            float histogramScale,
+            float histogramBias,
+            out float averageSceneLuminance)
+        {
+            averageSceneLuminance = AutoExposureSettingsResolver.MiddleGrey;
+            if (accumulator == null || accumulator.Count < 2)
+                return false;
+
+            var weightedScaledLogLuminance = UIntBitsToFloat(accumulator[0]);
+            var totalWeight = Mathf.Max(UIntBitsToFloat(accumulator[1]), 1e-10f);
+            var averageScaledLogLuminance = weightedScaledLogLuminance / totalWeight;
+            var averageLogLuminance = ResolveLogLuminanceFromHistogramPosition(
+                averageScaledLogLuminance,
+                histogramScale,
+                histogramBias);
+            averageSceneLuminance = Mathf.Pow(2f, averageLogLuminance);
+            return true;
+        }
+
         internal static AutoExposureExposureState ResolveExposureState(
             IReadOnlyList<uint> histogram,
             in AutoExposureSettingsData settings,
             Vector4 previousExposureState)
         {
             var previousState = AutoExposureExposureState.FromVector4(previousExposureState);
-            if (!TryResolveAverageSceneLuminance(
+            float averageSceneLuminance;
+            bool resolvedAverageSceneLuminance;
+            if (settings.mode == AutoExposureMode.Basic)
+            {
+                resolvedAverageSceneLuminance = TryResolveBasicAverageSceneLuminance(
+                    histogram,
+                    settings.histogramScale,
+                    settings.histogramBias,
+                    out averageSceneLuminance);
+            }
+            else
+            {
+                resolvedAverageSceneLuminance = TryResolveAverageSceneLuminance(
                     histogram,
                     settings.exposureLowPercent,
                     settings.exposureHighPercent,
                     settings.histogramScale,
                     settings.histogramBias,
-                    out var averageSceneLuminance))
+                    out averageSceneLuminance);
+            }
+
+            if (!resolvedAverageSceneLuminance)
             {
                 return previousState;
             }
@@ -832,9 +874,11 @@ namespace VividRP.Runtime
                 settings.maxAverageLuminance);
             var targetExposure = targetAverageLuminance / AutoExposureSettingsResolver.MiddleGrey;
 
-            var curveCompensationStops = SampleExposureCompensationCurveStops(averageSceneLuminance, settings);
+            var curveCompensationStops = SampleExposureCompensationCurveStops(
+                previousState.averageSceneLuminance,
+                settings);
             var middleGreyExposureCompensation = settings.exposureCompensationSettings * Mathf.Pow(2f, curveCompensationStops);
-            var oldExposure = Mathf.Max(previousState.middleGreyCompensation, Epsilon)
+            var oldExposure = middleGreyExposureCompensation
                 / Mathf.Max(previousState.currentExposureScale, Epsilon);
             var estimatedExposure = ComputeAdaptedExposure(oldExposure, targetExposure, settings);
             var smoothedExposure = Mathf.Clamp(
@@ -857,6 +901,11 @@ namespace VividRP.Runtime
                 return 0f;
 
             return histogram[bucketIndex];
+        }
+
+        private static float UIntBitsToFloat(uint value)
+        {
+            return BitConverter.Int32BitsToSingle(unchecked((int)value));
         }
 
         private static float ResolveLogLuminanceFromHistogramPosition(float histogramPosition, float histogramScale, float histogramBias)
@@ -905,7 +954,9 @@ namespace VividRP.Runtime
 
         private static float SampleExposureCompensationCurveStops(float averageSceneLuminance, in AutoExposureSettingsData settings)
         {
-            if (!settings.exposureCompensationCurveEnabled
+            if (!settings.unrealCompensationCurveHasHistory
+                || averageSceneLuminance <= 0f
+                || !settings.exposureCompensationCurveEnabled
                 || settings.exposureCompensationCurveTexture == null
                 || settings.exposureCompensationCurveTexture is not Texture2D curveTexture)
             {

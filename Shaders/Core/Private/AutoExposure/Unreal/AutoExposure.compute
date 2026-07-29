@@ -6,9 +6,10 @@
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Common.hlsl"
 #include "Packages/com.unity.render-pipelines.core/ShaderLibrary/GlobalSamplers.hlsl"
 #define HISTOGRAM_SIZE 64
-#define HISTOGRAM_THREAD_GROUP_SIZE_X 8
-#define HISTOGRAM_THREAD_GROUP_SIZE_Y 8
-#define HISTOGRAM_WEIGHT_SCALE 64
+#define HISTOGRAM_THREAD_GROUP_SIZE 64
+#define HISTOGRAM_LOCAL_WEIGHT_SCALE (1u << 18)
+#define HISTOGRAM_GLOBAL_WEIGHT_SCALE 64u
+#define HISTOGRAM_LOCAL_TO_GLOBAL_SCALE (HISTOGRAM_LOCAL_WEIGHT_SCALE / HISTOGRAM_GLOBAL_WEIGHT_SCALE)
 
 Texture2D<float4> _InputColor;
 Texture2D<float4> _AutoExposureMeterMask;
@@ -29,7 +30,16 @@ float4 _UnrealAutoExposureMethodParams;
 // Matches UE's default r.AutoExposure.LuminanceMethod=0 (uniform luminance).
 static const float3 kLuminanceWeights = float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);
 static const float kMiddleGrey = 0.18f;
+// UE's extended-range default 0.78 / r.EyeAdaptation.LensAttenuation=0.78.
+static const float kLuminanceMax = 1.0f;
 static const float kEpsilon = 1e-4f;
+static const float kCurveLuminanceEpsilon = 1e-6f;
+static const float kBasicWeightEpsilon = 1e-10f;
+static const float kBasicLogLuminanceMin = -10.0f;
+static const float kBasicLogLuminanceMax = 20.0f;
+
+groupshared uint s_GroupHistogram[HISTOGRAM_SIZE];
+groupshared float2 s_GroupBasicLuminance[HISTOGRAM_THREAD_GROUP_SIZE];
 
 float GetHistogramPositionFromLogLuminance(float logLuminance)
 {
@@ -43,15 +53,19 @@ float GetLogLuminanceFromHistogramPosition(float histogramPosition)
 
 float ResolveAverageSceneEV100FromLuminance(float averageSceneLuminance)
 {
-    return log2(max(averageSceneLuminance / kMiddleGrey, kEpsilon));
+    const float normalizedLuminance =
+        averageSceneLuminance / (kMiddleGrey * kLuminanceMax);
+    return log2(max(normalizedLuminance, kCurveLuminanceEpsilon));
 }
 
-float SampleExposureCompensationCurveStops(float averageSceneLuminance)
+float SampleExposureCompensationCurveStops(float previousAverageSceneLuminance)
 {
-    if (_AutoExposureCurveParams.z < 0.5f)
+    if (_AutoExposureCurveParams.z < 0.5f
+        || _UnrealAutoExposureMethodParams.z < 0.5f
+        || previousAverageSceneLuminance <= 0.0f)
         return 0.0f;
 
-    const float averageSceneEV100 = ResolveAverageSceneEV100FromLuminance(averageSceneLuminance);
+    const float averageSceneEV100 = ResolveAverageSceneEV100FromLuminance(previousAverageSceneLuminance);
     const float curveUv = saturate((averageSceneEV100 - _AutoExposureCurveParams.x) * _AutoExposureCurveParams.y);
     return _AutoExposureCompensationCurve.SampleLevel(sampler_LinearClamp, float2(curveUv, 0.5f), 0.0f).r;
 }
@@ -95,45 +109,157 @@ void ClearHistogram(uint3 dispatchThreadId : SV_DispatchThreadID)
     _HistogramBuffer[dispatchThreadId.x] = 0;
 }
 
-[numthreads(HISTOGRAM_THREAD_GROUP_SIZE_X, HISTOGRAM_THREAD_GROUP_SIZE_Y, 1)]
-void BuildHistogram(uint3 dispatchThreadId : SV_DispatchThreadID)
+void InterlockedAddFloat(uint bufferIndex, float value)
 {
-    const uint width = (uint)_AutoExposureScreenSize.x;
-    const uint height = (uint)_AutoExposureScreenSize.y;
-    if (dispatchThreadId.x >= width || dispatchThreadId.y >= height)
+    if (value == 0.0f)
         return;
 
-    const float preExposure = max(_PreviousExposureBuffer[0].x, kEpsilon);
-    const float3 color = _InputColor.Load(int3(dispatchThreadId.xy, 0)).rgb / preExposure;
-    const float luminance = max(dot(color, kLuminanceWeights), _AutoExposureParams2.z);
-    const float logLuminance = log2(luminance);
-    const float histogramPosition = saturate(GetHistogramPositionFromLogLuminance(logLuminance));
-    const float bucketPosition = histogramPosition * (HISTOGRAM_SIZE - 1);
-    const uint lowerBucket = min((uint)floor(bucketPosition), (uint)(HISTOGRAM_SIZE - 1));
-    const uint upperBucket = min(lowerBucket + 1, (uint)(HISTOGRAM_SIZE - 1));
-    const float upperBucketFraction = frac(bucketPosition);
+    uint expectedBits = _HistogramBuffer[bufferIndex];
+    uint originalBits;
 
-    const float2 uv = (dispatchThreadId.xy + 0.5f) * _AutoExposureScreenSize.zw;
-    float meterMask = saturate(
-        _AutoExposureMeterMask.SampleLevel(sampler_LinearClamp, uv, 0).r);
-    if (_UnrealAutoExposureMethodParams.x > 0.5f)
-        meterMask = max(meterMask, 0.05f);
-
-    const uint totalWeight = (uint)round(meterMask * HISTOGRAM_WEIGHT_SCALE);
-    uint upperWeight = (uint)round((float)totalWeight * upperBucketFraction);
-    uint lowerWeight = totalWeight - upperWeight;
-
-    if (lowerBucket == 0)
+    [allow_uav_condition]
+    while (true)
     {
-        lowerWeight = (uint)round(
-            (float)lowerWeight * saturate(_UnrealAutoExposureMethodParams.y));
+        const uint desiredBits = asuint(asfloat(expectedBits) + value);
+        InterlockedCompareExchange(
+            _HistogramBuffer[bufferIndex],
+            expectedBits,
+            desiredBits,
+            originalBits);
+
+        if (originalBits == expectedBits)
+            return;
+
+        expectedBits = originalBits;
+    }
+}
+
+[numthreads(HISTOGRAM_THREAD_GROUP_SIZE, 1, 1)]
+void BuildHistogram(
+    uint3 groupId : SV_GroupID,
+    uint3 groupThreadId : SV_GroupThreadID)
+{
+    const uint laneIndex = groupThreadId.x;
+    const bool useBasicMethod = _UnrealAutoExposureMethodParams.x > 0.5f;
+    const uint width = (uint)_AutoExposureScreenSize.x;
+    const uint height = (uint)_AutoExposureScreenSize.y;
+    const uint rowIndex = groupId.x;
+    const float preExposure = max(_PreviousExposureBuffer[0].x, kEpsilon);
+    float2 basicLuminance = 0.0f;
+
+    s_GroupHistogram[laneIndex] = 0u;
+    s_GroupBasicLuminance[laneIndex] = 0.0f;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (rowIndex < height)
+    {
+        for (uint columnIndex = laneIndex;
+             columnIndex < width;
+             columnIndex += HISTOGRAM_THREAD_GROUP_SIZE)
+        {
+            const uint2 pixelCoord = uint2(columnIndex, rowIndex);
+            const float3 color = _InputColor.Load(int3(pixelCoord, 0)).rgb / preExposure;
+            const float luminance = max(dot(color, kLuminanceWeights), _AutoExposureParams2.z);
+            const float2 uv = (pixelCoord + 0.5f) * _AutoExposureScreenSize.zw;
+            float meterMask = saturate(
+                _AutoExposureMeterMask.SampleLevel(sampler_LinearClamp, uv, 0).r);
+
+            if (useBasicMethod)
+            {
+                const float logLuminance = clamp(
+                    log2(luminance),
+                    kBasicLogLuminanceMin,
+                    kBasicLogLuminanceMax);
+                const float scaledLogLuminance =
+                    GetHistogramPositionFromLogLuminance(logLuminance);
+                const float bucketPosition =
+                    saturate(scaledLogLuminance) * (HISTOGRAM_SIZE - 1);
+                const uint lowerBucket = min(
+                    (uint)floor(bucketPosition),
+                    (uint)(HISTOGRAM_SIZE - 1));
+
+                meterMask = max(meterMask, 0.05f);
+                if (lowerBucket == 0u)
+                {
+                    meterMask *= saturate(
+                        _UnrealAutoExposureMethodParams.y);
+                }
+
+                basicLuminance += float2(
+                    scaledLogLuminance * meterMask,
+                    meterMask);
+                continue;
+            }
+
+            const float logLuminance = log2(luminance);
+            const float histogramPosition = saturate(
+                GetHistogramPositionFromLogLuminance(logLuminance));
+            const float bucketPosition =
+                histogramPosition * (HISTOGRAM_SIZE - 1);
+            const uint lowerBucket = min(
+                (uint)floor(bucketPosition),
+                (uint)(HISTOGRAM_SIZE - 1));
+            const uint upperBucket = min(
+                lowerBucket + 1,
+                (uint)(HISTOGRAM_SIZE - 1));
+            const float upperBucketFraction = frac(bucketPosition);
+
+            const uint totalWeight = (uint)round(
+                meterMask * HISTOGRAM_LOCAL_WEIGHT_SCALE);
+            uint upperWeight = (uint)round(
+                (float)totalWeight * upperBucketFraction);
+            uint lowerWeight = totalWeight - upperWeight;
+
+            if (lowerBucket == 0u)
+            {
+                lowerWeight = (uint)round(
+                    (float)lowerWeight
+                    * saturate(_UnrealAutoExposureMethodParams.y));
+            }
+
+            if (lowerWeight > 0u)
+                InterlockedAdd(s_GroupHistogram[lowerBucket], lowerWeight);
+
+            if (upperWeight > 0u)
+                InterlockedAdd(s_GroupHistogram[upperBucket], upperWeight);
+        }
     }
 
-    if (lowerWeight > 0)
-        InterlockedAdd(_HistogramBuffer[lowerBucket], lowerWeight);
+    s_GroupBasicLuminance[laneIndex] = basicLuminance;
+    GroupMemoryBarrierWithGroupSync();
 
-    if (upperWeight > 0)
-        InterlockedAdd(_HistogramBuffer[upperBucket], upperWeight);
+    if (!useBasicMethod)
+    {
+        const uint localWeight = s_GroupHistogram[laneIndex];
+        // Preserve UE-like high precision inside a row while keeping the
+        // public 64-bin uint buffer safe for 8K-class frame sizes.
+        const uint globalWeight =
+            (localWeight + HISTOGRAM_LOCAL_TO_GLOBAL_SCALE / 2u)
+            / HISTOGRAM_LOCAL_TO_GLOBAL_SCALE;
+        if (globalWeight > 0u)
+            InterlockedAdd(_HistogramBuffer[laneIndex], globalWeight);
+        return;
+    }
+
+    [unroll]
+    for (uint reductionStride = HISTOGRAM_THREAD_GROUP_SIZE / 2u;
+         reductionStride > 0u;
+         reductionStride >>= 1u)
+    {
+        if (laneIndex < reductionStride)
+        {
+            s_GroupBasicLuminance[laneIndex] +=
+                s_GroupBasicLuminance[laneIndex + reductionStride];
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    if (laneIndex == 0u)
+    {
+        InterlockedAddFloat(0u, s_GroupBasicLuminance[0].x);
+        InterlockedAddFloat(1u, s_GroupBasicLuminance[0].y);
+    }
 }
 
 bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
@@ -146,8 +272,8 @@ bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
 
     if (histogramSum <= kEpsilon)
     {
-        averageSceneLuminance = 0.0f;
-        return false;
+        averageSceneLuminance = 1.0f;
+        return true;
     }
 
     float minFractionSum = histogramSum * _AutoExposureParams0.x;
@@ -178,25 +304,16 @@ bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
 
 bool TryResolveBasicAverageSceneLuminance(out float averageSceneLuminance)
 {
-    float2 weightedLogLuminance = 0.0f;
-
-    [unroll]
-    for (uint bucketIndex = 0; bucketIndex < HISTOGRAM_SIZE; ++bucketIndex)
-    {
-        const float bucketWeight = (float)_HistogramBuffer[bucketIndex];
-        const float logLuminanceAtBucket = GetLogLuminanceFromHistogramPosition(
-            (float)bucketIndex / (float)(HISTOGRAM_SIZE - 1));
-        weightedLogLuminance += float2(logLuminanceAtBucket, 1.0f) * bucketWeight;
-    }
-
-    if (weightedLogLuminance.y <= kEpsilon)
-    {
-        averageSceneLuminance = 0.0f;
-        return false;
-    }
-
-    averageSceneLuminance = exp2(
-        weightedLogLuminance.x / weightedLogLuminance.y);
+    const float weightedScaledLogLuminance = asfloat(_HistogramBuffer[0]);
+    const float totalWeight = max(
+        asfloat(_HistogramBuffer[1]),
+        kBasicWeightEpsilon);
+    const float averageScaledLogLuminance =
+        weightedScaledLogLuminance / totalWeight;
+    const float averageLogLuminance =
+        GetLogLuminanceFromHistogramPosition(
+            averageScaledLogLuminance);
+    averageSceneLuminance = exp2(averageLogLuminance);
     return true;
 }
 
@@ -208,11 +325,16 @@ void WriteResolvedExposure(float averageSceneLuminance)
         _AutoExposureParams0.w);
 
     const float targetExposure = targetAverageLuminance / kMiddleGrey;
-    const float curveCompensationStops = SampleExposureCompensationCurveStops(averageSceneLuminance);
+    const float previousAverageSceneLuminance =
+        _PreviousExposureBuffer[0].z;
+    const float curveCompensationStops =
+        SampleExposureCompensationCurveStops(
+            previousAverageSceneLuminance);
     const float middleGreyExposureCompensation = _AutoExposureParams1.z * exp2(curveCompensationStops);
     const float oldExposureScale = _PreviousExposureBuffer[0].x;
-    const float oldMiddleGreyExposureCompensation = max(_PreviousExposureBuffer[0].w, kEpsilon);
-    const float oldExposure = oldMiddleGreyExposureCompensation / max(oldExposureScale, kEpsilon);
+    const float oldExposure =
+        middleGreyExposureCompensation
+        / max(oldExposureScale, kEpsilon);
     const float estimatedExposure = ComputeAdaptedExposure(oldExposure, targetExposure);
     const float smoothedExposure = clamp(
         estimatedExposure,

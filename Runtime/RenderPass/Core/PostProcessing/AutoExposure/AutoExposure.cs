@@ -61,18 +61,9 @@ namespace VividRP.Runtime
 
         internal bool IsUnrealActive()
         {
-            if (!enabled.value)
-                return false;
-
-            if (mode.value == AutoExposureMode.Manual)
-                return true;
-
-            var minWhitePointLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(minEV100.value);
-            var maxWhitePointLuminance = AutoExposureSettingsResolver.ResolveWhitePointLuminanceFromEV100(maxEV100.value);
-
-            return maxWhitePointLuminance >= minWhitePointLuminance
-                && speedUp.value > 0f
-                && speedDown.value > 0f;
+            // Unreal keeps eye adaptation active for collapsed/invalid ranges
+            // and asks the shader to force the target for that frame.
+            return enabled.value;
         }
 
     }

@@ -61,8 +61,8 @@ namespace VividRP.Editor
             DrawSectionHeader(mode == AutoExposureMode.Basic ? "Basic" : "Histogram");
             if (mode == AutoExposureMode.Histogram)
                 PropertyField(m_Percent, s_HistogramPercentagesLabel);
-            DoExposurePropertyField(m_MinEV100, s_LimitMinLabel);
-            DoExposurePropertyField(m_MaxEV100, s_LimitMaxLabel);
+            PropertyField(m_MinEV100, s_LimitMinLabel);
+            PropertyField(m_MaxEV100, s_LimitMaxLabel);
             PropertyField(m_HistogramLogRange, s_HistogramEv100RangeLabel);
             PropertyField(m_ExposureCompensation, s_CompensationLabel);
             PropertyField(m_ExposureCompensationCurve, s_CompensationCurveLabel);

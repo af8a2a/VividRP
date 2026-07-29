@@ -10,8 +10,6 @@ namespace VividRP.Runtime.RenderPass
     {
         private const int UnrealAutoExposureHistogramBucketCount = 64;
         private const int HdrpAutoExposureHistogramBucketCount = 128;
-        private const int AutoExposureHistogramThreadGroupSizeX = 8;
-        private const int AutoExposureHistogramThreadGroupSizeY = 8;
         private const int HdrpAutoExposurePrePassSize = 1024;
         private const int HdrpAutoExposureReductionSize = 32;
         private const int HdrpHistogramThreadGroupSizeX = 16;
@@ -319,7 +317,7 @@ namespace VividRP.Runtime.RenderPass
                 new Vector4(
                     m_AutoExposureSettings.mode == AutoExposureMode.Basic ? 1f : 0f,
                     m_AutoExposureSettings.unrealBlackHistogramBucketInfluence,
-                    0f,
+                    m_AutoExposureSettings.unrealCompensationCurveHasHistory ? 1f : 0f,
                     0f));
             cmd.SetComputeTextureParam(
                 computeShader,
@@ -345,7 +343,8 @@ namespace VividRP.Runtime.RenderPass
 
         private bool UsesHistogramBufferAutoExposureExecution()
         {
-            return UsesUnrealAutoExposureExecution()
+            return (UsesUnrealAutoExposureExecution()
+                    && m_AutoExposureSettings.mode == AutoExposureMode.Histogram)
                 || UsesHDRPHistogramAutoExposureExecution();
         }
 

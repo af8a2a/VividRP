@@ -131,6 +131,7 @@ namespace VividRP.Editor
     {
         internal const float MetallicWorkflow = 1.0f;
         internal const float OpaqueSurface = 0.0f;
+        internal const float TransparentSurface = 1.0f;
 
         /// <summary>
         /// MaterialFinalizer delegate for use with MaterialUpgrader.
@@ -156,6 +157,8 @@ namespace VividRP.Editor
         private const string SurfaceTypeTransparentKeyword = "_SURFACE_TYPE_TRANSPARENT";
         private const string SpecularSetupKeyword = "_SPECULAR_SETUP";
         private const string VirtualTextureBaseColorKeyword = "_VIRTUAL_TEXTURE_BASE_COLOR";
+        private const string StandardLitShaderName =
+            "VividRP/Material/StandardLit";
 
         internal static void SetupMaterial(Material material, Shader oldShader, bool logWarnings)
         {
@@ -167,7 +170,7 @@ namespace VividRP.Editor
             MigrateLegacyValues(material, oldShader);
             ApplyUnsupportedFallbacks(material, logWarnings);
             SyncLegacyAliases(material);
-            SyncOpaqueState(material);
+            SyncSurfaceState(material);
             SyncKeywords(material);
             SyncRenderQueue(material);
             SyncGlobalIlluminationFlags(material);
@@ -209,9 +212,13 @@ namespace VividRP.Editor
                 material.SetFloat("_WorkflowMode", MetallicWorkflow);
             }
 
-            if (material.HasProperty("_Surface") && Mathf.Abs(material.GetFloat("_Surface") - OpaqueSurface) > EnabledThreshold)
+            if (IsTransparent(material)
+                && !SupportsPathTracingTransparency(material))
             {
-                Warn(material, logWarnings, "Transparent surface type is not supported yet. Falling back to Opaque.");
+                Warn(
+                    material,
+                    logWarnings,
+                    "Transparent surface type is currently supported only by StandardLit reference path tracing. Falling back to Opaque.");
                 material.SetFloat("_Surface", OpaqueSurface);
             }
         }
@@ -232,15 +239,32 @@ namespace VividRP.Editor
             }
         }
 
-        private static void SyncOpaqueState(Material material)
+        private static void SyncSurfaceState(Material material)
         {
-            SetFloat(material, "_Surface", OpaqueSurface);
+            bool transparent = IsTransparent(material);
+            SetFloat(
+                material,
+                "_Surface",
+                transparent ? TransparentSurface : OpaqueSurface);
             SetFloat(material, "_Blend", 0.0f);
-            SetFloat(material, "_SrcBlend", (float)BlendMode.One);
-            SetFloat(material, "_DstBlend", (float)BlendMode.Zero);
+            SetFloat(
+                material,
+                "_SrcBlend",
+                (float)(transparent ? BlendMode.SrcAlpha : BlendMode.One));
+            SetFloat(
+                material,
+                "_DstBlend",
+                (float)(transparent
+                    ? BlendMode.OneMinusSrcAlpha
+                    : BlendMode.Zero));
             SetFloat(material, "_SrcBlendAlpha", (float)BlendMode.One);
-            SetFloat(material, "_DstBlendAlpha", (float)BlendMode.Zero);
-            SetFloat(material, "_ZWrite", 1.0f);
+            SetFloat(
+                material,
+                "_DstBlendAlpha",
+                (float)(transparent
+                    ? BlendMode.OneMinusSrcAlpha
+                    : BlendMode.Zero));
+            SetFloat(material, "_ZWrite", transparent ? 0.0f : 1.0f);
         }
 
         private static void SyncKeywords(Material material)
@@ -255,19 +279,46 @@ namespace VividRP.Editor
             CoreUtils.SetKeyword(material, ClearCoatKeyword, GetFloat(material, "_ClearCoatMask") > EnabledThreshold);
             CoreUtils.SetKeyword(material, SmoothnessFromAlbedoKeyword, GetFloat(material, "_SmoothnessTextureChannel") > AlphaClipThreshold);
             CoreUtils.SetKeyword(material, ReceiveShadowsOffKeyword, GetFloat(material, "_ReceiveShadows") <= AlphaClipThreshold);
-            CoreUtils.SetKeyword(material, SurfaceTypeTransparentKeyword, false);
+            CoreUtils.SetKeyword(
+                material,
+                SurfaceTypeTransparentKeyword,
+                IsTransparent(material));
             CoreUtils.SetKeyword(material, SpecularSetupKeyword, false);
             CoreUtils.SetKeyword(material, VirtualTextureBaseColorKeyword, GetFloat(material, "_UseVirtualTextureBaseColor") > EnabledThreshold);
         }
 
         private static void SyncRenderQueue(Material material)
         {
+            bool transparent = IsTransparent(material);
             bool alphaClip = GetFloat(material, "_AlphaClip") > AlphaClipThreshold;
             int queueOffset = Mathf.RoundToInt(GetFloat(material, "_QueueOffset"));
-            int baseQueue = alphaClip ? (int)RenderQueue.AlphaTest : (int)RenderQueue.Geometry;
+            int baseQueue = transparent
+                ? (int)RenderQueue.Transparent
+                : alphaClip
+                    ? (int)RenderQueue.AlphaTest
+                    : (int)RenderQueue.Geometry;
 
             material.renderQueue = baseQueue + queueOffset;
-            material.SetOverrideTag("RenderType", alphaClip ? "TransparentCutout" : "Opaque");
+            material.SetOverrideTag(
+                "RenderType",
+                transparent
+                    ? "Transparent"
+                    : alphaClip
+                        ? "TransparentCutout"
+                        : "Opaque");
+        }
+
+        private static bool IsTransparent(Material material)
+        {
+            return GetFloat(material, "_Surface")
+                > (OpaqueSurface + TransparentSurface) * 0.5f;
+        }
+
+        private static bool SupportsPathTracingTransparency(Material material)
+        {
+            return material != null
+                && material.shader != null
+                && material.shader.name == StandardLitShaderName;
         }
 
         private static void SyncGlobalIlluminationFlags(Material material)

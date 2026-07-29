@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 4"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 5"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -1744,6 +1744,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void V1FreezeGate_RejectsNonCanonicalThinWalledTransmissionContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+            capture.thinWalledTransmissionContractVersion = 0;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("Thin-walled transmission contract"));
+        }
+
+        [Test]
         public void EnvironmentState_DisablesUnsupportedSkyAndSanitizesInvalidValues()
         {
             var cubemap = new Cubemap(1, TextureFormat.RGBAHalf, false);
@@ -2036,6 +2053,9 @@ namespace VividRP.Editor.Tests
                 usesPhysicalCameraDof = false,
                 shadingNormalContractVersion =
                     ReferencedPathTracingShadingNormalContract.Version,
+                thinWalledTransmissionContractVersion =
+                    ReferencedPathTracingThinWalledTransmissionContract
+                        .Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

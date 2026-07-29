@@ -91,11 +91,30 @@ static const int kReferencedTransportDebugPathSamples = 8;
 static const int kReferencedTransportDebugShadingNormal = 9;
 static const int kReferencedTransportDebugPhysicalCamera = 10;
 static const int kReferencedTransportDebugAtmosphereTransport = 11;
+static const int kReferencedTransportDebugThinWalledTransmission = 12;
+static const int kReferencedTransportDebugStochasticTransparency = 13;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
 static const int kReferencedEnvironmentDebugIndirectMissOnly = 3;
 static const float kReferencedPathtracingPi = 3.14159265358979323846;
+
+uint ReferencedPathtracingHashStochasticTransparency(uint value)
+{
+    value ^= value >> 16u;
+    value *= 0x7feb352du;
+    value ^= value >> 15u;
+    value *= 0x846ca68bu;
+    value ^= value >> 16u;
+    return value;
+}
+
+float ReferencedPathtracingHashStochasticTransparencyToUnitFloat(uint value)
+{
+    return (float)(
+        ReferencedPathtracingHashStochasticTransparency(value) >> 8u)
+        * (1.0 / 16777216.0);
+}
 
 #define REFERENCED_ENVIRONMENT_DISTRIBUTION_VERSION 1
 #define REFERENCED_ENVIRONMENT_HEADER_ELEMENT_COUNT 4u
@@ -1524,6 +1543,7 @@ struct ReferencedPathtracingPayload
     float3 pathThroughput;
     float3 bsdfRandom;
     float3 directLightRandom;
+    uint stochasticAlphaSeed;
     float rayConeWidth;
     float rayConeSpreadAngle;
 
@@ -1556,8 +1576,14 @@ struct ReferencedPathtracingPayload
     // R/G: unadjusted/consistent shading-normal agreement with the geometric
     // normal. B: minimum diffuse shadow-terminator factor for this vertex.
     float3 shadingNormalDiagnostics;
+    // Effective dielectric transmission fraction after metallic suppression.
+    float thinWalledTransmissionWeight;
+    // x: most recent opacity, y: ignored candidate count,
+    // z: transparent candidate count.
+    float3 stochasticTransparencyDiagnostics;
     uint nextLobeClass;
     uint nextLobeIsDelta;
+    uint nextLobeIsTransmission;
     uint hit;
 };
 
@@ -1566,6 +1592,7 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.pathThroughput = 1.0;
     payload.bsdfRandom = 0.0;
     payload.directLightRandom = 0.0;
+    payload.stochasticAlphaSeed = 0u;
     payload.rayConeWidth = 0.0;
     payload.rayConeSpreadAngle = 0.0;
     payload.positionWS = 0.0;
@@ -1591,8 +1618,11 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.denoisingAlbedo = 0.0;
     payload.denoisingNormalWS = 0.0;
     payload.shadingNormalDiagnostics = 0.0;
+    payload.thinWalledTransmissionWeight = 0.0;
+    payload.stochasticTransparencyDiagnostics = 0.0;
     payload.nextLobeClass = 0u;
     payload.nextLobeIsDelta = 0u;
+    payload.nextLobeIsTransmission = 0u;
     payload.hit = 0u;
 }
 

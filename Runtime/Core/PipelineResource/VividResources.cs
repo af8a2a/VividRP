@@ -91,6 +91,10 @@ namespace VividRP.Runtime
 
         [VividResourcePath("Shaders/Core/Private/DLSS/DLSSRRResourcePrep.compute")]
         public ComputeShader DLSSRRResourcePrepCompute;
+
+        [VividResourcePath(
+            "Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathTracingDLSSRayReconstructionResolve.compute")]
+        public ComputeShader ReferencedPathTracingDLSSRayReconstructionResolveCompute;
 #endif
 
         [VividResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]

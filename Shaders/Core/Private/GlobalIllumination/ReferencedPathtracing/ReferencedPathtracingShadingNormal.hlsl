@@ -81,6 +81,34 @@ bool ReferencedPathtracingIsValidOpaqueReflectionDirection(
             > kReferencedShadingNormalDirectionEpsilon;
 }
 
+bool ReferencedPathtracingIsValidThinTransmissionDirection(
+    float3 directionWS,
+    float3 geometricNormalWS,
+    float3 shadingNormalWS)
+{
+    return dot(directionWS, geometricNormalWS)
+            < -kReferencedShadingNormalDirectionEpsilon
+        && dot(directionWS, shadingNormalWS)
+            < -kReferencedShadingNormalDirectionEpsilon;
+}
+
+bool ReferencedPathtracingIsValidThinWalledSurfaceDirection(
+    float3 directionWS,
+    float3 geometricNormalWS,
+    float3 shadingNormalWS,
+    bool allowTransmission)
+{
+    return ReferencedPathtracingIsValidOpaqueReflectionDirection(
+            directionWS,
+            geometricNormalWS,
+            shadingNormalWS)
+        || (allowTransmission
+            && ReferencedPathtracingIsValidThinTransmissionDirection(
+                directionWS,
+                geometricNormalWS,
+                shadingNormalWS));
+}
+
 float ReferencedPathtracingEvaluateDiffuseShadowTerminator(
     float3 directionWS,
     float3 shadingNormalWS,

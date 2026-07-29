@@ -252,6 +252,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_ExposesOptInThinWalledTransmissionProperties()
+        {
+            UnityEngine.Material material = CreateMaterial();
+            try
+            {
+                Assert.That(
+                    material.HasProperty("_ThinWalledTransmission"),
+                    Is.True);
+                Assert.That(material.HasProperty("_TransmissionWeight"), Is.True);
+                Assert.That(material.HasProperty("_TransmissionColor"), Is.True);
+                Assert.That(material.HasProperty("_SpecularIOR"), Is.True);
+                Assert.That(
+                    material.GetFloat("_ThinWalledTransmission"),
+                    Is.Zero);
+                Assert.That(material.GetFloat("_TransmissionWeight"), Is.Zero);
+                Assert.That(
+                    material.GetColor("_TransmissionColor"),
+                    Is.EqualTo(Color.white));
+                Assert.That(
+                    material.GetFloat("_SpecularIOR"),
+                    Is.EqualTo(1.5f).Within(1e-6f));
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
         public void SetupMaterial_UpdatesAlphaClipKeywordAndQueue_WhenAlphaClipEnabled()
         {
             UnityEngine.Material material = CreateMaterial();
@@ -317,23 +346,38 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void SetupMaterial_DowngradesUnsupportedModes_WhenSpecularWorkflowAndTransparentSurfaceSelected()
+        public void SetupMaterial_PreservesPathTracingTransparency_AndDowngradesUnsupportedSpecularWorkflow()
         {
             Material material = CreateMaterial();
             try
             {
                 material.SetFloat("_WorkflowMode", 0.0f);
                 material.SetFloat("_Surface", 1.0f);
+                material.SetFloat("_QueueOffset", 5.0f);
 
                 LogAssert.Expect(LogType.Warning, new Regex("Specular workflow is not supported yet"));
-                LogAssert.Expect(LogType.Warning, new Regex("Transparent surface type is not supported yet"));
 
                 StandardLitMaterialUtility.SetupMaterial(material, null, true);
 
                 Assert.That(material.GetFloat("_WorkflowMode"), Is.EqualTo(StandardLitMaterialUtility.MetallicWorkflow));
-                Assert.That(material.GetFloat("_Surface"), Is.EqualTo(0.0f));
-                Assert.That(material.IsKeywordEnabled("_SURFACE_TYPE_TRANSPARENT"), Is.False);
+                Assert.That(
+                    material.GetFloat("_Surface"),
+                    Is.EqualTo(StandardLitMaterialUtility.TransparentSurface));
+                Assert.That(material.IsKeywordEnabled("_SURFACE_TYPE_TRANSPARENT"), Is.True);
                 Assert.That(material.IsKeywordEnabled("_SPECULAR_SETUP"), Is.False);
+                Assert.That(
+                    material.GetFloat("_SrcBlend"),
+                    Is.EqualTo((float)BlendMode.SrcAlpha));
+                Assert.That(
+                    material.GetFloat("_DstBlend"),
+                    Is.EqualTo((float)BlendMode.OneMinusSrcAlpha));
+                Assert.That(material.GetFloat("_ZWrite"), Is.Zero);
+                Assert.That(
+                    material.renderQueue,
+                    Is.EqualTo((int)RenderQueue.Transparent + 5));
+                Assert.That(
+                    material.GetTag("RenderType", false),
+                    Is.EqualTo("Transparent"));
             }
             finally
             {
@@ -404,6 +448,32 @@ namespace VividRP.Editor.Tests
                 StandardLitMaterialUtility.SetupMaterial(material, null, false);
 
                 Assert.That(material.IsKeywordEnabled("_VIRTUAL_TEXTURE_BASE_COLOR"), Is.False);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void SetupMaterial_KeepsLayeredLitTransparencyUnsupported()
+        {
+            UnityEngine.Material material = CreateStandardLayeredLitMaterial();
+            try
+            {
+                material.SetFloat("_Surface", 1.0f);
+
+                StandardLitMaterialUtility.SetupMaterial(
+                    material,
+                    null,
+                    false);
+
+                Assert.That(
+                    material.GetFloat("_Surface"),
+                    Is.EqualTo(StandardLitMaterialUtility.OpaqueSurface));
+                Assert.That(
+                    material.IsKeywordEnabled("_SURFACE_TYPE_TRANSPARENT"),
+                    Is.False);
             }
             finally
             {

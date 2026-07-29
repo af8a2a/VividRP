@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 8;
+        internal const int Version = 10;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -68,6 +68,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingShadingNormalContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingThinWalledTransmissionContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -188,7 +191,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 4;
+        internal const int Version = 5;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -333,6 +336,85 @@ namespace VividRP.Runtime.RenderPass.Core
                     + Mathf.Sqrt(
                         1.0f
                         + alphaSquared * lightTangentSquared)));
+        }
+
+        private static Vector3 NormalizeOrFallback(
+            Vector3 value,
+            Vector3 fallback)
+        {
+            return value.sqrMagnitude > DirectionEpsilon
+                ? value.normalized
+                : fallback.normalized;
+        }
+    }
+
+    internal static class ReferencedPathTracingThinWalledTransmissionContract
+    {
+        internal const int Version = 1;
+        internal const float MinimumIor = 1.0f;
+        internal const float MaximumIor = 3.0f;
+        private const float DirectionEpsilon = 0.000001f;
+
+        internal static float ResolveEffectiveWeight(
+            bool thinWalled,
+            float transmissionWeight,
+            float metalness)
+        {
+            if (!thinWalled)
+                return 0.0f;
+
+            return Mathf.Clamp01(transmissionWeight)
+                * (1.0f - Mathf.Clamp01(metalness));
+        }
+
+        internal static float ResolveIor(float ior)
+        {
+            if (float.IsNaN(ior) || float.IsInfinity(ior))
+                return 1.5f;
+
+            return Mathf.Clamp(ior, MinimumIor, MaximumIor);
+        }
+
+        internal static bool IsDirectionSupported(
+            Vector3 direction,
+            Vector3 geometricNormal,
+            Vector3 shadingNormal,
+            bool allowTransmission)
+        {
+            direction = NormalizeOrFallback(direction, Vector3.forward);
+            geometricNormal = NormalizeOrFallback(
+                geometricNormal,
+                Vector3.up);
+            shadingNormal = NormalizeOrFallback(
+                shadingNormal,
+                geometricNormal);
+
+            var geometricCosine =
+                Vector3.Dot(direction, geometricNormal);
+            var shadingCosine =
+                Vector3.Dot(direction, shadingNormal);
+            var reflection =
+                geometricCosine > DirectionEpsilon
+                && shadingCosine > DirectionEpsilon;
+            var transmission =
+                geometricCosine < -DirectionEpsilon
+                && shadingCosine < -DirectionEpsilon;
+            return reflection || (allowTransmission && transmission);
+        }
+
+        internal static float EvaluateSelectionCosine(
+            Vector3 normal,
+            Vector3 directionToLight,
+            bool allowTransmission)
+        {
+            normal = NormalizeOrFallback(normal, Vector3.up);
+            directionToLight = NormalizeOrFallback(
+                directionToLight,
+                normal);
+            var cosine = Vector3.Dot(normal, directionToLight);
+            return allowTransmission
+                ? Mathf.Abs(cosine)
+                : Mathf.Clamp01(cosine);
         }
 
         private static Vector3 NormalizeOrFallback(
@@ -1461,6 +1543,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public int physicalCameraContractVersion;
         public bool usesPhysicalCameraDof;
         public int shadingNormalContractVersion;
+        public int thinWalledTransmissionContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ulong integratorSignature;
@@ -1593,7 +1676,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 7;
+        public const int ContractVersion = 9;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -1668,6 +1751,14 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Shading-normal transport contract does not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.thinWalledTransmissionContractVersion
+                != ReferencedPathTracingThinWalledTransmissionContract.Version)
+            {
+                return Fail(
+                    "Thin-walled transmission contract does not match the corpus.",
                     out failure);
             }
 
@@ -1935,6 +2026,9 @@ namespace VividRP.Runtime.RenderPass.Core
                     && pathTracingData.physicalCameraDofEnabled,
                 shadingNormalContractVersion =
                     ReferencedPathTracingShadingNormalContract.Version,
+                thinWalledTransmissionContractVersion =
+                    ReferencedPathTracingThinWalledTransmissionContract
+                        .Version,
                 maxBounceCount = integratorState.maxBounceCount,
                 russianRouletteStartBounce =
                     integratorState.russianRouletteStartBounce,

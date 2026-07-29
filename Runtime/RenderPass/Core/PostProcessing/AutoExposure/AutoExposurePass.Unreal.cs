@@ -14,6 +14,7 @@ namespace VividRP.Runtime.RenderPass
         private int m_BuildHistogramKernel = -1;
         private int m_ResolveExposureKernel = -1;
         private int m_ResolveBasicExposureKernel = -1;
+        private int m_ExportExposureTextureKernel = -1;
 
         private bool ExecuteUnrealAutoExposure(CommandBuffer cmd)
         {
@@ -124,6 +125,35 @@ namespace VividRP.Runtime.RenderPass
         {
             m_UnrealPartialHistogramBuffer?.Dispose();
             m_UnrealPartialHistogramBuffer = null;
+        }
+
+        private bool ExportDLSSExposureTexture(
+            CommandBuffer cmd,
+            GraphicsBuffer exposureBuffer)
+        {
+            var histogramCompute = m_HistogramAutoExposureCompute;
+            var exposureTexture = m_ExposureData?.currentExposureTexture;
+            if (cmd == null
+                || exposureBuffer == null
+                || exposureTexture == null
+                || histogramCompute == null
+                || m_ExportExposureTextureKernel < 0)
+            {
+                return false;
+            }
+
+            cmd.SetComputeBufferParam(
+                histogramCompute,
+                m_ExportExposureTextureKernel,
+                AutoExposureCurrentBufferId,
+                exposureBuffer);
+            cmd.SetComputeTextureParam(
+                histogramCompute,
+                m_ExportExposureTextureKernel,
+                DlssExposureTextureId,
+                exposureTexture);
+            cmd.DispatchCompute(histogramCompute, m_ExportExposureTextureKernel, 1, 1, 1);
+            return true;
         }
     }
 }

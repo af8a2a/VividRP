@@ -36,6 +36,7 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseColor;
     float4 _BaseMap_ST;
     float4 _EmissionColor;
+    float4 _TransmissionColor;
     float _Cutoff;
     float _Smoothness;
     float _SmoothnessTextureChannel;
@@ -54,6 +55,9 @@ CBUFFER_START(UnityPerMaterial)
     float _WorkflowMode;
     float _ReceiveSSR;
     float _ReceiveDecals;
+    float _ThinWalledTransmission;
+    float _TransmissionWeight;
+    float _SpecularIOR;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);

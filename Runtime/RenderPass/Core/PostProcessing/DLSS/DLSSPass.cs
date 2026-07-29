@@ -31,6 +31,7 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTexture depthTexture,
             RenderGraphTexture motionTexture,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            VividExposureData exposureData,
             bool forceResetHistory = false)
         {
             using var recordGraphScope = s_RecordGraphMarker.Auto();
@@ -71,9 +72,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 passData.Output = outputHandle;
                 passData.InputWidth = currentImageSize.x;
                 passData.InputHeight = currentImageSize.y;
-                passData.JitterX = -cameraData.jitter.x * currentImageSize.x;
-                passData.JitterY = -cameraData.jitter.y * currentImageSize.y;
-                passData.PreExposure = 1.0f;
+                passData.JitterOffset = DLSSJitterOffset.FromProjectionNdc(
+                    cameraData.jitter,
+                    currentImageSize);
+                passData.MotionVectorEncoding = DLSSMotionVectorEncoding.VividNormalizedUV;
+                passData.Exposure = new DLSSExposure(
+                    exposureData?.dlssPreExposure ?? 1.0f,
+                    1.0f);
 
                 builder.UseTexture(passData.Source, AccessFlags.Read);
                 builder.UseTexture(passData.Depth, AccessFlags.Read);
@@ -108,6 +113,7 @@ namespace VividRP.Runtime.RenderPass.Core
             RenderGraphTexture motionTexture,
             RenderGraphTexture outputTexture,
             Dictionary<RenderGraphTexture, TextureHandle> textureCache,
+            VividExposureData exposureData,
             bool forceResetHistory = false)
         {
             if (outputTexture == null)
@@ -121,6 +127,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 depthTexture,
                 motionTexture,
                 textureCache,
+                exposureData,
                 forceResetHistory);
             if (recordedOutput == null)
                 return false;
@@ -241,9 +248,9 @@ namespace VividRP.Runtime.RenderPass.Core
             public bool ResetHistory;
             public int InputWidth;
             public int InputHeight;
-            public float JitterX;
-            public float JitterY;
-            public float PreExposure;
+            public DLSSJitterOffset JitterOffset;
+            public DLSSMotionVectorEncoding MotionVectorEncoding;
+            public DLSSExposure Exposure;
         }
 
         internal sealed class CameraState : IDisposable
@@ -259,7 +266,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     return;
 
                 m_SuperResolution ??= new DLSSSuperResolution(
-                    NVSDK_NGX_DLSS_Feature_Flags.IsHDR | NVSDK_NGX_DLSS_Feature_Flags.DepthInverted,
+                    NVSDK_NGX_DLSS_Feature_Flags.IsHDR
+                    | NVSDK_NGX_DLSS_Feature_Flags.MVLowRes
+                    | NVSDK_NGX_DLSS_Feature_Flags.DepthInverted
+                    | NVSDK_NGX_DLSS_Feature_Flags.AutoExposure,
                     data.Quality.ToNGXQuality());
 
                 if (m_Quality != data.Quality)
@@ -282,12 +292,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     output,
                     depth,
                     motionVectors,
-                    data.JitterX,
-                    data.JitterY,
-                    -data.InputWidth,
-                    -data.InputHeight,
-                    data.ResetHistory,
-                    data.PreExposure);
+                    data.JitterOffset,
+                    data.MotionVectorEncoding,
+                    data.Exposure,
+                    data.ResetHistory);
             }
 
             public void Dispose()

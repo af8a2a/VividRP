@@ -58,6 +58,7 @@ CBUFFER_START(UnityPerMaterial)
     float _ReceiveDecals;
     float _ThinWalledTransmission;
     float _TransmissionWeight;
+    float _TransmissionDepth;
     float _SpecularIOR;
 CBUFFER_END
 

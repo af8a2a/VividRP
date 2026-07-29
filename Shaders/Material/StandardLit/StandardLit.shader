@@ -45,6 +45,7 @@ Shader "VividRP/Material/StandardLit"
         [SubToggle(ReferencePathTracing, _)] _ThinWalledTransmission("Thin-Walled Transmission", Float) = 0.0
         [Sub(ReferencePathTracing)] _TransmissionWeight("Transmission Weight", Range(0.0, 1.0)) = 0.0
         [Sub(ReferencePathTracing)] _TransmissionColor("Transmission Color", Color) = (1, 1, 1, 1)
+        [Sub(ReferencePathTracing)] _TransmissionDepth("Transmission Depth", Float) = 0.0
         [Sub(ReferencePathTracing)] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
 
         [HideInInspector] _Blend("__blend", Float) = 0.0

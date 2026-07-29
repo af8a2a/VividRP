@@ -81,7 +81,7 @@ bool ReferencedPathtracingIsValidOpaqueReflectionDirection(
             > kReferencedShadingNormalDirectionEpsilon;
 }
 
-bool ReferencedPathtracingIsValidThinTransmissionDirection(
+bool ReferencedPathtracingIsValidTransmissionDirection(
     float3 directionWS,
     float3 geometricNormalWS,
     float3 shadingNormalWS)
@@ -90,6 +90,17 @@ bool ReferencedPathtracingIsValidThinTransmissionDirection(
             < -kReferencedShadingNormalDirectionEpsilon
         && dot(directionWS, shadingNormalWS)
             < -kReferencedShadingNormalDirectionEpsilon;
+}
+
+bool ReferencedPathtracingIsValidThinTransmissionDirection(
+    float3 directionWS,
+    float3 geometricNormalWS,
+    float3 shadingNormalWS)
+{
+    return ReferencedPathtracingIsValidTransmissionDirection(
+        directionWS,
+        geometricNormalWS,
+        shadingNormalWS);
 }
 
 bool ReferencedPathtracingIsValidThinWalledSurfaceDirection(
@@ -103,7 +114,7 @@ bool ReferencedPathtracingIsValidThinWalledSurfaceDirection(
             geometricNormalWS,
             shadingNormalWS)
         || (allowTransmission
-            && ReferencedPathtracingIsValidThinTransmissionDirection(
+            && ReferencedPathtracingIsValidTransmissionDirection(
                 directionWS,
                 geometricNormalWS,
                 shadingNormalWS));

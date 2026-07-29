@@ -252,7 +252,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void StandardLitShader_ExposesOptInThinWalledTransmissionProperties()
+        public void StandardLitShader_ExposesOptInOpenPbrTransmissionProperties()
         {
             UnityEngine.Material material = CreateMaterial();
             try
@@ -262,6 +262,7 @@ namespace VividRP.Editor.Tests
                     Is.True);
                 Assert.That(material.HasProperty("_TransmissionWeight"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionColor"), Is.True);
+                Assert.That(material.HasProperty("_TransmissionDepth"), Is.True);
                 Assert.That(material.HasProperty("_SpecularIOR"), Is.True);
                 Assert.That(
                     material.GetFloat("_ThinWalledTransmission"),
@@ -270,6 +271,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     material.GetColor("_TransmissionColor"),
                     Is.EqualTo(Color.white));
+                Assert.That(material.GetFloat("_TransmissionDepth"), Is.Zero);
                 Assert.That(
                     material.GetFloat("_SpecularIOR"),
                     Is.EqualTo(1.5f).Within(1e-6f));

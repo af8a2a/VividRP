@@ -97,11 +97,27 @@ void StandardLitReferencedPathtracingClosestHit(
         normalTextureLod,
         viewDirectionWS);
 
+    float exteriorIor = payload.activeMediumIor;
+    if (material.isSolidTransmissionBoundary
+        && !geometry.isFrontFace
+        && payload.activeMediumInstanceIndex == InstanceIndex())
+    {
+        exteriorIor = payload.parentMediumIor;
+    }
+    if (!VividReferencedPathtracingIsFinite(exteriorIor))
+        exteriorIor = OpenPBR_VacuumIor;
+    exteriorIor = clamp(exteriorIor, 1.0, 3.0);
+    float3 segmentMediumTransmittance =
+        ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+            payload.activeMediumExtinction,
+            geometry.hitDistance);
     OpenPBR_PreparedBsdf preparedBsdf = openpbr_prepare(
         material.openPbrInputs,
-        max(payload.pathThroughput, 0.0),
+        max(
+            payload.pathThroughput * segmentMediumTransmittance,
+            0.0),
         OpenPBR_BaseRgbWavelengths_nm,
-        OpenPBR_VacuumIor,
+        exteriorIor,
         viewDirectionWS);
 
     payload.positionWS = geometry.positionWS;
@@ -139,12 +155,12 @@ void StandardLitReferencedPathtracingClosestHit(
     payload.nextLobeIsTransmission = 0u;
     payload.thinWalledTransmissionWeight =
         material.openPbrInputs.geometry_thin_walled
-            ? saturate(
-                material.openPbrInputs.transmission_weight
-                * (1.0 - material.openPbrInputs.base_metalness))
+            ? saturate(material.effectiveTransmissionWeight)
             : 0.0;
     bool allowsThinWalledTransmission =
         payload.thinWalledTransmissionWeight > 0.0;
+    bool allowsSurfaceTransmission =
+        material.effectiveTransmissionWeight > 0.0;
     payload.shadingNormalDiagnostics = float3(
         saturate(dot(
             material.unadjustedShadingNormalWS,
@@ -248,8 +264,8 @@ void StandardLitReferencedPathtracingClosestHit(
                 geometry.faceNormalWS,
                 material.shadingNormalWS))
         || (sampledTransmission
-            && allowsThinWalledTransmission
-            && ReferencedPathtracingIsValidThinTransmissionDirection(
+            && allowsSurfaceTransmission
+            && ReferencedPathtracingIsValidTransmissionDirection(
                 sampledDirectionWS,
                 geometry.faceNormalWS,
                 material.shadingNormalWS));
@@ -285,6 +301,22 @@ void StandardLitReferencedPathtracingClosestHit(
                     : 2u);
             payload.nextLobeIsTransmission =
                 sampledTransmission ? 1u : 0u;
+            if (sampledTransmission
+                && material.isSolidTransmissionBoundary)
+            {
+                payload.mediumTransition =
+                    geometry.isFrontFace ? 1 : -1;
+                payload.nextMediumIor =
+                    material.openPbrInputs.specular_ior;
+                payload.nextMediumExtinction =
+                    VividReferencedPathtracingIsFinite(
+                        preparedBsdf.volume.extinction_coefficient)
+                    ? max(
+                        preparedBsdf.volume.extinction_coefficient,
+                        0.0)
+                    : 0.0;
+                payload.nextMediumInstanceIndex = InstanceIndex();
+            }
             // OpenPBR uses the Specular flag for a singular (delta) event. Glossy
             // reflection remains non-delta and competes with environment NEE.
             payload.nextLobeIsDelta =
@@ -302,6 +334,24 @@ void StandardLitReferencedPathtracingAnyHit(
     inout ReferencedPathtracingPayload payload : SV_RayPayload,
     AttributeData attributeData : SV_IntersectionAttributes)
 {
+    bool isSolidTransmissionBoundary =
+        _ThinWalledTransmission <= 0.5
+        && _TransmissionWeight > 0.0;
+    bool isUnmatchedNestedExit =
+        isSolidTransmissionBoundary
+        && HitKind() == HIT_KIND_TRIANGLE_BACK_FACE
+        && payload.activeMediumInstanceIndex
+            != kReferencedPathtracingInvalidMediumInstance
+        && payload.activeMediumInstanceIndex != InstanceIndex();
+    if (isUnmatchedNestedExit)
+    {
+        // Match RTXPT's nested-dielectric false-hit handling: an exit that
+        // does not belong to the active medium cannot change the current
+        // interface, so continue traversal to the next candidate.
+        IgnoreHit();
+        return;
+    }
+
 #if defined(_ALPHATEST_ON) || defined(_SURFACE_TYPE_TRANSPARENT)
     float2 uv = VividIndirectDiffuseFetchUV(attributeData);
 #if defined(_ALPHATEST_ON)

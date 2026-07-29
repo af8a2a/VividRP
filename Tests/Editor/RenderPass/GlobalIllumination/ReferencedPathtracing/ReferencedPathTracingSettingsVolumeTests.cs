@@ -379,6 +379,65 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SolidTransmissionContract_UsesBeerLambertAbsorption()
+        {
+            var transmissionColor = new Vector3(0.25f, 0.5f, 1.0f);
+            var extinction =
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveExtinction(transmissionColor, 2.0f);
+            var transmittance =
+                ReferencedPathTracingSolidTransmissionContract
+                    .EvaluateTransmittance(extinction, 2.0f);
+
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .Version,
+                Is.EqualTo(1));
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .MaximumMediumDepth,
+                Is.EqualTo(4));
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveEffectiveWeight(0.8f, 0.25f),
+                Is.EqualTo(0.6f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveExtinction(transmissionColor, 0.0f),
+                Is.EqualTo(Vector3.zero));
+            Assert.That(
+                transmittance.x,
+                Is.EqualTo(transmissionColor.x).Within(1e-5f));
+            Assert.That(
+                transmittance.y,
+                Is.EqualTo(transmissionColor.y).Within(1e-5f));
+            Assert.That(
+                transmittance.z,
+                Is.EqualTo(transmissionColor.z).Within(1e-5f));
+        }
+
+        [Test]
+        public void SolidTransmissionContract_ResolvesEnteringAndExitingIors()
+        {
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveExteriorIor(
+                        true,
+                        1.33f,
+                        1.0f,
+                        false),
+                Is.EqualTo(1.33f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveExteriorIor(
+                        false,
+                        1.5f,
+                        1.33f,
+                        true),
+                Is.EqualTo(1.33f).Within(1e-6f));
+        }
+
+        [Test]
         public void ColoredOpacityContract_ComposesMaterialInputsPerChannel()
         {
             var opacity =

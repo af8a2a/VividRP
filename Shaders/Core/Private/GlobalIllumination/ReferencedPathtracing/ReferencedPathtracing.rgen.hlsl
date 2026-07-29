@@ -563,6 +563,25 @@ void RayGenReferencedPathtracing()
     uint maxBounceCount = min(
         (uint)max(_ReferencedMaxBounceCount, 1),
         kReferencedPathtracingMaxSupportedBounceCount);
+    float materialMediumIorStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
+    float3 materialMediumExtinctionStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
+    uint materialMediumInstanceStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
+    [unroll]
+    for (uint mediumIndex = 0u;
+         mediumIndex
+            < kReferencedPathtracingMaximumMaterialMediumDepth;
+         ++mediumIndex)
+    {
+        materialMediumIorStack[mediumIndex] =
+            kReferencedPathtracingVacuumIor;
+        materialMediumExtinctionStack[mediumIndex] = 0.0;
+        materialMediumInstanceStack[mediumIndex] =
+            kReferencedPathtracingInvalidMediumInstance;
+    }
+    uint materialMediumDepth = 0u;
 
     for (uint bounceIndex = 0u; bounceIndex < maxBounceCount; ++bounceIndex)
     {
@@ -610,10 +629,37 @@ void RayGenReferencedPathtracing()
                     sampleIndex + bounceSampleDimension));
         payload.rayConeWidth = rayConeWidth;
         payload.rayConeSpreadAngle = rayConeSpreadAngle;
+        float3 activeMaterialMediumExtinction = 0.0;
+        if (materialMediumDepth > 0u)
+        {
+            uint activeMediumIndex = materialMediumDepth - 1u;
+            payload.activeMediumIor =
+                materialMediumIorStack[activeMediumIndex];
+            payload.activeMediumExtinction =
+                materialMediumExtinctionStack[activeMediumIndex];
+            activeMaterialMediumExtinction =
+                payload.activeMediumExtinction;
+            payload.activeMediumInstanceIndex =
+                materialMediumInstanceStack[activeMediumIndex];
+        }
+        if (materialMediumDepth > 1u)
+        {
+            payload.parentMediumIor =
+                materialMediumIorStack[materialMediumDepth - 2u];
+        }
         // SER is useful around the material-heavy closest-hit path. Shadow rays
         // skip closest-hit shading and retain the lower-overhead standard TraceRay.
         TraceReferencedPathtracingSurface(ray, payload);
-        throughput *= payload.stochasticTransparencyWeight;
+        float materialMediumDistance = payload.hit != 0u
+            ? payload.hitDistance
+            : ray.TMax;
+        float3 materialMediumTransmittance =
+            ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                activeMaterialMediumExtinction,
+                materialMediumDistance);
+        throughput *=
+            payload.stochasticTransparencyWeight
+            * materialMediumTransmittance;
         if (!IsFiniteReferencedPathtracingRadiance(throughput)
             || MaxReferencedPathtracingComponent(throughput) <= 0.0)
         {
@@ -721,7 +767,8 @@ void RayGenReferencedPathtracing()
         ReferencedPathtracingAtmosphereMediumSample
             atmosphereMediumSample;
         bool intersectsAtmosphere =
-            ReferencedPathtracingSampleAtmosphereMedium(
+            materialMediumDepth == 0u
+            && ReferencedPathtracingSampleAtmosphereMedium(
                 atmosphereRayOriginWS,
                 ray.Direction,
                 atmosphereMaximumDistance,
@@ -737,7 +784,8 @@ void RayGenReferencedPathtracing()
             : atmosphereMaximumDistance;
         ReferencedPathtracingCloudMediumSample cloudMediumSample;
         bool intersectsCloud =
-            ReferencedPathtracingSampleCloudMedium(
+            materialMediumDepth == 0u
+            && ReferencedPathtracingSampleCloudMedium(
                 atmosphereRayOriginWS,
                 ray.Direction,
                 cloudMaximumDistance,
@@ -1557,6 +1605,10 @@ void RayGenReferencedPathtracing()
                         ^ ReferencedPathtracingHashStochasticTransparency(
                             payload.neeLightIndex + 0x299f31d0u)))
                 : 0.0;
+            visibility *=
+                ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                    payload.activeMediumExtinction,
+                    payload.neeDistance);
             float3 directDiffuse = throughput
                 * payload.neeDiffuseRadiance
                 * lightEstimatorWeight
@@ -1664,7 +1716,8 @@ void RayGenReferencedPathtracing()
         // intersected along the sampled direction even though their display meshes are
         // not present in the RTAS. Punctual and tube lights remain zero-measure events.
         if (payload.nextPdf > 0.0
-            && any(payload.nextThroughputWeight > 0.0))
+            && any(payload.nextThroughputWeight > 0.0)
+            && payload.mediumTransition == 0)
         {
             ReferencedPathtracingLightSelectionContext selectionContext =
                 ReferencedPathtracingCreateLightSelectionContext(
@@ -1744,6 +1797,10 @@ void RayGenReferencedPathtracing()
                             payload.stochasticAlphaSeed
                             ^ ReferencedPathtracingHashStochasticTransparency(
                                 lightIndex + 0x082efa98u)));
+                visibility *=
+                    ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                        payload.activeMediumExtinction,
+                        segmentLightHit.distance);
                 float3 bsdfSampledDirect =
                     throughput
                     * payload.nextThroughputWeight
@@ -1857,6 +1914,44 @@ void RayGenReferencedPathtracing()
             if (russianRouletteSample >= survivalProbability)
                 break;
             throughput /= survivalProbability;
+        }
+
+        if (payload.mediumTransition > 0)
+        {
+            if (materialMediumDepth
+                >= kReferencedPathtracingMaximumMaterialMediumDepth)
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
+
+            materialMediumIorStack[materialMediumDepth] =
+                payload.nextMediumIor;
+            materialMediumExtinctionStack[materialMediumDepth] =
+                payload.nextMediumExtinction;
+            materialMediumInstanceStack[materialMediumDepth] =
+                payload.nextMediumInstanceIndex;
+            ++materialMediumDepth;
+        }
+        else if (payload.mediumTransition < 0
+            && materialMediumDepth > 0u)
+        {
+            uint activeMediumIndex = materialMediumDepth - 1u;
+            if (materialMediumInstanceStack[activeMediumIndex]
+                == payload.nextMediumInstanceIndex)
+            {
+                materialMediumIorStack[activeMediumIndex] =
+                    kReferencedPathtracingVacuumIor;
+                materialMediumExtinctionStack[activeMediumIndex] = 0.0;
+                materialMediumInstanceStack[activeMediumIndex] =
+                    kReferencedPathtracingInvalidMediumInstance;
+                --materialMediumDepth;
+            }
+            else
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
         }
 
         rayConeWidth = payload.rayConeWidth;

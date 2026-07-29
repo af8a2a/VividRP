@@ -136,7 +136,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "throughput *= payload.stochasticTransparencyWeight;"));
+                    "payload.stochasticTransparencyWeight"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
@@ -145,6 +145,68 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "throughput * cameraBackground.rgb"));
+        }
+
+        [Test]
+        public void SolidTransmission_UsesOpenPbrRefractionAndNestedMediumTransport()
+        {
+            var openPbrBridgeSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "OpenPBR",
+                "OpenPBR.hlsl"));
+            var adapterSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "StandardLitOpenPBRAdapter.hlsl"));
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                openPbrBridgeSource,
+                Does.Contain(
+                    "VIVIDRP_OPENPBR_FEATURE_EnableTranslucency true"));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_weight = saturate(_TransmissionWeight);"));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_depth = max(transmissionDepth, 0.0);"));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "preparedBsdf.volume.extinction_coefficient"));
+            Assert.That(
+                materialSource,
+                Does.Contain("payload.mediumTransition ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingMaximumMaterialMediumDepth"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateMaterialMediumTransmittance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("++materialMediumDepth;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("--materialMediumDepth;"));
         }
 
         [Test]

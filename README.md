@@ -41,7 +41,7 @@ Pass 通过 `[RenderGraphResource]` 标记的字段自动生成端口。运行�
 | 体积效果 | 全局及局部体积雾、VBuffer、体积光照和 Max-Z 生成 |
 | GPU Driven | Meshlet 导入与渲染、Visibility Buffer、对象调度、调试 Overlay、Bindless 描述符支持 |
 | Ray Tracing | 可序列化 RTAS 描述符、RTAS 构建、方向光光追阴影与相关调试 Pass |
-| 参考路径追踪 | 基于 OpenPBR 的多反弹 DXR 原型，含解析光源与 HDRI 的 MIS / Next-Event Estimation、rectangle / disc 的 BSDF 段命中评估、着色点感知的混合光源选择与空间索引、Rendering Debugger 传输视图、确定性像素捕获、REBLUR 信号路由（有限太阳光照）、NRD REBLUR 预览降噪与 Unity Open Image Denoise 后端 |
+| 参考路径追踪 | 基于 OpenPBR 的多反弹 DXR 原型，支持随机 RGB 几何透明度、薄壁透射以及带四层介质栈和 Beer–Lambert 吸收的半透明实体折射；另含解析光源与 HDRI 的 MIS / Next-Event Estimation、rectangle / disc 的 BSDF 段命中评估、着色点感知的混合光源选择与空间索引、Rendering Debugger 传输视图、确定性像素捕获、REBLUR 信号路由（有限太阳光照）、NRD REBLUR 预览降噪与 Unity Open Image Denoise 后端 |
 | 资源与子系统 | 虚拟纹理（含 SVT）、DBuffer Decal、LTC 面光源、反射探针图集、ReGIR、天空管理 |
 | Per-Object Buffer | 不依赖 `MaterialPropertyBlock` 的逐 Renderer Shader 数据、子系统生命周期集成、集中生成的 HLSL 布局、颜色示例与 MPB CPU 对比基准 |
 | 实验性粒子 | 基于 ECS 页式存储的粒子模拟、裁剪、排序、Billboard / Mesh / Stretch 渲染、Trail、碰撞和子发射器 |
@@ -72,7 +72,7 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 - Ray Tracing 需要 DXR 兼容硬件及 DX12。请在 Volume Profile 中添加 `VividRP/Ray Tracing/Settings` 并按项目需求配置。
 - DLSS 需要安装 NVIDIA 相关依赖，并定义 `DLSS_PLUGIN_INTEGRATE` 脚本符号。
 - NVIDIA Shader Execution Reordering（SER）在参考路径追踪中为 Windows x86_64 + DX12 提供可选加速，需 NVAPI 支持。
-- 参考路径追踪使用独立的 `.vrdg` 和管线资产，面向受控场景的验证，不以实时性能或完整 ground truth 为目标。当前支持范围以 `StandardLit` 的不透明 / Alpha Test 材质为主；OIDN 后端仅在 Editor 或 64 位 Standalone 且 `com.unity.rendering.denoising` 可用时启用。
+- 参考路径追踪使用独立的 `.vrdg` 和管线资产，面向受控场景的验证，不以实时性能或完整 ground truth 为目标。`StandardLit` 除不透明 / Alpha Test 外还支持随机 RGB 几何透明度和 OpenPBR 透射：薄片应启用 `Thin-Walled Transmission`，封闭实体应关闭该选项，并可用 `Transmission Depth` 指定 `Transmission Color` 所对应的 Beer–Lambert 吸收距离；实体介质最多正确嵌套四层。OIDN 后端仅在 Editor 或 64 位 Standalone 且 `com.unity.rendering.denoising` 可用时启用。
 
 ## 目录导览
 

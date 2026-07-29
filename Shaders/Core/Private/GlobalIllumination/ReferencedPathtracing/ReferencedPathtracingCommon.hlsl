@@ -93,6 +93,9 @@ static const int kReferencedTransportDebugPhysicalCamera = 10;
 static const int kReferencedTransportDebugAtmosphereTransport = 11;
 static const int kReferencedTransportDebugThinWalledTransmission = 12;
 static const int kReferencedTransportDebugStochasticTransparency = 13;
+static const uint kReferencedPathtracingMaximumMaterialMediumDepth = 4u;
+static const uint kReferencedPathtracingInvalidMediumInstance = 0xffffffffu;
+static const float kReferencedPathtracingVacuumIor = 1.0;
 static const int kReferencedEnvironmentDebugCombined = 0;
 static const int kReferencedEnvironmentDebugEnvironmentOnly = 1;
 static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
@@ -114,6 +117,16 @@ float ReferencedPathtracingHashStochasticTransparencyToUnitFloat(uint value)
     return (float)(
         ReferencedPathtracingHashStochasticTransparency(value) >> 8u)
         * (1.0 / 16777216.0);
+}
+
+float3 ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+    float3 extinctionCoefficient,
+    float distance)
+{
+    float3 extinction = max(extinctionCoefficient, 0.0);
+    float finiteDistance = min(max(distance, 0.0), 1e30);
+    float3 opticalDepth = min(extinction * finiteDistance, 80.0);
+    return exp(-opticalDepth);
 }
 
 #define REFERENCED_ENVIRONMENT_DISTRIBUTION_VERSION 1
@@ -1546,6 +1559,13 @@ struct ReferencedPathtracingPayload
     uint stochasticAlphaSeed;
     float rayConeWidth;
     float rayConeSpreadAngle;
+    // RTXPT-style compact view of the active nested dielectric stack. The
+    // complete four-entry stack stays in raygen; closest-hit only needs the
+    // current and parent media to prepare the interface BSDF.
+    float activeMediumIor;
+    float parentMediumIor;
+    float3 activeMediumExtinction;
+    uint activeMediumInstanceIndex;
 
     // Compact closest-hit outputs consumed by the iterative path loop.
     float3 positionWS;
@@ -1586,6 +1606,12 @@ struct ReferencedPathtracingPayload
     uint nextLobeClass;
     uint nextLobeIsDelta;
     uint nextLobeIsTransmission;
+    // A non-zero transition is applied only after a valid solid-transmission
+    // sample: +1 enters this medium, -1 exits the current stack entry.
+    int mediumTransition;
+    float nextMediumIor;
+    float3 nextMediumExtinction;
+    uint nextMediumInstanceIndex;
     uint hit;
 };
 
@@ -1597,6 +1623,11 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.stochasticAlphaSeed = 0u;
     payload.rayConeWidth = 0.0;
     payload.rayConeSpreadAngle = 0.0;
+    payload.activeMediumIor = 1.0;
+    payload.parentMediumIor = 1.0;
+    payload.activeMediumExtinction = 0.0;
+    payload.activeMediumInstanceIndex =
+        kReferencedPathtracingInvalidMediumInstance;
     payload.positionWS = 0.0;
     payload.faceNormalWS = 0.0;
     payload.emission = 0.0;
@@ -1626,6 +1657,11 @@ void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload pay
     payload.nextLobeClass = 0u;
     payload.nextLobeIsDelta = 0u;
     payload.nextLobeIsTransmission = 0u;
+    payload.mediumTransition = 0;
+    payload.nextMediumIor = 1.0;
+    payload.nextMediumExtinction = 0.0;
+    payload.nextMediumInstanceIndex =
+        kReferencedPathtracingInvalidMediumInstance;
     payload.hit = 0u;
 }
 

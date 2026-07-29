@@ -10,6 +10,8 @@ struct VividReferencedPathtracingMaterial
     float3 unadjustedShadingNormalWS;
     float3 shadingNormalWS;
     float3 emission;
+    float effectiveTransmissionWeight;
+    bool isSolidTransmissionBoundary;
 };
 
 float3 VividReferencedPathtracingConstrainShadingNormal(
@@ -103,16 +105,29 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.emission_luminance = any(material.emission > 0.0) ? 1.0 : 0.0;
     inputs.emission_color = material.emission;
     inputs.subsurface_weight = 0.0;
-    inputs.transmission_weight = inputs.geometry_thin_walled
-        ? saturate(_TransmissionWeight)
-        : 0.0;
+    inputs.transmission_weight = saturate(_TransmissionWeight);
     inputs.transmission_color = saturate(_TransmissionColor.rgb);
+    float transmissionDepth = _TransmissionDepth;
+    if (isnan(transmissionDepth) || isinf(transmissionDepth))
+        transmissionDepth = 0.0;
+    inputs.transmission_depth = max(transmissionDepth, 0.0);
     inputs.fuzz_weight = 0.0;
     inputs.thin_film_weight = 0.0;
 
+    material.effectiveTransmissionWeight =
+        inputs.transmission_weight
+        * (1.0 - inputs.base_metalness);
+    material.isSolidTransmissionBoundary =
+        !inputs.geometry_thin_walled
+        && material.effectiveTransmissionWeight > 0.0;
+    float3 openPbrShadingNormalWS =
+        material.isSolidTransmissionBoundary
+            && !geometry.isFrontFace
+        ? -material.shadingNormalWS
+        : material.shadingNormalWS;
     inputs.geometry_basis = VividReferencedPathtracingBuildOpenPBRBasis(
         geometry,
-        material.shadingNormalWS);
+        openPbrShadingNormalWS);
     inputs.geometry_coat_basis = inputs.geometry_basis;
     material.openPbrInputs = inputs;
     return material;

@@ -430,6 +430,100 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    internal static class ReferencedPathTracingSolidTransmissionContract
+    {
+        internal const int Version = 1;
+        internal const int MaximumMediumDepth = 4;
+        private const float MinimumTransmissionColor = 1e-3f;
+        private const float MinimumTransmissionDistance = 1e-3f;
+        private const float MaximumOpticalDepth = 80.0f;
+
+        internal static float ResolveEffectiveWeight(
+            float transmissionWeight,
+            float metalness)
+        {
+            return Mathf.Clamp01(transmissionWeight)
+                * (1.0f - Mathf.Clamp01(metalness));
+        }
+
+        internal static Vector3 ResolveExtinction(
+            Vector3 transmissionColor,
+            float transmissionDepth)
+        {
+            if (float.IsNaN(transmissionDepth)
+                || float.IsInfinity(transmissionDepth)
+                || transmissionDepth <= 0.0f)
+            {
+                return Vector3.zero;
+            }
+
+            float resolvedTransmissionDepth = Mathf.Max(
+                transmissionDepth,
+                MinimumTransmissionDistance);
+            return new Vector3(
+                ResolveExtinctionChannel(
+                    transmissionColor.x,
+                    resolvedTransmissionDepth),
+                ResolveExtinctionChannel(
+                    transmissionColor.y,
+                    resolvedTransmissionDepth),
+                ResolveExtinctionChannel(
+                    transmissionColor.z,
+                    resolvedTransmissionDepth));
+        }
+
+        internal static Vector3 EvaluateTransmittance(
+            Vector3 extinction,
+            float distance)
+        {
+            if (float.IsNaN(distance) || distance <= 0.0f)
+                return Vector3.one;
+
+            if (float.IsInfinity(distance))
+                distance = float.MaxValue;
+
+            return new Vector3(
+                EvaluateTransmittanceChannel(extinction.x, distance),
+                EvaluateTransmittanceChannel(extinction.y, distance),
+                EvaluateTransmittanceChannel(extinction.z, distance));
+        }
+
+        internal static float ResolveExteriorIor(
+            bool isFrontFace,
+            float activeMediumIor,
+            float parentMediumIor,
+            bool exitsActiveMedium)
+        {
+            float exteriorIor =
+                !isFrontFace && exitsActiveMedium
+                    ? parentMediumIor
+                    : activeMediumIor;
+            return ReferencedPathTracingThinWalledTransmissionContract
+                .ResolveIor(exteriorIor);
+        }
+
+        private static float ResolveExtinctionChannel(
+            float transmissionColor,
+            float transmissionDepth)
+        {
+            float color = Mathf.Clamp(
+                transmissionColor,
+                MinimumTransmissionColor,
+                1.0f);
+            return -Mathf.Log(color) / transmissionDepth;
+        }
+
+        private static float EvaluateTransmittanceChannel(
+            float extinction,
+            float distance)
+        {
+            float opticalDepth = Mathf.Min(
+                Mathf.Max(extinction, 0.0f) * distance,
+                MaximumOpticalDepth);
+            return Mathf.Exp(-opticalDepth);
+        }
+    }
+
     internal static class ReferencedPathTracingColoredOpacityContract
     {
         internal const int Version = 1;

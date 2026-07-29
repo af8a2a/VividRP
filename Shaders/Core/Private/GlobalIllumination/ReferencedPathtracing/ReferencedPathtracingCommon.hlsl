@@ -1615,6 +1615,13 @@ struct ReferencedPathtracingPayload
     uint4 packed[REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT];
 };
 
+// Opaque visibility traversal never invokes material hit shaders. It therefore
+// needs only a committed-hit sentinel and a matching dedicated miss shader.
+struct ReferencedPathtracingVisibilityPayload
+{
+    uint hit;
+};
+
 struct ReferencedPathtracingPayloadInput
 {
     float3 pathThroughput;

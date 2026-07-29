@@ -140,11 +140,54 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
-                    "return visibilityPayload.hit == 0u ? 1.0 : 0.0;"));
+                    "ReferencedPathtracingVisibilityPayload opaqueVisibilityPayload;"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(
                     "throughput * cameraBackground.rgb"));
+        }
+
+        [Test]
+        public void VisibilityTrace_UsesIndependentOpaquePayloadAndNonOpaqueMaterialFallback()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                commonSource,
+                Does.Contain("struct ReferencedPathtracingVisibilityPayload"));
+            Assert.That(
+                commonSource,
+                Does.Contain("uint hit;"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 13"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("| RAY_FLAG_CULL_NON_OPAQUE"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("| RAY_FLAG_CULL_OPAQUE"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("MissReferencedPathtracingVisibility("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "LoadReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload)"));
         }
 
         [Test]
@@ -196,7 +239,7 @@ namespace VividRP.Editor.Tests
                     "preparedBsdf.volume.extinction_coefficient"));
             Assert.That(
                 materialSource,
-                Does.Contain("payload.mediumTransition ="));
+                Does.Contain("result.mediumTransition ="));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain(

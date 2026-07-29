@@ -250,27 +250,52 @@ float3 TraceReferencedPathtracingVisibility(
     if (shadowRay.TMax <= shadowRay.TMin)
         return 1.0;
 
-    ReferencedPathtracingPayloadInput visibilityInput;
-    InitializeReferencedPathtracingPayloadInput(visibilityInput);
-    visibilityInput.stochasticAlphaSeed = stochasticAlphaSeed;
-    ReferencedPathtracingPayload visibilityPayload;
-    PackReferencedPathtracingPayloadInput(
-        visibilityInput,
-        visibilityPayload);
-    // With the closest-hit shader skipped, this value survives any hit; the miss shader clears it.
-    StoreReferencedPathtracingPayloadHit(visibilityPayload, 1u);
+    // Unity binds one material hit group per selected ShaderLab ray-tracing
+    // pass. Split visibility by geometry opacity so opaque traversal can use a
+    // one-DWORD payload without invoking the material AnyHit that consumes the
+    // full surface payload.
+    ReferencedPathtracingVisibilityPayload opaqueVisibilityPayload;
+    opaqueVisibilityPayload.hit = 1u;
     TraceRay(
         _AccelerationStructure,
         RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
-            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER
+            | RAY_FLAG_CULL_NON_OPAQUE,
+        0xFF,
+        0,
+        1,
+        1,
+        shadowRay,
+        opaqueVisibilityPayload);
+    if (opaqueVisibilityPayload.hit != 0u)
+        return 0.0;
+
+    // Alpha-tested and transparent geometry still requires the material
+    // AnyHit for texture coverage, stochastic opacity, and nested-dielectric
+    // false-hit handling. Restrict the fallback trace to non-opaque geometry.
+    ReferencedPathtracingPayloadInput visibilityInput;
+    InitializeReferencedPathtracingPayloadInput(visibilityInput);
+    visibilityInput.stochasticAlphaSeed = stochasticAlphaSeed;
+    ReferencedPathtracingPayload nonOpaqueVisibilityPayload;
+    PackReferencedPathtracingPayloadInput(
+        visibilityInput,
+        nonOpaqueVisibilityPayload);
+    // With closest-hit skipped, this value survives an accepted hit; the main
+    // miss shader clears it.
+    StoreReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload, 1u);
+    TraceRay(
+        _AccelerationStructure,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
+            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER
+            | RAY_FLAG_CULL_OPAQUE,
         0xFF,
         0,
         1,
         0,
         shadowRay,
-        visibilityPayload);
+        nonOpaqueVisibilityPayload);
 
-    return LoadReferencedPathtracingPayloadHit(visibilityPayload) == 0u
+    return LoadReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload) == 0u
         ? 1.0
         : 0.0;
 }
@@ -2253,4 +2278,11 @@ void MissReferencedPathtracing(inout ReferencedPathtracingPayload payload : SV_R
     result.stochasticTransparencyDiagnostics =
         stochasticTransparencyDiagnostics;
     PackReferencedPathtracingSurfaceResult(result, payload);
+}
+
+[shader("miss")]
+void MissReferencedPathtracingVisibility(
+    inout ReferencedPathtracingVisibilityPayload payload : SV_RayPayload)
+{
+    payload.hit = 0u;
 }

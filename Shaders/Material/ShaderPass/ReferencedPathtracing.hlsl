@@ -72,12 +72,19 @@ void StandardLitReferencedPathtracingClosestHit(
     inout ReferencedPathtracingPayload payload : SV_RayPayload,
     AttributeData attributeData : SV_IntersectionAttributes)
 {
+    ReferencedPathtracingPayloadInput payloadInput;
+    UnpackReferencedPathtracingPayloadInput(payload, payloadInput);
+    ReferencedPathtracingSurfaceResult result;
+    InitializeReferencedPathtracingSurfaceResult(result);
+    result.stochasticTransparencyDiagnostics =
+        LoadReferencedPathtracingStochasticTransparencyDiagnostics(payload);
+
     VividIndirectDiffuseHitGeometry geometry = VividIndirectDiffuseBuildHitGeometry(attributeData);
     float hitConeWidth;
     float textureBaseLambda = ComputeReferencedPathtracingTextureBaseLambda(
         geometry,
-        payload.rayConeWidth,
-        payload.rayConeSpreadAngle,
+        payloadInput.rayConeWidth,
+        payloadInput.rayConeSpreadAngle,
         hitConeWidth);
     float baseTextureLod = max(
         computeTargetTextureLOD(_BaseMap, textureBaseLambda) + kReferencedPathtracingTextureLodBias,
@@ -97,71 +104,53 @@ void StandardLitReferencedPathtracingClosestHit(
         normalTextureLod,
         viewDirectionWS);
 
-    float exteriorIor = payload.activeMediumIor;
+    float exteriorIor = payloadInput.activeMediumIor;
     if (material.isSolidTransmissionBoundary
         && !geometry.isFrontFace
-        && payload.activeMediumInstanceIndex == InstanceIndex())
+        && payloadInput.activeMediumInstanceIndex == InstanceIndex())
     {
-        exteriorIor = payload.parentMediumIor;
+        exteriorIor = payloadInput.parentMediumIor;
     }
     if (!VividReferencedPathtracingIsFinite(exteriorIor))
         exteriorIor = OpenPBR_VacuumIor;
     exteriorIor = clamp(exteriorIor, 1.0, 3.0);
     float3 segmentMediumTransmittance =
         ReferencedPathtracingEvaluateMaterialMediumTransmittance(
-            payload.activeMediumExtinction,
+            payloadInput.activeMediumExtinction,
             geometry.hitDistance);
     OpenPBR_PreparedBsdf preparedBsdf = openpbr_prepare(
         material.openPbrInputs,
         max(
-            payload.pathThroughput * segmentMediumTransmittance,
+            payloadInput.pathThroughput * segmentMediumTransmittance,
             0.0),
         OpenPBR_BaseRgbWavelengths_nm,
         exteriorIor,
         viewDirectionWS);
 
-    payload.positionWS = geometry.positionWS;
-    payload.faceNormalWS = geometry.faceNormalWS;
-    payload.rayConeWidth = hitConeWidth;
-    payload.emission = VividReferencedPathtracingIsFinite(preparedBsdf.emission)
+    result.positionWS = geometry.positionWS;
+    result.faceNormalWS = geometry.faceNormalWS;
+    result.rayConeWidth = hitConeWidth;
+    result.emission = VividReferencedPathtracingIsFinite(preparedBsdf.emission)
         ? max(preparedBsdf.emission, 0.0)
         : 0.0;
-    payload.neeDiffuseRadiance = 0.0;
-    payload.neeSpecularRadiance = 0.0;
-    payload.neeDirectionWS = 0.0;
-    payload.neeDistance = 0.0;
-    payload.neeSelectionPdf = 0.0;
-    payload.neeSolidAnglePdf = 0.0;
-    payload.neeBsdfPdf = 0.0;
-    payload.neeShadowStrength = 0.0;
-    payload.neeLightIndex = 0xffffffffu;
-    payload.neeLightType = REFERENCED_LIGHT_TYPE_INVALID;
-    payload.neeFlags = 0u;
-    payload.neeValid = 0u;
-    payload.nextDirectionWS = 0.0;
-    payload.nextThroughputWeight = 0.0;
-    payload.nextPdf = 0.0;
-    payload.linearRoughness = material.openPbrInputs.specular_roughness;
-    payload.hitDistance = geometry.hitDistance;
+    result.linearRoughness = material.openPbrInputs.specular_roughness;
+    result.hitDistance = geometry.hitDistance;
     // Match HDRP's reference-denoising AOV contract: diffuse reflectance and
     // the actual shading normal, both evaluated at primary visibility.
-    payload.denoisingAlbedo = saturate(
+    result.denoisingAlbedo = saturate(
         material.openPbrInputs.base_color
         * (1.0 - material.openPbrInputs.base_metalness)
         * (1.0 - material.openPbrInputs.transmission_weight));
-    payload.denoisingNormalWS = material.shadingNormalWS;
-    payload.nextLobeClass = 0u;
-    payload.nextLobeIsDelta = 0u;
-    payload.nextLobeIsTransmission = 0u;
-    payload.thinWalledTransmissionWeight =
+    result.denoisingNormalWS = material.shadingNormalWS;
+    result.thinWalledTransmissionWeight =
         material.openPbrInputs.geometry_thin_walled
             ? saturate(material.effectiveTransmissionWeight)
             : 0.0;
     bool allowsThinWalledTransmission =
-        payload.thinWalledTransmissionWeight > 0.0;
+        result.thinWalledTransmissionWeight > 0.0;
     bool allowsSurfaceTransmission =
         material.effectiveTransmissionWeight > 0.0;
-    payload.shadingNormalDiagnostics = float3(
+    result.shadingNormalDiagnostics = float3(
         saturate(dot(
             material.unadjustedShadingNormalWS,
             geometry.faceNormalWS)),
@@ -176,21 +165,21 @@ void StandardLitReferencedPathtracingClosestHit(
             geometry.positionWS,
             geometry.faceNormalWS,
             allowsThinWalledTransmission,
-            payload.directLightRandom,
+            payloadInput.directLightRandom,
             neeCandidate);
     // Preserve the selected source and declared densities even when its
     // conditional sample is rejected. Phase 4.4 diagnostics use this to
     // measure the selector itself rather than only positive contributions.
     if (neeCandidate.selectionPdf > 0.0)
     {
-        payload.neeDirectionWS = neeCandidate.directionWS;
-        payload.neeDistance = neeCandidate.distance;
-        payload.neeSelectionPdf = neeCandidate.selectionPdf;
-        payload.neeSolidAnglePdf = neeCandidate.solidAnglePdf;
-        payload.neeShadowStrength = neeCandidate.shadowStrength;
-        payload.neeLightIndex = neeCandidate.lightIndex;
-        payload.neeLightType = neeCandidate.lightType;
-        payload.neeFlags = neeCandidate.flags;
+        result.neeDirectionWS = neeCandidate.directionWS;
+        result.neeDistance = neeCandidate.distance;
+        result.neeSelectionPdf = neeCandidate.selectionPdf;
+        result.neeSolidAnglePdf = neeCandidate.solidAnglePdf;
+        result.neeShadowStrength = neeCandidate.shadowStrength;
+        result.neeLightIndex = neeCandidate.lightIndex;
+        result.neeLightType = neeCandidate.lightType;
+        result.neeFlags = neeCandidate.flags;
     }
 
     bool neeUsesReflectionHemisphere =
@@ -222,22 +211,22 @@ void StandardLitReferencedPathtracingClosestHit(
                 geometry.normalWS)
             : 1.0;
         neeDiffuseBsdf *= diffuseShadowTerminator;
-        payload.shadingNormalDiagnostics.z = min(
-            payload.shadingNormalDiagnostics.z,
+        result.shadingNormalDiagnostics.z = min(
+            result.shadingNormalDiagnostics.z,
             diffuseShadowTerminator);
         if (VividReferencedPathtracingIsFinite(neeDiffuseBsdf)
             && VividReferencedPathtracingIsFinite(neeSpecularBsdf)
             && VividReferencedPathtracingIsFinite(neeBsdfPdf)
             && neeBsdfPdf >= 0.0)
         {
-            payload.neeDiffuseRadiance =
+            result.neeDiffuseRadiance =
                 max(neeDiffuseBsdf, 0.0)
                 * neeCandidate.incidentRadianceOverPdf;
-            payload.neeSpecularRadiance =
+            result.neeSpecularRadiance =
                 max(neeSpecularBsdf, 0.0)
                 * neeCandidate.incidentRadianceOverPdf;
-            payload.neeBsdfPdf = neeBsdfPdf;
-            payload.neeValid = 1u;
+            result.neeBsdfPdf = neeBsdfPdf;
+            result.neeValid = 1u;
         }
     }
 
@@ -247,7 +236,7 @@ void StandardLitReferencedPathtracingClosestHit(
     OpenPBR_BsdfLobeType sampledLobeType;
     openpbr_sample(
         preparedBsdf,
-        saturate(payload.bsdfRandom),
+        saturate(payloadInput.bsdfRandom),
         sampledDirectionWS,
         sampledWeight,
         sampledPdf,
@@ -284,49 +273,50 @@ void StandardLitReferencedPathtracingClosestHit(
             sampledWeight,
             openpbr_extract_diffuse_from_diffuse_specular(sampledWeight)
                 * diffuseShadowTerminator);
-        payload.shadingNormalDiagnostics.z = min(
-            payload.shadingNormalDiagnostics.z,
+        result.shadingNormalDiagnostics.z = min(
+            result.shadingNormalDiagnostics.z,
             diffuseShadowTerminator);
         float3 nextThroughputWeight = openpbr_get_sum_of_diffuse_specular(sampledWeight);
         if (VividReferencedPathtracingIsFinite(nextThroughputWeight)
             && any(nextThroughputWeight > 0.0))
         {
-            payload.nextDirectionWS = normalize(sampledDirectionWS);
-            payload.nextThroughputWeight = max(nextThroughputWeight, 0.0);
-            payload.nextPdf = sampledPdf;
-            payload.nextLobeClass = sampledTransmission
+            result.nextDirectionWS = normalize(sampledDirectionWS);
+            result.nextThroughputWeight = max(nextThroughputWeight, 0.0);
+            result.nextPdf = sampledPdf;
+            result.nextLobeClass = sampledTransmission
                 ? 2u
                 : ((sampledLobeType & OpenPBR_BsdfLobeTypeDiffuse) != 0u
                     ? 1u
                     : 2u);
-            payload.nextLobeIsTransmission =
+            result.nextLobeIsTransmission =
                 sampledTransmission ? 1u : 0u;
             if (sampledTransmission
                 && material.isSolidTransmissionBoundary)
             {
-                payload.mediumTransition =
+                result.mediumTransition =
                     geometry.isFrontFace ? 1 : -1;
-                payload.nextMediumIor =
+                result.nextMediumIor =
                     material.openPbrInputs.specular_ior;
-                payload.nextMediumExtinction =
+                result.nextMediumExtinction =
                     VividReferencedPathtracingIsFinite(
                         preparedBsdf.volume.extinction_coefficient)
                     ? max(
                         preparedBsdf.volume.extinction_coefficient,
                         0.0)
                     : 0.0;
-                payload.nextMediumInstanceIndex = InstanceIndex();
+                result.nextMediumInstanceIndex = InstanceIndex();
             }
             // OpenPBR uses the Specular flag for a singular (delta) event. Glossy
             // reflection remains non-delta and competes with environment NEE.
-            payload.nextLobeIsDelta =
+            result.nextLobeIsDelta =
                 (sampledLobeType & OpenPBR_BsdfLobeTypeSpecular) != 0u
                     ? 1u
                     : 0u;
         }
     }
 
-    payload.hit = 1u;
+    result.hit = 1u;
+    PackReferencedPathtracingSurfaceResult(result, payload);
 }
 
 [shader("anyhit")]
@@ -338,12 +328,14 @@ void StandardLitReferencedPathtracingAnyHit(
     bool isSolidTransmissionBoundary =
         _ThinWalledTransmission <= 0.5
         && SampleOpenPbrTransmissionWeight(uv) > 0.0;
+    uint activeMediumInstanceIndex =
+        LoadReferencedPathtracingActiveMediumInstanceIndex(payload);
     bool isUnmatchedNestedExit =
         isSolidTransmissionBoundary
         && HitKind() == HIT_KIND_TRIANGLE_BACK_FACE
-        && payload.activeMediumInstanceIndex
+        && activeMediumInstanceIndex
             != kReferencedPathtracingInvalidMediumInstance
-        && payload.activeMediumInstanceIndex != InstanceIndex();
+        && activeMediumInstanceIndex != InstanceIndex();
     if (isUnmatchedNestedExit)
     {
         // Match RTXPT's nested-dielectric false-hit handling: an exit that
@@ -367,7 +359,8 @@ void StandardLitReferencedPathtracingAnyHit(
     float geometryOpacity = SampleOpenPbrGeometryOpacity(uv);
     uint candidateSeed =
         ReferencedPathtracingHashStochasticTransparency(
-            payload.stochasticAlphaSeed ^ 0x9e3779b9u);
+            LoadReferencedPathtracingStochasticAlphaSeed(payload)
+                ^ 0x9e3779b9u);
     candidateSeed ^=
         ReferencedPathtracingHashStochasticTransparency(
             InstanceIndex() + 0x85ebca6bu);
@@ -382,8 +375,9 @@ void StandardLitReferencedPathtracingAnyHit(
             candidateSeed);
 
     bool surfaceBranch = opacityRandom < geometryOpacity;
-    payload.stochasticTransparencyDiagnostics.rgb = geometryOpacity;
-    payload.stochasticTransparencyDiagnostics.a += 1.0;
+    RecordReferencedPathtracingStochasticTransparency(
+        payload,
+        geometryOpacity);
     if (!surfaceBranch)
     {
         IgnoreHit();

@@ -1550,9 +1550,73 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
         saturate(_ReferencedCameraClearColor.a));
 }
 
+#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 13
+#define REFERENCED_PATHTRACING_PAYLOAD_DWORD_COUNT 52u
+
+// Raygen input layout. Closest-hit unpacks these values before overwriting the
+// same storage with the surface result.
+#define REFERENCED_PAYLOAD_INPUT_PATH_THROUGHPUT 0u
+#define REFERENCED_PAYLOAD_INPUT_BSDF_RANDOM 3u
+#define REFERENCED_PAYLOAD_INPUT_DIRECT_LIGHT_RANDOM 6u
+#define REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED 9u
+#define REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH 10u
+#define REFERENCED_PAYLOAD_INPUT_RAY_CONE_SPREAD_ANGLE 11u
+#define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_IOR 12u
+#define REFERENCED_PAYLOAD_INPUT_PARENT_MEDIUM_IOR 13u
+#define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_EXTINCTION 14u
+#define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX 17u
+
+// Closest-hit result layout. The result occupies 51 DWORDs; the final DWORD in
+// the uint4-aligned payload is intentionally unused.
+#define REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH 0u
+#define REFERENCED_PAYLOAD_RESULT_POSITION_WS 1u
+#define REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS 4u
+#define REFERENCED_PAYLOAD_RESULT_EMISSION 7u
+#define REFERENCED_PAYLOAD_RESULT_NEE_DIFFUSE_RADIANCE 10u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE 13u
+#define REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS 16u
+#define REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE 19u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SELECTION_PDF 20u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SOLID_ANGLE_PDF 21u
+#define REFERENCED_PAYLOAD_RESULT_NEE_BSDF_PDF 22u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SHADOW_STRENGTH 23u
+#define REFERENCED_PAYLOAD_RESULT_NEE_LIGHT_INDEX 24u
+#define REFERENCED_PAYLOAD_RESULT_FLAGS 25u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS 26u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT 29u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_PDF 32u
+#define REFERENCED_PAYLOAD_RESULT_LINEAR_ROUGHNESS 33u
+#define REFERENCED_PAYLOAD_RESULT_HIT_DISTANCE 34u
+#define REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO 35u
+#define REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS 38u
+#define REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS 41u
+#define REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT 44u
+#define REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY 45u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR 46u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION 47u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 50u
+
+#define REFERENCED_PAYLOAD_FLAG_HIT (1u << 0u)
+#define REFERENCED_PAYLOAD_FLAG_NEE_VALID (1u << 1u)
+#define REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_IS_DELTA (1u << 2u)
+#define REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_IS_TRANSMISSION (1u << 3u)
+#define REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_CLASS_SHIFT 4u
+#define REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_CLASS_MASK (3u << REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_CLASS_SHIFT)
+#define REFERENCED_PAYLOAD_FLAG_MEDIUM_TRANSITION_SHIFT 6u
+#define REFERENCED_PAYLOAD_FLAG_MEDIUM_TRANSITION_MASK (3u << REFERENCED_PAYLOAD_FLAG_MEDIUM_TRANSITION_SHIFT)
+#define REFERENCED_PAYLOAD_FLAG_STOCHASTIC_TRANSPARENCY_SEEN (1u << 8u)
+#define REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_SHIFT 9u
+#define REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_MASK (15u << REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_SHIFT)
+#define REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT 13u
+#define REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_MASK (255u << REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT)
+
 struct ReferencedPathtracingPayload
 {
-    // Raygen inputs consumed by closest-hit.
+    uint4 packed[REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT];
+};
+
+struct ReferencedPathtracingPayloadInput
+{
     float3 pathThroughput;
     float3 bsdfRandom;
     float3 directLightRandom;
@@ -1566,8 +1630,11 @@ struct ReferencedPathtracingPayload
     float parentMediumIor;
     float3 activeMediumExtinction;
     uint activeMediumInstanceIndex;
+};
 
-    // Compact closest-hit outputs consumed by the iterative path loop.
+struct ReferencedPathtracingSurfaceResult
+{
+    float rayConeWidth;
     float3 positionWS;
     float3 faceNormalWS;
     float3 emission;
@@ -1598,7 +1665,8 @@ struct ReferencedPathtracingPayload
     float3 shadingNormalDiagnostics;
     // Effective dielectric transmission fraction after metallic suppression.
     float thinWalledTransmissionWeight;
-    // RGB: most recent scalar geometry opacity. A: transparent candidate count.
+    // RGB: most recent scalar geometry opacity. A: whether a transparent
+    // candidate was encountered. The payload stores this as one float and one bit.
     float4 stochasticTransparencyDiagnostics;
     uint nextLobeClass;
     uint nextLobeIsDelta;
@@ -1612,53 +1680,549 @@ struct ReferencedPathtracingPayload
     uint hit;
 };
 
+uint LoadReferencedPathtracingPayloadUint(
+    ReferencedPathtracingPayload payload,
+    uint dwordOffset)
+{
+    return payload.packed[dwordOffset >> 2u][dwordOffset & 3u];
+}
+
+void StoreReferencedPathtracingPayloadUint(
+    inout ReferencedPathtracingPayload payload,
+    uint dwordOffset,
+    uint value)
+{
+    payload.packed[dwordOffset >> 2u][dwordOffset & 3u] = value;
+}
+
+float LoadReferencedPathtracingPayloadFloat(
+    ReferencedPathtracingPayload payload,
+    uint dwordOffset)
+{
+    return asfloat(LoadReferencedPathtracingPayloadUint(payload, dwordOffset));
+}
+
+void StoreReferencedPathtracingPayloadFloat(
+    inout ReferencedPathtracingPayload payload,
+    uint dwordOffset,
+    float value)
+{
+    StoreReferencedPathtracingPayloadUint(payload, dwordOffset, asuint(value));
+}
+
+float3 LoadReferencedPathtracingPayloadFloat3(
+    ReferencedPathtracingPayload payload,
+    uint dwordOffset)
+{
+    return float3(
+        LoadReferencedPathtracingPayloadFloat(payload, dwordOffset),
+        LoadReferencedPathtracingPayloadFloat(payload, dwordOffset + 1u),
+        LoadReferencedPathtracingPayloadFloat(payload, dwordOffset + 2u));
+}
+
+void StoreReferencedPathtracingPayloadFloat3(
+    inout ReferencedPathtracingPayload payload,
+    uint dwordOffset,
+    float3 value)
+{
+    StoreReferencedPathtracingPayloadFloat(payload, dwordOffset, value.x);
+    StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 1u, value.y);
+    StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 2u, value.z);
+}
+
 void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload payload)
 {
-    payload.pathThroughput = 1.0;
-    payload.bsdfRandom = 0.0;
-    payload.directLightRandom = 0.0;
-    payload.stochasticAlphaSeed = 0u;
-    payload.rayConeWidth = 0.0;
-    payload.rayConeSpreadAngle = 0.0;
-    payload.activeMediumIor = 1.0;
-    payload.parentMediumIor = 1.0;
-    payload.activeMediumExtinction = 0.0;
-    payload.activeMediumInstanceIndex =
+    [unroll]
+    for (uint packedIndex = 0u;
+        packedIndex < REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT;
+        ++packedIndex)
+    {
+        payload.packed[packedIndex] = 0u;
+    }
+}
+
+void InitializeReferencedPathtracingPayloadInput(
+    out ReferencedPathtracingPayloadInput input)
+{
+    input.pathThroughput = 1.0;
+    input.bsdfRandom = 0.0;
+    input.directLightRandom = 0.0;
+    input.stochasticAlphaSeed = 0u;
+    input.rayConeWidth = 0.0;
+    input.rayConeSpreadAngle = 0.0;
+    input.activeMediumIor = 1.0;
+    input.parentMediumIor = 1.0;
+    input.activeMediumExtinction = 0.0;
+    input.activeMediumInstanceIndex =
         kReferencedPathtracingInvalidMediumInstance;
-    payload.positionWS = 0.0;
-    payload.faceNormalWS = 0.0;
-    payload.emission = 0.0;
-    payload.neeDiffuseRadiance = 0.0;
-    payload.neeSpecularRadiance = 0.0;
-    payload.neeDirectionWS = 0.0;
-    payload.neeDistance = 0.0;
-    payload.neeSelectionPdf = 0.0;
-    payload.neeSolidAnglePdf = 0.0;
-    payload.neeBsdfPdf = 0.0;
-    payload.neeShadowStrength = 0.0;
-    payload.neeLightIndex = 0xffffffffu;
-    payload.neeLightType = 0u;
-    payload.neeFlags = 0u;
-    payload.neeValid = 0u;
-    payload.nextDirectionWS = 0.0;
-    payload.nextThroughputWeight = 0.0;
-    payload.nextPdf = 0.0;
-    payload.linearRoughness = 1.0;
-    payload.hitDistance = 0.0;
-    payload.denoisingAlbedo = 0.0;
-    payload.denoisingNormalWS = 0.0;
-    payload.shadingNormalDiagnostics = 0.0;
-    payload.thinWalledTransmissionWeight = 0.0;
-    payload.stochasticTransparencyDiagnostics = 0.0;
-    payload.nextLobeClass = 0u;
-    payload.nextLobeIsDelta = 0u;
-    payload.nextLobeIsTransmission = 0u;
-    payload.mediumTransition = 0;
-    payload.nextMediumIor = 1.0;
-    payload.nextMediumExtinction = 0.0;
-    payload.nextMediumInstanceIndex =
+}
+
+void InitializeReferencedPathtracingSurfaceResult(
+    out ReferencedPathtracingSurfaceResult result)
+{
+    result.rayConeWidth = 0.0;
+    result.positionWS = 0.0;
+    result.faceNormalWS = 0.0;
+    result.emission = 0.0;
+    result.neeDiffuseRadiance = 0.0;
+    result.neeSpecularRadiance = 0.0;
+    result.neeDirectionWS = 0.0;
+    result.neeDistance = 0.0;
+    result.neeSelectionPdf = 0.0;
+    result.neeSolidAnglePdf = 0.0;
+    result.neeBsdfPdf = 0.0;
+    result.neeShadowStrength = 0.0;
+    result.neeLightIndex = 0xffffffffu;
+    result.neeLightType = 0u;
+    result.neeFlags = 0u;
+    result.neeValid = 0u;
+    result.nextDirectionWS = 0.0;
+    result.nextThroughputWeight = 0.0;
+    result.nextPdf = 0.0;
+    result.linearRoughness = 1.0;
+    result.hitDistance = 0.0;
+    result.denoisingAlbedo = 0.0;
+    result.denoisingNormalWS = 0.0;
+    result.shadingNormalDiagnostics = 0.0;
+    result.thinWalledTransmissionWeight = 0.0;
+    result.stochasticTransparencyDiagnostics = 0.0;
+    result.nextLobeClass = 0u;
+    result.nextLobeIsDelta = 0u;
+    result.nextLobeIsTransmission = 0u;
+    result.mediumTransition = 0;
+    result.nextMediumIor = 1.0;
+    result.nextMediumExtinction = 0.0;
+    result.nextMediumInstanceIndex =
         kReferencedPathtracingInvalidMediumInstance;
-    payload.hit = 0u;
+    result.hit = 0u;
+}
+
+void PackReferencedPathtracingPayloadInput(
+    ReferencedPathtracingPayloadInput input,
+    out ReferencedPathtracingPayload payload)
+{
+    InitializeReferencedPathtracingPayload(payload);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_PATH_THROUGHPUT,
+        input.pathThroughput);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_BSDF_RANDOM,
+        input.bsdfRandom);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_DIRECT_LIGHT_RANDOM,
+        input.directLightRandom);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED,
+        input.stochasticAlphaSeed);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH,
+        input.rayConeWidth);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RAY_CONE_SPREAD_ANGLE,
+        input.rayConeSpreadAngle);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_IOR,
+        input.activeMediumIor);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_PARENT_MEDIUM_IOR,
+        input.parentMediumIor);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_EXTINCTION,
+        input.activeMediumExtinction);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX,
+        input.activeMediumInstanceIndex);
+}
+
+void UnpackReferencedPathtracingPayloadInput(
+    ReferencedPathtracingPayload payload,
+    out ReferencedPathtracingPayloadInput input)
+{
+    input.pathThroughput = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_PATH_THROUGHPUT);
+    input.bsdfRandom = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_BSDF_RANDOM);
+    input.directLightRandom = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_DIRECT_LIGHT_RANDOM);
+    input.stochasticAlphaSeed = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED);
+    input.rayConeWidth = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH);
+    input.rayConeSpreadAngle = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RAY_CONE_SPREAD_ANGLE);
+    input.activeMediumIor = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_IOR);
+    input.parentMediumIor = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_PARENT_MEDIUM_IOR);
+    input.activeMediumExtinction = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_EXTINCTION);
+    input.activeMediumInstanceIndex = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX);
+}
+
+uint PackReferencedPathtracingSurfaceResultFlags(
+    ReferencedPathtracingSurfaceResult result)
+{
+    uint flags = result.hit != 0u ? REFERENCED_PAYLOAD_FLAG_HIT : 0u;
+    flags |= result.neeValid != 0u ? REFERENCED_PAYLOAD_FLAG_NEE_VALID : 0u;
+    flags |= result.nextLobeIsDelta != 0u
+        ? REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_IS_DELTA
+        : 0u;
+    flags |= result.nextLobeIsTransmission != 0u
+        ? REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_IS_TRANSMISSION
+        : 0u;
+    flags |= (result.nextLobeClass & 3u)
+        << REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_CLASS_SHIFT;
+    uint mediumTransition = result.mediumTransition < 0
+        ? 0u
+        : (result.mediumTransition > 0 ? 2u : 1u);
+    flags |= mediumTransition
+        << REFERENCED_PAYLOAD_FLAG_MEDIUM_TRANSITION_SHIFT;
+    flags |= result.stochasticTransparencyDiagnostics.a > 0.0
+        ? REFERENCED_PAYLOAD_FLAG_STOCHASTIC_TRANSPARENCY_SEEN
+        : 0u;
+    flags |= (result.neeLightType & 15u)
+        << REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_SHIFT;
+    flags |= (result.neeFlags & 255u)
+        << REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT;
+    return flags;
+}
+
+void UnpackReferencedPathtracingSurfaceResultFlags(
+    uint flags,
+    inout ReferencedPathtracingSurfaceResult result)
+{
+    result.hit = (flags & REFERENCED_PAYLOAD_FLAG_HIT) != 0u ? 1u : 0u;
+    result.neeValid =
+        (flags & REFERENCED_PAYLOAD_FLAG_NEE_VALID) != 0u ? 1u : 0u;
+    result.nextLobeIsDelta =
+        (flags & REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_IS_DELTA) != 0u
+            ? 1u
+            : 0u;
+    result.nextLobeIsTransmission =
+        (flags & REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_IS_TRANSMISSION) != 0u
+            ? 1u
+            : 0u;
+    result.nextLobeClass =
+        (flags & REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_CLASS_MASK)
+        >> REFERENCED_PAYLOAD_FLAG_NEXT_LOBE_CLASS_SHIFT;
+    uint mediumTransition =
+        (flags & REFERENCED_PAYLOAD_FLAG_MEDIUM_TRANSITION_MASK)
+        >> REFERENCED_PAYLOAD_FLAG_MEDIUM_TRANSITION_SHIFT;
+    result.mediumTransition = mediumTransition == 0u
+        ? -1
+        : (mediumTransition == 2u ? 1 : 0);
+    result.stochasticTransparencyDiagnostics.a =
+        (flags & REFERENCED_PAYLOAD_FLAG_STOCHASTIC_TRANSPARENCY_SEEN) != 0u
+            ? 1.0
+            : 0.0;
+    result.neeLightType =
+        (flags & REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_MASK)
+        >> REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_SHIFT;
+    result.neeFlags =
+        (flags & REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_MASK)
+        >> REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT;
+}
+
+float4 LoadReferencedPathtracingStochasticTransparencyDiagnostics(
+    ReferencedPathtracingPayload payload)
+{
+    uint flags = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS);
+    float opacity = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY);
+    float candidateSeen =
+        (flags & REFERENCED_PAYLOAD_FLAG_STOCHASTIC_TRANSPARENCY_SEEN) != 0u
+            ? 1.0
+            : 0.0;
+    return float4(opacity.xxx, candidateSeen);
+}
+
+void RecordReferencedPathtracingStochasticTransparency(
+    inout ReferencedPathtracingPayload payload,
+    float opacity)
+{
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY,
+        opacity);
+    uint flags = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS,
+        flags | REFERENCED_PAYLOAD_FLAG_STOCHASTIC_TRANSPARENCY_SEEN);
+}
+
+uint LoadReferencedPathtracingStochasticAlphaSeed(
+    ReferencedPathtracingPayload payload)
+{
+    return LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED);
+}
+
+uint LoadReferencedPathtracingActiveMediumInstanceIndex(
+    ReferencedPathtracingPayload payload)
+{
+    return LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX);
+}
+
+void StoreReferencedPathtracingPayloadHit(
+    inout ReferencedPathtracingPayload payload,
+    uint hit)
+{
+    uint flags = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS);
+    flags = hit != 0u
+        ? flags | REFERENCED_PAYLOAD_FLAG_HIT
+        : flags & ~REFERENCED_PAYLOAD_FLAG_HIT;
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS,
+        flags);
+}
+
+uint LoadReferencedPathtracingPayloadHit(
+    ReferencedPathtracingPayload payload)
+{
+    uint flags = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS);
+    return (flags & REFERENCED_PAYLOAD_FLAG_HIT) != 0u ? 1u : 0u;
+}
+
+void PackReferencedPathtracingSurfaceResult(
+    ReferencedPathtracingSurfaceResult result,
+    out ReferencedPathtracingPayload payload)
+{
+    InitializeReferencedPathtracingPayload(payload);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH,
+        result.rayConeWidth);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_POSITION_WS,
+        result.positionWS);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS,
+        result.faceNormalWS);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_EMISSION,
+        result.emission);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_DIFFUSE_RADIANCE,
+        result.neeDiffuseRadiance);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE,
+        result.neeSpecularRadiance);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS,
+        result.neeDirectionWS);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE,
+        result.neeDistance);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SELECTION_PDF,
+        result.neeSelectionPdf);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SOLID_ANGLE_PDF,
+        result.neeSolidAnglePdf);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_BSDF_PDF,
+        result.neeBsdfPdf);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SHADOW_STRENGTH,
+        result.neeShadowStrength);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_LIGHT_INDEX,
+        result.neeLightIndex);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS,
+        PackReferencedPathtracingSurfaceResultFlags(result));
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS,
+        result.nextDirectionWS);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT,
+        result.nextThroughputWeight);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_PDF,
+        result.nextPdf);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_LINEAR_ROUGHNESS,
+        result.linearRoughness);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_HIT_DISTANCE,
+        result.hitDistance);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO,
+        result.denoisingAlbedo);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS,
+        result.denoisingNormalWS);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS,
+        result.shadingNormalDiagnostics);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT,
+        result.thinWalledTransmissionWeight);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY,
+        result.stochasticTransparencyDiagnostics.x);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR,
+        result.nextMediumIor);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION,
+        result.nextMediumExtinction);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX,
+        result.nextMediumInstanceIndex);
+}
+
+void UnpackReferencedPathtracingSurfaceResult(
+    ReferencedPathtracingPayload payload,
+    out ReferencedPathtracingSurfaceResult result)
+{
+    InitializeReferencedPathtracingSurfaceResult(result);
+    result.rayConeWidth = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH);
+    result.positionWS = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_POSITION_WS);
+    result.faceNormalWS = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS);
+    result.emission = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_EMISSION);
+    result.neeDiffuseRadiance = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_DIFFUSE_RADIANCE);
+    result.neeSpecularRadiance = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE);
+    result.neeDirectionWS = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS);
+    result.neeDistance = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE);
+    result.neeSelectionPdf = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SELECTION_PDF);
+    result.neeSolidAnglePdf = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SOLID_ANGLE_PDF);
+    result.neeBsdfPdf = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_BSDF_PDF);
+    result.neeShadowStrength = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_SHADOW_STRENGTH);
+    result.neeLightIndex = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEE_LIGHT_INDEX);
+    result.nextDirectionWS = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS);
+    result.nextThroughputWeight = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT);
+    result.nextPdf = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_PDF);
+    result.linearRoughness = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_LINEAR_ROUGHNESS);
+    result.hitDistance = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_HIT_DISTANCE);
+    result.denoisingAlbedo = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO);
+    result.denoisingNormalWS = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS);
+    result.shadingNormalDiagnostics = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS);
+    result.thinWalledTransmissionWeight = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT);
+    float stochasticTransparencyOpacity =
+        LoadReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY);
+    result.stochasticTransparencyDiagnostics.rgb =
+        stochasticTransparencyOpacity;
+    result.nextMediumIor = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR);
+    result.nextMediumExtinction = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION);
+    result.nextMediumInstanceIndex = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX);
+    uint flags = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_FLAGS);
+    UnpackReferencedPathtracingSurfaceResultFlags(flags, result);
 }
 
 #endif

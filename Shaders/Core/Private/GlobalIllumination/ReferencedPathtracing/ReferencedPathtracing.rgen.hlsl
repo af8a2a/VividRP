@@ -684,6 +684,11 @@ void RayGenReferencedPathtracing()
         TraceReferencedPathtracingSurface(ray, tracePayload);
         ReferencedPathtracingSurfaceResult payload;
         UnpackReferencedPathtracingSurfaceResult(tracePayload, payload);
+        if (payload.hit != 0u)
+        {
+            payload.positionWS =
+                ray.Origin + ray.Direction * payload.hitDistance;
+        }
         float materialMediumDistance = payload.hit != 0u
             ? payload.hitDistance
             : ray.TMax;

@@ -1550,8 +1550,8 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
         saturate(_ReferencedCameraClearColor.a));
 }
 
-#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 13
-#define REFERENCED_PATHTRACING_PAYLOAD_DWORD_COUNT 52u
+#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10
+#define REFERENCED_PATHTRACING_PAYLOAD_DWORD_COUNT 40u
 
 // Raygen input layout. Closest-hit unpacks these values before overwriting the
 // same storage with the surface result.
@@ -1566,35 +1566,35 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_EXTINCTION 14u
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX 17u
 
-// Closest-hit result layout. The result occupies 51 DWORDs; the final DWORD in
-// the uint4-aligned payload is intentionally unused.
+// Closest-hit result layout. Raygen reconstructs positionWS from its RayDesc
+// and hit distance. Unit directions use octahedral UNORM16x2 encoding so the
+// complete result fits exactly in 40 DWORDs (160 bytes).
 #define REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH 0u
-#define REFERENCED_PAYLOAD_RESULT_POSITION_WS 1u
-#define REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS 4u
-#define REFERENCED_PAYLOAD_RESULT_EMISSION 7u
-#define REFERENCED_PAYLOAD_RESULT_NEE_DIFFUSE_RADIANCE 10u
-#define REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE 13u
-#define REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS 16u
-#define REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE 19u
-#define REFERENCED_PAYLOAD_RESULT_NEE_SELECTION_PDF 20u
-#define REFERENCED_PAYLOAD_RESULT_NEE_SOLID_ANGLE_PDF 21u
-#define REFERENCED_PAYLOAD_RESULT_NEE_BSDF_PDF 22u
-#define REFERENCED_PAYLOAD_RESULT_NEE_SHADOW_STRENGTH 23u
-#define REFERENCED_PAYLOAD_RESULT_NEE_LIGHT_INDEX 24u
-#define REFERENCED_PAYLOAD_RESULT_FLAGS 25u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS 26u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT 29u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_PDF 32u
-#define REFERENCED_PAYLOAD_RESULT_LINEAR_ROUGHNESS 33u
-#define REFERENCED_PAYLOAD_RESULT_HIT_DISTANCE 34u
-#define REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO 35u
-#define REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS 38u
-#define REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS 41u
-#define REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT 44u
-#define REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY 45u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR 46u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION 47u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 50u
+#define REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS_PACKED 1u
+#define REFERENCED_PAYLOAD_RESULT_EMISSION 2u
+#define REFERENCED_PAYLOAD_RESULT_NEE_DIFFUSE_RADIANCE 5u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE 8u
+#define REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS_PACKED 11u
+#define REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE 12u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SELECTION_PDF 13u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SOLID_ANGLE_PDF 14u
+#define REFERENCED_PAYLOAD_RESULT_NEE_BSDF_PDF 15u
+#define REFERENCED_PAYLOAD_RESULT_NEE_SHADOW_STRENGTH 16u
+#define REFERENCED_PAYLOAD_RESULT_NEE_LIGHT_INDEX 17u
+#define REFERENCED_PAYLOAD_RESULT_FLAGS 18u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS_PACKED 19u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT 20u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_PDF 23u
+#define REFERENCED_PAYLOAD_RESULT_LINEAR_ROUGHNESS 24u
+#define REFERENCED_PAYLOAD_RESULT_HIT_DISTANCE 25u
+#define REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO 26u
+#define REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS_PACKED 29u
+#define REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS 30u
+#define REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT 33u
+#define REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY 34u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR 35u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION 36u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 39u
 
 #define REFERENCED_PAYLOAD_FLAG_HIT (1u << 0u)
 #define REFERENCED_PAYLOAD_FLAG_NEE_VALID (1u << 1u)
@@ -1735,6 +1735,42 @@ void StoreReferencedPathtracingPayloadFloat3(
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset, value.x);
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 1u, value.y);
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 2u, value.z);
+}
+
+uint PackReferencedPathtracingUnitVector(float3 value)
+{
+    float inverseL1Norm = rcp(max(
+        dot(abs(value), float3(1.0, 1.0, 1.0)),
+        0.0000001));
+    float3 octahedral = value * inverseL1Norm;
+    if (octahedral.z < 0.0)
+    {
+        float2 signNotZero = float2(
+            octahedral.x >= 0.0 ? 1.0 : -1.0,
+            octahedral.y >= 0.0 ? 1.0 : -1.0);
+        octahedral.xy =
+            (1.0 - abs(octahedral.yx)) * signNotZero;
+    }
+
+    uint2 quantized = (uint2)round(
+        saturate(octahedral.xy * 0.5 + 0.5) * 65535.0);
+    return quantized.x | (quantized.y << 16u);
+}
+
+float3 UnpackReferencedPathtracingUnitVector(uint packedValue)
+{
+    float2 octahedral =
+        float2(packedValue & 0xffffu, packedValue >> 16u)
+        * (2.0 / 65535.0)
+        - 1.0;
+    float3 value = float3(
+        octahedral,
+        1.0 - abs(octahedral.x) - abs(octahedral.y));
+    float fold = saturate(-value.z);
+    value.xy += float2(
+        value.x >= 0.0 ? -fold : fold,
+        value.y >= 0.0 ? -fold : fold);
+    return normalize(value);
 }
 
 void InitializeReferencedPathtracingPayload(out ReferencedPathtracingPayload payload)
@@ -2034,14 +2070,10 @@ void PackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH,
         result.rayConeWidth);
-    StoreReferencedPathtracingPayloadFloat3(
+    StoreReferencedPathtracingPayloadUint(
         payload,
-        REFERENCED_PAYLOAD_RESULT_POSITION_WS,
-        result.positionWS);
-    StoreReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS,
-        result.faceNormalWS);
+        REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS_PACKED,
+        PackReferencedPathtracingUnitVector(result.faceNormalWS));
     StoreReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_EMISSION,
@@ -2054,10 +2086,10 @@ void PackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE,
         result.neeSpecularRadiance);
-    StoreReferencedPathtracingPayloadFloat3(
+    StoreReferencedPathtracingPayloadUint(
         payload,
-        REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS,
-        result.neeDirectionWS);
+        REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS_PACKED,
+        PackReferencedPathtracingUnitVector(result.neeDirectionWS));
     StoreReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE,
@@ -2086,10 +2118,10 @@ void PackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_FLAGS,
         PackReferencedPathtracingSurfaceResultFlags(result));
-    StoreReferencedPathtracingPayloadFloat3(
+    StoreReferencedPathtracingPayloadUint(
         payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS,
-        result.nextDirectionWS);
+        REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS_PACKED,
+        PackReferencedPathtracingUnitVector(result.nextDirectionWS));
     StoreReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT,
@@ -2110,10 +2142,10 @@ void PackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO,
         result.denoisingAlbedo);
-    StoreReferencedPathtracingPayloadFloat3(
+    StoreReferencedPathtracingPayloadUint(
         payload,
-        REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS,
-        result.denoisingNormalWS);
+        REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS_PACKED,
+        PackReferencedPathtracingUnitVector(result.denoisingNormalWS));
     StoreReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS,
@@ -2148,12 +2180,10 @@ void UnpackReferencedPathtracingSurfaceResult(
     result.rayConeWidth = LoadReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH);
-    result.positionWS = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_POSITION_WS);
-    result.faceNormalWS = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS);
+    result.faceNormalWS = UnpackReferencedPathtracingUnitVector(
+        LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS_PACKED));
     result.emission = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_EMISSION);
@@ -2163,9 +2193,10 @@ void UnpackReferencedPathtracingSurfaceResult(
     result.neeSpecularRadiance = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEE_SPECULAR_RADIANCE);
-    result.neeDirectionWS = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS);
+    result.neeDirectionWS = UnpackReferencedPathtracingUnitVector(
+        LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEE_DIRECTION_WS_PACKED));
     result.neeDistance = LoadReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEE_DISTANCE);
@@ -2184,9 +2215,10 @@ void UnpackReferencedPathtracingSurfaceResult(
     result.neeLightIndex = LoadReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEE_LIGHT_INDEX);
-    result.nextDirectionWS = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS);
+    result.nextDirectionWS = UnpackReferencedPathtracingUnitVector(
+        LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_DIRECTION_WS_PACKED));
     result.nextThroughputWeight = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_THROUGHPUT_WEIGHT);
@@ -2202,9 +2234,10 @@ void UnpackReferencedPathtracingSurfaceResult(
     result.denoisingAlbedo = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_DENOISING_ALBEDO);
-    result.denoisingNormalWS = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS);
+    result.denoisingNormalWS = UnpackReferencedPathtracingUnitVector(
+        LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_DENOISING_NORMAL_WS_PACKED));
     result.shadingNormalDiagnostics = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS);

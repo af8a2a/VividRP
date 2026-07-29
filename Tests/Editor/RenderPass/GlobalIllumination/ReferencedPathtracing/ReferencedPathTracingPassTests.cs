@@ -174,7 +174,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 commonSource,
                 Does.Contain(
-                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 13"));
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain("| RAY_FLAG_CULL_NON_OPAQUE"));
@@ -188,6 +188,51 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "LoadReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload)"));
+        }
+
+        [Test]
+        public void SurfaceTrace_Uses160BytePayloadWithPackedUnitVectors()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_DWORD_COUNT 40u"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 39u"));
+            Assert.That(
+                commonSource,
+                Does.Contain("PackReferencedPathtracingUnitVector("));
+            Assert.That(
+                commonSource,
+                Does.Contain("UnpackReferencedPathtracingUnitVector("));
+            Assert.That(
+                commonSource,
+                Does.Not.Contain("REFERENCED_PAYLOAD_RESULT_POSITION_WS "));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ray.Origin + ray.Direction * payload.hitDistance"));
         }
 
         [Test]

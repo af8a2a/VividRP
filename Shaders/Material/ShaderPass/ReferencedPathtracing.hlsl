@@ -127,7 +127,6 @@ void StandardLitReferencedPathtracingClosestHit(
         exteriorIor,
         viewDirectionWS);
 
-    result.positionWS = geometry.positionWS;
     result.faceNormalWS = geometry.faceNormalWS;
     result.rayConeWidth = hitConeWidth;
     result.emission = VividReferencedPathtracingIsFinite(preparedBsdf.emission)

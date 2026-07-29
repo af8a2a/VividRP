@@ -76,6 +76,7 @@ namespace VividRP.Runtime
         private uint m_outputWidth;
         private uint m_outputHeight;
         private NVSDK_NGX_PerfQuality_Value m_qualityValue;
+        private DLSSRRPreset m_renderPreset;
         private NVSDK_NGX_DLSS_Feature_Flags m_featureFlags;
         private bool m_createParamsChanged = false;
 
@@ -130,16 +131,19 @@ namespace VividRP.Runtime
         /// <param name="qualityValue">Quality/performance preset</param>
         /// <param name="depthType">Depth buffer type</param>
         /// <param name="roughnessMode">Roughness packing mode</param>
+        /// <param name="renderPreset">Ray Reconstruction model preset</param>
         public DLSSRayReconstruction(
             NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
             NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
             DepthType depthType = DepthType.Hardware,
-            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
+            RoughnessMode roughnessMode = RoughnessMode.Unpacked,
+            DLSSRRPreset renderPreset = DLSSRRPreset.Default)
         {
             m_featureFlags = featureFlags;
             m_qualityValue = qualityValue;
             m_depthType = depthType;
             m_roughnessMode = roughnessMode;
+            m_renderPreset = NormalizeRenderPreset(renderPreset);
         }
 
         /// <summary>
@@ -157,6 +161,27 @@ namespace VividRP.Runtime
                 m_qualityValue = quality;
                 m_createParamsChanged = true;
             }
+        }
+
+        /// <summary>
+        /// Set the Ray Reconstruction model preset.
+        /// </summary>
+        public void SetRenderPreset(DLSSRRPreset renderPreset)
+        {
+            var normalizedPreset = NormalizeRenderPreset(renderPreset);
+            if (m_renderPreset != normalizedPreset)
+            {
+                m_renderPreset = normalizedPreset;
+                m_createParamsChanged = true;
+            }
+        }
+
+        private static DLSSRRPreset NormalizeRenderPreset(DLSSRRPreset renderPreset)
+        {
+            return renderPreset == DLSSRRPreset.D
+                || renderPreset == DLSSRRPreset.E
+                ? renderPreset
+                : DLSSRRPreset.Default;
         }
 
         /// <summary>
@@ -385,7 +410,7 @@ namespace VividRP.Runtime
                     case DLSSFeatureStatus.Ready:
                         m_initialized = true;
 #if DEBUG || UNITY_EDITOR
-                        Debug.Log($"[DLSSRayReconstruction] Initialized: {m_inputWidth}x{m_inputHeight} -> {m_outputWidth}x{m_outputHeight}, Quality={m_qualityValue}");
+                        Debug.Log($"[DLSSRayReconstruction] Initialized: {m_inputWidth}x{m_inputHeight} -> {m_outputWidth}x{m_outputHeight}, Quality={m_qualityValue}, Preset={m_renderPreset}");
 #endif
                         return true;
 
@@ -438,6 +463,7 @@ namespace VividRP.Runtime
             ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Denoise_Mode, (int)m_denoiseMode);
             ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Depth_Type, (int)m_depthType);
             ext.SetParameterI(parameters, DLSSExtension.NVSDK_NGX_Parameter_DLSS_Roughness_Mode, (int)m_roughnessMode);
+            SetRenderPresetParameters(ext, parameters);
 
             // Create feature
             m_dlssHandle = ext.CreateFeature(
@@ -451,6 +477,35 @@ namespace VividRP.Runtime
             }
 
             return true;
+        }
+
+        private void SetRenderPresetParameters(DLSSExtension ext, IntPtr parameters)
+        {
+            var preset = (int)m_renderPreset;
+            ext.SetParameterI(
+                parameters,
+                DLSSExtension.NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_DLAA,
+                preset);
+            ext.SetParameterI(
+                parameters,
+                DLSSExtension.NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Quality,
+                preset);
+            ext.SetParameterI(
+                parameters,
+                DLSSExtension.NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Balanced,
+                preset);
+            ext.SetParameterI(
+                parameters,
+                DLSSExtension.NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_Performance,
+                preset);
+            ext.SetParameterI(
+                parameters,
+                DLSSExtension.NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraPerformance,
+                preset);
+            ext.SetParameterI(
+                parameters,
+                DLSSExtension.NVSDK_NGX_Parameter_RayReconstruction_Hint_Render_Preset_UltraQuality,
+                preset);
         }
 
         private void DiscardFailedInitialization(DLSSExtension ext, bool releaseHandle)
@@ -537,13 +592,16 @@ namespace VividRP.Runtime
             NVSDK_NGX_DLSS_Feature_Flags featureFlags = NVSDK_NGX_DLSS_Feature_Flags.None,
             NVSDK_NGX_PerfQuality_Value qualityValue = NVSDK_NGX_PerfQuality_Value.NVSDK_NGX_PerfQuality_Value_Balanced,
             DepthType depthType = DepthType.Hardware,
-            RoughnessMode roughnessMode = RoughnessMode.Unpacked)
+            RoughnessMode roughnessMode = RoughnessMode.Unpacked,
+            DLSSRRPreset renderPreset = DLSSRRPreset.Default)
         {
         }
 
         public bool IsSupported => false;
 
         public void SetQuality(NVSDK_NGX_PerfQuality_Value quality) { }
+
+        public void SetRenderPreset(DLSSRRPreset renderPreset) { }
 
         public void SetFeatureFlags(NVSDK_NGX_DLSS_Feature_Flags flags) { }
 

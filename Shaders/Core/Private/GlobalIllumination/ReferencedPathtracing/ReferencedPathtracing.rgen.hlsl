@@ -130,6 +130,66 @@ float4 PackReferencedPathtracingReblurSignal(float3 radiance, float normalizedHi
         normalizedHitDistance);
 }
 
+static const float kReferencedPathtracingDlssInfiniteHitDistance = 65504.0;
+
+float3 ResolveReferencedPathtracingDlssRayDirection(
+    float3 directionWS,
+    float3 fallbackDirectionWS)
+{
+    float directionLengthSquared = dot(directionWS, directionWS);
+    if (IsFiniteReferencedPathtracingRadiance(directionWS)
+        && directionLengthSquared > 1e-12)
+    {
+        return directionWS * rsqrt(directionLengthSquared);
+    }
+
+    float fallbackLengthSquared =
+        dot(fallbackDirectionWS, fallbackDirectionWS);
+    if (IsFiniteReferencedPathtracingRadiance(fallbackDirectionWS)
+        && fallbackLengthSquared > 1e-12)
+    {
+        return fallbackDirectionWS * rsqrt(fallbackLengthSquared);
+    }
+
+    return float3(0.0, 0.0, 1.0);
+}
+
+float4 PackReferencedPathtracingDlssRayDirectionHitDistance(
+    float3 directionWS,
+    float hitDistance,
+    float3 fallbackDirectionWS,
+    bool hasPrimarySurface,
+    bool hasFiniteHitDistance)
+{
+    // DLSS-RR consumes a dense world-space guide. Background pixels retain a
+    // zero direction, while an unsampled lobe or a secondary miss uses the
+    // largest representable FP16 value instead of camera far clip or zero.
+    if (!hasPrimarySurface)
+    {
+        return float4(
+            0.0,
+            0.0,
+            0.0,
+            kReferencedPathtracingDlssInfiniteHitDistance);
+    }
+
+    float3 resolvedDirectionWS =
+        ResolveReferencedPathtracingDlssRayDirection(
+            directionWS,
+            fallbackDirectionWS);
+    bool hitDistanceIsFinite =
+        !isnan(hitDistance)
+        && !isinf(hitDistance)
+        && hitDistance >= 0.0;
+    float resolvedHitDistance =
+        hasFiniteHitDistance && hitDistanceIsFinite
+            ? min(
+                hitDistance,
+                kReferencedPathtracingDlssInfiniteHitDistance)
+            : kReferencedPathtracingDlssInfiniteHitDistance;
+    return float4(resolvedDirectionWS, resolvedHitDistance);
+}
+
 float GetReferencedPathtracingDenoiserLuminance(float3 radiance)
 {
     return dot(max(radiance, 0.0), float3(0.2126, 0.7152, 0.0722));
@@ -170,7 +230,7 @@ float3 OffsetReferencedPathtracingRayOrigin(
     return positionWS + faceNormalWS * (rayBias * offsetSign);
 }
 
-float TraceReferencedPathtracingVisibility(
+float3 TraceReferencedPathtracingVisibility(
     float3 positionWS,
     float3 faceNormalWS,
     float3 lightDirectionWS,
@@ -190,23 +250,54 @@ float TraceReferencedPathtracingVisibility(
     if (shadowRay.TMax <= shadowRay.TMin)
         return 1.0;
 
-    ReferencedPathtracingPayload visibilityPayload;
-    InitializeReferencedPathtracingPayload(visibilityPayload);
-    visibilityPayload.stochasticAlphaSeed = stochasticAlphaSeed;
-    // With the closest-hit shader skipped, this value survives any hit; the miss shader clears it.
-    visibilityPayload.hit = 1u;
+    // Unity binds one material hit group per selected ShaderLab ray-tracing
+    // pass. Split visibility by geometry opacity so opaque traversal can use a
+    // one-DWORD payload without invoking the material AnyHit that consumes the
+    // full surface payload.
+    ReferencedPathtracingVisibilityPayload opaqueVisibilityPayload;
+    opaqueVisibilityPayload.hit = 1u;
     TraceRay(
         _AccelerationStructure,
         RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
-            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER,
+            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER
+            | RAY_FLAG_CULL_NON_OPAQUE,
+        0xFF,
+        0,
+        1,
+        1,
+        shadowRay,
+        opaqueVisibilityPayload);
+    if (opaqueVisibilityPayload.hit != 0u)
+        return 0.0;
+
+    // Alpha-tested and transparent geometry still requires the material
+    // AnyHit for texture coverage, stochastic opacity, and nested-dielectric
+    // false-hit handling. Restrict the fallback trace to non-opaque geometry.
+    ReferencedPathtracingPayloadInput visibilityInput;
+    InitializeReferencedPathtracingPayloadInput(visibilityInput);
+    visibilityInput.stochasticAlphaSeed = stochasticAlphaSeed;
+    ReferencedPathtracingPayload nonOpaqueVisibilityPayload;
+    PackReferencedPathtracingPayloadInput(
+        visibilityInput,
+        nonOpaqueVisibilityPayload);
+    // With closest-hit skipped, this value survives an accepted hit; the main
+    // miss shader clears it.
+    StoreReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload, 1u);
+    TraceRay(
+        _AccelerationStructure,
+        RAY_FLAG_ACCEPT_FIRST_HIT_AND_END_SEARCH
+            | RAY_FLAG_SKIP_CLOSEST_HIT_SHADER
+            | RAY_FLAG_CULL_OPAQUE,
         0xFF,
         0,
         1,
         0,
         shadowRay,
-        visibilityPayload);
+        nonOpaqueVisibilityPayload);
 
-    return visibilityPayload.hit == 0u ? 1.0 : 0.0;
+    return LoadReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload) == 0u
+        ? 1.0
+        : 0.0;
 }
 
 float3 TraceReferencedPathtracingCandidateVisibility(
@@ -219,7 +310,7 @@ float3 TraceReferencedPathtracingCandidateVisibility(
     uint stochasticAlphaSeed)
 {
     shadowStrength = saturate(shadowStrength);
-    float tracedVisibility = shadowStrength > 0.0
+    float3 tracedVisibility = shadowStrength > 0.0
         ? TraceReferencedPathtracingVisibility(
             positionWS,
             faceNormalWS,
@@ -404,6 +495,7 @@ void RayGenReferencedPathtracing()
         lensDiskSample,
         ray.Origin,
         ray.Direction);
+    float3 primaryCameraRayDirectionWS = ray.Direction;
     float cameraForwardProjection = max(
         dot(
             ray.Direction,
@@ -489,22 +581,47 @@ void RayGenReferencedPathtracing()
     float primaryLinearRoughness = 1.0;
     float diffuseHitDistance = _RayMaxDistance;
     float specularHitDistance = _RayMaxDistance;
+    // RR requires a literal primary-surface ray distance, while REBLUR hitT
+    // may be radiance-weighted when several estimators share one signal.
+    float diffuseDlssHitDistance = 0.0;
+    float specularDlssHitDistance = 0.0;
+    bool diffuseHitDistanceValid = false;
+    bool specularHitDistanceValid = false;
     float3 diffuseRayDirectionWS = 0.0;
     float3 specularRayDirectionWS = 0.0;
     uint maxBounceCount = min(
         (uint)max(_ReferencedMaxBounceCount, 1),
         kReferencedPathtracingMaxSupportedBounceCount);
+    float materialMediumIorStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
+    float3 materialMediumExtinctionStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
+    uint materialMediumInstanceStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
+    [unroll]
+    for (uint mediumIndex = 0u;
+         mediumIndex
+            < kReferencedPathtracingMaximumMaterialMediumDepth;
+         ++mediumIndex)
+    {
+        materialMediumIorStack[mediumIndex] =
+            kReferencedPathtracingVacuumIor;
+        materialMediumExtinctionStack[mediumIndex] = 0.0;
+        materialMediumInstanceStack[mediumIndex] =
+            kReferencedPathtracingInvalidMediumInstance;
+    }
+    uint materialMediumDepth = 0u;
 
     for (uint bounceIndex = 0u; bounceIndex < maxBounceCount; ++bounceIndex)
     {
-        ReferencedPathtracingPayload payload;
-        InitializeReferencedPathtracingPayload(payload);
-        payload.pathThroughput = throughput;
+        ReferencedPathtracingPayloadInput payloadInput;
+        InitializeReferencedPathtracingPayloadInput(payloadInput);
+        payloadInput.pathThroughput = throughput;
         uint bounceSampleDimension =
             ReferencedPathtracingGetBounceSampleDimension(
                 bounceIndex,
                 0u);
-        payload.bsdfRandom =
+        payloadInput.bsdfRandom =
             ReferencedPathtracingGetPathSample3D(
                 pixelCoord,
                 sampleIndex,
@@ -514,7 +631,7 @@ void RayGenReferencedPathtracing()
                 pathSamplingMode);
         // A single dimension selects the source and the remaining pair samples its
         // conditional shape or direction.
-        payload.directLightRandom =
+        payloadInput.directLightRandom =
             ReferencedPathtracingGetPathSample3D(
                 pixelCoord,
                 sampleIndex,
@@ -530,7 +647,7 @@ void RayGenReferencedPathtracing()
                     + kReferencedPathtracingStochasticAlphaDimensionOffset,
                 sampleSeed,
                 pathSamplingMode);
-        payload.stochasticAlphaSeed =
+        uint stochasticAlphaSeed =
             ReferencedPathtracingHashStochasticTransparency(
                 asuint(stochasticAlphaSample)
                 ^ ReferencedPathtracingHashStochasticTransparency(
@@ -539,19 +656,59 @@ void RayGenReferencedPathtracing()
                     pixelCoord.y + 0x85ebca6bu)
                 ^ ReferencedPathtracingHashStochasticTransparency(
                     sampleIndex + bounceSampleDimension));
-        payload.rayConeWidth = rayConeWidth;
-        payload.rayConeSpreadAngle = rayConeSpreadAngle;
+        payloadInput.stochasticAlphaSeed = stochasticAlphaSeed;
+        payloadInput.rayConeWidth = rayConeWidth;
+        payloadInput.rayConeSpreadAngle = rayConeSpreadAngle;
+        float3 activeMaterialMediumExtinction = 0.0;
+        if (materialMediumDepth > 0u)
+        {
+            uint activeMediumIndex = materialMediumDepth - 1u;
+            payloadInput.activeMediumIor =
+                materialMediumIorStack[activeMediumIndex];
+            payloadInput.activeMediumExtinction =
+                materialMediumExtinctionStack[activeMediumIndex];
+            activeMaterialMediumExtinction =
+                payloadInput.activeMediumExtinction;
+            payloadInput.activeMediumInstanceIndex =
+                materialMediumInstanceStack[activeMediumIndex];
+        }
+        if (materialMediumDepth > 1u)
+        {
+            payloadInput.parentMediumIor =
+                materialMediumIorStack[materialMediumDepth - 2u];
+        }
         // SER is useful around the material-heavy closest-hit path. Shadow rays
         // skip closest-hit shading and retain the lower-overhead standard TraceRay.
-        TraceReferencedPathtracingSurface(ray, payload);
-        if (bounceIndex == 0u
-            && payload.stochasticTransparencyDiagnostics.z > 0.0)
+        ReferencedPathtracingPayload tracePayload;
+        PackReferencedPathtracingPayloadInput(payloadInput, tracePayload);
+        TraceReferencedPathtracingSurface(ray, tracePayload);
+        ReferencedPathtracingSurfaceResult payload;
+        UnpackReferencedPathtracingSurfaceResult(tracePayload, payload);
+        if (payload.hit != 0u)
         {
-            stochasticTransparencyDiagnostic = float3(
-                payload.stochasticTransparencyDiagnostics.x,
-                payload.stochasticTransparencyDiagnostics.y
-                    / payload.stochasticTransparencyDiagnostics.z,
-                payload.stochasticTransparencyDiagnostics.z);
+            payload.positionWS =
+                ray.Origin + ray.Direction * payload.hitDistance;
+        }
+        float materialMediumDistance = payload.hit != 0u
+            ? payload.hitDistance
+            : ray.TMax;
+        float3 materialMediumTransmittance =
+            ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                activeMaterialMediumExtinction,
+                materialMediumDistance);
+        throughput *= materialMediumTransmittance;
+        if (!IsFiniteReferencedPathtracingRadiance(throughput)
+            || MaxReferencedPathtracingComponent(throughput) <= 0.0)
+        {
+            if (!IsFiniteReferencedPathtracingRadiance(throughput))
+                invalidSampleMask.z = 1.0;
+            break;
+        }
+        if (bounceIndex == 0u
+            && payload.stochasticTransparencyDiagnostics.a > 0.0)
+        {
+            stochasticTransparencyDiagnostic =
+                payload.stochasticTransparencyDiagnostics.rgb;
         }
 
         float4 volumeRandom = float4(
@@ -647,7 +804,8 @@ void RayGenReferencedPathtracing()
         ReferencedPathtracingAtmosphereMediumSample
             atmosphereMediumSample;
         bool intersectsAtmosphere =
-            ReferencedPathtracingSampleAtmosphereMedium(
+            materialMediumDepth == 0u
+            && ReferencedPathtracingSampleAtmosphereMedium(
                 atmosphereRayOriginWS,
                 ray.Direction,
                 atmosphereMaximumDistance,
@@ -663,7 +821,8 @@ void RayGenReferencedPathtracing()
             : atmosphereMaximumDistance;
         ReferencedPathtracingCloudMediumSample cloudMediumSample;
         bool intersectsCloud =
-            ReferencedPathtracingSampleCloudMedium(
+            materialMediumDepth == 0u
+            && ReferencedPathtracingSampleCloudMedium(
                 atmosphereRayOriginWS,
                 ray.Direction,
                 cloudMaximumDistance,
@@ -804,7 +963,7 @@ void RayGenReferencedPathtracing()
                         true,
                         _ReferencedAtmosphereSunIlluminance.w,
                         ReferencedPathtracingHashStochasticTransparency(
-                            payload.stochasticAlphaSeed
+                            stochasticAlphaSeed
                             ^ 0x243f6a88u));
                 float3 cloudDirectRadiance =
                     throughput
@@ -997,7 +1156,7 @@ void RayGenReferencedPathtracing()
                             true,
                             _ReferencedAtmosphereSunIlluminance.w,
                             ReferencedPathtracingHashStochasticTransparency(
-                                payload.stochasticAlphaSeed
+                                stochasticAlphaSeed
                                 ^ 0x13198a2eu));
                     float3 atmosphereDirectRadiance =
                         throughput
@@ -1190,7 +1349,7 @@ void RayGenReferencedPathtracing()
                             true,
                             _ReferencedAtmosphereSunIlluminance.w,
                             ReferencedPathtracingHashStochasticTransparency(
-                                payload.stochasticAlphaSeed
+                                stochasticAlphaSeed
                                 ^ 0xa4093822u));
                     float3 groundDirectRadiance =
                         throughput
@@ -1307,7 +1466,8 @@ void RayGenReferencedPathtracing()
             {
                 float4 cameraBackground =
                     ReferencedPathtracingEvaluateCameraBackground(ray.Direction);
-                cameraBackgroundRadiance = cameraBackground.rgb;
+                cameraBackgroundRadiance =
+                    throughput * cameraBackground.rgb;
                 cameraBackgroundAlpha = cameraBackground.a;
 
                 bool usesReferenceAtmosphereBackground =
@@ -1421,9 +1581,17 @@ void RayGenReferencedPathtracing()
             if (bounceIndex == 1u)
             {
                 if (primaryLobeClass == 1u)
+                {
                     diffuseHitDistance = payload.hitDistance;
+                    diffuseDlssHitDistance = payload.hitDistance;
+                    diffuseHitDistanceValid = true;
+                }
                 else if (primaryLobeClass == 2u)
+                {
                     specularHitDistance = payload.hitDistance;
+                    specularDlssHitDistance = payload.hitDistance;
+                    specularHitDistanceValid = true;
+                }
             }
         }
 
@@ -1470,10 +1638,14 @@ void RayGenReferencedPathtracing()
                     !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
                     payload.neeShadowStrength,
                     ReferencedPathtracingHashStochasticTransparency(
-                        payload.stochasticAlphaSeed
+                        stochasticAlphaSeed
                         ^ ReferencedPathtracingHashStochasticTransparency(
                             payload.neeLightIndex + 0x299f31d0u)))
                 : 0.0;
+            visibility *=
+                ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                    activeMaterialMediumExtinction,
+                    payload.neeDistance);
             float3 directDiffuse = throughput
                 * payload.neeDiffuseRadiance
                 * lightEstimatorWeight
@@ -1554,12 +1726,16 @@ void RayGenReferencedPathtracing()
                     {
                         diffuseRayDirectionWS = neeDirectionWS;
                         diffuseHitDistance = payload.neeDistance;
+                        diffuseDlssHitDistance = payload.neeDistance;
+                        diffuseHitDistanceValid = true;
                     }
 
                     if (any(directSpecular > 0.0))
                     {
                         specularRayDirectionWS = neeDirectionWS;
                         specularHitDistance = payload.neeDistance;
+                        specularDlssHitDistance = payload.neeDistance;
+                        specularHitDistanceValid = true;
                     }
                 }
                 else if (primaryLobeClass == 1u)
@@ -1577,7 +1753,8 @@ void RayGenReferencedPathtracing()
         // intersected along the sampled direction even though their display meshes are
         // not present in the RTAS. Punctual and tube lights remain zero-measure events.
         if (payload.nextPdf > 0.0
-            && any(payload.nextThroughputWeight > 0.0))
+            && any(payload.nextThroughputWeight > 0.0)
+            && payload.mediumTransition == 0)
         {
             ReferencedPathtracingLightSelectionContext selectionContext =
                 ReferencedPathtracingCreateLightSelectionContext(
@@ -1654,9 +1831,13 @@ void RayGenReferencedPathtracing()
                         !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
                         segmentLightHit.shadowStrength,
                         ReferencedPathtracingHashStochasticTransparency(
-                            payload.stochasticAlphaSeed
+                            stochasticAlphaSeed
                             ^ ReferencedPathtracingHashStochasticTransparency(
                                 lightIndex + 0x082efa98u)));
+                visibility *=
+                    ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                        activeMaterialMediumExtinction,
+                        segmentLightHit.distance);
                 float3 bsdfSampledDirect =
                     throughput
                     * payload.nextThroughputWeight
@@ -1699,6 +1880,8 @@ void RayGenReferencedPathtracing()
                     diffuseRadiance += bsdfSampledDirect;
                     diffuseRayDirectionWS =
                         normalize(payload.nextDirectionWS);
+                    diffuseDlssHitDistance = segmentLightHit.distance;
+                    diffuseHitDistanceValid = true;
                 }
                 else if (bounceIndex == 0u
                     && payload.nextLobeClass == 2u)
@@ -1712,6 +1895,8 @@ void RayGenReferencedPathtracing()
                     specularRadiance += bsdfSampledDirect;
                     specularRayDirectionWS =
                         normalize(payload.nextDirectionWS);
+                    specularDlssHitDistance = segmentLightHit.distance;
+                    specularHitDistanceValid = true;
                 }
                 else if (primaryLobeClass == 1u)
                 {
@@ -1766,6 +1951,44 @@ void RayGenReferencedPathtracing()
             if (russianRouletteSample >= survivalProbability)
                 break;
             throughput /= survivalProbability;
+        }
+
+        if (payload.mediumTransition > 0)
+        {
+            if (materialMediumDepth
+                >= kReferencedPathtracingMaximumMaterialMediumDepth)
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
+
+            materialMediumIorStack[materialMediumDepth] =
+                payload.nextMediumIor;
+            materialMediumExtinctionStack[materialMediumDepth] =
+                payload.nextMediumExtinction;
+            materialMediumInstanceStack[materialMediumDepth] =
+                payload.nextMediumInstanceIndex;
+            ++materialMediumDepth;
+        }
+        else if (payload.mediumTransition < 0
+            && materialMediumDepth > 0u)
+        {
+            uint activeMediumIndex = materialMediumDepth - 1u;
+            if (materialMediumInstanceStack[activeMediumIndex]
+                == payload.nextMediumInstanceIndex)
+            {
+                materialMediumIorStack[activeMediumIndex] =
+                    kReferencedPathtracingVacuumIor;
+                materialMediumExtinctionStack[activeMediumIndex] = 0.0;
+                materialMediumInstanceStack[activeMediumIndex] =
+                    kReferencedPathtracingInvalidMediumInstance;
+                --materialMediumDepth;
+            }
+            else
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
         }
 
         rayConeWidth = payload.rayConeWidth;
@@ -1963,8 +2186,7 @@ void RayGenReferencedPathtracing()
     else if (_ReferencedTransportDebugMode
         == kReferencedTransportDebugStochasticTransparency)
     {
-        // R: most recent opacity. G: ignored candidate fraction.
-        // B: transparent candidate count along primary visibility.
+        // RGB: most recent scalar geometry opacity along primary visibility.
         debugRadiance = stochasticTransparencyDiagnostic;
     }
 
@@ -1997,12 +2219,27 @@ void RayGenReferencedPathtracing()
     _ReferencedPathTracingEnvironmentDirectSpecular[pixelCoord] = float4(
         environmentDirectSpecularRadiance,
         primaryHit != 0u ? 1.0 : 0.0);
-    _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] = float4(
-        diffuseRayDirectionWS,
-        primaryHit != 0u ? diffuseHitDistance : 0.0);
-    _ReferencedSpecularRayDirectionHitDistance[pixelCoord] = float4(
-        specularRayDirectionWS,
-        primaryHit != 0u ? specularHitDistance : 0.0);
+    float3 diffuseFallbackDirectionWS =
+        ResolveReferencedPathtracingDlssRayDirection(
+            primaryDenoisingNormalWS,
+            -primaryCameraRayDirectionWS);
+    float3 specularFallbackDirectionWS = reflect(
+        primaryCameraRayDirectionWS,
+        diffuseFallbackDirectionWS);
+    _ReferencedDiffuseRayDirectionHitDistance[pixelCoord] =
+        PackReferencedPathtracingDlssRayDirectionHitDistance(
+            diffuseRayDirectionWS,
+            diffuseDlssHitDistance,
+            diffuseFallbackDirectionWS,
+            primaryHit != 0u,
+            diffuseHitDistanceValid);
+    _ReferencedSpecularRayDirectionHitDistance[pixelCoord] =
+        PackReferencedPathtracingDlssRayDirectionHitDistance(
+            specularRayDirectionWS,
+            specularDlssHitDistance,
+            specularFallbackDirectionWS,
+            primaryHit != 0u,
+            specularHitDistanceValid);
 
     uint2 signalPixelCoord = pixelCoord;
     bool writeDiffuse = true;
@@ -2039,11 +2276,18 @@ void RayGenReferencedPathtracing()
 [shader("miss")]
 void MissReferencedPathtracing(inout ReferencedPathtracingPayload payload : SV_RayPayload)
 {
-    uint stochasticAlphaSeed = payload.stochasticAlphaSeed;
-    float3 stochasticTransparencyDiagnostics =
-        payload.stochasticTransparencyDiagnostics;
-    InitializeReferencedPathtracingPayload(payload);
-    payload.stochasticAlphaSeed = stochasticAlphaSeed;
-    payload.stochasticTransparencyDiagnostics =
+    float4 stochasticTransparencyDiagnostics =
+        LoadReferencedPathtracingStochasticTransparencyDiagnostics(payload);
+    ReferencedPathtracingSurfaceResult result;
+    InitializeReferencedPathtracingSurfaceResult(result);
+    result.stochasticTransparencyDiagnostics =
         stochasticTransparencyDiagnostics;
+    PackReferencedPathtracingSurfaceResult(result, payload);
+}
+
+[shader("miss")]
+void MissReferencedPathtracingVisibility(
+    inout ReferencedPathtracingVisibilityPayload payload : SV_RayPayload)
+{
+    payload.hit = 0u;
 }

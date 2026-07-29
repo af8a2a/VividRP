@@ -1,7 +1,8 @@
 ﻿#ifndef __OPENPBR_BRIDGE__
 #define __OPENPBR_BRIDGE__
-// V1 uses the self-contained array LUT path. Transmission, dispersion and fuzz are
-// intentionally disabled by the StandardLit adapter; coat and metallic stay enabled.
+// Use the self-contained array LUT path. OpenPBR translucency is required for
+// non-thin-walled reflection/refraction; dispersion and fuzz remain disabled by
+// the StandardLit adapter while coat and metallic stay enabled.
 #define OPENPBR_LANGUAGE_TARGET_SLANG 1
 #define OPENPBR_USE_TEXTURE_LUTS 0
 #define OPENPBR_FAST_RCP_SQRT(value) rsqrt(value)
@@ -10,7 +11,7 @@
 
 #define VIVIDRP_OPENPBR_FEATURE_EnableSheenAndCoat true
 #define VIVIDRP_OPENPBR_FEATURE_EnableDispersion false
-#define VIVIDRP_OPENPBR_FEATURE_EnableTranslucency false
+#define VIVIDRP_OPENPBR_FEATURE_EnableTranslucency true
 #define VIVIDRP_OPENPBR_FEATURE_EnableMetallic true
 #define VIVIDRP_OPENPBR_SELECT_FEATURE_IMPL(name) VIVIDRP_OPENPBR_FEATURE_##name
 #define VIVIDRP_OPENPBR_SELECT_FEATURE(name) VIVIDRP_OPENPBR_SELECT_FEATURE_IMPL(name)

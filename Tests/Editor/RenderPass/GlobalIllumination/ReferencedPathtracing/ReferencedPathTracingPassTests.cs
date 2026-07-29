@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 5"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 6"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -90,6 +90,215 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Not.Contain("NextReferencedPathtracingRng"));
+        }
+
+        [Test]
+        public void GeometryOpacityEstimator_UsesUnweightedScalarCoverage()
+        {
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var indirectDiffuseSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Shaders",
+                    "Material",
+                    "ShaderPass",
+                    "IndirectDiffuse.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Contain("SampleOpenPbrGeometryOpacity("));
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Contain("float SampleOpenPbrGeometryOpacity("));
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Contain(
+                    "textureLod).r);"));
+            Assert.That(
+                indirectDiffuseSource,
+                Does.Not.Contain("_OpacityColor"));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "bool surfaceBranch = opacityRandom < geometryOpacity;"));
+            Assert.That(
+                materialSource,
+                Does.Not.Contain("branchWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain("stochasticTransparencyWeight"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingVisibilityPayload opaqueVisibilityPayload;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "throughput * cameraBackground.rgb"));
+        }
+
+        [Test]
+        public void VisibilityTrace_UsesIndependentOpaquePayloadAndNonOpaqueMaterialFallback()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                commonSource,
+                Does.Contain("struct ReferencedPathtracingVisibilityPayload"));
+            Assert.That(
+                commonSource,
+                Does.Contain("uint hit;"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("| RAY_FLAG_CULL_NON_OPAQUE"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("| RAY_FLAG_CULL_OPAQUE"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("MissReferencedPathtracingVisibility("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "LoadReferencedPathtracingPayloadHit(nonOpaqueVisibilityPayload)"));
+        }
+
+        [Test]
+        public void SurfaceTrace_Uses160BytePayloadWithPackedUnitVectors()
+        {
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_DWORD_COUNT 40u"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 39u"));
+            Assert.That(
+                commonSource,
+                Does.Contain("PackReferencedPathtracingUnitVector("));
+            Assert.That(
+                commonSource,
+                Does.Contain("UnpackReferencedPathtracingUnitVector("));
+            Assert.That(
+                commonSource,
+                Does.Not.Contain("REFERENCED_PAYLOAD_RESULT_POSITION_WS "));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ray.Origin + ray.Direction * payload.hitDistance"));
+        }
+
+        [Test]
+        public void SolidTransmission_UsesOpenPbrRefractionAndNestedMediumTransport()
+        {
+            var openPbrBridgeSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "OpenPBR",
+                "OpenPBR.hlsl"));
+            var adapterSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "StandardLitOpenPBRAdapter.hlsl"));
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                openPbrBridgeSource,
+                Does.Contain(
+                    "VIVIDRP_OPENPBR_FEATURE_EnableTranslucency true"));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_weight = SampleOpenPbrTransmissionWeight("));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "computeTargetTextureLOD(_TransmissionMap, textureBaseLambda)"));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_depth = max(transmissionDepth, 0.0);"));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "preparedBsdf.volume.extinction_coefficient"));
+            Assert.That(
+                materialSource,
+                Does.Contain("result.mediumTransition ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingMaximumMaterialMediumDepth"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "ReferencedPathtracingEvaluateMaterialMediumTransmittance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("++materialMediumDepth;"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("--materialMediumDepth;"));
         }
 
         [Test]
@@ -274,6 +483,10 @@ namespace VividRP.Editor.Tests
                 resource => resource.Name == "EnvironmentDirectDiffuse");
             var environmentDirectSpecular = resources.Textures.Single(
                 resource => resource.Name == "EnvironmentDirectSpecular");
+            var diffuseRayDirectionHitDistance = resources.Textures.Single(
+                resource => resource.Name == "DiffuseRayDirectionHitDistance");
+            var specularRayDirectionHitDistance = resources.Textures.Single(
+                resource => resource.Name == "SpecularRayDirectionHitDistance");
 
             Assert.That(accelerationStructure.Name, Is.EqualTo("SceneRTAS"));
             Assert.That(accelerationStructure.Access, Is.EqualTo(AccessFlags.Read));
@@ -359,6 +572,30 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(GraphicsFormat.R32G32B32A32_SFloat));
             Assert.That(environmentDirectDiffuse.Texture.desc.ClearBuffer, Is.True);
             Assert.That(environmentDirectSpecular.Texture.desc.ClearBuffer, Is.True);
+            Assert.That(
+                diffuseRayDirectionHitDistance.Access,
+                Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                specularRayDirectionHitDistance.Access,
+                Is.EqualTo(AccessFlags.Write));
+            Assert.That(
+                diffuseRayDirectionHitDistance.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                specularRayDirectionHitDistance.Texture.desc.ColorFormat,
+                Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+            Assert.That(
+                diffuseRayDirectionHitDistance.Texture.desc.ClearBuffer,
+                Is.True);
+            Assert.That(
+                specularRayDirectionHitDistance.Texture.desc.ClearBuffer,
+                Is.True);
+            Assert.That(
+                diffuseRayDirectionHitDistance.Texture.desc.ClearColor.a,
+                Is.EqualTo(ReferencedPathTracingPass.DlssInfiniteHitDistance));
+            Assert.That(
+                specularRayDirectionHitDistance.Texture.desc.ClearColor.a,
+                Is.EqualTo(ReferencedPathTracingPass.DlssInfiniteHitDistance));
         }
 
         [Test]
@@ -643,6 +880,42 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "CombineReferencedPathtracingDenoiserHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "kReferencedPathtracingDlssInfiniteHitDistance = 65504.0"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "PackReferencedPathtracingDlssRayDirectionHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedDiffuseRayDirectionHitDistance[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "_ReferencedSpecularRayDirectionHitDistance[pixelCoord] ="));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("diffuseHitDistanceValid"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("specularHitDistanceValid"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("diffuseDlssHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("specularDlssHitDistance"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain(
+                    "primaryHit != 0u ? diffuseHitDistance : 0.0"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Not.Contain(
+                    "primaryHit != 0u ? specularHitDistance : 0.0"));
             Assert.That(
                 reblurResolveSource,
                 Does.Contain("_ReblurMainLightInSignals != 0"));
@@ -1761,6 +2034,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void V1FreezeGate_RejectsNonCanonicalGeometryOpacityContract()
+        {
+            var corpusCase = ReferencedPathTracingV1Corpus.Cases[0];
+            var capture = CreateValidFrozenCapture(corpusCase);
+            capture.coloredOpacityContractVersion = 0;
+
+            Assert.That(
+                ReferencedPathTracingV1FreezeGate.ValidateCaptureContract(
+                    capture,
+                    out var failure),
+                Is.False);
+            Assert.That(
+                failure,
+                Does.Contain("Geometry-opacity transport contract"));
+        }
+
+        [Test]
         public void EnvironmentState_DisablesUnsupportedSkyAndSanitizesInvalidValues()
         {
             var cubemap = new Cubemap(1, TextureFormat.RGBAHalf, false);
@@ -2056,6 +2346,8 @@ namespace VividRP.Editor.Tests
                 thinWalledTransmissionContractVersion =
                     ReferencedPathTracingThinWalledTransmissionContract
                         .Version,
+                coloredOpacityContractVersion =
+                    ReferencedPathTracingGeometryOpacityContract.Version,
                 maxBounceCount = corpusCase.maxBounceCount,
                 russianRouletteStartBounce =
                     corpusCase.russianRouletteStartBounce,

@@ -67,6 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const string IndexedBndKeywordName =
             "VIVID_REFERENCE_PT_INDEXED_BND";
         internal const uint ShaderExecutionReorderingUavSlot = 31;
+        internal const float DlssInfiniteHitDistance = 65504.0f;
 
         private const string AccelerationStructureName = "_AccelerationStructure";
         private const int NvidiaShaderExtensionStructStride = 256;
@@ -911,18 +912,35 @@ namespace VividRP.Runtime.RenderPass.Core
                 height,
                 GraphicsFormat.R32G32B32A32_SFloat,
                 "EnvironmentDirectSpecular");
-            ConfigureOutput(
+            ConfigureDlssRayGuideOutput(
                 m_DiffuseRayDirectionHitDistance,
                 width,
                 height,
-                GraphicsFormat.R16G16B16A16_SFloat,
                 "DiffuseRayDirectionHitDistance");
-            ConfigureOutput(
+            ConfigureDlssRayGuideOutput(
                 m_SpecularRayDirectionHitDistance,
                 width,
                 height,
-                GraphicsFormat.R16G16B16A16_SFloat,
                 "SpecularRayDirectionHitDistance");
+        }
+
+        private static void ConfigureDlssRayGuideOutput(
+            RenderGraphTexture texture,
+            int width,
+            int height,
+            string name)
+        {
+            ConfigureOutput(
+                texture,
+                width,
+                height,
+                GraphicsFormat.R16G16B16A16_SFloat,
+                name);
+            if (texture?.desc != null)
+            {
+                texture.desc.ClearColor =
+                    new Color(0.0f, 0.0f, 0.0f, DlssInfiniteHitDistance);
+            }
         }
 
         private static void ConfigureOutput(

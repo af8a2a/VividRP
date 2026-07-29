@@ -44,6 +44,7 @@ CBUFFER_START(UnityPerMaterial)
     float _ReceiveDecals;
     float _ThinWalledTransmission;
     float _TransmissionWeight;
+    float _TransmissionDepth;
     float _SpecularIOR;
 CBUFFER_END
 
@@ -51,6 +52,8 @@ TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
 TEXTURE2D(_OpacityMap);
 SAMPLER(sampler_OpacityMap);
+TEXTURE2D(_TransmissionMap);
+SAMPLER(sampler_TransmissionMap);
 TEXTURE2D(_MetallicGlossMap);
 SAMPLER(sampler_MetallicGlossMap);
 TEXTURE2D(_RoughnessMap);

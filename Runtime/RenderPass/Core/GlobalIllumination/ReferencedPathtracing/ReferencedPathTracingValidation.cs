@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 10;
+        internal const int Version = 12;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -71,6 +71,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingThinWalledTransmissionContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingGeometryOpacityContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
@@ -191,7 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 5;
+        internal const int Version = 6;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -424,6 +427,128 @@ namespace VividRP.Runtime.RenderPass.Core
             return value.sqrMagnitude > DirectionEpsilon
                 ? value.normalized
                 : fallback.normalized;
+        }
+    }
+
+    internal static class ReferencedPathTracingSolidTransmissionContract
+    {
+        internal const int Version = 1;
+        internal const int MaximumMediumDepth = 4;
+        private const float MinimumTransmissionColor = 1e-3f;
+        private const float MinimumTransmissionDistance = 1e-3f;
+        private const float MaximumOpticalDepth = 80.0f;
+
+        internal static float ResolveEffectiveWeight(
+            float transmissionWeight,
+            float metalness)
+        {
+            return Mathf.Clamp01(transmissionWeight)
+                * (1.0f - Mathf.Clamp01(metalness));
+        }
+
+        internal static Vector3 ResolveExtinction(
+            Vector3 transmissionColor,
+            float transmissionDepth)
+        {
+            if (float.IsNaN(transmissionDepth)
+                || float.IsInfinity(transmissionDepth)
+                || transmissionDepth <= 0.0f)
+            {
+                return Vector3.zero;
+            }
+
+            float resolvedTransmissionDepth = Mathf.Max(
+                transmissionDepth,
+                MinimumTransmissionDistance);
+            return new Vector3(
+                ResolveExtinctionChannel(
+                    transmissionColor.x,
+                    resolvedTransmissionDepth),
+                ResolveExtinctionChannel(
+                    transmissionColor.y,
+                    resolvedTransmissionDepth),
+                ResolveExtinctionChannel(
+                    transmissionColor.z,
+                    resolvedTransmissionDepth));
+        }
+
+        internal static Vector3 EvaluateTransmittance(
+            Vector3 extinction,
+            float distance)
+        {
+            if (float.IsNaN(distance) || distance <= 0.0f)
+                return Vector3.one;
+
+            if (float.IsInfinity(distance))
+                distance = float.MaxValue;
+
+            return new Vector3(
+                EvaluateTransmittanceChannel(extinction.x, distance),
+                EvaluateTransmittanceChannel(extinction.y, distance),
+                EvaluateTransmittanceChannel(extinction.z, distance));
+        }
+
+        internal static float ResolveExteriorIor(
+            bool isFrontFace,
+            float activeMediumIor,
+            float parentMediumIor,
+            bool exitsActiveMedium)
+        {
+            float exteriorIor =
+                !isFrontFace && exitsActiveMedium
+                    ? parentMediumIor
+                    : activeMediumIor;
+            return ReferencedPathTracingThinWalledTransmissionContract
+                .ResolveIor(exteriorIor);
+        }
+
+        private static float ResolveExtinctionChannel(
+            float transmissionColor,
+            float transmissionDepth)
+        {
+            float color = Mathf.Clamp(
+                transmissionColor,
+                MinimumTransmissionColor,
+                1.0f);
+            return -Mathf.Log(color) / transmissionDepth;
+        }
+
+        private static float EvaluateTransmittanceChannel(
+            float extinction,
+            float distance)
+        {
+            float opticalDepth = Mathf.Min(
+                Mathf.Max(extinction, 0.0f) * distance,
+                MaximumOpticalDepth);
+            return Mathf.Exp(-opticalDepth);
+        }
+    }
+
+    internal static class ReferencedPathTracingGeometryOpacityContract
+    {
+        internal const int Version = 2;
+
+        internal static float ResolveOpacity(
+            float baseAlpha,
+            float opacityMapRed)
+        {
+            return Mathf.Clamp01(baseAlpha)
+                * Mathf.Clamp01(opacityMapRed);
+        }
+
+        internal static float ResolveBranchProbability(float opacity)
+        {
+            return Mathf.Clamp01(opacity);
+        }
+
+        internal static Vector3 EvaluateExpectedComposite(
+            float opacity,
+            Vector3 surfaceRadiance,
+            Vector3 transmittedRadiance)
+        {
+            opacity = Mathf.Clamp01(opacity);
+            return surfaceRadiance * opacity
+                + transmittedRadiance * (1.0f - opacity);
         }
     }
 
@@ -1544,6 +1669,9 @@ namespace VividRP.Runtime.RenderPass.Core
         public bool usesPhysicalCameraDof;
         public int shadingNormalContractVersion;
         public int thinWalledTransmissionContractVersion;
+        // Kept as the serialized field name for capture compatibility. Version
+        // 2 and later identify the scalar geometry-opacity contract.
+        public int coloredOpacityContractVersion;
         public int maxBounceCount;
         public int russianRouletteStartBounce;
         public ulong integratorSignature;
@@ -1676,7 +1804,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     public static class ReferencedPathTracingV1FreezeGate
     {
-        public const int ContractVersion = 9;
+        public const int ContractVersion = 11;
         public const float MinimumFinitePixelFraction = 1.0f;
         public const float MaximumNegativeRadianceFraction = 0.0f;
         public const float MaximumRelativeMeanError = 0.02f;
@@ -1759,6 +1887,14 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return Fail(
                     "Thin-walled transmission contract does not match the corpus.",
+                    out failure);
+            }
+
+            if (metadata.coloredOpacityContractVersion
+                != ReferencedPathTracingGeometryOpacityContract.Version)
+            {
+                return Fail(
+                    "Geometry-opacity transport contract does not match the corpus.",
                     out failure);
             }
 
@@ -2029,6 +2165,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 thinWalledTransmissionContractVersion =
                     ReferencedPathTracingThinWalledTransmissionContract
                         .Version,
+                coloredOpacityContractVersion =
+                    ReferencedPathTracingGeometryOpacityContract.Version,
                 maxBounceCount = integratorState.maxBounceCount,
                 russianRouletteStartBounce =
                     integratorState.russianRouletteStartBounce,

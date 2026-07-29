@@ -76,7 +76,8 @@ namespace VividRP.Runtime
         /// Initialize or update the DLSS-RR context for the given resolution
         /// </summary>
         public bool Initialize(int inputWidth, int inputHeight, int outputWidth, int outputHeight,
-            DLSSQuality quality, bool isHDR = true, bool autoExposure = false)
+            DLSSQuality quality, bool isHDR = true, bool autoExposure = false,
+            DLSSRRPreset renderPreset = DLSSRRPreset.Default)
         {
             if (!IsSupported)
             {
@@ -97,6 +98,7 @@ namespace VividRP.Runtime
             {
                 m_DlssRR.SetQuality(ngxQuality);
                 m_DlssRR.SetFeatureFlags(BuildFeatureFlags(isHDR, autoExposure));
+                m_DlssRR.SetRenderPreset(renderPreset);
                 return true;
             }
 
@@ -111,7 +113,8 @@ namespace VividRP.Runtime
                 flags,
                 ngxQuality,
                 DLSSRayReconstruction.DepthType.Hardware,
-                DLSSRayReconstruction.RoughnessMode.PackedInNormalsW
+                DLSSRayReconstruction.RoughnessMode.PackedInNormalsW,
+                renderPreset
             );
 
             m_InputWidth = inputWidth;
@@ -170,7 +173,9 @@ namespace VividRP.Runtime
                 Emissive = emissive
             };
 
-            // Build ray inputs - hit distances from path tracer output alpha channels
+            // Combined DLSS-RR guides: normalized world-space ray direction in
+            // RGB and world-space hit distance in A. Secondary misses use the
+            // FP16 maximum-value sentinel required by the RR input contract.
             var rayInputs = new DLSSRRRayInputs
             {
                 DiffuseRayDirectionHitDistance = diffuseHitDistance,

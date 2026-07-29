@@ -57,6 +57,7 @@ CBUFFER_START(UnityPerMaterial)
     float _ReceiveDecals;
     float _ThinWalledTransmission;
     float _TransmissionWeight;
+    float _TransmissionDepth;
     float _SpecularIOR;
 CBUFFER_END
 
@@ -64,6 +65,8 @@ TEXTURE2D(_BaseMap);
 SAMPLER(sampler_BaseMap);
 TEXTURE2D(_OpacityMap);
 SAMPLER(sampler_OpacityMap);
+TEXTURE2D(_TransmissionMap);
+SAMPLER(sampler_TransmissionMap);
 TEXTURE2D(_MetallicGlossMap);
 SAMPLER(sampler_MetallicGlossMap);
 TEXTURE2D(_RoughnessMap);
@@ -156,6 +159,48 @@ float4 SampleBase(float2 uv, float textureLod)
 float4 SampleBase(float2 uv)
 {
     return SampleBase(uv, 0.0);
+}
+
+float SampleOpenPbrGeometryOpacity(float2 uv, float textureLod)
+{
+    float opacity = saturate(
+        SAMPLE_TEXTURE2D_LOD(
+            _BaseMap,
+            sampler_BaseMap,
+            uv,
+            textureLod).a
+        * _BaseColor.a);
+#if defined(_OPACITYMAP)
+    opacity *= saturate(SAMPLE_TEXTURE2D_LOD(
+        _OpacityMap,
+        sampler_OpacityMap,
+        uv,
+        textureLod).r);
+#endif
+    return saturate(opacity);
+}
+
+float SampleOpenPbrGeometryOpacity(float2 uv)
+{
+    return SampleOpenPbrGeometryOpacity(uv, 0.0);
+}
+
+float SampleOpenPbrTransmissionWeight(float2 uv, float textureLod)
+{
+    float transmissionWeight = saturate(_TransmissionWeight);
+#if defined(_TRANSMISSIONMAP)
+    transmissionWeight *= saturate(SAMPLE_TEXTURE2D_LOD(
+        _TransmissionMap,
+        sampler_TransmissionMap,
+        uv,
+        textureLod).r);
+#endif
+    return saturate(transmissionWeight);
+}
+
+float SampleOpenPbrTransmissionWeight(float2 uv)
+{
+    return SampleOpenPbrTransmissionWeight(uv, 0.0);
 }
 
 bool VividIndirectDiffuseIsAlphaClipped(float alpha)

@@ -40,7 +40,7 @@ The modules below have implementations in the current package. Availability stil
 | Volumetrics | Global and local volumetric fog, VBuffer, volumetric lighting, and Max-Z generation |
 | GPU Driven | Meshlet import and rendering, Visibility Buffer, object dispatch, debug overlay, and bindless descriptor support |
 | Ray Tracing | Serializable RTAS descriptors, RTAS construction, directional ray-traced shadows, and related debug passes |
-| Reference path tracing | OpenPBR-based multi-bounce DXR prototype with analytic-light and HDRI MIS / next-event estimation, rectangle / disc BSDF-segment evaluation, shading-point-aware mixed light selection and a spatial index, Rendering Debugger transport views, deterministic pixel capture, REBLUR signal routing for finite sun lighting, NRD REBLUR preview denoising, and a Unity Open Image Denoise backend |
+| Reference path tracing | OpenPBR-based multi-bounce DXR prototype with stochastic RGB geometry opacity, thin-walled transmission, and partially transmissive solid refraction using a four-level medium stack and Beer–Lambert absorption; also includes analytic-light and HDRI MIS / next-event estimation, rectangle / disc BSDF-segment evaluation, shading-point-aware mixed light selection and a spatial index, Rendering Debugger transport views, deterministic pixel capture, REBLUR signal routing for finite sun lighting, NRD REBLUR preview denoising, and a Unity Open Image Denoise backend |
 | Resources and subsystems | Virtual Texturing with SVT, DBuffer Decals, LTC area lights, reflection-probe atlas, ReGIR, and sky management |
 | Per-Object Buffer | Per-renderer shader data without `MaterialPropertyBlock`, centralized generated HLSL layouts, a color example, and an MPB CPU benchmark |
 | Experimental particles | ECS paged-storage simulation, culling, sorting, Billboard / Mesh / Stretch rendering, trails, collisions, and sub-emitters |
@@ -69,7 +69,7 @@ powershell -ExecutionPolicy Bypass -File .\Packages\VividRP\Setup-Bindless.ps1
 
 - Ray Tracing requires DXR-compatible hardware and DX12. Add `VividRP/Ray Tracing/Settings` to a Volume Profile and configure it for the project.
 - DLSS requires the NVIDIA dependencies and the `DLSS_PLUGIN_INTEGRATE` scripting define symbol.
-- Reference path tracing uses a dedicated `.vrdg` asset and pipeline asset for controlled-scene validation; it is not intended for real-time use or complete ground truth. Current support is primarily `StandardLit` opaque / alpha-tested materials. The OIDN backend is enabled only in the Editor or 64-bit Standalone builds when `com.unity.rendering.denoising` is available.
+- Reference path tracing uses a dedicated `.vrdg` asset and pipeline asset for controlled-scene validation; it is not intended for real-time use or complete ground truth. In addition to opaque / alpha-tested `StandardLit`, it supports stochastic RGB geometry opacity and OpenPBR transmission. Enable **Thin-Walled Transmission** for sheets; disable it for closed solids, where **Transmission Depth** specifies the Beer–Lambert distance represented by **Transmission Color**. Solid media can be nested up to four levels. The OIDN backend is enabled only in the Editor or 64-bit Standalone builds when `com.unity.rendering.denoising` is available.
 
 ## Directory guide
 

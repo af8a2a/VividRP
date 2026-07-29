@@ -4,7 +4,6 @@ namespace VividRP.Runtime
 {
     internal static class AutoExposureImplementationUtility
     {
-        private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
         private const string ResolveBasicExposureKernelName = "ResolveBasicExposure";
@@ -57,7 +56,6 @@ namespace VividRP.Runtime
         internal static bool SupportsUnrealDispatch(ComputeShader computeShader)
         {
             return computeShader != null
-                && computeShader.HasKernel(ClearHistogramKernelName)
                 && computeShader.HasKernel(BuildHistogramKernelName)
                 && computeShader.HasKernel(ResolveExposureKernelName)
                 && computeShader.HasKernel(ResolveBasicExposureKernelName);

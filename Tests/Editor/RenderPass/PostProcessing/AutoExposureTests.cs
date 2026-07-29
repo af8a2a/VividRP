@@ -5,6 +5,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
+using VividRP.Runtime.RenderPass;
 
 namespace VividRP.Editor.Tests
 {
@@ -749,6 +750,60 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(Mathf.Pow(2f, -10f)).Within(1e-6f));
         }
 
+        [TestCase(0, 64)]
+        [TestCase(1, 64)]
+        [TestCase(1080, 69120)]
+        [TestCase(2160, 138240)]
+        public void ResolveUnrealPartialHistogramBufferCount_AllocatesOneSlicePerRow(
+            int height,
+            int expectedCount)
+        {
+            Assert.That(
+                AutoExposurePass.ResolveUnrealPartialHistogramBufferCount(height),
+                Is.EqualTo(expectedCount));
+        }
+
+        [Test]
+        public void AutoExposurePass_DeclaresPersistentHistorySideEffect()
+        {
+            Assert.That(
+                typeof(IRenderGraphSideEffectPass)
+                    .IsAssignableFrom(typeof(AutoExposurePass)),
+                Is.True);
+        }
+
+        [TestCase(true, 0.016f, 0.016f)]
+        [TestCase(true, 0f, 0.000001f)]
+        [TestCase(false, 0f, 0.033f)]
+        [TestCase(false, 0.5f, 0.033f)]
+        public void ResolveUnrealExposureDeltaTime_UsesStableEditorStep(
+            bool isPlaying,
+            float deltaTime,
+            float expected)
+        {
+            Assert.That(
+                AutoExposureSettingsResolver.ResolveUnrealExposureDeltaTime(
+                    isPlaying,
+                    deltaTime),
+                Is.EqualTo(expected).Within(1e-7f));
+        }
+
+        [TestCase(false, false, false)]
+        [TestCase(false, true, false)]
+        [TestCase(true, false, false)]
+        [TestCase(true, true, true)]
+        public void UnrealHistory_ReuseRequiresCommittedStateAndAllocatedBuffer(
+            bool stateHasValidHistory,
+            bool hasAllocatedPreviousBuffer,
+            bool expected)
+        {
+            Assert.That(
+                UnrealAutoExposureHistoryUtility.HasUsableExposureState(
+                    stateHasValidHistory,
+                    hasAllocatedPreviousBuffer),
+                Is.EqualTo(expected));
+        }
+
         [Test]
         public void AutoExposureReferenceSolver_ResolvesGoldenFirstFrameExposureState()
         {
@@ -1008,12 +1063,13 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 autoExposureHDRPSource,
                 Does.Not.Contain("exposureMeteringMask"));
-            Assert.That(shaderSource, Does.Contain("#pragma kernel ClearHistogram"));
+            Assert.That(shaderSource, Does.Not.Contain("#pragma kernel ClearHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel BuildHistogram"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveExposure"));
             Assert.That(shaderSource, Does.Contain("#pragma kernel ResolveBasicExposure"));
             Assert.That(shaderSource, Does.Contain("#define HISTOGRAM_THREAD_GROUP_SIZE 64"));
             Assert.That(shaderSource, Does.Contain("groupshared uint s_GroupHistogram[HISTOGRAM_SIZE];"));
+            Assert.That(shaderSource, Does.Contain("groupshared uint s_ResolvedHistogram[HISTOGRAM_SIZE];"));
             Assert.That(shaderSource, Does.Contain("groupshared float2 s_GroupBasicLuminance[HISTOGRAM_THREAD_GROUP_SIZE];"));
             Assert.That(shaderSource, Does.Contain("[numthreads(HISTOGRAM_THREAD_GROUP_SIZE, 1, 1)]"));
             Assert.That(hdrpShaderSource, Does.Contain("#pragma kernel KHistogramClear"));
@@ -1069,9 +1125,25 @@ namespace VividRP.Editor.Tests
             Assert.That(autoExposurePassSource, Does.Contain("private const int HdrpHistogramThreadGroupSizeX = 16;"));
             Assert.That(autoExposurePassSource, Does.Contain("private const int HdrpHistogramThreadGroupSizeY = 8;"));
             Assert.That(autoExposurePassSource, Does.Contain("&& m_AutoExposureSettings.mode == AutoExposureMode.Histogram"));
+            Assert.That(
+                autoExposurePassSource,
+                Does.Contain("IRenderGraphSideEffectPass"));
+            Assert.That(
+                autoExposurePassSource,
+                Does.Contain("RegisterExposureBufferAccess();"));
+            Assert.That(
+                autoExposurePassSource,
+                Does.Contain("m_ExposureData.frameExposureBuffer ="));
+            Assert.That(
+                autoExposurePassSource,
+                Does.Contain("PassRecorder.ImportBufferForPass("));
+            Assert.That(
+                autoExposurePassSource,
+                Does.Contain("AccessFlags.Write"));
             Assert.That(normalizedAutoExposurePassSource, Does.Contain("return m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP\n                ? HdrpAutoExposureHistogramBucketCount\n                : UnrealAutoExposureHistogramBucketCount;"));
             Assert.That(unrealPassSource, Does.Contain("Mathf.Max(1, m_AutoExposureHeight)"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _HistogramBuffer;"));
+            Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<uint> _PartialHistogramBuffer;"));
             Assert.That(shaderSource, Does.Contain("RWStructuredBuffer<float4> _CurrentExposureBuffer;"));
             Assert.That(shaderSource, Does.Contain("Texture2D<float4> _AutoExposureCompensationCurve;"));
             Assert.That(shaderSource, Does.Contain("static const float3 kLuminanceWeights = float3(1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0);"));
@@ -1085,8 +1157,10 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("const uint upperBucket"));
             Assert.That(shaderSource, Does.Contain("InterlockedAdd(s_GroupHistogram[lowerBucket], lowerWeight);"));
             Assert.That(shaderSource, Does.Contain("InterlockedAdd(s_GroupHistogram[upperBucket], upperWeight);"));
-            Assert.That(shaderSource, Does.Contain("InterlockedAdd(_HistogramBuffer[laneIndex], globalWeight);"));
-            Assert.That(shaderSource, Does.Contain("InterlockedCompareExchange("));
+            Assert.That(shaderSource, Does.Not.Contain("InterlockedAdd(_HistogramBuffer"));
+            Assert.That(shaderSource, Does.Not.Contain("InterlockedCompareExchange("));
+            Assert.That(shaderSource, Does.Contain("_PartialHistogramBuffer[rowIndex * HISTOGRAM_SIZE + laneIndex]"));
+            Assert.That(shaderSource, Does.Contain("_HistogramBuffer[laneIndex] = bucketWeight;"));
             Assert.That(shaderSource, Does.Contain("_UnrealAutoExposureMethodParams.y"));
             Assert.That(shaderSource, Does.Contain("void ResolveBasicExposure("));
             Assert.That(shaderSource, Does.Contain("const float previousAverageSceneLuminance ="));
@@ -1213,7 +1287,10 @@ namespace VividRP.Editor.Tests
             Assert.That(autoExposurePassSource, Does.Contain("UsesHistogramBufferAutoExposureExecution()"));
             Assert.That(autoExposureHDRPPassSource, Does.Contain("ExecuteHDRPHistogramAutoExposure("));
             Assert.That(autoExposurePassSource, Does.Contain("m_HistogramAutoExposureCompute"));
-            Assert.That(autoExposureUnrealPassSource, Does.Contain("BindAutoExposureParameters(cmd, histogramCompute, m_ClearHistogramKernel);"));
+            Assert.That(autoExposureUnrealPassSource, Does.Not.Contain("m_ClearHistogramKernel"));
+            Assert.That(autoExposureUnrealPassSource, Does.Contain("AutoExposurePartialHistogramBufferId"));
+            Assert.That(autoExposureUnrealPassSource, Does.Contain("m_UnrealPartialHistogramBuffer"));
+            Assert.That(autoExposureUnrealPassSource, Does.Contain("InsertUnrealHistogramBuildToResolveFence(cmd);"));
             Assert.That(readbackBridgeSource, Does.Contain("Dictionary<Camera, SnapshotState>"));
             Assert.That(readbackBridgeSource, Does.Contain("public readonly Action<AsyncGPUReadbackRequest> exposureReadback;"));
             Assert.That(readbackBridgeSource, Does.Contain("internal static void TouchInspectorRequest()"));

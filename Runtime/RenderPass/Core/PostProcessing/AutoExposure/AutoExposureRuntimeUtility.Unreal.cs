@@ -2,8 +2,36 @@ using UnityEngine;
 
 namespace VividRP.Runtime
 {
+    internal static class UnrealAutoExposureHistoryUtility
+    {
+        internal static bool HasUsableExposureState(
+            bool stateHasValidHistory,
+            bool hasAllocatedPreviousBuffer)
+        {
+            // The Unreal exposure buffer is a self-contained physical state
+            // (scale, target, luminance, compensation). It remains usable
+            // when an editor repaint advances the camera sequence without
+            // executing an auto-exposure write.
+            return stateHasValidHistory && hasAllocatedPreviousBuffer;
+        }
+    }
+
     internal static partial class AutoExposureSettingsResolver
     {
+        private const float UnrealEditorExposureDeltaTime = 0.033f;
+
+        internal static float ResolveUnrealExposureDeltaTime(
+            bool isPlaying,
+            float deltaTime)
+        {
+            // Match HDRP's editor-camera policy: editor repaints are not
+            // simulation frames, so their irregular Time.deltaTime must not
+            // change the adaptation rate when Game View scale is adjusted.
+            return isPlaying
+                ? Mathf.Max(deltaTime, 1e-6f)
+                : UnrealEditorExposureDeltaTime;
+        }
+
         internal static AutoExposureSettingsData ResolveUnreal(
             AutoExposure autoExposure,
             Camera camera,
@@ -82,7 +110,9 @@ namespace VividRP.Runtime
             settings.exposureHighPercent = exposureHighPercent;
             settings.minAverageLuminance = minWhitePointLuminance * MiddleGrey;
             settings.maxAverageLuminance = maxWhitePointLuminance * MiddleGrey;
-            settings.deltaTime = Mathf.Max(Time.deltaTime, 1e-6f);
+            settings.deltaTime = ResolveUnrealExposureDeltaTime(
+                Application.isPlaying,
+                Time.deltaTime);
             settings.exposureSpeedUp = Mathf.Max(autoExposure.speedUp.value, MinSpeed);
             settings.exposureSpeedDown = Mathf.Max(autoExposure.speedDown.value, MinSpeed);
             settings.histogramScale = histogramScaleBias.x;

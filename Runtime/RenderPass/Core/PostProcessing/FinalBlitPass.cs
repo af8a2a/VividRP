@@ -196,6 +196,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_EnableExposure = m_PostProcessingAllowed
                     && m_ExposureData != null
                     && m_ExposureData.exposureEnabled;
+
+                var exposureBuffer = m_EnableExposure
+                    ? m_ExposureData?.frameExposureBuffer
+                    : m_ExposureData?.defaultExposureBuffer;
+                if (exposureBuffer != null)
+                {
+                    PassRecorder.ImportBufferForPass(
+                        this,
+                        exposureBuffer,
+                        AccessFlags.Read);
+                }
             }
         }
 

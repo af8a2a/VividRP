@@ -1,4 +1,3 @@
-#pragma kernel ClearHistogram
 #pragma kernel BuildHistogram
 #pragma kernel ResolveExposure
 #pragma kernel ResolveBasicExposure
@@ -16,6 +15,7 @@ Texture2D<float4> _AutoExposureMeterMask;
 Texture2D<float4> _AutoExposureCompensationCurve;
 
 StructuredBuffer<float4> _PreviousExposureBuffer;
+RWStructuredBuffer<uint> _PartialHistogramBuffer;
 RWStructuredBuffer<uint> _HistogramBuffer;
 RWStructuredBuffer<float4> _CurrentExposureBuffer;
 
@@ -39,6 +39,7 @@ static const float kBasicLogLuminanceMin = -10.0f;
 static const float kBasicLogLuminanceMax = 20.0f;
 
 groupshared uint s_GroupHistogram[HISTOGRAM_SIZE];
+groupshared uint s_ResolvedHistogram[HISTOGRAM_SIZE];
 groupshared float2 s_GroupBasicLuminance[HISTOGRAM_THREAD_GROUP_SIZE];
 
 float GetHistogramPositionFromLogLuminance(float logLuminance)
@@ -98,40 +99,6 @@ float ComputeAdaptedExposure(float oldExposure, float targetExposure)
     const float adaptedExposure = exp2(adaptedLogExposure);
 
     return lerp(adaptedExposure, targetExposure, _AutoExposureParams2.w);
-}
-
-[numthreads(HISTOGRAM_SIZE, 1, 1)]
-void ClearHistogram(uint3 dispatchThreadId : SV_DispatchThreadID)
-{
-    if (dispatchThreadId.x >= HISTOGRAM_SIZE)
-        return;
-
-    _HistogramBuffer[dispatchThreadId.x] = 0;
-}
-
-void InterlockedAddFloat(uint bufferIndex, float value)
-{
-    if (value == 0.0f)
-        return;
-
-    uint expectedBits = _HistogramBuffer[bufferIndex];
-    uint originalBits;
-
-    [allow_uav_condition]
-    while (true)
-    {
-        const uint desiredBits = asuint(asfloat(expectedBits) + value);
-        InterlockedCompareExchange(
-            _HistogramBuffer[bufferIndex],
-            expectedBits,
-            desiredBits,
-            originalBits);
-
-        if (originalBits == expectedBits)
-            return;
-
-        expectedBits = originalBits;
-    }
 }
 
 [numthreads(HISTOGRAM_THREAD_GROUP_SIZE, 1, 1)]
@@ -231,13 +198,14 @@ void BuildHistogram(
     if (!useBasicMethod)
     {
         const uint localWeight = s_GroupHistogram[laneIndex];
-        // Preserve UE-like high precision inside a row while keeping the
-        // public 64-bin uint buffer safe for 8K-class frame sizes.
+        // Each row owns one 64-bin slice. ResolveExposure combines the
+        // slices deterministically, so no per-frame clear or global atomic
+        // accumulation is required.
         const uint globalWeight =
             (localWeight + HISTOGRAM_LOCAL_TO_GLOBAL_SCALE / 2u)
             / HISTOGRAM_LOCAL_TO_GLOBAL_SCALE;
-        if (globalWeight > 0u)
-            InterlockedAdd(_HistogramBuffer[laneIndex], globalWeight);
+        _PartialHistogramBuffer[rowIndex * HISTOGRAM_SIZE + laneIndex] =
+            globalWeight;
         return;
     }
 
@@ -255,11 +223,14 @@ void BuildHistogram(
         GroupMemoryBarrierWithGroupSync();
     }
 
+    uint basicValue = 0u;
     if (laneIndex == 0u)
-    {
-        InterlockedAddFloat(0u, s_GroupBasicLuminance[0].x);
-        InterlockedAddFloat(1u, s_GroupBasicLuminance[0].y);
-    }
+        basicValue = asuint(s_GroupBasicLuminance[0].x);
+    else if (laneIndex == 1u)
+        basicValue = asuint(s_GroupBasicLuminance[0].y);
+
+    _PartialHistogramBuffer[rowIndex * HISTOGRAM_SIZE + laneIndex] =
+        basicValue;
 }
 
 bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
@@ -268,7 +239,7 @@ bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
 
     [unroll]
     for (uint bucketIndex = 0; bucketIndex < HISTOGRAM_SIZE; ++bucketIndex)
-        histogramSum += (float)_HistogramBuffer[bucketIndex];
+        histogramSum += (float)s_ResolvedHistogram[bucketIndex];
 
     if (histogramSum <= kEpsilon)
     {
@@ -283,7 +254,7 @@ bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
     [unroll]
     for (uint bucketIndex = 0; bucketIndex < HISTOGRAM_SIZE; ++bucketIndex)
     {
-        float localValue = (float)_HistogramBuffer[bucketIndex];
+        float localValue = (float)s_ResolvedHistogram[bucketIndex];
 
         const float subtractedLow = min(localValue, minFractionSum);
         localValue -= subtractedLow;
@@ -304,9 +275,10 @@ bool TryResolveHistogramAverageSceneLuminance(out float averageSceneLuminance)
 
 bool TryResolveBasicAverageSceneLuminance(out float averageSceneLuminance)
 {
-    const float weightedScaledLogLuminance = asfloat(_HistogramBuffer[0]);
+    const float weightedScaledLogLuminance =
+        asfloat(s_ResolvedHistogram[0]);
     const float totalWeight = max(
-        asfloat(_HistogramBuffer[1]),
+        asfloat(s_ResolvedHistogram[1]),
         kBasicWeightEpsilon);
     const float averageScaledLogLuminance =
         weightedScaledLogLuminance / totalWeight;
@@ -351,9 +323,26 @@ void WriteResolvedExposure(float averageSceneLuminance)
         middleGreyExposureCompensation);
 }
 
-[numthreads(1, 1, 1)]
-void ResolveExposure(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(HISTOGRAM_THREAD_GROUP_SIZE, 1, 1)]
+void ResolveExposure(uint3 groupThreadId : SV_GroupThreadID)
 {
+    const uint laneIndex = groupThreadId.x;
+    const uint height = (uint)_AutoExposureScreenSize.y;
+    uint bucketWeight = 0u;
+
+    for (uint rowIndex = 0u; rowIndex < height; ++rowIndex)
+    {
+        bucketWeight += _PartialHistogramBuffer[
+            rowIndex * HISTOGRAM_SIZE + laneIndex];
+    }
+
+    s_ResolvedHistogram[laneIndex] = bucketWeight;
+    _HistogramBuffer[laneIndex] = bucketWeight;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (laneIndex != 0u)
+        return;
+
     float averageSceneLuminance;
     if (!TryResolveHistogramAverageSceneLuminance(averageSceneLuminance))
     {
@@ -364,9 +353,30 @@ void ResolveExposure(uint3 dispatchThreadId : SV_DispatchThreadID)
     WriteResolvedExposure(averageSceneLuminance);
 }
 
-[numthreads(1, 1, 1)]
-void ResolveBasicExposure(uint3 dispatchThreadId : SV_DispatchThreadID)
+[numthreads(HISTOGRAM_THREAD_GROUP_SIZE, 1, 1)]
+void ResolveBasicExposure(uint3 groupThreadId : SV_GroupThreadID)
 {
+    const uint laneIndex = groupThreadId.x;
+    const uint height = (uint)_AutoExposureScreenSize.y;
+    float partialValue = 0.0f;
+
+    if (laneIndex < 2u)
+    {
+        for (uint rowIndex = 0u; rowIndex < height; ++rowIndex)
+        {
+            partialValue += asfloat(_PartialHistogramBuffer[
+                rowIndex * HISTOGRAM_SIZE + laneIndex]);
+        }
+    }
+
+    const uint resolvedValue = asuint(partialValue);
+    s_ResolvedHistogram[laneIndex] = resolvedValue;
+    _HistogramBuffer[laneIndex] = resolvedValue;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (laneIndex != 0u)
+        return;
+
     float averageSceneLuminance;
     if (!TryResolveBasicAverageSceneLuminance(averageSceneLuminance))
     {

@@ -6,7 +6,10 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass
 {
-    public sealed partial class AutoExposurePass : UnsafePass, IPostProcessSourceOverridePass
+    public sealed partial class AutoExposurePass :
+        UnsafePass,
+        IPostProcessSourceOverridePass,
+        IRenderGraphSideEffectPass
     {
         private const int UnrealAutoExposureHistogramBucketCount = 64;
         private const int HdrpAutoExposureHistogramBucketCount = 128;
@@ -14,7 +17,6 @@ namespace VividRP.Runtime.RenderPass
         private const int HdrpAutoExposureReductionSize = 32;
         private const int HdrpHistogramThreadGroupSizeX = 16;
         private const int HdrpHistogramThreadGroupSizeY = 8;
-        private const string ClearHistogramKernelName = "ClearHistogram";
         private const string BuildHistogramKernelName = "BuildHistogram";
         private const string ResolveExposureKernelName = "ResolveExposure";
         private const string ResolveBasicExposureKernelName = "ResolveBasicExposure";
@@ -156,6 +158,7 @@ namespace VividRP.Runtime.RenderPass
 
             RefreshAutoExposureImplementation();
             EnsureAutoExposureHistogramBuffer();
+            EnsureUnrealPartialHistogramBuffer();
 
             m_EnableAutoExposure = m_PostProcessingAllowed
                 && m_ExposureData != null
@@ -164,6 +167,8 @@ namespace VividRP.Runtime.RenderPass
             m_EnableExposure = m_PostProcessingAllowed
                 && m_ExposureData != null
                 && m_ExposureData.exposureEnabled;
+
+            RegisterExposureBufferAccess();
         }
 
 
@@ -226,12 +231,12 @@ namespace VividRP.Runtime.RenderPass
         {
             m_AutoExposureHistogramBuffer?.Dispose();
             m_AutoExposureHistogramBuffer = null;
+            DisposeUnrealAutoExposureResources();
             ReleaseHDRPScratchTexture(ref m_HDRPPrePassTexture);
             ReleaseHDRPScratchTexture(ref m_HDRPReductionTexture);
             m_AutoExposureCompute = null;
             m_HistogramAutoExposureCompute = null;
             m_AutoExposureImplementation = AutoExposureImplementationPath.Unreal;
-            m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
             m_ResolveBasicExposureKernel = -1;
@@ -254,6 +259,32 @@ namespace VividRP.Runtime.RenderPass
                 return ExecuteUnrealAutoExposure(cmd);
 
             return ExecuteHDRPAutoExposure(cmd);
+        }
+
+        private void RegisterExposureBufferAccess()
+        {
+            if (!m_EnableExposure || m_ExposureData == null)
+                return;
+
+            var writesCurrentExposure = m_EnableAutoExposure
+                || (m_AutoExposureImplementation == AutoExposureImplementationPath.HDRP
+                    && m_AutoExposureSettings.mode == AutoExposureMode.Manual);
+            if (!writesCurrentExposure
+                || m_ExposureData.currentExposureBuffer == null)
+            {
+                return;
+            }
+
+            // Publish the exact buffer FinalBlit will consume during Prepare.
+            // The exposure buffer is camera history owned outside RenderGraph,
+            // so it must be imported explicitly to establish the UAV-write to
+            // fragment-read dependency and resource transition.
+            m_ExposureData.frameExposureBuffer =
+                m_ExposureData.currentExposureBuffer;
+            PassRecorder.ImportBufferForPass(
+                this,
+                m_ExposureData.currentExposureBuffer,
+                AccessFlags.Write);
         }
 
 
@@ -351,7 +382,6 @@ namespace VividRP.Runtime.RenderPass
         private bool SupportsUnrealAutoExposurePath()
         {
             return m_HistogramAutoExposureCompute != null
-                && m_ClearHistogramKernel >= 0
                 && m_BuildHistogramKernel >= 0
                 && m_ResolveExposureKernel >= 0
                 && m_ResolveBasicExposureKernel >= 0;
@@ -407,7 +437,6 @@ namespace VividRP.Runtime.RenderPass
 
         private void ResolveAutoExposureKernels()
         {
-            m_ClearHistogramKernel = -1;
             m_BuildHistogramKernel = -1;
             m_ResolveExposureKernel = -1;
             m_ResolveBasicExposureKernel = -1;
@@ -422,7 +451,6 @@ namespace VividRP.Runtime.RenderPass
 
             if (AutoExposureImplementationUtility.SupportsUnrealDispatch(m_HistogramAutoExposureCompute))
             {
-                m_ClearHistogramKernel = m_HistogramAutoExposureCompute.FindKernel(ClearHistogramKernelName);
                 m_BuildHistogramKernel = m_HistogramAutoExposureCompute.FindKernel(BuildHistogramKernelName);
                 m_ResolveExposureKernel = m_HistogramAutoExposureCompute.FindKernel(ResolveExposureKernelName);
                 m_ResolveBasicExposureKernel =

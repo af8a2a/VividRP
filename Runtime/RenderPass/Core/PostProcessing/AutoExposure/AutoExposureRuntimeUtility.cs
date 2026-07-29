@@ -311,7 +311,14 @@ namespace VividRP.Runtime
             var defaultExposureBuffer = s_DefaultExposureBuffer;
             var bufferHistory = exposureEnabled ? state?.exposureBufferHistory : null;
             var textureHistory = exposureEnabled ? state?.exposureTextureHistory : null;
-            var hasValidBufferHistory = bufferHistory?.IsValid() == true;
+            var hasAllocatedPreviousBuffer =
+                bufferHistory?.GetPrevious() != null;
+            var hasValidBufferHistory =
+                implementation == AutoExposureImplementationPath.HDRP
+                    ? bufferHistory?.IsValid() == true
+                    : UnrealAutoExposureHistoryUtility.HasUsableExposureState(
+                        state?.hasValidHistory == true,
+                        hasAllocatedPreviousBuffer);
             var hasValidTextureHistory = textureHistory?.IsValid() == true;
             var hasValidHistory = exposureEnabled
                 && state != null

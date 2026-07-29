@@ -227,6 +227,8 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("resources.FinalBlitShader"));
             Assert.That(passSource, Does.Contain("m_EnableExposure"));
             Assert.That(passSource, Does.Contain("m_ExposureData?.frameExposureBuffer ?? defaultExposureBuffer"));
+            Assert.That(passSource, Does.Contain("PassRecorder.ImportBufferForPass("));
+            Assert.That(passSource, Does.Contain("AccessFlags.Read"));
             Assert.That(passSource, Does.Not.Contain("SetBuffer(AutoExposurePreExposureBufferId"));
             Assert.That(passSource, Does.Not.Contain("ExecuteAutoExposure("));
             Assert.That(passSource, Does.Not.Contain("RefreshAutoExposureImplementation("));

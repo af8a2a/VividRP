@@ -322,6 +322,41 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_EncodesVolumetricLightContract()
+        {
+            var light = CreateLight(
+                14,
+                LightType.Point,
+                Vector3.one);
+            light.flags |=
+                VividLightRenderDataFlags.AffectVolumetric;
+            light.volumetricDimmer = 2.5f;
+            light.volumetricShadowDimmer = 0.35f;
+            light.volumetricFadeDistance = 42.0f;
+
+            var result =
+                ReferencedPathTracingLightListBuilder.Build(
+                    new[] { light });
+            var record = result.records.Single();
+            var flags =
+                (ReferencedPathTracingLightFlags)record.flags;
+
+            Assert.That(
+                flags
+                & ReferencedPathTracingLightFlags.AffectVolumetric,
+                Is.Not.EqualTo(ReferencedPathTracingLightFlags.None));
+            Assert.That(
+                record.volumetricDimmer,
+                Is.EqualTo(2.5f));
+            Assert.That(
+                record.volumetricShadowDimmer,
+                Is.EqualTo(0.35f));
+            Assert.That(
+                record.volumetricFadeDistance,
+                Is.EqualTo(42.0f));
+        }
+
+        [Test]
         public void Build_ReportsUnsupportedAndUnstableActiveLights()
         {
             var unsupported = CreateLight(1, LightType.Box, Vector3.one);

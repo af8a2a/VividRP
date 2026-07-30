@@ -102,6 +102,21 @@ static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
 static const int kReferencedEnvironmentDebugIndirectMissOnly = 3;
 static const float kReferencedPathtracingPi = 3.14159265358979323846;
 
+bool VividReferencedPathtracingIsFinite(float value)
+{
+    return !isnan(value) && !isinf(value);
+}
+
+bool VividReferencedPathtracingIsFinite(float2 value)
+{
+    return !any(isnan(value)) && !any(isinf(value));
+}
+
+bool VividReferencedPathtracingIsFinite(float3 value)
+{
+    return !any(isnan(value)) && !any(isinf(value));
+}
+
 uint ReferencedPathtracingHashStochasticTransparency(uint value)
 {
     value ^= value >> 16u;

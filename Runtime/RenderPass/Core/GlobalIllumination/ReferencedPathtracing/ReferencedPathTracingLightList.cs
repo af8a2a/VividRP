@@ -31,12 +31,13 @@ namespace VividRP.Runtime.RenderPass.Core
         HasStableId = 1u << 5,
         UsesAreaMeasure = 1u << 6,
         UsesLineMeasure = 1u << 7,
+        AffectVolumetric = 1u << 8,
     }
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct ReferencedPathTracingLightRecord
     {
-        internal const int Stride = 144;
+        internal const int Stride = 160;
 
         internal Vector3 positionWS;
         internal float range;
@@ -69,6 +70,11 @@ namespace VividRP.Runtime.RenderPass.Core
         internal uint stableIdHigh;
         internal uint lightType;
         internal uint flags;
+
+        internal float volumetricDimmer;
+        internal float volumetricShadowDimmer;
+        internal float volumetricFadeDistance;
+        internal float padding;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -975,6 +981,16 @@ namespace VividRP.Runtime.RenderPass.Core
                 stableIdHigh = (uint)(stableId >> 32),
                 lightType = (uint)lightType,
                 flags = (uint)flags,
+                volumetricDimmer = Mathf.Clamp(
+                    SanitizeNonNegative(source.volumetricDimmer),
+                    0.0f,
+                    VividAdditionalLightData.MaxVolumetricDimmer),
+                volumetricShadowDimmer = Mathf.Clamp01(
+                    SanitizeNonNegative(
+                        source.volumetricShadowDimmer)),
+                volumetricFadeDistance = SanitizeNonNegative(
+                    source.volumetricFadeDistance),
+                padding = 0.0f,
             };
             return true;
         }
@@ -1004,6 +1020,12 @@ namespace VividRP.Runtime.RenderPass.Core
             float angularDiameter)
         {
             var flags = ReferencedPathTracingLightFlags.HasStableId;
+            if ((source.flags
+                    & VividLightRenderDataFlags.AffectVolumetric) != 0)
+            {
+                flags |=
+                    ReferencedPathTracingLightFlags.AffectVolumetric;
+            }
             if ((source.flags & VividLightRenderDataFlags.CastShadows) != 0
                 && source.shadowStrength > 0.0f)
             {
@@ -1279,6 +1301,9 @@ namespace VividRP.Runtime.RenderPass.Core
             Hash(ref hash, record.stableIdHigh);
             Hash(ref hash, record.lightType);
             Hash(ref hash, record.flags);
+            Hash(ref hash, record.volumetricDimmer);
+            Hash(ref hash, record.volumetricShadowDimmer);
+            Hash(ref hash, record.volumetricFadeDistance);
         }
 
         private static void Hash(ref ulong hash, Vector3 value)

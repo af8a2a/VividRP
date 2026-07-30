@@ -49,6 +49,9 @@ int _ReferencedPathSamplingMode;
 float4 _ReferencedReblurHitDistanceParameters;
 int _ReferencedReblurCheckerboardMode;
 
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingNEECandidate.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingGlobalFog.hlsl"
+
 static const float kReferencedPathtracingShadowMinBias = 0.001;
 static const float kReferencedPathtracingShadowMaxDistance = 100000.0;
 // DXR requires a finite float, so FLT_MAX is the infinite-light visibility endpoint.
@@ -306,6 +309,7 @@ float3 TraceReferencedPathtracingCandidateVisibility(
     float3 lightDirectionWS,
     float lightDistance,
     bool includeVirtualGround,
+    bool includeGlobalFog,
     float shadowStrength,
     uint stochasticAlphaSeed)
 {
@@ -318,7 +322,7 @@ float3 TraceReferencedPathtracingCandidateVisibility(
             lightDistance,
             stochasticAlphaSeed)
         : 1.0;
-    float geometryVisibility =
+    float3 geometryVisibility =
         lerp(1.0, tracedVisibility, shadowStrength);
 
     float shadowBias;
@@ -330,6 +334,7 @@ float3 TraceReferencedPathtracingCandidateVisibility(
             shadowBias);
     float3 atmosphereTransmittance = 1.0;
     float3 cloudTransmittance = 1.0;
+    float3 globalFogTransmittance = 1.0;
     if (ReferencedPathtracingHasReferenceAtmosphere())
     {
         ReferencedPathtracingAtmosphereRayInterval shadowInterval;
@@ -362,8 +367,19 @@ float3 TraceReferencedPathtracingCandidateVisibility(
                     lightDistance - shadowBias,
                     shadowBias));
     }
+    if (includeGlobalFog)
+    {
+        globalFogTransmittance =
+            ReferencedPathtracingEvaluateGlobalFogTransmittance(
+                shadowOriginWS,
+                lightDirectionWS,
+                max(
+                    lightDistance - shadowBias,
+                    shadowBias));
+    }
     return atmosphereTransmittance
         * cloudTransmittance
+        * globalFogTransmittance
         * geometryVisibility;
 }
 
@@ -410,6 +426,66 @@ float GetReferencedPathtracingNEELightEstimatorWeight(
         (lightFlags & REFERENCED_LIGHT_FLAG_SINGULAR) != 0u,
         lightPdf,
         bsdfPdf);
+}
+
+bool ReferencedPathtracingResolveGlobalFogLight(
+    ReferencedPathtracingNEECandidate candidate,
+    out float radianceScale,
+    out float shadowStrength)
+{
+    radianceScale = 0.0;
+    shadowStrength = 0.0;
+    if (candidate.valid == 0u)
+        return false;
+
+    bool directionalLightsOnly =
+        _ReferencedGlobalFogLighting.y > 0.5;
+    if (candidate.lightType
+        == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+    {
+        if (directionalLightsOnly)
+            return false;
+
+        radianceScale =
+            max(_ReferencedGlobalFogLighting.x, 0.0);
+        shadowStrength = candidate.shadowStrength;
+        return radianceScale > 0.0;
+    }
+
+    ReferencedPathTracingLightRecord light =
+        ReferencedPathtracingLoadReferenceLight(
+            candidate.lightIndex);
+    if ((light.flags
+            & REFERENCED_LIGHT_FLAG_AFFECT_VOLUMETRIC) == 0u
+        || light.volumetricDimmer <= 0.0
+        || (directionalLightsOnly
+            && light.lightType
+                != REFERENCED_LIGHT_TYPE_DIRECTIONAL))
+    {
+        return false;
+    }
+
+    float volumetricFade = 1.0;
+    if (light.lightType
+        != REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+    {
+        volumetricFade =
+            light.volumetricFadeDistance > 0.0
+                ? saturate(
+                    1.0
+                    - distance(
+                        _CameraPositionWS.xyz,
+                        light.positionWS)
+                        / light.volumetricFadeDistance)
+                : 0.0;
+    }
+    radianceScale =
+        max(light.volumetricDimmer, 0.0)
+        * volumetricFade;
+    shadowStrength = saturate(
+        candidate.shadowStrength
+        * max(light.volumetricShadowDimmer, 0.0));
+    return radianceScale > 0.0;
 }
 
 void AccumulateReferencedPathtracingMainLightRadiance(
@@ -677,11 +753,45 @@ void RayGenReferencedPathtracing()
             payloadInput.parentMediumIor =
                 materialMediumIorStack[materialMediumDepth - 2u];
         }
+
+        float3 globalFogRandom =
+            ReferencedPathtracingGetPathSample3D(
+                pixelCoord,
+                sampleIndex,
+                ReferencedPathtracingGetGlobalFogSampleDimension(
+                    bounceIndex,
+                    kReferencedPathtracingGlobalFogDistanceDimensionOffset),
+                sampleSeed,
+                pathSamplingMode);
+        ReferencedPathtracingGlobalFogSample globalFogSample =
+            (ReferencedPathtracingGlobalFogSample)0;
+        bool intersectsGlobalFog =
+            materialMediumDepth == 0u
+            && ReferencedPathtracingSampleGlobalFog(
+                ray.Origin,
+                ray.Direction,
+                ray.TMin,
+                kReferencedPathtracingInfiniteDistance,
+                globalFogRandom.x,
+                globalFogSample);
+        bool globalFogHasMediumEvent =
+            intersectsGlobalFog
+            && globalFogSample.hasEvent != 0u;
+        RayDesc surfaceRay = ray;
+        if (globalFogHasMediumEvent)
+        {
+            surfaceRay.TMax = min(
+                surfaceRay.TMax,
+                globalFogSample.distance);
+        }
+
         // SER is useful around the material-heavy closest-hit path. Shadow rays
         // skip closest-hit shading and retain the lower-overhead standard TraceRay.
         ReferencedPathtracingPayload tracePayload;
         PackReferencedPathtracingPayloadInput(payloadInput, tracePayload);
-        TraceReferencedPathtracingSurface(ray, tracePayload);
+        TraceReferencedPathtracingSurface(
+            surfaceRay,
+            tracePayload);
         ReferencedPathtracingSurfaceResult payload;
         UnpackReferencedPathtracingSurfaceResult(tracePayload, payload);
         if (payload.hit != 0u)
@@ -797,7 +907,12 @@ void RayGenReferencedPathtracing()
             + normalize(ray.Direction) * segmentStartDistance;
         float atmosphereMaximumDistance = payload.hit != 0u
             ? max(payload.hitDistance - segmentStartDistance, 0.0)
-            : kReferencedPathtracingInfiniteDistance;
+            : (globalFogHasMediumEvent
+                ? max(
+                    globalFogSample.distance
+                        - segmentStartDistance,
+                    0.0)
+                : kReferencedPathtracingInfiniteDistance);
         bool includeVirtualGround =
             !ReferencedPathtracingUsesCameraRelativeAtmosphere()
             || payload.hit == 0u;
@@ -862,11 +977,39 @@ void RayGenReferencedPathtracing()
             intersectsCloud
             && cloudMediumSample.eventType
                 != REFERENCED_CLOUD_EVENT_NONE;
+        float atmosphereCompetingDistance =
+            atmosphereHasMediumEvent
+                ? atmosphereMediumSample.distance
+                : (intersectsAtmosphere
+                    && atmosphereMediumSample.hitsGround != 0u
+                    ? atmosphereMediumSample.boundaryDistance
+                    : kReferencedPathtracingInfiniteDistance);
+        float cloudCompetingDistance =
+            cloudHasMediumEvent
+                ? cloudMediumSample.distance
+                : kReferencedPathtracingInfiniteDistance;
+        float globalFogCompetingDistance =
+            globalFogHasMediumEvent
+                ? max(
+                    globalFogSample.distance
+                        - segmentStartDistance,
+                    0.0)
+                : kReferencedPathtracingInfiniteDistance;
+        bool globalFogCanWin =
+            globalFogHasMediumEvent
+            && payload.hit == 0u;
         bool cloudEventFirst =
             cloudHasMediumEvent
-            && (!atmosphereHasMediumEvent
-                || cloudMediumSample.distance
-                    < atmosphereMediumSample.distance);
+            && cloudCompetingDistance
+                < atmosphereCompetingDistance
+            && cloudCompetingDistance
+                < globalFogCompetingDistance;
+        bool globalFogEventFirst =
+            globalFogCanWin
+            && globalFogCompetingDistance
+                <= atmosphereCompetingDistance
+            && globalFogCompetingDistance
+                <= cloudCompetingDistance;
         if (cloudEventFirst)
         {
             if (intersectsAtmosphere)
@@ -960,6 +1103,7 @@ void RayGenReferencedPathtracing()
                         cloudSunSample.directionWS,
                         cloudSunSample.directionWS,
                         kReferencedPathtracingInfiniteDistance,
+                        true,
                         true,
                         _ReferencedAtmosphereSunIlluminance.w,
                         ReferencedPathtracingHashStochasticTransparency(
@@ -1065,6 +1209,242 @@ void RayGenReferencedPathtracing()
             continue;
         }
 
+        if (globalFogEventFirst)
+        {
+            if (intersectsAtmosphere)
+            {
+                float3 atmosphereToGlobalFogTransmittance =
+                    ReferencedPathtracingEvaluateAtmosphereTransmittanceWithGroundPolicy(
+                        atmosphereRayOriginWS,
+                        ray.Direction,
+                        globalFogCompetingDistance,
+                        includeVirtualGround);
+                throughput *=
+                    ReferencedPathtracingGetAtmosphereTransmittanceRatio(
+                        atmosphereToGlobalFogTransmittance,
+                        atmosphereMediumSample.heroChannel);
+            }
+
+            throughput *= saturate(
+                _ReferencedGlobalFogScatteringExtinction.rgb);
+            if (!IsFiniteReferencedPathtracingRadiance(throughput)
+                || MaxReferencedPathtracingComponent(throughput)
+                    <= 0.0)
+            {
+                if (!IsFiniteReferencedPathtracingRadiance(throughput))
+                    invalidSampleMask.z = 1.0;
+                break;
+            }
+
+            float3 globalFogPositionWS =
+                ray.Origin
+                + normalize(ray.Direction)
+                    * globalFogSample.distance;
+            if (bounceIndex == 0u)
+            {
+                primaryHit = 1u;
+                primaryLobeClass = 1u;
+                primaryViewZ = abs(mul(
+                    _ReferencedWorldToView,
+                    float4(globalFogPositionWS, 1.0)).z);
+                primaryLinearRoughness = 1.0;
+                primaryDenoisingAlbedo = saturate(
+                    _ReferencedGlobalFogScatteringExtinction.rgb);
+                primaryDenoisingNormalWS =
+                    -normalize(ray.Direction);
+                diffuseHitDistance =
+                    globalFogSample.distance;
+            }
+
+            ReferencedPathtracingNEECandidate
+                globalFogLightCandidate;
+            if (ReferencedPathtracingSampleUnifiedNEECandidate(
+                    globalFogPositionWS,
+                    0.0,
+                    false,
+                    payloadInput.directLightRandom,
+                    globalFogLightCandidate))
+            {
+                float volumetricRadianceScale;
+                float volumetricShadowStrength;
+                if (ReferencedPathtracingResolveGlobalFogLight(
+                        globalFogLightCandidate,
+                        volumetricRadianceScale,
+                        volumetricShadowStrength))
+                {
+                    float globalFogPhasePdf =
+                        ReferencedPathtracingEvaluateGlobalFogPhasePdf(
+                            ray.Direction,
+                            globalFogLightCandidate.directionWS);
+                    bool phaseEstimatorCanReachLight =
+                        globalFogLightCandidate.lightType
+                            == REFERENCED_LIGHT_TYPE_ENVIRONMENT;
+                    float globalFogLightPdf =
+                        globalFogLightCandidate.selectionPdf
+                        * globalFogLightCandidate.solidAnglePdf;
+                    float globalFogLightEstimatorWeight =
+                        ReferencedPathtracingGetLightEstimatorWeight(
+                            phaseEstimatorCanReachLight,
+                            (globalFogLightCandidate.flags
+                                & REFERENCED_LIGHT_FLAG_SINGULAR) != 0u,
+                            globalFogLightPdf,
+                            globalFogPhasePdf);
+                    float3 globalFogLightDirectionWS =
+                        normalize(
+                            globalFogLightCandidate.directionWS);
+                    float3 globalFogVisibility =
+                        globalFogLightEstimatorWeight > 0.0
+                            ? TraceReferencedPathtracingCandidateVisibility(
+                                globalFogPositionWS,
+                                globalFogLightDirectionWS,
+                                globalFogLightDirectionWS,
+                                globalFogLightCandidate.distance,
+                                !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
+                                true,
+                                volumetricShadowStrength,
+                                ReferencedPathtracingHashStochasticTransparency(
+                                    stochasticAlphaSeed
+                                    ^ ReferencedPathtracingHashStochasticTransparency(
+                                        globalFogLightCandidate.lightIndex
+                                        + 0x082efa98u)))
+                            : 0.0;
+                    float3 globalFogDirectRadiance =
+                        throughput
+                        * globalFogPhasePdf
+                        * globalFogLightCandidate.incidentRadianceOverPdf
+                        * volumetricRadianceScale
+                        * globalFogLightEstimatorWeight
+                        * globalFogVisibility;
+                    if (IsFiniteReferencedPathtracingRadiance(
+                            globalFogDirectRadiance)
+                        && !any(globalFogDirectRadiance < -1e-6))
+                    {
+                        if (globalFogLightCandidate.lightType
+                            == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                        {
+                            AccumulateReferencedPathtracingMainLightRadiance(
+                                globalFogDirectRadiance,
+                                1u,
+                                bounceIndex,
+                                primaryLobeClass,
+                                (globalFogLightCandidate.flags
+                                    & REFERENCED_LIGHT_FLAG_SINGULAR) == 0u,
+                                directLightingRadiance,
+                                diffuseRadiance,
+                                specularRadiance,
+                                primaryDenoiserMainLightDiffuseRadiance,
+                                primaryDenoiserMainLightSpecularRadiance);
+                        }
+                        else if (globalFogLightCandidate.lightType
+                            == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+                        {
+                            environmentNeeRadiance +=
+                                globalFogDirectRadiance;
+                            if (bounceIndex == 0u)
+                            {
+                                environmentDirectDiffuseRadiance +=
+                                    globalFogDirectRadiance;
+                                diffuseRadiance +=
+                                    globalFogDirectRadiance;
+                            }
+                            else if (primaryLobeClass == 1u)
+                            {
+                                diffuseRadiance +=
+                                    globalFogDirectRadiance;
+                            }
+                            else if (primaryLobeClass == 2u)
+                            {
+                                specularRadiance +=
+                                    globalFogDirectRadiance;
+                            }
+                        }
+                        else if (bounceIndex == 0u
+                            || primaryLobeClass == 1u)
+                        {
+                            diffuseRadiance +=
+                                globalFogDirectRadiance;
+                        }
+                        else if (primaryLobeClass == 2u)
+                        {
+                            specularRadiance +=
+                                globalFogDirectRadiance;
+                        }
+                    }
+                    else
+                    {
+                        invalidSampleMask.z = 1.0;
+                    }
+                }
+            }
+
+            if (bounceIndex + 1u >= maxBounceCount)
+                break;
+
+            float3 globalFogNextDirectionWS;
+            float globalFogPhasePdf;
+            if (!ReferencedPathtracingSampleGlobalFogPhase(
+                    ray.Direction,
+                    globalFogRandom.yz,
+                    globalFogNextDirectionWS,
+                    globalFogPhasePdf))
+            {
+                break;
+            }
+
+            if ((int)(bounceIndex + 1u)
+                >= _ReferencedRussianRouletteStartBounce)
+            {
+                float survivalProbability = clamp(
+                    MaxReferencedPathtracingComponent(throughput),
+                    0.05,
+                    0.95);
+                float russianRouletteSample =
+                    ReferencedPathtracingGetPathSample(
+                        pixelCoord,
+                        sampleIndex,
+                        ReferencedPathtracingGetBounceSampleDimension(
+                            bounceIndex,
+                            kReferencedPathtracingRussianRouletteDimensionOffset),
+                        sampleSeed,
+                        pathSamplingMode);
+                if (russianRouletteSample
+                    >= survivalProbability)
+                {
+                    break;
+                }
+                throughput /= survivalProbability;
+            }
+
+            if (bounceIndex == 0u)
+            {
+                diffuseRayDirectionWS =
+                    normalize(globalFogNextDirectionWS);
+            }
+            previousBsdfPdf = globalFogPhasePdf;
+            previousBsdfWasDelta = false;
+            previousReferenceSunReachable = false;
+            previousLightSelectionContext =
+                ReferencedPathtracingCreateLightSelectionContext(
+                    globalFogPositionWS,
+                    0.0,
+                    false);
+            rayConeWidth = max(
+                rayConeWidth
+                + globalFogSample.distance
+                    * rayConeSpreadAngle,
+                0.0);
+            ray.Direction =
+                normalize(globalFogNextDirectionWS);
+            ray.Origin =
+                globalFogPositionWS
+                + ray.Direction
+                    * kReferencedPathtracingShadowMinBias;
+            ray.TMin =
+                kReferencedPathtracingShadowMinBias;
+            ray.TMax = _RayMaxDistance;
+            continue;
+        }
+
         if (intersectsAtmosphere)
         {
             bool primaryAtmosphereVisible =
@@ -1153,6 +1533,7 @@ void RayGenReferencedPathtracing()
                             sunSample.directionWS,
                             sunSample.directionWS,
                             kReferencedPathtracingInfiniteDistance,
+                            true,
                             true,
                             _ReferencedAtmosphereSunIlluminance.w,
                             ReferencedPathtracingHashStochasticTransparency(
@@ -1346,6 +1727,7 @@ void RayGenReferencedPathtracing()
                             groundNormalWS,
                             groundSunSample.directionWS,
                             kReferencedPathtracingInfiniteDistance,
+                            true,
                             true,
                             _ReferencedAtmosphereSunIlluminance.w,
                             ReferencedPathtracingHashStochasticTransparency(
@@ -1636,6 +2018,7 @@ void RayGenReferencedPathtracing()
                     neeDirectionWS,
                     payload.neeDistance,
                     !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
+                    materialMediumDepth == 0u,
                     payload.neeShadowStrength,
                     ReferencedPathtracingHashStochasticTransparency(
                         stochasticAlphaSeed
@@ -1829,6 +2212,7 @@ void RayGenReferencedPathtracing()
                         normalize(payload.nextDirectionWS),
                         segmentLightHit.distance,
                         !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
+                        materialMediumDepth == 0u,
                         segmentLightHit.shadowStrength,
                         ReferencedPathtracingHashStochasticTransparency(
                             stochasticAlphaSeed

@@ -71,7 +71,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 6"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 7"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));

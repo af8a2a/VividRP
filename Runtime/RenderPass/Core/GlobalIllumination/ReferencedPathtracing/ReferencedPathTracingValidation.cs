@@ -194,7 +194,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 6;
+        internal const int Version = 7;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -209,10 +209,14 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int AtmosphereSunDimensionOffset = 12;
         internal const int CloudDimensionOffset = 14;
         internal const int FutureDimensionOffset = 18;
+        internal const int GlobalFogBaseDimension = 200;
+        internal const int GlobalFogDimensionStride = 3;
+        internal const int GlobalFogDistanceDimensionOffset = 0;
+        internal const int GlobalFogPhaseDimensionOffset = 1;
         internal const int MaximumUsedDimension =
-            BounceBaseDimension
+            GlobalFogBaseDimension
             + ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount
-                * BounceDimensionStride
+                * GlobalFogDimensionStride
             - 1;
 
         internal static int GetBounceDimension(
@@ -236,6 +240,31 @@ namespace VividRP.Runtime.RenderPass.Core
 
             return BounceBaseDimension
                 + bounceIndex * BounceDimensionStride
+                + dimensionOffset;
+        }
+
+        internal static int GetGlobalFogDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= GlobalFogDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return GlobalFogBaseDimension
+                + bounceIndex * GlobalFogDimensionStride
                 + dimensionOffset;
         }
     }
@@ -562,6 +591,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
             ReferencedPathTracingAtmosphereState atmosphereState,
+            ReferencedPathTracingGlobalFogState globalFogState,
             ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
             ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
@@ -577,6 +607,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 atmosphereState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                globalFogState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 cameraBackgroundState.signature);

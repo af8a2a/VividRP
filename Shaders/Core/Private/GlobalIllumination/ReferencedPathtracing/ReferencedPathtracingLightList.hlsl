@@ -34,8 +34,9 @@
 #define REFERENCED_LIGHT_FLAG_HAS_STABLE_ID (1u << 5)
 #define REFERENCED_LIGHT_FLAG_USES_AREA_MEASURE (1u << 6)
 #define REFERENCED_LIGHT_FLAG_USES_LINE_MEASURE (1u << 7)
+#define REFERENCED_LIGHT_FLAG_AFFECT_VOLUMETRIC (1u << 8)
 
-// CPU ABI: ReferencedPathTracingLightRecord, 144 bytes.
+// CPU ABI: ReferencedPathTracingLightRecord, 160 bytes.
 struct ReferencedPathTracingLightRecord
 {
     float3 positionWS;
@@ -69,6 +70,11 @@ struct ReferencedPathTracingLightRecord
     uint stableIdHigh;
     uint lightType;
     uint flags;
+
+    float volumetricDimmer;
+    float volumetricShadowDimmer;
+    float volumetricFadeDistance;
+    float padding;
 };
 
 // CPU ABI: ReferencedPathTracingLightListParameters, 48 bytes.

@@ -201,6 +201,16 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedCloudMaterialParameters");
         private static readonly int CloudNoiseParametersId =
             Shader.PropertyToID("_ReferencedCloudNoiseParameters");
+        private static readonly int GlobalFogEnabledId =
+            Shader.PropertyToID("_ReferencedGlobalFogEnabled");
+        private static readonly int GlobalFogScatteringExtinctionId =
+            Shader.PropertyToID(
+                "_ReferencedGlobalFogScatteringExtinction");
+        private static readonly int GlobalFogHeightAnisotropyId =
+            Shader.PropertyToID(
+                "_ReferencedGlobalFogHeightAnisotropy");
+        private static readonly int GlobalFogLightingId =
+            Shader.PropertyToID("_ReferencedGlobalFogLighting");
 
         [RenderGraphResource(Name = "SceneRTAS", Access = AccessFlags.Read)]
         private RenderGraphAccelerationStructure m_SceneAccelerationStructure;
@@ -334,6 +344,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingReblurCheckerboardMode.Off;
         private ReferencedPathTracingEnvironmentState m_EnvironmentState;
         private ReferencedPathTracingAtmosphereState m_AtmosphereState;
+        private ReferencedPathTracingGlobalFogState m_GlobalFogState;
         private ReferencedPathTracingCameraBackgroundState m_CameraBackgroundState;
         private ReferencedPathTracingIntegratorState m_IntegratorState;
         private ReferencedPathTracingSamplingMode m_ResolvedPathSamplingMode =
@@ -466,6 +477,8 @@ namespace VividRP.Runtime.RenderPass.Core
             PrepareEnvironmentImportanceDistributionFallback();
             PrepareDirectionalDenoiserState();
             PrepareEnvironment(frameData, cameraData);
+            m_GlobalFogState =
+                ReferencedPathTracingGlobalFogState.Resolve();
             m_IntegratorState = ReferencedPathTracingIntegratorState.Resolve();
             RefreshIndexedBndKeyword();
             ResolvePathSamplingMode();
@@ -752,6 +765,8 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ReblurCheckerboardMode = ReferencedPathTracingReblurCheckerboardMode.Off;
             m_EnvironmentState = default;
             m_AtmosphereState = default;
+            m_GlobalFogState =
+                ReferencedPathTracingGlobalFogState.Disabled;
             m_CameraBackgroundState = default;
             m_IntegratorState = default;
             m_ResolvedPathSamplingMode =
@@ -1075,6 +1090,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     effectiveIntegratorSignature,
                     m_EnvironmentState,
                     m_AtmosphereState,
+                    m_GlobalFogState,
                     m_CameraBackgroundState,
                     m_PhysicalCameraState);
             var temporalData = frameData.Contains<VividTemporalData>()
@@ -1290,6 +1306,60 @@ namespace VividRP.Runtime.RenderPass.Core
                 CameraSkyEnabledId,
                 cameraSkyEnabled);
             BindAtmosphereContract(cmd);
+            BindGlobalFogContract(cmd);
+        }
+
+        private void BindGlobalFogContract(CommandBuffer cmd)
+        {
+            var scatteringAlbedo =
+                m_GlobalFogState.scatteringAlbedo;
+            var scatteringExtinction = new Vector4(
+                scatteringAlbedo.x,
+                scatteringAlbedo.y,
+                scatteringAlbedo.z,
+                m_GlobalFogState.extinction);
+            var heightAnisotropy = new Vector4(
+                m_GlobalFogState.baseHeight,
+                m_GlobalFogState.reciprocalScaleHeight,
+                m_GlobalFogState.maxDistance,
+                m_GlobalFogState.anisotropy);
+            var lighting = new Vector4(
+                m_GlobalFogState.globalLightProbeDimmer,
+                m_GlobalFogState.directionalLightsOnly
+                    ? 1.0f
+                    : 0.0f,
+                0.0f,
+                0.0f);
+            var enabled =
+                m_GlobalFogState.enabled ? 1 : 0;
+
+            cmd.SetGlobalInt(GlobalFogEnabledId, enabled);
+            cmd.SetGlobalVector(
+                GlobalFogScatteringExtinctionId,
+                scatteringExtinction);
+            cmd.SetGlobalVector(
+                GlobalFogHeightAnisotropyId,
+                heightAnisotropy);
+            cmd.SetGlobalVector(
+                GlobalFogLightingId,
+                lighting);
+
+            cmd.SetRayTracingIntParam(
+                m_RayTracingShader,
+                GlobalFogEnabledId,
+                enabled);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                GlobalFogScatteringExtinctionId,
+                scatteringExtinction);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                GlobalFogHeightAnisotropyId,
+                heightAnisotropy);
+            cmd.SetRayTracingVectorParam(
+                m_RayTracingShader,
+                GlobalFogLightingId,
+                lighting);
         }
 
         private void BindAtmosphereContract(CommandBuffer cmd)

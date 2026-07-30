@@ -3,6 +3,40 @@
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
 
+static const float kReferencedPathtracingPunctualLightThreshold = 0.01;
+
+float ReferencedPathtracingDistanceWindowing(
+    float distanceSquared,
+    float rangeAttenuationScale,
+    float rangeAttenuationBias)
+{
+    float scaledDistanceSquared =
+        distanceSquared * rangeAttenuationScale;
+    return saturate(
+        rangeAttenuationBias
+        - scaledDistanceSquared * scaledDistanceSquared);
+}
+
+float ReferencedPathtracingSmoothDistanceWindowing(
+    float distanceSquared,
+    float rangeAttenuationScale,
+    float rangeAttenuationBias)
+{
+    float window = ReferencedPathtracingDistanceWindowing(
+        distanceSquared,
+        rangeAttenuationScale,
+        rangeAttenuationBias);
+    return window * window;
+}
+
+float ReferencedPathtracingAngleAttenuation(
+    float cosineForward,
+    float angleScale,
+    float angleOffset)
+{
+    return saturate(cosineForward * angleScale + angleOffset);
+}
+
 // RTXPT-style canonical light sample. incidentRadianceOverPdf already contains
 // both the discrete light-selection and conditional shape/direction PDFs.
 struct ReferencedPathtracingNEECandidate
@@ -78,8 +112,10 @@ bool ReferencedPathtracingSamplePunctualCandidate(
         distanceSquared
         + max(light.shapeRadius * light.shapeRadius, 0.0));
     float attenuation =
-        min(inverseModifiedDistance, 1.0 / PUNCTUAL_LIGHT_THRESHOLD);
-    attenuation *= DistanceWindowing(
+        min(
+            inverseModifiedDistance,
+            1.0 / kReferencedPathtracingPunctualLightThreshold);
+    attenuation *= ReferencedPathtracingDistanceWindowing(
         distanceSquared,
         light.rangeAttenuation.x,
         light.rangeAttenuation.y);
@@ -93,7 +129,7 @@ bool ReferencedPathtracingSamplePunctualCandidate(
 
         float3 spotDirectionWS =
             light.forwardWS * rsqrt(directionLengthSquared);
-        attenuation *= AngleAttenuation(
+        attenuation *= ReferencedPathtracingAngleAttenuation(
             dot(spotDirectionWS, -candidate.directionWS),
             light.spotAngleParameters.x,
             light.spotAngleParameters.y);
@@ -133,7 +169,7 @@ bool ReferencedPathtracingFinalizeAreaCandidate(
 
     candidate.solidAnglePdf =
         distanceSquared / (lightFacingCosine * sampleArea);
-    float rangeWindow = SmoothDistanceWindowing(
+    float rangeWindow = ReferencedPathtracingSmoothDistanceWindowing(
         distanceSquared,
         light.rangeAttenuation.x,
         light.rangeAttenuation.y);
@@ -257,7 +293,7 @@ bool ReferencedPathtracingSampleTubeCandidate(
 
     float shapeJacobian =
         2.0 * radialCosine * length / distanceSquared;
-    float rangeWindow = SmoothDistanceWindowing(
+    float rangeWindow = ReferencedPathtracingSmoothDistanceWindowing(
         distanceSquared,
         light.rangeAttenuation.x,
         light.rangeAttenuation.y);

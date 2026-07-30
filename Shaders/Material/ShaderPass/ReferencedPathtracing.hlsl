@@ -50,21 +50,6 @@ float ComputeReferencedPathtracingTextureBaseLambda(
         max(triangleAreaWS, 0.000000000001));
 }
 
-bool VividReferencedPathtracingIsFinite(float value)
-{
-    return !isnan(value) && !isinf(value);
-}
-
-bool VividReferencedPathtracingIsFinite(float3 value)
-{
-    return !any(isnan(value)) && !any(isinf(value));
-}
-
-bool VividReferencedPathtracingIsFinite(float2 value)
-{
-    return !any(isnan(value)) && !any(isinf(value));
-}
-
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingNEECandidate.hlsl"
 
 [shader("closesthit")]

@@ -108,40 +108,21 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void State_ReportsDeferredMaskAndBlendModes()
+        public void State_ReportsDeferredBlendMode()
         {
             var cameraObject =
                 new GameObject("Reference Local Fog Deferred Camera");
-            var maskedObject =
-                new GameObject("Reference Local Fog Masked Volume");
             var blendedObject =
                 new GameObject("Reference Local Fog Blended Volume");
-            var mask = new Texture3D(
-                1,
-                1,
-                1,
-                TextureFormat.R8,
-                false);
             var camera = cameraObject.AddComponent<Camera>();
-            var maskedFog =
-                maskedObject.AddComponent<VividLocalVolumetricFog>();
             var blendedFog =
                 blendedObject.AddComponent<VividLocalVolumetricFog>();
             try
             {
-                var maskedParameters =
-                    VividLocalVolumetricFogArtistParameters
-                        .CreateDefault();
-                maskedParameters.priority = int.MaxValue;
-                maskedParameters.maskMode =
-                    VividLocalVolumetricFogMaskMode.Texture;
-                maskedParameters.volumeMask = mask;
-                maskedFog.parameters = maskedParameters;
-
                 var blendedParameters =
                     VividLocalVolumetricFogArtistParameters
                         .CreateDefault();
-                blendedParameters.priority = int.MaxValue - 1;
+                blendedParameters.priority = int.MaxValue;
                 blendedParameters.maskMode =
                     VividLocalVolumetricFogMaskMode.None;
                 blendedParameters.blendingMode =
@@ -153,16 +134,129 @@ namespace VividRP.Editor.Tests
                         camera,
                         true);
                 Assert.That(
-                    state.unsupportedMaskCount,
-                    Is.GreaterThanOrEqualTo(1));
-                Assert.That(
                     state.unsupportedBlendCount,
                     Is.GreaterThanOrEqualTo(1));
             }
             finally
             {
-                UnityEngine.Object.DestroyImmediate(maskedObject);
                 UnityEngine.Object.DestroyImmediate(blendedObject);
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void VolumeMaskContract_ResolvesTextureAndMaterialMasks()
+        {
+            var fogObject =
+                new GameObject("Reference Local Fog Texture Mask");
+            var fog =
+                fogObject.AddComponent<VividLocalVolumetricFog>();
+            var mask = new Texture3D(
+                1,
+                1,
+                1,
+                TextureFormat.RGBA32,
+                false);
+            Material material = null;
+            try
+            {
+                var parameters =
+                    VividLocalVolumetricFogArtistParameters
+                        .CreateDefault();
+                parameters.maskMode =
+                    VividLocalVolumetricFogMaskMode.Texture;
+                parameters.volumeMask = mask;
+                fog.parameters = parameters;
+
+                Assert.That(
+                    fog.TryGetVolumeMask(
+                        out var resolvedMask,
+                        out var alphaOnly),
+                    Is.True);
+                Assert.That(resolvedMask, Is.SameAs(mask));
+                Assert.That(alphaOnly, Is.False);
+
+                var shader = Shader.Find(
+                    "Hidden/VividRP/LocalVolumetricFogVoxelize");
+                Assert.That(shader, Is.Not.Null);
+                material = new Material(shader);
+                material.SetTexture("_Mask", mask);
+                material.SetFloat("_AlphaOnlyTexture", 1.0f);
+                parameters.maskMode =
+                    VividLocalVolumetricFogMaskMode.Material;
+                parameters.volumeMask = null;
+                parameters.materialMask = material;
+                fog.parameters = parameters;
+
+                Assert.That(
+                    fog.TryGetVolumeMask(
+                        out resolvedMask,
+                        out alphaOnly),
+                    Is.True);
+                Assert.That(resolvedMask, Is.SameAs(mask));
+                Assert.That(alphaOnly, Is.True);
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(fogObject);
+                UnityEngine.Object.DestroyImmediate(material);
+                UnityEngine.Object.DestroyImmediate(mask);
+            }
+        }
+
+        [Test]
+        public void State_AssignsExplicitTextureSlotWithoutBindless()
+        {
+            var cameraObject =
+                new GameObject("Reference Local Fog Slot Camera");
+            var fogObject =
+                new GameObject("Reference Local Fog Slot Volume");
+            var camera = cameraObject.AddComponent<Camera>();
+            var fog =
+                fogObject.AddComponent<VividLocalVolumetricFog>();
+            var mask = new Texture3D(
+                1,
+                1,
+                1,
+                TextureFormat.RGBA32,
+                false);
+            try
+            {
+                var parameters =
+                    VividLocalVolumetricFogArtistParameters
+                        .CreateDefault();
+                parameters.priority = int.MaxValue;
+                parameters.anisotropy = 0.731f;
+                parameters.maskMode =
+                    VividLocalVolumetricFogMaskMode.Texture;
+                parameters.volumeMask = mask;
+                fog.parameters = parameters;
+
+                var state =
+                    ReferencedPathTracingLocalFogState.Resolve(
+                        camera,
+                        true);
+                var maskSlot = Array.IndexOf(
+                    state.maskTextures,
+                    mask);
+                var record = state.records.First(
+                    candidate =>
+                        Mathf.Approximately(
+                            candidate.parameters.x,
+                            0.731f));
+
+                Assert.That(maskSlot, Is.GreaterThanOrEqualTo(0));
+                Assert.That(
+                    record.parameters.w,
+                    Is.EqualTo(maskSlot));
+                Assert.That(
+                    ReferencedPathTracingLocalFogState
+                        .MaximumMaskTextureSlotCount,
+                    Is.EqualTo(16));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(fogObject);
                 UnityEngine.Object.DestroyImmediate(cameraObject);
                 UnityEngine.Object.DestroyImmediate(mask);
             }
@@ -195,6 +289,22 @@ namespace VividRP.Editor.Tests
                     "GlobalIllumination",
                     "ReferencedPathtracing",
                     "ReferencedPathtracingCommon.hlsl"));
+            var stateSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Runtime",
+                    "RenderPass",
+                    "Core",
+                    "GlobalIllumination",
+                    "ReferencedPathtracing",
+                    "ReferencedPathTracingLocalFogState.cs"));
+            var passSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Runtime",
+                    "RenderPass",
+                    "Core",
+                    "GlobalIllumination",
+                    "ReferencedPathtracing",
+                    "ReferencedPathTracingPass.cs"));
 
             var localFogSampleIndex = rayGenerationSource.IndexOf(
                 "ReferencedPathtracingSampleLocalFog(",
@@ -228,6 +338,47 @@ namespace VividRP.Editor.Tests
                 localFogSource,
                 Does.Contain(
                     "ReferencedPathtracingSampleHenyeyGreensteinPhase("));
+            Assert.That(
+                localFogSource,
+                Does.Contain(
+                    "ReferencedPathtracingSampleLocalFogMask("));
+            Assert.That(
+                localFogSource,
+                Does.Contain("maskValue.a"));
+            Assert.That(
+                localFogSource,
+                Does.Contain("evaluatedPoint.scatteringAlbedo"));
+            Assert.That(
+                localFogSource,
+                Does.Contain("_ReferencedLocalFogMask0"));
+            Assert.That(
+                localFogSource,
+                Does.Contain("_ReferencedLocalFogMask15"));
+            Assert.That(
+                localFogSource,
+                Does.Not.Contain("ResourceDescriptorHeap"));
+            Assert.That(
+                localFogSource,
+                Does.Not.Contain("GetBindlessTexture3D"));
+            Assert.That(
+                stateSource,
+                Does.Contain("maskTexture.updateCount"));
+            Assert.That(
+                stateSource,
+                Does.Contain(
+                    "unsupportedProceduralMaterialCount"));
+            Assert.That(
+                stateSource,
+                Does.Contain("maskSlotOverflowCount"));
+            Assert.That(
+                stateSource,
+                Does.Not.Contain("TryGetOrCreateIndex"));
+            Assert.That(
+                passSource,
+                Does.Contain("LocalFogMaskTextureIds"));
+            Assert.That(
+                passSource,
+                Does.Contain("SetRayTracingTextureParam"));
             Assert.That(
                 commonSource,
                 Does.Contain(

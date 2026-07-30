@@ -1,10 +1,30 @@
 #ifndef VIVIDRP_REFERENCED_PATH_TRACING_LOCAL_FOG_INCLUDED
 #define VIVIDRP_REFERENCED_PATH_TRACING_LOCAL_FOG_INCLUDED
 
+SamplerState sampler_LinearRepeat;
+Texture3D<float4> _ReferencedLocalFogMask0;
+Texture3D<float4> _ReferencedLocalFogMask1;
+Texture3D<float4> _ReferencedLocalFogMask2;
+Texture3D<float4> _ReferencedLocalFogMask3;
+Texture3D<float4> _ReferencedLocalFogMask4;
+Texture3D<float4> _ReferencedLocalFogMask5;
+Texture3D<float4> _ReferencedLocalFogMask6;
+Texture3D<float4> _ReferencedLocalFogMask7;
+Texture3D<float4> _ReferencedLocalFogMask8;
+Texture3D<float4> _ReferencedLocalFogMask9;
+Texture3D<float4> _ReferencedLocalFogMask10;
+Texture3D<float4> _ReferencedLocalFogMask11;
+Texture3D<float4> _ReferencedLocalFogMask12;
+Texture3D<float4> _ReferencedLocalFogMask13;
+Texture3D<float4> _ReferencedLocalFogMask14;
+Texture3D<float4> _ReferencedLocalFogMask15;
+
 static const uint kReferencedPathtracingLocalFogMaximumTrackingStepCount =
     128u;
 static const uint kReferencedPathtracingLocalFogShadowIntegrationStepCount =
     8u;
+static const uint kReferencedPathtracingInvalidLocalFogMaskIndex =
+    0xffffffffu;
 
 struct ReferencedPathtracingLocalFogRecord
 {
@@ -33,6 +53,12 @@ struct ReferencedPathtracingLocalFogSample
     uint hasEvent;
     uint trackingOverflow;
     uint trackingStepCount;
+};
+
+struct ReferencedPathtracingLocalFogPoint
+{
+    float densityFactor;
+    float3 scatteringAlbedo;
 };
 
 float3 ReferencedPathtracingTransformLocalFogPosition(
@@ -113,17 +139,109 @@ bool ReferencedPathtracingIntersectLocalFog(
         && exitDistance > entryDistance;
 }
 
-float ReferencedPathtracingEvaluateLocalFogDensityFactor(
+float4 ReferencedPathtracingSampleLocalFogMaskTexture(
+    uint maskTextureIndex,
+    float3 maskCoord)
+{
+    switch (maskTextureIndex)
+    {
+        case 0u:
+            return _ReferencedLocalFogMask0.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 1u:
+            return _ReferencedLocalFogMask1.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 2u:
+            return _ReferencedLocalFogMask2.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 3u:
+            return _ReferencedLocalFogMask3.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 4u:
+            return _ReferencedLocalFogMask4.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 5u:
+            return _ReferencedLocalFogMask5.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 6u:
+            return _ReferencedLocalFogMask6.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 7u:
+            return _ReferencedLocalFogMask7.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 8u:
+            return _ReferencedLocalFogMask8.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 9u:
+            return _ReferencedLocalFogMask9.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 10u:
+            return _ReferencedLocalFogMask10.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 11u:
+            return _ReferencedLocalFogMask11.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 12u:
+            return _ReferencedLocalFogMask12.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 13u:
+            return _ReferencedLocalFogMask13.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 14u:
+            return _ReferencedLocalFogMask14.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        case 15u:
+            return _ReferencedLocalFogMask15.SampleLevel(
+                sampler_LinearRepeat, maskCoord, 0.0);
+        default:
+            return 1.0;
+    }
+}
+
+float4 ReferencedPathtracingSampleLocalFogMask(
+    ReferencedPathtracingLocalFogRecord record,
+    float3 coord)
+{
+    uint maskTextureIndex =
+        record.parameters.w < 0.0
+            ? kReferencedPathtracingInvalidLocalFogMaskIndex
+            : (uint)round(record.parameters.w);
+    if (maskTextureIndex
+        == kReferencedPathtracingInvalidLocalFogMaskIndex)
+    {
+        return 1.0;
+    }
+
+    float3 maskCoord =
+        coord * max(record.textureScaleOffset0.xyz, 1e-4)
+        + record.textureScaleOffset1.xyz;
+    float4 maskValue =
+        saturate(
+            ReferencedPathtracingSampleLocalFogMaskTexture(
+                maskTextureIndex,
+                maskCoord));
+    if (record.textureScaleOffset0.w > 0.5)
+        maskValue.rgb = 1.0;
+
+    return maskValue;
+}
+
+ReferencedPathtracingLocalFogPoint
+ReferencedPathtracingEvaluateLocalFogPoint(
     ReferencedPathtracingLocalFogRecord record,
     float3 positionWS)
 {
+    ReferencedPathtracingLocalFogPoint evaluatedPoint;
+    evaluatedPoint.densityFactor = 0.0;
+    evaluatedPoint.scatteringAlbedo = 0.0;
+
     float3 localPosition =
         ReferencedPathtracingTransformLocalFogPosition(
             record,
             positionWS);
     float3 coord = localPosition + 0.5;
     if (any(coord < 0.0) || any(coord > 1.0))
-        return 0.0;
+        return evaluatedPoint;
 
     float3 positiveFade = saturate(
         record.positiveFade.xyz
@@ -142,7 +260,29 @@ float ReferencedPathtracingEvaluateLocalFogDensityFactor(
         record.distanceFade.y
         - distance(positionWS, _CameraPositionWS.xyz)
             * record.distanceFade.x);
-    return saturate(fadeFactor * distanceFade);
+    float4 maskValue =
+        ReferencedPathtracingSampleLocalFogMask(
+            record,
+            coord);
+    evaluatedPoint.densityFactor =
+        saturate(fadeFactor * distanceFade * maskValue.a);
+    float extinction =
+        max(record.scatteringExtinction.w, 0.0);
+    evaluatedPoint.scatteringAlbedo =
+        saturate(
+            record.scatteringExtinction.rgb
+            / max(extinction, 1e-20)
+            * maskValue.rgb);
+    return evaluatedPoint;
+}
+
+float ReferencedPathtracingEvaluateLocalFogDensityFactor(
+    ReferencedPathtracingLocalFogRecord record,
+    float3 positionWS)
+{
+    return ReferencedPathtracingEvaluateLocalFogPoint(
+        record,
+        positionWS).densityFactor;
 }
 
 float ReferencedPathtracingGetLocalFogTrackingRandom(
@@ -242,8 +382,8 @@ bool ReferencedPathtracingSampleLocalFog(
                 break;
             }
 
-            float densityFactor =
-                ReferencedPathtracingEvaluateLocalFogDensityFactor(
+            ReferencedPathtracingLocalFogPoint evaluatedPoint =
+                ReferencedPathtracingEvaluateLocalFogPoint(
                     record,
                     rayOriginWS + direction * trackingDistance);
             float acceptanceRandom =
@@ -252,7 +392,8 @@ bool ReferencedPathtracingSampleLocalFog(
                     (uint)recordIndex,
                     trackingStep,
                     1u);
-            if (acceptanceRandom >= densityFactor)
+            if (acceptanceRandom
+                >= evaluatedPoint.densityFactor)
                 continue;
 
             completedTracking = true;
@@ -262,9 +403,8 @@ bool ReferencedPathtracingSampleLocalFog(
                 fogSample.distance = trackingDistance;
                 fogSample.recordIndex = (uint)recordIndex;
                 fogSample.hasEvent = 1u;
-                fogSample.scatteringAlbedo = saturate(
-                    record.scatteringExtinction.rgb
-                    / max(extinction, 1e-20));
+                fogSample.scatteringAlbedo =
+                    evaluatedPoint.scatteringAlbedo;
                 fogSample.anisotropy = clamp(
                     record.parameters.x,
                     -0.95,

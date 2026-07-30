@@ -12,46 +12,73 @@ namespace VividRP.Runtime.RenderPass.Core
             internal Candidate(
                 int priority,
                 ulong stableId,
+                ulong maskTextureStableId,
+                uint maskTextureUpdateCount,
+                Texture3D maskTexture,
                 VividLocalVolumetricFogEngineData record)
             {
                 this.priority = priority;
                 this.stableId = stableId;
+                this.maskTextureStableId = maskTextureStableId;
+                this.maskTextureUpdateCount = maskTextureUpdateCount;
+                this.maskTexture = maskTexture;
                 this.record = record;
             }
 
             internal int priority { get; }
             internal ulong stableId { get; }
+            internal ulong maskTextureStableId { get; }
+            internal uint maskTextureUpdateCount { get; }
+            internal Texture3D maskTexture { get; }
             internal VividLocalVolumetricFogEngineData record { get; }
         }
 
-        internal const int ContractVersion = 1;
+        internal const int ContractVersion = 3;
+        internal const int MaximumMaskTextureSlotCount = 16;
         private static readonly VividLocalVolumetricFogEngineData[]
             s_EmptyRecords = Array.Empty<VividLocalVolumetricFogEngineData>();
+        private static readonly Texture3D[] s_EmptyMaskTextures =
+            Array.Empty<Texture3D>();
         private static readonly List<VividLocalVolumetricFog>
             s_RegisteredFogs = new();
 
         private ReferencedPathTracingLocalFogState(
             VividLocalVolumetricFogEngineData[] records,
+            Texture3D[] maskTextures,
             ulong[] stableIds,
-            int unsupportedMaskCount,
+            ulong[] maskTextureStableIds,
+            uint[] maskTextureUpdateCounts,
+            int unsupportedProceduralMaterialCount,
+            int maskSlotOverflowCount,
             int unsupportedBlendCount,
             int truncatedCount)
         {
             this.records = records ?? s_EmptyRecords;
-            this.unsupportedMaskCount = unsupportedMaskCount;
+            this.maskTextures = maskTextures ?? s_EmptyMaskTextures;
+            this.unsupportedProceduralMaterialCount =
+                unsupportedProceduralMaterialCount;
+            this.maskSlotOverflowCount = maskSlotOverflowCount;
             this.unsupportedBlendCount = unsupportedBlendCount;
             this.truncatedCount = truncatedCount;
             signature = ComputeSignature(
                 this.records,
                 stableIds ?? Array.Empty<ulong>(),
-                unsupportedMaskCount,
+                maskTextureStableIds ?? Array.Empty<ulong>(),
+                maskTextureUpdateCounts ?? Array.Empty<uint>(),
+                unsupportedProceduralMaterialCount,
+                maskSlotOverflowCount,
                 unsupportedBlendCount,
                 truncatedCount);
         }
 
         internal VividLocalVolumetricFogEngineData[] records { get; }
+        internal Texture3D[] maskTextures { get; }
         internal int count => records?.Length ?? 0;
-        internal int unsupportedMaskCount { get; }
+        internal int unsupportedMaskCount =>
+            unsupportedProceduralMaterialCount
+            + maskSlotOverflowCount;
+        internal int unsupportedProceduralMaterialCount { get; }
+        internal int maskSlotOverflowCount { get; }
         internal int unsupportedBlendCount { get; }
         internal int truncatedCount { get; }
         internal ulong signature { get; }
@@ -59,7 +86,11 @@ namespace VividRP.Runtime.RenderPass.Core
         internal static ReferencedPathTracingLocalFogState Disabled =>
             new(
                 s_EmptyRecords,
+                s_EmptyMaskTextures,
                 Array.Empty<ulong>(),
+                Array.Empty<ulong>(),
+                Array.Empty<uint>(),
+                0,
                 0,
                 0,
                 0);
@@ -75,7 +106,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 s_RegisteredFogs);
             var candidates =
                 new List<Candidate>(s_RegisteredFogs.Count);
-            var unsupportedMaskCount = 0;
+            var unsupportedProceduralMaterialCount = 0;
             var unsupportedBlendCount = 0;
 
             for (var index = 0; index < s_RegisteredFogs.Count; index++)
@@ -92,30 +123,55 @@ namespace VividRP.Runtime.RenderPass.Core
                 }
 
                 var parameters = fog.parameters;
+                var hasMask = fog.TryGetVolumeMask(
+                    out var maskTexture,
+                    out var alphaOnly);
                 if (parameters.maskMode
                         == VividLocalVolumetricFogMaskMode.Material
-                    || fog.TryGetVolumeMask(out _, out _))
+                    && parameters.materialMask != null
+                    && fog.UsesProceduralVolumetricMaterial()
+                    && !hasMask)
                 {
-                    unsupportedMaskCount++;
+                    unsupportedProceduralMaterialCount++;
                     continue;
                 }
 
                 var stableId =
                     EntityId.ToULong(fog.GetEntityId());
                 var record = fog.ConvertToEngineData(camera);
-                // Stage two intentionally supports the analytic fade field only.
-                // Removing texture animation from the record also keeps temporal
-                // accumulation stable for an unused texture transform.
-                record.textureScaleOffset0 = Vector4.zero;
-                record.textureScaleOffset1 = new Vector4(
-                    0.0f,
-                    0.0f,
-                    0.0f,
-                    record.textureScaleOffset1.w);
+                ulong maskTextureStableId = 0;
+                uint maskTextureUpdateCount = 0;
+                if (hasMask)
+                {
+                    // The final explicit texture slot is assigned after
+                    // priority sorting and record-count truncation.
+                    record.parameters.w = 0.0f;
+                    record.textureScaleOffset0.w =
+                        alphaOnly ? 1.0f : 0.0f;
+                    maskTextureStableId =
+                        EntityId.ToULong(maskTexture.GetEntityId());
+                    maskTextureUpdateCount = maskTexture.updateCount;
+                }
+                else
+                {
+                    // Keep the homogeneous record independent of unused
+                    // texture animation so accumulation is not reset.
+                    record.parameters.w = -1.0f;
+                    record.textureScaleOffset0 = Vector4.zero;
+                    record.textureScaleOffset1 = new Vector4(
+                        0.0f,
+                        0.0f,
+                        0.0f,
+                        record.textureScaleOffset1.w);
+                }
+
                 candidates.Add(
                     new Candidate(
                         fog.priority,
                         stableId,
+                        maskTextureStableId,
+                        maskTextureUpdateCount,
+                        maskTexture,
                         record));
             }
 
@@ -127,34 +183,92 @@ namespace VividRP.Runtime.RenderPass.Core
             maximumCount =
                 VividLocalVolumetricFogManager
                     .ClampVisibleLocalVolumetricFogCount(maximumCount);
-            var recordCount = Mathf.Min(
-                candidates.Count,
-                maximumCount);
-            var truncatedCount =
-                Mathf.Max(candidates.Count - recordCount, 0);
+            var selectedRecords =
+                new List<VividLocalVolumetricFogEngineData>(
+                    Mathf.Min(candidates.Count, maximumCount));
+            var selectedCandidates =
+                new List<Candidate>(
+                    Mathf.Min(candidates.Count, maximumCount));
+            var maskTextures =
+                new List<Texture3D>(MaximumMaskTextureSlotCount);
+            var maskTextureSlots =
+                new Dictionary<ulong, int>(
+                    MaximumMaskTextureSlotCount);
+            var maskSlotOverflowCount = 0;
+            var truncatedCount = 0;
+            for (var index = 0; index < candidates.Count; index++)
+            {
+                if (selectedRecords.Count >= maximumCount)
+                {
+                    truncatedCount++;
+                    continue;
+                }
+
+                var candidate = candidates[index];
+                var record = candidate.record;
+                if (candidate.maskTexture != null)
+                {
+                    if (!maskTextureSlots.TryGetValue(
+                            candidate.maskTextureStableId,
+                            out var maskTextureSlot))
+                    {
+                        if (maskTextures.Count
+                            >= MaximumMaskTextureSlotCount)
+                        {
+                            maskSlotOverflowCount++;
+                            continue;
+                        }
+
+                        maskTextureSlot = maskTextures.Count;
+                        maskTextureSlots.Add(
+                            candidate.maskTextureStableId,
+                            maskTextureSlot);
+                        maskTextures.Add(candidate.maskTexture);
+                    }
+
+                    record.parameters.w = maskTextureSlot;
+                }
+
+                selectedRecords.Add(record);
+                selectedCandidates.Add(candidate);
+            }
+
+            var recordCount = selectedRecords.Count;
             if (recordCount == 0)
             {
                 return new ReferencedPathTracingLocalFogState(
                     s_EmptyRecords,
+                    maskTextures.ToArray(),
                     Array.Empty<ulong>(),
-                    unsupportedMaskCount,
+                    Array.Empty<ulong>(),
+                    Array.Empty<uint>(),
+                    unsupportedProceduralMaterialCount,
+                    maskSlotOverflowCount,
                     unsupportedBlendCount,
                     truncatedCount);
             }
 
-            var records =
-                new VividLocalVolumetricFogEngineData[recordCount];
+            var records = selectedRecords.ToArray();
             var stableIds = new ulong[recordCount];
+            var maskTextureStableIds = new ulong[recordCount];
+            var maskTextureUpdateCounts = new uint[recordCount];
             for (var index = 0; index < recordCount; index++)
             {
-                records[index] = candidates[index].record;
-                stableIds[index] = candidates[index].stableId;
+                stableIds[index] = selectedCandidates[index].stableId;
+                maskTextureStableIds[index] =
+                    selectedCandidates[index].maskTextureStableId;
+                maskTextureUpdateCounts[index] =
+                    selectedCandidates[index].maskTextureUpdateCount;
             }
 
             return new ReferencedPathTracingLocalFogState(
                 records,
+                maskTextures.ToArray(),
                 stableIds,
-                unsupportedMaskCount,
+                maskTextureStableIds,
+                maskTextureUpdateCounts,
+                unsupportedProceduralMaterialCount,
+                maskSlotOverflowCount,
                 unsupportedBlendCount,
                 truncatedCount);
         }
@@ -189,7 +303,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private static ulong ComputeSignature(
             IReadOnlyList<VividLocalVolumetricFogEngineData> records,
             IReadOnlyList<ulong> stableIds,
-            int unsupportedMaskCount,
+            IReadOnlyList<ulong> maskTextureStableIds,
+            IReadOnlyList<uint> maskTextureUpdateCounts,
+            int unsupportedProceduralMaterialCount,
+            int maskSlotOverflowCount,
             int unsupportedBlendCount,
             int truncatedCount)
         {
@@ -202,7 +319,10 @@ namespace VividRP.Runtime.RenderPass.Core
                 records.Count);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
-                unsupportedMaskCount);
+                unsupportedProceduralMaterialCount);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                maskSlotOverflowCount);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 unsupportedBlendCount);
@@ -214,6 +334,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingStableHash.Add(
                     ref hash,
                     stableIds[index]);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    maskTextureStableIds[index]);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (ulong)maskTextureUpdateCounts[index]);
                 AddRecord(ref hash, records[index]);
             }
 

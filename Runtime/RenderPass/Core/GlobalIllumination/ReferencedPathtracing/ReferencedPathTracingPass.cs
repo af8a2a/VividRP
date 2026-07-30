@@ -215,6 +215,8 @@ namespace VividRP.Runtime.RenderPass.Core
             Shader.PropertyToID("_ReferencedLocalFogCount");
         private static readonly int LocalFogListId =
             Shader.PropertyToID("_ReferencedLocalFogList");
+        private static readonly int[] LocalFogMaskTextureIds =
+            CreateLocalFogMaskTextureIds();
         private static readonly VividLocalVolumetricFogEngineData[]
             s_EmptyLocalFogStorage =
             {
@@ -1339,6 +1341,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 LocalFogCountId,
                 count);
+
+            var fallbackMask =
+                VividLocalVolumetricFogManager.defaultMaskTexture;
+            var maskTextures = m_LocalFogState.maskTextures;
+            for (var index = 0;
+                index
+                    < ReferencedPathTracingLocalFogState
+                        .MaximumMaskTextureSlotCount;
+                index++)
+            {
+                var maskTexture =
+                    maskTextures != null
+                        && index < maskTextures.Length
+                        ? maskTextures[index]
+                        : fallbackMask;
+                cmd.SetRayTracingTextureParam(
+                    m_RayTracingShader,
+                    LocalFogMaskTextureIds[index],
+                    maskTexture != null
+                        ? maskTexture
+                        : fallbackMask);
+            }
+
             if (m_LocalFogBuffer == null)
                 return;
 
@@ -1349,6 +1374,21 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_RayTracingShader,
                 LocalFogListId,
                 m_LocalFogBuffer);
+        }
+
+        private static int[] CreateLocalFogMaskTextureIds()
+        {
+            var textureIds =
+                new int[
+                    ReferencedPathTracingLocalFogState
+                        .MaximumMaskTextureSlotCount];
+            for (var index = 0; index < textureIds.Length; index++)
+            {
+                textureIds[index] = Shader.PropertyToID(
+                    $"_ReferencedLocalFogMask{index}");
+            }
+
+            return textureIds;
         }
 
         private void BindGlobalFogContract(CommandBuffer cmd)

@@ -1582,8 +1582,9 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX 17u
 
 // Closest-hit result layout. Raygen reconstructs positionWS from its RayDesc
-// and hit distance. Unit directions use octahedral UNORM16x2 encoding so the
-// complete result fits exactly in 40 DWORDs (160 bytes).
+// and hit distance. Unit directions use octahedral UNORM16x2 encoding. Material
+// medium extinction uses FP16x3 and scattering uses UNORM8x3 + SNORM8 so the
+// complete result remains exactly 40 DWORDs (160 bytes).
 #define REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH 0u
 #define REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS_PACKED 1u
 #define REFERENCED_PAYLOAD_RESULT_EMISSION 2u
@@ -1609,6 +1610,7 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY 34u
 #define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR 35u
 #define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION 36u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING 38u
 #define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 39u
 
 #define REFERENCED_PAYLOAD_FLAG_HIT (1u << 0u)
@@ -1698,6 +1700,7 @@ struct ReferencedPathtracingSurfaceResult
     int mediumTransition;
     float nextMediumIor;
     float3 nextMediumExtinction;
+    uint nextMediumScattering;
     uint nextMediumInstanceIndex;
     uint hit;
 };
@@ -1750,6 +1753,55 @@ void StoreReferencedPathtracingPayloadFloat3(
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset, value.x);
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 1u, value.y);
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 2u, value.z);
+}
+
+uint2 PackReferencedPathtracingMaterialMediumExtinction(
+    float3 extinctionCoefficient)
+{
+    float3 extinction = clamp(
+        max(extinctionCoefficient, 0.0),
+        0.0,
+        65504.0);
+    return uint2(
+        (f32tof16(extinction.x) & 0xffffu)
+            | (f32tof16(extinction.y) << 16u),
+        f32tof16(extinction.z) & 0xffffu);
+}
+
+float3 UnpackReferencedPathtracingMaterialMediumExtinction(
+    uint2 packedExtinction)
+{
+    return float3(
+        f16tof32(packedExtinction.x & 0xffffu),
+        f16tof32(packedExtinction.x >> 16u),
+        f16tof32(packedExtinction.y & 0xffffu));
+}
+
+uint PackReferencedPathtracingMaterialMediumScattering(
+    float3 scatteringAlbedo,
+    float anisotropy)
+{
+    uint3 albedo = (uint3)round(saturate(scatteringAlbedo) * 255.0);
+    int signedAnisotropy = (int)round(
+        clamp(anisotropy, -1.0, 1.0) * 127.0);
+    return albedo.x
+        | (albedo.y << 8u)
+        | (albedo.z << 16u)
+        | ((uint)(signedAnisotropy & 0xff) << 24u);
+}
+
+float4 UnpackReferencedPathtracingMaterialMediumScattering(
+    uint packedScattering)
+{
+    float3 scatteringAlbedo = float3(
+        packedScattering & 0xffu,
+        (packedScattering >> 8u) & 0xffu,
+        (packedScattering >> 16u) & 0xffu)
+        * (1.0 / 255.0);
+    int signedAnisotropy = (int)packedScattering >> 24;
+    return float4(
+        scatteringAlbedo,
+        clamp((float)signedAnisotropy / 127.0, -1.0, 1.0));
 }
 
 uint PackReferencedPathtracingUnitVector(float3 value)
@@ -1850,6 +1902,7 @@ void InitializeReferencedPathtracingSurfaceResult(
     result.mediumTransition = 0;
     result.nextMediumIor = 1.0;
     result.nextMediumExtinction = 0.0;
+    result.nextMediumScattering = 0u;
     result.nextMediumInstanceIndex =
         kReferencedPathtracingInvalidMediumInstance;
     result.hit = 0u;
@@ -2177,10 +2230,21 @@ void PackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR,
         result.nextMediumIor);
-    StoreReferencedPathtracingPayloadFloat3(
+    uint2 packedMediumExtinction =
+        PackReferencedPathtracingMaterialMediumExtinction(
+            result.nextMediumExtinction);
+    StoreReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION,
-        result.nextMediumExtinction);
+        packedMediumExtinction.x);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION + 1u,
+        packedMediumExtinction.y);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING,
+        result.nextMediumScattering);
     StoreReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX,
@@ -2268,9 +2332,20 @@ void UnpackReferencedPathtracingSurfaceResult(
     result.nextMediumIor = LoadReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR);
-    result.nextMediumExtinction = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION);
+    result.nextMediumExtinction =
+        UnpackReferencedPathtracingMaterialMediumExtinction(
+            uint2(
+                LoadReferencedPathtracingPayloadUint(
+                    payload,
+                    REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION),
+                LoadReferencedPathtracingPayloadUint(
+                    payload,
+                    REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION
+                        + 1u)));
+    result.nextMediumScattering =
+        LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING);
     result.nextMediumInstanceIndex = LoadReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX);

@@ -1,6 +1,7 @@
 #pragma max_recursion_depth 1
 
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/OpenPBR/OpenPBRVolume.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSampling.hlsl"
@@ -498,6 +499,57 @@ bool ReferencedPathtracingResolveGlobalFogLight(
     return radianceScale > 0.0;
 }
 
+bool ReferencedPathtracingResolveMaterialMediumLight(
+    ReferencedPathtracingNEECandidate candidate,
+    out float radianceScale,
+    out float shadowStrength)
+{
+    radianceScale = 0.0;
+    shadowStrength = 0.0;
+    if (candidate.valid == 0u)
+        return false;
+
+    if (candidate.lightType
+        == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+    {
+        radianceScale = 1.0;
+        shadowStrength = candidate.shadowStrength;
+        return true;
+    }
+
+    ReferencedPathTracingLightRecord light =
+        ReferencedPathtracingLoadReferenceLight(
+            candidate.lightIndex);
+    if ((light.flags
+            & REFERENCED_LIGHT_FLAG_AFFECT_VOLUMETRIC) == 0u
+        || light.volumetricDimmer <= 0.0)
+    {
+        return false;
+    }
+
+    float volumetricFade = 1.0;
+    if (light.lightType
+        != REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+    {
+        volumetricFade =
+            light.volumetricFadeDistance > 0.0
+                ? saturate(
+                    1.0
+                    - distance(
+                        _CameraPositionWS.xyz,
+                        light.positionWS)
+                        / light.volumetricFadeDistance)
+                : 0.0;
+    }
+    radianceScale =
+        max(light.volumetricDimmer, 0.0)
+        * volumetricFade;
+    shadowStrength = saturate(
+        candidate.shadowStrength
+        * max(light.volumetricShadowDimmer, 0.0));
+    return radianceScale > 0.0;
+}
+
 void AccumulateReferencedPathtracingMainLightRadiance(
     float3 contribution,
     uint contributionLobeClass,
@@ -682,6 +734,8 @@ void RayGenReferencedPathtracing()
         kReferencedPathtracingMaximumMaterialMediumDepth];
     float3 materialMediumExtinctionStack[
         kReferencedPathtracingMaximumMaterialMediumDepth];
+    uint materialMediumScatteringStack[
+        kReferencedPathtracingMaximumMaterialMediumDepth];
     uint materialMediumInstanceStack[
         kReferencedPathtracingMaximumMaterialMediumDepth];
     [unroll]
@@ -693,6 +747,7 @@ void RayGenReferencedPathtracing()
         materialMediumIorStack[mediumIndex] =
             kReferencedPathtracingVacuumIor;
         materialMediumExtinctionStack[mediumIndex] = 0.0;
+        materialMediumScatteringStack[mediumIndex] = 0u;
         materialMediumInstanceStack[mediumIndex] =
             kReferencedPathtracingInvalidMediumInstance;
     }
@@ -746,6 +801,7 @@ void RayGenReferencedPathtracing()
         payloadInput.rayConeWidth = rayConeWidth;
         payloadInput.rayConeSpreadAngle = rayConeSpreadAngle;
         float3 activeMaterialMediumExtinction = 0.0;
+        uint activeMaterialMediumScattering = 0u;
         if (materialMediumDepth > 0u)
         {
             uint activeMediumIndex = materialMediumDepth - 1u;
@@ -755,6 +811,8 @@ void RayGenReferencedPathtracing()
                 materialMediumExtinctionStack[activeMediumIndex];
             activeMaterialMediumExtinction =
                 payloadInput.activeMediumExtinction;
+            activeMaterialMediumScattering =
+                materialMediumScatteringStack[activeMediumIndex];
             payloadInput.activeMediumInstanceIndex =
                 materialMediumInstanceStack[activeMediumIndex];
         }
@@ -870,24 +928,6 @@ void RayGenReferencedPathtracing()
         float materialMediumDistance = payload.hit != 0u
             ? payload.hitDistance
             : ray.TMax;
-        float3 materialMediumTransmittance =
-            ReferencedPathtracingEvaluateMaterialMediumTransmittance(
-                activeMaterialMediumExtinction,
-                materialMediumDistance);
-        throughput *= materialMediumTransmittance;
-        if (!IsFiniteReferencedPathtracingRadiance(throughput)
-            || MaxReferencedPathtracingComponent(throughput) <= 0.0)
-        {
-            if (!IsFiniteReferencedPathtracingRadiance(throughput))
-                invalidSampleMask.z = 1.0;
-            break;
-        }
-        if (bounceIndex == 0u
-            && payload.stochasticTransparencyDiagnostics.a > 0.0)
-        {
-            stochasticTransparencyDiagnostic =
-                payload.stochasticTransparencyDiagnostics.rgb;
-        }
 
         float4 volumeRandom = float4(
             ReferencedPathtracingGetPathSample(
@@ -921,6 +961,304 @@ void RayGenReferencedPathtracing()
                     + 3u,
                 sampleSeed,
                 pathSamplingMode));
+        // Exterior atmosphere/fog sampling is disabled while the material
+        // stack is non-empty, so the existing volume dimensions can drive the
+        // mutually exclusive OpenPBR interior event without growing the
+        // sampling contract.
+        float4 activeMaterialMediumScatteringProperties =
+            UnpackReferencedPathtracingMaterialMediumScattering(
+                activeMaterialMediumScattering);
+        OpenPBR_HomogeneousVolume activeMaterialMedium =
+            openpbr_make_volume_from_extinction_coefficient_and_albedo_and_anisotropy(
+                max(activeMaterialMediumExtinction, 0.0),
+                saturate(
+                    activeMaterialMediumScatteringProperties.rgb),
+                clamp(
+                    activeMaterialMediumScatteringProperties.a,
+                    -0.95,
+                    0.95));
+        bool activeMaterialMediumHasScattering =
+            materialMediumDepth > 0u
+            && any(
+                activeMaterialMedium.extinction_coefficient
+                    * activeMaterialMedium.albedo
+                > 0.0);
+        float materialMediumEventDistance =
+            kReferencedPathtracingInfiniteDistance;
+        if (activeMaterialMediumHasScattering)
+        {
+            openpbr_sample_event_distance(
+                activeMaterialMedium,
+                max(throughput, 0.0),
+                min(volumeRandom.x, 0.99999994),
+                materialMediumEventDistance);
+        }
+        bool materialMediumHasEvent =
+            activeMaterialMediumHasScattering
+            && materialMediumEventDistance
+                < materialMediumDistance;
+        float3 materialMediumTransportWeight =
+            activeMaterialMediumHasScattering
+                ? (materialMediumHasEvent
+                    // OpenPBR's color-channel mixture accounts for both the
+                    // sampled event density and chromatic transmittance.
+                    ? openpbr_calculate_weight_for_event_at_distance(
+                        activeMaterialMedium,
+                        max(throughput, 0.0),
+                        materialMediumEventDistance)
+                    : openpbr_calculate_weight_for_surface_at_distance(
+                        activeMaterialMedium,
+                        max(throughput, 0.0),
+                        materialMediumDistance))
+                : ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                    activeMaterialMediumExtinction,
+                    materialMediumDistance);
+        throughput *= materialMediumTransportWeight;
+        if (!IsFiniteReferencedPathtracingRadiance(throughput)
+            || MaxReferencedPathtracingComponent(throughput) <= 0.0)
+        {
+            if (!IsFiniteReferencedPathtracingRadiance(throughput))
+                invalidSampleMask.z = 1.0;
+            break;
+        }
+
+        if (materialMediumHasEvent)
+        {
+            float3 materialMediumPositionWS =
+                ray.Origin
+                + normalize(ray.Direction)
+                    * materialMediumEventDistance;
+            if (bounceIndex == 0u)
+            {
+                primaryHit = 1u;
+                primaryLobeClass = 1u;
+                primaryViewZ = abs(mul(
+                    _ReferencedWorldToView,
+                    float4(materialMediumPositionWS, 1.0)).z);
+                primaryLinearRoughness = 1.0;
+                primaryDenoisingAlbedo =
+                    activeMaterialMedium.albedo;
+                primaryDenoisingNormalWS =
+                    -normalize(ray.Direction);
+                diffuseHitDistance =
+                    materialMediumEventDistance;
+            }
+
+            ReferencedPathtracingNEECandidate
+                materialMediumLightCandidate;
+            if (ReferencedPathtracingSampleUnifiedNEECandidate(
+                    materialMediumPositionWS,
+                    0.0,
+                    false,
+                    payloadInput.directLightRandom,
+                    materialMediumLightCandidate))
+            {
+                float volumetricRadianceScale;
+                float volumetricShadowStrength;
+                if (ReferencedPathtracingResolveMaterialMediumLight(
+                        materialMediumLightCandidate,
+                        volumetricRadianceScale,
+                        volumetricShadowStrength))
+                {
+                    float materialMediumPhasePdf =
+                        openpbr_calculate_anisotropic_phase_function_pdf(
+                            activeMaterialMedium,
+                            -normalize(ray.Direction),
+                            normalize(
+                                materialMediumLightCandidate
+                                    .directionWS));
+                    bool phaseEstimatorCanReachLight =
+                        materialMediumLightCandidate.lightType
+                            == REFERENCED_LIGHT_TYPE_ENVIRONMENT;
+                    float materialMediumLightPdf =
+                        materialMediumLightCandidate.selectionPdf
+                        * materialMediumLightCandidate.solidAnglePdf;
+                    float materialMediumLightEstimatorWeight =
+                        ReferencedPathtracingGetLightEstimatorWeight(
+                            phaseEstimatorCanReachLight,
+                            (materialMediumLightCandidate.flags
+                                & REFERENCED_LIGHT_FLAG_SINGULAR) != 0u,
+                            materialMediumLightPdf,
+                            materialMediumPhasePdf);
+                    float3 materialMediumLightDirectionWS =
+                        normalize(
+                            materialMediumLightCandidate.directionWS);
+                    float3 materialMediumVisibility =
+                        materialMediumLightEstimatorWeight > 0.0
+                            ? TraceReferencedPathtracingCandidateVisibility(
+                                materialMediumPositionWS,
+                                materialMediumLightDirectionWS,
+                                materialMediumLightDirectionWS,
+                                materialMediumLightCandidate.distance,
+                                !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
+                                false,
+                                volumetricShadowStrength,
+                                ReferencedPathtracingHashStochasticTransparency(
+                                    stochasticAlphaSeed
+                                    ^ ReferencedPathtracingHashStochasticTransparency(
+                                        materialMediumLightCandidate
+                                            .lightIndex
+                                        + 0x3c6ef372u)))
+                            : 0.0;
+                    materialMediumVisibility *=
+                        ReferencedPathtracingEvaluateMaterialMediumTransmittance(
+                            activeMaterialMediumExtinction,
+                            materialMediumLightCandidate.distance);
+                    float3 materialMediumDirectRadiance =
+                        throughput
+                        * materialMediumPhasePdf
+                        * materialMediumLightCandidate
+                            .incidentRadianceOverPdf
+                        * volumetricRadianceScale
+                        * materialMediumLightEstimatorWeight
+                        * materialMediumVisibility;
+                    if (IsFiniteReferencedPathtracingRadiance(
+                            materialMediumDirectRadiance)
+                        && !any(
+                            materialMediumDirectRadiance
+                                < -1e-6))
+                    {
+                        if (materialMediumLightCandidate.lightType
+                            == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                        {
+                            AccumulateReferencedPathtracingMainLightRadiance(
+                                materialMediumDirectRadiance,
+                                1u,
+                                bounceIndex,
+                                primaryLobeClass,
+                                (materialMediumLightCandidate.flags
+                                    & REFERENCED_LIGHT_FLAG_SINGULAR) == 0u,
+                                directLightingRadiance,
+                                diffuseRadiance,
+                                specularRadiance,
+                                primaryDenoiserMainLightDiffuseRadiance,
+                                primaryDenoiserMainLightSpecularRadiance);
+                        }
+                        else if (materialMediumLightCandidate.lightType
+                            == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+                        {
+                            environmentNeeRadiance +=
+                                materialMediumDirectRadiance;
+                            if (bounceIndex == 0u)
+                            {
+                                environmentDirectDiffuseRadiance +=
+                                    materialMediumDirectRadiance;
+                                diffuseRadiance +=
+                                    materialMediumDirectRadiance;
+                            }
+                            else if (primaryLobeClass == 1u)
+                            {
+                                diffuseRadiance +=
+                                    materialMediumDirectRadiance;
+                            }
+                            else if (primaryLobeClass == 2u)
+                            {
+                                specularRadiance +=
+                                    materialMediumDirectRadiance;
+                            }
+                        }
+                        else if (bounceIndex == 0u
+                            || primaryLobeClass == 1u)
+                        {
+                            diffuseRadiance +=
+                                materialMediumDirectRadiance;
+                        }
+                        else if (primaryLobeClass == 2u)
+                        {
+                            specularRadiance +=
+                                materialMediumDirectRadiance;
+                        }
+                    }
+                    else
+                    {
+                        invalidSampleMask.z = 1.0;
+                    }
+                }
+            }
+
+            if (bounceIndex + 1u >= maxBounceCount)
+                break;
+
+            float3 materialMediumNextDirectionWS =
+                openpbr_sample_anisotropic_phase_function(
+                    activeMaterialMedium,
+                    -normalize(ray.Direction),
+                    volumeRandom.yz);
+            float materialMediumPhasePdf =
+                openpbr_calculate_anisotropic_phase_function_pdf(
+                    activeMaterialMedium,
+                    -normalize(ray.Direction),
+                    normalize(materialMediumNextDirectionWS));
+            if (!VividReferencedPathtracingIsFinite(
+                    materialMediumNextDirectionWS)
+                || !VividReferencedPathtracingIsFinite(
+                    materialMediumPhasePdf)
+                || materialMediumPhasePdf <= 0.0)
+            {
+                invalidSampleMask.z = 1.0;
+                break;
+            }
+
+            if ((int)(bounceIndex + 1u)
+                >= _ReferencedRussianRouletteStartBounce)
+            {
+                float survivalProbability = clamp(
+                    MaxReferencedPathtracingComponent(throughput),
+                    0.05,
+                    0.95);
+                float russianRouletteSample =
+                    ReferencedPathtracingGetPathSample(
+                        pixelCoord,
+                        sampleIndex,
+                        ReferencedPathtracingGetBounceSampleDimension(
+                            bounceIndex,
+                            kReferencedPathtracingRussianRouletteDimensionOffset),
+                        sampleSeed,
+                        pathSamplingMode);
+                if (russianRouletteSample
+                    >= survivalProbability)
+                {
+                    break;
+                }
+                throughput /= survivalProbability;
+            }
+
+            if (bounceIndex == 0u)
+            {
+                diffuseRayDirectionWS =
+                    normalize(materialMediumNextDirectionWS);
+            }
+            previousBsdfPdf = materialMediumPhasePdf;
+            previousBsdfWasDelta = false;
+            previousReferenceSunReachable = false;
+            previousLightSelectionContext =
+                ReferencedPathtracingCreateLightSelectionContext(
+                    materialMediumPositionWS,
+                    0.0,
+                    false);
+            rayConeWidth = max(
+                rayConeWidth
+                + materialMediumEventDistance
+                    * rayConeSpreadAngle,
+                0.0);
+            ray.Direction =
+                normalize(materialMediumNextDirectionWS);
+            ray.Origin =
+                materialMediumPositionWS
+                + ray.Direction
+                    * kReferencedPathtracingShadowMinBias;
+            ray.TMin =
+                kReferencedPathtracingShadowMinBias;
+            ray.TMax = _RayMaxDistance;
+            continue;
+        }
+
+        if (bounceIndex == 0u
+            && payload.stochasticTransparencyDiagnostics.a > 0.0)
+        {
+            stochasticTransparencyDiagnostic =
+                payload.stochasticTransparencyDiagnostics.rgb;
+        }
         float2 atmosphereSunRandom = float2(
             ReferencedPathtracingGetPathSample(
                 pixelCoord,
@@ -2684,6 +3022,8 @@ void RayGenReferencedPathtracing()
                 payload.nextMediumIor;
             materialMediumExtinctionStack[materialMediumDepth] =
                 payload.nextMediumExtinction;
+            materialMediumScatteringStack[materialMediumDepth] =
+                payload.nextMediumScattering;
             materialMediumInstanceStack[materialMediumDepth] =
                 payload.nextMediumInstanceIndex;
             ++materialMediumDepth;
@@ -2698,6 +3038,7 @@ void RayGenReferencedPathtracing()
                 materialMediumIorStack[activeMediumIndex] =
                     kReferencedPathtracingVacuumIor;
                 materialMediumExtinctionStack[activeMediumIndex] = 0.0;
+                materialMediumScatteringStack[activeMediumIndex] = 0u;
                 materialMediumInstanceStack[activeMediumIndex] =
                     kReferencedPathtracingInvalidMediumInstance;
                 --materialMediumDepth;

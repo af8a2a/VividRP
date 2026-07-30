@@ -264,6 +264,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.HasProperty("_TransmissionMap"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionColor"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionDepth"), Is.True);
+                Assert.That(material.HasProperty("_TransmissionScatter"), Is.True);
+                Assert.That(
+                    material.HasProperty(
+                        "_TransmissionScatterAnisotropy"),
+                    Is.True);
                 Assert.That(material.HasProperty("_SpecularIOR"), Is.True);
                 Assert.That(
                     material.GetFloat("_ThinWalledTransmission"),
@@ -273,6 +278,13 @@ namespace VividRP.Editor.Tests
                     material.GetColor("_TransmissionColor"),
                     Is.EqualTo(Color.white));
                 Assert.That(material.GetFloat("_TransmissionDepth"), Is.Zero);
+                Assert.That(
+                    material.GetColor("_TransmissionScatter"),
+                    Is.EqualTo(Color.clear));
+                Assert.That(
+                    material.GetFloat(
+                        "_TransmissionScatterAnisotropy"),
+                    Is.Zero);
                 Assert.That(
                     material.GetFloat("_SpecularIOR"),
                     Is.EqualTo(1.5f).Within(1e-6f));

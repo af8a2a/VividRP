@@ -46,6 +46,8 @@ Shader "VividRP/Material/StandardLit"
         [NoScaleOffset] [Sub(ReferencePathTracing)] _TransmissionMap("Transmission Map (R)", 2D) = "white" {}
         [Sub(ReferencePathTracing)] _TransmissionColor("Transmission Color", Color) = (1, 1, 1, 1)
         [Sub(ReferencePathTracing)] _TransmissionDepth("Transmission Depth", Float) = 0.0
+        [HDR] [Sub(ReferencePathTracing)] _TransmissionScatter("Transmission Scatter", Color) = (0, 0, 0, 0)
+        [Sub(ReferencePathTracing)] _TransmissionScatterAnisotropy("Transmission Scatter Anisotropy", Range(-0.95, 0.95)) = 0.0
         [Sub(ReferencePathTracing)] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
 
         [HideInInspector] _Blend("__blend", Float) = 0.0

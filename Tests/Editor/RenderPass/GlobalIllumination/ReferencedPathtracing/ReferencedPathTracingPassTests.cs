@@ -244,6 +244,13 @@ namespace VividRP.Editor.Tests
                 "ShaderPass",
                 "OpenPBR",
                 "OpenPBR.hlsl"));
+            var openPbrVolumeBridgeSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Shaders",
+                    "Material",
+                    "ShaderPass",
+                    "OpenPBR",
+                    "OpenPBRVolume.hlsl"));
             var adapterSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Material",
@@ -254,6 +261,13 @@ namespace VividRP.Editor.Tests
                 "Material",
                 "ShaderPass",
                 "ReferencedPathtracing.hlsl"));
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
             var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Core",
@@ -267,6 +281,13 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "VIVIDRP_OPENPBR_FEATURE_EnableTranslucency true"));
             Assert.That(
+                openPbrVolumeBridgeSource,
+                Does.Contain(
+                    "Vendor/openpbr_homogeneous_volume.h"));
+            Assert.That(
+                openPbrVolumeBridgeSource,
+                Does.Not.Contain("Vendor/openpbr.h"));
+            Assert.That(
                 adapterSource,
                 Does.Contain(
                     "inputs.transmission_weight = SampleOpenPbrTransmissionWeight("));
@@ -279,9 +300,39 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "inputs.transmission_depth = max(transmissionDepth, 0.0);"));
             Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_scatter = max(transmissionScatter, 0.0);"));
+            Assert.That(
+                adapterSource,
+                Does.Not.Contain(
+                    "VividReferencedPathtracingIsFinite"));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_scatter_anisotropy ="));
+            Assert.That(
                 materialSource,
                 Does.Contain(
                     "preparedBsdf.volume.extinction_coefficient"));
+            Assert.That(
+                materialSource,
+                Does.Contain("preparedBsdf.volume.albedo"));
+            Assert.That(
+                materialSource,
+                Does.Contain("preparedBsdf.volume.anisotropy"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING 38u"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "PackReferencedPathtracingMaterialMediumExtinction("));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "PackReferencedPathtracingMaterialMediumScattering("));
             Assert.That(
                 materialSource,
                 Does.Contain("result.mediumTransition ="));
@@ -293,6 +344,23 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "ReferencedPathtracingEvaluateMaterialMediumTransmittance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("openpbr_sample_event_distance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("OpenPBRVolume.hlsl"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "openpbr_calculate_weight_for_event_at_distance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "openpbr_sample_anisotropic_phase_function("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("materialMediumScatteringStack"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain("++materialMediumDepth;"));

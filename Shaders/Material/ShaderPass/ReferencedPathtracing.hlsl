@@ -288,6 +288,23 @@ void StandardLitReferencedPathtracingClosestHit(
                         preparedBsdf.volume.extinction_coefficient,
                         0.0)
                     : 0.0;
+                float3 mediumScatteringAlbedo =
+                    VividReferencedPathtracingIsFinite(
+                        preparedBsdf.volume.albedo)
+                    ? saturate(preparedBsdf.volume.albedo)
+                    : 0.0;
+                float mediumScatteringAnisotropy =
+                    VividReferencedPathtracingIsFinite(
+                        preparedBsdf.volume.anisotropy)
+                    ? clamp(
+                        preparedBsdf.volume.anisotropy,
+                        -0.95,
+                        0.95)
+                    : 0.0;
+                result.nextMediumScattering =
+                    PackReferencedPathtracingMaterialMediumScattering(
+                        mediumScatteringAlbedo,
+                        mediumScatteringAnisotropy);
                 result.nextMediumInstanceIndex = InstanceIndex();
             }
             // OpenPBR uses the Specular flag for a singular (delta) event. Glossy

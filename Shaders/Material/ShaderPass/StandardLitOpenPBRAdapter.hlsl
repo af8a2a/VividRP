@@ -117,6 +117,22 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     if (isnan(transmissionDepth) || isinf(transmissionDepth))
         transmissionDepth = 0.0;
     inputs.transmission_depth = max(transmissionDepth, 0.0);
+    float3 transmissionScatter = _TransmissionScatter.rgb;
+    if (any(isnan(transmissionScatter))
+        || any(isinf(transmissionScatter)))
+    {
+        transmissionScatter = 0.0;
+    }
+    inputs.transmission_scatter = max(transmissionScatter, 0.0);
+    float transmissionScatterAnisotropy =
+        _TransmissionScatterAnisotropy;
+    if (isnan(transmissionScatterAnisotropy)
+        || isinf(transmissionScatterAnisotropy))
+    {
+        transmissionScatterAnisotropy = 0.0;
+    }
+    inputs.transmission_scatter_anisotropy =
+        clamp(transmissionScatterAnisotropy, -0.95, 0.95);
     inputs.fuzz_weight = 0.0;
     inputs.thin_film_weight = 0.0;
 

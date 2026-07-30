@@ -8,7 +8,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 12;
+        internal const int Version = 13;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -71,6 +71,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingThinWalledTransmissionContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSolidTransmissionContract.Version);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingGeometryOpacityContract.Version);
@@ -490,7 +493,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSolidTransmissionContract
     {
-        internal const int Version = 1;
+        internal const int Version = 2;
         internal const int MaximumMediumDepth = 4;
         private const float MinimumTransmissionColor = 1e-3f;
         private const float MinimumTransmissionDistance = 1e-3f;
@@ -508,17 +511,35 @@ namespace VividRP.Runtime.RenderPass.Core
             Vector3 transmissionColor,
             float transmissionDepth)
         {
+            ResolveVolume(
+                transmissionColor,
+                transmissionDepth,
+                Vector3.zero,
+                out Vector3 extinction,
+                out _);
+            return extinction;
+        }
+
+        internal static void ResolveVolume(
+            Vector3 transmissionColor,
+            float transmissionDepth,
+            Vector3 transmissionScatter,
+            out Vector3 extinction,
+            out Vector3 scatteringAlbedo)
+        {
             if (float.IsNaN(transmissionDepth)
                 || float.IsInfinity(transmissionDepth)
                 || transmissionDepth <= 0.0f)
             {
-                return Vector3.zero;
+                extinction = Vector3.zero;
+                scatteringAlbedo = Vector3.zero;
+                return;
             }
 
             float resolvedTransmissionDepth = Mathf.Max(
                 transmissionDepth,
                 MinimumTransmissionDistance);
-            return new Vector3(
+            var baseExtinction = new Vector3(
                 ResolveExtinctionChannel(
                     transmissionColor.x,
                     resolvedTransmissionDepth),
@@ -528,6 +549,44 @@ namespace VividRP.Runtime.RenderPass.Core
                 ResolveExtinctionChannel(
                     transmissionColor.z,
                     resolvedTransmissionDepth));
+            var scattering = new Vector3(
+                ResolveScatteringChannel(
+                    transmissionScatter.x,
+                    resolvedTransmissionDepth),
+                ResolveScatteringChannel(
+                    transmissionScatter.y,
+                    resolvedTransmissionDepth),
+                ResolveScatteringChannel(
+                    transmissionScatter.z,
+                    resolvedTransmissionDepth));
+            var absorption = baseExtinction - scattering;
+            float minimumAbsorption = Mathf.Min(
+                absorption.x,
+                Mathf.Min(absorption.y, absorption.z));
+            if (minimumAbsorption < 0.0f)
+            {
+                absorption -= Vector3.one * minimumAbsorption;
+            }
+
+            extinction = absorption + scattering;
+            scatteringAlbedo = new Vector3(
+                ResolveScatteringAlbedoChannel(
+                    scattering.x,
+                    extinction.x),
+                ResolveScatteringAlbedoChannel(
+                    scattering.y,
+                    extinction.y),
+                ResolveScatteringAlbedoChannel(
+                    scattering.z,
+                    extinction.z));
+        }
+
+        internal static float ResolveScatteringAnisotropy(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0.0f;
+
+            return Mathf.Clamp(value, -0.95f, 0.95f);
         }
 
         internal static Vector3 EvaluateTransmittance(
@@ -569,6 +628,29 @@ namespace VividRP.Runtime.RenderPass.Core
                 MinimumTransmissionColor,
                 1.0f);
             return -Mathf.Log(color) / transmissionDepth;
+        }
+
+        private static float ResolveScatteringChannel(
+            float transmissionScatter,
+            float transmissionDepth)
+        {
+            if (float.IsNaN(transmissionScatter)
+                || float.IsInfinity(transmissionScatter))
+            {
+                return 0.0f;
+            }
+
+            return Mathf.Max(transmissionScatter, 0.0f)
+                / transmissionDepth;
+        }
+
+        private static float ResolveScatteringAlbedoChannel(
+            float scattering,
+            float extinction)
+        {
+            return extinction > 0.0f
+                ? Mathf.Clamp01(scattering / extinction)
+                : 0.0f;
         }
 
         private static float EvaluateTransmittanceChannel(

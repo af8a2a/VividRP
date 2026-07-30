@@ -199,7 +199,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(12));
+                    Is.EqualTo(13));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -392,7 +392,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 ReferencedPathTracingSolidTransmissionContract
                     .Version,
-                Is.EqualTo(1));
+                Is.EqualTo(2));
             Assert.That(
                 ReferencedPathTracingSolidTransmissionContract
                     .MaximumMediumDepth,
@@ -414,6 +414,47 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 transmittance.z,
                 Is.EqualTo(transmissionColor.z).Within(1e-5f));
+        }
+
+        [Test]
+        public void SolidTransmissionContract_ResolvesOpenPbrInternalScattering()
+        {
+            var transmissionColor = new Vector3(0.25f, 0.5f, 1.0f);
+            var transmissionScatter = new Vector3(0.2f, 0.1f, 0.05f);
+            ReferencedPathTracingSolidTransmissionContract.ResolveVolume(
+                transmissionColor,
+                2.0f,
+                transmissionScatter,
+                out Vector3 extinction,
+                out Vector3 scatteringAlbedo);
+
+            Vector3 scattering = Vector3.Scale(
+                extinction,
+                scatteringAlbedo);
+            Vector3 absorption = extinction - scattering;
+            Assert.That(
+                scattering.x,
+                Is.EqualTo(transmissionScatter.x / 2.0f)
+                    .Within(1e-5f));
+            Assert.That(
+                scattering.y,
+                Is.EqualTo(transmissionScatter.y / 2.0f)
+                    .Within(1e-5f));
+            Assert.That(
+                scattering.z,
+                Is.EqualTo(transmissionScatter.z / 2.0f)
+                    .Within(1e-5f));
+            Assert.That(absorption.x, Is.GreaterThanOrEqualTo(0.0f));
+            Assert.That(absorption.y, Is.GreaterThanOrEqualTo(0.0f));
+            Assert.That(absorption.z, Is.GreaterThanOrEqualTo(0.0f));
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveScatteringAnisotropy(float.NaN),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveScatteringAnisotropy(1.0f),
+                Is.EqualTo(0.95f));
         }
 
         [Test]

@@ -498,7 +498,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(7));
+                Is.EqualTo(8));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -534,6 +534,14 @@ namespace VividRP.Editor.Tests
                 ReferencedPathTracingSamplingContract
                     .GlobalFogDimensionStride,
                 Is.EqualTo(3));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .LocalFogBaseDimension,
+                Is.EqualTo(224));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .LocalFogDimensionStride,
+                Is.EqualTo(4));
 
             var usedDimensions = new System.Collections.Generic.HashSet<int>();
             for (var bounceIndex = 0;
@@ -567,6 +575,28 @@ namespace VividRP.Editor.Tests
                 for (var offset = 0;
                      offset
                         < ReferencedPathTracingSamplingContract
+                            .LocalFogDimensionStride;
+                     offset++)
+                {
+                    Assert.That(
+                        usedDimensions.Add(
+                            ReferencedPathTracingSamplingContract
+                                .GetLocalFogDimension(
+                                    bounceIndex,
+                                    offset)),
+                        Is.True);
+                }
+            }
+
+            for (var bounceIndex = 0;
+                 bounceIndex
+                    < ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount;
+                 bounceIndex++)
+            {
+                for (var offset = 0;
+                     offset
+                        < ReferencedPathTracingSamplingContract
                             .GlobalFogDimensionStride;
                      offset++)
                 {
@@ -580,6 +610,10 @@ namespace VividRP.Editor.Tests
                 }
             }
 
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .MaximumUsedDimension,
+                Is.EqualTo(255));
             Assert.That(
                 ReferencedPathTracingSamplingContract
                     .MaximumUsedDimension,
@@ -598,6 +632,12 @@ namespace VividRP.Editor.Tests
             Assert.Throws<System.ArgumentOutOfRangeException>(
                 () => ReferencedPathTracingSamplingContract
                     .GetGlobalFogDimension(0, 3));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetLocalFogDimension(-1, 0));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetLocalFogDimension(0, 4));
         }
 
         [Test]

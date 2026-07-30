@@ -122,6 +122,16 @@ namespace VividRP.Runtime
             return Mathf.Clamp(count, MinVisibleLocalVolumetricFogCount, AbsoluteMaxVisibleLocalVolumetricFogCount);
         }
 
+        internal static void GetRegisteredFogs(List<VividLocalVolumetricFog> destination)
+        {
+            if (destination == null)
+                throw new ArgumentNullException(nameof(destination));
+
+            RemoveDestroyedFogs();
+            destination.Clear();
+            destination.AddRange(s_RegisteredFogs);
+        }
+
         internal static int PrepareVisibleFogs(Camera camera, int maxVisibleFogCount)
         {
             maxVisibleFogCount = ClampVisibleLocalVolumetricFogCount(maxVisibleFogCount);

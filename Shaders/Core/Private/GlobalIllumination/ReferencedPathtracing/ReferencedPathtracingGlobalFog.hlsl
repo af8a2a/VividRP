@@ -381,13 +381,11 @@ float3 ReferencedPathtracingEvaluateGlobalFogTransmittance(
     return exp(-min(max(opticalDepth, 0.0), 80.0)).xxx;
 }
 
-float ReferencedPathtracingEvaluateGlobalFogPhase(
+float ReferencedPathtracingEvaluateHenyeyGreensteinPhase(
+    float anisotropy,
     float cosineTheta)
 {
-    float anisotropy = clamp(
-        _ReferencedGlobalFogHeightAnisotropy.w,
-        -0.95,
-        0.95);
+    anisotropy = clamp(anisotropy, -0.95, 0.95);
     float anisotropySquared =
         anisotropy * anisotropy;
     float denominator = max(
@@ -403,6 +401,14 @@ float ReferencedPathtracingEvaluateGlobalFogPhase(
             * sqrt(denominator));
 }
 
+float ReferencedPathtracingEvaluateGlobalFogPhase(
+    float cosineTheta)
+{
+    return ReferencedPathtracingEvaluateHenyeyGreensteinPhase(
+        _ReferencedGlobalFogHeightAnisotropy.w,
+        cosineTheta);
+}
+
 float ReferencedPathtracingEvaluateGlobalFogPhasePdf(
     float3 currentDirectionWS,
     float3 sampledDirectionWS)
@@ -413,18 +419,16 @@ float ReferencedPathtracingEvaluateGlobalFogPhasePdf(
             normalize(sampledDirectionWS)));
 }
 
-bool ReferencedPathtracingSampleGlobalFogPhase(
+bool ReferencedPathtracingSampleHenyeyGreensteinPhase(
     float3 currentDirectionWS,
+    float anisotropy,
     float2 randomValue,
     out float3 sampledDirectionWS,
     out float phasePdf)
 {
     sampledDirectionWS = 0.0;
     phasePdf = 0.0;
-    float anisotropy = clamp(
-        _ReferencedGlobalFogHeightAnisotropy.w,
-        -0.95,
-        0.95);
+    anisotropy = clamp(anisotropy, -0.95, 0.95);
     float cosineTheta;
     if (abs(anisotropy) < 1e-3)
     {
@@ -478,11 +482,26 @@ bool ReferencedPathtracingSampleGlobalFogPhase(
             * (sineTheta * sineAzimuth)
         + forward * cosineTheta);
     phasePdf =
-        ReferencedPathtracingEvaluateGlobalFogPhase(
+        ReferencedPathtracingEvaluateHenyeyGreensteinPhase(
+            anisotropy,
             cosineTheta);
     return phasePdf > 0.0
         && !isnan(phasePdf)
         && !isinf(phasePdf);
+}
+
+bool ReferencedPathtracingSampleGlobalFogPhase(
+    float3 currentDirectionWS,
+    float2 randomValue,
+    out float3 sampledDirectionWS,
+    out float phasePdf)
+{
+    return ReferencedPathtracingSampleHenyeyGreensteinPhase(
+        currentDirectionWS,
+        _ReferencedGlobalFogHeightAnisotropy.w,
+        randomValue,
+        sampledDirectionWS,
+        phasePdf);
 }
 
 #endif

@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 7
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 8
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -28,6 +28,12 @@ static const uint kReferencedPathtracingGlobalFogBaseDimension = 200u;
 static const uint kReferencedPathtracingGlobalFogDimensionStride = 3u;
 static const uint kReferencedPathtracingGlobalFogDistanceDimensionOffset = 0u;
 static const uint kReferencedPathtracingGlobalFogPhaseDimensionOffset = 1u;
+// Local fog consumes the final append-only block in the 256-dimension set.
+// Two values seed delta tracking and two values sample the phase function.
+static const uint kReferencedPathtracingLocalFogBaseDimension = 224u;
+static const uint kReferencedPathtracingLocalFogDimensionStride = 4u;
+static const uint kReferencedPathtracingLocalFogDistanceDimensionOffset = 0u;
+static const uint kReferencedPathtracingLocalFogPhaseDimensionOffset = 2u;
 
 float2 ReferencedPathtracingSampleConcentricDisk(float2 sample)
 {
@@ -86,6 +92,16 @@ uint ReferencedPathtracingGetGlobalFogSampleDimension(
     return kReferencedPathtracingGlobalFogBaseDimension
         + bounceIndex
             * kReferencedPathtracingGlobalFogDimensionStride
+        + dimensionOffset;
+}
+
+uint ReferencedPathtracingGetLocalFogSampleDimension(
+    uint bounceIndex,
+    uint dimensionOffset)
+{
+    return kReferencedPathtracingLocalFogBaseDimension
+        + bounceIndex
+            * kReferencedPathtracingLocalFogDimensionStride
         + dimensionOffset;
 }
 

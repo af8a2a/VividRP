@@ -12,13 +12,19 @@ namespace VividRP.Editor.Tools
     {
         private const string SceneFolder = "Assets/Scenes/CornellBox";
         private const string MaterialFolder = SceneFolder + "/Materials";
-        private const string ScenePath = SceneFolder + "/BoxScene.unity";
+        private const string Tier1ScenePath = SceneFolder + "/BoxScene.unity";
+        private const string Tier2ScenePath =
+            SceneFolder + "/BoxScene_Tier2_Transmission.unity";
         private const string BackupScenePath =
             SceneFolder + "/BoxScene_PreCodex_Backup.unity";
-        private const string ProfilePath =
+        private const string Tier1ProfilePath =
             SceneFolder + "/CornellBox_PathTracing_Profile.asset";
-        private const string SceneTemplatePath =
+        private const string Tier2ProfilePath =
+            SceneFolder + "/CornellBox_Tier2_PathTracing_Profile.asset";
+        private const string Tier1SceneTemplatePath =
             SceneFolder + "/CornellBox_PathTracing.scenetemplate";
+        private const string Tier2SceneTemplatePath =
+            SceneFolder + "/CornellBox_Tier2_Transmission.scenetemplate";
         private const string WhiteTexturePath =
             MaterialFolder + "/CB_EmissionWhite.asset";
         private const string HdriPath =
@@ -27,107 +33,190 @@ namespace VividRP.Editor.Tools
             "VividRP/Material/StandardLit";
 
         [MenuItem("VividRP/Samples/Rebuild Cornell Box Path Tracing Scene")]
-        private static void RebuildScene()
+        private static void RebuildTier1Scene()
         {
-            EnsureFolder("Assets", "Scenes");
-            EnsureFolder("Assets/Scenes", "CornellBox");
-            EnsureFolder(SceneFolder, "Materials");
             SaveBackupIfNeeded();
-
-            var shader = Shader.Find(StandardLitShaderName);
-            if (shader == null)
-            {
-                Debug.LogError(
-                    $"[VividRP] Required shader was not found: "
-                    + StandardLitShaderName);
+            if (!TryCreateSharedMaterials(
+                    out var white,
+                    out var red,
+                    out var green,
+                    out var emission))
                 return;
-            }
-
-            var white = CreateOrUpdateMaterial(
-                MaterialFolder + "/CB_White.mat",
-                shader,
-                new Color(0.725f, 0.710f, 0.680f, 1.0f),
-                0.0f,
-                0.12f,
-                Color.black);
-            var red = CreateOrUpdateMaterial(
-                MaterialFolder + "/CB_Red.mat",
-                shader,
-                new Color(0.630f, 0.065f, 0.050f, 1.0f),
-                0.0f,
-                0.10f,
-                Color.black);
-            var green = CreateOrUpdateMaterial(
-                MaterialFolder + "/CB_Green.mat",
-                shader,
-                new Color(0.140f, 0.450f, 0.091f, 1.0f),
-                0.0f,
-                0.10f,
-                Color.black);
-            var emission = CreateOrUpdateMaterial(
-                MaterialFolder + "/CB_CeilingEmitter.mat",
-                shader,
-                new Color(0.02f, 0.02f, 0.02f, 1.0f),
-                0.0f,
-                0.0f,
-                new Color(22.0f, 19.5f, 15.0f, 1.0f));
 
             var scene = EditorSceneManager.NewScene(
                 NewSceneSetup.EmptyScene,
                 NewSceneMode.Single);
-            var sceneRoot = NewObject("CornellBox_PathTracing");
+            var sceneRoot = NewObject("CornellBox_Tier1_Opaque_Emission");
             BuildArchitecture(sceneRoot.transform, white, red, green);
-            BuildReferenceProps(sceneRoot.transform, white);
+            BuildTier1ReferenceProps(sceneRoot.transform, white);
             BuildEmissionLighting(sceneRoot.transform, emission);
             BuildCamera(sceneRoot.transform);
-            BuildGlobalVolume(sceneRoot.transform);
+            BuildGlobalVolume(
+                sceneRoot.transform,
+                Tier1ProfilePath,
+                8,
+                5);
             ConfigureRenderSettings();
             EnsureHDRPAutoExposureImplementation();
 
             EditorSceneManager.MarkSceneDirty(scene);
-            if (!EditorSceneManager.SaveScene(scene, ScenePath))
+            if (!EditorSceneManager.SaveScene(scene, Tier1ScenePath))
             {
                 Debug.LogError(
-                    $"[VividRP] Failed to save Cornell Box scene: {ScenePath}");
+                    $"[VividRP] Failed to save Tier 1 Cornell Box scene: "
+                    + Tier1ScenePath);
                 return;
             }
 
-            CreateOrUpdateSceneTemplate();
+            CreateOrUpdateSceneTemplate(
+                Tier1ScenePath,
+                Tier1SceneTemplatePath,
+                "Cornell Box Tier 1 - Opaque + Emission (VividRP)",
+                "Tier 1 VividRP path-tracing reference: StandardLit opaque "
+                + "geometry, HDRI importance sampling, emissive mesh "
+                + "lighting, automatic exposure, and no Unity Light "
+                + "components.");
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log(
-                "[VividRP] Built Cornell Box path-tracing scene. "
+                "[VividRP] Built Cornell Box Tier 1. "
                 + "Lighting uses HDRI and a StandardLit emissive mesh; "
                 + "the scene contains no Unity Light components.");
         }
 
-        [MenuItem("VividRP/Samples/Create Cornell Box Scene Template")]
-        private static void CreateSceneTemplate()
+        [MenuItem("VividRP/Samples/Rebuild Cornell Box Tier 2 - Transmission")]
+        private static void RebuildTier2Scene()
         {
-            CreateOrUpdateSceneTemplate();
+            if (!TryCreateSharedMaterials(
+                    out var white,
+                    out var red,
+                    out var green,
+                    out var emission))
+                return;
+
+            var shader = Shader.Find(StandardLitShaderName);
+            var roughDark = CreateOrUpdateMaterial(
+                MaterialFolder + "/CB_Tier2_RoughDark.mat",
+                shader,
+                new Color(0.075f, 0.060f, 0.040f, 1.0f),
+                0.0f,
+                0.04f,
+                Color.black);
+            var glossyRed = CreateOrUpdateMaterial(
+                MaterialFolder + "/CB_Tier2_GlossRed.mat",
+                shader,
+                new Color(0.42f, 0.018f, 0.025f, 1.0f),
+                0.0f,
+                0.94f,
+                Color.black);
+            ConfigureClearCoat(glossyRed, 0.35f, 0.96f);
+            var solidGlass = CreateOrUpdateTransmissionMaterial(
+                MaterialFolder + "/CB_Tier2_SolidGlass.mat",
+                shader);
+
+            var scene = EditorSceneManager.NewScene(
+                NewSceneSetup.EmptyScene,
+                NewSceneMode.Single);
+            var sceneRoot = NewObject(
+                "CornellBox_Tier2_Opaque_Transmission_Emission");
+            BuildArchitecture(sceneRoot.transform, white, red, green);
+            BuildTier2ReferenceProps(
+                sceneRoot.transform,
+                roughDark,
+                glossyRed,
+                solidGlass);
+            BuildEmissionLighting(sceneRoot.transform, emission);
+            BuildCamera(
+                sceneRoot.transform,
+                new Vector3(0.0f, 3.0f, -9.1f),
+                new Vector3(0.0f, 2.60f, 0.35f));
+            BuildGlobalVolume(
+                sceneRoot.transform,
+                Tier2ProfilePath,
+                8,
+                6);
+            ConfigureRenderSettings();
+            EnsureHDRPAutoExposureImplementation();
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            if (!EditorSceneManager.SaveScene(scene, Tier2ScenePath))
+            {
+                Debug.LogError(
+                    $"[VividRP] Failed to save Tier 2 Cornell Box scene: "
+                    + Tier2ScenePath);
+                return;
+            }
+
+            CreateOrUpdateSceneTemplate(
+                Tier2ScenePath,
+                Tier2SceneTemplatePath,
+                "Cornell Box Tier 2 - Transmission + Emission (VividRP)",
+                "Tier 2 VividRP path-tracing reference inspired by the "
+                + "Cornell sphere box: rough and glossy opaque StandardLit "
+                + "spheres, a solid dielectric transmission sphere with "
+                + "IOR 1.52, HDRI and emissive mesh lighting, automatic "
+                + "exposure, and no Unity Light components.");
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log(
+                "[VividRP] Built Cornell Box Tier 2 with opaque and solid "
+                + "transmission materials. Lighting remains HDRI and "
+                + "emissive-mesh only.");
+        }
+
+        [MenuItem("VividRP/Samples/Rebuild Cornell Box Tier Variants")]
+        private static void RebuildTierVariants()
+        {
+            RebuildTier1Scene();
+            RebuildTier2Scene();
+        }
+
+        [MenuItem("VividRP/Samples/Create Cornell Box Scene Template")]
+        private static void CreateSceneTemplates()
+        {
+            CreateOrUpdateSceneTemplate(
+                Tier1ScenePath,
+                Tier1SceneTemplatePath,
+                "Cornell Box Tier 1 - Opaque + Emission (VividRP)",
+                "Tier 1 VividRP path-tracing reference with opaque geometry "
+                + "and emissive-mesh lighting.");
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Tier2ScenePath)
+                != null)
+            {
+                CreateOrUpdateSceneTemplate(
+                    Tier2ScenePath,
+                    Tier2SceneTemplatePath,
+                    "Cornell Box Tier 2 - Transmission + Emission (VividRP)",
+                    "Tier 2 VividRP path-tracing reference with opaque and "
+                    + "solid dielectric transmission geometry.");
+            }
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
         }
 
-        private static void CreateOrUpdateSceneTemplate()
+        private static void CreateOrUpdateSceneTemplate(
+            string scenePath,
+            string sceneTemplatePath,
+            string templateName,
+            string description)
         {
-            var sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
+            var sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(scenePath);
             if (sceneAsset == null)
             {
                 Debug.LogError(
                     $"[VividRP] Cornell Box source scene was not found: "
-                    + ScenePath);
+                    + scenePath);
                 return;
             }
 
             var sceneTemplate =
                 AssetDatabase.LoadAssetAtPath<SceneTemplateAsset>(
-                    SceneTemplatePath);
+                    sceneTemplatePath);
             if (sceneTemplate == null)
             {
                 sceneTemplate = SceneTemplateService.CreateTemplateFromScene(
                     sceneAsset,
-                    SceneTemplatePath);
+                    sceneTemplatePath);
             }
             else
             {
@@ -138,12 +227,8 @@ namespace VividRP.Editor.Tools
             }
 
             sceneTemplate.templateScene = sceneAsset;
-            sceneTemplate.templateName = "Cornell Box Path Tracing (VividRP)";
-            sceneTemplate.description =
-                "Reference Cornell Box for VividRP path-tracing development. "
-                + "Uses StandardLit primitive geometry, HDRI importance "
-                + "sampling, a mesh emitter, deterministic accumulation, "
-                + "automatic exposure, and no Unity Light components.";
+            sceneTemplate.templateName = templateName;
+            sceneTemplate.description = description;
             sceneTemplate.templatePipeline =
                 AssetDatabase.LoadAssetAtPath<MonoScript>(
                     "Packages/com.vivid.render-pipelines/Editor/SceneTemplates/"
@@ -164,7 +249,7 @@ namespace VividRP.Editor.Tools
             AssetDatabase.SaveAssetIfDirty(sceneTemplate);
             Debug.Log(
                 $"[VividRP] Created or updated Cornell Box Scene Template: "
-                + SceneTemplatePath);
+                + sceneTemplatePath);
         }
 
         private static void RefreshTemplateDependencies(
@@ -242,9 +327,11 @@ namespace VividRP.Editor.Tools
                 green);
         }
 
-        private static void BuildReferenceProps(Transform root, Material white)
+        private static void BuildTier1ReferenceProps(
+            Transform root,
+            Material white)
         {
-            var props = NewObject("Reference Props");
+            var props = NewObject("Tier 1 Props - Opaque");
             props.transform.SetParent(root, false);
 
             CreateCube(
@@ -261,6 +348,36 @@ namespace VividRP.Editor.Tools
                 new Vector3(0.0f, 18.0f, 0.0f),
                 new Vector3(1.75f, 3.3f, 1.75f),
                 white);
+        }
+
+        private static void BuildTier2ReferenceProps(
+            Transform root,
+            Material roughDark,
+            Material glossyRed,
+            Material solidGlass)
+        {
+            var props = NewObject(
+                "Tier 2 Props - Opaque and Solid Transmission");
+            props.transform.SetParent(root, false);
+
+            CreateSphere(
+                "Opaque Rough Sphere",
+                props.transform,
+                new Vector3(-1.45f, 1.15f, 0.80f),
+                2.30f,
+                roughDark);
+            CreateSphere(
+                "Opaque Glossy Red Sphere",
+                props.transform,
+                new Vector3(1.45f, 1.15f, 0.80f),
+                2.30f,
+                glossyRed);
+            CreateSphere(
+                "Solid Glass Sphere - IOR 1.52",
+                props.transform,
+                new Vector3(0.0f, 0.85f, -0.85f),
+                1.70f,
+                solidGlass);
         }
 
         private static void BuildEmissionLighting(
@@ -280,13 +397,23 @@ namespace VividRP.Editor.Tools
 
         private static void BuildCamera(Transform root)
         {
+            BuildCamera(
+                root,
+                new Vector3(0.0f, 3.0f, -8.6f),
+                new Vector3(0.0f, 3.0f, 0.35f));
+        }
+
+        private static void BuildCamera(
+            Transform root,
+            Vector3 position,
+            Vector3 target)
+        {
             var cameraObject = NewObject("Main Camera");
             cameraObject.transform.SetParent(root, false);
             cameraObject.tag = "MainCamera";
-            cameraObject.transform.position = new Vector3(0.0f, 3.0f, -8.6f);
+            cameraObject.transform.position = position;
             cameraObject.transform.rotation = Quaternion.LookRotation(
-                new Vector3(0.0f, 3.0f, 0.35f)
-                - cameraObject.transform.position,
+                target - cameraObject.transform.position,
                 Vector3.up);
 
             var camera = cameraObject.AddComponent<Camera>();
@@ -297,7 +424,7 @@ namespace VividRP.Editor.Tools
             camera.usePhysicalProperties = true;
             camera.sensorSize = new Vector2(36.0f, 24.0f);
             camera.focalLength = 28.0f;
-            camera.focusDistance = 8.9f;
+            camera.focusDistance = Vector3.Distance(position, target);
             camera.aperture = 8.0f;
 
             var cameraData = cameraObject.AddComponent<VividAdditionalCameraData>();
@@ -307,10 +434,17 @@ namespace VividRP.Editor.Tools
             cameraData.antialiasing = VividAntialiasingMode.None;
         }
 
-        private static void BuildGlobalVolume(Transform root)
+        private static void BuildGlobalVolume(
+            Transform root,
+            string profilePath,
+            int maxBounceCount,
+            int russianRouletteStartBounce)
         {
-            var profile = GetOrCreateProfile();
-            ConfigureVolumeProfile(profile);
+            var profile = GetOrCreateProfile(profilePath);
+            ConfigureVolumeProfile(
+                profile,
+                maxBounceCount,
+                russianRouletteStartBounce);
 
             var volumeObject = NewObject(
                 "Global Volume - Path Tracing Ground Truth");
@@ -322,7 +456,10 @@ namespace VividRP.Editor.Tools
             volume.sharedProfile = profile;
         }
 
-        private static void ConfigureVolumeProfile(VolumeProfile profile)
+        private static void ConfigureVolumeProfile(
+            VolumeProfile profile,
+            int maxBounceCount,
+            int russianRouletteStartBounce)
         {
             Undo.RecordObject(profile, "Configure Cornell Box volume profile");
             profile.components.RemoveAll(component => component == null);
@@ -352,8 +489,10 @@ namespace VividRP.Editor.Tools
             Set(
                 pathTracing.pathSamplingMode,
                 ReferencedPathTracingSamplingMode.IndexedBnd);
-            Set(pathTracing.maxBounceCount, 8);
-            Set(pathTracing.russianRouletteStartBounce, 5);
+            Set(pathTracing.maxBounceCount, maxBounceCount);
+            Set(
+                pathTracing.russianRouletteStartBounce,
+                russianRouletteStartBounce);
             Set(pathTracing.enableReGIR, false);
             Set(pathTracing.shadingPointLightSelection, false);
             Set(pathTracing.lightSpatialIndex, false);
@@ -406,16 +545,17 @@ namespace VividRP.Editor.Tools
             AssetDatabase.SaveAssetIfDirty(profile);
         }
 
-        private static VolumeProfile GetOrCreateProfile()
+        private static VolumeProfile GetOrCreateProfile(string profilePath)
         {
             var profile = AssetDatabase.LoadAssetAtPath<VolumeProfile>(
-                ProfilePath);
+                profilePath);
             if (profile != null)
                 return profile;
 
             profile = ScriptableObject.CreateInstance<VolumeProfile>();
-            profile.name = "CornellBox_PathTracing_Profile";
-            AssetDatabase.CreateAsset(profile, ProfilePath);
+            profile.name = System.IO.Path.GetFileNameWithoutExtension(
+                profilePath);
+            AssetDatabase.CreateAsset(profile, profilePath);
             return profile;
         }
 
@@ -459,6 +599,61 @@ namespace VividRP.Editor.Tools
             AssetDatabase.SaveAssetIfDirty(pipeline);
         }
 
+        private static bool TryCreateSharedMaterials(
+            out Material white,
+            out Material red,
+            out Material green,
+            out Material emission)
+        {
+            EnsureFolder("Assets", "Scenes");
+            EnsureFolder("Assets/Scenes", "CornellBox");
+            EnsureFolder(SceneFolder, "Materials");
+
+            white = null;
+            red = null;
+            green = null;
+            emission = null;
+
+            var shader = Shader.Find(StandardLitShaderName);
+            if (shader == null)
+            {
+                Debug.LogError(
+                    $"[VividRP] Required shader was not found: "
+                    + StandardLitShaderName);
+                return false;
+            }
+
+            white = CreateOrUpdateMaterial(
+                MaterialFolder + "/CB_White.mat",
+                shader,
+                new Color(0.725f, 0.710f, 0.680f, 1.0f),
+                0.0f,
+                0.12f,
+                Color.black);
+            red = CreateOrUpdateMaterial(
+                MaterialFolder + "/CB_Red.mat",
+                shader,
+                new Color(0.630f, 0.065f, 0.050f, 1.0f),
+                0.0f,
+                0.10f,
+                Color.black);
+            green = CreateOrUpdateMaterial(
+                MaterialFolder + "/CB_Green.mat",
+                shader,
+                new Color(0.140f, 0.450f, 0.091f, 1.0f),
+                0.0f,
+                0.10f,
+                Color.black);
+            emission = CreateOrUpdateMaterial(
+                MaterialFolder + "/CB_CeilingEmitter.mat",
+                shader,
+                new Color(0.02f, 0.02f, 0.02f, 1.0f),
+                0.0f,
+                0.0f,
+                new Color(22.0f, 19.5f, 15.0f, 1.0f));
+            return true;
+        }
+
         private static Material CreateOrUpdateMaterial(
             string path,
             Shader shader,
@@ -492,6 +687,16 @@ namespace VividRP.Editor.Tools
             material.SetFloat("_Cull", 2.0f);
             material.SetFloat("_ReceiveShadows", 1.0f);
             material.SetColor("_EmissionColor", emission);
+            material.SetFloat("_ClearCoatMask", 0.0f);
+            material.SetFloat("_ClearCoatSmoothness", 1.0f);
+            material.SetFloat("_ThinWalledTransmission", 0.0f);
+            material.SetFloat("_TransmissionWeight", 0.0f);
+            material.SetTexture("_TransmissionMap", null);
+            material.SetColor("_TransmissionColor", Color.white);
+            material.SetFloat("_TransmissionDepth", 0.0f);
+            material.SetColor("_TransmissionScatter", Color.black);
+            material.SetFloat("_TransmissionScatterAnisotropy", 0.0f);
+            material.SetFloat("_SpecularIOR", 1.5f);
 
             if (emission.maxColorComponent > 0.0f)
             {
@@ -507,6 +712,55 @@ namespace VividRP.Editor.Tools
                 material.globalIlluminationFlags =
                     MaterialGlobalIlluminationFlags.EmissiveIsBlack;
             }
+
+            StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+            EditorUtility.SetDirty(material);
+            AssetDatabase.SaveAssetIfDirty(material);
+            return material;
+        }
+
+        private static void ConfigureClearCoat(
+            Material material,
+            float mask,
+            float smoothness)
+        {
+            Undo.RecordObject(material, "Configure Cornell Box clear coat");
+            material.SetFloat("_ClearCoatMask", mask);
+            material.SetFloat("_ClearCoatSmoothness", smoothness);
+            StandardLitMaterialUtility.SetupMaterial(material, null, false);
+            EditorUtility.SetDirty(material);
+            AssetDatabase.SaveAssetIfDirty(material);
+        }
+
+        private static Material CreateOrUpdateTransmissionMaterial(
+            string path,
+            Shader shader)
+        {
+            var material = CreateOrUpdateMaterial(
+                path,
+                shader,
+                new Color(0.97f, 0.985f, 1.0f, 1.0f),
+                0.0f,
+                0.995f,
+                Color.black);
+
+            Undo.RecordObject(
+                material,
+                "Configure Cornell Box solid transmission");
+            material.SetFloat("_Surface", 0.0f);
+            material.SetFloat("_Cull", 0.0f);
+            material.SetFloat("_ThinWalledTransmission", 0.0f);
+            material.SetFloat("_TransmissionWeight", 1.0f);
+            material.SetTexture("_TransmissionMap", null);
+            material.SetColor(
+                "_TransmissionColor",
+                new Color(0.985f, 0.995f, 1.0f, 1.0f));
+            material.SetFloat("_TransmissionDepth", 1.0f);
+            material.SetColor("_TransmissionScatter", Color.black);
+            material.SetFloat("_TransmissionScatterAnisotropy", 0.0f);
+            material.SetFloat("_SpecularIOR", 1.52f);
+            StandardLitMaterialUtility.SetupMaterial(material, null, false);
 
             EditorUtility.SetDirty(material);
             AssetDatabase.SaveAssetIfDirty(material);
@@ -574,6 +828,41 @@ namespace VividRP.Editor.Tools
             return gameObject;
         }
 
+        private static GameObject CreateSphere(
+            string name,
+            Transform parent,
+            Vector3 localPosition,
+            float diameter,
+            Material material)
+        {
+            var gameObject = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            gameObject.name = name;
+            gameObject.transform.SetParent(parent, false);
+            gameObject.transform.localPosition = localPosition;
+            gameObject.transform.localRotation = Quaternion.identity;
+            gameObject.transform.localScale = Vector3.one * diameter;
+
+            var renderer = gameObject.GetComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.On;
+            renderer.receiveShadows = true;
+            renderer.motionVectorGenerationMode =
+                MotionVectorGenerationMode.ForceNoMotion;
+
+            var collider = gameObject.GetComponent<Collider>();
+            if (collider != null)
+                UnityEngine.Object.DestroyImmediate(collider);
+
+            gameObject.isStatic = true;
+            GameObjectUtility.SetStaticEditorFlags(
+                gameObject,
+                StaticEditorFlags.BatchingStatic
+                | StaticEditorFlags.OccluderStatic
+                | StaticEditorFlags.OccludeeStatic
+                | StaticEditorFlags.ReflectionProbeStatic);
+            return gameObject;
+        }
+
         private static GameObject NewObject(string name)
         {
             return new GameObject(name);
@@ -582,8 +871,9 @@ namespace VividRP.Editor.Tools
         private static void SaveBackupIfNeeded()
         {
             var activeScene = SceneManager.GetActiveScene();
-            if (activeScene.path != ScenePath
-                || AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath) == null
+            if (activeScene.path != Tier1ScenePath
+                || AssetDatabase.LoadAssetAtPath<SceneAsset>(Tier1ScenePath)
+                    == null
                 || AssetDatabase.LoadAssetAtPath<SceneAsset>(BackupScenePath)
                     != null)
             {

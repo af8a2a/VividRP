@@ -12,21 +12,30 @@ namespace VividRP.Editor.Tools
     {
         private const string SceneFolder = "Assets/Scenes/CornellBox";
         private const string MaterialFolder = SceneFolder + "/Materials";
+        private const string MeshFolder = SceneFolder + "/Meshes";
         private const string Tier1ScenePath = SceneFolder + "/BoxScene.unity";
         private const string Tier2ScenePath =
             SceneFolder + "/BoxScene_Tier2_Transmission.unity";
+        private const string Tier3ScenePath =
+            SceneFolder + "/BoxScene_Tier3_DielectricBox.unity";
         private const string BackupScenePath =
             SceneFolder + "/BoxScene_PreCodex_Backup.unity";
         private const string Tier1ProfilePath =
             SceneFolder + "/CornellBox_PathTracing_Profile.asset";
         private const string Tier2ProfilePath =
             SceneFolder + "/CornellBox_Tier2_PathTracing_Profile.asset";
+        private const string Tier3ProfilePath =
+            SceneFolder + "/CornellBox_Tier3_PathTracing_Profile.asset";
         private const string Tier1SceneTemplatePath =
             SceneFolder + "/CornellBox_PathTracing.scenetemplate";
         private const string Tier2SceneTemplatePath =
             SceneFolder + "/CornellBox_Tier2_Transmission.scenetemplate";
+        private const string Tier3SceneTemplatePath =
+            SceneFolder + "/CornellBox_Tier3_DielectricBox.scenetemplate";
         private const string WhiteTexturePath =
             MaterialFolder + "/CB_EmissionWhite.asset";
+        private const string Tier3DielectricMeshPath =
+            MeshFolder + "/CB_Tier3_DielectricTallBox.asset";
         private const string HdriPath =
             "Assets/Scenes/ClassicSponza/Art/Generic/Skies/05-18_Day_D.hdr";
         private const string StandardLitShaderName =
@@ -164,11 +173,77 @@ namespace VividRP.Editor.Tools
                 + "emissive-mesh only.");
         }
 
+        [MenuItem("VividRP/Samples/Rebuild Cornell Box Tier 3 - Dielectric Box")]
+        private static void RebuildTier3Scene()
+        {
+            if (!TryCreateSharedMaterials(
+                    out var white,
+                    out var red,
+                    out var green,
+                    out var emission))
+                return;
+
+            var shader = Shader.Find(StandardLitShaderName);
+            var dielectric = CreateOrUpdateDielectricBoxMaterial(
+                MaterialFolder + "/CB_Tier3_FrostedDielectric.mat",
+                shader);
+            var dielectricMesh = CreateOrUpdateCuboidMesh(
+                Tier3DielectricMeshPath,
+                new Vector3(1.75f, 3.3f, 1.75f));
+
+            var scene = EditorSceneManager.NewScene(
+                NewSceneSetup.EmptyScene,
+                NewSceneMode.Single);
+            var sceneRoot = NewObject(
+                "CornellBox_Tier3_DielectricBox_ColorTransmission");
+            BuildArchitecture(sceneRoot.transform, white, red, green);
+            BuildTier3ReferenceProps(
+                sceneRoot.transform,
+                white,
+                dielectric,
+                dielectricMesh);
+            BuildEmissionLighting(sceneRoot.transform, emission);
+            BuildCamera(sceneRoot.transform);
+            BuildGlobalVolume(
+                sceneRoot.transform,
+                Tier3ProfilePath,
+                8,
+                6);
+            ConfigureRenderSettings();
+            EnsureHDRPAutoExposureImplementation();
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            if (!EditorSceneManager.SaveScene(scene, Tier3ScenePath))
+            {
+                Debug.LogError(
+                    $"[VividRP] Failed to save Tier 3 Cornell Box scene: "
+                    + Tier3ScenePath);
+                return;
+            }
+
+            CreateOrUpdateSceneTemplate(
+                Tier3ScenePath,
+                Tier3SceneTemplatePath,
+                "Cornell Box Tier 3 - Dielectric Box (VividRP)",
+                "Tier 3 VividRP path-tracing reference based on Tier 1. "
+                + "The tall right box is a closed frosted thin-walled "
+                + "dielectric shell with IOR 1.46 so "
+                + "colored indirect light penetrates the white body. "
+                + "Lighting remains HDRI and emissive-mesh only, with no "
+                + "Unity Light components.");
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log(
+                "[VividRP] Built Cornell Box Tier 3 with a frosted thin-walled "
+                + "dielectric tall box and color transmission.");
+        }
+
         [MenuItem("VividRP/Samples/Rebuild Cornell Box Tier Variants")]
         private static void RebuildTierVariants()
         {
             RebuildTier1Scene();
             RebuildTier2Scene();
+            RebuildTier3Scene();
         }
 
         [MenuItem("VividRP/Samples/Create Cornell Box Scene Template")]
@@ -189,6 +264,17 @@ namespace VividRP.Editor.Tools
                     "Cornell Box Tier 2 - Transmission + Emission (VividRP)",
                     "Tier 2 VividRP path-tracing reference with opaque and "
                     + "solid dielectric transmission geometry.");
+            }
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(Tier3ScenePath)
+                != null)
+            {
+                CreateOrUpdateSceneTemplate(
+                    Tier3ScenePath,
+                    Tier3SceneTemplatePath,
+                    "Cornell Box Tier 3 - Dielectric Box (VividRP)",
+                    "Tier 3 VividRP path-tracing reference based on Tier 1 "
+                    + "with a frosted thin-walled dielectric tall box and "
+                    + "color transmission.");
             }
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -378,6 +464,32 @@ namespace VividRP.Editor.Tools
                 new Vector3(0.0f, 0.85f, -0.85f),
                 1.70f,
                 solidGlass);
+        }
+
+        private static void BuildTier3ReferenceProps(
+            Transform root,
+            Material opaqueWhite,
+            Material dielectric,
+            Mesh dielectricMesh)
+        {
+            var props = NewObject(
+                "Tier 3 Props - Opaque and Dielectric Boxes");
+            props.transform.SetParent(root, false);
+
+            CreateCube(
+                "Short Box - Opaque White",
+                props.transform,
+                new Vector3(-1.15f, 1.0f, 0.45f),
+                new Vector3(0.0f, -17.0f, 0.0f),
+                new Vector3(1.8f, 2.0f, 1.8f),
+                opaqueWhite);
+            CreateMeshObject(
+                "Tall Box - Frosted Dielectric Shell IOR 1.46",
+                props.transform,
+                new Vector3(1.10f, 1.65f, 1.15f),
+                new Vector3(0.0f, 18.0f, 0.0f),
+                dielectricMesh,
+                dielectric);
         }
 
         private static void BuildEmissionLighting(
@@ -608,6 +720,7 @@ namespace VividRP.Editor.Tools
             EnsureFolder("Assets", "Scenes");
             EnsureFolder("Assets/Scenes", "CornellBox");
             EnsureFolder(SceneFolder, "Materials");
+            EnsureFolder(SceneFolder, "Meshes");
 
             white = null;
             red = null;
@@ -767,6 +880,40 @@ namespace VividRP.Editor.Tools
             return material;
         }
 
+        private static Material CreateOrUpdateDielectricBoxMaterial(
+            string path,
+            Shader shader)
+        {
+            var material = CreateOrUpdateMaterial(
+                path,
+                shader,
+                new Color(0.95f, 0.95f, 0.94f, 1.0f),
+                0.0f,
+                0.72f,
+                Color.black);
+
+            Undo.RecordObject(
+                material,
+                "Configure Cornell Box frosted dielectric");
+            material.SetFloat("_Surface", 0.0f);
+            material.SetFloat("_Cull", 0.0f);
+            material.SetFloat("_ThinWalledTransmission", 1.0f);
+            material.SetFloat("_TransmissionWeight", 0.65f);
+            material.SetTexture("_TransmissionMap", null);
+            material.SetColor(
+                "_TransmissionColor",
+                new Color(0.985f, 0.995f, 1.0f, 1.0f));
+            material.SetFloat("_TransmissionDepth", 0.0f);
+            material.SetColor("_TransmissionScatter", Color.black);
+            material.SetFloat("_TransmissionScatterAnisotropy", 0.0f);
+            material.SetFloat("_SpecularIOR", 1.46f);
+            StandardLitMaterialUtility.SetupMaterial(material, null, false);
+
+            EditorUtility.SetDirty(material);
+            AssetDatabase.SaveAssetIfDirty(material);
+            return material;
+        }
+
         private static Texture2D GetOrCreateWhiteTexture()
         {
             var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(
@@ -790,6 +937,112 @@ namespace VividRP.Editor.Tools
             }
 
             return texture;
+        }
+
+        private static Mesh CreateOrUpdateCuboidMesh(
+            string path,
+            Vector3 size)
+        {
+            var mesh = AssetDatabase.LoadAssetAtPath<Mesh>(path);
+            if (mesh == null)
+            {
+                mesh = new Mesh
+                {
+                    name = System.IO.Path.GetFileNameWithoutExtension(path)
+                };
+                AssetDatabase.CreateAsset(mesh, path);
+            }
+            else
+            {
+                Undo.RecordObject(mesh, "Configure Cornell Box cuboid mesh");
+                mesh.Clear();
+            }
+
+            var half = size * 0.5f;
+            var x = half.x;
+            var y = half.y;
+            var z = half.z;
+            mesh.vertices = new[]
+            {
+                new Vector3(-x, -y, -z), new Vector3(-x, y, -z),
+                new Vector3(x, y, -z), new Vector3(x, -y, -z),
+                new Vector3(-x, -y, z), new Vector3(x, -y, z),
+                new Vector3(x, y, z), new Vector3(-x, y, z),
+                new Vector3(-x, -y, z), new Vector3(-x, y, z),
+                new Vector3(-x, y, -z), new Vector3(-x, -y, -z),
+                new Vector3(x, -y, -z), new Vector3(x, y, -z),
+                new Vector3(x, y, z), new Vector3(x, -y, z),
+                new Vector3(-x, y, -z), new Vector3(-x, y, z),
+                new Vector3(x, y, z), new Vector3(x, y, -z),
+                new Vector3(-x, -y, z), new Vector3(-x, -y, -z),
+                new Vector3(x, -y, -z), new Vector3(x, -y, z)
+            };
+            mesh.normals = new[]
+            {
+                Vector3.back, Vector3.back, Vector3.back, Vector3.back,
+                Vector3.forward, Vector3.forward, Vector3.forward,
+                Vector3.forward,
+                Vector3.left, Vector3.left, Vector3.left, Vector3.left,
+                Vector3.right, Vector3.right, Vector3.right, Vector3.right,
+                Vector3.up, Vector3.up, Vector3.up, Vector3.up,
+                Vector3.down, Vector3.down, Vector3.down, Vector3.down
+            };
+            mesh.uv = new[]
+            {
+                Vector2.zero, Vector2.up, Vector2.one, Vector2.right,
+                Vector2.zero, Vector2.right, Vector2.one, Vector2.up,
+                Vector2.zero, Vector2.up, Vector2.one, Vector2.right,
+                Vector2.zero, Vector2.up, Vector2.one, Vector2.right,
+                Vector2.zero, Vector2.up, Vector2.one, Vector2.right,
+                Vector2.zero, Vector2.up, Vector2.one, Vector2.right
+            };
+            mesh.triangles = new[]
+            {
+                0, 1, 2, 0, 2, 3,
+                4, 5, 6, 4, 6, 7,
+                8, 9, 10, 8, 10, 11,
+                12, 13, 14, 12, 14, 15,
+                16, 17, 18, 16, 18, 19,
+                20, 21, 22, 20, 22, 23
+            };
+            mesh.RecalculateTangents();
+            mesh.RecalculateBounds();
+            mesh.UploadMeshData(false);
+
+            EditorUtility.SetDirty(mesh);
+            AssetDatabase.SaveAssetIfDirty(mesh);
+            return mesh;
+        }
+
+        private static GameObject CreateMeshObject(
+            string name,
+            Transform parent,
+            Vector3 localPosition,
+            Vector3 localEulerAngles,
+            Mesh mesh,
+            Material material)
+        {
+            var gameObject = NewObject(name);
+            gameObject.transform.SetParent(parent, false);
+            gameObject.transform.localPosition = localPosition;
+            gameObject.transform.localEulerAngles = localEulerAngles;
+            gameObject.transform.localScale = Vector3.one;
+
+            var filter = gameObject.AddComponent<MeshFilter>();
+            filter.sharedMesh = mesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            renderer.sharedMaterial = material;
+            renderer.shadowCastingMode = ShadowCastingMode.On;
+            renderer.receiveShadows = true;
+            renderer.motionVectorGenerationMode =
+                MotionVectorGenerationMode.ForceNoMotion;
+
+            GameObjectUtility.SetStaticEditorFlags(
+                gameObject,
+                StaticEditorFlags.OccluderStatic
+                | StaticEditorFlags.OccludeeStatic
+                | StaticEditorFlags.ReflectionProbeStatic);
+            return gameObject;
         }
 
         private static GameObject CreateCube(

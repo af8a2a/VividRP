@@ -99,6 +99,44 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void RequestPolicy_RequiresConvergenceAndKeepsCompletedResultStable()
+        {
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .HasReachedSampleTarget(true, 31ul, 32),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .HasReachedSampleTarget(true, 32ul, 32),
+                Is.True);
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .HasReachedSampleTarget(true, 33ul, 32),
+                Is.True);
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .HasReachedSampleTarget(false, 32ul, 32),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .HasReachedSampleTarget(true, 32ul, 0),
+                Is.False);
+
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .ShouldBeginRequest(false, false),
+                Is.True);
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .ShouldBeginRequest(true, false),
+                Is.False);
+            Assert.That(
+                ReferencedPathTracingDenoiserRequestPolicy
+                    .ShouldBeginRequest(false, true),
+                Is.False);
+        }
+
+        [Test]
         public void Prepare_ResizesOutputAndInvalidatesBackendWhenCameraSignatureChanges()
         {
             var cameraObject = new GameObject("ReferencedPathTracingDenoisingPassTests.Camera");
@@ -118,6 +156,8 @@ namespace VividRP.Editor.Tests
                 pathTracingData.isValid = true;
                 pathTracingData.integratorSignature = 11ul;
                 pathTracingData.frameSignature = 22ul;
+                pathTracingData.targetSampleCount = 32;
+                pathTracingData.accumulatedSampleCount = 1ul;
 
                 pass.Prepare(frameData);
 
@@ -141,6 +181,120 @@ namespace VividRP.Editor.Tests
                 pathTracingData.frameSignature++;
                 pass.Prepare(frameData);
                 Assert.That(backend.InvalidationCount, Is.EqualTo(3));
+
+                pass.Dispose();
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void Prepare_GatesDenoisingAndInvalidatesWhenAccumulationRestarts()
+        {
+            var cameraObject = new GameObject(
+                "ReferencedPathTracingDenoisingPassTests.ConvergenceCamera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var backend = new TestBackend();
+
+            try
+            {
+                var pass = new ReferencedPathTracingDenoisingPass(() => backend);
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.SetCamera(camera);
+                cameraData.actualWidth = 320;
+                cameraData.actualHeight = 180;
+                cameraData.frameIndex = 10;
+                var pathTracingData =
+                    frameData.GetOrCreate<VividReferencedPathTracingData>();
+                pathTracingData.isValid = true;
+                pathTracingData.integratorSignature = 101ul;
+                pathTracingData.frameSignature = 202ul;
+                pathTracingData.targetSampleCount = 8;
+                pathTracingData.accumulatedSampleCount = 7ul;
+
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.False);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(1));
+
+                pathTracingData.accumulatedSampleCount = 8ul;
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.True);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(1));
+
+                pathTracingData.accumulatedSampleCount = 9ul;
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.True);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(1));
+
+                pathTracingData.accumulatedSampleCount = 1ul;
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.False);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(2));
+
+                pathTracingData.targetSampleCount = 16;
+                pathTracingData.accumulatedSampleCount = 8ul;
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.False);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(3));
+
+                pathTracingData.accumulatedSampleCount = 16ul;
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.True);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(3));
+
+                pathTracingData.Reset();
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.False);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(4));
+
+                pass.Prepare(frameData);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(4));
+
+                pass.Dispose();
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(cameraObject);
+            }
+        }
+
+        [Test]
+        public void Prepare_DetectsOneSampleAccumulationRestart()
+        {
+            var cameraObject = new GameObject(
+                "ReferencedPathTracingDenoisingPassTests.OneSampleCamera");
+            var camera = cameraObject.AddComponent<Camera>();
+            var backend = new TestBackend();
+
+            try
+            {
+                var pass = new ReferencedPathTracingDenoisingPass(() => backend);
+                var frameData = new ContextContainer();
+                var cameraData = frameData.GetOrCreate<VividCameraData>();
+                cameraData.SetCamera(camera);
+                cameraData.actualWidth = 64;
+                cameraData.actualHeight = 64;
+                cameraData.frameIndex = 20;
+                var pathTracingData =
+                    frameData.GetOrCreate<VividReferencedPathTracingData>();
+                pathTracingData.isValid = true;
+                pathTracingData.integratorSignature = 303ul;
+                pathTracingData.frameSignature = 404ul;
+                pathTracingData.targetSampleCount = 1;
+                pathTracingData.accumulatedSampleCount = 1ul;
+                pathTracingData.sampleIndex = 0;
+
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.True);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(1));
+
+                cameraData.frameIndex++;
+                pass.Prepare(frameData);
+                Assert.That(GetField<bool>(pass, "m_IsDenoisingReady"), Is.True);
+                Assert.That(backend.InvalidationCount, Is.EqualTo(2));
 
                 pass.Dispose();
             }

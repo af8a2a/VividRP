@@ -25,6 +25,26 @@ namespace VividRP.Runtime.RenderPass.Core
             int height);
     }
 
+    internal static class ReferencedPathTracingDenoiserRequestPolicy
+    {
+        internal static bool HasReachedSampleTarget(
+            bool hasValidPathTracingData,
+            ulong accumulatedSampleCount,
+            int targetSampleCount)
+        {
+            return hasValidPathTracingData
+                && targetSampleCount > 0
+                && accumulatedSampleCount >= (ulong)targetSampleCount;
+        }
+
+        internal static bool ShouldBeginRequest(
+            bool requestActive,
+            bool hasValidResult)
+        {
+            return !requestActive && !hasValidResult;
+        }
+    }
+
     internal static class ReferencedPathTracingDenoiserBackendFactory
     {
 #if VIVIDRP_HAS_UNITY_DENOISING && (UNITY_EDITOR || UNITY_STANDALONE)

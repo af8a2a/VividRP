@@ -1141,6 +1141,8 @@ namespace VividRP.Runtime.RenderPass.Core
             pathTracingData.frameSignature = frameSignature;
             pathTracingData.integratorSignature =
                 effectiveIntegratorSignature;
+            pathTracingData.targetSampleCount =
+                m_IntegratorState.targetSampleCount;
             pathTracingData.accumulatedSampleCount = 0;
             pathTracingData.mainLightInDenoiserSignals =
                 m_HasFiniteDirectionalLight;

@@ -66,7 +66,10 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 CompleteFinishedRequest(commandBuffer);
 
-                if (!m_RequestActive)
+                if (ReferencedPathTracingDenoiserRequestPolicy.ShouldBeginRequest(
+                        m_RequestActive,
+                        m_HasValidResult))
+                {
                     BeginRequest(
                         commandBuffer,
                         radiance,
@@ -74,6 +77,7 @@ namespace VividRP.Runtime.RenderPass.Core
                         normal,
                         width,
                         height);
+                }
 
                 if (!m_HasValidResult
                     || m_ResultTexture == null

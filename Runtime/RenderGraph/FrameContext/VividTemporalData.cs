@@ -41,6 +41,7 @@ namespace VividRP.Runtime
         internal int samplingContractVersion;
         internal ulong frameSignature;
         internal ulong integratorSignature;
+        internal int targetSampleCount;
         internal ulong accumulatedSampleCount;
         internal bool mainLightInDenoiserSignals;
         internal bool physicalCameraDofEnabled;
@@ -54,6 +55,7 @@ namespace VividRP.Runtime
             samplingContractVersion = 0;
             frameSignature = 0;
             integratorSignature = 0;
+            targetSampleCount = 0;
             accumulatedSampleCount = 0;
             mainLightInDenoiserSignals = false;
             physicalCameraDofEnabled = false;

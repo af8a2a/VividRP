@@ -1,5 +1,6 @@
 using UnityEditor;
 using UnityEditor.SceneManagement;
+using UnityEditor.SceneTemplate;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
@@ -16,6 +17,8 @@ namespace VividRP.Editor.Tools
             SceneFolder + "/BoxScene_PreCodex_Backup.unity";
         private const string ProfilePath =
             SceneFolder + "/CornellBox_PathTracing_Profile.asset";
+        private const string SceneTemplatePath =
+            SceneFolder + "/CornellBox_PathTracing.scenetemplate";
         private const string WhiteTexturePath =
             MaterialFolder + "/CB_EmissionWhite.asset";
         private const string HdriPath =
@@ -89,12 +92,108 @@ namespace VividRP.Editor.Tools
                 return;
             }
 
+            CreateOrUpdateSceneTemplate();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log(
                 "[VividRP] Built Cornell Box path-tracing scene. "
                 + "Lighting uses HDRI and a StandardLit emissive mesh; "
                 + "the scene contains no Unity Light components.");
+        }
+
+        [MenuItem("VividRP/Samples/Create Cornell Box Scene Template")]
+        private static void CreateSceneTemplate()
+        {
+            CreateOrUpdateSceneTemplate();
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+        }
+
+        private static void CreateOrUpdateSceneTemplate()
+        {
+            var sceneAsset = AssetDatabase.LoadAssetAtPath<SceneAsset>(ScenePath);
+            if (sceneAsset == null)
+            {
+                Debug.LogError(
+                    $"[VividRP] Cornell Box source scene was not found: "
+                    + ScenePath);
+                return;
+            }
+
+            var sceneTemplate =
+                AssetDatabase.LoadAssetAtPath<SceneTemplateAsset>(
+                    SceneTemplatePath);
+            if (sceneTemplate == null)
+            {
+                sceneTemplate = SceneTemplateService.CreateTemplateFromScene(
+                    sceneAsset,
+                    SceneTemplatePath);
+            }
+            else
+            {
+                Undo.RecordObject(
+                    sceneTemplate,
+                    "Refresh Cornell Box scene template");
+                RefreshTemplateDependencies(sceneTemplate, sceneAsset);
+            }
+
+            sceneTemplate.templateScene = sceneAsset;
+            sceneTemplate.templateName = "Cornell Box Path Tracing (VividRP)";
+            sceneTemplate.description =
+                "Reference Cornell Box for VividRP path-tracing development. "
+                + "Uses StandardLit primitive geometry, HDRI importance "
+                + "sampling, a mesh emitter, deterministic accumulation, "
+                + "automatic exposure, and no Unity Light components.";
+            sceneTemplate.templatePipeline =
+                AssetDatabase.LoadAssetAtPath<MonoScript>(
+                    "Packages/com.vivid.render-pipelines/Editor/SceneTemplates/"
+                    + "VividBasicScenePipeline.cs");
+            sceneTemplate.addToDefaults = false;
+
+            for (var index = 0;
+                 index < sceneTemplate.dependencies.Length;
+                 index++)
+            {
+                var dependency = sceneTemplate.dependencies[index];
+                dependency.instantiationMode =
+                    TemplateInstantiationMode.Reference;
+                sceneTemplate.dependencies[index] = dependency;
+            }
+
+            EditorUtility.SetDirty(sceneTemplate);
+            AssetDatabase.SaveAssetIfDirty(sceneTemplate);
+            Debug.Log(
+                $"[VividRP] Created or updated Cornell Box Scene Template: "
+                + SceneTemplatePath);
+        }
+
+        private static void RefreshTemplateDependencies(
+            SceneTemplateAsset destination,
+            SceneAsset sceneAsset)
+        {
+            var temporaryPath = AssetDatabase.GenerateUniqueAssetPath(
+                SceneFolder + "/CornellBox_PathTracing_Temporary.scenetemplate");
+            var generated = SceneTemplateService.CreateTemplateFromScene(
+                sceneAsset,
+                temporaryPath);
+
+            var dependencies =
+                new DependencyInfo[generated.dependencies.Length];
+            for (var index = 0;
+                 index < generated.dependencies.Length;
+                 index++)
+            {
+                dependencies[index] = new DependencyInfo
+                {
+                    dependency = generated.dependencies[index].dependency,
+                    instantiationMode =
+                        TemplateInstantiationMode.Reference
+                };
+            }
+
+            destination.dependencies = dependencies;
+
+            AssetDatabase.DeleteAsset(temporaryPath);
         }
 
         private static void BuildArchitecture(

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -692,6 +693,201 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    internal static class ReferencedPathTracingSceneSignatureUtility
+    {
+        private static readonly List<Material> s_SharedMaterials = new();
+
+        internal static ulong Resolve()
+        {
+            var renderers = UnityEngine.Object.FindObjectsByType<Renderer>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.InstanceID);
+            var database = VividMeshletRendererDatabase.instance;
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                Compute(renderers));
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                Compute(
+                    database?.rendererData,
+                    database?.rendererResources));
+            return hash;
+        }
+
+        internal static ulong Compute(
+            IReadOnlyList<Renderer> renderers)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            var rendererCount = renderers?.Count ?? 0;
+            var supportedRendererCount = 0;
+            for (var rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                if (TryResolveMesh(renderers[rendererIndex], out _))
+                    supportedRendererCount++;
+            }
+
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                supportedRendererCount);
+
+            for (var rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                var renderer = renderers[rendererIndex];
+                if (!TryResolveMesh(renderer, out var mesh))
+                    continue;
+
+                var gameObject = renderer.gameObject;
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(renderer.GetEntityId()));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    renderer.enabled);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    gameObject != null && gameObject.activeInHierarchy);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    renderer.forceRenderingOff);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    gameObject != null ? gameObject.layer : 0);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (ulong)renderer.renderingLayerMask);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)renderer.shadowCastingMode);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)renderer.rayTracingMode);
+                AddMatrix(ref hash, renderer.localToWorldMatrix);
+
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(mesh.GetEntityId()));
+
+                s_SharedMaterials.Clear();
+                renderer.GetSharedMaterials(s_SharedMaterials);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    s_SharedMaterials.Count);
+                for (var materialIndex = 0;
+                     materialIndex < s_SharedMaterials.Count;
+                     materialIndex++)
+                {
+                    AddMaterial(
+                        ref hash,
+                        s_SharedMaterials[materialIndex]);
+                }
+            }
+
+            s_SharedMaterials.Clear();
+            return hash;
+        }
+
+        private static bool TryResolveMesh(
+            Renderer renderer,
+            out Mesh mesh)
+        {
+            mesh = null;
+            if (renderer == null)
+                return false;
+
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer)
+                mesh = skinnedMeshRenderer.sharedMesh;
+            else if (renderer is MeshRenderer
+                && renderer.TryGetComponent<MeshFilter>(out var meshFilter))
+                mesh = meshFilter.sharedMesh;
+
+            return mesh != null;
+        }
+
+        internal static ulong Compute(
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData,
+            IReadOnlyList<VividMeshletRendererResources> rendererResources)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            var rendererCount = rendererData?.Count ?? 0;
+            ReferencedPathTracingStableHash.Add(ref hash, rendererCount);
+
+            for (var rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                var data = rendererData[rendererIndex];
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(data.meshletRendererEntityId));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(data.sourceMeshEntityId));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (ulong)data.renderingLayerMask);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    unchecked((int)data.flags));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)data.shadowCastingMode);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    data.subMeshCount);
+                AddMatrix(ref hash, data.objectToWorldMatrix);
+
+                if (rendererResources == null
+                    || rendererIndex >= rendererResources.Count)
+                {
+                    ReferencedPathTracingStableHash.Add(ref hash, 0);
+                    continue;
+                }
+
+                var materials = rendererResources[rendererIndex]
+                    .SharedMaterials;
+                var materialCount = materials?.Length ?? 0;
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    materialCount);
+                for (var materialIndex = 0;
+                     materialIndex < materialCount;
+                     materialIndex++)
+                {
+                    AddMaterial(ref hash, materials[materialIndex]);
+                }
+            }
+
+            return hash;
+        }
+
+        private static void AddMaterial(
+            ref ulong hash,
+            Material material)
+        {
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                material != null
+                    ? EntityId.ToULong(material.GetEntityId())
+                    : EntityId.ToULong(EntityId.None));
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                material != null ? material.ComputeCRC() : 0);
+        }
+
+        private static void AddMatrix(
+            ref ulong hash,
+            Matrix4x4 matrix)
+        {
+            for (var index = 0; index < 16; index++)
+                ReferencedPathTracingStableHash.Add(ref hash, matrix[index]);
+        }
+    }
+
     internal static class ReferencedPathTracingFrameSignatureUtility
     {
         internal static ulong Compute(
@@ -731,6 +927,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 physicalCameraState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSceneSignatureUtility.Resolve());
 
             if (cameraData != null)
             {
@@ -783,6 +982,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool resetRequested;
             internal int lastRenderFrameIndex = -1;
             internal uint sampleIndex;
+            internal uint maximumSampleCount;
             internal ulong frameSignature;
 
             public override void Dispose()
@@ -791,6 +991,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 resetRequested = false;
                 lastRenderFrameIndex = -1;
                 sampleIndex = 0;
+                maximumSampleCount = 0;
                 frameSignature = 0;
             }
         }
@@ -802,22 +1003,25 @@ namespace VividRP.Runtime.RenderPass.Core
             Camera camera,
             int renderFrameIndex,
             ulong frameSignature,
-            bool isFirstFrame)
+            bool isFirstFrame,
+            uint maximumSampleCount = uint.MaxValue)
         {
             if (camera == null)
                 return 0;
 
+            maximumSampleCount = Math.Max(1u, maximumSampleCount);
             var state = s_States.GetOrCreateBase(camera);
             if (!state.hasSignature
                 || state.resetRequested
                 || state.frameSignature != frameSignature
+                || state.maximumSampleCount != maximumSampleCount
                 || isFirstFrame)
             {
                 state.sampleIndex = 0;
                 state.resetRequested = false;
             }
             else if (state.lastRenderFrameIndex != renderFrameIndex
-                && state.sampleIndex < uint.MaxValue)
+                && state.sampleIndex < maximumSampleCount)
             {
                 state.sampleIndex++;
             }
@@ -825,6 +1029,7 @@ namespace VividRP.Runtime.RenderPass.Core
             state.hasSignature = true;
             state.lastRenderFrameIndex = renderFrameIndex;
             state.frameSignature = frameSignature;
+            state.maximumSampleCount = maximumSampleCount;
             s_States.PurgeDestroyedCameras();
             return state.sampleIndex;
         }

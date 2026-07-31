@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -333,6 +334,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private bool m_ShaderExecutionReorderingWarningIssued;
         private string m_ShaderExecutionReorderingFailureReason;
         private bool m_ShouldSkipExecution;
+        private bool m_ShouldRenderSample;
         private int m_Width = 1;
         private int m_Height = 1;
         private Vector4 m_CameraPositionWS;
@@ -527,6 +529,7 @@ namespace VividRP.Runtime.RenderPass.Core
             if (m_ShouldSkipExecution)
             {
                 pathTracingData.Reset();
+                m_ShouldRenderSample = false;
                 m_CameraPositionWS = Vector4.zero;
                 m_PixelCoordToViewDirWS = Matrix4x4.identity;
                 m_WorldToView = Matrix4x4.identity;
@@ -577,6 +580,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Record(UnsafePassContext context)
         {
             if (m_ShouldSkipExecution
+                || !m_ShouldRenderSample
                 || !m_SupportsRayTracing
                 || m_RayTracingShader == null
                 || m_SceneAccelerationStructure == null
@@ -764,6 +768,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShaderExecutionReorderingWarningIssued = false;
             m_ShaderExecutionReorderingFailureReason = null;
             m_ShouldSkipExecution = false;
+            m_ShouldRenderSample = false;
             m_Width = 1;
             m_Height = 1;
             m_CameraPositionWS = Vector4.zero;
@@ -1124,7 +1129,10 @@ namespace VividRP.Runtime.RenderPass.Core
                     cameraData.camera,
                     renderFrameIndex,
                     frameSignature,
-                    temporalData == null || temporalData.isFirstFrame);
+                    temporalData == null || temporalData.isFirstFrame,
+                    (uint)m_IntegratorState.targetSampleCount);
+            m_ShouldRenderSample = sampleIndex
+                < (uint)m_IntegratorState.targetSampleCount;
 
             m_FrameIndex = unchecked((int)sampleIndex);
             m_Seed = m_IntegratorState.deterministicSampling
@@ -1143,7 +1151,11 @@ namespace VividRP.Runtime.RenderPass.Core
                 effectiveIntegratorSignature;
             pathTracingData.targetSampleCount =
                 m_IntegratorState.targetSampleCount;
-            pathTracingData.accumulatedSampleCount = 0;
+            pathTracingData.accumulatedSampleCount = Math.Min(
+                (ulong)sampleIndex,
+                (ulong)m_IntegratorState.targetSampleCount);
+            pathTracingData.shouldRenderSample = m_ShouldRenderSample;
+            pathTracingData.isConverged = !m_ShouldRenderSample;
             pathTracingData.mainLightInDenoiserSignals =
                 m_HasFiniteDirectionalLight;
             pathTracingData.physicalCameraDofEnabled =

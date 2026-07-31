@@ -43,6 +43,8 @@ namespace VividRP.Runtime
         internal ulong integratorSignature;
         internal int targetSampleCount;
         internal ulong accumulatedSampleCount;
+        internal bool shouldRenderSample;
+        internal bool isConverged;
         internal bool mainLightInDenoiserSignals;
         internal bool physicalCameraDofEnabled;
 
@@ -57,6 +59,8 @@ namespace VividRP.Runtime
             integratorSignature = 0;
             targetSampleCount = 0;
             accumulatedSampleCount = 0;
+            shouldRenderSample = false;
+            isConverged = false;
             mainLightInDenoiserSignals = false;
             physicalCameraDofEnabled = false;
         }

@@ -227,8 +227,8 @@ namespace VividRP.Runtime
         public BoolParameter enableShaderExecutionReordering = new(false);
 
         [Tooltip(
-            "Target accumulated samples used by canonical capture tooling and convergence-gated " +
-            "Open Image Denoise. Interactive accumulation remains unbounded.")]
+            "Maximum accumulated samples for reference path tracing and canonical capture. " +
+            "Rendering stops at this count and convergence-gated Open Image Denoise runs once.")]
         public ClampedIntParameter targetSampleCount =
             new(2048, 1, MaximumTargetSampleCount);
 

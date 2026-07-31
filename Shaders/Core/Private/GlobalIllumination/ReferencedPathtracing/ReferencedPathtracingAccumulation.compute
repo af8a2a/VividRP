@@ -1,6 +1,7 @@
 #pragma kernel ReferencedPathTracingAccumulation
 #pragma target 5.0
 
+#include "Packages/com.unity.render-pipelines.core/ShaderLibrary/Color.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/AutoExposure.hlsl"
 
 Texture2D<float4> _ReferencedPathTracingSampleRadiance;
@@ -8,10 +9,36 @@ Texture2D<float4> _ReferencedPathTracingHistoryRadiance;
 RWTexture2D<float4> _ReferencedPathTracingHistoryWrite;
 RWTexture2D<float4> _ReferencedPathTracingResolvedColor;
 
-// x = 1 / accumulated sample count, y = history is valid.
+// x = 1 / accumulated sample count, y = history is valid, z = preserve converged history.
 float4 _ReferencedPathTracingAccumulationParameters;
+// x = accumulated sample count, y = target sample count.
+float4 _ReferencedPathTracingProgressParameters;
 // xy = render dimensions, zw = inverse render dimensions.
 float4 _ReferencedPathTracingScreenSize;
+
+void AddConvergenceCue(uint2 pixelCoord, uint sampleCount, uint targetSampleCount, inout float3 color)
+{
+    if (targetSampleCount <= 1 || sampleCount >= targetSampleCount)
+        return;
+
+    uint width = (uint)_ReferencedPathTracingScreenSize.x;
+    uint height = (uint)_ReferencedPathTracingScreenSize.y;
+    uint barHeight = max(4u, (uint)ceil(height * 0.005));
+    float progress = (float)sampleCount / targetSampleCount;
+    if (pixelCoord.y >= barHeight || (float)pixelCoord.x / width > progress)
+        return;
+
+    float luminance = Luminance(color);
+    if (luminance > 1.0)
+    {
+        color /= luminance;
+        luminance = 1.0;
+    }
+
+    color += luminance > 0.5
+        ? -0.5 * luminance
+        : 0.05 + 0.5 * luminance;
+}
 
 [numthreads(8, 8, 1)]
 void ReferencedPathTracingAccumulation(uint3 dispatchThreadId : SV_DispatchThreadID)
@@ -21,24 +48,41 @@ void ReferencedPathTracingAccumulation(uint3 dispatchThreadId : SV_DispatchThrea
     if (any(pixelCoord >= dimensions))
         return;
 
-    float4 currentSample = _ReferencedPathTracingSampleRadiance[pixelCoord];
-    float3 accumulatedRadiance = currentSample.rgb;
-    if (_ReferencedPathTracingAccumulationParameters.y > 0.5)
+    bool useHistory = _ReferencedPathTracingAccumulationParameters.y > 0.5;
+    bool preserveConvergedHistory = _ReferencedPathTracingAccumulationParameters.z > 0.5;
+    float4 sceneLinearResult;
+    if (preserveConvergedHistory)
     {
-        float3 previousRadiance = _ReferencedPathTracingHistoryRadiance[pixelCoord].rgb;
-        accumulatedRadiance = previousRadiance
-            + (currentSample.rgb - previousRadiance) * _ReferencedPathTracingAccumulationParameters.x;
+        sceneLinearResult = _ReferencedPathTracingHistoryRadiance[pixelCoord];
+    }
+    else
+    {
+        float4 currentSample = _ReferencedPathTracingSampleRadiance[pixelCoord];
+        float3 accumulatedRadiance = currentSample.rgb;
+        if (useHistory)
+        {
+            float3 previousRadiance = _ReferencedPathTracingHistoryRadiance[pixelCoord].rgb;
+            accumulatedRadiance = previousRadiance
+                + (currentSample.rgb - previousRadiance) * _ReferencedPathTracingAccumulationParameters.x;
+        }
+
+        sceneLinearResult = float4(accumulatedRadiance, currentSample.a);
     }
 
     // Accumulation stays in absolute scene-linear radiance. Applying camera exposure to history
     // would invalidate convergence whenever automatic exposure adapts.
-    float4 sceneLinearResult = float4(accumulatedRadiance, currentSample.a);
     _ReferencedPathTracingHistoryWrite[pixelCoord] = sceneLinearResult;
 
     // VividRP lighting buffers are pre-exposed before auto-exposure metering and FinalBlit.
     // FinalBlit subsequently applies currentExposure / preExposure, so this conversion belongs
     // only on the presentation output.
-    _ReferencedPathTracingResolvedColor[pixelCoord] = float4(
-        VividApplyPreExposure(max(accumulatedRadiance, 0.0)),
-        currentSample.a);
+    float4 presentationResult = float4(
+        VividApplyPreExposure(max(sceneLinearResult.rgb, 0.0)),
+        sceneLinearResult.a);
+    AddConvergenceCue(
+        pixelCoord,
+        (uint)_ReferencedPathTracingProgressParameters.x,
+        (uint)_ReferencedPathTracingProgressParameters.y,
+        presentationResult.rgb);
+    _ReferencedPathTracingResolvedColor[pixelCoord] = presentationResult;
 }

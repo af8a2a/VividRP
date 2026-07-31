@@ -11,6 +11,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
@@ -1870,6 +1871,128 @@ namespace VividRP.Editor.Tests
             {
                 ReferencedPathTracingSampleSequence.Dispose();
                 UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void SampleSequence_StopsAtTargetAndRestartsWhenTargetChanges()
+        {
+            var gameObject =
+                new GameObject("ReferencedPathTracingFiniteSequenceTests.Camera");
+            var camera = gameObject.AddComponent<Camera>();
+
+            try
+            {
+                var first = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    200,
+                    21ul,
+                    true,
+                    2u);
+                var second = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    201,
+                    21ul,
+                    false,
+                    2u);
+                var converged = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    202,
+                    21ul,
+                    false,
+                    2u);
+                var remainsConverged = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    203,
+                    21ul,
+                    false,
+                    2u);
+                var changedTarget = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    204,
+                    21ul,
+                    false,
+                    3u);
+
+                Assert.That(first, Is.Zero);
+                Assert.That(second, Is.EqualTo(1u));
+                Assert.That(converged, Is.EqualTo(2u));
+                Assert.That(remainsConverged, Is.EqualTo(2u));
+                Assert.That(changedTarget, Is.Zero);
+            }
+            finally
+            {
+                ReferencedPathTracingSampleSequence.Dispose();
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void SceneSignature_TracksMeshletRendererTransformChanges()
+        {
+            var rendererData = new[]
+            {
+                new VividMeshletRendererRenderData
+                {
+                    meshletRendererEntityId = EntityId.FromULong(1ul),
+                    sourceMeshEntityId = EntityId.FromULong(2ul),
+                    objectToWorldMatrix = Matrix4x4.identity,
+                    renderingLayerMask = uint.MaxValue,
+                    flags = VividMeshletRendererFlags.ActiveInHierarchy
+                        | VividMeshletRendererFlags.Enabled
+                        | VividMeshletRendererFlags.Valid,
+                    shadowCastingMode = ShadowCastingMode.On,
+                    subMeshCount = 1
+                }
+            };
+            var rendererResources = new[]
+            {
+                new VividMeshletRendererResources(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null)
+            };
+
+            var original = ReferencedPathTracingSceneSignatureUtility.Compute(
+                rendererData,
+                rendererResources);
+            rendererData[0].objectToWorldMatrix =
+                Matrix4x4.Translate(Vector3.right);
+            var moved = ReferencedPathTracingSceneSignatureUtility.Compute(
+                rendererData,
+                rendererResources);
+
+            Assert.That(moved, Is.Not.EqualTo(original));
+        }
+
+        [Test]
+        public void SceneSignature_TracksStandardRendererTransformChanges()
+        {
+            var gameObject = new GameObject(
+                "ReferencedPathTracingSceneSignatureTests.Renderer");
+            var mesh = new Mesh();
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+
+            try
+            {
+                var original =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+                gameObject.transform.position = Vector3.right;
+                var moved =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+
+                Assert.That(moved, Is.Not.EqualTo(original));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+                UnityEngine.Object.DestroyImmediate(mesh);
             }
         }
 

@@ -18,6 +18,8 @@ namespace VividRP.Editor.Tools
             SceneFolder + "/BoxScene_Tier2_Transmission.unity";
         private const string Tier3ScenePath =
             SceneFolder + "/BoxScene_Tier3_DielectricBox.unity";
+        private const string Tier3DragonScenePath =
+            SceneFolder + "/BoxScene_Tier3_DragonAttenuation.unity";
         private const string BackupScenePath =
             SceneFolder + "/BoxScene_PreCodex_Backup.unity";
         private const string Tier1ProfilePath =
@@ -26,16 +28,28 @@ namespace VividRP.Editor.Tools
             SceneFolder + "/CornellBox_Tier2_PathTracing_Profile.asset";
         private const string Tier3ProfilePath =
             SceneFolder + "/CornellBox_Tier3_PathTracing_Profile.asset";
+        private const string Tier3DragonProfilePath =
+            SceneFolder
+            + "/CornellBox_Tier3_DragonAttenuation_Profile.asset";
         private const string Tier1SceneTemplatePath =
             SceneFolder + "/CornellBox_PathTracing.scenetemplate";
         private const string Tier2SceneTemplatePath =
             SceneFolder + "/CornellBox_Tier2_Transmission.scenetemplate";
         private const string Tier3SceneTemplatePath =
             SceneFolder + "/CornellBox_Tier3_DielectricBox.scenetemplate";
+        private const string Tier3DragonSceneTemplatePath =
+            SceneFolder
+            + "/CornellBox_Tier3_DragonAttenuation.scenetemplate";
         private const string WhiteTexturePath =
             MaterialFolder + "/CB_EmissionWhite.asset";
         private const string Tier3DielectricMeshPath =
             MeshFolder + "/CB_Tier3_DielectricTallBox.asset";
+        private const string DragonAttenuationModelPath =
+            "Packages/com.vivid.render-pipelines/Samples/DragonAttenuation/"
+            + "glTF/DragonAttenuation.gltf";
+        private const string DragonAttenuationMaterialPath =
+            "Packages/com.vivid.render-pipelines/Samples/DragonAttenuation/"
+            + "Materials/Dragon with Attenuation VividRP.mat";
         private const string HdriPath =
             "Assets/Scenes/ClassicSponza/Art/Generic/Skies/05-18_Day_D.hdr";
         private const string StandardLitShaderName =
@@ -238,12 +252,79 @@ namespace VividRP.Editor.Tools
                 + "dielectric tall box and color transmission.");
         }
 
+        [MenuItem(
+            "VividRP/Samples/Rebuild Cornell Box Tier 3 - Dragon Attenuation")]
+        private static void RebuildTier3DragonAttenuationScene()
+        {
+            if (!TryCreateSharedMaterials(
+                    out var white,
+                    out var red,
+                    out var green,
+                    out var emission)
+                || !TryLoadDragonAttenuationAssets(
+                    out var dragonModel,
+                    out var dragonMaterial))
+            {
+                return;
+            }
+
+            var scene = EditorSceneManager.NewScene(
+                NewSceneSetup.EmptyScene,
+                NewSceneMode.Single);
+            var sceneRoot = NewObject(
+                "CornellBox_Tier3_DragonAttenuation");
+            BuildArchitecture(sceneRoot.transform, white, red, green);
+            BuildTier3DragonAttenuationProps(
+                sceneRoot.transform,
+                dragonModel,
+                dragonMaterial);
+            BuildEmissionLighting(sceneRoot.transform, emission);
+            BuildCamera(
+                sceneRoot.transform,
+                new Vector3(0.0f, 2.45f, -8.6f),
+                new Vector3(0.0f, 1.65f, 0.70f));
+            BuildGlobalVolume(
+                sceneRoot.transform,
+                Tier3DragonProfilePath,
+                8,
+                8);
+            ConfigureRenderSettings();
+            EnsureHDRPAutoExposureImplementation();
+
+            EditorSceneManager.MarkSceneDirty(scene);
+            if (!EditorSceneManager.SaveScene(scene, Tier3DragonScenePath))
+            {
+                Debug.LogError(
+                    "[VividRP] Failed to save Tier 3 Dragon Attenuation "
+                    + "Cornell Box scene: "
+                    + Tier3DragonScenePath);
+                return;
+            }
+
+            CreateOrUpdateSceneTemplate(
+                Tier3DragonScenePath,
+                Tier3DragonSceneTemplatePath,
+                "Cornell Box Tier 3 - Dragon Attenuation (VividRP)",
+                "Tier 3 VividRP path-tracing reference based on Tier 1. "
+                + "The packaged Khronos DragonAttenuation mesh uses the "
+                + "included Dragon with Attenuation VividRP StandardLit "
+                + "material for solid dielectric absorption and colored "
+                + "transmission. Lighting remains HDRI and emissive-mesh "
+                + "only, with no Unity Light components.");
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log(
+                "[VividRP] Built Cornell Box Tier 3 Dragon Attenuation "
+                + "variant with the packaged Khronos sample asset.");
+        }
+
         [MenuItem("VividRP/Samples/Rebuild Cornell Box Tier Variants")]
         private static void RebuildTierVariants()
         {
             RebuildTier1Scene();
             RebuildTier2Scene();
             RebuildTier3Scene();
+            RebuildTier3DragonAttenuationScene();
         }
 
         [MenuItem("VividRP/Samples/Create Cornell Box Scene Template")]
@@ -275,6 +356,18 @@ namespace VividRP.Editor.Tools
                     "Tier 3 VividRP path-tracing reference based on Tier 1 "
                     + "with a frosted thin-walled dielectric tall box and "
                     + "color transmission.");
+            }
+            if (AssetDatabase.LoadAssetAtPath<SceneAsset>(
+                    Tier3DragonScenePath)
+                != null)
+            {
+                CreateOrUpdateSceneTemplate(
+                    Tier3DragonScenePath,
+                    Tier3DragonSceneTemplatePath,
+                    "Cornell Box Tier 3 - Dragon Attenuation (VividRP)",
+                    "Tier 3 VividRP path-tracing reference based on Tier 1 "
+                    + "with the packaged Khronos DragonAttenuation mesh and "
+                    + "included VividRP solid attenuation material.");
             }
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
@@ -490,6 +583,69 @@ namespace VividRP.Editor.Tools
                 new Vector3(0.0f, 18.0f, 0.0f),
                 dielectricMesh,
                 dielectric);
+        }
+
+        private static void BuildTier3DragonAttenuationProps(
+            Transform root,
+            GameObject dragonModel,
+            Material dragonMaterial)
+        {
+            var props = NewObject(
+                "Tier 3 Props - Khronos Dragon Attenuation");
+            props.transform.SetParent(root, false);
+
+            var modelInstance = PrefabUtility.InstantiatePrefab(
+                dragonModel) as GameObject;
+            if (modelInstance == null)
+                modelInstance = Object.Instantiate(dragonModel);
+
+            if (PrefabUtility.IsPartOfPrefabInstance(modelInstance))
+            {
+                PrefabUtility.UnpackPrefabInstance(
+                    modelInstance,
+                    PrefabUnpackMode.Completely,
+                    InteractionMode.AutomatedAction);
+            }
+            modelInstance.name =
+                "DragonAttenuation - Solid Dielectric IOR 1.50";
+            modelInstance.transform.SetParent(props.transform, false);
+            modelInstance.transform.localPosition =
+                new Vector3(0.0f, 0.842f, 0.70f);
+            modelInstance.transform.localEulerAngles =
+                new Vector3(0.0f, -12.0f, 0.0f);
+            modelInstance.transform.localScale = Vector3.one * 1.15f;
+
+            var backdrop = FindChildByName(
+                modelInstance.transform,
+                "Cloth Backdrop");
+            if (backdrop != null)
+                Object.DestroyImmediate(backdrop.gameObject);
+
+            var dragon = FindChildByName(
+                modelInstance.transform,
+                "Dragon");
+            if (dragon == null)
+            {
+                Debug.LogError(
+                    "[VividRP] DragonAttenuation model does not contain "
+                    + "the expected Dragon child.");
+                return;
+            }
+
+            foreach (var renderer in dragon.GetComponentsInChildren<Renderer>(
+                         true))
+            {
+                renderer.sharedMaterial = dragonMaterial;
+                renderer.shadowCastingMode = ShadowCastingMode.On;
+                renderer.receiveShadows = true;
+                renderer.motionVectorGenerationMode =
+                    MotionVectorGenerationMode.ForceNoMotion;
+                GameObjectUtility.SetStaticEditorFlags(
+                    renderer.gameObject,
+                    StaticEditorFlags.OccluderStatic
+                    | StaticEditorFlags.OccludeeStatic
+                    | StaticEditorFlags.ReflectionProbeStatic);
+            }
         }
 
         private static void BuildEmissionLighting(
@@ -765,6 +921,31 @@ namespace VividRP.Editor.Tools
                 0.0f,
                 new Color(22.0f, 19.5f, 15.0f, 1.0f));
             return true;
+        }
+
+        private static bool TryLoadDragonAttenuationAssets(
+            out GameObject model,
+            out Material material)
+        {
+            model = AssetDatabase.LoadAssetAtPath<GameObject>(
+                DragonAttenuationModelPath);
+            material = AssetDatabase.LoadAssetAtPath<Material>(
+                DragonAttenuationMaterialPath);
+            if (model != null
+                && material != null
+                && material.shader != null
+                && material.shader.name == StandardLitShaderName)
+            {
+                return true;
+            }
+
+            Debug.LogError(
+                "[VividRP] Tier 3 Dragon Attenuation requires "
+                + DragonAttenuationModelPath
+                + " and a StandardLit material at "
+                + DragonAttenuationMaterialPath
+                + ".");
+            return false;
         }
 
         private static Material CreateOrUpdateMaterial(
@@ -1119,6 +1300,19 @@ namespace VividRP.Editor.Tools
         private static GameObject NewObject(string name)
         {
             return new GameObject(name);
+        }
+
+        private static Transform FindChildByName(
+            Transform root,
+            string name)
+        {
+            foreach (var child in root.GetComponentsInChildren<Transform>(true))
+            {
+                if (child.name == name)
+                    return child;
+            }
+
+            return null;
         }
 
         private static void SaveBackupIfNeeded()

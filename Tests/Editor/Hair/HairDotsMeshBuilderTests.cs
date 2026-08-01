@@ -36,6 +36,8 @@ namespace VividRP.Editor.Tests
                 var normals = mesh.normals;
                 var radii = new List<Vector2>();
                 mesh.GetUVs(1, radii);
+                var previousCenterlines = new List<Vector4>();
+                mesh.GetUVs(2, previousCenterlines);
                 var indices = mesh.triangles;
 
                 for (var triangleIndex = 0;
@@ -58,12 +60,101 @@ namespace VividRP.Editor.Tests
                         recoveredEnd);
                     Assert.That(radii[firstIndex].y, Is.EqualTo(0.0f));
                     Assert.That(radii[lastIndex].y, Is.EqualTo(1.0f));
+                    AssertVectorApproximately(
+                        segment.Start.Position,
+                        previousCenterlines[firstIndex]);
+                    AssertVectorApproximately(
+                        segment.End.Position,
+                        previousCenterlines[lastIndex]);
+                    Assert.That(
+                        previousCenterlines[firstIndex].w,
+                        Is.EqualTo(radii[firstIndex].x).Within(1e-6f));
+                    Assert.That(
+                        previousCenterlines[lastIndex].w,
+                        Is.EqualTo(radii[lastIndex].x).Within(1e-6f));
                 }
             }
             finally
             {
                 UnityEngine.Object.DestroyImmediate(mesh);
             }
+        }
+
+        [Test]
+        public void BuildDynamic_StoresPreviousCenterlineAndRadiusInUv2()
+        {
+            var current = new HairStrandSegment(
+                new HairStrandPoint(
+                    new Vector3(0.5f, 0.0f, 0.0f),
+                    0.12f,
+                    Vector2.zero),
+                new HairStrandPoint(
+                    new Vector3(0.5f, 1.0f, 0.25f),
+                    0.06f,
+                    Vector2.one));
+            var previous = new HairStrandSegment(
+                new HairStrandPoint(
+                    new Vector3(-0.25f, 0.0f, 0.0f),
+                    0.1f,
+                    Vector2.zero),
+                new HairStrandPoint(
+                    new Vector3(-0.1f, 0.9f, -0.2f),
+                    0.04f,
+                    Vector2.one));
+            var mesh = HairDotsMeshBuilder.BuildDynamic(
+                new[] { current },
+                new[] { previous });
+
+            try
+            {
+                var previousCenterlines = new List<Vector4>();
+                mesh.GetUVs(2, previousCenterlines);
+                var indices = mesh.triangles;
+
+                for (var triangleIndex = 0;
+                     triangleIndex
+                        < HairDotsMeshBuilder.TriangleCountPerSegment;
+                     triangleIndex++)
+                {
+                    var firstIndex = indices[triangleIndex * 3];
+                    var lastIndex = indices[triangleIndex * 3 + 2];
+                    AssertVectorApproximately(
+                        previous.Start.Position,
+                        previousCenterlines[firstIndex]);
+                    AssertVectorApproximately(
+                        previous.End.Position,
+                        previousCenterlines[lastIndex]);
+                    Assert.That(
+                        previousCenterlines[firstIndex].w,
+                        Is.EqualTo(
+                                previous.Start.Radius
+                                * HairDotsMeshBuilder.RadiusCompensation)
+                            .Within(1e-6f));
+                    Assert.That(
+                        previousCenterlines[lastIndex].w,
+                        Is.EqualTo(
+                                previous.End.Radius
+                                * HairDotsMeshBuilder.RadiusCompensation)
+                            .Within(1e-6f));
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void BuildDynamic_RejectsMismatchedFrameTopology()
+        {
+            var segment = new HairStrandSegment(
+                new HairStrandPoint(Vector3.zero, 0.1f, Vector2.zero),
+                new HairStrandPoint(Vector3.up, 0.1f, Vector2.one));
+
+            Assert.Throws<ArgumentException>(() =>
+                HairDotsMeshBuilder.BuildDynamic(
+                    new[] { segment },
+                    Array.Empty<HairStrandSegment>()));
         }
 
         [Test]
@@ -129,6 +220,15 @@ namespace VividRP.Editor.Tests
             Assert.That(actual.x, Is.EqualTo(expected.x).Within(1e-5f));
             Assert.That(actual.y, Is.EqualTo(expected.y).Within(1e-5f));
             Assert.That(actual.z, Is.EqualTo(expected.z).Within(1e-5f));
+        }
+
+        private static void AssertVectorApproximately(
+            Vector3 expected,
+            Vector4 actual)
+        {
+            AssertVectorApproximately(
+                expected,
+                new Vector3(actual.x, actual.y, actual.z));
         }
     }
 }

@@ -49,10 +49,11 @@ Hair V1 固定采用以下方案：
 - Raytracing GBuffer payload 支持 material-supplied diffuse/specular albedo；Hair 输出 corrected position、radial normal、longitudinal roughness、base color 和 dielectric F0，StandardLit 保持原推导路径。
 - Hair ShaderLab contract 已增加专用 Inspector，按 Absorption、Scattering、Fiber Interface 和 Emission 分组；保留现有序列化属性名，并由 Editor adapter 统一执行范围、非有限值、枚举、版本和 emissive GI 状态修正。
 - `VividHairMaterialData` 已成为 ShaderLab uniform 与 Chiang/Reference PT/GBuffer 之间的唯一材质边界，三个消费者使用同一份 sanitized material data。
+- DOTS `TEXCOORD2` 已定义 previous centerline/radius contract；Hair GBuffer 按相同 `segmentU` 和径向坐标重建 previous surface position，并通过 material-supplied payload 覆盖 camera-only motion fallback。
 - 增加 validation asset builder，以及 DOTS、sampling、shader import、payload、许可证和 source contract tests。
 - Unity 6000.7 Editor 已确认 Hair shader 包含 2 个 pass 且无 shader compiler message；当前交互式 Editor 正在运行，因此尚未主动启动 batchmode EditMode suite。
 
-Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation assets，完成 raw accumulation、analytic/environment NEE、self-intersection、ReBLUR 和 DLSS-RR 的实际画面与 GPU capture 验证。动态 strand、previous centerline、NRD strand metadata、AABB 和 LSS 仍按后续 milestone 处理。
+Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation assets，完成 raw accumulation、analytic/environment NEE、self-intersection、ReBLUR 和 DLSS-RR 的实际画面与 GPU capture 验证。动态 groom 调度/历史重置、NRD strand metadata、AABB 和 LSS 仍按后续 milestone 处理。
 
 现有实现已经提供以下接入条件：
 
@@ -67,7 +68,7 @@ Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation 
 后续仍缺少：
 
 - validation corpus 的 raw accumulation、lobe reference、melanin/roughness sweep 和 DLSS-RR 实际画面验收。
-- 动态 strand 的 previous centerline position。
+- 动态 groom simulation/importer、拓扑历史管理与调度集成。
 - NRD strand material ID/thickness specialization。
 - 生产 groom importer、LOD/partition 和替代几何后端。
 

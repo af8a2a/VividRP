@@ -7,6 +7,7 @@ struct RaytracingGBufferPayload
     float rayConeSpreadAngle;
 
     float3 positionWS;
+    float3 previousPositionWS;
     float3 faceNormalWS;
     float3 shadingNormalWS;
     float3 baseColor;
@@ -19,6 +20,7 @@ struct RaytracingGBufferPayload
     float metalness;
     float hitDistance;
     uint materialAlbedoValid;
+    uint materialPreviousPositionValid;
     uint hit;
 };
 
@@ -27,6 +29,7 @@ void InitializeRaytracingGBufferPayload(out RaytracingGBufferPayload payload)
     payload.rayConeWidth = 0.0;
     payload.rayConeSpreadAngle = 0.0;
     payload.positionWS = 0.0;
+    payload.previousPositionWS = 0.0;
     payload.faceNormalWS = 0.0;
     payload.shadingNormalWS = float3(0.0, 1.0, 0.0);
     payload.baseColor = 0.0;
@@ -39,6 +42,7 @@ void InitializeRaytracingGBufferPayload(out RaytracingGBufferPayload payload)
     payload.metalness = 0.0;
     payload.hitDistance = 0.0;
     payload.materialAlbedoValid = 0u;
+    payload.materialPreviousPositionValid = 0u;
     payload.hit = 0u;
 }
 

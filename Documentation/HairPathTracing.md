@@ -1,11 +1,11 @@
 # Chiang Hair Path Tracing
 
-VividRP Hair V1 adds a static strand path for the Reference Path Tracer. It uses RTXCR's Chiang near-field BCSDF material implementation with a VividRP-owned DOTS geometry backend.
+VividRP Hair uses RTXCR's Chiang near-field BCSDF material implementation with a VividRP-owned DOTS geometry backend. Static strands form the V1 baseline; the same mesh contract can now carry previous-frame centerlines for deforming-strand motion vectors.
 
 ## Supported Path
 
 - Shader: `VividRP/Material/Hair`
-- Geometry: static DOTS mesh, four triangles per line segment
+- Geometry: DOTS mesh, four triangles per line segment, with optional dynamic frame history
 - Reference material pass: `ReferencedPathtracingDXR`
 - Ray-tracing GBuffer pass: `RaytracingGBufferDXR`
 - Lighting: unified analytic-light and environment NEE, BSDF sampling, multi-bounce transport and MIS
@@ -34,10 +34,19 @@ The validation asset is a small curved, tapered bundle. It is intended for geome
 - `TEXCOORD0.xy`: strand UV
 - `TEXCOORD1.x`: volume-compensated radius
 - `TEXCOORD1.y`: endpoint coordinate, 0 at the start and 1 at the end
+- `TEXCOORD2.xyz`: previous-frame endpoint centerline position in object space
+- `TEXCOORD2.w`: previous-frame volume-compensated radius
 
 Radius scale is applied while building the mesh. Changing only a material property cannot resize DOTS correctly because expanded positions and stored radii must remain synchronized.
 
 The ray-tracing hit shader reconstructs the tapered segment centerline, intersects the analytic tapered body near the committed triangle hit, and outputs corrected position, radial normal, tangent and radius. The next-event and continuation ray origin helpers use the radius to skip the second orthogonal strip when crossing the fiber.
+
+Static builds write the current centerline and radius into `TEXCOORD2`, so
+they retain camera and object-transform motion without a separate asset path.
+Deforming integrations call `HairDotsMeshBuilder.BuildDynamic(current,
+previous, target)` after simulation and before RTAS construction. Current and
+previous arrays must have identical segment ordering and topology. On a
+history reset, teleport, or groom swap, pass current data for both frames.
 
 ## Material Parameters
 
@@ -65,17 +74,27 @@ synchronizes the emissive global-illumination flag.
 
 ## DLSS Ray Reconstruction Guides
 
-The Hair GBuffer closest-hit writes corrected fiber position, radial normal, longitudinal roughness, base color and dielectric F0. Static Hair motion vectors cover camera motion through the existing previous-camera matrices.
+The Hair GBuffer closest-hit writes corrected fiber position, radial normal, longitudinal roughness, base color and dielectric F0.
 
-Dynamic strand deformation is not supported in V1. It requires previous centerline endpoints and a material-supplied previous surface position; using the current position for both frames will cause temporal dragging.
+For motion, the hit shader reconstructs the previous centerline at the current
+`segmentU`, transports the radial surface coordinate into the previous strand
+frame, applies the previous radius, and transforms the result with
+`UNITY_PREV_MATRIX_M`. The GBuffer payload uses that material-supplied position
+for previous clip-space and view-depth calculations. Camera motion, object
+transform, centerline deformation/rotation, and radius changes therefore share
+one motion-vector path.
+
+Animated meshes must participate in RTAS as dynamic geometry, and their vertex
+update must complete before `RTASBuildPass`. The package currently provides the
+frame/mesh contract, not a groom simulation scheduler.
 
 ## Current Limitations
 
-- Static DOTS only
+- Dynamic DOTS requires caller-managed current/previous frames and topology reset
 - No glTF or groom importer
 - No raster lighting or raster shadow pass
 - No far-field Hair BCSDF
-- No dynamic strand motion vectors
+- No built-in groom simulation scheduler
 - No procedural AABB or native LSS backend
 - NRD strand material ID/thickness specialization is not enabled yet
 

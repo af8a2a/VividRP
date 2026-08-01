@@ -18,6 +18,8 @@ void HairRaytracingGBufferClosestHit(
             + geometry.hitDistance * payload.rayConeSpreadAngle,
         0.000001);
     payload.positionWS = geometry.positionWS;
+    payload.previousPositionWS = geometry.previousPositionWS;
+    payload.materialPreviousPositionValid = 1u;
     payload.faceNormalWS = geometry.faceNormalWS;
     payload.shadingNormalWS = geometry.radialNormalWS;
     payload.baseColor = material.baseColor;

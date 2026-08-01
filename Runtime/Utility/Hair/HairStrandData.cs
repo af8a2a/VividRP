@@ -4,7 +4,7 @@ using UnityEngine;
 namespace VividRP.Runtime
 {
     [Serializable]
-    internal struct HairStrandPoint
+    public struct HairStrandPoint
     {
         public Vector3 Position;
         public float Radius;
@@ -19,7 +19,7 @@ namespace VividRP.Runtime
     }
 
     [Serializable]
-    internal struct HairStrandSegment
+    public struct HairStrandSegment
     {
         public HairStrandPoint Start;
         public HairStrandPoint End;

@@ -6,6 +6,7 @@
 #define ATTRIBUTES_NEED_TANGENT
 #define ATTRIBUTES_NEED_TEXCOORD0
 #define ATTRIBUTES_NEED_TEXCOORD1
+#define ATTRIBUTES_NEED_TEXCOORD2
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Raytracing/RayTracingCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Raytracing/RaytracingIntersection.hlsl"
 
@@ -13,6 +14,8 @@ struct VividHairSurfaceGeometry
 {
     float3 positionWS;
     float3 centerlinePositionWS;
+    float3 previousPositionWS;
+    float3 previousCenterlinePositionWS;
     float3 faceNormalWS;
     float3 radialNormalWS;
     float3 tangentWS;
@@ -25,6 +28,11 @@ struct VividHairSurfaceGeometry
 float3 VividHairTransformPositionToWorld(float3 positionOS)
 {
     return mul(ObjectToWorld3x4(), float4(positionOS, 1.0));
+}
+
+float3 VividHairTransformPreviousPositionToWorld(float3 positionOS)
+{
+    return TransformPreviousObjectToWorld(positionOS);
 }
 
 float3 VividHairTransformNormalToWorld(float3 normalOS)
@@ -47,6 +55,81 @@ bool VividHairIsFinite3(float3 value)
     return VividHairIsFiniteScalar(value.x)
         && VividHairIsFiniteScalar(value.y)
         && VividHairIsFiniteScalar(value.z);
+}
+
+void VividHairBuildPerpendicularFrame(
+    float3 tangentOS,
+    out float3 firstAxisOS,
+    out float3 secondAxisOS)
+{
+    tangentOS = normalize(tangentOS);
+    float3 referenceAxis = abs(dot(tangentOS, float3(0.0, 1.0, 0.0)))
+            < 0.999
+        ? float3(0.0, 1.0, 0.0)
+        : float3(1.0, 0.0, 0.0);
+    firstAxisOS = normalize(cross(tangentOS, referenceAxis));
+    secondAxisOS = normalize(cross(tangentOS, firstAxisOS));
+}
+
+float3 VividHairReconstructPreviousSurfacePositionOS(
+    float3 currentPositionOS,
+    float3 currentCenterlinePositionOS,
+    float3 currentSegmentStartOS,
+    float3 currentSegmentEndOS,
+    float3 previousSegmentStartOS,
+    float3 previousSegmentEndOS,
+    float previousRadius,
+    float segmentU)
+{
+    float3 currentTangent = normalize(
+        currentSegmentEndOS - currentSegmentStartOS);
+    float3 previousSegmentVector =
+        previousSegmentEndOS - previousSegmentStartOS;
+    float previousSegmentLength = length(previousSegmentVector);
+    if (previousSegmentLength <= 1e-7)
+        return currentPositionOS;
+
+    float3 previousTangent =
+        previousSegmentVector / previousSegmentLength;
+    float3 currentFirstAxis;
+    float3 currentSecondAxis;
+    VividHairBuildPerpendicularFrame(
+        currentTangent,
+        currentFirstAxis,
+        currentSecondAxis);
+    float3 previousFirstAxis;
+    float3 previousSecondAxis;
+    VividHairBuildPerpendicularFrame(
+        previousTangent,
+        previousFirstAxis,
+        previousSecondAxis);
+
+    float3 currentRadialVector =
+        currentPositionOS - currentCenterlinePositionOS;
+    float radialLength = length(currentRadialVector);
+    float3 currentRadialDirection = radialLength > 1e-7
+        ? currentRadialVector / radialLength
+        : currentFirstAxis;
+    float2 radialCoordinates = float2(
+        dot(currentRadialDirection, currentFirstAxis),
+        dot(currentRadialDirection, currentSecondAxis));
+    float radialCoordinateLength = length(radialCoordinates);
+    radialCoordinates = radialCoordinateLength > 1e-7
+        ? radialCoordinates / radialCoordinateLength
+        : float2(1.0, 0.0);
+
+    float3 previousRadialDirection = normalize(
+        previousFirstAxis * radialCoordinates.x
+        + previousSecondAxis * radialCoordinates.y);
+    float3 previousCenterlinePositionOS = lerp(
+        previousSegmentStartOS,
+        previousSegmentEndOS,
+        saturate(segmentU));
+    float3 previousPositionOS = previousCenterlinePositionOS
+        + previousRadialDirection * max(previousRadius, 1e-7);
+    return VividHairIsFinite3(previousPositionOS)
+        ? previousPositionOS
+        : currentPositionOS;
 }
 
 bool VividHairAcceptConeRoot(
@@ -200,6 +283,9 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
     float4 tangentsOS[3];
     float4 strandUVs[3];
     float4 radiusAndEndpoints[3];
+    float4 previousCenterlineAndRadius[3];
+    bool hasPreviousCenterline =
+        UnityRayTracingHasVertexAttribute(kVertexAttributeTexCoord2);
 
     [unroll]
     for (uint vertex = 0u; vertex < 3u; ++vertex)
@@ -221,6 +307,11 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
             UnityRayTracingHasVertexAttribute(kVertexAttributeTexCoord1)
                 ? kVertexAttributeTexCoord1
                 : kVertexAttributeTexCoord0);
+        previousCenterlineAndRadius[vertex] = hasPreviousCenterline
+            ? UnityRayTracingFetchVertexAttribute4(
+                indices[vertex],
+                kVertexAttributeTexCoord2)
+            : 0.0;
     }
 
     float radius0 = max(radiusAndEndpoints[0].x, 1e-7);
@@ -229,6 +320,18 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
         - offsetNormalsOS[0] * radius0;
     float3 segmentEndOS = positionsOS[2]
         - offsetNormalsOS[2] * radius1;
+    float3 previousSegmentStartOS = hasPreviousCenterline
+        ? previousCenterlineAndRadius[0].xyz
+        : segmentStartOS;
+    float3 previousSegmentEndOS = hasPreviousCenterline
+        ? previousCenterlineAndRadius[2].xyz
+        : segmentEndOS;
+    float previousRadius0 = hasPreviousCenterline
+        ? max(previousCenterlineAndRadius[0].w, 1e-7)
+        : radius0;
+    float previousRadius1 = hasPreviousCenterline
+        ? max(previousCenterlineAndRadius[2].w, 1e-7)
+        : radius1;
 
     float correctedT;
     float segmentU;
@@ -249,6 +352,24 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
 
     float3 correctedPositionOS = ObjectRayOrigin()
         + correctedT * ObjectRayDirection();
+    float previousRadius = lerp(
+        previousRadius0,
+        previousRadius1,
+        segmentU);
+    float3 previousCenterlinePositionOS = lerp(
+        previousSegmentStartOS,
+        previousSegmentEndOS,
+        segmentU);
+    float3 previousPositionOS =
+        VividHairReconstructPreviousSurfacePositionOS(
+            correctedPositionOS,
+            centerlinePositionOS,
+            segmentStartOS,
+            segmentEndOS,
+            previousSegmentStartOS,
+            previousSegmentEndOS,
+            previousRadius,
+            segmentU);
     float3 positionWS = VividHairTransformPositionToWorld(
         correctedPositionOS);
     float3 centerlinePositionWS = VividHairTransformPositionToWorld(
@@ -263,6 +384,11 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
     VividHairSurfaceGeometry geometry;
     geometry.positionWS = positionWS;
     geometry.centerlinePositionWS = centerlinePositionWS;
+    geometry.previousPositionWS =
+        VividHairTransformPreviousPositionToWorld(previousPositionOS);
+    geometry.previousCenterlinePositionWS =
+        VividHairTransformPreviousPositionToWorld(
+            previousCenterlinePositionOS);
     geometry.faceNormalWS = radialNormalWS;
     geometry.radialNormalWS = radialNormalWS;
     geometry.tangentWS = tangentWS;

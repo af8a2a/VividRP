@@ -5,33 +5,80 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
-    internal static class HairDotsMeshBuilder
+    public static class HairDotsMeshBuilder
     {
-        internal const int TriangleCountPerSegment = 4;
-        internal const int VertexCountPerSegment = TriangleCountPerSegment * 3;
-        internal static readonly float RadiusCompensation =
+        public const int TriangleCountPerSegment = 4;
+        public const int VertexCountPerSegment = TriangleCountPerSegment * 3;
+        public static readonly float RadiusCompensation =
             1.0f / (Mathf.Sin(Mathf.PI / 4.0f) / (Mathf.PI / 4.0f));
 
-        internal static Mesh Build(
+        /// <summary>
+        /// Builds a static DOTS mesh. The current centerline is also written as
+        /// previous-frame history so object and camera motion remain valid.
+        /// </summary>
+        public static Mesh Build(
             IReadOnlyList<HairStrandSegment> segments,
             Mesh target = null,
             float radiusScale = 1.0f)
         {
-            if (segments == null)
-                throw new ArgumentNullException(nameof(segments));
+            return BuildInternal(
+                segments,
+                segments,
+                target,
+                radiusScale,
+                false);
+        }
+
+        /// <summary>
+        /// Builds or updates a deforming DOTS mesh with explicit previous-frame
+        /// centerline and radius data. Frame arrays must have matching topology
+        /// and segment ordering.
+        /// </summary>
+        public static Mesh BuildDynamic(
+            IReadOnlyList<HairStrandSegment> currentSegments,
+            IReadOnlyList<HairStrandSegment> previousSegments,
+            Mesh target = null,
+            float radiusScale = 1.0f)
+        {
+            return BuildInternal(
+                currentSegments,
+                previousSegments,
+                target,
+                radiusScale,
+                true);
+        }
+
+        private static Mesh BuildInternal(
+            IReadOnlyList<HairStrandSegment> currentSegments,
+            IReadOnlyList<HairStrandSegment> previousSegments,
+            Mesh target,
+            float radiusScale,
+            bool markDynamic)
+        {
+            if (currentSegments == null)
+                throw new ArgumentNullException(nameof(currentSegments));
+            if (previousSegments == null)
+                throw new ArgumentNullException(nameof(previousSegments));
+            if (currentSegments.Count != previousSegments.Count)
+            {
+                throw new ArgumentException(
+                    "Current and previous strand segment counts must match.",
+                    nameof(previousSegments));
+            }
             if (!IsFinite(radiusScale) || radiusScale <= 0.0f)
                 throw new ArgumentOutOfRangeException(nameof(radiusScale));
 
             int vertexCount;
             try
             {
-                vertexCount = checked(segments.Count * VertexCountPerSegment);
+                vertexCount = checked(
+                    currentSegments.Count * VertexCountPerSegment);
             }
             catch (OverflowException exception)
             {
                 throw new ArgumentException(
                     "The strand collection is too large for a Unity mesh.",
-                    nameof(segments),
+                    nameof(currentSegments),
                     exception);
             }
 
@@ -40,14 +87,17 @@ namespace VividRP.Runtime
             var tangents = new List<Vector4>(vertexCount);
             var strandUVs = new List<Vector2>(vertexCount);
             var radiusAndEndpoint = new List<Vector2>(vertexCount);
+            var previousCenterlineAndRadius =
+                new List<Vector4>(vertexCount);
             var indices = new List<int>(vertexCount);
 
             for (var segmentIndex = 0;
-                 segmentIndex < segments.Count;
+                 segmentIndex < currentSegments.Count;
                  segmentIndex++)
             {
                 AppendSegment(
-                    segments[segmentIndex],
+                    currentSegments[segmentIndex],
+                    previousSegments[segmentIndex],
                     segmentIndex,
                     radiusScale,
                     positions,
@@ -55,10 +105,13 @@ namespace VividRP.Runtime
                     tangents,
                     strandUVs,
                     radiusAndEndpoint,
+                    previousCenterlineAndRadius,
                     indices);
             }
 
             var mesh = target != null ? target : new Mesh();
+            if (markDynamic)
+                mesh.MarkDynamic();
             mesh.Clear();
             mesh.name = string.IsNullOrEmpty(mesh.name)
                 ? "Hair DOTS Mesh"
@@ -71,13 +124,15 @@ namespace VividRP.Runtime
             mesh.SetTangents(tangents);
             mesh.SetUVs(0, strandUVs);
             mesh.SetUVs(1, radiusAndEndpoint);
+            mesh.SetUVs(2, previousCenterlineAndRadius);
             mesh.SetIndices(indices, MeshTopology.Triangles, 0, true);
             mesh.RecalculateBounds();
             return mesh;
         }
 
         private static void AppendSegment(
-            HairStrandSegment segment,
+            HairStrandSegment currentSegment,
+            HairStrandSegment previousSegment,
             int segmentIndex,
             float radiusScale,
             List<Vector3> positions,
@@ -85,18 +140,45 @@ namespace VividRP.Runtime
             List<Vector4> tangents,
             List<Vector2> strandUVs,
             List<Vector2> radiusAndEndpoint,
+            List<Vector4> previousCenterlineAndRadius,
             List<int> indices)
         {
-            ValidatePoint(segment.Start, segmentIndex, nameof(segment.Start));
-            ValidatePoint(segment.End, segmentIndex, nameof(segment.End));
+            ValidatePoint(
+                currentSegment.Start,
+                segmentIndex,
+                "current start");
+            ValidatePoint(
+                currentSegment.End,
+                segmentIndex,
+                "current end");
+            ValidatePoint(
+                previousSegment.Start,
+                segmentIndex,
+                "previous start");
+            ValidatePoint(
+                previousSegment.End,
+                segmentIndex,
+                "previous end");
 
-            var segmentVector = segment.End.Position - segment.Start.Position;
+            var segmentVector =
+                currentSegment.End.Position - currentSegment.Start.Position;
             var length = segmentVector.magnitude;
             if (!IsFinite(length) || length <= 1e-7f)
             {
                 throw new ArgumentException(
                     $"Hair segment {segmentIndex} has coincident endpoints.",
-                    nameof(segment));
+                    nameof(currentSegment));
+            }
+
+            var previousSegmentVector = previousSegment.End.Position
+                - previousSegment.Start.Position;
+            var previousLength = previousSegmentVector.magnitude;
+            if (!IsFinite(previousLength) || previousLength <= 1e-7f)
+            {
+                throw new ArgumentException(
+                    $"Previous hair segment {segmentIndex} has "
+                    + "coincident endpoints.",
+                    nameof(previousSegment));
             }
 
             var tangent = segmentVector / length;
@@ -113,135 +195,173 @@ namespace VividRP.Runtime
                 tangent.y,
                 tangent.z,
                 1.0f);
-            var radius0 = segment.Start.Radius
+            var radius0 = currentSegment.Start.Radius
                 * radiusScale
                 * RadiusCompensation;
-            var radius1 = segment.End.Radius
+            var radius1 = currentSegment.End.Radius
+                * radiusScale
+                * RadiusCompensation;
+            var previousRadius0 = previousSegment.Start.Radius
+                * radiusScale
+                * RadiusCompensation;
+            var previousRadius1 = previousSegment.End.Radius
                 * radiusScale
                 * RadiusCompensation;
 
             AppendFace(
-                segment,
+                currentSegment,
+                previousSegment,
                 firstAxis,
                 tangent4,
                 radius0,
                 radius1,
+                previousRadius0,
+                previousRadius1,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
             AppendFace(
-                segment,
+                currentSegment,
+                previousSegment,
                 secondAxis,
                 tangent4,
                 radius0,
                 radius1,
+                previousRadius0,
+                previousRadius1,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
         }
 
         private static void AppendFace(
-            HairStrandSegment segment,
+            HairStrandSegment currentSegment,
+            HairStrandSegment previousSegment,
             Vector3 axis,
             Vector4 tangent,
             float radius0,
             float radius1,
+            float previousRadius0,
+            float previousRadius1,
             List<Vector3> positions,
             List<Vector3> normals,
             List<Vector4> tangents,
             List<Vector2> strandUVs,
             List<Vector2> radiusAndEndpoint,
+            List<Vector4> previousCenterlineAndRadius,
             List<int> indices)
         {
-            var positiveStart = segment.Start.Position + axis * radius0;
-            var negativeStart = segment.Start.Position - axis * radius0;
-            var positiveEnd = segment.End.Position + axis * radius1;
-            var negativeEnd = segment.End.Position - axis * radius1;
+            var positiveStart =
+                currentSegment.Start.Position + axis * radius0;
+            var negativeStart =
+                currentSegment.Start.Position - axis * radius0;
+            var positiveEnd = currentSegment.End.Position + axis * radius1;
+            var negativeEnd = currentSegment.End.Position - axis * radius1;
 
             AppendVertex(
                 positiveStart,
                 axis,
                 tangent,
-                segment.Start.UV,
+                currentSegment.Start.UV,
                 radius0,
                 0.0f,
+                previousSegment.Start,
+                previousRadius0,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
             AppendVertex(
                 negativeEnd,
                 -axis,
                 tangent,
-                segment.End.UV,
+                currentSegment.End.UV,
                 radius1,
                 1.0f,
+                previousSegment.End,
+                previousRadius1,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
             AppendVertex(
                 positiveEnd,
                 axis,
                 tangent,
-                segment.End.UV,
+                currentSegment.End.UV,
                 radius1,
                 1.0f,
+                previousSegment.End,
+                previousRadius1,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
 
             AppendVertex(
                 positiveStart,
                 axis,
                 tangent,
-                segment.Start.UV,
+                currentSegment.Start.UV,
                 radius0,
                 0.0f,
+                previousSegment.Start,
+                previousRadius0,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
             AppendVertex(
                 negativeStart,
                 -axis,
                 tangent,
-                segment.Start.UV,
+                currentSegment.Start.UV,
                 radius0,
                 0.0f,
+                previousSegment.Start,
+                previousRadius0,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
             AppendVertex(
                 negativeEnd,
                 -axis,
                 tangent,
-                segment.End.UV,
+                currentSegment.End.UV,
                 radius1,
                 1.0f,
+                previousSegment.End,
+                previousRadius1,
                 positions,
                 normals,
                 tangents,
                 strandUVs,
                 radiusAndEndpoint,
+                previousCenterlineAndRadius,
                 indices);
         }
 
@@ -252,11 +372,14 @@ namespace VividRP.Runtime
             Vector2 uv,
             float radius,
             float endpoint,
+            HairStrandPoint previousPoint,
+            float previousRadius,
             List<Vector3> positions,
             List<Vector3> normals,
             List<Vector4> tangents,
             List<Vector2> strandUVs,
             List<Vector2> radiusAndEndpoint,
+            List<Vector4> previousCenterlineAndRadius,
             List<int> indices)
         {
             indices.Add(positions.Count);
@@ -265,6 +388,11 @@ namespace VividRP.Runtime
             tangents.Add(tangent);
             strandUVs.Add(uv);
             radiusAndEndpoint.Add(new Vector2(radius, endpoint));
+            previousCenterlineAndRadius.Add(new Vector4(
+                previousPoint.Position.x,
+                previousPoint.Position.y,
+                previousPoint.Position.z,
+                previousRadius));
         }
 
         private static void ValidatePoint(

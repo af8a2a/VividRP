@@ -164,6 +164,69 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void HairGeometry_ReconstructsPreviousDeformedSurfaceFromUv2()
+        {
+            string geometry = ReadPackageFile(
+                "Shaders",
+                "Material",
+                "Hair",
+                "HairGeometry.hlsl");
+            string common = ReadPackageFile(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "RaytracingGBufferCommon.hlsl");
+            string rayGeneration = ReadPackageFile(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "RaytracingGBuffer.rgen.hlsl");
+            string hairGBuffer = ReadPackageFile(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "HairRaytracingGBuffer.hlsl");
+
+            Assert.That(
+                geometry,
+                Does.Contain("kVertexAttributeTexCoord2"));
+            Assert.That(
+                geometry,
+                Does.Contain(
+                    "VividHairReconstructPreviousSurfacePositionOS("));
+            Assert.That(
+                geometry,
+                Does.Contain("TransformPreviousObjectToWorld(positionOS)"));
+            Assert.That(
+                geometry,
+                Does.Contain("geometry.previousPositionWS"));
+            Assert.That(
+                common,
+                Does.Contain("float3 previousPositionWS;"));
+            Assert.That(
+                common,
+                Does.Contain("uint materialPreviousPositionValid;"));
+            Assert.That(
+                rayGeneration,
+                Does.Contain("payload.materialPreviousPositionValid != 0u"));
+            Assert.That(
+                rayGeneration,
+                Does.Contain("float4(previousPositionWS, 1.0)"));
+            Assert.That(
+                hairGBuffer,
+                Does.Contain(
+                    "payload.previousPositionWS = geometry.previousPositionWS;"));
+            Assert.That(
+                hairGBuffer,
+                Does.Contain(
+                    "payload.materialPreviousPositionValid = 1u;"));
+        }
+
+        [Test]
         public void PathTracer_ReservesIndependentHairDimensionAndRadiusAwareOffset()
         {
             string sampling = ReadPackageFile(

@@ -94,6 +94,69 @@ void StandardLitReferencedPathtracingClosestHit(
         normalTextureLod,
         viewDirectionWS);
 
+    if (payloadInput.queryMode
+        == REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE)
+    {
+        // A surface query returns only the sampled exit point identity and a
+        // Lambertian direct-light proposal. Raygen owns both the Burley
+        // spatial estimator and the visibility trace, keeping recursion at 1.
+        result.faceNormalWS = geometry.faceNormalWS;
+        result.rayConeWidth = hitConeWidth;
+        result.hitDistance = geometry.hitDistance;
+        result.denoisingNormalWS = material.shadingNormalWS;
+        result.surfaceInstanceIndex = InstanceIndex();
+        result.isSurfaceQuery = 1u;
+
+        ReferencedPathtracingNEECandidate queryNeeCandidate;
+        bool validQueryNeeCandidate =
+            ReferencedPathtracingSampleUnifiedNEECandidate(
+                geometry.positionWS,
+                geometry.faceNormalWS,
+                false,
+                payloadInput.directLightRandom,
+                queryNeeCandidate);
+        if (queryNeeCandidate.selectionPdf > 0.0)
+        {
+            result.neeDirectionWS = queryNeeCandidate.directionWS;
+            result.neeDistance = queryNeeCandidate.distance;
+            result.neeSelectionPdf = queryNeeCandidate.selectionPdf;
+            result.neeSolidAnglePdf = queryNeeCandidate.solidAnglePdf;
+            result.neeShadowStrength = queryNeeCandidate.shadowStrength;
+            result.neeLightIndex = queryNeeCandidate.lightIndex;
+            result.neeLightType = queryNeeCandidate.lightType;
+            result.neeFlags = queryNeeCandidate.flags;
+        }
+
+        if (validQueryNeeCandidate
+            && ReferencedPathtracingIsValidOpaqueReflectionDirection(
+                queryNeeCandidate.directionWS,
+                geometry.faceNormalWS,
+                material.shadingNormalWS))
+        {
+            float diffuseShadowTerminator =
+                ReferencedPathtracingEvaluateDiffuseShadowTerminator(
+                    queryNeeCandidate.directionWS,
+                    material.shadingNormalWS,
+                    geometry.normalWS);
+            float cosineToLight = max(
+                dot(
+                    material.shadingNormalWS,
+                    queryNeeCandidate.directionWS),
+                0.0);
+            result.neeDiffuseRadiance =
+                (cosineToLight * INV_PI * diffuseShadowTerminator)
+                * queryNeeCandidate.incidentRadianceOverPdf;
+            result.neeBsdfPdf = 0.0;
+            result.neeValid = any(result.neeDiffuseRadiance > 0.0)
+                ? 1u
+                : 0u;
+        }
+
+        result.hit = 1u;
+        PackReferencedPathtracingSurfaceResult(result, payload);
+        return;
+    }
+
     float exteriorIor = payloadInput.activeMediumIor;
     if (material.isSolidTransmissionBoundary
         && !geometry.isFrontFace
@@ -108,8 +171,15 @@ void StandardLitReferencedPathtracingClosestHit(
         ReferencedPathtracingEvaluateMaterialMediumTransmittance(
             payloadInput.activeMediumExtinction,
             geometry.hitDistance);
+    OpenPBR_ResolvedInputs transportInputs = material.openPbrInputs;
+    // The Burley estimator replaces only the selected dielectric diffuse
+    // fraction. Keep the microfacet/coat response in OpenPBR and leave the
+    // remaining local diffuse fraction available for partial SSS weights.
+    transportInputs.base_color *=
+        1.0 - saturate(material.effectiveSubsurfaceWeight);
+    transportInputs.subsurface_weight = 0.0;
     OpenPBR_PreparedBsdf preparedBsdf = openpbr_prepare(
-        material.openPbrInputs,
+        transportInputs,
         max(
             payloadInput.pathThroughput * segmentMediumTransmittance,
             0.0),
@@ -126,11 +196,25 @@ void StandardLitReferencedPathtracingClosestHit(
     result.hitDistance = geometry.hitDistance;
     // Match HDRP's reference-denoising AOV contract: diffuse reflectance and
     // the actual shading normal, both evaluated at primary visibility.
-    result.denoisingAlbedo = saturate(
+    float3 surfaceDiffuseAlbedo = saturate(
         material.openPbrInputs.base_color
         * (1.0 - material.openPbrInputs.base_metalness)
         * (1.0 - material.openPbrInputs.transmission_weight));
+    result.denoisingAlbedo = saturate(lerp(
+        surfaceDiffuseAlbedo,
+        material.subsurfaceAlbedo,
+        saturate(material.effectiveSubsurfaceWeight)));
     result.denoisingNormalWS = material.shadingNormalWS;
+    if (geometry.isFrontFace
+        && material.effectiveSubsurfaceWeight > 0.0)
+    {
+        result.subsurfaceWeight =
+            saturate(material.effectiveSubsurfaceWeight);
+        result.subsurfaceAlbedo = material.subsurfaceAlbedo;
+        result.subsurfaceRadius = material.subsurfaceRadius;
+        result.surfaceInstanceIndex = InstanceIndex();
+        result.isSubsurface = 1u;
+    }
     result.thinWalledTransmissionWeight =
         material.openPbrInputs.geometry_thin_walled
             ? saturate(material.effectiveTransmissionWeight)

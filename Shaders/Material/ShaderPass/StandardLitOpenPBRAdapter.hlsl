@@ -11,6 +11,9 @@ struct VividReferencedPathtracingMaterial
     float3 shadingNormalWS;
     float3 emission;
     float effectiveTransmissionWeight;
+    float effectiveSubsurfaceWeight;
+    float3 subsurfaceAlbedo;
+    float3 subsurfaceRadius;
     bool isSolidTransmissionBoundary;
 };
 
@@ -151,7 +154,39 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
 
     inputs.emission_luminance = any(material.emission > 0.0) ? 1.0 : 0.0;
     inputs.emission_color = material.emission;
-    inputs.subsurface_weight = 0.0;
+    float subsurfaceWeight = _SubsurfaceWeight;
+    if (isnan(subsurfaceWeight) || isinf(subsurfaceWeight))
+        subsurfaceWeight = 0.0;
+    inputs.subsurface_weight = saturate(subsurfaceWeight);
+    float3 subsurfaceColor = _SubsurfaceColor.rgb;
+    if (any(isnan(subsurfaceColor)) || any(isinf(subsurfaceColor)))
+        subsurfaceColor = 1.0;
+    inputs.subsurface_color = saturate(
+        baseSample.rgb * max(subsurfaceColor, 0.0));
+    float subsurfaceRadius = _SubsurfaceRadius;
+    if (isnan(subsurfaceRadius) || isinf(subsurfaceRadius))
+        subsurfaceRadius = 0.0;
+    inputs.subsurface_radius = max(subsurfaceRadius, 0.0);
+    float3 subsurfaceRadiusScale = _SubsurfaceRadiusScale.rgb;
+    if (any(isnan(subsurfaceRadiusScale))
+        || any(isinf(subsurfaceRadiusScale)))
+    {
+        subsurfaceRadiusScale = float3(1.0, 0.5, 0.25);
+    }
+    inputs.subsurface_radius_scale = max(
+        subsurfaceRadiusScale,
+        0.0001);
+    float subsurfaceScatterAnisotropy =
+        _SubsurfaceScatterAnisotropy;
+    if (isnan(subsurfaceScatterAnisotropy)
+        || isinf(subsurfaceScatterAnisotropy))
+    {
+        subsurfaceScatterAnisotropy = 0.0;
+    }
+    inputs.subsurface_scatter_anisotropy = clamp(
+        subsurfaceScatterAnisotropy,
+        -0.95,
+        0.95);
     float transmissionTextureLod = baseTextureLod;
 #if defined(_TRANSMISSIONMAP)
     transmissionTextureLod = max(
@@ -198,6 +233,26 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     material.effectiveTransmissionWeight =
         inputs.transmission_weight
         * (1.0 - inputs.base_metalness);
+    // Face SSS V1 is an opaque dielectric hybrid. Thin-wall scattering and
+    // simultaneous refraction stay on the regular OpenPBR path until V1.1.
+    bool surfaceIsOpaque = true;
+#if defined(_SURFACE_TYPE_TRANSPARENT)
+    surfaceIsOpaque = false;
+#endif
+    bool supportsHybridSubsurface =
+        surfaceIsOpaque
+        && !inputs.geometry_thin_walled
+        && inputs.transmission_weight <= 0.0001
+        && inputs.base_metalness <= 0.0001;
+    material.effectiveSubsurfaceWeight = supportsHybridSubsurface
+        ? (1.0 - inputs.transmission_weight)
+            * inputs.subsurface_weight
+            * (1.0 - inputs.base_metalness)
+        : 0.0;
+    material.subsurfaceAlbedo = inputs.subsurface_color;
+    material.subsurfaceRadius = max(
+        inputs.subsurface_radius * inputs.subsurface_radius_scale,
+        0.000001);
     material.isSolidTransmissionBoundary =
         !inputs.geometry_thin_walled
         && material.effectiveTransmissionWeight > 0.0;

@@ -49,6 +49,11 @@ Shader "VividRP/Material/StandardLit"
         [HDR] [Sub(ReferencePathTracing)] _TransmissionScatter("Transmission Scatter", Color) = (0, 0, 0, 0)
         [Sub(ReferencePathTracing)] _TransmissionScatterAnisotropy("Transmission Scatter Anisotropy", Range(-0.95, 0.95)) = 0.0
         [Sub(ReferencePathTracing)] _SpecularIOR("Specular IOR", Range(1.0, 3.0)) = 1.5
+        [Sub(ReferencePathTracing)] _SubsurfaceWeight("Face Subsurface Weight", Range(0.0, 1.0)) = 0.0
+        [Sub(ReferencePathTracing)] _SubsurfaceColor("Face Subsurface Color", Color) = (1, 1, 1, 1)
+        [Sub(ReferencePathTracing)] _SubsurfaceRadius("Face Subsurface Radius (World Units)", Float) = 0.01
+        [Sub(ReferencePathTracing)] _SubsurfaceRadiusScale("Face Subsurface Radius Scale", Color) = (1, 0.5, 0.25, 1)
+        [Sub(ReferencePathTracing)] _SubsurfaceScatterAnisotropy("Face Subsurface Scatter Anisotropy", Range(-0.95, 0.95)) = 0.0
 
         [HideInInspector] _Blend("__blend", Float) = 0.0
         [HideInInspector] _SrcBlend("__src", Float) = 1.0

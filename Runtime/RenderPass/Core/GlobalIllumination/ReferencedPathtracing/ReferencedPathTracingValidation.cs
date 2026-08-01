@@ -238,7 +238,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 10;
+        internal const int Version = 11;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -255,6 +255,8 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int HairBsdfExtraDimensionOffset = 17;
         internal const int RTXTFDimensionOffset = 18;
         internal const int FutureDimensionOffset = 18;
+        internal const int SubsurfaceBaseDimension = 168;
+        internal const int SubsurfaceDimensionStride = 4;
         internal const int GlobalFogBaseDimension = 200;
         internal const int GlobalFogDimensionStride = 3;
         internal const int GlobalFogDistanceDimensionOffset = 0;
@@ -315,6 +317,31 @@ namespace VividRP.Runtime.RenderPass.Core
 
             return GlobalFogBaseDimension
                 + bounceIndex * GlobalFogDimensionStride
+                + dimensionOffset;
+        }
+
+        internal static int GetSubsurfaceDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= SubsurfaceDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return SubsurfaceBaseDimension
+                + bounceIndex * SubsurfaceDimensionStride
                 + dimensionOffset;
         }
 

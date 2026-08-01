@@ -72,7 +72,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 10"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 11"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -1927,6 +1927,102 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FaceSubsurfaceV1_UsesBurleySurfaceQueryAndDiffuseGuides()
+        {
+            var adapterSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "StandardLitOpenPBRAdapter.hlsl"));
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var gBufferSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "RaytracingGBuffer.hlsl"));
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var subsurfaceSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSubsurface.hlsl"));
+
+            Assert.That(
+                adapterSource,
+                Does.Contain("inputs.subsurface_weight = saturate("));
+            Assert.That(
+                adapterSource,
+                Does.Contain("inputs.subsurface_radius_scale = max("));
+            Assert.That(
+                adapterSource,
+                Does.Contain("supportsHybridSubsurface"));
+            Assert.That(
+                adapterSource,
+                Does.Contain("surfaceIsOpaque"));
+            Assert.That(
+                materialSource,
+                Does.Contain("transportInputs.subsurface_weight = 0.0;"));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE"));
+            Assert.That(
+                materialSource,
+                Does.Contain("result.surfaceInstanceIndex = InstanceIndex();"));
+            Assert.That(
+                materialSource,
+                Does.Not.Contain("GeometryIndex()"));
+            Assert.That(
+                gBufferSource,
+                Does.Contain("material.subsurfaceAlbedo"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
+            Assert.That(
+                commonSource,
+                Does.Contain("#define REFERENCED_PAYLOAD_INPUT_QUERY_MODE 22u"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_WEIGHT 33u"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("ReferencedPathtracingSampleBurleySubsurface("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("RAY_FLAG_CULL_BACK_FACING_TRIANGLES"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("matchesSubsurfaceSurface"));
+            Assert.That(
+                subsurfaceSource,
+                Does.Contain("ReferencedPathtracingBurleyDiffusionShape("));
+            Assert.That(
+                subsurfaceSource,
+                Does.Contain("0.25 * diffusionRate"));
+        }
+
+        [Test]
         public void SampleSequence_StopsAtTargetAndRestartsWhenTargetChanges()
         {
             var gameObject =
@@ -2043,6 +2139,41 @@ namespace VividRP.Editor.Tests
             }
             finally
             {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void SceneSignature_TracksFaceSubsurfaceMaterialChanges()
+        {
+            var gameObject = new GameObject(
+                "ReferencedPathTracingSceneSignatureTests.FaceSSS");
+            var mesh = new Mesh();
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            var shader = Shader.Find("VividRP/Material/StandardLit");
+            Material material = null;
+
+            try
+            {
+                Assert.That(shader, Is.Not.Null);
+                material = new Material(shader);
+                renderer.sharedMaterial = material;
+                var original =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+                material.SetFloat("_SubsurfaceWeight", 1.0f);
+                var changed =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+
+                Assert.That(changed, Is.Not.EqualTo(original));
+            }
+            finally
+            {
+                if (material != null)
+                    UnityEngine.Object.DestroyImmediate(material);
                 UnityEngine.Object.DestroyImmediate(gameObject);
                 UnityEngine.Object.DestroyImmediate(mesh);
             }

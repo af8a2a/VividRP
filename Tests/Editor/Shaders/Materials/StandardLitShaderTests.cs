@@ -296,6 +296,57 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardLitShader_ExposesOptInFaceSubsurfaceProperties()
+        {
+            UnityEngine.Material material = CreateMaterial();
+            try
+            {
+                Assert.That(material.HasProperty("_SubsurfaceWeight"), Is.True);
+                Assert.That(material.HasProperty("_SubsurfaceColor"), Is.True);
+                Assert.That(material.HasProperty("_SubsurfaceRadius"), Is.True);
+                Assert.That(
+                    material.HasProperty("_SubsurfaceRadiusScale"),
+                    Is.True);
+                Assert.That(
+                    material.HasProperty(
+                        "_SubsurfaceScatterAnisotropy"),
+                    Is.True);
+                Assert.That(material.GetFloat("_SubsurfaceWeight"), Is.Zero);
+                Assert.That(
+                    material.GetColor("_SubsurfaceColor"),
+                    Is.EqualTo(Color.white));
+                Assert.That(
+                    material.GetFloat("_SubsurfaceRadius"),
+                    Is.EqualTo(0.01f).Within(1e-6f));
+                Assert.That(
+                    material.GetColor("_SubsurfaceRadiusScale"),
+                    Is.EqualTo(new Color(1.0f, 0.5f, 0.25f, 1.0f)));
+                Assert.That(
+                    material.GetFloat(
+                        "_SubsurfaceScatterAnisotropy"),
+                    Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void StandardLitIndirectDiffusePass_DeclaresFaceSubsurfaceProperties()
+        {
+            string source = File.ReadAllText(GetIndirectDiffuseSourcePath());
+
+            Assert.That(source, Does.Contain("float4 _SubsurfaceColor;"));
+            Assert.That(source, Does.Contain("float4 _SubsurfaceRadiusScale;"));
+            Assert.That(source, Does.Contain("float _SubsurfaceWeight;"));
+            Assert.That(source, Does.Contain("float _SubsurfaceRadius;"));
+            Assert.That(
+                source,
+                Does.Contain("float _SubsurfaceScatterAnisotropy;"));
+        }
+
+        [Test]
         public void StandardLitShader_DoesNotExposeDeprecatedOpacityColor()
         {
             UnityEngine.Material material = CreateMaterial();

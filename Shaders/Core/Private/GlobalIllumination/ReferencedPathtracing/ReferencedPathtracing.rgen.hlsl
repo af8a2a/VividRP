@@ -5,6 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSegmentLight.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSampling.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingSubsurface.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingAtmosphere.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCloud.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/NRD/REBLUR/VividReblurSignalEncoding.hlsli"
@@ -468,13 +469,14 @@ float3 TraceReferencedPathtracingCandidateVisibility(
 
 void TraceReferencedPathtracingSurface(
     RayDesc ray,
+    uint rayFlags,
     inout ReferencedPathtracingPayload payload)
 {
 #if defined(VIVID_REFERENCE_PT_SER)
     NvHitObject hitObject;
     NvTraceRayHitObject(
         _AccelerationStructure,
-        RAY_FLAG_NONE,
+        rayFlags,
         0xFF,
         0,
         1,
@@ -487,7 +489,7 @@ void TraceReferencedPathtracingSurface(
 #else
     TraceRay(
         _AccelerationStructure,
-        RAY_FLAG_NONE,
+        rayFlags,
         0xFF,
         0,
         1,
@@ -495,6 +497,13 @@ void TraceReferencedPathtracingSurface(
         ray,
         payload);
 #endif
+}
+
+void TraceReferencedPathtracingSurface(
+    RayDesc ray,
+    inout ReferencedPathtracingPayload payload)
+{
+    TraceReferencedPathtracingSurface(ray, RAY_FLAG_NONE, payload);
 }
 
 float GetReferencedPathtracingNEELightEstimatorWeight(
@@ -824,6 +833,7 @@ void RayGenReferencedPathtracing()
             kReferencedPathtracingInvalidMediumInstance;
     }
     uint materialMediumDepth = 0u;
+    bool hasSubsurfaceSampled = false;
 
     for (uint bounceIndex = 0u; bounceIndex < maxBounceCount; ++bounceIndex)
     {
@@ -2748,6 +2758,251 @@ void RayGenReferencedPathtracing()
                     specularHitDistance = payload.hitDistance;
                     specularDlssHitDistance = payload.hitDistance;
                     specularHitDistanceValid = true;
+                }
+            }
+        }
+
+        if (payload.isSubsurface != 0u
+            && !hasSubsurfaceSampled
+            && materialMediumDepth == 0u)
+        {
+            // Face SSS V1 performs at most one spatial diffusion event per
+            // camera path. Subsequent transport remains the existing OpenPBR
+            // surface path, which keeps the estimator bounded and predictable.
+            hasSubsurfaceSampled = true;
+            uint subsurfaceSampleDimension =
+                ReferencedPathtracingGetSubsurfaceSampleDimension(
+                    bounceIndex,
+                    0u);
+            float4 subsurfaceRandom = float4(
+                ReferencedPathtracingGetPathSample(
+                    pixelCoord,
+                    sampleIndex,
+                    subsurfaceSampleDimension,
+                    sampleSeed,
+                    pathSamplingMode),
+                ReferencedPathtracingGetPathSample(
+                    pixelCoord,
+                    sampleIndex,
+                    subsurfaceSampleDimension + 1u,
+                    sampleSeed,
+                    pathSamplingMode),
+                ReferencedPathtracingGetPathSample(
+                    pixelCoord,
+                    sampleIndex,
+                    subsurfaceSampleDimension + 2u,
+                    sampleSeed,
+                    pathSamplingMode),
+                ReferencedPathtracingGetPathSample(
+                    pixelCoord,
+                    sampleIndex,
+                    subsurfaceSampleDimension + 3u,
+                    sampleSeed,
+                    pathSamplingMode));
+            ReferencedPathtracingSubsurfaceSample subsurfaceSample;
+            if (ReferencedPathtracingSampleBurleySubsurface(
+                    payload.subsurfaceAlbedo,
+                    payload.subsurfaceRadius,
+                    subsurfaceRandom.x,
+                    subsurfaceSample))
+            {
+                bool useGeometryProjection = subsurfaceRandom.z < 0.5;
+                float3 projectionNormalWS = useGeometryProjection
+                    ? normalize(payload.faceNormalWS)
+                    : normalize(-ray.Direction);
+                float3 projectionTangentWS;
+                float3 projectionBitangentWS;
+                ReferencedPathtracingBuildSubsurfaceProjectionFrame(
+                    projectionNormalWS,
+                    useGeometryProjection
+                        ? float3(0.0, 0.0, 0.0)
+                        : _ReferencedCameraUpWS.xyz,
+                    projectionTangentWS,
+                    projectionBitangentWS);
+                float diskAngle = 2.0
+                    * kReferencedPathtracingPi
+                    * subsurfaceRandom.y;
+                float diskSine;
+                float diskCosine;
+                sincos(diskAngle, diskSine, diskCosine);
+                float3 diskOffsetWS = subsurfaceSample.radius
+                    * (diskCosine * projectionTangentWS
+                        + diskSine * projectionBitangentWS);
+                float maximumMeanFreePath = max(
+                    payload.subsurfaceRadius.x,
+                    max(
+                        payload.subsurfaceRadius.y,
+                        payload.subsurfaceRadius.z));
+                float projectionHalfLength = max(
+                    max(
+                        8.0 * maximumMeanFreePath,
+                        4.0 * kReferencedPathtracingShadowMinBias),
+                    subsurfaceSample.radius
+                        + 2.0 * maximumMeanFreePath);
+
+                RayDesc subsurfaceQueryRay;
+                subsurfaceQueryRay.Origin = payload.positionWS
+                    + diskOffsetWS
+                    + projectionNormalWS * projectionHalfLength;
+                subsurfaceQueryRay.Direction = -projectionNormalWS;
+                subsurfaceQueryRay.TMin = kReferencedPathtracingShadowMinBias;
+                subsurfaceQueryRay.TMax = min(
+                    2.0 * projectionHalfLength,
+                    _RayMaxDistance);
+
+                uint subsurfaceQuerySeed = ReferencedPathtracingHash(
+                    asuint(subsurfaceRandom.w)
+                    ^ ReferencedPathtracingHash(
+                        sampleSeed + subsurfaceSampleDimension));
+                ReferencedPathtracingPayloadInput subsurfaceQueryInput;
+                InitializeReferencedPathtracingPayloadInput(
+                    subsurfaceQueryInput);
+                subsurfaceQueryInput.directLightRandom = float3(
+                    subsurfaceRandom.w,
+                    ReferencedPathtracingHashToUnitFloat(
+                        subsurfaceQuerySeed ^ 0x9e3779b9u),
+                    ReferencedPathtracingHashToUnitFloat(
+                        subsurfaceQuerySeed ^ 0x85ebca6bu));
+                subsurfaceQueryInput.stochasticAlphaSeed =
+                    ReferencedPathtracingHashStochasticTransparency(
+                        subsurfaceQuerySeed ^ 0xc2b2ae35u);
+                subsurfaceQueryInput.rtxtfRandom = float3(
+                    ReferencedPathtracingHashToUnitFloat(
+                        subsurfaceQuerySeed ^ 0x27d4eb2du),
+                    ReferencedPathtracingHashToUnitFloat(
+                        subsurfaceQuerySeed ^ 0x165667b1u),
+                    ReferencedPathtracingHashToUnitFloat(
+                        subsurfaceQuerySeed ^ 0xd3a2646cu));
+                subsurfaceQueryInput.rayConeWidth = max(
+                    payload.rayConeWidth,
+                    subsurfaceSample.radius);
+                subsurfaceQueryInput.queryMode =
+                    REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE;
+
+                ReferencedPathtracingPayload subsurfaceQueryPayload;
+                PackReferencedPathtracingPayloadInput(
+                    subsurfaceQueryInput,
+                    subsurfaceQueryPayload);
+                TraceReferencedPathtracingSurface(
+                    subsurfaceQueryRay,
+                    RAY_FLAG_CULL_BACK_FACING_TRIANGLES,
+                    subsurfaceQueryPayload);
+                ReferencedPathtracingSurfaceResult subsurfaceQueryResult;
+                UnpackReferencedPathtracingSurfaceResult(
+                    subsurfaceQueryPayload,
+                    subsurfaceQueryResult);
+                if (subsurfaceQueryResult.hit != 0u)
+                {
+                    subsurfaceQueryResult.positionWS =
+                        subsurfaceQueryRay.Origin
+                        + subsurfaceQueryRay.Direction
+                            * subsurfaceQueryResult.hitDistance;
+                }
+
+                bool matchesSubsurfaceSurface =
+                    subsurfaceQueryResult.hit != 0u
+                    && subsurfaceQueryResult.isSurfaceQuery != 0u
+                    && subsurfaceQueryResult.surfaceInstanceIndex
+                        == payload.surfaceInstanceIndex;
+                if (matchesSubsurfaceSurface
+                    && subsurfaceQueryResult.neeValid != 0u
+                    && any(
+                        subsurfaceQueryResult.neeDiffuseRadiance > 0.0))
+                {
+                    float subsurfaceLightEstimatorWeight =
+                        GetReferencedPathtracingNEELightEstimatorWeight(
+                            subsurfaceQueryResult.neeFlags,
+                            subsurfaceQueryResult.neeSelectionPdf,
+                            subsurfaceQueryResult.neeSolidAnglePdf,
+                            0.0);
+                    float3 subsurfaceNeeDirectionWS = normalize(
+                        subsurfaceQueryResult.neeDirectionWS);
+                    float3 subsurfaceVisibility =
+                        subsurfaceLightEstimatorWeight > 0.0
+                        ? TraceReferencedPathtracingCandidateVisibility(
+                            subsurfaceQueryResult.positionWS,
+                            normalize(
+                                subsurfaceQueryResult.faceNormalWS),
+                            subsurfaceNeeDirectionWS,
+                            subsurfaceQueryResult.neeDistance,
+                            !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
+                            true,
+                            subsurfaceQueryResult.neeShadowStrength,
+                            ReferencedPathtracingHashStochasticTransparency(
+                                subsurfaceQuerySeed
+                                ^ ReferencedPathtracingHashStochasticTransparency(
+                                    subsurfaceQueryResult.neeLightIndex
+                                        + 0x299f31d0u)))
+                        : 0.0;
+                    float3 subsurfaceContribution = throughput
+                        * saturate(payload.subsurfaceWeight)
+                        * subsurfaceSample.weight
+                        * subsurfaceQueryResult.neeDiffuseRadiance
+                        * subsurfaceLightEstimatorWeight
+                        * subsurfaceVisibility;
+                    bool finiteSubsurfaceContribution =
+                        IsFiniteReferencedPathtracingRadiance(
+                            subsurfaceContribution)
+                        && all(subsurfaceContribution >= 0.0);
+                    if (!finiteSubsurfaceContribution)
+                    {
+                        invalidSampleMask.x = 1.0;
+                    }
+                    else if (subsurfaceQueryResult.neeLightType
+                        == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                    {
+                        bool includeInPrimaryDenoiserSignal =
+                            (subsurfaceQueryResult.neeFlags
+                                & REFERENCED_LIGHT_FLAG_SINGULAR) == 0u;
+                        AccumulateReferencedPathtracingMainLightRadiance(
+                            subsurfaceContribution,
+                            1u,
+                            bounceIndex,
+                            primaryLobeClass,
+                            includeInPrimaryDenoiserSignal,
+                            directLightingRadiance,
+                            diffuseRadiance,
+                            specularRadiance,
+                            primaryDenoiserMainLightDiffuseRadiance,
+                            primaryDenoiserMainLightSpecularRadiance);
+                    }
+                    else if (subsurfaceQueryResult.neeLightType
+                        == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+                    {
+                        environmentNeeRadiance += subsurfaceContribution;
+                        if (bounceIndex == 0u)
+                        {
+                            environmentDirectDiffuseRadiance +=
+                                subsurfaceContribution;
+                            diffuseRadiance += subsurfaceContribution;
+                        }
+                        else if (primaryLobeClass == 1u)
+                        {
+                            diffuseRadiance += subsurfaceContribution;
+                        }
+                        else if (primaryLobeClass == 2u)
+                        {
+                            specularRadiance += subsurfaceContribution;
+                        }
+                    }
+                    else if (bounceIndex == 0u)
+                    {
+                        diffuseRadiance += subsurfaceContribution;
+                        diffuseRayDirectionWS = subsurfaceNeeDirectionWS;
+                        diffuseHitDistance =
+                            subsurfaceQueryResult.neeDistance;
+                        diffuseDlssHitDistance =
+                            subsurfaceQueryResult.neeDistance;
+                        diffuseHitDistanceValid = true;
+                    }
+                    else if (primaryLobeClass == 1u)
+                    {
+                        diffuseRadiance += subsurfaceContribution;
+                    }
+                    else if (primaryLobeClass == 2u)
+                    {
+                        specularRadiance += subsurfaceContribution;
+                    }
                 }
             }
         }

@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 10
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 11
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -28,6 +28,11 @@ static const uint kReferencedPathtracingHairBsdfExtraDimensionOffset = 17u;
 // coordinates. Its mip selector is decorrelated from those values by hashing.
 static const uint kReferencedPathtracingRTXTFDimensionOffset = 18u;
 static const uint kReferencedPathtracingFutureDimensionOffset = 18u;
+// Face SSS is append-only: four values per bounce sample the Burley radius,
+// disk angle, projection frame, and exit-point NEE seed without perturbing any
+// established surface, atmosphere, cloud, or fog sequence.
+static const uint kReferencedPathtracingSubsurfaceBaseDimension = 168u;
+static const uint kReferencedPathtracingSubsurfaceDimensionStride = 4u;
 // Append-only block kept outside the established bounce stride so disabling
 // global fog preserves every existing surface, atmosphere, and cloud sample.
 static const uint kReferencedPathtracingGlobalFogBaseDimension = 200u;
@@ -98,6 +103,16 @@ uint ReferencedPathtracingGetGlobalFogSampleDimension(
     return kReferencedPathtracingGlobalFogBaseDimension
         + bounceIndex
             * kReferencedPathtracingGlobalFogDimensionStride
+        + dimensionOffset;
+}
+
+uint ReferencedPathtracingGetSubsurfaceSampleDimension(
+    uint bounceIndex,
+    uint dimensionOffset)
+{
+    return kReferencedPathtracingSubsurfaceBaseDimension
+        + bounceIndex
+            * kReferencedPathtracingSubsurfaceDimensionStride
         + dimensionOffset;
 }
 

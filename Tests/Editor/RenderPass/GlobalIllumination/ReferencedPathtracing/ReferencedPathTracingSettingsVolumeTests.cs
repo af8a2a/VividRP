@@ -578,7 +578,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(10));
+                Is.EqualTo(11));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -616,6 +616,14 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(18));
             Assert.That(
                 ReferencedPathTracingSamplingContract
+                    .SubsurfaceBaseDimension,
+                Is.EqualTo(168));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .SubsurfaceDimensionStride,
+                Is.EqualTo(4));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
                     .GlobalFogBaseDimension,
                 Is.EqualTo(200));
             Assert.That(
@@ -632,6 +640,28 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(4));
 
             var usedDimensions = new System.Collections.Generic.HashSet<int>();
+            for (var bounceIndex = 0;
+                 bounceIndex
+                    < ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount;
+                 bounceIndex++)
+            {
+                for (var offset = 0;
+                     offset
+                        < ReferencedPathTracingSamplingContract
+                            .SubsurfaceDimensionStride;
+                     offset++)
+                {
+                    Assert.That(
+                        usedDimensions.Add(
+                            ReferencedPathTracingSamplingContract
+                                .GetSubsurfaceDimension(
+                                    bounceIndex,
+                                    offset)),
+                        Is.True);
+                }
+            }
+
             for (var bounceIndex = 0;
                  bounceIndex
                     < ReferencedPathTracingSettingsVolume
@@ -714,6 +744,12 @@ namespace VividRP.Editor.Tests
             Assert.Throws<System.ArgumentOutOfRangeException>(
                 () => ReferencedPathTracingSamplingContract
                     .GetBounceDimension(0, 20));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetSubsurfaceDimension(-1, 0));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetSubsurfaceDimension(0, 4));
             Assert.Throws<System.ArgumentOutOfRangeException>(
                 () => ReferencedPathTracingSamplingContract
                     .GetGlobalFogDimension(-1, 0));

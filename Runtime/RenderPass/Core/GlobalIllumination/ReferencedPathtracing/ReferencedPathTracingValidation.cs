@@ -9,7 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 14;
+        internal const int Version = 15;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -86,6 +86,9 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingSolidTransmissionContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract.Version);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 ReferencedPathTracingGeometryOpacityContract.Version);
@@ -731,6 +734,66 @@ namespace VividRP.Runtime.RenderPass.Core
                 Mathf.Max(extinction, 0.0f) * distance,
                 MaximumOpticalDepth);
             return Mathf.Exp(-opticalDepth);
+        }
+    }
+
+    internal static class ReferencedPathTracingFaceSubsurfaceTransmissionContract
+    {
+        internal const int Version = 1;
+        private const float MinimumMeanFreePath = 1e-6f;
+
+        internal static float ResolveEffectiveWeight(
+            float subsurfaceWeight,
+            float transmissionWeight,
+            float metalness)
+        {
+            return Mathf.Clamp01(subsurfaceWeight)
+                * Mathf.Clamp01(transmissionWeight)
+                * (1.0f - Mathf.Clamp01(metalness));
+        }
+
+        internal static Vector3 Evaluate(
+            Vector3 albedo,
+            Vector3 meanFreePath,
+            float thickness)
+        {
+            float resolvedThickness =
+                float.IsNaN(thickness) || thickness <= 0.0f
+                    ? 0.0f
+                    : thickness;
+            if (float.IsInfinity(resolvedThickness))
+                resolvedThickness = float.MaxValue;
+
+            return new Vector3(
+                EvaluateChannel(
+                    albedo.x,
+                    meanFreePath.x,
+                    resolvedThickness),
+                EvaluateChannel(
+                    albedo.y,
+                    meanFreePath.y,
+                    resolvedThickness),
+                EvaluateChannel(
+                    albedo.z,
+                    meanFreePath.z,
+                    resolvedThickness));
+        }
+
+        private static float EvaluateChannel(
+            float albedo,
+            float meanFreePath,
+            float thickness)
+        {
+            float resolvedAlbedo = float.IsNaN(albedo)
+                || float.IsInfinity(albedo)
+                ? 0.0f
+                : Mathf.Clamp01(albedo);
+            float resolvedMeanFreePath = float.IsNaN(meanFreePath)
+                || float.IsInfinity(meanFreePath)
+                ? MinimumMeanFreePath
+                : Mathf.Max(meanFreePath, MinimumMeanFreePath);
+            return resolvedAlbedo
+                * Mathf.Exp(-thickness / resolvedMeanFreePath);
         }
     }
 

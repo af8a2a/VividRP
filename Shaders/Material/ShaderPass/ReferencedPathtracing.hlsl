@@ -94,24 +94,40 @@ void StandardLitReferencedPathtracingClosestHit(
         normalTextureLod,
         viewDirectionWS);
 
-    if (payloadInput.queryMode
-        == REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE)
+    bool isSubsurfaceSurfaceQuery = payloadInput.queryMode
+        == REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE;
+    bool isSubsurfaceTransmissionSurfaceQuery = payloadInput.queryMode
+        == REFERENCED_PATHTRACING_QUERY_SUBSURFACE_TRANSMISSION_SURFACE;
+    if (isSubsurfaceSurfaceQuery
+        || isSubsurfaceTransmissionSurfaceQuery)
     {
-        // A surface query returns only the sampled exit point identity and a
-        // Lambertian direct-light proposal. Raygen owns both the Burley
-        // spatial estimator and the visibility trace, keeping recursion at 1.
-        result.faceNormalWS = geometry.faceNormalWS;
+        // Surface queries return only a sampled boundary and a Lambertian
+        // direct-light proposal. The transmission query reaches the closed
+        // mesh from inside, so VividIndirectDiffuseBuildHitGeometry has
+        // oriented its normals inward; restore the exterior orientation for
+        // light sampling and visibility at the back boundary.
+        float queryNormalSign = isSubsurfaceTransmissionSurfaceQuery
+            ? -1.0
+            : 1.0;
+        float3 queryFaceNormalWS = geometry.faceNormalWS * queryNormalSign;
+        float3 queryShadingNormalWS =
+            material.shadingNormalWS * queryNormalSign;
+        result.faceNormalWS = queryFaceNormalWS;
         result.rayConeWidth = hitConeWidth;
         result.hitDistance = geometry.hitDistance;
-        result.denoisingNormalWS = material.shadingNormalWS;
+        result.denoisingNormalWS = queryShadingNormalWS;
         result.surfaceInstanceIndex = InstanceIndex();
-        result.isSurfaceQuery = 1u;
+        result.isSurfaceQuery =
+            (!isSubsurfaceTransmissionSurfaceQuery
+                || !geometry.isFrontFace)
+            ? 1u
+            : 0u;
 
         ReferencedPathtracingNEECandidate queryNeeCandidate;
         bool validQueryNeeCandidate =
             ReferencedPathtracingSampleUnifiedNEECandidate(
                 geometry.positionWS,
-                geometry.faceNormalWS,
+                queryFaceNormalWS,
                 false,
                 payloadInput.directLightRandom,
                 queryNeeCandidate);
@@ -130,17 +146,17 @@ void StandardLitReferencedPathtracingClosestHit(
         if (validQueryNeeCandidate
             && ReferencedPathtracingIsValidOpaqueReflectionDirection(
                 queryNeeCandidate.directionWS,
-                geometry.faceNormalWS,
-                material.shadingNormalWS))
+                queryFaceNormalWS,
+                queryShadingNormalWS))
         {
             float diffuseShadowTerminator =
                 ReferencedPathtracingEvaluateDiffuseShadowTerminator(
                     queryNeeCandidate.directionWS,
-                    material.shadingNormalWS,
-                    geometry.normalWS);
+                    queryShadingNormalWS,
+                    geometry.normalWS * queryNormalSign);
             float cosineToLight = max(
                 dot(
-                    material.shadingNormalWS,
+                    queryShadingNormalWS,
                     queryNeeCandidate.directionWS),
                 0.0);
             result.neeDiffuseRadiance =
@@ -212,6 +228,8 @@ void StandardLitReferencedPathtracingClosestHit(
             saturate(material.effectiveSubsurfaceWeight);
         result.subsurfaceAlbedo = material.subsurfaceAlbedo;
         result.subsurfaceRadius = material.subsurfaceRadius;
+        result.subsurfaceTransmissionWeight =
+            saturate(material.effectiveSubsurfaceTransmissionWeight);
         result.surfaceInstanceIndex = InstanceIndex();
         result.isSubsurface = 1u;
     }

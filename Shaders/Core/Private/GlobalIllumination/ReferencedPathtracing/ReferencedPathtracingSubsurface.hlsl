@@ -10,6 +10,23 @@ struct ReferencedPathtracingSubsurfaceSample
     float3 weight;
 };
 
+// Face SSS V1.1 keeps RTXCR's measured-thickness boundary transmission but
+// intentionally omits its additional in-volume HG samples. The RGB mean free
+// path makes thin ear cartilage transmit predominantly red wavelengths while
+// suppressing the same term through thicker parts of the head.
+float3 ReferencedPathtracingEvaluateSubsurfaceTransmission(
+    float3 albedo,
+    float3 meanFreePath,
+    float thickness)
+{
+    float3 safeMeanFreePath = max(meanFreePath, 0.000001);
+    float3 transmittance = exp(-max(thickness, 0.0) / safeMeanFreePath);
+    float3 transmission = saturate(albedo) * transmittance;
+    return !any(isnan(transmission)) && !any(isinf(transmission))
+        ? max(transmission, 0.0)
+        : 0.0;
+}
+
 float3 ReferencedPathtracingBurleyDiffusionShape(float3 albedo)
 {
     float3 centeredAlbedo = saturate(albedo) - 0.33;

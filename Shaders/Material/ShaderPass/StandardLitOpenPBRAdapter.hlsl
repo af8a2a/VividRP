@@ -12,6 +12,7 @@ struct VividReferencedPathtracingMaterial
     float3 emission;
     float effectiveTransmissionWeight;
     float effectiveSubsurfaceWeight;
+    float effectiveSubsurfaceTransmissionWeight;
     float3 subsurfaceAlbedo;
     float3 subsurfaceRadius;
     bool isSolidTransmissionBoundary;
@@ -233,8 +234,8 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     material.effectiveTransmissionWeight =
         inputs.transmission_weight
         * (1.0 - inputs.base_metalness);
-    // Face SSS V1 is an opaque dielectric hybrid. Thin-wall scattering and
-    // simultaneous refraction stay on the regular OpenPBR path until V1.1.
+    // Face SSS is an opaque dielectric hybrid. OpenPBR surface refraction stays
+    // mutually exclusive; V1.1 adds a separate measured-thickness ear term.
     bool surfaceIsOpaque = true;
 #if defined(_SURFACE_TYPE_TRANSPARENT)
     surfaceIsOpaque = false;
@@ -249,6 +250,17 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
             * inputs.subsurface_weight
             * (1.0 - inputs.base_metalness)
         : 0.0;
+    float subsurfaceTransmissionWeight = _SubsurfaceTransmissionWeight;
+    if (isnan(subsurfaceTransmissionWeight)
+        || isinf(subsurfaceTransmissionWeight))
+    {
+        subsurfaceTransmissionWeight = 0.0;
+    }
+    material.effectiveSubsurfaceTransmissionWeight =
+        supportsHybridSubsurface
+            ? material.effectiveSubsurfaceWeight
+                * saturate(subsurfaceTransmissionWeight)
+            : 0.0;
     material.subsurfaceAlbedo = inputs.subsurface_color;
     material.subsurfaceRadius = max(
         inputs.subsurface_radius * inputs.subsurface_radius_scale,

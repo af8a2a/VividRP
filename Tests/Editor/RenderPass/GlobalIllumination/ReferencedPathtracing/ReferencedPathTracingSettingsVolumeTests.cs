@@ -229,7 +229,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(14));
+                    Is.EqualTo(15));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
@@ -515,6 +515,43 @@ namespace VividRP.Editor.Tests
                         1.33f,
                         true),
                 Is.EqualTo(1.33f).Within(1e-6f));
+        }
+
+        [Test]
+        public void FaceSubsurfaceTransmissionContract_UsesThicknessAndRgbMeanFreePath()
+        {
+            Assert.That(
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .Version,
+                Is.EqualTo(1));
+            var albedo = new Vector3(1.0f, 0.8f, 0.6f);
+            var meanFreePath = new Vector3(0.01f, 0.005f, 0.0025f);
+            Vector3 thin =
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .Evaluate(albedo, meanFreePath, 0.005f);
+            Vector3 thick =
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .Evaluate(albedo, meanFreePath, 0.02f);
+
+            Assert.That(thin.x, Is.GreaterThan(thin.y));
+            Assert.That(thin.y, Is.GreaterThan(thin.z));
+            Assert.That(thick.x, Is.LessThan(thin.x));
+            Assert.That(thick.y, Is.LessThan(thin.y));
+            Assert.That(thick.z, Is.LessThan(thin.z));
+        }
+
+        [Test]
+        public void FaceSubsurfaceTransmissionContract_ResolvesEffectiveWeight()
+        {
+            float weight =
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .ResolveEffectiveWeight(0.8f, 0.5f, 0.25f);
+
+            Assert.That(weight, Is.EqualTo(0.3f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .ResolveEffectiveWeight(1.0f, 1.0f, 1.0f),
+                Is.Zero);
         }
 
         [Test]

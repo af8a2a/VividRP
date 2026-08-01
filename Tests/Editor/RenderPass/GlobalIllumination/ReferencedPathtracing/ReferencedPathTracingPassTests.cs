@@ -2167,8 +2167,15 @@ namespace VividRP.Editor.Tests
                 var changed =
                     ReferencedPathTracingSceneSignatureUtility.Compute(
                         new Renderer[] { renderer });
+                material.SetFloat("_SubsurfaceTransmissionWeight", 1.0f);
+                var transmissionChanged =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
 
                 Assert.That(changed, Is.Not.EqualTo(original));
+                Assert.That(
+                    transmissionChanged,
+                    Is.Not.EqualTo(changed));
             }
             finally
             {

@@ -311,6 +311,10 @@ namespace VividRP.Editor.Tests
                     material.HasProperty(
                         "_SubsurfaceScatterAnisotropy"),
                     Is.True);
+                Assert.That(
+                    material.HasProperty(
+                        "_SubsurfaceTransmissionWeight"),
+                    Is.True);
                 Assert.That(material.GetFloat("_SubsurfaceWeight"), Is.Zero);
                 Assert.That(
                     material.GetColor("_SubsurfaceColor"),
@@ -324,6 +328,10 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     material.GetFloat(
                         "_SubsurfaceScatterAnisotropy"),
+                    Is.Zero);
+                Assert.That(
+                    material.GetFloat(
+                        "_SubsurfaceTransmissionWeight"),
                     Is.Zero);
             }
             finally
@@ -344,6 +352,9 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 source,
                 Does.Contain("float _SubsurfaceScatterAnisotropy;"));
+            Assert.That(
+                source,
+                Does.Contain("float _SubsurfaceTransmissionWeight;"));
         }
 
         [Test]

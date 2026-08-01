@@ -53,6 +53,7 @@ CBUFFER_START(UnityPerMaterial)
     float _SubsurfaceWeight;
     float _SubsurfaceRadius;
     float _SubsurfaceScatterAnisotropy;
+    float _SubsurfaceTransmissionWeight;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);

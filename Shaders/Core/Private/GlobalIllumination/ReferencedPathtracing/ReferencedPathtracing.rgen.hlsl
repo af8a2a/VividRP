@@ -2799,6 +2799,197 @@ void RayGenReferencedPathtracing()
                     subsurfaceSampleDimension + 3u,
                     sampleSeed,
                     pathSamplingMode));
+
+            if (payload.subsurfaceTransmissionWeight > 0.0)
+            {
+                float maximumTransmissionMeanFreePath = max(
+                    payload.subsurfaceRadius.x,
+                    max(
+                        payload.subsurfaceRadius.y,
+                        payload.subsurfaceRadius.z));
+                float3 transmissionDirectionWS =
+                    -normalize(payload.faceNormalWS);
+                float transmissionRayBias;
+                RayDesc transmissionQueryRay;
+                transmissionQueryRay.Origin =
+                    OffsetReferencedPathtracingRayOrigin(
+                        payload.positionWS,
+                        normalize(payload.faceNormalWS),
+                        transmissionDirectionWS,
+                        transmissionRayBias);
+                transmissionQueryRay.Direction = transmissionDirectionWS;
+                transmissionQueryRay.TMin = transmissionRayBias;
+                transmissionQueryRay.TMax = min(
+                    max(
+                        8.0 * maximumTransmissionMeanFreePath,
+                        4.0 * transmissionRayBias),
+                    _RayMaxDistance);
+
+                uint transmissionQuerySeed = ReferencedPathtracingHash(
+                    asuint(subsurfaceRandom.w)
+                    ^ ReferencedPathtracingHash(
+                        sampleSeed
+                        + subsurfaceSampleDimension
+                        + 0x6a09e667u));
+                ReferencedPathtracingPayloadInput transmissionQueryInput;
+                InitializeReferencedPathtracingPayloadInput(
+                    transmissionQueryInput);
+                transmissionQueryInput.directLightRandom = float3(
+                    ReferencedPathtracingHashToUnitFloat(
+                        transmissionQuerySeed ^ 0xbb67ae85u),
+                    ReferencedPathtracingHashToUnitFloat(
+                        transmissionQuerySeed ^ 0x3c6ef372u),
+                    ReferencedPathtracingHashToUnitFloat(
+                        transmissionQuerySeed ^ 0xa54ff53au));
+                transmissionQueryInput.stochasticAlphaSeed =
+                    ReferencedPathtracingHashStochasticTransparency(
+                        transmissionQuerySeed ^ 0x510e527fu);
+                transmissionQueryInput.rtxtfRandom = float3(
+                    ReferencedPathtracingHashToUnitFloat(
+                        transmissionQuerySeed ^ 0x9b05688cu),
+                    ReferencedPathtracingHashToUnitFloat(
+                        transmissionQuerySeed ^ 0x1f83d9abu),
+                    ReferencedPathtracingHashToUnitFloat(
+                        transmissionQuerySeed ^ 0x5be0cd19u));
+                transmissionQueryInput.rayConeWidth = payload.rayConeWidth;
+                transmissionQueryInput.queryMode =
+                    REFERENCED_PATHTRACING_QUERY_SUBSURFACE_TRANSMISSION_SURFACE;
+
+                ReferencedPathtracingPayload transmissionQueryPayload;
+                PackReferencedPathtracingPayloadInput(
+                    transmissionQueryInput,
+                    transmissionQueryPayload);
+                TraceReferencedPathtracingSurface(
+                    transmissionQueryRay,
+                    transmissionQueryPayload);
+                ReferencedPathtracingSurfaceResult transmissionQueryResult;
+                UnpackReferencedPathtracingSurfaceResult(
+                    transmissionQueryPayload,
+                    transmissionQueryResult);
+                if (transmissionQueryResult.hit != 0u)
+                {
+                    transmissionQueryResult.positionWS =
+                        transmissionQueryRay.Origin
+                        + transmissionQueryRay.Direction
+                            * transmissionQueryResult.hitDistance;
+                }
+
+                bool matchesSubsurfaceTransmissionSurface =
+                    transmissionQueryResult.hit != 0u
+                    && transmissionQueryResult.isSurfaceQuery != 0u
+                    && transmissionQueryResult.surfaceInstanceIndex
+                        == payload.surfaceInstanceIndex;
+                if (matchesSubsurfaceTransmissionSurface
+                    && transmissionQueryResult.neeValid != 0u
+                    && any(
+                        transmissionQueryResult.neeDiffuseRadiance > 0.0))
+                {
+                    float transmissionLightEstimatorWeight =
+                        GetReferencedPathtracingNEELightEstimatorWeight(
+                            transmissionQueryResult.neeFlags,
+                            transmissionQueryResult.neeSelectionPdf,
+                            transmissionQueryResult.neeSolidAnglePdf,
+                            0.0);
+                    float3 transmissionNeeDirectionWS = normalize(
+                        transmissionQueryResult.neeDirectionWS);
+                    float3 transmissionVisibility =
+                        transmissionLightEstimatorWeight > 0.0
+                        ? TraceReferencedPathtracingCandidateVisibility(
+                            transmissionQueryResult.positionWS,
+                            normalize(
+                                transmissionQueryResult.faceNormalWS),
+                            transmissionNeeDirectionWS,
+                            transmissionQueryResult.neeDistance,
+                            !ReferencedPathtracingUsesCameraRelativeAtmosphere(),
+                            true,
+                            transmissionQueryResult.neeShadowStrength,
+                            ReferencedPathtracingHashStochasticTransparency(
+                                transmissionQuerySeed
+                                ^ ReferencedPathtracingHashStochasticTransparency(
+                                    transmissionQueryResult.neeLightIndex
+                                        + 0x428a2f98u)))
+                        : 0.0;
+                    float transmissionThickness = max(
+                        transmissionQueryResult.hitDistance
+                            + transmissionRayBias,
+                        0.0);
+                    float3 subsurfaceTransmission =
+                        ReferencedPathtracingEvaluateSubsurfaceTransmission(
+                            payload.subsurfaceAlbedo,
+                            payload.subsurfaceRadius,
+                            transmissionThickness);
+                    float3 transmissionContribution = throughput
+                        * saturate(payload.subsurfaceTransmissionWeight)
+                        * subsurfaceTransmission
+                        * transmissionQueryResult.neeDiffuseRadiance
+                        * transmissionLightEstimatorWeight
+                        * transmissionVisibility;
+                    bool finiteTransmissionContribution =
+                        IsFiniteReferencedPathtracingRadiance(
+                            transmissionContribution)
+                        && all(transmissionContribution >= 0.0);
+                    if (!finiteTransmissionContribution)
+                    {
+                        invalidSampleMask.x = 1.0;
+                    }
+                    else if (transmissionQueryResult.neeLightType
+                        == REFERENCED_LIGHT_TYPE_DIRECTIONAL)
+                    {
+                        bool includeInPrimaryDenoiserSignal =
+                            (transmissionQueryResult.neeFlags
+                                & REFERENCED_LIGHT_FLAG_SINGULAR) == 0u;
+                        AccumulateReferencedPathtracingMainLightRadiance(
+                            transmissionContribution,
+                            1u,
+                            bounceIndex,
+                            primaryLobeClass,
+                            includeInPrimaryDenoiserSignal,
+                            directLightingRadiance,
+                            diffuseRadiance,
+                            specularRadiance,
+                            primaryDenoiserMainLightDiffuseRadiance,
+                            primaryDenoiserMainLightSpecularRadiance);
+                    }
+                    else if (transmissionQueryResult.neeLightType
+                        == REFERENCED_LIGHT_TYPE_ENVIRONMENT)
+                    {
+                        environmentNeeRadiance += transmissionContribution;
+                        if (bounceIndex == 0u)
+                        {
+                            environmentDirectDiffuseRadiance +=
+                                transmissionContribution;
+                            diffuseRadiance += transmissionContribution;
+                        }
+                        else if (primaryLobeClass == 1u)
+                        {
+                            diffuseRadiance += transmissionContribution;
+                        }
+                        else if (primaryLobeClass == 2u)
+                        {
+                            specularRadiance += transmissionContribution;
+                        }
+                    }
+                    else if (bounceIndex == 0u)
+                    {
+                        diffuseRadiance += transmissionContribution;
+                        diffuseRayDirectionWS = transmissionNeeDirectionWS;
+                        diffuseHitDistance =
+                            transmissionQueryResult.neeDistance;
+                        diffuseDlssHitDistance =
+                            transmissionQueryResult.neeDistance;
+                        diffuseHitDistanceValid = true;
+                    }
+                    else if (primaryLobeClass == 1u)
+                    {
+                        diffuseRadiance += transmissionContribution;
+                    }
+                    else if (primaryLobeClass == 2u)
+                    {
+                        specularRadiance += transmissionContribution;
+                    }
+                }
+            }
+
             ReferencedPathtracingSubsurfaceSample subsurfaceSample;
             if (ReferencedPathtracingSampleBurleySubsurface(
                     payload.subsurfaceAlbedo,

@@ -1586,6 +1586,7 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 
 #define REFERENCED_PATHTRACING_QUERY_DEFAULT 0u
 #define REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE 1u
+#define REFERENCED_PATHTRACING_QUERY_SUBSURFACE_TRANSMISSION_SURFACE 2u
 
 // Closest-hit result layout. Raygen reconstructs positionWS from its RayDesc
 // and hit distance. Unit directions use octahedral UNORM16x2 encoding. Material
@@ -1629,6 +1630,7 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 // GeometryIndex() is unavailable. Face SSS V1 therefore uses the RTAS instance
 // as its surface ownership key.
 #define REFERENCED_PAYLOAD_RESULT_SURFACE_INSTANCE_INDEX 38u
+#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_TRANSMISSION_WEIGHT 39u
 
 #define REFERENCED_PAYLOAD_FLAG_HIT (1u << 0u)
 #define REFERENCED_PAYLOAD_FLAG_NEE_VALID (1u << 1u)
@@ -1732,6 +1734,7 @@ struct ReferencedPathtracingSurfaceResult
     float subsurfaceWeight;
     float3 subsurfaceAlbedo;
     float3 subsurfaceRadius;
+    float subsurfaceTransmissionWeight;
     uint surfaceInstanceIndex;
     uint isSubsurface;
     uint isSurfaceQuery;
@@ -1958,6 +1961,7 @@ void InitializeReferencedPathtracingSurfaceResult(
     result.subsurfaceWeight = 0.0;
     result.subsurfaceAlbedo = 0.0;
     result.subsurfaceRadius = 0.0;
+    result.subsurfaceTransmissionWeight = 0.0;
     result.surfaceInstanceIndex = 0xffffffffu;
     result.isSubsurface = 0u;
     result.isSurfaceQuery = 0u;
@@ -2348,6 +2352,10 @@ void PackReferencedPathtracingSurfaceResult(
             payload,
             REFERENCED_PAYLOAD_RESULT_SURFACE_INSTANCE_INDEX,
             result.surfaceInstanceIndex);
+        StoreReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_TRANSMISSION_WEIGHT,
+            result.subsurfaceTransmissionWeight);
     }
     else
     {
@@ -2517,6 +2525,10 @@ void UnpackReferencedPathtracingSurfaceResult(
         result.surfaceInstanceIndex = LoadReferencedPathtracingPayloadUint(
             payload,
             REFERENCED_PAYLOAD_RESULT_SURFACE_INSTANCE_INDEX);
+        result.subsurfaceTransmissionWeight =
+            LoadReferencedPathtracingPayloadFloat(
+                payload,
+                REFERENCED_PAYLOAD_RESULT_SUBSURFACE_TRANSMISSION_WEIGHT);
         result.thinWalledTransmissionWeight = 0.0;
         result.stochasticTransparencyDiagnostics = 0.0;
         result.nextMediumIor = 1.0;

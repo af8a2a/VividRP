@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 9
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 10
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -21,6 +21,9 @@ static const uint kReferencedPathtracingStochasticAlphaDimensionOffset = 7u;
 static const uint kReferencedPathtracingVolumeDimensionOffset = 8u;
 static const uint kReferencedPathtracingAtmosphereSunDimensionOffset = 12u;
 static const uint kReferencedPathtracingCloudDimensionOffset = 14u;
+// Chiang hair consumes two float2 samples. Keep the established three BSDF
+// dimensions stable and append the fourth scalar in the reserved bounce block.
+static const uint kReferencedPathtracingHairBsdfExtraDimensionOffset = 17u;
 // RTXTF uses the two reserved bounce dimensions for the stochastic texel
 // coordinates. Its mip selector is decorrelated from those values by hashing.
 static const uint kReferencedPathtracingRTXTFDimensionOffset = 18u;

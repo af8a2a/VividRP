@@ -35,6 +35,23 @@ Hair V1 固定采用以下方案：
 
 ## Current Baseline
 
+### 2026-08-01 Hair V1 Implementation Checkpoint
+
+当前已完成 Hair V1 的首轮代码闭环：
+
+- 引入 RTXCR commit `2bd10cff0824cbd18195339d4dc6987c0fe5a5bc` 中逐文件携带 MIT 许可的 Chiang material HLSL，并保留原始许可头和独立 `NOTICE.md`；未复制 RTXCR 的 proprietary geometry/sample glue。
+- 增加 VividRP-owned `HairStrandData` 和 `HairDotsMeshBuilder`，静态 line segment 会生成每段 4 triangle / 12 vertex 的 DOTS mesh，包含 centerline offset normal、tangent、strand UV、compensated radius 和 endpoint coordinate。
+- 增加 `VividRP/Material/Hair` shader，以及 `ReferencedPathtracingDXR`、`RaytracingGBufferDXR` 两个 ray-tracing material pass。
+- 增加 tapered DOTS body reconstruction、真实 radial normal、centerline tangent、corrected hit position/radius 和 world/local Hair frame。
+- 增加 Chiang material adapter、显式 Eval PDF、四维 importance sample 和 finite/PDF guards。
+- Reference PT sampling contract 已升级到 V10，在 bounce reserved block 的 dimension 17 追加第四个 Hair BSDF 随机数，不移动 StandardLit、NEE、volume、atmosphere、cloud 或 RTXTF 的既有维度。
+- Reference PT surface payload 以显式 medium-IOR/strand-radius union 传递 strand radius 和 surface flag；NEE visibility、BSDF-segment visibility 和 continuation ray 使用约 `2 * radius` 的 DOTS transition offset。
+- Raytracing GBuffer payload 支持 material-supplied diffuse/specular albedo；Hair 输出 corrected position、radial normal、longitudinal roughness、base color 和 dielectric F0，StandardLit 保持原推导路径。
+- 增加 validation asset builder，以及 DOTS、sampling、shader import、payload、许可证和 source contract tests。
+- Unity 6000.7 Editor 已确认 Hair shader 包含 2 个 pass 且无 shader compiler message；当前交互式 Editor 正在运行，因此尚未主动启动 batchmode EditMode suite。
+
+Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation assets，完成 raw accumulation、analytic/environment NEE、self-intersection、ReBLUR 和 DLSS-RR 的实际画面与 GPU capture 验证。动态 strand、previous centerline、NRD strand metadata、AABB 和 LSS 仍按后续 milestone 处理。
+
 现有实现已经提供以下接入条件：
 
 - `ReferencedPathTracingPass` 使用 material shader pass `ReferencedPathtracingDXR`，无需为 Hair shader 新增一套 raygen pass。
@@ -112,8 +129,9 @@ V1 不承诺：
 - `_HairIor`
 - `_HairCuticleAngleDegrees`
 - `_HairFresnelApproximation`
-- `_HairRadiusScale`
 - `_HairEmissionColor`，仅作为可选的 surface emission，不参与 Hair BCSDF 参数推导。
+
+DOTS radius scale 在 mesh build 阶段应用。展开后的 vertex position 和存储 radius 必须同步变化，因此 V1 不提供只修改 shader property、却不重建 mesh 的 `_HairRadiusScale`。
 
 VividRP adapter 构造统一的 `VividHairMaterialData`，再映射到 Chiang interaction：
 
@@ -661,4 +679,3 @@ Hair V1 只有在以下条件全部满足时才能标记完成：
 - raw Reference PT accumulation 与 DLSS-RR preview 可以独立启用和比较。
 - validation corpus、性能数据、已知限制和许可证说明已记录。
 - StandardLit Reference PT、ReBLUR 和 DLSS-RR 没有非预期回归。
-

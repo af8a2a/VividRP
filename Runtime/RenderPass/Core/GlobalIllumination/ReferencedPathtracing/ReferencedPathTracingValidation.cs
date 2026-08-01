@@ -238,7 +238,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 9;
+        internal const int Version = 10;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -252,6 +252,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int VolumeDimensionOffset = 8;
         internal const int AtmosphereSunDimensionOffset = 12;
         internal const int CloudDimensionOffset = 14;
+        internal const int HairBsdfExtraDimensionOffset = 17;
         internal const int RTXTFDimensionOffset = 18;
         internal const int FutureDimensionOffset = 18;
         internal const int GlobalFogBaseDimension = 200;

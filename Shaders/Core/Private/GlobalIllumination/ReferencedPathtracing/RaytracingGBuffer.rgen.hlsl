@@ -150,6 +150,11 @@ void RayGenRaytracingGBuffer()
         linearRoughness,
         normalWS,
         -rayDirectionWS);
+    if (payload.materialAlbedoValid != 0u)
+    {
+        diffuseAlbedo = saturate(payload.diffuseAlbedo);
+        specularAlbedo = saturate(payload.specularAlbedo);
+    }
 
     float4 clip = mul(_RaytracingGBufferWorldToClip, float4(payload.positionWS, 1.0));
     float hardwareDepth = saturate(clip.z / max(abs(clip.w), 1e-6));

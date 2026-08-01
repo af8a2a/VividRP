@@ -227,12 +227,34 @@ float3 OffsetReferencedPathtracingRayOrigin(
     float3 positionWS,
     float3 faceNormalWS,
     float3 rayDirectionWS,
+    uint isStrand,
+    float strandRadius,
     out float rayBias)
 {
     float positionScale = max(max(abs(positionWS.x), abs(positionWS.y)), abs(positionWS.z));
     rayBias = max(kReferencedPathtracingShadowMinBias, positionScale * 0.00001);
     float offsetSign = dot(faceNormalWS, rayDirectionWS) >= 0.0 ? 1.0 : -1.0;
-    return positionWS + faceNormalWS * (rayBias * offsetSign);
+    float strandTransitionOffset = isStrand != 0u && offsetSign < 0.0
+        ? 2.0 * max(strandRadius, 0.0)
+        : 0.0;
+    return positionWS
+        + faceNormalWS
+            * ((rayBias + strandTransitionOffset) * offsetSign);
+}
+
+float3 OffsetReferencedPathtracingRayOrigin(
+    float3 positionWS,
+    float3 faceNormalWS,
+    float3 rayDirectionWS,
+    out float rayBias)
+{
+    return OffsetReferencedPathtracingRayOrigin(
+        positionWS,
+        faceNormalWS,
+        rayDirectionWS,
+        0u,
+        0.0,
+        rayBias);
 }
 
 float3 TraceReferencedPathtracingVisibility(
@@ -240,7 +262,9 @@ float3 TraceReferencedPathtracingVisibility(
     float3 faceNormalWS,
     float3 lightDirectionWS,
     float maximumDistance,
-    uint stochasticAlphaSeed)
+    uint stochasticAlphaSeed,
+    uint isStrand,
+    float strandRadius)
 {
     RayDesc shadowRay;
     float shadowBias;
@@ -248,6 +272,8 @@ float3 TraceReferencedPathtracingVisibility(
         positionWS,
         faceNormalWS,
         lightDirectionWS,
+        isStrand,
+        strandRadius,
         shadowBias);
     shadowRay.Direction = lightDirectionWS;
     shadowRay.TMin = shadowBias;
@@ -305,6 +331,23 @@ float3 TraceReferencedPathtracingVisibility(
         : 0.0;
 }
 
+float3 TraceReferencedPathtracingVisibility(
+    float3 positionWS,
+    float3 faceNormalWS,
+    float3 lightDirectionWS,
+    float maximumDistance,
+    uint stochasticAlphaSeed)
+{
+    return TraceReferencedPathtracingVisibility(
+        positionWS,
+        faceNormalWS,
+        lightDirectionWS,
+        maximumDistance,
+        stochasticAlphaSeed,
+        0u,
+        0.0);
+}
+
 float3 TraceReferencedPathtracingCandidateVisibility(
     float3 positionWS,
     float3 faceNormalWS,
@@ -313,7 +356,9 @@ float3 TraceReferencedPathtracingCandidateVisibility(
     bool includeVirtualGround,
     bool includeGlobalFog,
     float shadowStrength,
-    uint stochasticAlphaSeed)
+    uint stochasticAlphaSeed,
+    uint isStrand,
+    float strandRadius)
 {
     shadowStrength = saturate(shadowStrength);
     float3 tracedVisibility = shadowStrength > 0.0
@@ -322,7 +367,9 @@ float3 TraceReferencedPathtracingCandidateVisibility(
             faceNormalWS,
             lightDirectionWS,
             lightDistance,
-            stochasticAlphaSeed)
+            stochasticAlphaSeed,
+            isStrand,
+            strandRadius)
         : 1.0;
     float3 geometryVisibility =
         lerp(1.0, tracedVisibility, shadowStrength);
@@ -333,6 +380,8 @@ float3 TraceReferencedPathtracingCandidateVisibility(
             positionWS,
             faceNormalWS,
             lightDirectionWS,
+            isStrand,
+            strandRadius,
             shadowBias);
     float3 atmosphereTransmittance = 1.0;
     float3 cloudTransmittance = 1.0;
@@ -392,6 +441,29 @@ float3 TraceReferencedPathtracingCandidateVisibility(
         * globalFogTransmittance
         * localFogTransmittance
         * geometryVisibility;
+}
+
+float3 TraceReferencedPathtracingCandidateVisibility(
+    float3 positionWS,
+    float3 faceNormalWS,
+    float3 lightDirectionWS,
+    float lightDistance,
+    bool includeVirtualGround,
+    bool includeGlobalFog,
+    float shadowStrength,
+    uint stochasticAlphaSeed)
+{
+    return TraceReferencedPathtracingCandidateVisibility(
+        positionWS,
+        faceNormalWS,
+        lightDirectionWS,
+        lightDistance,
+        includeVirtualGround,
+        includeGlobalFog,
+        shadowStrength,
+        stochasticAlphaSeed,
+        0u,
+        0.0);
 }
 
 void TraceReferencedPathtracingSurface(
@@ -768,6 +840,14 @@ void RayGenReferencedPathtracing()
                 sampleIndex,
                 bounceSampleDimension
                     + kReferencedPathtracingBsdfDimensionOffset,
+                sampleSeed,
+                pathSamplingMode);
+        payloadInput.hairBsdfExtraRandom =
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingHairBsdfExtraDimensionOffset,
                 sampleSeed,
                 pathSamplingMode);
         // A single dimension selects the source and the remaining pair samples its
@@ -2718,7 +2798,9 @@ void RayGenReferencedPathtracing()
                     ReferencedPathtracingHashStochasticTransparency(
                         stochasticAlphaSeed
                         ^ ReferencedPathtracingHashStochasticTransparency(
-                            payload.neeLightIndex + 0x299f31d0u)))
+                            payload.neeLightIndex + 0x299f31d0u)),
+                    payload.isStrand,
+                    payload.strandRadius)
                 : 0.0;
             visibility *=
                 ReferencedPathtracingEvaluateMaterialMediumTransmittance(
@@ -2838,7 +2920,8 @@ void RayGenReferencedPathtracing()
                 ReferencedPathtracingCreateLightSelectionContext(
                     payload.positionWS,
                     payload.faceNormalWS,
-                    payload.thinWalledTransmissionWeight > 0.0);
+                    payload.isStrand != 0u
+                        || payload.thinWalledTransmissionWeight > 0.0);
             previousLightSelectionContext = selectionContext;
             uint contextLightCount =
                 ReferencedPathtracingGetContextLightCount(
@@ -2912,7 +2995,9 @@ void RayGenReferencedPathtracing()
                         ReferencedPathtracingHashStochasticTransparency(
                             stochasticAlphaSeed
                             ^ ReferencedPathtracingHashStochasticTransparency(
-                                lightIndex + 0x082efa98u)));
+                                lightIndex + 0x082efa98u)),
+                        payload.isStrand,
+                        payload.strandRadius);
                 visibility *=
                     ReferencedPathtracingEvaluateMaterialMediumTransmittance(
                         activeMaterialMediumExtinction,
@@ -3080,6 +3165,8 @@ void RayGenReferencedPathtracing()
             payload.positionWS,
             normalize(payload.faceNormalWS),
             ray.Direction,
+            payload.isStrand,
+            payload.strandRadius,
             nextRayBias);
         ray.TMin = nextRayBias;
         ray.TMax = _RayMaxDistance;

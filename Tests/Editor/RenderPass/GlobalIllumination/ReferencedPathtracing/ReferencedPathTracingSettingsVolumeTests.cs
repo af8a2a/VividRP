@@ -578,7 +578,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(9));
+                Is.EqualTo(10));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -603,6 +603,10 @@ namespace VividRP.Editor.Tests
                 ReferencedPathTracingSamplingContract
                     .CloudDimensionOffset,
                 Is.EqualTo(14));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .HairBsdfExtraDimensionOffset,
+                Is.EqualTo(17));
             Assert.That(
                 ReferencedPathTracingSamplingContract
                     .RTXTFDimensionOffset,

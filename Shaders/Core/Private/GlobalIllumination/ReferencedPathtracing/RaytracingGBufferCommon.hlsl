@@ -13,9 +13,12 @@ struct RaytracingGBufferPayload
     float3 emission;
     float3 nrdDiffuseMaterialFactor;
     float3 nrdSpecularMaterialFactor;
+    float3 diffuseAlbedo;
+    float3 specularAlbedo;
     float linearRoughness;
     float metalness;
     float hitDistance;
+    uint materialAlbedoValid;
     uint hit;
 };
 
@@ -30,9 +33,12 @@ void InitializeRaytracingGBufferPayload(out RaytracingGBufferPayload payload)
     payload.emission = 0.0;
     payload.nrdDiffuseMaterialFactor = 1.0;
     payload.nrdSpecularMaterialFactor = 1.0;
+    payload.diffuseAlbedo = 0.0;
+    payload.specularAlbedo = 0.0;
     payload.linearRoughness = 1.0;
     payload.metalness = 0.0;
     payload.hitDistance = 0.0;
+    payload.materialAlbedoValid = 0u;
     payload.hit = 0u;
 }
 

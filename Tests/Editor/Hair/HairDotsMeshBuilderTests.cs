@@ -1,0 +1,134 @@
+using System;
+using System.Collections.Generic;
+using NUnit.Framework;
+using UnityEngine;
+using VividRP.Runtime;
+
+namespace VividRP.Editor.Tests
+{
+    public sealed class HairDotsMeshBuilderTests
+    {
+        [Test]
+        public void Build_EmitsFourTrianglesAndStableEndpointAttributes()
+        {
+            var segment = new HairStrandSegment(
+                new HairStrandPoint(
+                    new Vector3(1.0f, 2.0f, 3.0f),
+                    0.1f,
+                    new Vector2(0.0f, 0.25f)),
+                new HairStrandPoint(
+                    new Vector3(1.0f, 4.0f, 3.0f),
+                    0.05f,
+                    new Vector2(1.0f, 0.75f)));
+            var mesh = HairDotsMeshBuilder.Build(new[] { segment });
+
+            try
+            {
+                Assert.That(
+                    mesh.vertexCount,
+                    Is.EqualTo(HairDotsMeshBuilder.VertexCountPerSegment));
+                Assert.That(
+                    mesh.triangles.Length,
+                    Is.EqualTo(
+                        HairDotsMeshBuilder.TriangleCountPerSegment * 3));
+
+                var positions = mesh.vertices;
+                var normals = mesh.normals;
+                var radii = new List<Vector2>();
+                mesh.GetUVs(1, radii);
+                var indices = mesh.triangles;
+
+                for (var triangleIndex = 0;
+                     triangleIndex
+                        < HairDotsMeshBuilder.TriangleCountPerSegment;
+                     triangleIndex++)
+                {
+                    var firstIndex = indices[triangleIndex * 3];
+                    var lastIndex = indices[triangleIndex * 3 + 2];
+                    var recoveredStart = positions[firstIndex]
+                        - normals[firstIndex] * radii[firstIndex].x;
+                    var recoveredEnd = positions[lastIndex]
+                        - normals[lastIndex] * radii[lastIndex].x;
+
+                    AssertVectorApproximately(
+                        segment.Start.Position,
+                        recoveredStart);
+                    AssertVectorApproximately(
+                        segment.End.Position,
+                        recoveredEnd);
+                    Assert.That(radii[firstIndex].y, Is.EqualTo(0.0f));
+                    Assert.That(radii[lastIndex].y, Is.EqualTo(1.0f));
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void Build_AppliesRadiusScaleAndVolumeCompensation()
+        {
+            const float radiusScale = 2.0f;
+            var segment = new HairStrandSegment(
+                new HairStrandPoint(Vector3.zero, 0.25f, Vector2.zero),
+                new HairStrandPoint(Vector3.forward, 0.5f, Vector2.one));
+            var mesh = HairDotsMeshBuilder.Build(
+                new[] { segment },
+                radiusScale: radiusScale);
+
+            try
+            {
+                var radii = new List<Vector2>();
+                mesh.GetUVs(1, radii);
+                Assert.That(
+                    radii[0].x,
+                    Is.EqualTo(
+                            segment.Start.Radius
+                            * radiusScale
+                            * HairDotsMeshBuilder.RadiusCompensation)
+                        .Within(1e-6f));
+                Assert.That(
+                    radii[2].x,
+                    Is.EqualTo(
+                            segment.End.Radius
+                            * radiusScale
+                            * HairDotsMeshBuilder.RadiusCompensation)
+                        .Within(1e-6f));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void Build_RejectsDegenerateOrInvalidSegments()
+        {
+            var coincident = new HairStrandSegment(
+                new HairStrandPoint(Vector3.zero, 0.1f, Vector2.zero),
+                new HairStrandPoint(Vector3.zero, 0.1f, Vector2.one));
+            var invalidRadius = new HairStrandSegment(
+                new HairStrandPoint(Vector3.zero, 0.0f, Vector2.zero),
+                new HairStrandPoint(Vector3.forward, 0.1f, Vector2.one));
+
+            Assert.Throws<ArgumentException>(
+                () => HairDotsMeshBuilder.Build(new[] { coincident }));
+            Assert.Throws<ArgumentException>(
+                () => HairDotsMeshBuilder.Build(new[] { invalidRadius }));
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => HairDotsMeshBuilder.Build(
+                    Array.Empty<HairStrandSegment>(),
+                    radiusScale: 0.0f));
+        }
+
+        private static void AssertVectorApproximately(
+            Vector3 expected,
+            Vector3 actual)
+        {
+            Assert.That(actual.x, Is.EqualTo(expected.x).Within(1e-5f));
+            Assert.That(actual.y, Is.EqualTo(expected.y).Within(1e-5f));
+            Assert.That(actual.z, Is.EqualTo(expected.z).Within(1e-5f));
+        }
+    }
+}

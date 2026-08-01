@@ -35,6 +35,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     volume.enableShaderExecutionReordering.value,
                     Is.False);
+                Assert.That(volume.enableRTXTF.value, Is.True);
+                Assert.That(
+                    volume.rtxtfFilter.value,
+                    Is.EqualTo(ReferencedPathTracingRTXTFMode.Linear));
+                Assert.That(
+                    volume.rtxtfGaussianSigma.value,
+                    Is.EqualTo(0.7f));
                 Assert.That(volume.targetSampleCount.value, Is.EqualTo(2048));
                 Assert.That(
                     volume.environmentMode.value,
@@ -126,6 +133,10 @@ namespace VividRP.Editor.Tests
                 volume.globalLightProposalProbability.value = 0.25f;
                 volume.lightSpatialIndex.value = true;
                 volume.enableShaderExecutionReordering.value = false;
+                volume.enableRTXTF.value = true;
+                volume.rtxtfFilter.value =
+                    ReferencedPathTracingRTXTFMode.Cubic;
+                volume.rtxtfGaussianSigma.value = 0.9f;
                 volume.targetSampleCount.value = 1024;
                 var original =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
@@ -136,6 +147,20 @@ namespace VividRP.Editor.Tests
                 volume.enableShaderExecutionReordering.value = true;
                 var shaderExecutionReorderingChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.enableRTXTF.value = false;
+                var rtxtfDisabled =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.enableRTXTF.value = true;
+                volume.rtxtfFilter.value =
+                    ReferencedPathTracingRTXTFMode.Gaussian;
+                var rtxtfFilterChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.rtxtfFilter.value =
+                    ReferencedPathTracingRTXTFMode.Cubic;
+                volume.rtxtfGaussianSigma.value = 1.1f;
+                var rtxtfSigmaChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.rtxtfGaussianSigma.value = 0.9f;
                 volume.fixedSeed.value = 12346;
                 var seedChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
@@ -188,6 +213,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     original.enableShaderExecutionReordering,
                     Is.False);
+                Assert.That(original.enableRTXTF, Is.True);
+                Assert.That(
+                    original.rtxtfFilter,
+                    Is.EqualTo(ReferencedPathTracingRTXTFMode.Cubic));
+                Assert.That(original.rtxtfGaussianSigma, Is.EqualTo(0.9f));
                 Assert.That(
                     original.estimatorMode,
                     Is.EqualTo(
@@ -199,13 +229,22 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(13));
+                    Is.EqualTo(14));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
                 Assert.That(
                     shaderExecutionReorderingChanged.signature,
                     Is.EqualTo(original.signature));
+                Assert.That(
+                    rtxtfDisabled.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    rtxtfFilterChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    rtxtfSigmaChanged.signature,
+                    Is.Not.EqualTo(original.signature));
                 Assert.That(
                     seedChanged.signature,
                     Is.Not.EqualTo(original.signature));
@@ -539,7 +578,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(8));
+                Is.EqualTo(9));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -564,6 +603,10 @@ namespace VividRP.Editor.Tests
                 ReferencedPathTracingSamplingContract
                     .CloudDimensionOffset,
                 Is.EqualTo(14));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .RTXTFDimensionOffset,
+                Is.EqualTo(18));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FutureDimensionOffset,
                 Is.EqualTo(18));

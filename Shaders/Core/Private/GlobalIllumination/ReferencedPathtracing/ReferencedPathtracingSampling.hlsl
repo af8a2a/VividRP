@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 8
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 9
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -21,6 +21,9 @@ static const uint kReferencedPathtracingStochasticAlphaDimensionOffset = 7u;
 static const uint kReferencedPathtracingVolumeDimensionOffset = 8u;
 static const uint kReferencedPathtracingAtmosphereSunDimensionOffset = 12u;
 static const uint kReferencedPathtracingCloudDimensionOffset = 14u;
+// RTXTF uses the two reserved bounce dimensions for the stochastic texel
+// coordinates. Its mip selector is decorrelated from those values by hashing.
+static const uint kReferencedPathtracingRTXTFDimensionOffset = 18u;
 static const uint kReferencedPathtracingFutureDimensionOffset = 18u;
 // Append-only block kept outside the established bounce stride so disabling
 // global fog preserves every existing surface, atmosphere, and cloud sample.

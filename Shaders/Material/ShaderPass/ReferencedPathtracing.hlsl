@@ -4,8 +4,10 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 
+#define VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF 1
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracingRTXTF.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
 
 static const float kReferencedPathtracingTextureLodBias = 0.5;
@@ -81,8 +83,11 @@ void StandardLitReferencedPathtracingClosestHit(
         0.0);
 #endif
     float3 viewDirectionWS = normalize(-WorldRayDirection());
+    STF_SamplerState rtxtfSamplerState =
+        ReferencedPathtracingCreateRTXTFState(payloadInput.rtxtfRandom);
     VividReferencedPathtracingMaterial material =
         VividReferencedPathtracingResolveStandardLitOpenPBR(
+        rtxtfSamplerState,
         geometry,
         textureBaseLambda,
         baseTextureLod,

@@ -118,6 +118,12 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int SeedId = Shader.PropertyToID("_ReferencedSeed");
         private static readonly int PathSamplingModeId =
             Shader.PropertyToID("_ReferencedPathSamplingMode");
+        private static readonly int RTXTFEnabledId =
+            Shader.PropertyToID("_ReferencedRTXTFEnabled");
+        private static readonly int RTXTFModeId =
+            Shader.PropertyToID("_ReferencedRTXTFMode");
+        private static readonly int RTXTFGaussianSigmaId =
+            Shader.PropertyToID("_ReferencedRTXTFGaussianSigma");
         private static readonly int ReblurHitDistanceParametersId =
             Shader.PropertyToID("_ReferencedReblurHitDistanceParameters");
         private static readonly int ReblurCheckerboardModeId =
@@ -691,6 +697,18 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_RayTracingShader,
                     PathSamplingModeId,
                     (int)m_ResolvedPathSamplingMode);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    RTXTFEnabledId,
+                    m_IntegratorState.enableRTXTF ? 1 : 0);
+                cmd.SetRayTracingIntParam(
+                    m_RayTracingShader,
+                    RTXTFModeId,
+                    (int)m_IntegratorState.rtxtfFilter);
+                cmd.SetRayTracingFloatParam(
+                    m_RayTracingShader,
+                    RTXTFGaussianSigmaId,
+                    m_IntegratorState.rtxtfGaussianSigma);
                 if (m_ResolvedPathSamplingMode
                     == ReferencedPathTracingSamplingMode.IndexedBnd)
                 {

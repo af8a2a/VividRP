@@ -798,6 +798,29 @@ void RayGenReferencedPathtracing()
                 ^ ReferencedPathtracingHashStochasticTransparency(
                     sampleIndex + bounceSampleDimension));
         payloadInput.stochasticAlphaSeed = stochasticAlphaSeed;
+        float2 rtxtfRandom = float2(
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingRTXTFDimensionOffset,
+                sampleSeed,
+                pathSamplingMode),
+            ReferencedPathtracingGetPathSample(
+                pixelCoord,
+                sampleIndex,
+                bounceSampleDimension
+                    + kReferencedPathtracingRTXTFDimensionOffset
+                    + 1u,
+                sampleSeed,
+                pathSamplingMode));
+        payloadInput.rtxtfRandom = float3(
+            rtxtfRandom,
+            ReferencedPathtracingHashToUnitFloat(
+                asuint(rtxtfRandom.x)
+                ^ ReferencedPathtracingHash(asuint(rtxtfRandom.y))
+                ^ ReferencedPathtracingHash(
+                    sampleSeed + bounceSampleDimension)));
         payloadInput.rayConeWidth = rayConeWidth;
         payloadInput.rayConeSpreadAngle = rayConeSpreadAngle;
         float3 activeMaterialMediumExtinction = 0.0;

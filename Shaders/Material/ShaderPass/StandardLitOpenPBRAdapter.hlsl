@@ -44,6 +44,9 @@ OpenPBR_Basis VividReferencedPathtracingBuildOpenPBRBasis(
 }
 
 VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitOpenPBR(
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    inout STF_SamplerState rtxtfSamplerState,
+#endif
     VividIndirectDiffuseHitGeometry geometry,
     float textureBaseLambda,
     float baseTextureLod,
@@ -52,27 +55,65 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
 {
     VividReferencedPathtracingMaterial material;
 
-    float4 baseSample = SampleBase(geometry.uv, baseTextureLod);
+    float4 baseSample;
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    baseSample = ReferencedPathtracingSampleBaseRTXTF(
+        rtxtfSamplerState,
+        geometry.uv,
+        baseTextureLod);
+#else
+    baseSample = SampleBase(geometry.uv, baseTextureLod);
+#endif
     float materialTextureLod = baseTextureLod;
 #if defined(_METALLICSPECGLOSSMAP)
     materialTextureLod = max(computeTargetTextureLOD(_MetallicGlossMap, textureBaseLambda), 0.0);
 #elif defined(_ROUGHNESSMAP)
     materialTextureLod = max(computeTargetTextureLOD(_RoughnessMap, textureBaseLambda), 0.0);
 #endif
-    float2 metallicSmoothness = SampleMetallicSmoothness(
+    float2 metallicSmoothness;
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    metallicSmoothness =
+        ReferencedPathtracingSampleMetallicSmoothnessRTXTF(
+        rtxtfSamplerState,
         geometry.uv,
         baseSample.a,
         materialTextureLod);
+#else
+    metallicSmoothness = SampleMetallicSmoothness(
+        geometry.uv,
+        baseSample.a,
+        materialTextureLod);
+#endif
 
     float emissionTextureLod = baseTextureLod;
 #if defined(_EMISSION)
     emissionTextureLod = max(computeTargetTextureLOD(_EmissionMap, textureBaseLambda), 0.0);
 #endif
-    material.emission = SampleEmission(geometry.uv, emissionTextureLod);
+    float3 sampledEmission;
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    sampledEmission = ReferencedPathtracingSampleEmissionRTXTF(
+        rtxtfSamplerState,
+        geometry.uv,
+        emissionTextureLod);
+#else
+    sampledEmission = SampleEmission(geometry.uv, emissionTextureLod);
+#endif
+    material.emission = sampledEmission;
+    float3 unadjustedShadingNormalWS;
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    unadjustedShadingNormalWS = ReferencedPathtracingSampleNormalWSRTXTF(
+        rtxtfSamplerState,
+        geometry,
+        normalTextureLod);
+#else
+    unadjustedShadingNormalWS = VividIndirectDiffuseSampleNormalWS(
+        geometry,
+        normalTextureLod);
+#endif
     material.unadjustedShadingNormalWS =
         VividReferencedPathtracingConstrainShadingNormal(
-        VividIndirectDiffuseSampleNormalWS(geometry, normalTextureLod),
-        geometry.faceNormalWS);
+            unadjustedShadingNormalWS,
+            geometry.faceNormalWS);
     material.shadingNormalWS =
         ReferencedPathtracingComputeConsistentShadingNormal(
             viewDirectionWS,
@@ -84,9 +125,17 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
     inputs.base_metalness = saturate(metallicSmoothness.x);
     inputs.base_diffuse_roughness = saturate(1.0 - metallicSmoothness.y);
     inputs.specular_roughness = max(1.0 - metallicSmoothness.y, 0.001);
-    inputs.geometry_opacity = SampleOpenPbrGeometryOpacity(
+    float geometryOpacity;
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    // Reuse the same stochastic base/opacity texel used by base color and
+    // smoothness so one material evaluation does not decorrelate coverage.
+    geometryOpacity = saturate(baseSample.a);
+#else
+    geometryOpacity = SampleOpenPbrGeometryOpacity(
         geometry.uv,
         baseTextureLod);
+#endif
+    inputs.geometry_opacity = geometryOpacity;
     inputs.geometry_thin_walled = _ThinWalledTransmission > 0.5;
     float specularIor = _SpecularIOR;
     if (isnan(specularIor) || isinf(specularIor))
@@ -109,9 +158,19 @@ VividReferencedPathtracingMaterial VividReferencedPathtracingResolveStandardLitO
         computeTargetTextureLOD(_TransmissionMap, textureBaseLambda),
         0.0);
 #endif
-    inputs.transmission_weight = SampleOpenPbrTransmissionWeight(
+    float transmissionWeight;
+#if defined(VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF)
+    transmissionWeight =
+        ReferencedPathtracingSampleTransmissionWeightRTXTF(
+        rtxtfSamplerState,
         geometry.uv,
         transmissionTextureLod);
+#else
+    transmissionWeight = SampleOpenPbrTransmissionWeight(
+        geometry.uv,
+        transmissionTextureLod);
+#endif
+    inputs.transmission_weight = transmissionWeight;
     inputs.transmission_color = saturate(_TransmissionColor.rgb);
     float transmissionDepth = _TransmissionDepth;
     if (isnan(transmissionDepth) || isinf(transmissionDepth))

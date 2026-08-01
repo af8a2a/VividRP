@@ -72,7 +72,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 8"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 9"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -91,6 +91,58 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Not.Contain("NextReferencedPathtracingRng"));
+        }
+
+        [Test]
+        public void RTXTF_UsesVendoredLibraryForOpaqueMaterialSampling()
+        {
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var integrationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracingRTXTF.hlsl"));
+            var samplerSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "ThirdParty",
+                "RTXTF",
+                "STFSamplerState.hlsli"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                samplerSource,
+                Does.Contain("struct STF_SamplerState"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("Shaders/ThirdParty/RTXTF/STFSamplerState.hlsli"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("samplerState.Texture2DSampleLevel("));
+            Assert.That(
+                integrationSource,
+                Does.Contain("defined(_ALPHATEST_ON)"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("defined(_SURFACE_TYPE_TRANSPARENT)"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("STF_MAGNIFICATION_METHOD_NONE"));
+            Assert.That(
+                materialSource,
+                Does.Contain("ReferencedPathtracingCreateRTXTFState("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("kReferencedPathtracingRTXTFDimensionOffset"));
         }
 
         [Test]

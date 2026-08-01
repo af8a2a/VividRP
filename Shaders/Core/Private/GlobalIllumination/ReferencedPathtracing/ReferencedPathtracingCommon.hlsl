@@ -1580,6 +1580,7 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_INPUT_PARENT_MEDIUM_IOR 13u
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_EXTINCTION 14u
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX 17u
+#define REFERENCED_PAYLOAD_INPUT_RTXTF_RANDOM 18u
 
 // Closest-hit result layout. Raygen reconstructs positionWS from its RayDesc
 // and hit distance. Unit directions use octahedral UNORM16x2 encoding. Material
@@ -1645,6 +1646,7 @@ struct ReferencedPathtracingPayloadInput
     float3 bsdfRandom;
     float3 directLightRandom;
     uint stochasticAlphaSeed;
+    float3 rtxtfRandom;
     float rayConeWidth;
     float rayConeSpreadAngle;
     // RTXPT-style compact view of the active nested dielectric stack. The
@@ -1858,6 +1860,7 @@ void InitializeReferencedPathtracingPayloadInput(
     input.bsdfRandom = 0.0;
     input.directLightRandom = 0.0;
     input.stochasticAlphaSeed = 0u;
+    input.rtxtfRandom = 0.0;
     input.rayConeWidth = 0.0;
     input.rayConeSpreadAngle = 0.0;
     input.activeMediumIor = 1.0;
@@ -1929,6 +1932,10 @@ void PackReferencedPathtracingPayloadInput(
         payload,
         REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED,
         input.stochasticAlphaSeed);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RTXTF_RANDOM,
+        input.rtxtfRandom);
     StoreReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH,
@@ -1971,6 +1978,9 @@ void UnpackReferencedPathtracingPayloadInput(
     input.stochasticAlphaSeed = LoadReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED);
+    input.rtxtfRandom = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RTXTF_RANDOM);
     input.rayConeWidth = LoadReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH);

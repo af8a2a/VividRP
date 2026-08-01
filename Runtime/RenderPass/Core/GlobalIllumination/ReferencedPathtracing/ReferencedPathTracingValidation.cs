@@ -9,7 +9,7 @@ namespace VividRP.Runtime.RenderPass.Core
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 13;
+        internal const int Version = 14;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -22,6 +22,9 @@ namespace VividRP.Runtime.RenderPass.Core
             float globalLightProposalProbability,
             bool lightSpatialIndex,
             bool enableShaderExecutionReordering,
+            bool enableRTXTF,
+            ReferencedPathTracingRTXTFMode rtxtfFilter,
+            float rtxtfGaussianSigma,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
             int targetSampleCount)
         {
@@ -48,6 +51,14 @@ namespace VividRP.Runtime.RenderPass.Core
             this.lightSpatialIndex = lightSpatialIndex;
             this.enableShaderExecutionReordering =
                 enableShaderExecutionReordering;
+            this.enableRTXTF = enableRTXTF;
+            this.rtxtfFilter = SanitizeRTXTFMode(rtxtfFilter);
+            this.rtxtfGaussianSigma = Mathf.Clamp(
+                float.IsFinite(rtxtfGaussianSigma)
+                    ? rtxtfGaussianSigma
+                    : 0.7f,
+                0.05f,
+                4.0f);
             this.estimatorMode = SanitizeEstimatorMode(estimatorMode);
             this.targetSampleCount = Mathf.Clamp(
                 targetSampleCount,
@@ -92,6 +103,16 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 lightSpatialIndex);
+            ReferencedPathTracingStableHash.Add(ref hash, enableRTXTF);
+            if (enableRTXTF)
+            {
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)this.rtxtfFilter);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    this.rtxtfGaussianSigma);
+            }
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 (int)this.estimatorMode);
@@ -110,6 +131,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal float globalLightProposalProbability { get; }
         internal bool lightSpatialIndex { get; }
         internal bool enableShaderExecutionReordering { get; }
+        internal bool enableRTXTF { get; }
+        internal ReferencedPathTracingRTXTFMode rtxtfFilter { get; }
+        internal float rtxtfGaussianSigma { get; }
         internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
         internal int targetSampleCount { get; }
         internal ulong signature { get; }
@@ -154,6 +178,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 !useVolumeSettings || settings.lightSpatialIndex.value,
                 useVolumeSettings
                     && settings.enableShaderExecutionReordering.value,
+                !useVolumeSettings || settings.enableRTXTF.value,
+                useVolumeSettings
+                    ? settings.rtxtfFilter.value
+                    : ReferencedPathTracingRTXTFMode.Linear,
+                useVolumeSettings
+                    ? settings.rtxtfGaussianSigma.value
+                    : 0.7f,
                 useVolumeSettings
                     ? settings.environmentEstimatorMode.value
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis,
@@ -179,6 +210,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis;
         }
 
+        private static ReferencedPathTracingRTXTFMode SanitizeRTXTFMode(
+            ReferencedPathTracingRTXTFMode mode)
+        {
+            return mode is ReferencedPathTracingRTXTFMode.Cubic
+                or ReferencedPathTracingRTXTFMode.Gaussian
+                    ? mode
+                    : ReferencedPathTracingRTXTFMode.Linear;
+        }
+
         public bool Equals(ReferencedPathTracingIntegratorState other)
         {
             return signature == other.signature;
@@ -198,7 +238,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 8;
+        internal const int Version = 9;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -212,6 +252,7 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int VolumeDimensionOffset = 8;
         internal const int AtmosphereSunDimensionOffset = 12;
         internal const int CloudDimensionOffset = 14;
+        internal const int RTXTFDimensionOffset = 18;
         internal const int FutureDimensionOffset = 18;
         internal const int GlobalFogBaseDimension = 200;
         internal const int GlobalFogDimensionStride = 3;

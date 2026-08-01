@@ -11,7 +11,7 @@ void HairRaytracingGBufferClosestHit(
 {
     VividHairSurfaceGeometry geometry =
         VividHairBuildDotsSurfaceGeometry(attributeData);
-    float3 baseColor = VividHairGetBaseColor();
+    VividHairMaterialData material = VividHairLoadMaterialData();
 
     payload.rayConeWidth = max(
         payload.rayConeWidth
@@ -20,14 +20,14 @@ void HairRaytracingGBufferClosestHit(
     payload.positionWS = geometry.positionWS;
     payload.faceNormalWS = geometry.faceNormalWS;
     payload.shadingNormalWS = geometry.radialNormalWS;
-    payload.baseColor = baseColor;
-    payload.emission = VividHairGetEmission();
+    payload.baseColor = material.baseColor;
+    payload.emission = material.emission;
     payload.nrdDiffuseMaterialFactor = 1.0;
     payload.nrdSpecularMaterialFactor = 1.0;
-    payload.diffuseAlbedo = baseColor;
-    payload.specularAlbedo = VividHairGetSpecularF0();
+    payload.diffuseAlbedo = material.baseColor;
+    payload.specularAlbedo = VividHairGetSpecularF0(material);
     payload.materialAlbedoValid = 1u;
-    payload.linearRoughness = VividHairGetLongitudinalRoughness();
+    payload.linearRoughness = material.longitudinalRoughness;
     payload.metalness = 0.0;
     payload.hitDistance = geometry.hitDistance;
     payload.hit = 1u;

@@ -12,31 +12,25 @@ struct VividHairPreparedChiang
     float3 viewDirectionLocal;
 };
 
-RTXCR_HairMaterialData VividHairCreateChiangMaterialData()
+RTXCR_HairMaterialData VividHairCreateChiangMaterialData(
+    VividHairMaterialData source)
 {
     RTXCR_HairMaterialData material;
-    material.baseColor = max(VividHairGetBaseColor(), 1e-4);
-    material.longitudinalRoughness =
-        VividHairGetLongitudinalRoughness();
-    material.azimuthalRoughness = VividHairGetAzimuthalRoughness();
-    material.ior = VividHairGetIor();
+    material.baseColor = max(source.baseColor, 1e-4);
+    material.longitudinalRoughness = source.longitudinalRoughness;
+    material.azimuthalRoughness = source.azimuthalRoughness;
+    material.ior = source.ior;
     material.eta = rcp(material.ior);
-    material.fresnelApproximation =
-        _HairFresnelApproximation > 0.5 ? 1u : 0u;
-    material.absorptionModel = (uint)clamp(
-        round(_HairAbsorptionModel),
-        0.0,
-        2.0);
-    material.melanin = saturate(_HairMelanin);
-    material.melaninRedness = saturate(_HairMelaninRedness);
-    material.cuticleAngleInDegrees = clamp(
-        _HairCuticleAngleDegrees,
-        0.0,
-        10.0);
+    material.fresnelApproximation = source.useFresnelApproximation;
+    material.absorptionModel = source.absorptionModel;
+    material.melanin = source.melanin;
+    material.melaninRedness = source.melaninRedness;
+    material.cuticleAngleInDegrees = source.cuticleAngleInDegrees;
     return material;
 }
 
 VividHairPreparedChiang VividHairPrepareChiang(
+    VividHairMaterialData material,
     VividHairSurfaceGeometry geometry,
     float3 viewDirectionWS)
 {
@@ -55,7 +49,7 @@ VividHairPreparedChiang VividHairPrepareChiang(
     surface.shadingNormal = float3(0.0, 0.0, 1.0);
     surface.tangent = float3(1.0, 0.0, 0.0);
     prepared.interaction = RTXCR_CreateHairMaterialInteraction(
-        VividHairCreateChiangMaterialData(),
+        VividHairCreateChiangMaterialData(material),
         surface);
     return prepared;
 }

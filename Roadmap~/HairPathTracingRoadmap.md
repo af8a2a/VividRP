@@ -47,6 +47,8 @@ Hair V1 固定采用以下方案：
 - Reference PT sampling contract 已升级到 V10，在 bounce reserved block 的 dimension 17 追加第四个 Hair BSDF 随机数，不移动 StandardLit、NEE、volume、atmosphere、cloud 或 RTXTF 的既有维度。
 - Reference PT surface payload 以显式 medium-IOR/strand-radius union 传递 strand radius 和 surface flag；NEE visibility、BSDF-segment visibility 和 continuation ray 使用约 `2 * radius` 的 DOTS transition offset。
 - Raytracing GBuffer payload 支持 material-supplied diffuse/specular albedo；Hair 输出 corrected position、radial normal、longitudinal roughness、base color 和 dielectric F0，StandardLit 保持原推导路径。
+- Hair ShaderLab contract 已增加专用 Inspector，按 Absorption、Scattering、Fiber Interface 和 Emission 分组；保留现有序列化属性名，并由 Editor adapter 统一执行范围、非有限值、枚举、版本和 emissive GI 状态修正。
+- `VividHairMaterialData` 已成为 ShaderLab uniform 与 Chiang/Reference PT/GBuffer 之间的唯一材质边界，三个消费者使用同一份 sanitized material data。
 - 增加 validation asset builder，以及 DOTS、sampling、shader import、payload、许可证和 source contract tests。
 - Unity 6000.7 Editor 已确认 Hair shader 包含 2 个 pass 且无 shader compiler message；当前交互式 Editor 正在运行，因此尚未主动启动 batchmode EditMode suite。
 
@@ -62,15 +64,12 @@ Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation 
 - `RTASBuildPass` 已收集普通 `MeshRenderer` 及其 material，因此 V1 的 DOTS mesh 不需要新增专用 RTAS instance 路径。
 - ReBLUR 常量已有 `gStrandMaterialID` 和 `gStrandThickness`，但默认 strand material ID 为 `999`，当前等价于未启用 strand 特化。
 
-当前还缺少：
+后续仍缺少：
 
-- Hair 专用 ShaderLab properties 和材质 adapter。
-- Chiang BCSDF 的 VividRP-owned wrapper。
-- DOTS mesh 数据约定和 closest-hit 几何重建。
-- 第四个 Chiang BSDF 随机数维度。
-- DOTS 穿越另一组正交 strip 时的 hair-aware ray origin offset。
-- Hair 专用 Raytracing GBuffer closest-hit 和 DLSS-RR albedo guide 映射。
+- validation corpus 的 raw accumulation、lobe reference、melanin/roughness sweep 和 DLSS-RR 实际画面验收。
 - 动态 strand 的 previous centerline position。
+- NRD strand material ID/thickness specialization。
+- 生产 groom importer、LOD/partition 和替代几何后端。
 
 ## Scope
 

@@ -176,6 +176,7 @@ namespace VividRP.Editor
             material.SetFloat("_HairIor", 1.55f);
             material.SetFloat("_HairCuticleAngleDegrees", 3.0f);
             material.SetFloat("_HairFresnelApproximation", 1.0f);
+            HairMaterialUtility.SetupMaterial(material);
             EditorUtility.SetDirty(material);
             return material;
         }

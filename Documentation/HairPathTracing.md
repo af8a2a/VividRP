@@ -41,16 +41,27 @@ The ray-tracing hit shader reconstructs the tapered segment centerline, intersec
 
 ## Material Parameters
 
-- Base Color
-- Absorption Model: Color, Physics, or Normalized Physics
-- Melanin and Melanin Redness
-- Longitudinal and Azimuthal Roughness
-- IOR
-- Cuticle Angle
-- Analytical or Schlick Fresnel selection
-- Emission
+The dedicated Hair material inspector divides the ShaderLab contract into
+Absorption, Scattering, Fiber Interface, and Emission sections. The serialized
+property names remain stable so materials created before the inspector was
+introduced continue to load without migration.
+
+- Absorption Model: Color, Physical Melanin, or Normalized Melanin
+- Absorption Color, shown for the Color model
+- Melanin Concentration and Melanin Redness, shown for both physical models
+- Longitudinal roughness `beta_m` and azimuthal roughness `beta_n`
+- Cuticle angle in degrees
+- Fiber IOR and analytical/Schlick Fresnel selection
+- Optional HDR emission
 
 The defaults match the RTXCR sample's Chiang defaults. Color parameters are consumed in scene-linear space by the BCSDF adapter.
+
+`HairInput.hlsl` loads and sanitizes ShaderLab values into a single
+`VividHairMaterialData` value. The Chiang adapter, Reference Path Tracing
+closest-hit, and Raytracing GBuffer closest-hit all consume that same value.
+The editor material adapter applies the same ranges, repairs non-finite legacy
+values, rounds enum/toggle fields, tracks the material contract version, and
+synchronizes the emissive global-illumination flag.
 
 ## DLSS Ray Reconstruction Guides
 

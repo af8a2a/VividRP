@@ -49,6 +49,70 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 source,
                 Does.Contain("HairRaytracingGBuffer.hlsl"));
+            Assert.That(
+                source,
+                Does.Contain(
+                    "CustomEditor \"VividRP.Editor.HairShaderGUI\""));
+        }
+
+        [Test]
+        public void HairShader_DeclaresDedicatedChiangMaterialProperties()
+        {
+            string source = ReadPackageFile(
+                "Shaders",
+                "Material",
+                "Hair",
+                "Hair.shader");
+
+            Assert.That(source, Does.Contain("_HairAbsorptionModel"));
+            Assert.That(source, Does.Contain("_HairBaseColor"));
+            Assert.That(source, Does.Contain("_HairMelanin"));
+            Assert.That(source, Does.Contain("_HairMelaninRedness"));
+            Assert.That(source, Does.Contain("_HairLongitudinalRoughness"));
+            Assert.That(source, Does.Contain("_HairAzimuthalRoughness"));
+            Assert.That(source, Does.Contain("_HairIor"));
+            Assert.That(source, Does.Contain("_HairCuticleAngleDegrees"));
+            Assert.That(source, Does.Contain("_HairFresnelApproximation"));
+            Assert.That(source, Does.Contain("_HairEmissionColor"));
+            Assert.That(source, Does.Contain("_HairMaterialVersion"));
+        }
+
+        [Test]
+        public void HairAdapter_UsesUnifiedSanitizedMaterialData()
+        {
+            string input = ReadPackageFile(
+                "Shaders",
+                "Material",
+                "Hair",
+                "HairInput.hlsl");
+            string adapter = ReadPackageFile(
+                "Shaders",
+                "Material",
+                "Hair",
+                "HairChiangAdapter.hlsl");
+            string referencePass = ReadPackageFile(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "HairReferencedPathtracing.hlsl");
+
+            Assert.That(input, Does.Contain("struct VividHairMaterialData"));
+            Assert.That(input, Does.Contain("VividHairLoadMaterialData()"));
+            Assert.That(
+                input,
+                Does.Contain("VividHairSanitizeMaterialScalar("));
+            Assert.That(
+                adapter,
+                Does.Contain(
+                    "VividHairCreateChiangMaterialData(\n    VividHairMaterialData source)"));
+            Assert.That(
+                adapter,
+                Does.Contain(
+                    "VividHairPrepareChiang(\n    VividHairMaterialData material,"));
+            Assert.That(
+                referencePass,
+                Does.Contain(
+                    "VividHairMaterialData material = VividHairLoadMaterialData();"));
         }
 
         [Test]
@@ -161,11 +225,11 @@ namespace VividRP.Editor.Tests
                 Does.Contain("payload.materialAlbedoValid != 0u"));
             Assert.That(
                 hairGBuffer,
-                Does.Contain("payload.diffuseAlbedo = baseColor;"));
+                Does.Contain("payload.diffuseAlbedo = material.baseColor;"));
             Assert.That(
                 hairGBuffer,
                 Does.Contain(
-                    "payload.specularAlbedo = VividHairGetSpecularF0();"));
+                    "payload.specularAlbedo = VividHairGetSpecularF0(material);"));
         }
 
         [Test]

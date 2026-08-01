@@ -20,8 +20,10 @@ void HairReferencedPathtracingClosestHit(
 
     VividHairSurfaceGeometry geometry =
         VividHairBuildDotsSurfaceGeometry(attributeData);
+    VividHairMaterialData material = VividHairLoadMaterialData();
     float3 viewDirectionWS = normalize(-WorldRayDirection());
     VividHairPreparedChiang prepared = VividHairPrepareChiang(
+        material,
         geometry,
         viewDirectionWS);
 
@@ -31,10 +33,10 @@ void HairReferencedPathtracingClosestHit(
         0.000001);
     result.positionWS = geometry.positionWS;
     result.faceNormalWS = geometry.faceNormalWS;
-    result.emission = VividHairGetEmission();
-    result.linearRoughness = VividHairGetLongitudinalRoughness();
+    result.emission = material.emission;
+    result.linearRoughness = material.longitudinalRoughness;
     result.hitDistance = geometry.hitDistance;
-    result.denoisingAlbedo = VividHairGetBaseColor();
+    result.denoisingAlbedo = material.baseColor;
     result.denoisingNormalWS = geometry.radialNormalWS;
     result.shadingNormalDiagnostics = 1.0;
     result.strandRadius = geometry.radius;

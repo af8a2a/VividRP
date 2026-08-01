@@ -21,6 +21,9 @@
 // THE SOFTWARE.
 
 #pragma use_dxc
+#pragma require Native16Bit
+#pragma only_renderers d3d11 playstation xboxone xboxseries vulkan metal switch switch2
+
 #pragma kernel CS
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #define FFX_GPU 1

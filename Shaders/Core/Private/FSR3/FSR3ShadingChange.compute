@@ -22,6 +22,8 @@
 
 
 #pragma use_dxc
+#pragma require Native16Bit
+
 #pragma kernel CS
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
 #define FFX_GPU 1

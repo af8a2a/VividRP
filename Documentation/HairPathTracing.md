@@ -35,7 +35,7 @@ The validation asset is a small curved, tapered bundle. It is intended for geome
 - `TEXCOORD1.x`: volume-compensated radius
 - `TEXCOORD1.y`: endpoint coordinate, 0 at the start and 1 at the end
 - `TEXCOORD2.xyz`: previous-frame endpoint centerline position in object space
-- `TEXCOORD2.w`: previous-frame volume-compensated radius
+- `TEXCOORD2.w`: previous-frame volume-compensated radius magnitude; a negative value is the one-frame history-reset marker
 
 Radius scale is applied while building the mesh. Changing only a material property cannot resize DOTS correctly because expanded positions and stored radii must remain synchronized.
 
@@ -47,6 +47,55 @@ Deforming integrations call `HairDotsMeshBuilder.BuildDynamic(current,
 previous, target)` after simulation and before RTAS construction. Current and
 previous arrays must have identical segment ordering and topology. On a
 history reset, teleport, or groom swap, pass current data for both frames.
+
+## Persistent GPU Strand Updates
+
+`HairDotsGpuStream` is the production-oriented update path for a fixed-topology
+groom. It creates the mesh vertex/index allocation once, exposes that persistent
+mesh to the renderer, expands GPU simulation output directly into its raw
+vertex buffer, and retains the previous centerline in a GPU history buffer.
+There is no per-frame `Mesh.Clear`, index rebuild, or GPU-to-CPU readback.
+
+The simulation buffer contains one `HairGpuStrandSegment` per segment. Its
+48-byte ABI is three consecutive `float4` values:
+
+- start object-space position in `xyz`, start radius in `w`
+- end object-space position in `xyz`, end radius in `w`
+- start UV in `xy`, end UV in `zw`
+
+Create a `GraphicsBuffer` with `GraphicsBuffer.Target.Structured` and a stride
+of `HairGpuStrandSegment.Stride`, or use
+`HairDotsGpuStream.CreateSimulationBuffer`. After the simulation kernel writes
+the current segments, record the expansion before `RTASBuildPass`:
+
+```csharp
+var stream = new HairDotsGpuStream(segmentCount);
+meshFilter.sharedMesh = stream.Mesh;
+
+stream.RecordGpuUpdate(
+    commandBuffer,
+    simulationSegments,
+    segmentCount,
+    conservativeObjectSpaceBounds,
+    Time.frameCount,
+    topologyVersion);
+```
+
+The supplied bounds must conservatively cover all simulated vertices; GPU
+bounds reduction is not part of V1. The renderer/RTAS instance must be marked
+as dynamic geometry. Dispose the stream and the caller-owned simulation buffer
+when the groom is released.
+
+History resets are automatic on the first update, segment-count or topology
+version changes, GPU storage recreation, and non-consecutive frame indices. A
+reset writes the current
+centerline into both current and previous vertex data, preventing teleport or
+new-groom motion spikes. It also marks the previous radius for one frame so the
+hit shader bypasses the stale previous object transform and emits current as
+previous world position. Call `RequestHistoryReset()` before the next update
+for a teleport not otherwise represented by the topology version, or pass
+`forceHistoryReset: true` to that update. Increment `topologyVersion` whenever
+segment identity or ordering changes even if the segment count stays constant.
 
 ## Material Parameters
 
@@ -90,7 +139,7 @@ frame/mesh contract, not a groom simulation scheduler.
 
 ## Current Limitations
 
-- Dynamic DOTS requires caller-managed current/previous frames and topology reset
+- Persistent GPU DOTS requires caller-provided conservative bounds and update scheduling before RTAS build
 - No glTF or groom importer
 - No raster lighting or raster shadow pass
 - No far-field Hair BCSDF

@@ -205,6 +205,12 @@ namespace VividRP.Editor.Tests
                 geometry,
                 Does.Contain("geometry.previousPositionWS"));
             Assert.That(
+                geometry,
+                Does.Contain("bool resetPreviousTransform"));
+            Assert.That(
+                geometry,
+                Does.Contain("? positionWS"));
+            Assert.That(
                 common,
                 Does.Contain("float3 previousPositionWS;"));
             Assert.That(

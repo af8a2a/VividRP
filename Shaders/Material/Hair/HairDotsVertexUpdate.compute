@@ -1,0 +1,221 @@
+#pragma kernel ExpandHairDots
+#pragma kernel CopyHairHistory
+#pragma use_dxc
+
+struct HairGpuStrandSegment
+{
+    float4 startPositionRadius;
+    float4 endPositionRadius;
+    float4 startEndUV;
+};
+
+StructuredBuffer<HairGpuStrandSegment> _HairCurrentSegments;
+StructuredBuffer<HairGpuStrandSegment> _HairPreviousSegments;
+RWStructuredBuffer<HairGpuStrandSegment> _HairHistoryDestination;
+RWByteAddressBuffer _HairDotsVertexBuffer;
+
+uint _HairSegmentCount;
+uint _HairResetHistory;
+float _HairRadiusScale;
+float _HairRadiusCompensation;
+
+static const uint kHairVertexStride = 72u;
+static const uint kHairVerticesPerSegment = 12u;
+
+void BuildHairFrame(
+    float3 startPosition,
+    float3 endPosition,
+    out float3 tangent,
+    out float3 firstAxis,
+    out float3 secondAxis)
+{
+    float3 segment = endPosition - startPosition;
+    float segmentLength = length(segment);
+    tangent = segmentLength > 1e-7
+        ? segment / segmentLength
+        : float3(0.0, 1.0, 0.0);
+    float3 referenceAxis = abs(dot(tangent, float3(0.0, 1.0, 0.0)))
+            < 0.999
+        ? float3(0.0, 1.0, 0.0)
+        : float3(1.0, 0.0, 0.0);
+    firstAxis = normalize(cross(tangent, referenceAxis));
+    secondAxis = normalize(cross(tangent, firstAxis));
+}
+
+void StoreHairVertex(
+    uint vertexIndex,
+    float3 position,
+    float3 normal,
+    float3 tangent,
+    float2 uv,
+    float radius,
+    float endpoint,
+    float3 previousCenterline,
+    float previousRadius)
+{
+    uint address = vertexIndex * kHairVertexStride;
+    _HairDotsVertexBuffer.Store3(address, asuint(position));
+    _HairDotsVertexBuffer.Store3(address + 12u, asuint(normal));
+    _HairDotsVertexBuffer.Store4(
+        address + 24u,
+        asuint(float4(tangent, 1.0)));
+    _HairDotsVertexBuffer.Store2(address + 40u, asuint(uv));
+    _HairDotsVertexBuffer.Store2(
+        address + 48u,
+        asuint(float2(radius, endpoint)));
+    _HairDotsVertexBuffer.Store4(
+        address + 56u,
+        asuint(float4(previousCenterline, previousRadius)));
+}
+
+void StoreHairFace(
+    uint baseVertex,
+    float3 axis,
+    float3 tangent,
+    HairGpuStrandSegment current,
+    HairGpuStrandSegment previous,
+    float radius0,
+    float radius1,
+    float previousRadius0,
+    float previousRadius1)
+{
+    float3 startPosition = current.startPositionRadius.xyz;
+    float3 endPosition = current.endPositionRadius.xyz;
+    float3 positiveStart = startPosition + axis * radius0;
+    float3 negativeStart = startPosition - axis * radius0;
+    float3 positiveEnd = endPosition + axis * radius1;
+    float3 negativeEnd = endPosition - axis * radius1;
+    float2 startUV = current.startEndUV.xy;
+    float2 endUV = current.startEndUV.zw;
+
+    StoreHairVertex(
+        baseVertex,
+        positiveStart,
+        axis,
+        tangent,
+        startUV,
+        radius0,
+        0.0,
+        previous.startPositionRadius.xyz,
+        previousRadius0);
+    StoreHairVertex(
+        baseVertex + 1u,
+        negativeEnd,
+        -axis,
+        tangent,
+        endUV,
+        radius1,
+        1.0,
+        previous.endPositionRadius.xyz,
+        previousRadius1);
+    StoreHairVertex(
+        baseVertex + 2u,
+        positiveEnd,
+        axis,
+        tangent,
+        endUV,
+        radius1,
+        1.0,
+        previous.endPositionRadius.xyz,
+        previousRadius1);
+    StoreHairVertex(
+        baseVertex + 3u,
+        positiveStart,
+        axis,
+        tangent,
+        startUV,
+        radius0,
+        0.0,
+        previous.startPositionRadius.xyz,
+        previousRadius0);
+    StoreHairVertex(
+        baseVertex + 4u,
+        negativeStart,
+        -axis,
+        tangent,
+        startUV,
+        radius0,
+        0.0,
+        previous.startPositionRadius.xyz,
+        previousRadius0);
+    StoreHairVertex(
+        baseVertex + 5u,
+        negativeEnd,
+        -axis,
+        tangent,
+        endUV,
+        radius1,
+        1.0,
+        previous.endPositionRadius.xyz,
+        previousRadius1);
+}
+
+[numthreads(64, 1, 1)]
+void ExpandHairDots(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint segmentIndex = dispatchThreadId.x;
+    if (segmentIndex >= _HairSegmentCount)
+        return;
+
+    HairGpuStrandSegment current = _HairCurrentSegments[segmentIndex];
+    HairGpuStrandSegment previous = current;
+    if (_HairResetHistory == 0u)
+        previous = _HairPreviousSegments[segmentIndex];
+    float radiusMultiplier =
+        max(_HairRadiusScale, 1e-7) * _HairRadiusCompensation;
+    float radius0 = max(current.startPositionRadius.w, 1e-7)
+        * radiusMultiplier;
+    float radius1 = max(current.endPositionRadius.w, 1e-7)
+        * radiusMultiplier;
+    float previousRadius0 = max(previous.startPositionRadius.w, 1e-7)
+        * radiusMultiplier;
+    float previousRadius1 = max(previous.endPositionRadius.w, 1e-7)
+        * radiusMultiplier;
+    if (_HairResetHistory != 0u)
+    {
+        previousRadius0 = -previousRadius0;
+        previousRadius1 = -previousRadius1;
+    }
+
+    float3 tangent;
+    float3 firstAxis;
+    float3 secondAxis;
+    BuildHairFrame(
+        current.startPositionRadius.xyz,
+        current.endPositionRadius.xyz,
+        tangent,
+        firstAxis,
+        secondAxis);
+    uint baseVertex = segmentIndex * kHairVerticesPerSegment;
+    StoreHairFace(
+        baseVertex,
+        firstAxis,
+        tangent,
+        current,
+        previous,
+        radius0,
+        radius1,
+        previousRadius0,
+        previousRadius1);
+    StoreHairFace(
+        baseVertex + 6u,
+        secondAxis,
+        tangent,
+        current,
+        previous,
+        radius0,
+        radius1,
+        previousRadius0,
+        previousRadius1);
+}
+
+[numthreads(64, 1, 1)]
+void CopyHairHistory(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    uint segmentIndex = dispatchThreadId.x;
+    if (segmentIndex < _HairSegmentCount)
+    {
+        _HairHistoryDestination[segmentIndex] =
+            _HairCurrentSegments[segmentIndex];
+    }
+}

@@ -50,10 +50,12 @@ Hair V1 固定采用以下方案：
 - Hair ShaderLab contract 已增加专用 Inspector，按 Absorption、Scattering、Fiber Interface 和 Emission 分组；保留现有序列化属性名，并由 Editor adapter 统一执行范围、非有限值、枚举、版本和 emissive GI 状态修正。
 - `VividHairMaterialData` 已成为 ShaderLab uniform 与 Chiang/Reference PT/GBuffer 之间的唯一材质边界，三个消费者使用同一份 sanitized material data。
 - DOTS `TEXCOORD2` 已定义 previous centerline/radius contract；Hair GBuffer 按相同 `segmentU` 和径向坐标重建 previous surface position，并通过 material-supplied payload 覆盖 camera-only motion fallback。
+- 增加 `HairDotsGpuStream` 持久化更新路径：Mesh 顶点/索引拓扑只分配一次，GPU simulation 以 48-byte segment ABI 直接展开到 72-byte raw vertex buffer，并在 GPU 上提交 previous centerline/radius history，无需逐帧 Mesh rebuild 或 readback。
+- 动态 history 会在首帧、跳帧、segment count/topology version 改变时自动 reset；teleport/groom swap 可通过显式 reset 合并到同一条 current-as-previous 路径。
 - 增加 validation asset builder，以及 DOTS、sampling、shader import、payload、许可证和 source contract tests。
 - Unity 6000.7 Editor 已确认 Hair shader 包含 2 个 pass 且无 shader compiler message；当前交互式 Editor 正在运行，因此尚未主动启动 batchmode EditMode suite。
 
-Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation assets，完成 raw accumulation、analytic/environment NEE、self-intersection、ReBLUR 和 DLSS-RR 的实际画面与 GPU capture 验证。动态 groom 调度/历史重置、NRD strand metadata、AABB 和 LSS 仍按后续 milestone 处理。
+Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation assets，完成 raw accumulation、analytic/environment NEE、self-intersection、ReBLUR 和 DLSS-RR 的实际画面与 GPU capture 验证。动态 GPU buffer/history 基础已经落地，但 groom simulation scheduler、RenderGraph/RTAS 调度集成、NRD strand metadata、AABB 和 LSS 仍按后续 milestone 处理。
 
 现有实现已经提供以下接入条件：
 
@@ -68,7 +70,7 @@ Hair V1 还不能标记 freeze：仍需在 Reference graph 中生成 validation 
 后续仍缺少：
 
 - validation corpus 的 raw accumulation、lobe reference、melanin/roughness sweep 和 DLSS-RR 实际画面验收。
-- 动态 groom simulation/importer、拓扑历史管理与调度集成。
+- 动态 groom simulation/importer，以及 `HairDotsGpuStream` 与正式 simulation/RTAS pass 的调度集成。
 - NRD strand material ID/thickness specialization。
 - 生产 groom importer、LOD/partition 和替代几何后端。
 
@@ -549,15 +551,20 @@ V1 可以先只提交小型 synthetic validation asset builder。正式 glTF/gro
 
 在 V1 冻结后支持 strand deformation，并向 DLSS-RR/ReBLUR 提供正确的 previous geometry。
 
+### 2026-08-01 Implementation Checkpoint
+
+H6 的 geometry/history 基础已提前完成：previous surface GBuffer contract、持久化 DOTS Mesh、GPU simulation segment upload、GPU previous buffer 和自动 history reset 已实现。尚未完成的是正式 groom simulation/importer、RenderGraph 中 simulation-to-expand-to-RTAS 的调度节点、动画画面验收以及 NRD strand metadata。
+
 ### Scope
 
-- 保存 current/previous centerline endpoint 和 radius buffer。
-- 根据同一 segment U 重建 previous centerline position。
-- 使用 previous object transform 和 previous centerline 生成 previous surface position。
-- 将 GBuffer payload 从 camera-only motion 扩展为 material-supplied previous position。
-- 更新或重建 DOTS vertex buffer，并验证 Unity RTAS dynamic geometry 行为。
+- [x] 保存 current/previous centerline endpoint 和 radius buffer。
+- [x] 根据同一 segment U 重建 previous centerline position。
+- [x] 使用 previous object transform 和 previous centerline 生成 previous surface position。
+- [x] 将 GBuffer payload 从 camera-only motion 扩展为 material-supplied previous position。
+- [x] 以 compute 直接更新持久化 DOTS vertex buffer，避免 CPU rebuild/readback。
+- [ ] 将 update 调度接入正式 simulation pass，并验证 Unity RTAS dynamic geometry 行为。
 - 根据实际 hair diameter 启用 NRD strand material ID/thickness。
-- 定义 topology change、simulation reset、teleport 和 groom swap 的 history reset。
+- [x] 定义首帧、跳帧、topology change、simulation reset、teleport 和 groom swap 的 history reset contract。
 
 ### Acceptance
 

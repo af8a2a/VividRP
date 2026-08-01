@@ -9,6 +9,7 @@ namespace VividRP.Runtime
     {
         public const int TriangleCountPerSegment = 4;
         public const int VertexCountPerSegment = TriangleCountPerSegment * 3;
+        public const int PersistentVertexStride = 72;
         public static readonly float RadiusCompensation =
             1.0f / (Mathf.Sin(Mathf.PI / 4.0f) / (Mathf.PI / 4.0f));
 
@@ -46,6 +47,76 @@ namespace VividRP.Runtime
                 target,
                 radiusScale,
                 true);
+        }
+
+        /// <summary>
+        /// Allocates fixed vertex and index storage for compute-driven DOTS
+        /// expansion. The returned mesh must be populated before RTAS build.
+        /// </summary>
+        public static Mesh CreatePersistent(
+            int segmentCount,
+            Mesh target = null)
+        {
+            if (segmentCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(segmentCount));
+
+            int vertexCount;
+            try
+            {
+                vertexCount = checked(segmentCount * VertexCountPerSegment);
+            }
+            catch (OverflowException exception)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(segmentCount),
+                    exception.Message);
+            }
+
+            var mesh = target != null ? target : new Mesh();
+            mesh.Clear();
+            mesh.name = string.IsNullOrEmpty(mesh.name)
+                ? "Persistent Hair DOTS Mesh"
+                : mesh.name;
+            mesh.MarkDynamic();
+            mesh.vertexBufferTarget |= GraphicsBuffer.Target.Raw;
+            mesh.SetVertexBufferParams(
+                vertexCount,
+                new VertexAttributeDescriptor(
+                    VertexAttribute.Position,
+                    VertexAttributeFormat.Float32,
+                    3),
+                new VertexAttributeDescriptor(
+                    VertexAttribute.Normal,
+                    VertexAttributeFormat.Float32,
+                    3),
+                new VertexAttributeDescriptor(
+                    VertexAttribute.Tangent,
+                    VertexAttributeFormat.Float32,
+                    4),
+                new VertexAttributeDescriptor(
+                    VertexAttribute.TexCoord0,
+                    VertexAttributeFormat.Float32,
+                    2),
+                new VertexAttributeDescriptor(
+                    VertexAttribute.TexCoord1,
+                    VertexAttributeFormat.Float32,
+                    2),
+                new VertexAttributeDescriptor(
+                    VertexAttribute.TexCoord2,
+                    VertexAttributeFormat.Float32,
+                    4));
+
+            var indices = new int[vertexCount];
+            for (var index = 0; index < vertexCount; index++)
+                indices[index] = index;
+            mesh.indexFormat = IndexFormat.UInt32;
+            mesh.SetIndices(
+                indices,
+                MeshTopology.Triangles,
+                0,
+                false);
+            mesh.bounds = new Bounds(Vector3.zero, Vector3.one * 0.001f);
+            return mesh;
         }
 
         private static Mesh BuildInternal(

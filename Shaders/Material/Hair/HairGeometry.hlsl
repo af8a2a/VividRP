@@ -326,11 +326,14 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
     float3 previousSegmentEndOS = hasPreviousCenterline
         ? previousCenterlineAndRadius[2].xyz
         : segmentEndOS;
+    bool resetPreviousTransform = hasPreviousCenterline
+        && (previousCenterlineAndRadius[0].w < 0.0
+            || previousCenterlineAndRadius[2].w < 0.0);
     float previousRadius0 = hasPreviousCenterline
-        ? max(previousCenterlineAndRadius[0].w, 1e-7)
+        ? max(abs(previousCenterlineAndRadius[0].w), 1e-7)
         : radius0;
     float previousRadius1 = hasPreviousCenterline
-        ? max(previousCenterlineAndRadius[2].w, 1e-7)
+        ? max(abs(previousCenterlineAndRadius[2].w), 1e-7)
         : radius1;
 
     float correctedT;
@@ -384,10 +387,12 @@ VividHairSurfaceGeometry VividHairBuildDotsSurfaceGeometry(
     VividHairSurfaceGeometry geometry;
     geometry.positionWS = positionWS;
     geometry.centerlinePositionWS = centerlinePositionWS;
-    geometry.previousPositionWS =
-        VividHairTransformPreviousPositionToWorld(previousPositionOS);
-    geometry.previousCenterlinePositionWS =
-        VividHairTransformPreviousPositionToWorld(
+    geometry.previousPositionWS = resetPreviousTransform
+        ? positionWS
+        : VividHairTransformPreviousPositionToWorld(previousPositionOS);
+    geometry.previousCenterlinePositionWS = resetPreviousTransform
+        ? centerlinePositionWS
+        : VividHairTransformPreviousPositionToWorld(
             previousCenterlinePositionOS);
     geometry.faceNormalWS = radialNormalWS;
     geometry.radialNormalWS = radialNormalWS;

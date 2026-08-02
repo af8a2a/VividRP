@@ -1,11 +1,13 @@
 using System;
+using System.Runtime.CompilerServices;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 
-namespace VividRP.Runtime.GPUDriven.Utility
+namespace VividRP.Runtime 
 {
     public static class VividNativeCollectionExtensions
     {
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe ref T ElementAtRef<T>(this NativeArray<T> array, int index) where T : struct
         {
             if ((uint) index >= (uint) array.Length)
@@ -15,7 +17,7 @@ namespace VividRP.Runtime.GPUDriven.Utility
 
             return ref UnsafeUtility.ArrayElementAsRef<T>(array.GetUnsafePtr(), index);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe ref readonly T ElementAtRefReadonly<T>(this NativeArray<T> array, int index) where T : struct
         {
             if ((uint) index >= (uint) array.Length)
@@ -25,7 +27,7 @@ namespace VividRP.Runtime.GPUDriven.Utility
 
             return ref UnsafeUtility.ArrayElementAsRef<T>(array.GetUnsafeReadOnlyPtr(), index);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe T* ElementPtr<T>(this NativeArray<T> array, int index) where T : unmanaged
         {
             if ((uint) index >= (uint) array.Length)
@@ -35,7 +37,7 @@ namespace VividRP.Runtime.GPUDriven.Utility
 
             return (T*) array.GetUnsafePtr() + index;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe T* ElementPtrReadonly<T>(this NativeArray<T> array, int index) where T : unmanaged
         {
             if ((uint) index >= (uint) array.Length)
@@ -45,7 +47,7 @@ namespace VividRP.Runtime.GPUDriven.Utility
 
             return (T*) array.GetUnsafeReadOnlyPtr() + index;
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe ref T ElementAtRef<T>(this NativeList<T> list, int index) where T : unmanaged
         {
             if ((uint) index >= (uint) list.Length)
@@ -55,7 +57,7 @@ namespace VividRP.Runtime.GPUDriven.Utility
 
             return ref UnsafeUtility.ArrayElementAsRef<T>(list.GetUnsafePtr(), index);
         }
-
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static unsafe ref readonly T ElementAtRefReadonly<T>(this NativeList<T> list, int index) where T : unmanaged
         {
             if ((uint) index >= (uint) list.Length)

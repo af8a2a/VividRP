@@ -2,7 +2,7 @@ using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine.Assertions;
 
-namespace VividRP.Runtime.GPUDriven.METIS
+namespace VividRP.Runtime
 {
     public static class VividMETIS
     {

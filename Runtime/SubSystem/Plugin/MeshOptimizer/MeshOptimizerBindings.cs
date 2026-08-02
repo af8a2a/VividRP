@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
-namespace VividRP.Runtime.GPUDriven.MeshOptimizer
+namespace VividRP.Runtime
 {
     public static unsafe class MeshOptimizerBindings
     {

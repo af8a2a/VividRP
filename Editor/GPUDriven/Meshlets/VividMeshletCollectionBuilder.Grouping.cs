@@ -6,9 +6,8 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Assertions;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
-using VividRP.Runtime.GPUDriven.METIS;
-using VividRP.Runtime.GPUDriven.MeshOptimizer;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
 {

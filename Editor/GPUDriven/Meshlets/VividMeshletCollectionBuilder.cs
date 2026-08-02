@@ -7,10 +7,9 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Assertions;
 using UnityEngine.Rendering;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
-using VividRP.Runtime.GPUDriven.MeshOptimizer;
-using VividRP.Runtime.GPUDriven.Utility;
 
 namespace VividRP.Editor.GPUDriven.Meshlets
 {

@@ -1,7 +1,6 @@
 using System;
 using UnityEngine;
 using UnityEngine.Serialization;
-using VividRP.Runtime.GPUDriven.MeshOptimizer;
 
 namespace VividRP.Runtime.GPUDriven.Meshlets
 {

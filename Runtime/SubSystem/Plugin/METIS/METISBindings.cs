@@ -1,7 +1,7 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.InteropServices;
 
-namespace VividRP.Runtime.GPUDriven.METIS
+namespace VividRP.Runtime
 {
     public static unsafe class METISBindings
     {

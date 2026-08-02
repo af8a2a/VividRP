@@ -5,10 +5,9 @@ using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine.Assertions;
-using VividRP.Runtime.GPUDriven.Utility;
-using static VividRP.Runtime.GPUDriven.MeshOptimizer.MeshOptimizerBindings;
+using static VividRP.Runtime.MeshOptimizerBindings;
 
-namespace VividRP.Runtime.GPUDriven.MeshOptimizer
+namespace VividRP.Runtime
 {
     public static class VividMeshOptimizer
     {

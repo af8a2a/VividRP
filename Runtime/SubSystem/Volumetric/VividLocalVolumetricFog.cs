@@ -313,6 +313,8 @@ namespace VividRP.Runtime
         private static readonly int VolumetricMaterialEndTimesRcpDistFadeLenId = Shader.PropertyToID("_VolumetricMaterialEndTimesRcpDistFadeLen");
         private static readonly int VolumetricMaterialFalloffModeId = Shader.PropertyToID("_VolumetricMaterialFalloffMode");
         private const string FogVolumeVoxelizePassName = "FogVolumeVoxelize";
+        private const string DefaultFogVolumeVoxelizeShaderName =
+            "Hidden/VividRP/LocalVolumetricFogVoxelize";
 
         [SerializeField]
         private BoundProxyShape m_BoundProxy = CreateDefaultBoundProxy();
@@ -423,6 +425,19 @@ namespace VividRP.Runtime
             return parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
                 && parameters.materialMask != null
                 && parameters.materialMask.FindPass(FogVolumeVoxelizePassName) >= 0;
+        }
+
+        internal bool UsesProceduralVolumetricMaterial()
+        {
+            var parameters = GetEffectiveParameters();
+            var material = parameters.materialMask;
+            return parameters.maskMode
+                    == VividLocalVolumetricFogMaskMode.Material
+                && material != null
+                && material.FindPass(FogVolumeVoxelizePassName) >= 0
+                && (material.shader == null
+                    || material.shader.name
+                        != DefaultFogVolumeVoxelizeShaderName);
         }
 
         internal VividVolumetricMaterialBounds ConvertToVolumeBounds()
@@ -584,22 +599,50 @@ namespace VividRP.Runtime
         {
             alphaOnly = false;
             volumeMask = null;
+            Material maskMaterial = null;
 
             if (parameters.maskMode == VividLocalVolumetricFogMaskMode.Texture)
             {
                 volumeMask = parameters.volumeMask;
             }
             else if (parameters.maskMode == VividLocalVolumetricFogMaskMode.Material
-                && parameters.materialMask != null
-                && parameters.materialMask.HasProperty(FogVolumeMaskId))
+                && parameters.materialMask != null)
             {
-                volumeMask = parameters.materialMask.GetTexture(FogVolumeMaskId) as Texture3D;
+                maskMaterial = parameters.materialMask;
+                if (maskMaterial.HasProperty(FogVolumeMaskId))
+                {
+                    volumeMask =
+                        maskMaterial.GetTexture(FogVolumeMaskId)
+                        as Texture3D;
+                }
+
+                if (volumeMask == null
+                    && maskMaterial.HasProperty(VolumetricMaskId))
+                {
+                    volumeMask =
+                        maskMaterial.GetTexture(VolumetricMaskId)
+                        as Texture3D;
+                }
             }
 
             if (volumeMask == null)
                 return false;
 
             alphaOnly = volumeMask.format == TextureFormat.Alpha8;
+            if (maskMaterial != null)
+            {
+                alphaOnly |=
+                    maskMaterial.HasProperty(
+                        FogVolumeAlphaOnlyTextureId)
+                    && maskMaterial.GetFloat(
+                        FogVolumeAlphaOnlyTextureId) > 0.5f;
+                alphaOnly |=
+                    maskMaterial.HasProperty(
+                        VolumetricAlphaOnlyTextureId)
+                    && maskMaterial.GetFloat(
+                        VolumetricAlphaOnlyTextureId) > 0.5f;
+            }
+
             return true;
         }
 

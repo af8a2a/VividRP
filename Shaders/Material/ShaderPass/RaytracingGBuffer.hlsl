@@ -94,6 +94,17 @@ void StandardLitRaytracingGBufferClosestHit(
         baseColor
         * (1.0 - metalness)
         * (1.0 - material.openPbrInputs.transmission_weight);
+    diffuseAlbedo = lerp(
+        diffuseAlbedo,
+        material.subsurfaceAlbedo,
+        saturate(material.effectiveSubsurfaceWeight));
+    // Face SSS V1 is restricted to dielectrics, so replacing the GBuffer base
+    // color with the blended diffusion guide preserves the 0.04 dielectric F0
+    // while feeding the same diffuse albedo to REBLUR and DLSS-RR.
+    payload.baseColor = lerp(
+        baseColor,
+        material.subsurfaceAlbedo,
+        saturate(material.effectiveSubsurfaceWeight));
     float3 reflectance0 = lerp(0.04.xxx, baseColor, metalness);
     NRD_MaterialFactors(
         normalize(material.shadingNormalWS),

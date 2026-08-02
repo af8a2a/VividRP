@@ -12,6 +12,16 @@ namespace VividRP.Runtime
         IndexedHash = 1
     }
 
+    public enum ReferencedPathTracingRTXTFMode
+    {
+        [InspectorName("Linear")]
+        Linear = 1,
+        [InspectorName("Cubic")]
+        Cubic = 2,
+        [InspectorName("Gaussian")]
+        Gaussian = 3
+    }
+
     public enum ReferencedPathTracingEnvironmentSamplingMode
     {
         BsdfOnly = 0,
@@ -129,6 +139,18 @@ namespace VividRP.Runtime
     }
 
     [Serializable]
+    public sealed class ReferencedPathTracingRTXTFModeParameter
+        : VolumeParameter<ReferencedPathTracingRTXTFMode>
+    {
+        public ReferencedPathTracingRTXTFModeParameter(
+            ReferencedPathTracingRTXTFMode value,
+            bool overrideState = false)
+            : base(value, overrideState)
+        {
+        }
+    }
+
+    [Serializable]
     public sealed class ReferencedPathTracingEnvironmentEstimatorModeParameter
         : VolumeParameter<ReferencedPathTracingEnvironmentEstimatorMode>
     {
@@ -226,9 +248,29 @@ namespace VividRP.Runtime
             "on supported NVIDIA hardware. Unsupported systems use the standard path automatically.")]
         public BoolParameter enableShaderExecutionReordering = new(false);
 
+        [Header("RTX Texture Filtering")]
         [Tooltip(
-            "Target accumulated samples used by canonical capture tooling. Interactive " +
-            "accumulation remains unbounded.")]
+            "Uses NVIDIA RTXTF stochastic texture filtering for opaque StandardLit " +
+            "materials in the reference path tracer. Alpha-tested, transparent, and " +
+            "virtual-textured materials retain their visibility-safe sampling path.")]
+        public BoolParameter enableRTXTF = new(true);
+
+        [Tooltip(
+            "Selects the RTXTF reconstruction kernel. Linear converges to the normal " +
+            "bilinear result; Cubic and Gaussian trade more temporal noise for a " +
+            "higher-order filter.")]
+        public ReferencedPathTracingRTXTFModeParameter rtxtfFilter =
+            new(ReferencedPathTracingRTXTFMode.Linear);
+
+        [Tooltip(
+            "Gaussian standard deviation in texels. This is used only by the Gaussian " +
+            "RTXTF filter.")]
+        public ClampedFloatParameter rtxtfGaussianSigma =
+            new(0.7f, 0.05f, 4.0f);
+
+        [Tooltip(
+            "Maximum accumulated samples for reference path tracing and canonical capture. " +
+            "Rendering stops at this count and convergence-gated Open Image Denoise runs once.")]
         public ClampedIntParameter targetSampleCount =
             new(2048, 1, MaximumTargetSampleCount);
 

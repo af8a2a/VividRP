@@ -24,6 +24,9 @@ CBUFFER_START(UnityPerMaterial)
     float4 _BaseMap_ST;
     float4 _EmissionColor;
     float4 _TransmissionColor;
+    float4 _TransmissionScatter;
+    float4 _SubsurfaceColor;
+    float4 _SubsurfaceRadiusScale;
     float _Cutoff;
     float _Smoothness;
     float _SmoothnessTextureChannel;
@@ -45,7 +48,12 @@ CBUFFER_START(UnityPerMaterial)
     float _ThinWalledTransmission;
     float _TransmissionWeight;
     float _TransmissionDepth;
+    float _TransmissionScatterAnisotropy;
     float _SpecularIOR;
+    float _SubsurfaceWeight;
+    float _SubsurfaceRadius;
+    float _SubsurfaceScatterAnisotropy;
+    float _SubsurfaceTransmissionWeight;
 CBUFFER_END
 
 TEXTURE2D(_BaseMap);

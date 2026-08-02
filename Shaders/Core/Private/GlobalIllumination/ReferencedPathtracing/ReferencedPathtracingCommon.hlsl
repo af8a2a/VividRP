@@ -102,6 +102,21 @@ static const int kReferencedEnvironmentDebugPrimaryBackgroundOnly = 2;
 static const int kReferencedEnvironmentDebugIndirectMissOnly = 3;
 static const float kReferencedPathtracingPi = 3.14159265358979323846;
 
+bool VividReferencedPathtracingIsFinite(float value)
+{
+    return !isnan(value) && !isinf(value);
+}
+
+bool VividReferencedPathtracingIsFinite(float2 value)
+{
+    return !any(isnan(value)) && !any(isinf(value));
+}
+
+bool VividReferencedPathtracingIsFinite(float3 value)
+{
+    return !any(isnan(value)) && !any(isinf(value));
+}
+
 uint ReferencedPathtracingHashStochasticTransparency(uint value)
 {
     value ^= value >> 16u;
@@ -1565,10 +1580,18 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_INPUT_PARENT_MEDIUM_IOR 13u
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_EXTINCTION 14u
 #define REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX 17u
+#define REFERENCED_PAYLOAD_INPUT_RTXTF_RANDOM 18u
+#define REFERENCED_PAYLOAD_INPUT_HAIR_BSDF_EXTRA_RANDOM 21u
+#define REFERENCED_PAYLOAD_INPUT_QUERY_MODE 22u
+
+#define REFERENCED_PATHTRACING_QUERY_DEFAULT 0u
+#define REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE 1u
+#define REFERENCED_PATHTRACING_QUERY_SUBSURFACE_TRANSMISSION_SURFACE 2u
 
 // Closest-hit result layout. Raygen reconstructs positionWS from its RayDesc
-// and hit distance. Unit directions use octahedral UNORM16x2 encoding so the
-// complete result fits exactly in 40 DWORDs (160 bytes).
+// and hit distance. Unit directions use octahedral UNORM16x2 encoding. Material
+// medium extinction uses FP16x3 and scattering uses UNORM8x3 + SNORM8 so the
+// complete result remains exactly 40 DWORDs (160 bytes).
 #define REFERENCED_PAYLOAD_RESULT_RAY_CONE_WIDTH 0u
 #define REFERENCED_PAYLOAD_RESULT_FACE_NORMAL_WS_PACKED 1u
 #define REFERENCED_PAYLOAD_RESULT_EMISSION 2u
@@ -1592,9 +1615,22 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS 30u
 #define REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT 33u
 #define REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY 34u
-#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR 35u
+#define REFERENCED_PAYLOAD_RESULT_MEDIUM_IOR_OR_STRAND_RADIUS 35u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR REFERENCED_PAYLOAD_RESULT_MEDIUM_IOR_OR_STRAND_RADIUS
 #define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION 36u
+#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING 38u
 #define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX 39u
+// Face SSS and surface-query results never carry a dielectric transition or a
+// strand result. Reuse that mutually exclusive tail to keep the payload at the
+// existing 40-DWORD DXR budget.
+#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_WEIGHT 33u
+#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_ALBEDO 34u
+#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_RADIUS 36u
+// Unity surface ray-tracing shaders currently compile as lib_6_3, where
+// GeometryIndex() is unavailable. Face SSS V1 therefore uses the RTAS instance
+// as its surface ownership key.
+#define REFERENCED_PAYLOAD_RESULT_SURFACE_INSTANCE_INDEX 38u
+#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_TRANSMISSION_WEIGHT 39u
 
 #define REFERENCED_PAYLOAD_FLAG_HIT (1u << 0u)
 #define REFERENCED_PAYLOAD_FLAG_NEE_VALID (1u << 1u)
@@ -1609,6 +1645,9 @@ float4 ReferencedPathtracingEvaluateCameraBackground(float3 directionWS)
 #define REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_MASK (15u << REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_SHIFT)
 #define REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT 13u
 #define REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_MASK (255u << REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT)
+#define REFERENCED_PAYLOAD_FLAG_STRAND_SURFACE (1u << 21u)
+#define REFERENCED_PAYLOAD_FLAG_SUBSURFACE_SURFACE (1u << 22u)
+#define REFERENCED_PAYLOAD_FLAG_SURFACE_QUERY (1u << 23u)
 
 struct ReferencedPathtracingPayload
 {
@@ -1626,8 +1665,10 @@ struct ReferencedPathtracingPayloadInput
 {
     float3 pathThroughput;
     float3 bsdfRandom;
+    float hairBsdfExtraRandom;
     float3 directLightRandom;
     uint stochasticAlphaSeed;
+    float3 rtxtfRandom;
     float rayConeWidth;
     float rayConeSpreadAngle;
     // RTXPT-style compact view of the active nested dielectric stack. The
@@ -1637,6 +1678,7 @@ struct ReferencedPathtracingPayloadInput
     float parentMediumIor;
     float3 activeMediumExtinction;
     uint activeMediumInstanceIndex;
+    uint queryMode;
 };
 
 struct ReferencedPathtracingSurfaceResult
@@ -1683,7 +1725,19 @@ struct ReferencedPathtracingSurfaceResult
     int mediumTransition;
     float nextMediumIor;
     float3 nextMediumExtinction;
+    uint nextMediumScattering;
     uint nextMediumInstanceIndex;
+    // The packed result aliases strand radius with nextMediumIor. A strand is
+    // never a solid-medium transition, so the two values are mutually exclusive.
+    float strandRadius;
+    uint isStrand;
+    float subsurfaceWeight;
+    float3 subsurfaceAlbedo;
+    float3 subsurfaceRadius;
+    float subsurfaceTransmissionWeight;
+    uint surfaceInstanceIndex;
+    uint isSubsurface;
+    uint isSurfaceQuery;
     uint hit;
 };
 
@@ -1735,6 +1789,67 @@ void StoreReferencedPathtracingPayloadFloat3(
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset, value.x);
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 1u, value.y);
     StoreReferencedPathtracingPayloadFloat(payload, dwordOffset + 2u, value.z);
+}
+
+uint2 PackReferencedPathtracingNonnegativeFloat3(float3 value)
+{
+    float3 packedValue = clamp(
+        max(value, 0.0),
+        0.0,
+        65504.0);
+    return uint2(
+        (f32tof16(packedValue.x) & 0xffffu)
+            | (f32tof16(packedValue.y) << 16u),
+        f32tof16(packedValue.z) & 0xffffu);
+}
+
+float3 UnpackReferencedPathtracingNonnegativeFloat3(uint2 packedValue)
+{
+    return float3(
+        f16tof32(packedValue.x & 0xffffu),
+        f16tof32(packedValue.x >> 16u),
+        f16tof32(packedValue.y & 0xffffu));
+}
+
+uint2 PackReferencedPathtracingMaterialMediumExtinction(
+    float3 extinctionCoefficient)
+{
+    return PackReferencedPathtracingNonnegativeFloat3(
+        extinctionCoefficient);
+}
+
+float3 UnpackReferencedPathtracingMaterialMediumExtinction(
+    uint2 packedExtinction)
+{
+    return UnpackReferencedPathtracingNonnegativeFloat3(
+        packedExtinction);
+}
+
+uint PackReferencedPathtracingMaterialMediumScattering(
+    float3 scatteringAlbedo,
+    float anisotropy)
+{
+    uint3 albedo = (uint3)round(saturate(scatteringAlbedo) * 255.0);
+    int signedAnisotropy = (int)round(
+        clamp(anisotropy, -1.0, 1.0) * 127.0);
+    return albedo.x
+        | (albedo.y << 8u)
+        | (albedo.z << 16u)
+        | ((uint)(signedAnisotropy & 0xff) << 24u);
+}
+
+float4 UnpackReferencedPathtracingMaterialMediumScattering(
+    uint packedScattering)
+{
+    float3 scatteringAlbedo = float3(
+        packedScattering & 0xffu,
+        (packedScattering >> 8u) & 0xffu,
+        (packedScattering >> 16u) & 0xffu)
+        * (1.0 / 255.0);
+    int signedAnisotropy = (int)packedScattering >> 24;
+    return float4(
+        scatteringAlbedo,
+        clamp((float)signedAnisotropy / 127.0, -1.0, 1.0));
 }
 
 uint PackReferencedPathtracingUnitVector(float3 value)
@@ -1789,8 +1904,10 @@ void InitializeReferencedPathtracingPayloadInput(
 {
     input.pathThroughput = 1.0;
     input.bsdfRandom = 0.0;
+    input.hairBsdfExtraRandom = 0.0;
     input.directLightRandom = 0.0;
     input.stochasticAlphaSeed = 0u;
+    input.rtxtfRandom = 0.0;
     input.rayConeWidth = 0.0;
     input.rayConeSpreadAngle = 0.0;
     input.activeMediumIor = 1.0;
@@ -1798,6 +1915,7 @@ void InitializeReferencedPathtracingPayloadInput(
     input.activeMediumExtinction = 0.0;
     input.activeMediumInstanceIndex =
         kReferencedPathtracingInvalidMediumInstance;
+    input.queryMode = REFERENCED_PATHTRACING_QUERY_DEFAULT;
 }
 
 void InitializeReferencedPathtracingSurfaceResult(
@@ -1835,8 +1953,18 @@ void InitializeReferencedPathtracingSurfaceResult(
     result.mediumTransition = 0;
     result.nextMediumIor = 1.0;
     result.nextMediumExtinction = 0.0;
+    result.nextMediumScattering = 0u;
     result.nextMediumInstanceIndex =
         kReferencedPathtracingInvalidMediumInstance;
+    result.strandRadius = 0.0;
+    result.isStrand = 0u;
+    result.subsurfaceWeight = 0.0;
+    result.subsurfaceAlbedo = 0.0;
+    result.subsurfaceRadius = 0.0;
+    result.subsurfaceTransmissionWeight = 0.0;
+    result.surfaceInstanceIndex = 0xffffffffu;
+    result.isSubsurface = 0u;
+    result.isSurfaceQuery = 0u;
     result.hit = 0u;
 }
 
@@ -1853,6 +1981,10 @@ void PackReferencedPathtracingPayloadInput(
         payload,
         REFERENCED_PAYLOAD_INPUT_BSDF_RANDOM,
         input.bsdfRandom);
+    StoreReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_HAIR_BSDF_EXTRA_RANDOM,
+        input.hairBsdfExtraRandom);
     StoreReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_INPUT_DIRECT_LIGHT_RANDOM,
@@ -1861,6 +1993,10 @@ void PackReferencedPathtracingPayloadInput(
         payload,
         REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED,
         input.stochasticAlphaSeed);
+    StoreReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RTXTF_RANDOM,
+        input.rtxtfRandom);
     StoreReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH,
@@ -1885,6 +2021,10 @@ void PackReferencedPathtracingPayloadInput(
         payload,
         REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX,
         input.activeMediumInstanceIndex);
+    StoreReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_QUERY_MODE,
+        input.queryMode);
 }
 
 void UnpackReferencedPathtracingPayloadInput(
@@ -1897,12 +2037,18 @@ void UnpackReferencedPathtracingPayloadInput(
     input.bsdfRandom = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_INPUT_BSDF_RANDOM);
+    input.hairBsdfExtraRandom = LoadReferencedPathtracingPayloadFloat(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_HAIR_BSDF_EXTRA_RANDOM);
     input.directLightRandom = LoadReferencedPathtracingPayloadFloat3(
         payload,
         REFERENCED_PAYLOAD_INPUT_DIRECT_LIGHT_RANDOM);
     input.stochasticAlphaSeed = LoadReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_INPUT_STOCHASTIC_ALPHA_SEED);
+    input.rtxtfRandom = LoadReferencedPathtracingPayloadFloat3(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_RTXTF_RANDOM);
     input.rayConeWidth = LoadReferencedPathtracingPayloadFloat(
         payload,
         REFERENCED_PAYLOAD_INPUT_RAY_CONE_WIDTH);
@@ -1921,6 +2067,9 @@ void UnpackReferencedPathtracingPayloadInput(
     input.activeMediumInstanceIndex = LoadReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_INPUT_ACTIVE_MEDIUM_INSTANCE_INDEX);
+    input.queryMode = LoadReferencedPathtracingPayloadUint(
+        payload,
+        REFERENCED_PAYLOAD_INPUT_QUERY_MODE);
 }
 
 uint PackReferencedPathtracingSurfaceResultFlags(
@@ -1948,6 +2097,15 @@ uint PackReferencedPathtracingSurfaceResultFlags(
         << REFERENCED_PAYLOAD_FLAG_NEE_LIGHT_TYPE_SHIFT;
     flags |= (result.neeFlags & 255u)
         << REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT;
+    flags |= result.isStrand != 0u
+        ? REFERENCED_PAYLOAD_FLAG_STRAND_SURFACE
+        : 0u;
+    flags |= result.isSubsurface != 0u
+        ? REFERENCED_PAYLOAD_FLAG_SUBSURFACE_SURFACE
+        : 0u;
+    flags |= result.isSurfaceQuery != 0u
+        ? REFERENCED_PAYLOAD_FLAG_SURFACE_QUERY
+        : 0u;
     return flags;
 }
 
@@ -1985,6 +2143,18 @@ void UnpackReferencedPathtracingSurfaceResultFlags(
     result.neeFlags =
         (flags & REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_MASK)
         >> REFERENCED_PAYLOAD_FLAG_NEE_FLAGS_SHIFT;
+    result.isStrand =
+        (flags & REFERENCED_PAYLOAD_FLAG_STRAND_SURFACE) != 0u
+            ? 1u
+            : 0u;
+    result.isSubsurface =
+        (flags & REFERENCED_PAYLOAD_FLAG_SUBSURFACE_SURFACE) != 0u
+            ? 1u
+            : 0u;
+    result.isSurfaceQuery =
+        (flags & REFERENCED_PAYLOAD_FLAG_SURFACE_QUERY) != 0u
+            ? 1u
+            : 0u;
 }
 
 float4 LoadReferencedPathtracingStochasticTransparencyDiagnostics(
@@ -2150,26 +2320,79 @@ void PackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_SHADING_NORMAL_DIAGNOSTICS,
         result.shadingNormalDiagnostics);
-    StoreReferencedPathtracingPayloadFloat(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT,
-        result.thinWalledTransmissionWeight);
-    StoreReferencedPathtracingPayloadFloat(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY,
-        result.stochasticTransparencyDiagnostics.x);
-    StoreReferencedPathtracingPayloadFloat(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR,
-        result.nextMediumIor);
-    StoreReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION,
-        result.nextMediumExtinction);
-    StoreReferencedPathtracingPayloadUint(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX,
-        result.nextMediumInstanceIndex);
+    if (result.isSubsurface != 0u || result.isSurfaceQuery != 0u)
+    {
+        StoreReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_WEIGHT,
+            result.subsurfaceWeight);
+        uint2 packedSubsurfaceAlbedo =
+            PackReferencedPathtracingNonnegativeFloat3(
+                result.subsurfaceAlbedo);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_ALBEDO,
+            packedSubsurfaceAlbedo.x);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_ALBEDO + 1u,
+            packedSubsurfaceAlbedo.y);
+        uint2 packedSubsurfaceRadius =
+            PackReferencedPathtracingNonnegativeFloat3(
+                result.subsurfaceRadius);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_RADIUS,
+            packedSubsurfaceRadius.x);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_RADIUS + 1u,
+            packedSubsurfaceRadius.y);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SURFACE_INSTANCE_INDEX,
+            result.surfaceInstanceIndex);
+        StoreReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_TRANSMISSION_WEIGHT,
+            result.subsurfaceTransmissionWeight);
+    }
+    else
+    {
+        StoreReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_THIN_WALLED_TRANSMISSION_WEIGHT,
+            result.thinWalledTransmissionWeight);
+        StoreReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY,
+            result.stochasticTransparencyDiagnostics.x);
+        StoreReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_MEDIUM_IOR_OR_STRAND_RADIUS,
+            result.isStrand != 0u
+                ? max(result.strandRadius, 0.0)
+                : result.nextMediumIor);
+        uint2 packedMediumExtinction =
+            PackReferencedPathtracingMaterialMediumExtinction(
+                result.nextMediumExtinction);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION,
+            packedMediumExtinction.x);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION + 1u,
+            packedMediumExtinction.y);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING,
+            result.nextMediumScattering);
+        StoreReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX,
+            result.nextMediumInstanceIndex);
+    }
 }
 
 void UnpackReferencedPathtracingSurfaceResult(
@@ -2250,12 +2473,25 @@ void UnpackReferencedPathtracingSurfaceResult(
             REFERENCED_PAYLOAD_RESULT_STOCHASTIC_TRANSPARENCY_OPACITY);
     result.stochasticTransparencyDiagnostics.rgb =
         stochasticTransparencyOpacity;
-    result.nextMediumIor = LoadReferencedPathtracingPayloadFloat(
+    float mediumIorOrStrandRadius = LoadReferencedPathtracingPayloadFloat(
         payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_IOR);
-    result.nextMediumExtinction = LoadReferencedPathtracingPayloadFloat3(
-        payload,
-        REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION);
+        REFERENCED_PAYLOAD_RESULT_MEDIUM_IOR_OR_STRAND_RADIUS);
+    result.nextMediumIor = mediumIorOrStrandRadius;
+    result.strandRadius = mediumIorOrStrandRadius;
+    result.nextMediumExtinction =
+        UnpackReferencedPathtracingMaterialMediumExtinction(
+            uint2(
+                LoadReferencedPathtracingPayloadUint(
+                    payload,
+                    REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION),
+                LoadReferencedPathtracingPayloadUint(
+                    payload,
+                    REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_EXTINCTION
+                        + 1u)));
+    result.nextMediumScattering =
+        LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING);
     result.nextMediumInstanceIndex = LoadReferencedPathtracingPayloadUint(
         payload,
         REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_INSTANCE_INDEX);
@@ -2263,6 +2499,55 @@ void UnpackReferencedPathtracingSurfaceResult(
         payload,
         REFERENCED_PAYLOAD_RESULT_FLAGS);
     UnpackReferencedPathtracingSurfaceResultFlags(flags, result);
+    if (result.isSubsurface != 0u || result.isSurfaceQuery != 0u)
+    {
+        result.subsurfaceWeight = LoadReferencedPathtracingPayloadFloat(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SUBSURFACE_WEIGHT);
+        result.subsurfaceAlbedo =
+            UnpackReferencedPathtracingNonnegativeFloat3(
+                uint2(
+                    LoadReferencedPathtracingPayloadUint(
+                        payload,
+                        REFERENCED_PAYLOAD_RESULT_SUBSURFACE_ALBEDO),
+                    LoadReferencedPathtracingPayloadUint(
+                        payload,
+                        REFERENCED_PAYLOAD_RESULT_SUBSURFACE_ALBEDO + 1u)));
+        result.subsurfaceRadius =
+            UnpackReferencedPathtracingNonnegativeFloat3(
+                uint2(
+                    LoadReferencedPathtracingPayloadUint(
+                        payload,
+                        REFERENCED_PAYLOAD_RESULT_SUBSURFACE_RADIUS),
+                    LoadReferencedPathtracingPayloadUint(
+                        payload,
+                        REFERENCED_PAYLOAD_RESULT_SUBSURFACE_RADIUS + 1u)));
+        result.surfaceInstanceIndex = LoadReferencedPathtracingPayloadUint(
+            payload,
+            REFERENCED_PAYLOAD_RESULT_SURFACE_INSTANCE_INDEX);
+        result.subsurfaceTransmissionWeight =
+            LoadReferencedPathtracingPayloadFloat(
+                payload,
+                REFERENCED_PAYLOAD_RESULT_SUBSURFACE_TRANSMISSION_WEIGHT);
+        result.thinWalledTransmissionWeight = 0.0;
+        result.stochasticTransparencyDiagnostics = 0.0;
+        result.nextMediumIor = 1.0;
+        result.nextMediumExtinction = 0.0;
+        result.nextMediumScattering = 0u;
+        result.nextMediumInstanceIndex =
+            kReferencedPathtracingInvalidMediumInstance;
+        result.strandRadius = 0.0;
+        result.isStrand = 0u;
+    }
+    else if (result.isStrand != 0u)
+    {
+        result.nextMediumIor = 1.0;
+        result.strandRadius = max(result.strandRadius, 0.0);
+    }
+    else
+    {
+        result.strandRadius = 0.0;
+    }
 }
 
 #endif

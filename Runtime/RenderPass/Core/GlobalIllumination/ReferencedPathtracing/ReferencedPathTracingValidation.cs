@@ -2,13 +2,14 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
     internal readonly struct ReferencedPathTracingIntegratorState
         : IEquatable<ReferencedPathTracingIntegratorState>
     {
-        internal const int Version = 12;
+        internal const int Version = 15;
 
         internal ReferencedPathTracingIntegratorState(
             bool deterministicSampling,
@@ -21,6 +22,9 @@ namespace VividRP.Runtime.RenderPass.Core
             float globalLightProposalProbability,
             bool lightSpatialIndex,
             bool enableShaderExecutionReordering,
+            bool enableRTXTF,
+            ReferencedPathTracingRTXTFMode rtxtfFilter,
+            float rtxtfGaussianSigma,
             ReferencedPathTracingEnvironmentEstimatorMode estimatorMode,
             int targetSampleCount)
         {
@@ -47,6 +51,14 @@ namespace VividRP.Runtime.RenderPass.Core
             this.lightSpatialIndex = lightSpatialIndex;
             this.enableShaderExecutionReordering =
                 enableShaderExecutionReordering;
+            this.enableRTXTF = enableRTXTF;
+            this.rtxtfFilter = SanitizeRTXTFMode(rtxtfFilter);
+            this.rtxtfGaussianSigma = Mathf.Clamp(
+                float.IsFinite(rtxtfGaussianSigma)
+                    ? rtxtfGaussianSigma
+                    : 0.7f,
+                0.05f,
+                4.0f);
             this.estimatorMode = SanitizeEstimatorMode(estimatorMode);
             this.targetSampleCount = Mathf.Clamp(
                 targetSampleCount,
@@ -73,6 +85,12 @@ namespace VividRP.Runtime.RenderPass.Core
                 ReferencedPathTracingThinWalledTransmissionContract.Version);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
+                ReferencedPathTracingSolidTransmissionContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract.Version);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
                 ReferencedPathTracingGeometryOpacityContract.Version);
             ReferencedPathTracingStableHash.Add(ref hash, this.maxBounceCount);
             ReferencedPathTracingStableHash.Add(
@@ -88,6 +106,16 @@ namespace VividRP.Runtime.RenderPass.Core
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 lightSpatialIndex);
+            ReferencedPathTracingStableHash.Add(ref hash, enableRTXTF);
+            if (enableRTXTF)
+            {
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)this.rtxtfFilter);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    this.rtxtfGaussianSigma);
+            }
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 (int)this.estimatorMode);
@@ -106,6 +134,9 @@ namespace VividRP.Runtime.RenderPass.Core
         internal float globalLightProposalProbability { get; }
         internal bool lightSpatialIndex { get; }
         internal bool enableShaderExecutionReordering { get; }
+        internal bool enableRTXTF { get; }
+        internal ReferencedPathTracingRTXTFMode rtxtfFilter { get; }
+        internal float rtxtfGaussianSigma { get; }
         internal ReferencedPathTracingEnvironmentEstimatorMode estimatorMode { get; }
         internal int targetSampleCount { get; }
         internal ulong signature { get; }
@@ -150,6 +181,13 @@ namespace VividRP.Runtime.RenderPass.Core
                 !useVolumeSettings || settings.lightSpatialIndex.value,
                 useVolumeSettings
                     && settings.enableShaderExecutionReordering.value,
+                !useVolumeSettings || settings.enableRTXTF.value,
+                useVolumeSettings
+                    ? settings.rtxtfFilter.value
+                    : ReferencedPathTracingRTXTFMode.Linear,
+                useVolumeSettings
+                    ? settings.rtxtfGaussianSigma.value
+                    : 0.7f,
                 useVolumeSettings
                     ? settings.environmentEstimatorMode.value
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis,
@@ -175,6 +213,15 @@ namespace VividRP.Runtime.RenderPass.Core
                     : ReferencedPathTracingEnvironmentEstimatorMode.Mis;
         }
 
+        private static ReferencedPathTracingRTXTFMode SanitizeRTXTFMode(
+            ReferencedPathTracingRTXTFMode mode)
+        {
+            return mode is ReferencedPathTracingRTXTFMode.Cubic
+                or ReferencedPathTracingRTXTFMode.Gaussian
+                    ? mode
+                    : ReferencedPathTracingRTXTFMode.Linear;
+        }
+
         public bool Equals(ReferencedPathTracingIntegratorState other)
         {
             return signature == other.signature;
@@ -194,7 +241,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSamplingContract
     {
-        internal const int Version = 6;
+        internal const int Version = 11;
         internal const int DimensionCapacity = 256;
         internal const int FilmDimension = 0;
         internal const int LensDimension = 2;
@@ -208,11 +255,23 @@ namespace VividRP.Runtime.RenderPass.Core
         internal const int VolumeDimensionOffset = 8;
         internal const int AtmosphereSunDimensionOffset = 12;
         internal const int CloudDimensionOffset = 14;
+        internal const int HairBsdfExtraDimensionOffset = 17;
+        internal const int RTXTFDimensionOffset = 18;
         internal const int FutureDimensionOffset = 18;
+        internal const int SubsurfaceBaseDimension = 168;
+        internal const int SubsurfaceDimensionStride = 4;
+        internal const int GlobalFogBaseDimension = 200;
+        internal const int GlobalFogDimensionStride = 3;
+        internal const int GlobalFogDistanceDimensionOffset = 0;
+        internal const int GlobalFogPhaseDimensionOffset = 1;
+        internal const int LocalFogBaseDimension = 224;
+        internal const int LocalFogDimensionStride = 4;
+        internal const int LocalFogDistanceDimensionOffset = 0;
+        internal const int LocalFogPhaseDimensionOffset = 2;
         internal const int MaximumUsedDimension =
-            BounceBaseDimension
+            LocalFogBaseDimension
             + ReferencedPathTracingSettingsVolume.MaximumSupportedBounceCount
-                * BounceDimensionStride
+                * LocalFogDimensionStride
             - 1;
 
         internal static int GetBounceDimension(
@@ -236,6 +295,81 @@ namespace VividRP.Runtime.RenderPass.Core
 
             return BounceBaseDimension
                 + bounceIndex * BounceDimensionStride
+                + dimensionOffset;
+        }
+
+        internal static int GetGlobalFogDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= GlobalFogDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return GlobalFogBaseDimension
+                + bounceIndex * GlobalFogDimensionStride
+                + dimensionOffset;
+        }
+
+        internal static int GetSubsurfaceDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= SubsurfaceDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return SubsurfaceBaseDimension
+                + bounceIndex * SubsurfaceDimensionStride
+                + dimensionOffset;
+        }
+
+        internal static int GetLocalFogDimension(
+            int bounceIndex,
+            int dimensionOffset)
+        {
+            if (bounceIndex < 0
+                || bounceIndex
+                    >= ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bounceIndex));
+            }
+
+            if (dimensionOffset < 0
+                || dimensionOffset >= LocalFogDimensionStride)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(dimensionOffset));
+            }
+
+            return LocalFogBaseDimension
+                + bounceIndex * LocalFogDimensionStride
                 + dimensionOffset;
         }
     }
@@ -432,7 +566,7 @@ namespace VividRP.Runtime.RenderPass.Core
 
     internal static class ReferencedPathTracingSolidTransmissionContract
     {
-        internal const int Version = 1;
+        internal const int Version = 2;
         internal const int MaximumMediumDepth = 4;
         private const float MinimumTransmissionColor = 1e-3f;
         private const float MinimumTransmissionDistance = 1e-3f;
@@ -450,17 +584,35 @@ namespace VividRP.Runtime.RenderPass.Core
             Vector3 transmissionColor,
             float transmissionDepth)
         {
+            ResolveVolume(
+                transmissionColor,
+                transmissionDepth,
+                Vector3.zero,
+                out Vector3 extinction,
+                out _);
+            return extinction;
+        }
+
+        internal static void ResolveVolume(
+            Vector3 transmissionColor,
+            float transmissionDepth,
+            Vector3 transmissionScatter,
+            out Vector3 extinction,
+            out Vector3 scatteringAlbedo)
+        {
             if (float.IsNaN(transmissionDepth)
                 || float.IsInfinity(transmissionDepth)
                 || transmissionDepth <= 0.0f)
             {
-                return Vector3.zero;
+                extinction = Vector3.zero;
+                scatteringAlbedo = Vector3.zero;
+                return;
             }
 
             float resolvedTransmissionDepth = Mathf.Max(
                 transmissionDepth,
                 MinimumTransmissionDistance);
-            return new Vector3(
+            var baseExtinction = new Vector3(
                 ResolveExtinctionChannel(
                     transmissionColor.x,
                     resolvedTransmissionDepth),
@@ -470,6 +622,44 @@ namespace VividRP.Runtime.RenderPass.Core
                 ResolveExtinctionChannel(
                     transmissionColor.z,
                     resolvedTransmissionDepth));
+            var scattering = new Vector3(
+                ResolveScatteringChannel(
+                    transmissionScatter.x,
+                    resolvedTransmissionDepth),
+                ResolveScatteringChannel(
+                    transmissionScatter.y,
+                    resolvedTransmissionDepth),
+                ResolveScatteringChannel(
+                    transmissionScatter.z,
+                    resolvedTransmissionDepth));
+            var absorption = baseExtinction - scattering;
+            float minimumAbsorption = Mathf.Min(
+                absorption.x,
+                Mathf.Min(absorption.y, absorption.z));
+            if (minimumAbsorption < 0.0f)
+            {
+                absorption -= Vector3.one * minimumAbsorption;
+            }
+
+            extinction = absorption + scattering;
+            scatteringAlbedo = new Vector3(
+                ResolveScatteringAlbedoChannel(
+                    scattering.x,
+                    extinction.x),
+                ResolveScatteringAlbedoChannel(
+                    scattering.y,
+                    extinction.y),
+                ResolveScatteringAlbedoChannel(
+                    scattering.z,
+                    extinction.z));
+        }
+
+        internal static float ResolveScatteringAnisotropy(float value)
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value))
+                return 0.0f;
+
+            return Mathf.Clamp(value, -0.95f, 0.95f);
         }
 
         internal static Vector3 EvaluateTransmittance(
@@ -513,6 +703,29 @@ namespace VividRP.Runtime.RenderPass.Core
             return -Mathf.Log(color) / transmissionDepth;
         }
 
+        private static float ResolveScatteringChannel(
+            float transmissionScatter,
+            float transmissionDepth)
+        {
+            if (float.IsNaN(transmissionScatter)
+                || float.IsInfinity(transmissionScatter))
+            {
+                return 0.0f;
+            }
+
+            return Mathf.Max(transmissionScatter, 0.0f)
+                / transmissionDepth;
+        }
+
+        private static float ResolveScatteringAlbedoChannel(
+            float scattering,
+            float extinction)
+        {
+            return extinction > 0.0f
+                ? Mathf.Clamp01(scattering / extinction)
+                : 0.0f;
+        }
+
         private static float EvaluateTransmittanceChannel(
             float extinction,
             float distance)
@@ -521,6 +734,66 @@ namespace VividRP.Runtime.RenderPass.Core
                 Mathf.Max(extinction, 0.0f) * distance,
                 MaximumOpticalDepth);
             return Mathf.Exp(-opticalDepth);
+        }
+    }
+
+    internal static class ReferencedPathTracingFaceSubsurfaceTransmissionContract
+    {
+        internal const int Version = 1;
+        private const float MinimumMeanFreePath = 1e-6f;
+
+        internal static float ResolveEffectiveWeight(
+            float subsurfaceWeight,
+            float transmissionWeight,
+            float metalness)
+        {
+            return Mathf.Clamp01(subsurfaceWeight)
+                * Mathf.Clamp01(transmissionWeight)
+                * (1.0f - Mathf.Clamp01(metalness));
+        }
+
+        internal static Vector3 Evaluate(
+            Vector3 albedo,
+            Vector3 meanFreePath,
+            float thickness)
+        {
+            float resolvedThickness =
+                float.IsNaN(thickness) || thickness <= 0.0f
+                    ? 0.0f
+                    : thickness;
+            if (float.IsInfinity(resolvedThickness))
+                resolvedThickness = float.MaxValue;
+
+            return new Vector3(
+                EvaluateChannel(
+                    albedo.x,
+                    meanFreePath.x,
+                    resolvedThickness),
+                EvaluateChannel(
+                    albedo.y,
+                    meanFreePath.y,
+                    resolvedThickness),
+                EvaluateChannel(
+                    albedo.z,
+                    meanFreePath.z,
+                    resolvedThickness));
+        }
+
+        private static float EvaluateChannel(
+            float albedo,
+            float meanFreePath,
+            float thickness)
+        {
+            float resolvedAlbedo = float.IsNaN(albedo)
+                || float.IsInfinity(albedo)
+                ? 0.0f
+                : Mathf.Clamp01(albedo);
+            float resolvedMeanFreePath = float.IsNaN(meanFreePath)
+                || float.IsInfinity(meanFreePath)
+                ? MinimumMeanFreePath
+                : Mathf.Max(meanFreePath, MinimumMeanFreePath);
+            return resolvedAlbedo
+                * Mathf.Exp(-thickness / resolvedMeanFreePath);
         }
     }
 
@@ -552,6 +825,201 @@ namespace VividRP.Runtime.RenderPass.Core
         }
     }
 
+    internal static class ReferencedPathTracingSceneSignatureUtility
+    {
+        private static readonly List<Material> s_SharedMaterials = new();
+
+        internal static ulong Resolve()
+        {
+            var renderers = UnityEngine.Object.FindObjectsByType<Renderer>(
+                FindObjectsInactive.Exclude,
+                FindObjectsSortMode.InstanceID);
+            var database = VividMeshletRendererDatabase.instance;
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                Compute(renderers));
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                Compute(
+                    database?.rendererData,
+                    database?.rendererResources));
+            return hash;
+        }
+
+        internal static ulong Compute(
+            IReadOnlyList<Renderer> renderers)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            var rendererCount = renderers?.Count ?? 0;
+            var supportedRendererCount = 0;
+            for (var rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                if (TryResolveMesh(renderers[rendererIndex], out _))
+                    supportedRendererCount++;
+            }
+
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                supportedRendererCount);
+
+            for (var rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                var renderer = renderers[rendererIndex];
+                if (!TryResolveMesh(renderer, out var mesh))
+                    continue;
+
+                var gameObject = renderer.gameObject;
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(renderer.GetEntityId()));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    renderer.enabled);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    gameObject != null && gameObject.activeInHierarchy);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    renderer.forceRenderingOff);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    gameObject != null ? gameObject.layer : 0);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (ulong)renderer.renderingLayerMask);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)renderer.shadowCastingMode);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)renderer.rayTracingMode);
+                AddMatrix(ref hash, renderer.localToWorldMatrix);
+
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(mesh.GetEntityId()));
+
+                s_SharedMaterials.Clear();
+                renderer.GetSharedMaterials(s_SharedMaterials);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    s_SharedMaterials.Count);
+                for (var materialIndex = 0;
+                     materialIndex < s_SharedMaterials.Count;
+                     materialIndex++)
+                {
+                    AddMaterial(
+                        ref hash,
+                        s_SharedMaterials[materialIndex]);
+                }
+            }
+
+            s_SharedMaterials.Clear();
+            return hash;
+        }
+
+        private static bool TryResolveMesh(
+            Renderer renderer,
+            out Mesh mesh)
+        {
+            mesh = null;
+            if (renderer == null)
+                return false;
+
+            if (renderer is SkinnedMeshRenderer skinnedMeshRenderer)
+                mesh = skinnedMeshRenderer.sharedMesh;
+            else if (renderer is MeshRenderer
+                && renderer.TryGetComponent<MeshFilter>(out var meshFilter))
+                mesh = meshFilter.sharedMesh;
+
+            return mesh != null;
+        }
+
+        internal static ulong Compute(
+            IReadOnlyList<VividMeshletRendererRenderData> rendererData,
+            IReadOnlyList<VividMeshletRendererResources> rendererResources)
+        {
+            var hash = ReferencedPathTracingStableHash.OffsetBasis;
+            var rendererCount = rendererData?.Count ?? 0;
+            ReferencedPathTracingStableHash.Add(ref hash, rendererCount);
+
+            for (var rendererIndex = 0;
+                 rendererIndex < rendererCount;
+                 rendererIndex++)
+            {
+                var data = rendererData[rendererIndex];
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(data.meshletRendererEntityId));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    EntityId.ToULong(data.sourceMeshEntityId));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (ulong)data.renderingLayerMask);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    unchecked((int)data.flags));
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    (int)data.shadowCastingMode);
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    data.subMeshCount);
+                AddMatrix(ref hash, data.objectToWorldMatrix);
+
+                if (rendererResources == null
+                    || rendererIndex >= rendererResources.Count)
+                {
+                    ReferencedPathTracingStableHash.Add(ref hash, 0);
+                    continue;
+                }
+
+                var materials = rendererResources[rendererIndex]
+                    .SharedMaterials;
+                var materialCount = materials?.Length ?? 0;
+                ReferencedPathTracingStableHash.Add(
+                    ref hash,
+                    materialCount);
+                for (var materialIndex = 0;
+                     materialIndex < materialCount;
+                     materialIndex++)
+                {
+                    AddMaterial(ref hash, materials[materialIndex]);
+                }
+            }
+
+            return hash;
+        }
+
+        private static void AddMaterial(
+            ref ulong hash,
+            Material material)
+        {
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                material != null
+                    ? EntityId.ToULong(material.GetEntityId())
+                    : EntityId.ToULong(EntityId.None));
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                material != null ? material.ComputeCRC() : 0);
+        }
+
+        private static void AddMatrix(
+            ref ulong hash,
+            Matrix4x4 matrix)
+        {
+            for (var index = 0; index < 16; index++)
+                ReferencedPathTracingStableHash.Add(ref hash, matrix[index]);
+        }
+    }
+
     internal static class ReferencedPathTracingFrameSignatureUtility
     {
         internal static ulong Compute(
@@ -562,6 +1030,8 @@ namespace VividRP.Runtime.RenderPass.Core
             ulong effectiveIntegratorSignature,
             ReferencedPathTracingEnvironmentState environmentState,
             ReferencedPathTracingAtmosphereState atmosphereState,
+            ReferencedPathTracingGlobalFogState globalFogState,
+            ReferencedPathTracingLocalFogState localFogState,
             ReferencedPathTracingCameraBackgroundState cameraBackgroundState,
             ReferencedPathTracingPhysicalCameraState physicalCameraState)
         {
@@ -579,10 +1049,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 atmosphereState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
+                globalFogState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                localFogState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
                 cameraBackgroundState.signature);
             ReferencedPathTracingStableHash.Add(
                 ref hash,
                 physicalCameraState.signature);
+            ReferencedPathTracingStableHash.Add(
+                ref hash,
+                ReferencedPathTracingSceneSignatureUtility.Resolve());
 
             if (cameraData != null)
             {
@@ -635,6 +1114,7 @@ namespace VividRP.Runtime.RenderPass.Core
             internal bool resetRequested;
             internal int lastRenderFrameIndex = -1;
             internal uint sampleIndex;
+            internal uint maximumSampleCount;
             internal ulong frameSignature;
 
             public override void Dispose()
@@ -643,6 +1123,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 resetRequested = false;
                 lastRenderFrameIndex = -1;
                 sampleIndex = 0;
+                maximumSampleCount = 0;
                 frameSignature = 0;
             }
         }
@@ -654,22 +1135,25 @@ namespace VividRP.Runtime.RenderPass.Core
             Camera camera,
             int renderFrameIndex,
             ulong frameSignature,
-            bool isFirstFrame)
+            bool isFirstFrame,
+            uint maximumSampleCount = uint.MaxValue)
         {
             if (camera == null)
                 return 0;
 
+            maximumSampleCount = Math.Max(1u, maximumSampleCount);
             var state = s_States.GetOrCreateBase(camera);
             if (!state.hasSignature
                 || state.resetRequested
                 || state.frameSignature != frameSignature
+                || state.maximumSampleCount != maximumSampleCount
                 || isFirstFrame)
             {
                 state.sampleIndex = 0;
                 state.resetRequested = false;
             }
             else if (state.lastRenderFrameIndex != renderFrameIndex
-                && state.sampleIndex < uint.MaxValue)
+                && state.sampleIndex < maximumSampleCount)
             {
                 state.sampleIndex++;
             }
@@ -677,6 +1161,7 @@ namespace VividRP.Runtime.RenderPass.Core
             state.hasSignature = true;
             state.lastRenderFrameIndex = renderFrameIndex;
             state.frameSignature = frameSignature;
+            state.maximumSampleCount = maximumSampleCount;
             s_States.PurgeDestroyedCameras();
             return state.sampleIndex;
         }

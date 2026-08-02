@@ -1,0 +1,48 @@
+{
+    "name": "UnityGLTFScripts",
+    "rootNamespace": "",
+    "references": [
+        "GLTFSerialization",
+        "UnityGLTF.Helpers",
+        "Unity.Collections",
+        "Unity.Mathematics",
+        "Unity.Burst"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": true,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "Newtonsoft.Json.dll"
+    ],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.modules.physics",
+            "expression": "1.0.0",
+            "define": "UNITY_PHYSICS"
+        },
+        {
+            "name": "com.unity.modules.unitywebrequest",
+            "expression": "1.0.0",
+            "define": "UNITY_WEBREQUEST"
+        },
+        {
+            "name": "com.unity.modules.imgui",
+            "expression": "1.0.0",
+            "define": "UNITY_IMGUI"
+        },
+        {
+            "name": "com.unity.modules.animation",
+            "expression": "1.0.0",
+            "define": "UNITY_ANIMATION"
+        },
+        {
+            "name": "com.unity.modules.imageconversion",
+            "expression": "1.0.0",
+            "define": "UNITY_IMAGECONVERSION"
+        }
+    ],
+    "noEngineReferences": false
+}

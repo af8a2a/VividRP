@@ -11,6 +11,7 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Editor.RenderGraph;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.RenderPass.Core;
 
 namespace VividRP.Editor.Tests
@@ -71,7 +72,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 samplingSource,
                 Does.Contain(
-                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 6"));
+                    "#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 11"));
             Assert.That(
                 samplingSource,
                 Does.Contain("uint sampleBlock = sampleIndex >> 8u;"));
@@ -90,6 +91,58 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 rayGenerationSource,
                 Does.Not.Contain("NextReferencedPathtracingRng"));
+        }
+
+        [Test]
+        public void RTXTF_UsesVendoredLibraryForOpaqueMaterialSampling()
+        {
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var integrationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracingRTXTF.hlsl"));
+            var samplerSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "ThirdParty",
+                "RTXTF",
+                "STFSamplerState.hlsli"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+
+            Assert.That(
+                samplerSource,
+                Does.Contain("struct STF_SamplerState"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("Shaders/ThirdParty/RTXTF/STFSamplerState.hlsli"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("samplerState.Texture2DSampleLevel("));
+            Assert.That(
+                integrationSource,
+                Does.Contain("defined(_ALPHATEST_ON)"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("defined(_SURFACE_TYPE_TRANSPARENT)"));
+            Assert.That(
+                integrationSource,
+                Does.Contain("STF_MAGNIFICATION_METHOD_NONE"));
+            Assert.That(
+                materialSource,
+                Does.Contain("ReferencedPathtracingCreateRTXTFState("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("kReferencedPathtracingRTXTFDimensionOffset"));
         }
 
         [Test]
@@ -244,6 +297,13 @@ namespace VividRP.Editor.Tests
                 "ShaderPass",
                 "OpenPBR",
                 "OpenPBR.hlsl"));
+            var openPbrVolumeBridgeSource = File.ReadAllText(
+                GetPackageFilePath(
+                    "Shaders",
+                    "Material",
+                    "ShaderPass",
+                    "OpenPBR",
+                    "OpenPBRVolume.hlsl"));
             var adapterSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Material",
@@ -254,6 +314,13 @@ namespace VividRP.Editor.Tests
                 "Material",
                 "ShaderPass",
                 "ReferencedPathtracing.hlsl"));
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
             var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
                 "Shaders",
                 "Core",
@@ -267,6 +334,13 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "VIVIDRP_OPENPBR_FEATURE_EnableTranslucency true"));
             Assert.That(
+                openPbrVolumeBridgeSource,
+                Does.Contain(
+                    "Vendor/openpbr_homogeneous_volume.h"));
+            Assert.That(
+                openPbrVolumeBridgeSource,
+                Does.Not.Contain("Vendor/openpbr.h"));
+            Assert.That(
                 adapterSource,
                 Does.Contain(
                     "inputs.transmission_weight = SampleOpenPbrTransmissionWeight("));
@@ -279,9 +353,39 @@ namespace VividRP.Editor.Tests
                 Does.Contain(
                     "inputs.transmission_depth = max(transmissionDepth, 0.0);"));
             Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_scatter = max(transmissionScatter, 0.0);"));
+            Assert.That(
+                adapterSource,
+                Does.Not.Contain(
+                    "VividReferencedPathtracingIsFinite"));
+            Assert.That(
+                adapterSource,
+                Does.Contain(
+                    "inputs.transmission_scatter_anisotropy ="));
+            Assert.That(
                 materialSource,
                 Does.Contain(
                     "preparedBsdf.volume.extinction_coefficient"));
+            Assert.That(
+                materialSource,
+                Does.Contain("preparedBsdf.volume.albedo"));
+            Assert.That(
+                materialSource,
+                Does.Contain("preparedBsdf.volume.anisotropy"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PAYLOAD_RESULT_NEXT_MEDIUM_SCATTERING 38u"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "PackReferencedPathtracingMaterialMediumExtinction("));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "PackReferencedPathtracingMaterialMediumScattering("));
             Assert.That(
                 materialSource,
                 Does.Contain("result.mediumTransition ="));
@@ -293,6 +397,23 @@ namespace VividRP.Editor.Tests
                 rayGenerationSource,
                 Does.Contain(
                     "ReferencedPathtracingEvaluateMaterialMediumTransmittance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("openpbr_sample_event_distance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("OpenPBRVolume.hlsl"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "openpbr_calculate_weight_for_event_at_distance("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain(
+                    "openpbr_sample_anisotropic_phase_function("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("materialMediumScatteringStack"));
             Assert.That(
                 rayGenerationSource,
                 Does.Contain("++materialMediumDepth;"));
@@ -1802,6 +1923,266 @@ namespace VividRP.Editor.Tests
             {
                 ReferencedPathTracingSampleSequence.Dispose();
                 UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void FaceSubsurfaceV1_UsesBurleySurfaceQueryAndDiffuseGuides()
+        {
+            var adapterSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "StandardLitOpenPBRAdapter.hlsl"));
+            var materialSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "ReferencedPathtracing.hlsl"));
+            var gBufferSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Material",
+                "ShaderPass",
+                "RaytracingGBuffer.hlsl"));
+            var commonSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingCommon.hlsl"));
+            var rayGenerationSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracing.rgen.hlsl"));
+            var subsurfaceSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GlobalIllumination",
+                "ReferencedPathtracing",
+                "ReferencedPathtracingSubsurface.hlsl"));
+
+            Assert.That(
+                adapterSource,
+                Does.Contain("inputs.subsurface_weight = saturate("));
+            Assert.That(
+                adapterSource,
+                Does.Contain("inputs.subsurface_radius_scale = max("));
+            Assert.That(
+                adapterSource,
+                Does.Contain("supportsHybridSubsurface"));
+            Assert.That(
+                adapterSource,
+                Does.Contain("surfaceIsOpaque"));
+            Assert.That(
+                materialSource,
+                Does.Contain("transportInputs.subsurface_weight = 0.0;"));
+            Assert.That(
+                materialSource,
+                Does.Contain(
+                    "REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE"));
+            Assert.That(
+                materialSource,
+                Does.Contain("result.surfaceInstanceIndex = InstanceIndex();"));
+            Assert.That(
+                materialSource,
+                Does.Not.Contain("GeometryIndex()"));
+            Assert.That(
+                gBufferSource,
+                Does.Contain("material.subsurfaceAlbedo"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PATHTRACING_PAYLOAD_UINT4_COUNT 10"));
+            Assert.That(
+                commonSource,
+                Does.Contain("#define REFERENCED_PAYLOAD_INPUT_QUERY_MODE 22u"));
+            Assert.That(
+                commonSource,
+                Does.Contain(
+                    "#define REFERENCED_PAYLOAD_RESULT_SUBSURFACE_WEIGHT 33u"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("ReferencedPathtracingSampleBurleySubsurface("));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("RAY_FLAG_CULL_BACK_FACING_TRIANGLES"));
+            Assert.That(
+                rayGenerationSource,
+                Does.Contain("matchesSubsurfaceSurface"));
+            Assert.That(
+                subsurfaceSource,
+                Does.Contain("ReferencedPathtracingBurleyDiffusionShape("));
+            Assert.That(
+                subsurfaceSource,
+                Does.Contain("0.25 * diffusionRate"));
+        }
+
+        [Test]
+        public void SampleSequence_StopsAtTargetAndRestartsWhenTargetChanges()
+        {
+            var gameObject =
+                new GameObject("ReferencedPathTracingFiniteSequenceTests.Camera");
+            var camera = gameObject.AddComponent<Camera>();
+
+            try
+            {
+                var first = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    200,
+                    21ul,
+                    true,
+                    2u);
+                var second = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    201,
+                    21ul,
+                    false,
+                    2u);
+                var converged = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    202,
+                    21ul,
+                    false,
+                    2u);
+                var remainsConverged = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    203,
+                    21ul,
+                    false,
+                    2u);
+                var changedTarget = ReferencedPathTracingSampleSequence.Resolve(
+                    camera,
+                    204,
+                    21ul,
+                    false,
+                    3u);
+
+                Assert.That(first, Is.Zero);
+                Assert.That(second, Is.EqualTo(1u));
+                Assert.That(converged, Is.EqualTo(2u));
+                Assert.That(remainsConverged, Is.EqualTo(2u));
+                Assert.That(changedTarget, Is.Zero);
+            }
+            finally
+            {
+                ReferencedPathTracingSampleSequence.Dispose();
+                UnityEngine.Object.DestroyImmediate(gameObject);
+            }
+        }
+
+        [Test]
+        public void SceneSignature_TracksMeshletRendererTransformChanges()
+        {
+            var rendererData = new[]
+            {
+                new VividMeshletRendererRenderData
+                {
+                    meshletRendererEntityId = EntityId.FromULong(1ul),
+                    sourceMeshEntityId = EntityId.FromULong(2ul),
+                    objectToWorldMatrix = Matrix4x4.identity,
+                    renderingLayerMask = uint.MaxValue,
+                    flags = VividMeshletRendererFlags.ActiveInHierarchy
+                        | VividMeshletRendererFlags.Enabled
+                        | VividMeshletRendererFlags.Valid,
+                    shadowCastingMode = ShadowCastingMode.On,
+                    subMeshCount = 1
+                }
+            };
+            var rendererResources = new[]
+            {
+                new VividMeshletRendererResources(
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null)
+            };
+
+            var original = ReferencedPathTracingSceneSignatureUtility.Compute(
+                rendererData,
+                rendererResources);
+            rendererData[0].objectToWorldMatrix =
+                Matrix4x4.Translate(Vector3.right);
+            var moved = ReferencedPathTracingSceneSignatureUtility.Compute(
+                rendererData,
+                rendererResources);
+
+            Assert.That(moved, Is.Not.EqualTo(original));
+        }
+
+        [Test]
+        public void SceneSignature_TracksStandardRendererTransformChanges()
+        {
+            var gameObject = new GameObject(
+                "ReferencedPathTracingSceneSignatureTests.Renderer");
+            var mesh = new Mesh();
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+
+            try
+            {
+                var original =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+                gameObject.transform.position = Vector3.right;
+                var moved =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+
+                Assert.That(moved, Is.Not.EqualTo(original));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(gameObject);
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
+        public void SceneSignature_TracksFaceSubsurfaceMaterialChanges()
+        {
+            var gameObject = new GameObject(
+                "ReferencedPathTracingSceneSignatureTests.FaceSSS");
+            var mesh = new Mesh();
+            gameObject.AddComponent<MeshFilter>().sharedMesh = mesh;
+            var renderer = gameObject.AddComponent<MeshRenderer>();
+            var shader = Shader.Find("VividRP/Material/StandardLit");
+            Material material = null;
+
+            try
+            {
+                Assert.That(shader, Is.Not.Null);
+                material = new Material(shader);
+                renderer.sharedMaterial = material;
+                var original =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+                material.SetFloat("_SubsurfaceWeight", 1.0f);
+                var changed =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+                material.SetFloat("_SubsurfaceTransmissionWeight", 1.0f);
+                var transmissionChanged =
+                    ReferencedPathTracingSceneSignatureUtility.Compute(
+                        new Renderer[] { renderer });
+
+                Assert.That(changed, Is.Not.EqualTo(original));
+                Assert.That(
+                    transmissionChanged,
+                    Is.Not.EqualTo(changed));
+            }
+            finally
+            {
+                if (material != null)
+                    UnityEngine.Object.DestroyImmediate(material);
+                UnityEngine.Object.DestroyImmediate(gameObject);
+                UnityEngine.Object.DestroyImmediate(mesh);
             }
         }
 

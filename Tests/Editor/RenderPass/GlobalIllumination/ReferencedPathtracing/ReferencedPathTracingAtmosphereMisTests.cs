@@ -81,7 +81,7 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(7));
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(6));
+                Is.EqualTo(8));
         }
 
         [Test]

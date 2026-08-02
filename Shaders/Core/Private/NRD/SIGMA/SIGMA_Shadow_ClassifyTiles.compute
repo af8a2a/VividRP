@@ -8,6 +8,7 @@ distribution of this software and related documentation without an express
 license agreement from NVIDIA CORPORATION is strictly prohibited.
 */
 #pragma use_dxc
+#pragma require Native16Bit
 #include "../NRD.hlsl"
 #include "../ml.hlsl"
 

@@ -6,8 +6,9 @@ using UnityEngine.Rendering.RenderGraphModule;
 namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
-    /// Unbounded progressive accumulation for the reference path tracer. The pass deliberately avoids
-    /// reprojection and history clamping so a static camera converges to the arithmetic mean of all samples.
+    /// Finite progressive accumulation for the reference path tracer. The pass deliberately avoids
+    /// reprojection and history clamping so a static camera converges to the arithmetic mean of the
+    /// configured target samples, then preserves that converged history without consuming new samples.
     /// </summary>
     public sealed class ReferencedPathTracingAccumulationPass : ComputePass, IRenderGraphSideEffectPass
     {
@@ -22,6 +23,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int ResolvedColorId = Shader.PropertyToID("_ReferencedPathTracingResolvedColor");
         private static readonly int AccumulationParametersId =
             Shader.PropertyToID("_ReferencedPathTracingAccumulationParameters");
+        private static readonly int ProgressParametersId =
+            Shader.PropertyToID("_ReferencedPathTracingProgressParameters");
         private static readonly int ScreenSizeId = Shader.PropertyToID("_ReferencedPathTracingScreenSize");
 
         [RenderGraphResource(Name = "PathTracingSampleRadiance", Access = AccessFlags.Read)]
@@ -71,7 +74,10 @@ namespace VividRP.Runtime.RenderPass.Core
         private CameraHistoryTexture m_AccumulationHistory;
         private bool m_HasValidHistory;
         private bool m_UseHistory;
+        private bool m_FreezeAccumulation;
         private float m_InverseSampleCount = 1.0f;
+        private ulong m_AccumulatedSampleCount;
+        private int m_TargetSampleCount = 1;
 
         public ReferencedPathTracingAccumulationPass()
         {
@@ -169,7 +175,19 @@ namespace VividRP.Runtime.RenderPass.Core
                 cmd.SetComputeVectorParam(
                     m_ComputeShader,
                     AccumulationParametersId,
-                    new Vector4(m_InverseSampleCount, m_UseHistory ? 1.0f : 0.0f, 0.0f, 0.0f));
+                    new Vector4(
+                        m_InverseSampleCount,
+                        m_UseHistory ? 1.0f : 0.0f,
+                        m_FreezeAccumulation ? 1.0f : 0.0f,
+                        0.0f));
+                cmd.SetComputeVectorParam(
+                    m_ComputeShader,
+                    ProgressParametersId,
+                    new Vector4(
+                        m_AccumulatedSampleCount,
+                        m_TargetSampleCount,
+                        0.0f,
+                        0.0f));
                 cmd.SetComputeVectorParam(
                     m_ComputeShader,
                     ScreenSizeId,
@@ -194,7 +212,10 @@ namespace VividRP.Runtime.RenderPass.Core
             m_AccumulationHistory = null;
             m_HasValidHistory = false;
             m_UseHistory = false;
+            m_FreezeAccumulation = false;
             m_InverseSampleCount = 1.0f;
+            m_AccumulatedSampleCount = 0;
+            m_TargetSampleCount = 1;
         }
 
         private void PrepareAccumulationState(ContextContainer frameData, VividCameraData cameraData)
@@ -203,7 +224,10 @@ namespace VividRP.Runtime.RenderPass.Core
             if (camera == null)
             {
                 m_UseHistory = false;
+                m_FreezeAccumulation = false;
                 m_InverseSampleCount = 1.0f;
+                m_AccumulatedSampleCount = 0;
+                m_TargetSampleCount = 1;
                 return;
             }
 
@@ -269,9 +293,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (!m_HasValidHistory && pathTracingData.sampleIndex > 0)
                     ReferencedPathTracingSampleSequence.RequestReset(camera);
 
-                state.SampleCount = m_UseHistory
-                    ? (ulong)pathTracingData.sampleIndex + 1ul
-                    : 1ul;
+                if (m_UseHistory)
+                {
+                    if (pathTracingData.shouldRenderSample)
+                        state.SampleCount = (ulong)pathTracingData.sampleIndex + 1ul;
+                }
+                else
+                {
+                    state.SampleCount = pathTracingData.shouldRenderSample
+                        ? 1ul
+                        : 0ul;
+                }
             }
             else
             {
@@ -281,8 +313,19 @@ namespace VividRP.Runtime.RenderPass.Core
                     state.SampleCount = 1;
             }
 
-            m_InverseSampleCount = (float)(1.0 / state.SampleCount);
+            m_FreezeAccumulation = pathTracingData.isValid
+                && !pathTracingData.shouldRenderSample
+                && m_UseHistory;
+            m_InverseSampleCount = state.SampleCount > 0
+                ? (float)(1.0 / state.SampleCount)
+                : 1.0f;
+            m_AccumulatedSampleCount = state.SampleCount;
+            m_TargetSampleCount = pathTracingData.isValid
+                ? Mathf.Max(1, pathTracingData.targetSampleCount)
+                : 1;
             pathTracingData.accumulatedSampleCount = state.SampleCount;
+            pathTracingData.isConverged = pathTracingData.isValid
+                && state.SampleCount >= (ulong)m_TargetSampleCount;
             state.HasSignature = true;
             state.Width = m_Width;
             state.Height = m_Height;

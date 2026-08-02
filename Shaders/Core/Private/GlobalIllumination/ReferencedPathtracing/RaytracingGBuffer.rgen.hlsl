@@ -125,16 +125,20 @@ void RayGenRaytracingGBuffer()
         return;
     }
 
+    float3 previousPositionWS =
+        payload.materialPreviousPositionValid != 0u
+            ? payload.previousPositionWS
+            : payload.positionWS;
     float viewZ = abs(mul(_RaytracingGBufferWorldToView, float4(payload.positionWS, 1.0)).z);
     float viewZPrevious = abs(mul(
         _RaytracingGBufferWorldToViewPrevious,
-        float4(payload.positionWS, 1.0)).z);
+        float4(previousPositionWS, 1.0)).z);
     float2 currentUv = GetRaytracingGBufferScreenUv(
         _RaytracingGBufferWorldToClip,
         payload.positionWS);
     float2 previousUv = GetRaytracingGBufferScreenUv(
         _RaytracingGBufferWorldToClipPrevious,
-        payload.positionWS);
+        previousPositionWS);
     float3 motion = float3(
         (previousUv - currentUv) * _RaytracingGBufferScreenSize,
         viewZPrevious - viewZ);
@@ -150,6 +154,11 @@ void RayGenRaytracingGBuffer()
         linearRoughness,
         normalWS,
         -rayDirectionWS);
+    if (payload.materialAlbedoValid != 0u)
+    {
+        diffuseAlbedo = saturate(payload.diffuseAlbedo);
+        specularAlbedo = saturate(payload.specularAlbedo);
+    }
 
     float4 clip = mul(_RaytracingGBufferWorldToClip, float4(payload.positionWS, 1.0));
     float hardwareDepth = saturate(clip.z / max(abs(clip.w), 1e-6));

@@ -19,6 +19,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/PerObjectBufferUpload.compute")]
         public ComputeShader PerObjectBufferUploadCompute;
 
+        [VividResourcePath("Shaders/Material/Hair/HairDotsVertexUpdate.compute")]
+        public ComputeShader HairDotsVertexUpdateCompute;
+
         [VividResourcePath("Shaders/Core/Private/PostProcessing/Diffusion")]
         public Shader DiffusionShader;
 

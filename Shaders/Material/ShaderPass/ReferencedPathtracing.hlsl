@@ -4,8 +4,10 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingCommon.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingLightList.hlsl"
 
+#define VIVIDRP_REFERENCED_PATH_TRACING_USE_RTXTF 1
 #define VIVIDRP_INDIRECT_DIFFUSE_DEFINE_RAYTRACING_SHADERS 0
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/IndirectDiffuse.hlsl"
+#include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/ReferencedPathtracingRTXTF.hlsl"
 #include "Packages/com.vivid.render-pipelines/Shaders/Material/ShaderPass/StandardLitOpenPBRAdapter.hlsl"
 
 static const float kReferencedPathtracingTextureLodBias = 0.5;
@@ -50,21 +52,6 @@ float ComputeReferencedPathtracingTextureBaseLambda(
         max(triangleAreaWS, 0.000000000001));
 }
 
-bool VividReferencedPathtracingIsFinite(float value)
-{
-    return !isnan(value) && !isinf(value);
-}
-
-bool VividReferencedPathtracingIsFinite(float3 value)
-{
-    return !any(isnan(value)) && !any(isinf(value));
-}
-
-bool VividReferencedPathtracingIsFinite(float2 value)
-{
-    return !any(isnan(value)) && !any(isinf(value));
-}
-
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathtracingNEECandidate.hlsl"
 
 [shader("closesthit")]
@@ -96,13 +83,95 @@ void StandardLitReferencedPathtracingClosestHit(
         0.0);
 #endif
     float3 viewDirectionWS = normalize(-WorldRayDirection());
+    STF_SamplerState rtxtfSamplerState =
+        ReferencedPathtracingCreateRTXTFState(payloadInput.rtxtfRandom);
     VividReferencedPathtracingMaterial material =
         VividReferencedPathtracingResolveStandardLitOpenPBR(
+        rtxtfSamplerState,
         geometry,
         textureBaseLambda,
         baseTextureLod,
         normalTextureLod,
         viewDirectionWS);
+
+    bool isSubsurfaceSurfaceQuery = payloadInput.queryMode
+        == REFERENCED_PATHTRACING_QUERY_SUBSURFACE_SURFACE;
+    bool isSubsurfaceTransmissionSurfaceQuery = payloadInput.queryMode
+        == REFERENCED_PATHTRACING_QUERY_SUBSURFACE_TRANSMISSION_SURFACE;
+    if (isSubsurfaceSurfaceQuery
+        || isSubsurfaceTransmissionSurfaceQuery)
+    {
+        // Surface queries return only a sampled boundary and a Lambertian
+        // direct-light proposal. The transmission query reaches the closed
+        // mesh from inside, so VividIndirectDiffuseBuildHitGeometry has
+        // oriented its normals inward; restore the exterior orientation for
+        // light sampling and visibility at the back boundary.
+        float queryNormalSign = isSubsurfaceTransmissionSurfaceQuery
+            ? -1.0
+            : 1.0;
+        float3 queryFaceNormalWS = geometry.faceNormalWS * queryNormalSign;
+        float3 queryShadingNormalWS =
+            material.shadingNormalWS * queryNormalSign;
+        result.faceNormalWS = queryFaceNormalWS;
+        result.rayConeWidth = hitConeWidth;
+        result.hitDistance = geometry.hitDistance;
+        result.denoisingNormalWS = queryShadingNormalWS;
+        result.surfaceInstanceIndex = InstanceIndex();
+        result.isSurfaceQuery =
+            (!isSubsurfaceTransmissionSurfaceQuery
+                || !geometry.isFrontFace)
+            ? 1u
+            : 0u;
+
+        ReferencedPathtracingNEECandidate queryNeeCandidate;
+        bool validQueryNeeCandidate =
+            ReferencedPathtracingSampleUnifiedNEECandidate(
+                geometry.positionWS,
+                queryFaceNormalWS,
+                false,
+                payloadInput.directLightRandom,
+                queryNeeCandidate);
+        if (queryNeeCandidate.selectionPdf > 0.0)
+        {
+            result.neeDirectionWS = queryNeeCandidate.directionWS;
+            result.neeDistance = queryNeeCandidate.distance;
+            result.neeSelectionPdf = queryNeeCandidate.selectionPdf;
+            result.neeSolidAnglePdf = queryNeeCandidate.solidAnglePdf;
+            result.neeShadowStrength = queryNeeCandidate.shadowStrength;
+            result.neeLightIndex = queryNeeCandidate.lightIndex;
+            result.neeLightType = queryNeeCandidate.lightType;
+            result.neeFlags = queryNeeCandidate.flags;
+        }
+
+        if (validQueryNeeCandidate
+            && ReferencedPathtracingIsValidOpaqueReflectionDirection(
+                queryNeeCandidate.directionWS,
+                queryFaceNormalWS,
+                queryShadingNormalWS))
+        {
+            float diffuseShadowTerminator =
+                ReferencedPathtracingEvaluateDiffuseShadowTerminator(
+                    queryNeeCandidate.directionWS,
+                    queryShadingNormalWS,
+                    geometry.normalWS * queryNormalSign);
+            float cosineToLight = max(
+                dot(
+                    queryShadingNormalWS,
+                    queryNeeCandidate.directionWS),
+                0.0);
+            result.neeDiffuseRadiance =
+                (cosineToLight * INV_PI * diffuseShadowTerminator)
+                * queryNeeCandidate.incidentRadianceOverPdf;
+            result.neeBsdfPdf = 0.0;
+            result.neeValid = any(result.neeDiffuseRadiance > 0.0)
+                ? 1u
+                : 0u;
+        }
+
+        result.hit = 1u;
+        PackReferencedPathtracingSurfaceResult(result, payload);
+        return;
+    }
 
     float exteriorIor = payloadInput.activeMediumIor;
     if (material.isSolidTransmissionBoundary
@@ -118,8 +187,15 @@ void StandardLitReferencedPathtracingClosestHit(
         ReferencedPathtracingEvaluateMaterialMediumTransmittance(
             payloadInput.activeMediumExtinction,
             geometry.hitDistance);
+    OpenPBR_ResolvedInputs transportInputs = material.openPbrInputs;
+    // The Burley estimator replaces only the selected dielectric diffuse
+    // fraction. Keep the microfacet/coat response in OpenPBR and leave the
+    // remaining local diffuse fraction available for partial SSS weights.
+    transportInputs.base_color *=
+        1.0 - saturate(material.effectiveSubsurfaceWeight);
+    transportInputs.subsurface_weight = 0.0;
     OpenPBR_PreparedBsdf preparedBsdf = openpbr_prepare(
-        material.openPbrInputs,
+        transportInputs,
         max(
             payloadInput.pathThroughput * segmentMediumTransmittance,
             0.0),
@@ -136,11 +212,27 @@ void StandardLitReferencedPathtracingClosestHit(
     result.hitDistance = geometry.hitDistance;
     // Match HDRP's reference-denoising AOV contract: diffuse reflectance and
     // the actual shading normal, both evaluated at primary visibility.
-    result.denoisingAlbedo = saturate(
+    float3 surfaceDiffuseAlbedo = saturate(
         material.openPbrInputs.base_color
         * (1.0 - material.openPbrInputs.base_metalness)
         * (1.0 - material.openPbrInputs.transmission_weight));
+    result.denoisingAlbedo = saturate(lerp(
+        surfaceDiffuseAlbedo,
+        material.subsurfaceAlbedo,
+        saturate(material.effectiveSubsurfaceWeight)));
     result.denoisingNormalWS = material.shadingNormalWS;
+    if (geometry.isFrontFace
+        && material.effectiveSubsurfaceWeight > 0.0)
+    {
+        result.subsurfaceWeight =
+            saturate(material.effectiveSubsurfaceWeight);
+        result.subsurfaceAlbedo = material.subsurfaceAlbedo;
+        result.subsurfaceRadius = material.subsurfaceRadius;
+        result.subsurfaceTransmissionWeight =
+            saturate(material.effectiveSubsurfaceTransmissionWeight);
+        result.surfaceInstanceIndex = InstanceIndex();
+        result.isSubsurface = 1u;
+    }
     result.thinWalledTransmissionWeight =
         material.openPbrInputs.geometry_thin_walled
             ? saturate(material.effectiveTransmissionWeight)
@@ -303,6 +395,23 @@ void StandardLitReferencedPathtracingClosestHit(
                         preparedBsdf.volume.extinction_coefficient,
                         0.0)
                     : 0.0;
+                float3 mediumScatteringAlbedo =
+                    VividReferencedPathtracingIsFinite(
+                        preparedBsdf.volume.albedo)
+                    ? saturate(preparedBsdf.volume.albedo)
+                    : 0.0;
+                float mediumScatteringAnisotropy =
+                    VividReferencedPathtracingIsFinite(
+                        preparedBsdf.volume.anisotropy)
+                    ? clamp(
+                        preparedBsdf.volume.anisotropy,
+                        -0.95,
+                        0.95)
+                    : 0.0;
+                result.nextMediumScattering =
+                    PackReferencedPathtracingMaterialMediumScattering(
+                        mediumScatteringAlbedo,
+                        mediumScatteringAnisotropy);
                 result.nextMediumInstanceIndex = InstanceIndex();
             }
             // OpenPBR uses the Specular flag for a singular (delta) event. Glossy

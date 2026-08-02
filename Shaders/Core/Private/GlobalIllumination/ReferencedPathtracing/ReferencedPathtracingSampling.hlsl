@@ -5,7 +5,7 @@
 #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/BlueNoise.hlsl"
 #endif
 
-#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 6
+#define REFERENCED_PATH_SAMPLING_CONTRACT_VERSION 11
 #define REFERENCED_PATH_SAMPLING_INDEXED_BND 0
 #define REFERENCED_PATH_SAMPLING_INDEXED_HASH 1
 
@@ -21,7 +21,30 @@ static const uint kReferencedPathtracingStochasticAlphaDimensionOffset = 7u;
 static const uint kReferencedPathtracingVolumeDimensionOffset = 8u;
 static const uint kReferencedPathtracingAtmosphereSunDimensionOffset = 12u;
 static const uint kReferencedPathtracingCloudDimensionOffset = 14u;
+// Chiang hair consumes two float2 samples. Keep the established three BSDF
+// dimensions stable and append the fourth scalar in the reserved bounce block.
+static const uint kReferencedPathtracingHairBsdfExtraDimensionOffset = 17u;
+// RTXTF uses the two reserved bounce dimensions for the stochastic texel
+// coordinates. Its mip selector is decorrelated from those values by hashing.
+static const uint kReferencedPathtracingRTXTFDimensionOffset = 18u;
 static const uint kReferencedPathtracingFutureDimensionOffset = 18u;
+// Face SSS is append-only: four values per bounce sample the Burley radius,
+// disk angle, projection frame, and exit-point NEE seed without perturbing any
+// established surface, atmosphere, cloud, or fog sequence.
+static const uint kReferencedPathtracingSubsurfaceBaseDimension = 168u;
+static const uint kReferencedPathtracingSubsurfaceDimensionStride = 4u;
+// Append-only block kept outside the established bounce stride so disabling
+// global fog preserves every existing surface, atmosphere, and cloud sample.
+static const uint kReferencedPathtracingGlobalFogBaseDimension = 200u;
+static const uint kReferencedPathtracingGlobalFogDimensionStride = 3u;
+static const uint kReferencedPathtracingGlobalFogDistanceDimensionOffset = 0u;
+static const uint kReferencedPathtracingGlobalFogPhaseDimensionOffset = 1u;
+// Local fog consumes the final append-only block in the 256-dimension set.
+// Two values seed delta tracking and two values sample the phase function.
+static const uint kReferencedPathtracingLocalFogBaseDimension = 224u;
+static const uint kReferencedPathtracingLocalFogDimensionStride = 4u;
+static const uint kReferencedPathtracingLocalFogDistanceDimensionOffset = 0u;
+static const uint kReferencedPathtracingLocalFogPhaseDimensionOffset = 2u;
 
 float2 ReferencedPathtracingSampleConcentricDisk(float2 sample)
 {
@@ -70,6 +93,36 @@ uint ReferencedPathtracingGetBounceSampleDimension(
 {
     return kReferencedPathtracingBounceBaseDimension
         + bounceIndex * kReferencedPathtracingBounceDimensionStride
+        + dimensionOffset;
+}
+
+uint ReferencedPathtracingGetGlobalFogSampleDimension(
+    uint bounceIndex,
+    uint dimensionOffset)
+{
+    return kReferencedPathtracingGlobalFogBaseDimension
+        + bounceIndex
+            * kReferencedPathtracingGlobalFogDimensionStride
+        + dimensionOffset;
+}
+
+uint ReferencedPathtracingGetSubsurfaceSampleDimension(
+    uint bounceIndex,
+    uint dimensionOffset)
+{
+    return kReferencedPathtracingSubsurfaceBaseDimension
+        + bounceIndex
+            * kReferencedPathtracingSubsurfaceDimensionStride
+        + dimensionOffset;
+}
+
+uint ReferencedPathtracingGetLocalFogSampleDimension(
+    uint bounceIndex,
+    uint dimensionOffset)
+{
+    return kReferencedPathtracingLocalFogBaseDimension
+        + bounceIndex
+            * kReferencedPathtracingLocalFogDimensionStride
         + dimensionOffset;
 }
 

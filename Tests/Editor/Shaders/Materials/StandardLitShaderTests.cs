@@ -264,6 +264,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(material.HasProperty("_TransmissionMap"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionColor"), Is.True);
                 Assert.That(material.HasProperty("_TransmissionDepth"), Is.True);
+                Assert.That(material.HasProperty("_TransmissionScatter"), Is.True);
+                Assert.That(
+                    material.HasProperty(
+                        "_TransmissionScatterAnisotropy"),
+                    Is.True);
                 Assert.That(material.HasProperty("_SpecularIOR"), Is.True);
                 Assert.That(
                     material.GetFloat("_ThinWalledTransmission"),
@@ -274,6 +279,13 @@ namespace VividRP.Editor.Tests
                     Is.EqualTo(Color.white));
                 Assert.That(material.GetFloat("_TransmissionDepth"), Is.Zero);
                 Assert.That(
+                    material.GetColor("_TransmissionScatter"),
+                    Is.EqualTo(Color.clear));
+                Assert.That(
+                    material.GetFloat(
+                        "_TransmissionScatterAnisotropy"),
+                    Is.Zero);
+                Assert.That(
                     material.GetFloat("_SpecularIOR"),
                     Is.EqualTo(1.5f).Within(1e-6f));
             }
@@ -281,6 +293,68 @@ namespace VividRP.Editor.Tests
             {
                 Object.DestroyImmediate(material);
             }
+        }
+
+        [Test]
+        public void StandardLitShader_ExposesOptInFaceSubsurfaceProperties()
+        {
+            UnityEngine.Material material = CreateMaterial();
+            try
+            {
+                Assert.That(material.HasProperty("_SubsurfaceWeight"), Is.True);
+                Assert.That(material.HasProperty("_SubsurfaceColor"), Is.True);
+                Assert.That(material.HasProperty("_SubsurfaceRadius"), Is.True);
+                Assert.That(
+                    material.HasProperty("_SubsurfaceRadiusScale"),
+                    Is.True);
+                Assert.That(
+                    material.HasProperty(
+                        "_SubsurfaceScatterAnisotropy"),
+                    Is.True);
+                Assert.That(
+                    material.HasProperty(
+                        "_SubsurfaceTransmissionWeight"),
+                    Is.True);
+                Assert.That(material.GetFloat("_SubsurfaceWeight"), Is.Zero);
+                Assert.That(
+                    material.GetColor("_SubsurfaceColor"),
+                    Is.EqualTo(Color.white));
+                Assert.That(
+                    material.GetFloat("_SubsurfaceRadius"),
+                    Is.EqualTo(0.01f).Within(1e-6f));
+                Assert.That(
+                    material.GetColor("_SubsurfaceRadiusScale"),
+                    Is.EqualTo(new Color(1.0f, 0.5f, 0.25f, 1.0f)));
+                Assert.That(
+                    material.GetFloat(
+                        "_SubsurfaceScatterAnisotropy"),
+                    Is.Zero);
+                Assert.That(
+                    material.GetFloat(
+                        "_SubsurfaceTransmissionWeight"),
+                    Is.Zero);
+            }
+            finally
+            {
+                Object.DestroyImmediate(material);
+            }
+        }
+
+        [Test]
+        public void StandardLitIndirectDiffusePass_DeclaresFaceSubsurfaceProperties()
+        {
+            string source = File.ReadAllText(GetIndirectDiffuseSourcePath());
+
+            Assert.That(source, Does.Contain("float4 _SubsurfaceColor;"));
+            Assert.That(source, Does.Contain("float4 _SubsurfaceRadiusScale;"));
+            Assert.That(source, Does.Contain("float _SubsurfaceWeight;"));
+            Assert.That(source, Does.Contain("float _SubsurfaceRadius;"));
+            Assert.That(
+                source,
+                Does.Contain("float _SubsurfaceScatterAnisotropy;"));
+            Assert.That(
+                source,
+                Does.Contain("float _SubsurfaceTransmissionWeight;"));
         }
 
         [Test]

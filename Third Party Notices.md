@@ -35,6 +35,40 @@ SOFTWARE.
 
 ---------
 
+Component Name: UnityGLTF
+
+Source: https://github.com/af8a2a/UnityGLTF
+
+Version / Revision: 2.19.5, commit 50b2a2e82d465b5134e45970f24669ac8c2590a8
+
+License Type: MIT
+
+The unmodified upstream license is redistributed at
+`ThirdParty/UnityGLTF/LICENSE`. VividRP vendors an import-focused subset of the
+source; integration details and omitted components are recorded in
+`ThirdParty/UnityGLTF/UPSTREAM.md`.
+
+---------
+
+Component Name: Khronos glTF Sample Asset — DragonAttenuation
+
+Source: https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/DragonAttenuation
+
+Version / Revision: commit 2bac6f8c57bf471df0d2a1e8a8ec023c7801dddf
+
+License Types: Stanford Graphics Library, CC0-1.0, and CC-BY-4.0, as assigned
+by the upstream asset metadata.
+
+Attribution: original dragon scan by the Stanford University Computer Graphics
+Laboratory (1996); conversion and cleanup by Morgan McGuire (2017); cloth
+backdrop by Adobe (2021).
+
+The upstream `LICENSE.md`, `README.md`, and `metadata.json` are redistributed
+without modification under `Samples/DragonAttenuation`. The package includes
+the original uncompressed glTF representation without modification.
+
+---------
+
 Component Name: LWGUI
 
 Source: https://github.com/JasonMa0012/LWGUI

@@ -35,6 +35,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     volume.enableShaderExecutionReordering.value,
                     Is.False);
+                Assert.That(volume.enableRTXTF.value, Is.True);
+                Assert.That(
+                    volume.rtxtfFilter.value,
+                    Is.EqualTo(ReferencedPathTracingRTXTFMode.Linear));
+                Assert.That(
+                    volume.rtxtfGaussianSigma.value,
+                    Is.EqualTo(0.7f));
                 Assert.That(volume.targetSampleCount.value, Is.EqualTo(2048));
                 Assert.That(
                     volume.environmentMode.value,
@@ -126,6 +133,10 @@ namespace VividRP.Editor.Tests
                 volume.globalLightProposalProbability.value = 0.25f;
                 volume.lightSpatialIndex.value = true;
                 volume.enableShaderExecutionReordering.value = false;
+                volume.enableRTXTF.value = true;
+                volume.rtxtfFilter.value =
+                    ReferencedPathTracingRTXTFMode.Cubic;
+                volume.rtxtfGaussianSigma.value = 0.9f;
                 volume.targetSampleCount.value = 1024;
                 var original =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
@@ -136,6 +147,20 @@ namespace VividRP.Editor.Tests
                 volume.enableShaderExecutionReordering.value = true;
                 var shaderExecutionReorderingChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.enableRTXTF.value = false;
+                var rtxtfDisabled =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.enableRTXTF.value = true;
+                volume.rtxtfFilter.value =
+                    ReferencedPathTracingRTXTFMode.Gaussian;
+                var rtxtfFilterChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.rtxtfFilter.value =
+                    ReferencedPathTracingRTXTFMode.Cubic;
+                volume.rtxtfGaussianSigma.value = 1.1f;
+                var rtxtfSigmaChanged =
+                    ReferencedPathTracingIntegratorState.Resolve(volume);
+                volume.rtxtfGaussianSigma.value = 0.9f;
                 volume.fixedSeed.value = 12346;
                 var seedChanged =
                     ReferencedPathTracingIntegratorState.Resolve(volume);
@@ -188,6 +213,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     original.enableShaderExecutionReordering,
                     Is.False);
+                Assert.That(original.enableRTXTF, Is.True);
+                Assert.That(
+                    original.rtxtfFilter,
+                    Is.EqualTo(ReferencedPathTracingRTXTFMode.Cubic));
+                Assert.That(original.rtxtfGaussianSigma, Is.EqualTo(0.9f));
                 Assert.That(
                     original.estimatorMode,
                     Is.EqualTo(
@@ -199,13 +229,22 @@ namespace VividRP.Editor.Tests
                 Assert.That(original.targetSampleCount, Is.EqualTo(1024));
                 Assert.That(
                     ReferencedPathTracingIntegratorState.Version,
-                    Is.EqualTo(12));
+                    Is.EqualTo(15));
                 Assert.That(
                     captureTargetChanged.signature,
                     Is.EqualTo(original.signature));
                 Assert.That(
                     shaderExecutionReorderingChanged.signature,
                     Is.EqualTo(original.signature));
+                Assert.That(
+                    rtxtfDisabled.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    rtxtfFilterChanged.signature,
+                    Is.Not.EqualTo(original.signature));
+                Assert.That(
+                    rtxtfSigmaChanged.signature,
+                    Is.Not.EqualTo(original.signature));
                 Assert.That(
                     seedChanged.signature,
                     Is.Not.EqualTo(original.signature));
@@ -392,7 +431,7 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 ReferencedPathTracingSolidTransmissionContract
                     .Version,
-                Is.EqualTo(1));
+                Is.EqualTo(2));
             Assert.That(
                 ReferencedPathTracingSolidTransmissionContract
                     .MaximumMediumDepth,
@@ -417,6 +456,47 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SolidTransmissionContract_ResolvesOpenPbrInternalScattering()
+        {
+            var transmissionColor = new Vector3(0.25f, 0.5f, 1.0f);
+            var transmissionScatter = new Vector3(0.2f, 0.1f, 0.05f);
+            ReferencedPathTracingSolidTransmissionContract.ResolveVolume(
+                transmissionColor,
+                2.0f,
+                transmissionScatter,
+                out Vector3 extinction,
+                out Vector3 scatteringAlbedo);
+
+            Vector3 scattering = Vector3.Scale(
+                extinction,
+                scatteringAlbedo);
+            Vector3 absorption = extinction - scattering;
+            Assert.That(
+                scattering.x,
+                Is.EqualTo(transmissionScatter.x / 2.0f)
+                    .Within(1e-5f));
+            Assert.That(
+                scattering.y,
+                Is.EqualTo(transmissionScatter.y / 2.0f)
+                    .Within(1e-5f));
+            Assert.That(
+                scattering.z,
+                Is.EqualTo(transmissionScatter.z / 2.0f)
+                    .Within(1e-5f));
+            Assert.That(absorption.x, Is.GreaterThanOrEqualTo(0.0f));
+            Assert.That(absorption.y, Is.GreaterThanOrEqualTo(0.0f));
+            Assert.That(absorption.z, Is.GreaterThanOrEqualTo(0.0f));
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveScatteringAnisotropy(float.NaN),
+                Is.Zero);
+            Assert.That(
+                ReferencedPathTracingSolidTransmissionContract
+                    .ResolveScatteringAnisotropy(1.0f),
+                Is.EqualTo(0.95f));
+        }
+
+        [Test]
         public void SolidTransmissionContract_ResolvesEnteringAndExitingIors()
         {
             Assert.That(
@@ -435,6 +515,43 @@ namespace VividRP.Editor.Tests
                         1.33f,
                         true),
                 Is.EqualTo(1.33f).Within(1e-6f));
+        }
+
+        [Test]
+        public void FaceSubsurfaceTransmissionContract_UsesThicknessAndRgbMeanFreePath()
+        {
+            Assert.That(
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .Version,
+                Is.EqualTo(1));
+            var albedo = new Vector3(1.0f, 0.8f, 0.6f);
+            var meanFreePath = new Vector3(0.01f, 0.005f, 0.0025f);
+            Vector3 thin =
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .Evaluate(albedo, meanFreePath, 0.005f);
+            Vector3 thick =
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .Evaluate(albedo, meanFreePath, 0.02f);
+
+            Assert.That(thin.x, Is.GreaterThan(thin.y));
+            Assert.That(thin.y, Is.GreaterThan(thin.z));
+            Assert.That(thick.x, Is.LessThan(thin.x));
+            Assert.That(thick.y, Is.LessThan(thin.y));
+            Assert.That(thick.z, Is.LessThan(thin.z));
+        }
+
+        [Test]
+        public void FaceSubsurfaceTransmissionContract_ResolvesEffectiveWeight()
+        {
+            float weight =
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .ResolveEffectiveWeight(0.8f, 0.5f, 0.25f);
+
+            Assert.That(weight, Is.EqualTo(0.3f).Within(1e-6f));
+            Assert.That(
+                ReferencedPathTracingFaceSubsurfaceTransmissionContract
+                    .ResolveEffectiveWeight(1.0f, 1.0f, 1.0f),
+                Is.Zero);
         }
 
         [Test]
@@ -498,7 +615,7 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(
                 ReferencedPathTracingSamplingContract.Version,
-                Is.EqualTo(6));
+                Is.EqualTo(11));
             Assert.That(
                 ReferencedPathTracingSamplingContract.FilmDimension,
                 Is.EqualTo(0));
@@ -524,10 +641,64 @@ namespace VividRP.Editor.Tests
                     .CloudDimensionOffset,
                 Is.EqualTo(14));
             Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .HairBsdfExtraDimensionOffset,
+                Is.EqualTo(17));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .RTXTFDimensionOffset,
+                Is.EqualTo(18));
+            Assert.That(
                 ReferencedPathTracingSamplingContract.FutureDimensionOffset,
                 Is.EqualTo(18));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .SubsurfaceBaseDimension,
+                Is.EqualTo(168));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .SubsurfaceDimensionStride,
+                Is.EqualTo(4));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .GlobalFogBaseDimension,
+                Is.EqualTo(200));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .GlobalFogDimensionStride,
+                Is.EqualTo(3));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .LocalFogBaseDimension,
+                Is.EqualTo(224));
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .LocalFogDimensionStride,
+                Is.EqualTo(4));
 
             var usedDimensions = new System.Collections.Generic.HashSet<int>();
+            for (var bounceIndex = 0;
+                 bounceIndex
+                    < ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount;
+                 bounceIndex++)
+            {
+                for (var offset = 0;
+                     offset
+                        < ReferencedPathTracingSamplingContract
+                            .SubsurfaceDimensionStride;
+                     offset++)
+                {
+                    Assert.That(
+                        usedDimensions.Add(
+                            ReferencedPathTracingSamplingContract
+                                .GetSubsurfaceDimension(
+                                    bounceIndex,
+                                    offset)),
+                        Is.True);
+                }
+            }
+
             for (var bounceIndex = 0;
                  bounceIndex
                     < ReferencedPathTracingSettingsVolume
@@ -550,6 +721,54 @@ namespace VividRP.Editor.Tests
                 }
             }
 
+            for (var bounceIndex = 0;
+                 bounceIndex
+                    < ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount;
+                 bounceIndex++)
+            {
+                for (var offset = 0;
+                     offset
+                        < ReferencedPathTracingSamplingContract
+                            .LocalFogDimensionStride;
+                     offset++)
+                {
+                    Assert.That(
+                        usedDimensions.Add(
+                            ReferencedPathTracingSamplingContract
+                                .GetLocalFogDimension(
+                                    bounceIndex,
+                                    offset)),
+                        Is.True);
+                }
+            }
+
+            for (var bounceIndex = 0;
+                 bounceIndex
+                    < ReferencedPathTracingSettingsVolume
+                        .MaximumSupportedBounceCount;
+                 bounceIndex++)
+            {
+                for (var offset = 0;
+                     offset
+                        < ReferencedPathTracingSamplingContract
+                            .GlobalFogDimensionStride;
+                     offset++)
+                {
+                    Assert.That(
+                        usedDimensions.Add(
+                            ReferencedPathTracingSamplingContract
+                                .GetGlobalFogDimension(
+                                    bounceIndex,
+                                    offset)),
+                        Is.True);
+                }
+            }
+
+            Assert.That(
+                ReferencedPathTracingSamplingContract
+                    .MaximumUsedDimension,
+                Is.EqualTo(255));
             Assert.That(
                 ReferencedPathTracingSamplingContract
                     .MaximumUsedDimension,
@@ -562,6 +781,24 @@ namespace VividRP.Editor.Tests
             Assert.Throws<System.ArgumentOutOfRangeException>(
                 () => ReferencedPathTracingSamplingContract
                     .GetBounceDimension(0, 20));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetSubsurfaceDimension(-1, 0));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetSubsurfaceDimension(0, 4));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetGlobalFogDimension(-1, 0));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetGlobalFogDimension(0, 3));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetLocalFogDimension(-1, 0));
+            Assert.Throws<System.ArgumentOutOfRangeException>(
+                () => ReferencedPathTracingSamplingContract
+                    .GetLocalFogDimension(0, 4));
         }
 
         [Test]

@@ -22,6 +22,7 @@
 
 
 #pragma use_dxc
+#pragma require Native16Bit
 #pragma kernel CS
 #define FFX_GPU 1
 #define FFX_HLSL 1

@@ -7,9 +7,9 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     /// <summary>
     /// Traces a stable primary visibility ray and emits the material/geometry guides shared by
-    /// NRD REBLUR and DLSS Ray Reconstruction. StandardLit is the only supported material in V1.
-    /// Motion vectors currently cover camera motion; deforming-object previous positions are a
-    /// separate extension point.
+    /// NRD REBLUR and DLSS Ray Reconstruction. Material closest-hit shaders can provide a
+    /// previous world-space surface position for deforming geometry; materials without one
+    /// retain the camera-motion-only fallback.
     /// </summary>
     public sealed class RaytracingGBufferPass : UnsafePass
     {

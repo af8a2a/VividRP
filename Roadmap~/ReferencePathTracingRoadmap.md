@@ -1459,6 +1459,27 @@ Runtime GPU correctness无法用 EditMode API 可靠覆盖时，应建立 `Tests
   透射界面做有偏的直通近似；透射焦散依靠 BSDF path 收敛。运行中修改材质参数后仍需显式
   重置 accumulation。
 
+### Face SSS V1.1 checkpoint: Ear Transmission (2026-08-01)
+
+- StandardLit 新增默认关闭的 `_SubsurfaceTransmissionWeight`。它只在 opaque、非金属、
+  非 OpenPBR transmission 的 Face SSS hybrid 上生效，并与 `_SubsurfaceWeight` 相乘；
+  因此既有 Face SSS V1 材质与 reference corpus 默认不变。
+- 参考 RTXCR `evalSingleScatteringTransmission` 的边界段，raygen 从可见表面沿几何法线向
+  体内发射一条同实例 thickness query。查询只接受闭合网格的背面边界，在该边界重新执行
+  light selection、Lambertian NEE 与 visibility；没有有效同实例背面时 transmission 为 0。
+- 厚度响应使用 `Subsurface Color * exp(-thickness / RGB mean-free-path)`，其中
+  mean-free-path 继续来自 `_SubsurfaceRadius * _SubsurfaceRadiusScale`。默认 RGB scale
+  `(1, 0.5, 0.25)` 让薄耳廓保留更多红光，同时头部较厚区域自然快速衰减。query 最大距离
+  限制为最大 mean-free-path 的 8 倍，避免把不相关的远端表面当成耳部出口。
+- transmission 贡献保持 diffuse transport/AOV 分类，沿用 Face SSS diffusion albedo 与
+  shading-normal guide，可进入现有 REBLUR/DLSS-RR 参考降噪；材质属性由 Material CRC 纳入
+  scene signature，运行中调节权重会自动 reset history。integrator contract 升级到 15，
+  Face SSS transmission 子契约也进入 integrator signature，避免旧累积结果跨版本复用。
+- V1.1 仍是一次边界 transmission：暂不包含 RTXCR 的体内多点 HG scattering、折射方向
+  importance sampling 或多层组织。Unity `lib_6_3` hit shader 不提供 `GeometryIndex()`，
+  当前 ownership key 为 RTAS instance；精确到 submesh 的匹配留给后续 shader-model/RTAS
+  metadata 升级。
+
 ## Milestone 4: Progressive Accumulation and Capture
 
 ### Goal

@@ -152,7 +152,14 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 UVOffset = uvOffset,
                 UVStride = uvStride,
             };
-            BuildLodGraph(meshLODLevels, allocator, vertexLayout, generationParams, parameters);
+            if (parameters.MaxMeshLODLevelCount == 1)
+            {
+                FinalizeSingleLODLevel(meshLODLevels, allocator);
+            }
+            else
+            {
+                BuildLodGraph(meshLODLevels, allocator, vertexLayout, generationParams, parameters);
+            }
 
             int totalMeshLODNodes = 0;
             int totalMeshlets = 0;
@@ -374,6 +381,23 @@ namespace VividRP.Editor.GPUDriven.Meshlets
         private static uint GetVertexAttributeOffsetOrMax(Mesh.MeshData data, VertexAttribute attribute)
         {
             return data.GetVertexAttributeStream(attribute) >= 0 ? (uint) data.GetVertexAttributeOffset(attribute) : uint.MaxValue;
+        }
+
+        private static void FinalizeSingleLODLevel(NativeList<MeshLODNodeLevel> levels, Allocator allocator)
+        {
+            Assert.IsTrue(levels.Length == 1);
+            ref MeshLODNodeLevel level = ref levels.ElementAtRef(0);
+            level.Groups = new NativeArray<NativeList<int>>(1, allocator);
+            var group = new NativeList<int>(level.Nodes.Length, allocator);
+            for (int nodeIndex = 0; nodeIndex < level.Nodes.Length; nodeIndex++)
+            {
+                group.Add(nodeIndex);
+                ref MeshLODNode node = ref level.Nodes.ElementAtRef(nodeIndex);
+                node.ParentError = -1.0f;
+                node.ParentBounds = default;
+            }
+
+            level.Groups[0] = group;
         }
 
         private static void BuildLodGraph(NativeList<MeshLODNodeLevel> levels, Allocator allocator, in VividMeshOptimizer.VertexLayout vertexLayout,

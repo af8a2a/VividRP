@@ -1,5 +1,7 @@
+using System;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using NUnit.Framework;
 using Unity.GraphToolkit.Editor;
 using UnityEditor;
@@ -39,7 +41,10 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(PreDepthPass).FullName)), Is.True);
                 Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(GBufferPass).FullName)), Is.True);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(MaterialClassificationPass).FullName)), Is.True);
                 Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(DeferredLightingPass).FullName)), Is.True);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferPass).FullName)), Is.False);
+                Assert.That(result.Passes.Any(pass => pass.PassType.StartsWith(typeof(VisibilityBufferGBufferResolvePass).FullName)), Is.False);
                 Assert.That(drawPasses, Has.Length.EqualTo(1));
                 Assert.That(drawPasses[0].RenderListDescParameters, Has.Count.EqualTo(1));
                 Assert.That(drawPasses[0].RenderListDescParameters[0].FieldName, Is.EqualTo("m_RenderListDesc"));
@@ -53,6 +58,23 @@ namespace VividRP.Editor.Tests
                 AssetDatabase.DeleteAsset(TempGraphAssetPath);
                 AssetDatabase.DeleteAsset(TempFolder);
             }
+        }
+
+        [Test]
+        public void StandardTemplate_AllGeneratedNodeTypesCanBeResolved()
+        {
+            var content = RenderGraphEditorGraph.LoadStandardGraphTemplateContent();
+            var generatedNodeTypes = Regex.Matches(
+                    content,
+                    @"type: \{class: ([^,]+), ns: VividRP\.Editor\.RenderGraph\.Generated, asm: ([^}]+)\}")
+                .Cast<Match>()
+                .Select(match => $"VividRP.Editor.RenderGraph.Generated.{match.Groups[1].Value}, {match.Groups[2].Value}")
+                .Distinct()
+                .ToArray();
+
+            Assert.That(generatedNodeTypes, Is.Not.Empty);
+            foreach (var typeName in generatedNodeTypes)
+                Assert.That(Type.GetType(typeName), Is.Not.Null, $"Template node type '{typeName}' cannot be resolved.");
         }
 
         [Test]

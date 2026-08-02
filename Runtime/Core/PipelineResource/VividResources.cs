@@ -88,7 +88,6 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/TSR/TSRSharpen.compute")]
         public ComputeShader TSRSharpenCompute;
 
-#if DLSS_PLUGIN_INTEGRATE
         [VividResourcePath("Shaders/Core/Private/DLSS/DLSSBiasColorMask")]
         public Shader DLSSBiasColorMaskShader;
 
@@ -98,7 +97,6 @@ namespace VividRP.Runtime
         [VividResourcePath(
             "Shaders/Core/Private/GlobalIllumination/ReferencedPathtracing/ReferencedPathTracingDLSSRayReconstructionResolve.compute")]
         public ComputeShader ReferencedPathTracingDLSSRayReconstructionResolveCompute;
-#endif
 
         [VividResourcePath("Shaders/Core/Private/AutoExposure/Unreal/AutoExposure.compute")]
         public ComputeShader AutoExposureCompute;

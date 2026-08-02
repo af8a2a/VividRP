@@ -24,9 +24,11 @@ namespace VividRP.Editor.Tests
                     CameraType.Game,
                     17,
                     1.25,
+                    "Bindless",
                     true,
                     8,
                     12,
+                    6,
                     6,
                     21,
                     55,
@@ -47,9 +49,11 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.IsAvailable, Is.True);
             Assert.That(stats.HasCamera, Is.True);
             Assert.That(stats.CameraName, Is.EqualTo("Main Camera"));
+            Assert.That(stats.TextureBackendName, Is.EqualTo("Bindless"));
+            Assert.That(stats.SurfaceBindingCount, Is.EqualTo(6));
             Assert.That(stats.MeshletCount, Is.EqualTo(55));
-            Assert.That(stats.AllocatedDescriptorCount, Is.EqualTo(128u));
-            Assert.That(stats.CreateSRVDescriptorCallCountThisFrame, Is.EqualTo(9u));
+            Assert.That(stats.AllocatedBackendResourceCount, Is.EqualTo(128u));
+            Assert.That(stats.CreateBackendResourceCallCountThisFrame, Is.EqualTo(9u));
             Assert.That(stats.MeshLODErrorThreshold, Is.EqualTo(12.5f).Within(0.0001f));
         }
 
@@ -65,9 +69,11 @@ namespace VividRP.Editor.Tests
                     default,
                     3,
                     0.5,
+                    "Fake",
                     false,
                     1,
                     2,
+                    3,
                     3,
                     4,
                     5,

@@ -62,6 +62,16 @@ namespace VividRP.Runtime.GPUDriven
 
     [GenerateHLSL(PackingRules.Exact)]
     [Flags]
+    public enum VividSurfaceBindingFlags : uint
+    {
+        None = 0,
+        BaseColor = 1 << 0,
+        Normal = 1 << 1,
+        Mask = 1 << 2,
+    }
+
+    [GenerateHLSL(PackingRules.Exact)]
+    [Flags]
     public enum VividRendererListID
     {
         Default = 0,
@@ -79,22 +89,34 @@ namespace VividRP.Runtime.GPUDriven
         public float4 TextureTilingOffset;
         public float4 Emission;
 
-        public uint AlbedoIndex;
-        public uint NormalsIndex;
+        public uint SurfaceBindingIndex;
         public float NormalsStrength;
-        public uint MasksIndex;
-
         public float Roughness;
         public float Metallic;
+
         public float SpecularAAScreenSpaceVariance;
         public float SpecularAAThreshold;
-
         public VividGeometryFlags GeometryFlags;
         public VividMaterialFlags MaterialFlags;
+
         public VividRendererListID RendererListID;
         public float AlphaClipThreshold;
+        public uint Padding0;
+        public uint Padding1;
+    }
 
-        public const uint NoTextureIndex = uint.MaxValue;
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividSurfaceBindingData
+    {
+        public uint BaseColorResource;
+        public uint NormalResource;
+        public uint MaskResource;
+        public VividSurfaceBindingFlags Flags;
+
+        public float4 UVScaleBias;
+
+        public const uint InvalidResource = uint.MaxValue;
     }
 
     [GenerateHLSL]

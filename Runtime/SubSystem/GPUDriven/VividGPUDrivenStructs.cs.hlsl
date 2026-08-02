@@ -40,9 +40,12 @@
 #define VIVIDRENDERERLISTID_COUNT (8)
 
 //
-// VividRP.Runtime.GPUDriven.VividMaterialData:  static fields
+// VividRP.Runtime.GPUDriven.VividSurfaceBindingFlags:  static fields
 //
-#define NO_TEXTURE_INDEX (4294967295)
+#define VIVIDSURFACEBINDINGFLAGS_NONE (0)
+#define VIVIDSURFACEBINDINGFLAGS_BASE_COLOR (1)
+#define VIVIDSURFACEBINDINGFLAGS_NORMAL (2)
+#define VIVIDSURFACEBINDINGFLAGS_MASK (4)
 
 //
 // VividRP.Runtime.GPUDriven.VividMeshletConfiguration:  static fields
@@ -51,6 +54,11 @@
 #define MAX_MESHLET_TRIANGLES (128)
 #define MAX_MESHLET_INDICES (384)
 #define MESHLET_CONE_WEIGHT (0.25)
+
+//
+// VividRP.Runtime.GPUDriven.VividSurfaceBindingData:  static fields
+//
+#define INVALID_RESOURCE (4294967295)
 
 // Generated from VividRP.Runtime.GPUDriven.IndirectDispatchArgs
 // PackingRules = Exact
@@ -128,10 +136,8 @@ struct VividMaterialData
     float4 AlbedoColor;
     float4 TextureTilingOffset;
     float4 Emission;
-    uint AlbedoIndex;
-    uint NormalsIndex;
+    uint SurfaceBindingIndex;
     float NormalsStrength;
-    uint MasksIndex;
     float Roughness;
     float Metallic;
     float SpecularAAScreenSpaceVariance;
@@ -140,6 +146,8 @@ struct VividMaterialData
     int MaterialFlags;
     int RendererListID;
     float AlphaClipThreshold;
+    uint Padding0;
+    uint Padding1;
 };
 
 // Generated from VividRP.Runtime.GPUDriven.VividMeshlet
@@ -187,6 +195,17 @@ struct VividMeshLODNode
     uint Padding0;
     uint Padding1;
     uint Padding2;
+};
+
+// Generated from VividRP.Runtime.GPUDriven.VividSurfaceBindingData
+// PackingRules = Exact
+struct VividSurfaceBindingData
+{
+    uint BaseColorResource;
+    uint NormalResource;
+    uint MaskResource;
+    uint Flags;
+    float4 UVScaleBias;
 };
 
 

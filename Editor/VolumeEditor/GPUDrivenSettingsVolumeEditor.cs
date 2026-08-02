@@ -56,25 +56,27 @@ namespace VividRP.Editor
 
                 if (!string.IsNullOrEmpty(stats.StatusMessage))
                 {
-                    EditorGUILayout.HelpBox(stats.StatusMessage, stats.BindlessAvailable ? MessageType.Info : MessageType.Warning);
+                    EditorGUILayout.HelpBox(stats.StatusMessage, stats.TextureBackendAvailable ? MessageType.Info : MessageType.Warning);
                 }
 
                 DrawStatLine("Camera", BuildCameraLabel(stats));
                 DrawStatLine("Frame", stats.FrameIndex.ToString());
-                DrawStatLine("Bindless", stats.BindlessAvailable ? "Available" : "Unavailable");
+                DrawStatLine("Texture Backend", stats.TextureBackendName);
+                DrawStatLine("Backend State", stats.TextureBackendAvailable ? "Available" : "Unavailable");
                 DrawStatLine("Tracked Renderers", stats.RendererCount.ToString("N0"));
                 DrawStatLine("Instances", stats.InstanceCount.ToString("N0"));
                 DrawStatLine("Materials", stats.MaterialCount.ToString("N0"));
+                DrawStatLine("Surface Bindings", stats.SurfaceBindingCount.ToString("N0"));
                 DrawStatLine("Mesh LOD Nodes", stats.MeshLODNodeCount.ToString("N0"));
                 DrawStatLine("Meshlets", stats.MeshletCount.ToString("N0"));
                 DrawStatLine("Vertices", stats.VertexCount.ToString("N0"));
                 DrawStatLine("Indices", stats.IndexCount.ToString("N0"));
                 DrawStatLine("Build Job Capacity", stats.MaxMeshletListBuildJobCount.ToString("N0"));
                 DrawStatLine("Visible Request Capacity", stats.MaxVisibleMeshletRenderRequestCount.ToString("N0"));
-                DrawStatLine("Descriptor Heaps", stats.DescriptorHeapCount.ToString("N0"));
-                DrawStatLine("Descriptors Used", $"{stats.AllocatedDescriptorCount:N0} / {stats.DescriptorCapacity:N0}");
-                DrawStatLine("CreateSRVDescriptor Calls/Frame", stats.CreateSRVDescriptorCallCountThisFrame.ToString("N0"));
-                DrawStatLine("Tracked Textures", stats.RegisteredTextureCount.ToString("N0"));
+                DrawStatLine("Backend Resource Pools", stats.BackendPoolCount.ToString("N0"));
+                DrawStatLine("Backend Resources Used", $"{stats.AllocatedBackendResourceCount:N0} / {stats.BackendResourceCapacity:N0}");
+                DrawStatLine("Resource Creates/Frame", stats.CreateBackendResourceCallCountThisFrame.ToString("N0"));
+                DrawStatLine("Tracked Resources", stats.RegisteredBackendResourceCount.ToString("N0"));
                 DrawStatLine(
                     "Forced Mesh LOD Depth",
                     stats.ForcedMeshLODNodeDepth < 0 ? "Automatic" : stats.ForcedMeshLODNodeDepth.ToString());

@@ -12,21 +12,23 @@ namespace VividRP.Runtime.GPUDriven
             CameraType cameraType,
             int frameIndex,
             double timestamp,
-            bool bindlessAvailable,
+            string textureBackendName,
+            bool textureBackendAvailable,
             int rendererCount,
             int instanceCount,
             int materialCount,
+            int surfaceBindingCount,
             int meshLODNodeCount,
             int meshletCount,
             int vertexCount,
             int indexCount,
             int maxMeshletListBuildJobCount,
             int maxVisibleMeshletRenderRequestCount,
-            uint descriptorHeapCount,
-            uint descriptorCapacity,
-            uint allocatedDescriptorCount,
-            uint createSRVDescriptorCallCountThisFrame,
-            int registeredTextureCount,
+            uint backendPoolCount,
+            uint backendResourceCapacity,
+            uint allocatedBackendResourceCount,
+            uint createBackendResourceCallCountThisFrame,
+            int registeredBackendResourceCount,
             int forcedMeshLODNodeDepth,
             float meshLODErrorThreshold)
         {
@@ -37,21 +39,23 @@ namespace VividRP.Runtime.GPUDriven
             CameraType = cameraType;
             FrameIndex = frameIndex;
             Timestamp = timestamp;
-            BindlessAvailable = bindlessAvailable;
+            TextureBackendName = textureBackendName;
+            TextureBackendAvailable = textureBackendAvailable;
             RendererCount = rendererCount;
             InstanceCount = instanceCount;
             MaterialCount = materialCount;
+            SurfaceBindingCount = surfaceBindingCount;
             MeshLODNodeCount = meshLODNodeCount;
             MeshletCount = meshletCount;
             VertexCount = vertexCount;
             IndexCount = indexCount;
             MaxMeshletListBuildJobCount = maxMeshletListBuildJobCount;
             MaxVisibleMeshletRenderRequestCount = maxVisibleMeshletRenderRequestCount;
-            DescriptorHeapCount = descriptorHeapCount;
-            DescriptorCapacity = descriptorCapacity;
-            AllocatedDescriptorCount = allocatedDescriptorCount;
-            CreateSRVDescriptorCallCountThisFrame = createSRVDescriptorCallCountThisFrame;
-            RegisteredTextureCount = registeredTextureCount;
+            BackendPoolCount = backendPoolCount;
+            BackendResourceCapacity = backendResourceCapacity;
+            AllocatedBackendResourceCount = allocatedBackendResourceCount;
+            CreateBackendResourceCallCountThisFrame = createBackendResourceCallCountThisFrame;
+            RegisteredBackendResourceCount = registeredBackendResourceCount;
             ForcedMeshLODNodeDepth = forcedMeshLODNodeDepth;
             MeshLODErrorThreshold = meshLODErrorThreshold;
         }
@@ -63,21 +67,23 @@ namespace VividRP.Runtime.GPUDriven
         internal CameraType CameraType { get; }
         internal int FrameIndex { get; }
         internal double Timestamp { get; }
-        internal bool BindlessAvailable { get; }
+        internal string TextureBackendName { get; }
+        internal bool TextureBackendAvailable { get; }
         internal int RendererCount { get; }
         internal int InstanceCount { get; }
         internal int MaterialCount { get; }
+        internal int SurfaceBindingCount { get; }
         internal int MeshLODNodeCount { get; }
         internal int MeshletCount { get; }
         internal int VertexCount { get; }
         internal int IndexCount { get; }
         internal int MaxMeshletListBuildJobCount { get; }
         internal int MaxVisibleMeshletRenderRequestCount { get; }
-        internal uint DescriptorHeapCount { get; }
-        internal uint DescriptorCapacity { get; }
-        internal uint AllocatedDescriptorCount { get; }
-        internal uint CreateSRVDescriptorCallCountThisFrame { get; }
-        internal int RegisteredTextureCount { get; }
+        internal uint BackendPoolCount { get; }
+        internal uint BackendResourceCapacity { get; }
+        internal uint AllocatedBackendResourceCount { get; }
+        internal uint CreateBackendResourceCallCountThisFrame { get; }
+        internal int RegisteredBackendResourceCount { get; }
         internal int ForcedMeshLODNodeDepth { get; }
         internal float MeshLODErrorThreshold { get; }
     }

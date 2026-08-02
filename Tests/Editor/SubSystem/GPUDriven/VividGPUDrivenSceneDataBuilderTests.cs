@@ -60,12 +60,13 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
 
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
                 Assert.That(sceneData.VertexCount, Is.EqualTo(3));
@@ -107,7 +108,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 bool firstStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
                 Assert.That(firstStaticDataChanged, Is.True);
@@ -164,7 +165,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 bool firstStaticDataChanged = builder.Build(
                     sceneData,
@@ -223,7 +224,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(
                     sceneData,
@@ -285,7 +286,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(
                     sceneData,
@@ -352,7 +353,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer, out _);
                 materialProxy.BaseColor = new Color(0.8f, 0.7f, 0.6f, 1.0f);
@@ -410,15 +411,15 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
                 EntityId textureId = texture.GetEntityId();
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer, out _);
                 Object.DestroyImmediate(texture);
                 texture = null;
 
-                bindlessTextureContainer.MarkTextureDestroyed(textureId);
-                bindlessTextureContainer.PreRender();
+                bindlessTextureContainer.TextureContainer.MarkTextureDestroyed(textureId);
+                bindlessTextureContainer.PrepareFrame();
 
                 bool staticDataChanged = builder.Build(
                     sceneData,
@@ -429,7 +430,13 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(staticDataChanged, Is.False);
                 Assert.That(materialDataChanged, Is.True);
-                Assert.That(sceneData.Materials[0].AlbedoIndex, Is.EqualTo(VividMaterialData.NoTextureIndex));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
+                Assert.That(sceneData.Materials[0].SurfaceBindingIndex, Is.EqualTo(0u));
+                Assert.That(sceneData.SurfaceBindings[0].BaseColorResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(sceneData.SurfaceBindings[0].NormalResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(sceneData.SurfaceBindings[0].MaskResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(sceneData.SurfaceBindings[0].Flags & VividSurfaceBindingFlags.BaseColor, Is.EqualTo(VividSurfaceBindingFlags.None));
+                Assert.That(sceneData.SurfaceBindings[0].UVScaleBias, Is.EqualTo(new float4(1.0f, 1.0f, 0.0f, 0.0f)));
             }
             finally
             {
@@ -465,7 +472,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 bool firstStaticDataChanged = builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
                 Assert.That(firstStaticDataChanged, Is.True);
@@ -558,7 +565,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
 
@@ -634,17 +641,22 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
 
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
                 VividMaterialData materialData = sceneData.Materials[0];
+                VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
                 Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.8f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(5.0f).Within(0.0001f));
-                Assert.That(materialData.AlbedoIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
-                Assert.That(materialData.NormalsIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
-                Assert.That(materialData.MasksIndex, Is.EqualTo(VividMaterialData.NoTextureIndex));
+                Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.BaseColor, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
+                Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.Normal, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
+                Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.Mask, Is.EqualTo(VividSurfaceBindingFlags.None));
+                Assert.That(surfaceBindingData.BaseColorResource, Is.EqualTo(15u));
+                Assert.That(surfaceBindingData.NormalResource, Is.EqualTo(14u));
+                Assert.That(surfaceBindingData.MaskResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.35f).Within(0.0001f));
@@ -713,7 +725,7 @@ namespace VividRP.Editor.Tests
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
-                using var bindlessTextureContainer = new BindlessTextureContainer(new FakeBindlessTextureDescriptorAllocator(16));
+                using var bindlessTextureContainer = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
 
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, bindlessTextureContainer);
 
@@ -721,7 +733,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
                 Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(sceneData.Materials[0].AlbedoColor.x, Is.EqualTo(syncedProxy.BaseColor.r).Within(0.0001f));
-                Assert.That(sceneData.Materials[0].AlbedoIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
+                VividSurfaceBindingData surfaceBindingData = sceneData.SurfaceBindings[(int) sceneData.Materials[0].SurfaceBindingIndex];
+                Assert.That(surfaceBindingData.Flags & VividSurfaceBindingFlags.BaseColor, Is.Not.EqualTo(VividSurfaceBindingFlags.None));
             }
             finally
             {
@@ -792,11 +805,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(system.SceneData.MaterialCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.InstanceCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MaterialCount, Is.EqualTo(1));
+                Assert.That(system.BufferSet.SurfaceBindingCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshLODNodeCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.MeshletCount, Is.EqualTo(1));
                 Assert.That(system.BufferSet.SharedVertexCount, Is.EqualTo(3));
                 Assert.That(system.BufferSet.SharedIndexCount, Is.EqualTo(3));
                 VividMaterialData materialData = system.SceneData.Materials[0];
+                VividSurfaceBindingData surfaceBindingData = system.SceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
                 Assert.That(materialData.AlbedoColor.x, Is.EqualTo(0.25f).Within(0.0001f));
                 Assert.That(materialData.AlbedoColor.y, Is.EqualTo(0.5f).Within(0.0001f));
                 Assert.That(materialData.AlbedoColor.z, Is.EqualTo(0.75f).Within(0.0001f));
@@ -804,9 +819,11 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(3.0f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.z, Is.EqualTo(0.1f).Within(0.0001f));
                 Assert.That(materialData.TextureTilingOffset.w, Is.EqualTo(0.2f).Within(0.0001f));
-                Assert.That(materialData.AlbedoIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
-                Assert.That(materialData.NormalsIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
-                Assert.That(materialData.MasksIndex, Is.Not.EqualTo(VividMaterialData.NoTextureIndex));
+                Assert.That(surfaceBindingData.Flags, Is.EqualTo(
+                    VividSurfaceBindingFlags.BaseColor | VividSurfaceBindingFlags.Normal | VividSurfaceBindingFlags.Mask));
+                Assert.That(surfaceBindingData.BaseColorResource, Is.EqualTo(15u));
+                Assert.That(surfaceBindingData.NormalResource, Is.EqualTo(14u));
+                Assert.That(surfaceBindingData.MaskResource, Is.EqualTo(13u));
                 Assert.That(materialData.NormalsStrength, Is.EqualTo(0.75f).Within(0.0001f));
                 Assert.That(materialData.Metallic, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialData.Roughness, Is.EqualTo(0.8f).Within(0.0001f));

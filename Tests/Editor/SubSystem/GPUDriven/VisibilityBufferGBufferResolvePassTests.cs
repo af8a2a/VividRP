@@ -136,15 +136,21 @@ namespace VividRP.Editor.Tests
         {
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GBuffer.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("GBuffer.hlsl"));
+            Assert.That(shaderSource, Does.Contain("VividVisibilityBuffer.hlsl"));
+            Assert.That(shaderSource, Does.Contain("VividBarycentric.hlsl"));
             Assert.That(shaderSource, Does.Contain("PackVividGBufferSurfaceData("));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue("));
             Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid("));
             Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric("));
-            Assert.That(shaderSource, Does.Contain("GetBindlessTexture2D("));
-            Assert.That(shaderSource, Does.Contain("NormalsIndex"));
+            Assert.That(shaderSource, Does.Contain("VividSurfaceSampling.hlsl"));
+            Assert.That(shaderSource, Does.Contain("PullSurfaceBindingData(result.materialData.SurfaceBindingIndex)"));
+            Assert.That(shaderSource, Does.Contain("VividSampleBaseColorGrad("));
+            Assert.That(shaderSource, Does.Contain("VividSampleNormalGrad("));
+            Assert.That(shaderSource, Does.Contain("VividSurfaceHasNormal("));
+            Assert.That(shaderSource, Does.Not.Contain("VividSampleMaskGrad("));
+            Assert.That(shaderSource, Does.Not.Contain("GetBindlessTexture2D("));
+            Assert.That(shaderSource, Does.Not.Contain("GPUDriven/Bindless.hlsl"));
             Assert.That(shaderSource, Does.Contain("ComputeDoubleSidedNormalFlipSign("));
             Assert.That(shaderSource, Does.Contain("#pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2"));
             Assert.That(shaderSource, Does.Contain("SampleVividProbeVolume("));

@@ -20,11 +20,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
             #pragma use_dxc 
-            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
@@ -60,6 +61,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             {
                 VividInstanceData instanceData;
                 VividMaterialData materialData;
+                VividSurfaceBindingData surfaceBindingData;
                 VividMeshlet meshlet;
                 uint3 indices;
                 VividMeshletVertex vertex0;
@@ -176,29 +178,20 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 uv.ddy *= tilingOffset.xy;
             }
 
-            float4 SampleAlbedoTextureGrad(const InterpolatedUV uv, const VividMaterialData materialData)
+            float4 SampleAlbedoTextureGrad(
+                const InterpolatedUV uv,
+                const VividSurfaceBindingData surfaceBindingData)
             {
-                UNITY_BRANCH
-                if (materialData.AlbedoIndex != 0xffffffffu)
-                {
-                    Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(materialData.AlbedoIndex));
-                    return SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, uv.uv, uv.ddx, uv.ddy);
-                }
-
-                return 1.0f.xxxx;
+                return VividSampleBaseColorGrad(surfaceBindingData, uv.uv, uv.ddx, uv.ddy);
             }
 
-            float3 SampleNormalTSGrad(const InterpolatedUV uv, const VividMaterialData materialData)
+            float3 SampleNormalTSGrad(
+                const InterpolatedUV uv,
+                const VividMaterialData materialData,
+                const VividSurfaceBindingData surfaceBindingData)
             {
-                UNITY_BRANCH
-                if (materialData.NormalsIndex != 0xffffffffu)
-                {
-                    Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(materialData.NormalsIndex));
-                    float4 packedNormal = SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, uv.uv, uv.ddx, uv.ddy);
-                    return UnpackVividNormalScale(packedNormal, materialData.NormalsStrength);
-                }
-
-                return float3(0.0f, 0.0f, 1.0f);
+                float4 packedNormal = VividSampleNormalGrad(surfaceBindingData, uv.uv, uv.ddx, uv.ddy);
+                return UnpackVividNormalScale(packedNormal, materialData.NormalsStrength);
             }
 
             float ComputeDoubleSidedNormalFlipSign(const TriangleData triangleData)
@@ -245,6 +238,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 TriangleData result;
                 result.instanceData = PullInstanceData(visibilityBufferValue.InstanceID);
                 result.materialData = PullMaterialData(result.instanceData.MaterialIndex);
+                result.surfaceBindingData = PullSurfaceBindingData(result.materialData.SurfaceBindingIndex);
                 result.meshlet = PullMeshletData(visibilityBufferValue.MeshletID);
 
                 result.indices = uint3(
@@ -297,7 +291,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     triangleData.vertex2);
                 ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
 
-                float4 albedoSample = SampleAlbedoTextureGrad(uv, triangleData.materialData);
+                float4 albedoSample = SampleAlbedoTextureGrad(uv, triangleData.surfaceBindingData);
                 float3 baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
 
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
@@ -324,7 +318,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     triangleData.positionWS2);
 
                 UNITY_BRANCH
-                if (triangleData.materialData.NormalsIndex != 0xffffffffu)
+                if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
                 {
                     float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
                         barycentric,
@@ -343,7 +337,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                             * GetInstanceOddNegativeScaleSign(triangleData.instanceData)
                             * normalFlipSign;
                         float3x3 tangentToWorld = CreateInstanceTangentToWorld(normalWS, tangentWS, tangentSign);
-                        float3 normalTS = SampleNormalTSGrad(uv, triangleData.materialData);
+                        float3 normalTS = SampleNormalTSGrad(
+                            uv,
+                            triangleData.materialData,
+                            triangleData.surfaceBindingData);
                         normalWS = TransformTangentToWorld(normalTS, tangentToWorld, true);
                     }
                 }

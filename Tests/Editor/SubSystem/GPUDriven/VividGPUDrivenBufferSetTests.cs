@@ -1,4 +1,6 @@
+using System.IO;
 using NUnit.Framework;
+using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -8,6 +10,28 @@ namespace VividRP.Editor.Tests
 {
     public class VividGPUDrivenBufferSetTests
     {
+        [Test]
+        public void GPUDataLayouts_HaveExpectedStrides()
+        {
+            Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(96));
+            Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
+        }
+
+        [Test]
+        public void GeneratedShaderInclude_ContainsSurfaceBindingLayout()
+        {
+            string source = File.ReadAllText(GetGeneratedStructIncludePath());
+
+            Assert.That(source, Does.Contain("uint SurfaceBindingIndex;"));
+            Assert.That(source, Does.Contain("struct VividSurfaceBindingData"));
+            Assert.That(source, Does.Contain("uint BaseColorResource;"));
+            Assert.That(source, Does.Contain("uint NormalResource;"));
+            Assert.That(source, Does.Contain("uint MaskResource;"));
+            Assert.That(source, Does.Contain("uint Flags;"));
+            Assert.That(source, Does.Contain("float4 UVScaleBias;"));
+            Assert.That(source, Does.Not.Contain("uint AlbedoIndex;"));
+        }
+
         [Test]
         public void Upload_CreatesExpectedBufferCounts_WhenSceneDataContainsData()
         {
@@ -20,6 +44,11 @@ namespace VividRP.Editor.Tests
             sceneData.MutableMaterials.Add(new VividMaterialData
             {
                 AlbedoColor = new float4(1.0f, 1.0f, 1.0f, 1.0f),
+            });
+            sceneData.MutableSurfaceBindings.Add(new VividSurfaceBindingData
+            {
+                BaseColorResource = 4u,
+                UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
             });
             sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
             {
@@ -44,18 +73,21 @@ namespace VividRP.Editor.Tests
 
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
+            Assert.That(bufferSet.SurfaceBindingCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodeCount, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletCount, Is.EqualTo(1));
             Assert.That(bufferSet.SharedVertexCount, Is.EqualTo(1));
             Assert.That(bufferSet.SharedIndexCount, Is.EqualTo(3));
             Assert.That(bufferSet.InstanceDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MaterialDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshLODNodesBuffer, Is.Not.Null);
             Assert.That(bufferSet.MeshletsBuffer, Is.Not.Null);
             Assert.That(bufferSet.SharedVertexBuffer, Is.Not.Null);
             Assert.That(bufferSet.SharedIndexBuffer, Is.Not.Null);
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshLODNodesBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MeshletsBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.SharedVertexBuffer.count, Is.EqualTo(1));
@@ -70,20 +102,26 @@ namespace VividRP.Editor.Tests
 
             sceneData.MutableInstances.Add(default);
             sceneData.MutableMaterials.Add(default);
+            sceneData.MutableSurfaceBindings.Add(default);
             bufferSet.Upload(sceneData);
 
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(1));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
 
             sceneData.MutableInstances.Add(default);
             sceneData.MutableMaterials.Add(default);
             sceneData.MutableMaterials.Add(default);
+            sceneData.MutableSurfaceBindings.Add(default);
+            sceneData.MutableSurfaceBindings.Add(default);
             bufferSet.Upload(sceneData);
 
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(2));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(3));
+            Assert.That(bufferSet.SurfaceBindingCount, Is.EqualTo(3));
             Assert.That(bufferSet.InstanceDataBuffer.count, Is.EqualTo(2));
             Assert.That(bufferSet.MaterialDataBuffer.count, Is.EqualTo(3));
+            Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(3));
         }
 
         [Test]
@@ -94,6 +132,10 @@ namespace VividRP.Editor.Tests
 
             using var bufferSet = new VividGPUDrivenBufferSet();
             bufferSet.Upload(sceneData);
+
+            Assert.That(bufferSet.SurfaceBindingCount, Is.Zero);
+            Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.SurfaceBindingDataBuffer.count, Is.EqualTo(1));
 
             CommandBuffer cmd = CommandBufferPool.Get("VividGPUDrivenBufferSetTests");
 
@@ -162,6 +204,10 @@ namespace VividRP.Editor.Tests
             {
                 AlbedoColor = new float4(1.0f, 0.0f, 0.0f, 1.0f),
             });
+            sceneData.MutableSurfaceBindings.Add(new VividSurfaceBindingData
+            {
+                BaseColorResource = 7u,
+            });
 
             using var bufferSet = new VividGPUDrivenBufferSet();
             bufferSet.Upload(sceneData);
@@ -171,16 +217,38 @@ namespace VividRP.Editor.Tests
             {
                 AlbedoColor = new float4(0.0f, 1.0f, 0.0f, 1.0f),
             };
+            sceneData.MutableSurfaceBindings[0] = new VividSurfaceBindingData
+            {
+                BaseColorResource = 11u,
+            };
 
             bufferSet.Upload(sceneData, uploadMaterialData: false, uploadStaticData: false);
 
             var materials = new VividMaterialData[1];
             bufferSet.MaterialDataBuffer.GetData(materials);
+            var surfaceBindings = new VividSurfaceBindingData[1];
+            bufferSet.SurfaceBindingDataBuffer.GetData(surfaceBindings);
 
             Assert.That(materials[0].AlbedoColor.x, Is.EqualTo(1.0f).Within(0.0001f));
             Assert.That(materials[0].AlbedoColor.y, Is.EqualTo(0.0f).Within(0.0001f));
+            Assert.That(surfaceBindings[0].BaseColorResource, Is.EqualTo(7u));
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(2));
             Assert.That(bufferSet.MaterialCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Dispose_ReleasesSurfaceBindingBuffer()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.MutableSurfaceBindings.Add(default);
+            var bufferSet = new VividGPUDrivenBufferSet();
+            bufferSet.Upload(sceneData);
+
+            Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Not.Null);
+
+            bufferSet.Dispose();
+
+            Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Null);
         }
 
         [Test]
@@ -220,6 +288,34 @@ namespace VividRP.Editor.Tests
             Assert.That(instances[0].ObjectToWorldMatrix.c3.y, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(instances[0].ObjectToWorldMatrix.c3.z, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(bufferSet.InstanceCount, Is.EqualTo(1));
+        }
+
+        private static string GetGeneratedStructIncludePath()
+        {
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string[] packageRoots =
+            {
+                Path.Combine(projectRoot, "Packages", "Custom_URP"),
+                Path.Combine(projectRoot, "Packages", "VividRP"),
+                Path.Combine(projectRoot, "Packages", "com.af8a2a.vividrp"),
+            };
+
+            foreach (string packageRoot in packageRoots)
+            {
+                string path = Path.Combine(
+                    packageRoot,
+                    "Runtime",
+                    "SubSystem",
+                    "GPUDriven",
+                    "VividGPUDrivenStructs.cs.hlsl");
+                if (File.Exists(path))
+                {
+                    return path;
+                }
+            }
+
+            Assert.Fail("Could not locate VividGPUDrivenStructs.cs.hlsl.");
+            return string.Empty;
         }
     }
 }

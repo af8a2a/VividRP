@@ -236,7 +236,7 @@ namespace VividRP.Editor.Tests
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/CameraData"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame/ResetStats"));
-            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame/BindlessPreRender"));
+            Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame/TextureBackend"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame/BuildSceneData"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame/BuildSceneData/CollectReferences"));
             Assert.That(profilingSource, Does.Contain("VividRP.RenderPass.PrepareFrame/FrameContext.SubsystemPreRender/GPUDrivenSystem/PrepareFrame/BuildSceneData/DetectChanges"));
@@ -334,7 +334,7 @@ namespace VividRP.Editor.Tests
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenCameraDataMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameResetStatsMarker.Auto()"));
-            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameBindlessPreRenderMarker.Auto()"));
+            Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameTextureBackendMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenPrepareFrameUploadBuffersMarker.Auto()"));
             Assert.That(gpuDrivenSource, Does.Contain("PrepareFrameSubsystemGPUDrivenApplySettingsMarker.Auto()"));

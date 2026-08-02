@@ -12,12 +12,14 @@ namespace VividRP.Runtime.GPUDriven
 
         private GraphicsBuffer m_InstanceDataBuffer;
         private GraphicsBuffer m_MaterialDataBuffer;
+        private GraphicsBuffer m_SurfaceBindingDataBuffer;
         private GraphicsBuffer m_MeshLODNodesBuffer;
         private GraphicsBuffer m_MeshletsBuffer;
         private GraphicsBuffer m_SharedVertexBuffer;
         private GraphicsBuffer m_SharedIndexBuffer;
         private VividInstanceData[] m_InstanceUploadData = Array.Empty<VividInstanceData>();
         private VividMaterialData[] m_MaterialUploadData = Array.Empty<VividMaterialData>();
+        private VividSurfaceBindingData[] m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
         private VividMeshLODNode[] m_MeshLODNodeUploadData = Array.Empty<VividMeshLODNode>();
         private VividMeshlet[] m_MeshletUploadData = Array.Empty<VividMeshlet>();
         private VividMeshletVertex[] m_VertexUploadData = Array.Empty<VividMeshletVertex>();
@@ -27,6 +29,8 @@ namespace VividRP.Runtime.GPUDriven
         public GraphicsBuffer InstanceDataBuffer => m_InstanceDataBuffer;
 
         public GraphicsBuffer MaterialDataBuffer => m_MaterialDataBuffer;
+
+        public GraphicsBuffer SurfaceBindingDataBuffer => m_SurfaceBindingDataBuffer;
 
         public GraphicsBuffer MeshLODNodesBuffer => m_MeshLODNodesBuffer;
 
@@ -39,6 +43,8 @@ namespace VividRP.Runtime.GPUDriven
         public int InstanceCount { get; private set; }
 
         public int MaterialCount { get; private set; }
+
+        public int SurfaceBindingCount { get; private set; }
 
         public int MeshLODNodeCount { get; private set; }
 
@@ -64,6 +70,7 @@ namespace VividRP.Runtime.GPUDriven
 
             InstanceCount = sceneData.InstanceCount;
             MaterialCount = sceneData.MaterialCount;
+            SurfaceBindingCount = sceneData.SurfaceBindingCount;
             MeshLODNodeCount = sceneData.MeshLODNodeCount;
             MeshletCount = sceneData.MeshletCount;
             SharedVertexCount = sceneData.VertexCount;
@@ -91,6 +98,13 @@ namespace VividRP.Runtime.GPUDriven
                     ref m_MaterialUploadData,
                     UnsafeUtility.SizeOf<VividMaterialData>(),
                     "VividGPUDriven_MaterialData"
+                );
+                UploadStructuredBuffer(
+                    ref m_SurfaceBindingDataBuffer,
+                    sceneData.MutableSurfaceBindings,
+                    ref m_SurfaceBindingUploadData,
+                    UnsafeUtility.SizeOf<VividSurfaceBindingData>(),
+                    "VividGPUDriven_SurfaceBindingData"
                 );
             }
 
@@ -132,6 +146,7 @@ namespace VividRP.Runtime.GPUDriven
 
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._InstanceData, InstanceDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MaterialData, MaterialDataBuffer);
+            cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SurfaceBindingData, SurfaceBindingDataBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._MeshLODNodes, MeshLODNodesBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._Meshlets, MeshletsBuffer);
             cmd.SetGlobalBuffer(VividGPUDrivenShaderIDs._SharedVertexBuffer, SharedVertexBuffer);
@@ -139,6 +154,7 @@ namespace VividRP.Runtime.GPUDriven
 
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._InstanceDataCount, InstanceCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._MaterialDataCount, MaterialCount);
+            cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._SurfaceBindingDataCount, SurfaceBindingCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._MeshLODNodeCount, MeshLODNodeCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._MeshletCount, MeshletCount);
             cmd.SetGlobalInteger(VividGPUDrivenShaderIDs._SharedVertexCount, SharedVertexCount);
@@ -154,6 +170,7 @@ namespace VividRP.Runtime.GPUDriven
 
             m_InstanceDataBuffer?.Dispose();
             m_MaterialDataBuffer?.Dispose();
+            m_SurfaceBindingDataBuffer?.Dispose();
             m_MeshLODNodesBuffer?.Dispose();
             m_MeshletsBuffer?.Dispose();
             m_SharedVertexBuffer?.Dispose();
@@ -161,12 +178,14 @@ namespace VividRP.Runtime.GPUDriven
 
             m_InstanceDataBuffer = null;
             m_MaterialDataBuffer = null;
+            m_SurfaceBindingDataBuffer = null;
             m_MeshLODNodesBuffer = null;
             m_MeshletsBuffer = null;
             m_SharedVertexBuffer = null;
             m_SharedIndexBuffer = null;
             m_InstanceUploadData = Array.Empty<VividInstanceData>();
             m_MaterialUploadData = Array.Empty<VividMaterialData>();
+            m_SurfaceBindingUploadData = Array.Empty<VividSurfaceBindingData>();
             m_MeshLODNodeUploadData = Array.Empty<VividMeshLODNode>();
             m_MeshletUploadData = Array.Empty<VividMeshlet>();
             m_VertexUploadData = Array.Empty<VividMeshletVertex>();
@@ -285,7 +304,11 @@ namespace VividRP.Runtime.GPUDriven
 
         private bool RequiresMaterialBufferUpload(VividGPUDrivenSceneData sceneData)
         {
-            return !IsStructuredBufferCompatible(m_MaterialDataBuffer, sceneData.MaterialCount, UnsafeUtility.SizeOf<VividMaterialData>());
+            return !IsStructuredBufferCompatible(m_MaterialDataBuffer, sceneData.MaterialCount, UnsafeUtility.SizeOf<VividMaterialData>()) ||
+                   !IsStructuredBufferCompatible(
+                       m_SurfaceBindingDataBuffer,
+                       sceneData.SurfaceBindingCount,
+                       UnsafeUtility.SizeOf<VividSurfaceBindingData>());
         }
 
         private static bool IsStructuredBufferCompatible(GraphicsBuffer buffer, int count, int stride)

@@ -33,8 +33,9 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             #pragma shader_feature_local_fragment _ALPHATEST_ON
 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
-            #include_with_pragmas  "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/Bindless.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
+            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
 
             #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs
             #include "UnityIndirect.cginc"
@@ -77,18 +78,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 return vertex.UV.xy * materialData.TextureTilingOffset.xy + materialData.TextureTilingOffset.zw;
             }
 
-            float4 SampleAlbedo(const float2 uv, const VividMaterialData materialData)
+            float4 SampleAlbedo(
+                const float2 uv,
+                const VividMaterialData materialData,
+                const VividSurfaceBindingData surfaceBindingData)
             {
-                float4 textureAlbedo = float4(1.0, 1.0, 1.0, 1.0);
-
-                UNITY_BRANCH
-                if (materialData.AlbedoIndex != 0xffffffffu)
-                {
-                    Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(materialData.AlbedoIndex));
-                    textureAlbedo = SAMPLE_TEXTURE2D(texture, sampler_LinearRepeat, uv);
-                }
-
-                return materialData.AlbedoColor * textureAlbedo;
+                return materialData.AlbedoColor * VividSampleBaseColor(surfaceBindingData, uv);
             }
 
             float4 ApplyVividShadowClamping(float4 positionCS)
@@ -146,7 +141,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
                 #ifdef _ALPHATEST_ON
                 const VividInstanceData instanceData = PullInstanceData(input.instanceIndex);
                 const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-                const float4 albedo = SampleAlbedo(input.uv0, materialData);
+                const VividSurfaceBindingData surfaceBindingData = PullSurfaceBindingData(materialData.SurfaceBindingIndex);
+                const float4 albedo = SampleAlbedo(input.uv0, materialData, surfaceBindingData);
                 clip(albedo.a - materialData.AlphaClipThreshold);
                 #endif
             }

@@ -7,6 +7,10 @@
 #define VIVIDINSTANCEFLAGS_DISABLED 1u
 #define VIVIDINSTANCEFLAGS_FLIP_WINDING_ORDER 2u
 
+#define VIVIDSURFACEBINDINGFLAGS_BASE_COLOR 1u
+#define VIVIDSURFACEBINDINGFLAGS_NORMAL 2u
+#define VIVIDSURFACEBINDINGFLAGS_MASK 4u
+
 #define VIVIDRENDERERLISTID_CULL_FRONT 1u
 #define VIVIDRENDERERLISTID_CULL_OFF 2u
 #define VIVIDRENDERERLISTID_ALPHA_TEST 4u
@@ -38,20 +42,30 @@ struct VividMaterialData
     float4 TextureTilingOffset;
     float4 Emission;
 
-    uint AlbedoIndex;
-    uint NormalsIndex;
+    uint SurfaceBindingIndex;
     float NormalsStrength;
-    uint MasksIndex;
-
     float Roughness;
     float Metallic;
+
     float SpecularAAScreenSpaceVariance;
     float SpecularAAThreshold;
-
     uint GeometryFlags;
     uint MaterialFlags;
+
     uint RendererListID;
     float AlphaClipThreshold;
+    uint Padding0;
+    uint Padding1;
+};
+
+struct VividSurfaceBindingData
+{
+    uint BaseColorResource;
+    uint NormalResource;
+    uint MaskResource;
+    uint Flags;
+
+    float4 UVScaleBias;
 };
 
 struct VividMeshLODNode
@@ -158,6 +172,8 @@ StructuredBuffer<VividInstanceData> _InstanceData;
 uint _InstanceDataCount;
 
 StructuredBuffer<VividMaterialData> _MaterialData;
+StructuredBuffer<VividSurfaceBindingData> _SurfaceBindingData;
+uint _SurfaceBindingDataCount;
 StructuredBuffer<VividMeshLODNode> _MeshLODNodes;
 StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
@@ -171,6 +187,11 @@ VividInstanceData PullInstanceData(const uint instanceIndex)
 VividMaterialData PullMaterialData(const uint materialIndex)
 {
     return _MaterialData[materialIndex];
+}
+
+VividSurfaceBindingData PullSurfaceBindingData(const uint surfaceBindingIndex)
+{
+    return _SurfaceBindingData[surfaceBindingIndex];
 }
 
 VividMeshLODNode PullMeshLODNode(const uint nodeIndex)

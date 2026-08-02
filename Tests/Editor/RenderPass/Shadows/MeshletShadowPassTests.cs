@@ -67,6 +67,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("UNITY_REVERSED_Z"));
             Assert.That(source, Does.Contain("round(_ShadowBias.z) == 1.0 ? 1.0 : 0.0"));
             Assert.That(source, Does.Contain("output.positionCS = ApplyVividShadowClamping(output.positionCS);"));
+            Assert.That(source, Does.Contain("VividSurfaceSampling.hlsl"));
+            Assert.That(source, Does.Contain("PullSurfaceBindingData(materialData.SurfaceBindingIndex)"));
+            Assert.That(source, Does.Contain("VividSampleBaseColor(surfaceBindingData, uv)"));
+            Assert.That(source, Does.Not.Contain("GetBindlessTexture2D("));
+            Assert.That(source, Does.Not.Contain("GPUDriven/Bindless.hlsl"));
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

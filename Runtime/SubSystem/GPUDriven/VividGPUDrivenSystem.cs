@@ -12,28 +12,33 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
-        private readonly VividGPUDrivenObjectTracker m_ObjectTracker;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
+        private readonly IGPUDrivenTextureBackend m_TextureBackend;
         private VividGPUDrivenCullingDispatcher[] m_ShadowCullingDispatchers;
         private bool m_IsDisposed;
 
         public VividGPUDrivenSystem()
-            : this(new BindlessTextureContainer(), new VividGPUDrivenSceneDataBuilder())
+            : this(new BindlessGPUDrivenTextureBackend(), new VividGPUDrivenSceneDataBuilder())
         {
         }
 
         internal VividGPUDrivenSystem(IBindlessTextureDescriptorAllocator allocator)
-            : this(new BindlessTextureContainer(allocator), new VividGPUDrivenSceneDataBuilder())
+            : this(new BindlessGPUDrivenTextureBackend(allocator), new VividGPUDrivenSceneDataBuilder())
+        {
+        }
+
+        internal VividGPUDrivenSystem(IGPUDrivenTextureBackend textureBackend)
+            : this(textureBackend, new VividGPUDrivenSceneDataBuilder())
         {
         }
 
         private VividGPUDrivenSystem(
-            BindlessTextureContainer bindlessTextureContainer,
+            IGPUDrivenTextureBackend textureBackend,
             VividGPUDrivenSceneDataBuilder sceneDataBuilder
         )
         {
-            BindlessTextureContainer = bindlessTextureContainer ?? throw new ArgumentNullException(nameof(bindlessTextureContainer));
-            m_ObjectTracker = new VividGPUDrivenObjectTracker(BindlessTextureContainer);
+            m_TextureBackend = textureBackend ?? throw new ArgumentNullException(nameof(textureBackend));
+            BindlessTextureContainer = (textureBackend as BindlessGPUDrivenTextureBackend)?.TextureContainer;
             m_BufferSet = new VividGPUDrivenBufferSet();
             m_CullingDispatcher = new VividGPUDrivenCullingDispatcher();
             m_SceneDataBuilder = sceneDataBuilder ?? throw new ArgumentNullException(nameof(sceneDataBuilder));
@@ -98,9 +103,9 @@ namespace VividRP.Runtime.GPUDriven
 
         public VividGPUDrivenSceneData SceneData { get; }
 
-        public bool IsAvailable => BindlessTextureContainer.IsAvailable;
+        public bool IsAvailable => m_TextureBackend.IsAvailable;
 
-        public string UnavailableReason => BindlessTextureContainer.UnavailableReason;
+        public string UnavailableReason => m_TextureBackend.UnavailableReason;
 
         internal VividGPUDrivenBufferSet BufferSet => m_BufferSet;
 
@@ -163,12 +168,12 @@ namespace VividRP.Runtime.GPUDriven
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameResetStatsMarker.Auto())
                 {
-                    BindlessTextureContainer.ResetPerFrameStats();
+                    m_TextureBackend.ResetPerFrameStats();
                 }
 
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBindlessPreRenderMarker.Auto())
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameTextureBackendMarker.Auto())
                 {
-                    BindlessTextureContainer.PreRender();
+                    m_TextureBackend.PrepareFrame();
                 }
 
                 bool staticDataChanged;
@@ -179,7 +184,7 @@ namespace VividRP.Runtime.GPUDriven
                     staticDataChanged = m_SceneDataBuilder.Build(
                         SceneData,
                         VividMeshletRendererDatabase.instance,
-                        BindlessTextureContainer,
+                        m_TextureBackend,
                         out materialDataChanged,
                         out instanceDataChanged
                     );
@@ -320,8 +325,7 @@ namespace VividRP.Runtime.GPUDriven
                 }
                 m_ShadowCullingDispatchers = null;
             }
-            m_ObjectTracker.Dispose();
-            BindlessTextureContainer.Dispose();
+            m_TextureBackend.Dispose();
             m_IsDisposed = true;
             VividGPUDrivenStatsRegistry.Clear();
         }
@@ -477,10 +481,11 @@ namespace VividRP.Runtime.GPUDriven
         {
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenReportStatsMarker.Auto())
             {
-                bool bindlessAvailable = BindlessTextureContainer.IsAvailable;
-                string statusMessage = bindlessAvailable
+                bool textureBackendAvailable = m_TextureBackend.IsAvailable;
+                string statusMessage = textureBackendAvailable
                     ? string.Empty
-                    : BindlessTextureContainer.UnavailableReason;
+                    : m_TextureBackend.UnavailableReason;
+                GPUDrivenTextureBackendStats backendStats = m_TextureBackend.GetStats();
 
                 VividGPUDrivenStatsRegistry.Report(
                     new VividGPUDrivenStats(
@@ -491,21 +496,23 @@ namespace VividRP.Runtime.GPUDriven
                         camera != null ? camera.cameraType : default,
                         Time.frameCount,
                         Time.realtimeSinceStartupAsDouble,
-                        bindlessAvailable,
+                        m_TextureBackend.DisplayName,
+                        textureBackendAvailable,
                         VividMeshletRendererDatabase.instance.rendererCount,
                         SceneData.InstanceCount,
                         SceneData.MaterialCount,
+                        SceneData.SurfaceBindingCount,
                         SceneData.MeshLODNodeCount,
                         SceneData.MeshletCount,
                         SceneData.VertexCount,
                         SceneData.IndexCount,
                         m_CullingDispatcher.BufferSet.MaxMeshletListBuildJobCount,
                         m_CullingDispatcher.BufferSet.MaxVisibleMeshletRenderRequestCount,
-                        BindlessTextureContainer.DescriptorHeapCount,
-                        BindlessTextureContainer.DescriptorCapacity,
-                        BindlessTextureContainer.AllocatedDescriptorCount,
-                        BindlessTextureContainer.CreateSRVDescriptorCallCountThisFrame,
-                        BindlessTextureContainer.RegisteredTextureCount,
+                        backendStats.PoolCount,
+                        backendStats.ResourceCapacity,
+                        backendStats.AllocatedResourceCount,
+                        backendStats.CreateResourceCallCountThisFrame,
+                        backendStats.RegisteredResourceCount,
                         ForcedMeshLODNodeDepth,
                         MeshLODErrorThreshold));
             }

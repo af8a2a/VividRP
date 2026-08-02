@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
-using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.Meshlets;
 
 namespace VividRP.Runtime.GPUDriven
@@ -41,31 +40,31 @@ namespace VividRP.Runtime.GPUDriven
         private static bool s_SimpleForwardShaderResolved;
         private bool m_HasBuiltStaticData;
         private bool m_UsesFallbackMaterials;
-        private uint m_PreviousTextureBindingRevision;
+        private uint m_PreviousSurfaceBindingRevision;
 
         public bool Build(
             VividGPUDrivenSceneData sceneData,
             VividMeshletRendererDatabase database,
-            BindlessTextureContainer bindlessTextureContainer
+            IGPUDrivenTextureBackend textureBackend
         )
         {
-            return Build(sceneData, database, bindlessTextureContainer, out _);
+            return Build(sceneData, database, textureBackend, out _);
         }
 
         public bool Build(
             VividGPUDrivenSceneData sceneData,
             VividMeshletRendererDatabase database,
-            BindlessTextureContainer bindlessTextureContainer,
+            IGPUDrivenTextureBackend textureBackend,
             out bool materialDataChanged
         )
         {
-            return Build(sceneData, database, bindlessTextureContainer, out materialDataChanged, out _);
+            return Build(sceneData, database, textureBackend, out materialDataChanged, out _);
         }
 
         public bool Build(
             VividGPUDrivenSceneData sceneData,
             VividMeshletRendererDatabase database,
-            BindlessTextureContainer bindlessTextureContainer,
+            IGPUDrivenTextureBackend textureBackend,
             out bool materialDataChanged,
             out bool instanceDataChanged
         )
@@ -80,9 +79,9 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(database));
             }
 
-            if (bindlessTextureContainer == null)
+            if (textureBackend == null)
             {
-                throw new ArgumentNullException(nameof(bindlessTextureContainer));
+                throw new ArgumentNullException(nameof(textureBackend));
             }
 
             bool staticDataChanged = !m_HasBuiltStaticData;
@@ -115,7 +114,7 @@ namespace VividRP.Runtime.GPUDriven
                     materialDataChanged = true;
                 }
 
-                if (!materialDataChanged && m_PreviousTextureBindingRevision != bindlessTextureContainer.TextureBindingRevision)
+                if (!materialDataChanged && m_PreviousSurfaceBindingRevision != textureBackend.BindingRevision)
                 {
                     materialDataChanged = true;
                 }
@@ -154,7 +153,7 @@ namespace VividRP.Runtime.GPUDriven
                         sceneData,
                         rendererData[rendererIndex],
                         rendererResources[rendererIndex],
-                        bindlessTextureContainer
+                        textureBackend
                     );
                 }
             }
@@ -171,7 +170,7 @@ namespace VividRP.Runtime.GPUDriven
                 SwapReferencedMaterialProxyIds();
             }
             m_HasBuiltStaticData = true;
-            m_PreviousTextureBindingRevision = bindlessTextureContainer.TextureBindingRevision;
+            m_PreviousSurfaceBindingRevision = textureBackend.BindingRevision;
             return staticDataChanged;
         }
 
@@ -426,7 +425,7 @@ namespace VividRP.Runtime.GPUDriven
             VividGPUDrivenSceneData sceneData,
             in VividMeshletRendererRenderData trackedData,
             in VividMeshletRendererResources trackedResources,
-            BindlessTextureContainer bindlessTextureContainer
+            IGPUDrivenTextureBackend textureBackend
         )
         {
             if (!IsRenderable(trackedData, trackedResources))
@@ -452,7 +451,7 @@ namespace VividRP.Runtime.GPUDriven
                     materialProxy,
                     material,
                     subMeshIndex,
-                    bindlessTextureContainer
+                    textureBackend
                 );
 
                 sceneData.MutableInstances.Add(CreateInstanceData(trackedData, materialIndex, meshMetadata));
@@ -535,7 +534,7 @@ namespace VividRP.Runtime.GPUDriven
             GPUDrivenMaterialProxy materialProxy,
             Material material,
             int subMeshIndex,
-            BindlessTextureContainer bindlessTextureContainer
+            IGPUDrivenTextureBackend textureBackend
         )
         {
             EntityId objectId = materialProxy != null
@@ -556,18 +555,23 @@ namespace VividRP.Runtime.GPUDriven
                 return materialIndex;
             }
 
+            GPUDrivenSurfaceTextureSet surfaceTextures;
             VividMaterialData materialData;
+            uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
             if (materialProxy != null)
             {
-                materialData = CreateMaterialData(materialProxy, bindlessTextureContainer);
+                surfaceTextures = ExtractSurfaceTextures(materialProxy);
+                materialData = CreateMaterialData(materialProxy, surfaceBindingIndex);
             }
             else
             {
                 WarnMissingMaterialProxy(meshletRenderer, material, subMeshIndex);
-                materialData = CreateMaterialData(material, bindlessTextureContainer);
+                surfaceTextures = ExtractSurfaceTextures(material);
+                materialData = CreateMaterialData(material, surfaceBindingIndex);
             }
 
             materialIndex = sceneData.MaterialCount;
+            sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
             sceneData.MutableMaterials.Add(materialData);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             if (materialProxy != null)
@@ -602,7 +606,7 @@ namespace VividRP.Runtime.GPUDriven
 
         private static VividMaterialData CreateMaterialData(
             GPUDrivenMaterialProxy materialProxy,
-            BindlessTextureContainer bindlessTextureContainer
+            uint surfaceBindingIndex
         )
         {
             return new VividMaterialData
@@ -610,10 +614,8 @@ namespace VividRP.Runtime.GPUDriven
                 AlbedoColor = ToFloat4(materialProxy != null ? materialProxy.BaseColor : Color.white),
                 TextureTilingOffset = ToFloat4(materialProxy != null ? materialProxy.TextureTilingOffset : new Vector4(1.0f, 1.0f, 0.0f, 0.0f)),
                 Emission = ToFloat4(materialProxy != null ? materialProxy.EmissionColor : Color.black),
-                AlbedoIndex = GetTextureIndex(bindlessTextureContainer, materialProxy != null ? materialProxy.BaseMap : null),
-                NormalsIndex = GetTextureIndex(bindlessTextureContainer, materialProxy != null ? materialProxy.BumpMap : null),
+                SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = materialProxy != null ? materialProxy.BumpScale : 1.0f,
-                MasksIndex = VividMaterialData.NoTextureIndex,
                 Roughness = materialProxy != null ? materialProxy.Roughness : 1.0f,
                 Metallic = materialProxy != null ? materialProxy.Metallic : 0.0f,
                 SpecularAAScreenSpaceVariance = 0.0f,
@@ -622,26 +624,23 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialFlags = GetMaterialFlags(materialProxy),
                 RendererListID = GetRendererListId(materialProxy),
                 AlphaClipThreshold = GetAlphaClipThreshold(materialProxy),
+                Padding0 = 0,
+                Padding1 = 0,
             };
         }
 
         private static VividMaterialData CreateMaterialData(
             Material material,
-            BindlessTextureContainer bindlessTextureContainer
+            uint surfaceBindingIndex
         )
         {
-            Texture albedoTexture = GetTexture(material, s_BaseMapPropertyId) ?? GetTexture(material, s_MainTexPropertyId);
-            Texture masksTexture = GetTexture(material, s_MetallicGlossMapPropertyId) ?? GetTexture(material, s_RoughnessMapPropertyId);
-
             return new VividMaterialData
             {
                 AlbedoColor = GetColor(material, s_BaseColorPropertyId, Color.white),
                 TextureTilingOffset = GetTilingOffset(material),
                 Emission = GetColor(material, s_EmissionColorPropertyId, Color.black),
-                AlbedoIndex = GetTextureIndex(bindlessTextureContainer, albedoTexture),
-                NormalsIndex = GetTextureIndex(bindlessTextureContainer, GetTexture(material, s_BumpMapPropertyId)),
+                SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = GetFloat(material, s_BumpScalePropertyId, 1.0f),
-                MasksIndex = GetTextureIndex(bindlessTextureContainer, masksTexture),
                 Roughness = GetRoughness(material),
                 Metallic = GetFloat(material, s_MetallicPropertyId, 0.0f),
                 SpecularAAScreenSpaceVariance = 0.0f,
@@ -650,7 +649,26 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialFlags = GetMaterialFlags(material),
                 RendererListID = GetRendererListId(material),
                 AlphaClipThreshold = GetAlphaClipThreshold(material),
+                Padding0 = 0,
+                Padding1 = 0,
             };
+        }
+
+        private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(GPUDrivenMaterialProxy materialProxy)
+        {
+            return new GPUDrivenSurfaceTextureSet(
+                materialProxy != null ? materialProxy.BaseMap : null,
+                materialProxy != null ? materialProxy.BumpMap : null,
+                null
+            );
+        }
+
+        private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(Material material)
+        {
+            Texture baseColor = GetTexture(material, s_BaseMapPropertyId) ?? GetTexture(material, s_MainTexPropertyId);
+            Texture normal = GetTexture(material, s_BumpMapPropertyId);
+            Texture mask = GetTexture(material, s_MetallicGlossMapPropertyId) ?? GetTexture(material, s_RoughnessMapPropertyId);
+            return new GPUDrivenSurfaceTextureSet(baseColor, normal, mask);
         }
 
         private static VividInstanceData CreateInstanceData(
@@ -734,13 +752,6 @@ namespace VividRP.Runtime.GPUDriven
 
             int materialIndex = Mathf.Clamp(subMeshIndex, 0, materialProxies.Length - 1);
             return materialProxies[materialIndex];
-        }
-
-        private static uint GetTextureIndex(BindlessTextureContainer bindlessTextureContainer, Texture texture)
-        {
-            return bindlessTextureContainer.TryGetOrCreateIndex(texture, out uint textureIndex)
-                ? textureIndex
-                : VividMaterialData.NoTextureIndex;
         }
 
         private static Texture GetTexture(Material material, int propertyId)

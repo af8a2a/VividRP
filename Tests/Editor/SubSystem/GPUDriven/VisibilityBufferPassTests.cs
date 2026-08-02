@@ -142,8 +142,12 @@ namespace VividRP.Editor.Tests
         {
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/Bindless.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("VividSurfaceSampling.hlsl"));
+            Assert.That(shaderSource, Does.Contain("VividVisibilityBuffer.hlsl"));
+            Assert.That(shaderSource, Does.Contain("PullSurfaceBindingData(materialData.SurfaceBindingIndex)"));
+            Assert.That(shaderSource, Does.Contain("VividSampleBaseColor(surfaceBindingData, uv)"));
+            Assert.That(shaderSource, Does.Not.Contain("GetBindlessTexture2D("));
+            Assert.That(shaderSource, Does.Not.Contain("GPUDriven/Bindless.hlsl"));
             Assert.That(shaderSource, Does.Contain("GetIndirectInstanceID_Base"));
             Assert.That(shaderSource, Does.Contain("GetIndirectVertexID_Base"));
             Assert.That(shaderSource, Does.Contain("PackVisibilityBufferValue("));

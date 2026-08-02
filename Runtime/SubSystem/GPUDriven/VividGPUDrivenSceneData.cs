@@ -6,6 +6,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         private readonly List<VividInstanceData> m_Instances = new();
         private readonly List<VividMaterialData> m_Materials = new();
+        private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
         private readonly List<VividMeshLODNode> m_MeshLODNodes = new();
         private readonly List<VividMeshlet> m_Meshlets = new();
         private readonly List<VividMeshletVertex> m_Vertices = new();
@@ -14,6 +15,8 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<VividInstanceData> Instances => m_Instances;
 
         public IReadOnlyList<VividMaterialData> Materials => m_Materials;
+
+        public IReadOnlyList<VividSurfaceBindingData> SurfaceBindings => m_SurfaceBindings;
 
         public IReadOnlyList<VividMeshLODNode> MeshLODNodes => m_MeshLODNodes;
 
@@ -27,6 +30,8 @@ namespace VividRP.Runtime.GPUDriven
 
         public int MaterialCount => m_Materials.Count;
 
+        public int SurfaceBindingCount => m_SurfaceBindings.Count;
+
         public int MeshLODNodeCount => m_MeshLODNodes.Count;
 
         public int MeshletCount => m_Meshlets.Count;
@@ -38,6 +43,8 @@ namespace VividRP.Runtime.GPUDriven
         internal List<VividInstanceData> MutableInstances => m_Instances;
 
         internal List<VividMaterialData> MutableMaterials => m_Materials;
+
+        internal List<VividSurfaceBindingData> MutableSurfaceBindings => m_SurfaceBindings;
 
         internal List<VividMeshLODNode> MutableMeshLODNodes => m_MeshLODNodes;
 
@@ -57,10 +64,16 @@ namespace VividRP.Runtime.GPUDriven
             m_Materials.Clear();
         }
 
+        internal void ClearSurfaceBindings()
+        {
+            m_SurfaceBindings.Clear();
+        }
+
         internal void ClearDynamic()
         {
             ClearInstances();
             ClearMaterials();
+            ClearSurfaceBindings();
         }
 
         internal void Clear()

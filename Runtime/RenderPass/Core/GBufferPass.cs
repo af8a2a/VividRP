@@ -151,6 +151,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private float m_ClusterScale;
         private float m_ClusterBase = LightGridPass.ClusterLogBase;
         private int m_ClusterLog2SliceCount = LightGridPass.ClusterLog2SliceCount;
+#if UNITY_EDITOR
+        private static bool s_LoggedRendererConfiguration;
+#endif
 
         public GBufferPass()
         {
@@ -222,6 +225,15 @@ namespace VividRP.Runtime.RenderPass.Core
             m_GBuffer4.desc.ClearBuffer = false;
 
             UpdateRenderListShaderTags(frameData);
+#if UNITY_EDITOR
+            if (!s_LoggedRendererConfiguration)
+            {
+                Debug.Log(
+                    $"[VividRP Lightmap Diagnostic] GBuffer={m_RenderList?.desc?.RendererConfiguration}, "
+                    + $"VT GBuffer={m_VirtualTextureRenderList?.desc?.RendererConfiguration}");
+                s_LoggedRendererConfiguration = true;
+            }
+#endif
             PrepareClusteredDecalParameters(frameData, width, height);
         }
 

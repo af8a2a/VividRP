@@ -53,7 +53,17 @@ namespace VividRP.Runtime
 
         internal bool TryGetDefaultBinding(out VirtualTextureSpaceBinding binding)
         {
-            return TryGetBinding(0, out binding);
+            for (int bindingIndex = 0; bindingIndex < m_Bindings.Count; bindingIndex++)
+            {
+                if (m_Bindings[bindingIndex].PrivateSpace)
+                    continue;
+
+                binding = m_Bindings[bindingIndex];
+                return true;
+            }
+
+            binding = default;
+            return false;
         }
     }
 }

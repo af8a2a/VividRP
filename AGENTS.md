@@ -20,7 +20,7 @@
 - The repository currently uses both `Packages/com.af8a2a.vividrp/...` and `Packages/VividRP/...` path constants; do not “fix” only one side during refactors—audit all package-relative paths together.
 
 ## Build, Test, and Development Commands
-- Open the package through the Unity project root `E:\VividRP_Reborn` using Unity `6000.5.0a7` or a compatible `6000.5` build.
+- Open the package through the Unity project root `E:\VividRP_Reborn` using Unity `6000.7.0a3` or a compatible `6000.7` build.
 - Run the current EditMode suite with Unity Test Framework:
   `Unity.exe -batchmode -projectPath "E:\VividRP_Reborn" -runTests -testPlatform EditMode -testResults Logs/editmode-results.xml -quit -logFile Logs/editmode.log`
 - There are no committed PlayMode tests yet. Add the relevant test assembly before documenting or relying on a PlayMode batch command.

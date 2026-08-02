@@ -82,6 +82,14 @@ namespace VividRP.Editor.GPUDriven
             int baseTexturePropertyId = sourceMaterial.HasProperty(s_BaseMapId) ? s_BaseMapId : s_MainTexId;
             Texture2D baseMap = GetTexture2D(sourceMaterial, baseTexturePropertyId, "_BaseMap", warnings);
             Texture2D bumpMap = GetTexture2D(sourceMaterial, s_BumpMapId, "_BumpMap", warnings);
+            Texture2D metallicMap = GetTexture2D(sourceMaterial, s_MetallicGlossMapId, "_MetallicGlossMap", warnings);
+            Texture2D roughnessMap = GetTexture2D(sourceMaterial, s_RoughnessMapId, "_RoughnessMap", warnings);
+            Texture2D maskMap = metallicMap != null ? metallicMap : roughnessMap;
+            GPUDrivenMaterialMaskMode maskMode = metallicMap != null
+                ? GPUDrivenMaterialMaskMode.MetallicSmoothness
+                : roughnessMap != null
+                    ? GPUDrivenMaterialMaskMode.Roughness
+                    : GPUDrivenMaterialMaskMode.None;
             uint initialRevision = materialProxy.Revision;
 
             Undo.RecordObject(materialProxy, "Sync GPUDriven Material Proxy");
@@ -93,6 +101,8 @@ namespace VividRP.Editor.GPUDriven
             materialProxy.TextureTilingOffset = GetTilingOffset(sourceMaterial, baseTexturePropertyId);
             materialProxy.BumpMap = bumpMap;
             materialProxy.BumpScale = GetFloat(sourceMaterial, s_BumpScaleId, 1.0f);
+            materialProxy.MaskMap = maskMap;
+            materialProxy.MaskMode = maskMode;
             materialProxy.Metallic = GetFloat(sourceMaterial, s_MetallicId, 0.0f);
             materialProxy.Roughness = 1.0f - Mathf.Clamp01(GetFloat(sourceMaterial, s_SmoothnessId, 0.5f));
             materialProxy.EmissionColor = GetColor(sourceMaterial, s_EmissionColorId, Color.black);
@@ -138,14 +148,10 @@ namespace VividRP.Editor.GPUDriven
                 warnings.Add("_OpacityMap is not consumed by the V1 GPUDriven StandardLit path.");
             }
 
-            if (HasTexture(sourceMaterial, s_MetallicGlossMapId))
+            if (HasTexture(sourceMaterial, s_MetallicGlossMapId)
+                && HasTexture(sourceMaterial, s_RoughnessMapId))
             {
-                warnings.Add("_MetallicGlossMap is not consumed by the V1 GPUDriven StandardLit path.");
-            }
-
-            if (HasTexture(sourceMaterial, s_RoughnessMapId))
-            {
-                warnings.Add("_RoughnessMap is not consumed by the V1 GPUDriven StandardLit path.");
+                warnings.Add("_RoughnessMap is ignored because _MetallicGlossMap already occupies the GPUDriven mask layer.");
             }
 
             if (HasTexture(sourceMaterial, s_EmissionMapId))

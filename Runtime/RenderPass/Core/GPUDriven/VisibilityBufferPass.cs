@@ -4,6 +4,7 @@ using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -42,6 +43,11 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultDepth;
         private readonly Material[] m_Materials = new Material[(int)VividRendererListID.Count];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
+        private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
+        private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_VirtualTextureLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
+        private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private int m_FrameIndex;
 
         public VisibilityBufferPass()
         {
@@ -104,6 +110,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
             int width = cameraData.actualWidth > 0 ? cameraData.actualWidth : cameraData.pixelWidth;
             int height = cameraData.actualHeight > 0 ? cameraData.actualHeight : cameraData.pixelHeight;
 
@@ -153,6 +161,24 @@ namespace VividRP.Runtime.RenderPass.Core
             if (visibleMeshletRenderRequestsBuffer == null || visibleMeshletIndirectArgsBuffer == null)
                 return;
 
+            VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
+                ? VividGPUDrivenSystem.instance
+                : null;
+            bool virtualTextureReady = true;
+            VirtualTextureSpaceBinding virtualTextureBinding = default;
+            if (system != null)
+            {
+                for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
+                    system.ConfigureTextureBackendKeyword(m_Materials[materialIndex]);
+
+                if (system.UsesVirtualTexture)
+                {
+                    virtualTextureReady = GPUDrivenVirtualTextureBindingUtility.TryGetBinding(
+                        m_VirtualTextureFrameData,
+                        out virtualTextureBinding);
+                }
+            }
+
             using (new ProfilingScope(context.cmd, profilingSampler))
             {
                 for (int rendererListIndex = 0; rendererListIndex < m_Materials.Length; rendererListIndex++)
@@ -160,11 +186,26 @@ namespace VividRP.Runtime.RenderPass.Core
                     Material material = m_Materials[rendererListIndex];
                     if (material == null)
                         continue;
+                    if (!virtualTextureReady
+                        && (((VividRendererListID) rendererListIndex & VividRendererListID.AlphaTest) != 0))
+                    {
+                        continue;
+                    }
 
                     m_DrawProperties.Clear();
                     m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);
                     m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, visibleMeshletIndirectArgsBuffer);
                     m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);
+                    if (system?.UsesVirtualTexture == true && virtualTextureReady)
+                    {
+                        GPUDrivenVirtualTextureBindingUtility.BindSpaceProperties(
+                            m_DrawProperties,
+                            virtualTextureBinding,
+                            m_VirtualTextureSpaceParams,
+                            m_VirtualTextureMipOffsets,
+                            m_VirtualTextureLayerFallbacks,
+                            m_FrameIndex);
+                    }
                     context.cmd.DrawProceduralIndirect(
                         Matrix4x4.identity,
                         material,
@@ -180,6 +221,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            m_VirtualTextureFrameData = null;
+            m_FrameIndex = 0;
             for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
             {
                 if (m_Materials[materialIndex] == null)

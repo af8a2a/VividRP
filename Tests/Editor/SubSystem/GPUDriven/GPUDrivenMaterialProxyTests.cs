@@ -64,12 +64,14 @@ namespace VividRP.Editor.Tests
             var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
             Texture2D baseMap = null;
             Texture2D bumpMap = null;
+            Texture2D maskMap = null;
             Material material = null;
 
             try
             {
                 baseMap = new Texture2D(1, 1);
                 bumpMap = new Texture2D(1, 1);
+                maskMap = new Texture2D(1, 1);
                 material = new Material(shader);
                 material.SetColor("_BaseColor", new Color(0.25f, 0.5f, 0.75f, 1.0f));
                 material.SetTexture("_BaseMap", baseMap);
@@ -77,6 +79,7 @@ namespace VividRP.Editor.Tests
                 material.SetTextureOffset("_BaseMap", new Vector2(0.1f, 0.2f));
                 material.SetTexture("_BumpMap", bumpMap);
                 material.SetFloat("_BumpScale", 0.6f);
+                material.SetTexture("_MetallicGlossMap", maskMap);
                 material.SetFloat("_Metallic", 0.4f);
                 material.SetFloat("_Smoothness", 0.3f);
                 material.SetColor("_EmissionColor", new Color(1.0f, 0.5f, 0.0f, 1.0f));
@@ -99,6 +102,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(materialProxy.TextureTilingOffset, Is.EqualTo(new Vector4(2.0f, 3.0f, 0.1f, 0.2f)));
                 Assert.That(materialProxy.BumpMap, Is.SameAs(bumpMap));
                 Assert.That(materialProxy.BumpScale, Is.EqualTo(0.6f).Within(0.0001f));
+                Assert.That(materialProxy.MaskMap, Is.SameAs(maskMap));
+                Assert.That(materialProxy.MaskMode, Is.EqualTo(GPUDrivenMaterialMaskMode.MetallicSmoothness));
                 Assert.That(materialProxy.Metallic, Is.EqualTo(0.4f).Within(0.0001f));
                 Assert.That(materialProxy.Roughness, Is.EqualTo(0.7f).Within(0.0001f));
                 Assert.That(materialProxy.EmissionColor.r, Is.EqualTo(1.0f).Within(0.0001f));
@@ -125,6 +130,11 @@ namespace VividRP.Editor.Tests
                 if (bumpMap != null)
                 {
                     Object.DestroyImmediate(bumpMap);
+                }
+
+                if (maskMap != null)
+                {
+                    Object.DestroyImmediate(maskMap);
                 }
             }
         }
@@ -164,7 +174,7 @@ namespace VividRP.Editor.Tests
                 string[] warnings = GPUDrivenMaterialProxySyncUtility.CollectUnsupportedWarnings(material);
                 string warningText = string.Join("\n", warnings);
 
-                Assert.That(warnings, Has.Length.GreaterThanOrEqualTo(7));
+                Assert.That(warnings, Has.Length.GreaterThanOrEqualTo(6));
                 Assert.That(warningText, Does.Contain("_OpacityMap"));
                 Assert.That(warningText, Does.Contain("_MetallicGlossMap"));
                 Assert.That(warningText, Does.Contain("_RoughnessMap"));

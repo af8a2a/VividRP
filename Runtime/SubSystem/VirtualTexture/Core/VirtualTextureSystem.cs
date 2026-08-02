@@ -398,8 +398,12 @@ namespace VividRP.Runtime
                 int allocationId = s_AllocationIdBySpaceId.TryGetValue(addressSpace.SpaceId, out int mappedAllocationId)
                     ? mappedAllocationId
                     : 0;
+                bool privateSpace = allocationId > 0
+                                    && s_Allocations.TryGetValue(allocationId, out VTAllocatedVirtualTexture allocation)
+                                    && allocation.Description.PrivateSpace;
                 virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(
                     allocationId,
+                    privateSpace,
                     feedbackRequests,
                     feedbackCounter));
             }

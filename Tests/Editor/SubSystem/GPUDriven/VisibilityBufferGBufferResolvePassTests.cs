@@ -129,6 +129,9 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("m_GBuffer0"));
             Assert.That(passSource, Does.Contain("m_GBuffer3"));
             Assert.That(passSource, Does.Contain("m_GBuffer4"));
+            Assert.That(typeof(VisibilityBufferGBufferResolvePass).IsSubclassOf(typeof(UnsafePass)), Is.True);
+            Assert.That(passSource, Does.Contain("VirtualTextureFeedbackBindingUtility.BindFeedbackTargets("));
+            Assert.That(passSource, Does.Contain("ClearRandomWriteTargets()"));
         }
 
         [Test]
@@ -147,8 +150,11 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("PullSurfaceBindingData(result.materialData.SurfaceBindingIndex)"));
             Assert.That(shaderSource, Does.Contain("VividSampleBaseColorGrad("));
             Assert.That(shaderSource, Does.Contain("VividSampleNormalGrad("));
+            Assert.That(shaderSource, Does.Contain("VividCreateSurfaceSampleContextGrad("));
             Assert.That(shaderSource, Does.Contain("VividSurfaceHasNormal("));
-            Assert.That(shaderSource, Does.Not.Contain("VividSampleMaskGrad("));
+            Assert.That(shaderSource, Does.Contain("VividSampleMaskGrad("));
+            Assert.That(shaderSource, Does.Contain("VIVID_VT_ENABLE_FEEDBACK_RW"));
+            Assert.That(shaderSource, Does.Contain("VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE"));
             Assert.That(shaderSource, Does.Not.Contain("GetBindlessTexture2D("));
             Assert.That(shaderSource, Does.Not.Contain("GPUDriven/Bindless.hlsl"));
             Assert.That(shaderSource, Does.Contain("ComputeDoubleSidedNormalFlipSign("));

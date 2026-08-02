@@ -18,6 +18,7 @@ namespace VividRP.Runtime.GPUDriven
         private static readonly int s_SmoothnessPropertyId = Shader.PropertyToID("_Smoothness");
         private static readonly int s_MetallicGlossMapPropertyId = Shader.PropertyToID("_MetallicGlossMap");
         private static readonly int s_RoughnessMapPropertyId = Shader.PropertyToID("_RoughnessMap");
+        private static readonly int s_MaskMapPropertyId = Shader.PropertyToID("_MaskMap");
         private static readonly int s_EmissionColorPropertyId = Shader.PropertyToID("_EmissionColor");
         private static readonly int s_AlphaClipPropertyId = Shader.PropertyToID("_AlphaClip");
         private static readonly int s_CutoffPropertyId = Shader.PropertyToID("_Cutoff");
@@ -624,7 +625,7 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialFlags = GetMaterialFlags(materialProxy),
                 RendererListID = GetRendererListId(materialProxy),
                 AlphaClipThreshold = GetAlphaClipThreshold(materialProxy),
-                Padding0 = 0,
+                Padding0 = (uint) (materialProxy != null ? materialProxy.MaskMode : GPUDrivenMaterialMaskMode.None),
                 Padding1 = 0,
             };
         }
@@ -649,7 +650,7 @@ namespace VividRP.Runtime.GPUDriven
                 MaterialFlags = GetMaterialFlags(material),
                 RendererListID = GetRendererListId(material),
                 AlphaClipThreshold = GetAlphaClipThreshold(material),
-                Padding0 = 0,
+                Padding0 = (uint) GetMaskMode(material),
                 Padding1 = 0,
             };
         }
@@ -659,7 +660,7 @@ namespace VividRP.Runtime.GPUDriven
             return new GPUDrivenSurfaceTextureSet(
                 materialProxy != null ? materialProxy.BaseMap : null,
                 materialProxy != null ? materialProxy.BumpMap : null,
-                null
+                materialProxy != null ? materialProxy.MaskMap : null
             );
         }
 
@@ -667,8 +668,22 @@ namespace VividRP.Runtime.GPUDriven
         {
             Texture baseColor = GetTexture(material, s_BaseMapPropertyId) ?? GetTexture(material, s_MainTexPropertyId);
             Texture normal = GetTexture(material, s_BumpMapPropertyId);
-            Texture mask = GetTexture(material, s_MetallicGlossMapPropertyId) ?? GetTexture(material, s_RoughnessMapPropertyId);
+            Texture mask = GetTexture(material, s_MaskMapPropertyId)
+                           ?? GetTexture(material, s_MetallicGlossMapPropertyId)
+                           ?? GetTexture(material, s_RoughnessMapPropertyId);
             return new GPUDrivenSurfaceTextureSet(baseColor, normal, mask);
+        }
+
+        private static GPUDrivenMaterialMaskMode GetMaskMode(Material material)
+        {
+            if (GetTexture(material, s_MaskMapPropertyId) != null)
+                return GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness;
+            if (GetTexture(material, s_MetallicGlossMapPropertyId) != null)
+                return GPUDrivenMaterialMaskMode.MetallicSmoothness;
+            if (GetTexture(material, s_RoughnessMapPropertyId) != null)
+                return GPUDrivenMaterialMaskMode.Roughness;
+
+            return GPUDrivenMaterialMaskMode.None;
         }
 
         private static VividInstanceData CreateInstanceData(

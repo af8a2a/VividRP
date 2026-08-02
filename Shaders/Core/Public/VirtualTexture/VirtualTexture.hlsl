@@ -126,6 +126,19 @@ float VTComputeRequestedMipLevel(float2 virtualUv)
     return clamp(requestedMip, 0.0, (float)max(VT_MIP_COUNT - 1, 0));
 }
 
+float VTComputeRequestedMipLevelGrad(float2 virtualUvDdx, float2 virtualUvDdy, uint maxMip)
+{
+    float2 virtualTexelCount = float2(
+        max((float)(VT_VIRTUAL_PAGE_COUNT_X * VT_PAGE_SIZE), 1.0),
+        max((float)(VT_VIRTUAL_PAGE_COUNT_Y * VT_PAGE_SIZE), 1.0));
+    float2 dx = virtualUvDdx * virtualTexelCount;
+    float2 dy = virtualUvDdy * virtualTexelCount;
+    float rho = max(dot(dx, dx), dot(dy, dy));
+    float requestedMip = 0.5 * log2(max(rho, 1e-8));
+    uint clampedMaxMip = min(maxMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    return clamp(requestedMip, 0.0, (float)clampedMaxMip);
+}
+
 uint VTComputeRequestedMip(float2 virtualUv)
 {
     return (uint)floor(VTComputeRequestedMipLevel(virtualUv));
@@ -137,6 +150,25 @@ VTMipRange VTComputeRequestedMipRange(float2 virtualUv)
     uint maxMip = (uint)max(VT_MIP_COUNT - 1, 0);
     uint lowerMip = min((uint)floor(mipLevel), maxMip);
     uint upperMip = min(lowerMip + 1u, maxMip);
+
+    VTMipRange range;
+    range.level = mipLevel;
+    range.lowerMip = lowerMip;
+    range.upperMip = upperMip;
+    range.blend = upperMip == lowerMip ? 0.0 : saturate(mipLevel - (float)lowerMip);
+    return range;
+}
+
+VTMipRange VTComputeRequestedMipRangeGrad(
+    float2 virtualUv,
+    float2 virtualUvDdx,
+    float2 virtualUvDdy,
+    uint maxMip)
+{
+    float mipLevel = VTComputeRequestedMipLevelGrad(virtualUvDdx, virtualUvDdy, maxMip);
+    uint clampedMaxMip = min(maxMip, (uint)max(VT_MIP_COUNT - 1, 0));
+    uint lowerMip = min((uint)floor(mipLevel), clampedMaxMip);
+    uint upperMip = min(lowerMip + 1u, clampedMaxMip);
 
     VTMipRange range;
     range.level = mipLevel;

@@ -3,48 +3,120 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven.Bindless;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime.GPUDriven
 {
     public sealed class VividGPUDrivenSystem : VividSubsystem<VividGPUDrivenSystem>, IDisposable
     {
+        internal const string VirtualTextureBackendKeyword = "VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE";
+
+        private readonly struct BackendConfiguration
+        {
+            internal BackendConfiguration(
+                IGPUDrivenTextureBackend activeBackend,
+                BindlessGPUDrivenTextureBackend legacyBindlessBackend,
+                GPUDrivenTextureBackendMode mode)
+            {
+                ActiveBackend = activeBackend;
+                LegacyBindlessBackend = legacyBindlessBackend;
+                Mode = mode;
+            }
+
+            internal IGPUDrivenTextureBackend ActiveBackend { get; }
+
+            internal BindlessGPUDrivenTextureBackend LegacyBindlessBackend { get; }
+
+            internal GPUDrivenTextureBackendMode Mode { get; }
+        }
+
         private static int s_PreparedFrameIndex = -1;
 
         private readonly VividGPUDrivenBufferSet m_BufferSet;
         private readonly VividGPUDrivenCullingDispatcher m_CullingDispatcher;
         private readonly VividGPUDrivenSceneDataBuilder m_SceneDataBuilder;
         private readonly IGPUDrivenTextureBackend m_TextureBackend;
+        private readonly BindlessGPUDrivenTextureBackend m_LegacyBindlessBackend;
+        private readonly GPUDrivenTextureBackendMode m_TextureBackendMode;
         private VividGPUDrivenCullingDispatcher[] m_ShadowCullingDispatchers;
         private bool m_IsDisposed;
 
         public VividGPUDrivenSystem()
-            : this(new BindlessGPUDrivenTextureBackend(), new VividGPUDrivenSceneDataBuilder())
+            : this(CreateDefaultBackendConfiguration(), new VividGPUDrivenSceneDataBuilder())
         {
         }
 
         internal VividGPUDrivenSystem(IBindlessTextureDescriptorAllocator allocator)
-            : this(new BindlessGPUDrivenTextureBackend(allocator), new VividGPUDrivenSceneDataBuilder())
+            : this(CreateBindlessBackendConfiguration(allocator), new VividGPUDrivenSceneDataBuilder())
         {
         }
 
         internal VividGPUDrivenSystem(IGPUDrivenTextureBackend textureBackend)
-            : this(textureBackend, new VividGPUDrivenSceneDataBuilder())
+            : this(
+                textureBackend,
+                new VividGPUDrivenSceneDataBuilder(),
+                textureBackend as BindlessGPUDrivenTextureBackend,
+                textureBackend is IGPUDrivenVirtualTextureBackend
+                    ? GPUDrivenTextureBackendMode.VirtualTexture
+                    : GPUDrivenTextureBackendMode.Bindless)
+        {
+        }
+
+        private VividGPUDrivenSystem(
+            BackendConfiguration configuration,
+            VividGPUDrivenSceneDataBuilder sceneDataBuilder)
+            : this(
+                configuration.ActiveBackend,
+                sceneDataBuilder,
+                configuration.LegacyBindlessBackend,
+                configuration.Mode)
         {
         }
 
         private VividGPUDrivenSystem(
             IGPUDrivenTextureBackend textureBackend,
-            VividGPUDrivenSceneDataBuilder sceneDataBuilder
+            VividGPUDrivenSceneDataBuilder sceneDataBuilder,
+            BindlessGPUDrivenTextureBackend legacyBindlessBackend,
+            GPUDrivenTextureBackendMode textureBackendMode
         )
         {
             m_TextureBackend = textureBackend ?? throw new ArgumentNullException(nameof(textureBackend));
-            BindlessTextureContainer = (textureBackend as BindlessGPUDrivenTextureBackend)?.TextureContainer;
+            m_LegacyBindlessBackend = legacyBindlessBackend;
+            m_TextureBackendMode = textureBackendMode;
+            BindlessTextureContainer = legacyBindlessBackend?.TextureContainer;
             m_BufferSet = new VividGPUDrivenBufferSet();
             m_CullingDispatcher = new VividGPUDrivenCullingDispatcher();
             m_SceneDataBuilder = sceneDataBuilder ?? throw new ArgumentNullException(nameof(sceneDataBuilder));
             SceneData = new VividGPUDrivenSceneData();
             ForcedMeshLODNodeDepth = VividGPUDrivenCullingContextUtility.DefaultForcedMeshLODNodeDepth;
             MeshLODErrorThreshold = VividGPUDrivenCullingContextUtility.DefaultMeshLODErrorThreshold;
+        }
+
+        private static BackendConfiguration CreateDefaultBackendConfiguration()
+        {
+            VividRenderPipelineAsset asset = VividRenderPipelineAsset.GetActiveAsset();
+            GPUDrivenTextureBackendMode mode = asset?.GPUDrivenTextureBackend
+                                               ?? GPUDrivenTextureBackendMode.Bindless;
+            if (asset == null || !asset.EnableGPUDriven || mode == GPUDrivenTextureBackendMode.Bindless)
+                return CreateBindlessBackendConfiguration(null);
+
+            var legacyBindlessBackend = new BindlessGPUDrivenTextureBackend();
+            return new BackendConfiguration(
+                new VirtualTextureGPUDrivenTextureBackend(),
+                legacyBindlessBackend,
+                GPUDrivenTextureBackendMode.VirtualTexture);
+        }
+
+        private static BackendConfiguration CreateBindlessBackendConfiguration(
+            IBindlessTextureDescriptorAllocator allocator)
+        {
+            var bindlessBackend = allocator != null
+                ? new BindlessGPUDrivenTextureBackend(allocator)
+                : new BindlessGPUDrivenTextureBackend();
+            return new BackendConfiguration(
+                bindlessBackend,
+                bindlessBackend,
+                GPUDrivenTextureBackendMode.Bindless);
         }
 
 #if UNITY_EDITOR
@@ -107,6 +179,10 @@ namespace VividRP.Runtime.GPUDriven
 
         public string UnavailableReason => m_TextureBackend.UnavailableReason;
 
+        public GPUDrivenTextureBackendMode TextureBackendMode => m_TextureBackendMode;
+
+        public bool UsesVirtualTexture => m_TextureBackend is IGPUDrivenVirtualTextureBackend;
+
         internal VividGPUDrivenBufferSet BufferSet => m_BufferSet;
 
         internal VividGPUDrivenCullingBuffers CullingBufferSet => m_CullingDispatcher.BufferSet;
@@ -160,6 +236,26 @@ namespace VividRP.Runtime.GPUDriven
             return visibleMeshletRenderRequestsBuffer != null && visibleMeshletIndirectDrawArgsBuffer != null;
         }
 
+        internal static bool TryGetVirtualTextureAllocationId(out int allocationId)
+        {
+            VividGPUDrivenSystem currentInstance = RawInstance;
+            if (currentInstance?.m_TextureBackend is IGPUDrivenVirtualTextureBackend virtualTextureBackend
+                && currentInstance.IsAvailable)
+            {
+                allocationId = virtualTextureBackend.VirtualTextureAllocationId;
+                return allocationId > 0;
+            }
+
+            allocationId = 0;
+            return false;
+        }
+
+        internal void ConfigureTextureBackendKeyword(Material material)
+        {
+            if (material != null)
+                CoreUtils.SetKeyword(material, VirtualTextureBackendKeyword, UsesVirtualTexture);
+        }
+
         public void PrepareFrame(bool reportStats = true)
         {
             ThrowIfDisposed();
@@ -169,11 +265,15 @@ namespace VividRP.Runtime.GPUDriven
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameResetStatsMarker.Auto())
                 {
                     m_TextureBackend.ResetPerFrameStats();
+                    if (m_LegacyBindlessBackend != null && !ReferenceEquals(m_LegacyBindlessBackend, m_TextureBackend))
+                        m_LegacyBindlessBackend.ResetPerFrameStats();
                 }
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameTextureBackendMarker.Auto())
                 {
                     m_TextureBackend.PrepareFrame();
+                    if (m_LegacyBindlessBackend != null && !ReferenceEquals(m_LegacyBindlessBackend, m_TextureBackend))
+                        m_LegacyBindlessBackend.PrepareFrame();
                 }
 
                 bool staticDataChanged;
@@ -326,6 +426,8 @@ namespace VividRP.Runtime.GPUDriven
                 m_ShadowCullingDispatchers = null;
             }
             m_TextureBackend.Dispose();
+            if (m_LegacyBindlessBackend != null && !ReferenceEquals(m_LegacyBindlessBackend, m_TextureBackend))
+                m_LegacyBindlessBackend.Dispose();
             m_IsDisposed = true;
             VividGPUDrivenStatsRegistry.Clear();
         }
@@ -374,6 +476,11 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             VividGPUDrivenSystem gpuDrivenSystem = instance;
+            if (gpuDrivenSystem.TextureBackendMode != asset.GPUDrivenTextureBackend)
+            {
+                Shutdown();
+                gpuDrivenSystem = instance;
+            }
             if (!gpuDrivenSystem.IsAvailable)
             {
                 gpuDrivenSystem.ReportStats(camera, cameraData.cameraName);

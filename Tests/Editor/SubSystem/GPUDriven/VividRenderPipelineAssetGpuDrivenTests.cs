@@ -23,6 +23,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.sRGB));
                 Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.Unreal));
                 Assert.That(asset.EnableGPUDriven, Is.False);
+                Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
             }
             finally
             {
@@ -41,19 +42,23 @@ namespace VividRP.Editor.Tests
                 var colorGradingSpaceProperty = serializedObject.FindProperty("m_ColorGradingSpace");
                 var implementationProperty = serializedObject.FindProperty("m_AutoExposureImplementation");
                 var property = serializedObject.FindProperty("m_EnableGPUDriven");
+                var textureBackendProperty = serializedObject.FindProperty("m_GPUDrivenTextureBackend");
 
                 Assert.That(colorGradingSpaceProperty, Is.Not.Null);
                 Assert.That(implementationProperty, Is.Not.Null);
                 Assert.That(property, Is.Not.Null);
+                Assert.That(textureBackendProperty, Is.Not.Null);
 
                 colorGradingSpaceProperty.enumValueIndex = (int)ColorGradingSpace.AcesCg;
                 implementationProperty.enumValueIndex = (int)AutoExposureImplementationPath.HDRP;
                 property.boolValue = true;
+                textureBackendProperty.enumValueIndex = (int) GPUDrivenTextureBackendMode.Bindless;
                 serializedObject.ApplyModifiedPropertiesWithoutUndo();
 
                 Assert.That(asset.ColorGradingSpace, Is.EqualTo(ColorGradingSpace.AcesCg));
                 Assert.That(asset.AutoExposureImplementation, Is.EqualTo(AutoExposureImplementationPath.HDRP));
                 Assert.That(asset.EnableGPUDriven, Is.True);
+                Assert.That(asset.GPUDrivenTextureBackend, Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
             }
             finally
             {

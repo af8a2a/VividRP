@@ -510,6 +510,7 @@ namespace VividRP.Runtime
         internal VirtualTextureSpaceBinding(
             int bindingIndex,
             int allocationId,
+            bool privateSpace,
             int spaceId,
             string spaceName,
             VTProducerHandle producerHandle,
@@ -523,6 +524,7 @@ namespace VividRP.Runtime
         {
             BindingIndex = bindingIndex;
             AllocationId = allocationId;
+            PrivateSpace = privateSpace;
             SpaceId = spaceId;
             SpaceName = spaceName;
             ProducerHandle = producerHandle;
@@ -539,6 +541,8 @@ namespace VividRP.Runtime
         public int BindingIndex { get; }
 
         public int AllocationId { get; }
+
+        public bool PrivateSpace { get; }
 
         public int SpaceId { get; }
 
@@ -571,6 +575,7 @@ namespace VividRP.Runtime
             return new VirtualTextureSpaceBinding(
                 bindingIndex,
                 AllocationId,
+                PrivateSpace,
                 SpaceId,
                 SpaceName,
                 ProducerHandle,

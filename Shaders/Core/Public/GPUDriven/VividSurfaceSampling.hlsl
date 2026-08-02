@@ -6,7 +6,7 @@
 #elif defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS)
     #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/BindlessSurfaceSampling.hlsl"
 #elif defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
-    #error "The Virtual Texture GPUDriven sampling backend is not implemented."
+    #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VirtualTextureSurfaceSampling.hlsl"
 #else
     #error "VividSurfaceSampling requires a GPUDriven texture backend macro."
 #endif

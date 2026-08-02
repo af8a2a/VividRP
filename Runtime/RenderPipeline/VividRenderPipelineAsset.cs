@@ -66,6 +66,10 @@ namespace VividRP.Runtime
         private bool m_EnableGPUDriven;
 
         [SerializeField]
+        private GPUDriven.GPUDrivenTextureBackendMode m_GPUDrivenTextureBackend =
+            GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture;
+
+        [SerializeField]
         private bool m_EnableGPUDrivenDecal;
 
         [SerializeField]
@@ -160,6 +164,12 @@ namespace VividRP.Runtime
         {
             get => m_EnableGPUDriven;
             set => m_EnableGPUDriven = value;
+        }
+
+        public GPUDriven.GPUDrivenTextureBackendMode GPUDrivenTextureBackend
+        {
+            get => m_GPUDrivenTextureBackend;
+            set => m_GPUDrivenTextureBackend = value;
         }
 
         public bool EnableGPUDrivenDecal

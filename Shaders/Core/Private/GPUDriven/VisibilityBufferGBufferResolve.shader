@@ -19,12 +19,17 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             #pragma fragment Frag
             #pragma editor_sync_compilation
             #pragma multi_compile_fragment _ PROBE_VOLUMES_L1 PROBE_VOLUMES_L2
+            #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
             #pragma use_dxc 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VividProbeVolume.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
-            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #if defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #define VIVID_VT_ENABLE_FEEDBACK_RW 1
+            #else
+                #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
@@ -179,18 +184,18 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
             }
 
             float4 SampleAlbedoTextureGrad(
-                const InterpolatedUV uv,
-                const VividSurfaceBindingData surfaceBindingData)
+                const VividSurfaceBindingData surfaceBindingData,
+                const VividSurfaceSampleContext surfaceSampleContext)
             {
-                return VividSampleBaseColorGrad(surfaceBindingData, uv.uv, uv.ddx, uv.ddy);
+                return VividSampleBaseColorGrad(surfaceBindingData, surfaceSampleContext);
             }
 
             float3 SampleNormalTSGrad(
-                const InterpolatedUV uv,
                 const VividMaterialData materialData,
-                const VividSurfaceBindingData surfaceBindingData)
+                const VividSurfaceBindingData surfaceBindingData,
+                const VividSurfaceSampleContext surfaceSampleContext)
             {
-                float4 packedNormal = VividSampleNormalGrad(surfaceBindingData, uv.uv, uv.ddx, uv.ddy);
+                float4 packedNormal = VividSampleNormalGrad(surfaceBindingData, surfaceSampleContext);
                 return UnpackVividNormalScale(packedNormal, materialData.NormalsStrength);
             }
 
@@ -282,7 +287,8 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
 
             VividGBufferSurfaceData ResolveSurfaceData(
                 const TriangleData triangleData,
-                const VividBarycentricDerivatives barycentric)
+                const VividBarycentricDerivatives barycentric,
+                const float4 positionCS)
             {
                 InterpolatedUV uv = InterpolateUV(
                     barycentric,
@@ -291,7 +297,15 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     triangleData.vertex2);
                 ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
 
-                float4 albedoSample = SampleAlbedoTextureGrad(uv, triangleData.surfaceBindingData);
+                VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
+                    triangleData.surfaceBindingData,
+                    uv.uv,
+                    uv.ddx,
+                    uv.ddy,
+                    positionCS);
+                float4 albedoSample = SampleAlbedoTextureGrad(
+                    triangleData.surfaceBindingData,
+                    surfaceSampleContext);
                 float3 baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
 
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
@@ -338,19 +352,46 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                             * normalFlipSign;
                         float3x3 tangentToWorld = CreateInstanceTangentToWorld(normalWS, tangentWS, tangentSign);
                         float3 normalTS = SampleNormalTSGrad(
-                            uv,
                             triangleData.materialData,
-                            triangleData.surfaceBindingData);
+                            triangleData.surfaceBindingData,
+                            surfaceSampleContext);
                         normalWS = TransformTangentToWorld(normalTS, tangentToWorld, true);
+                    }
+                }
+
+                float perceptualRoughness = triangleData.materialData.Roughness;
+                float metallic = triangleData.materialData.Metallic;
+                float ambientOcclusion = 1.0f;
+                UNITY_BRANCH
+                if (VividSurfaceHasMask(triangleData.surfaceBindingData))
+                {
+                    float4 maskSample = VividSampleMaskGrad(
+                        triangleData.surfaceBindingData,
+                        surfaceSampleContext);
+                    const uint maskMode = triangleData.materialData.Padding0;
+                    if (maskMode == 1u)
+                    {
+                        metallic = maskSample.r;
+                        perceptualRoughness = 1.0f - maskSample.a;
+                    }
+                    else if (maskMode == 2u)
+                    {
+                        perceptualRoughness = maskSample.r;
+                    }
+                    else if (maskMode == 3u)
+                    {
+                        metallic = maskSample.r;
+                        ambientOcclusion = maskSample.g;
+                        perceptualRoughness = 1.0f - maskSample.a;
                     }
                 }
 
                 VividGBufferSurfaceData surfaceData;
                 surfaceData.baseColor = baseColor;
                 surfaceData.normalWS = normalWS;
-                surfaceData.linearRoughness = triangleData.materialData.Roughness * triangleData.materialData.Roughness;
-                surfaceData.metallic = triangleData.materialData.Metallic;
-                surfaceData.ambientOcclusion = 1.0f;
+                surfaceData.linearRoughness = perceptualRoughness * perceptualRoughness;
+                surfaceData.metallic = metallic;
+                surfaceData.ambientOcclusion = ambientOcclusion;
                 surfaceData.customData = 0.0f;
                 surfaceData.customData1 = 0.0f;
                 surfaceData.materialFeatures = VIVID_MATERIALFEATURE_DEFAULT;
@@ -395,7 +436,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     return (VividGBufferFragmentOutput) 0;
                 }
 
-                VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric);
+                VividGBufferSurfaceData surfaceData = ResolveSurfaceData(triangleData, barycentric, input.positionCS);
                 return PackVividGBufferSurfaceData(surfaceData);
             }
             ENDHLSL

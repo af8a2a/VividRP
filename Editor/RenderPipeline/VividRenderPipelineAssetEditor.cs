@@ -94,6 +94,15 @@ namespace VividRP.Editor.RenderPipeline
             };
             root.Add(gpuDrivenField);
 
+            var gpuDrivenTextureBackendField = new PropertyField(
+                serializedObject.FindProperty("m_GPUDrivenTextureBackend"),
+                "GPUDriven Texture Backend")
+            {
+                name = "vivid-rp-asset-gpu-driven-texture-backend-field",
+                tooltip = "Selects the material texture backend used by GPUDriven static meshes. Sky and decals keep using Bindless.",
+            };
+            root.Add(gpuDrivenTextureBackendField);
+
             var gpuDrivenDecalField = new PropertyField(
                 serializedObject.FindProperty("m_EnableGPUDrivenDecal"),
                 s_GpuDrivenDecalLabel.text)

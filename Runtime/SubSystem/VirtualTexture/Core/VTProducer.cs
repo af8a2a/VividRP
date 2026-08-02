@@ -553,7 +553,7 @@ namespace VividRP.Runtime
                 {
                     int logicalX = Mathf.Clamp(pageOriginX + x - desc.BorderSize, 0, logicalWidth - 1);
                     float u = (logicalX + 0.5f) / logicalWidth;
-                    outputPixels[y * physicalPageSize + x] = SampleSource(coord.Mip, u, v);
+                    outputPixels[y * physicalPageSize + x] = SampleSource(coord.Mip, u, v, false);
                 }
             }
         }
@@ -575,7 +575,8 @@ namespace VividRP.Runtime
             return SampleSource(
                 mip,
                 (clampedX + 0.5f) / logicalWidth,
-                (clampedY + 0.5f) / logicalHeight);
+                (clampedY + 0.5f) / logicalHeight,
+                false);
         }
 
         private void EnsureSourceData()
@@ -672,25 +673,48 @@ namespace VividRP.Runtime
             }
         }
 
-        private Color32 SampleSource(int mip, float u, float v)
+        internal Color32 SampleSource(int mip, float u, float v, bool repeat)
         {
+            EnsureSourceData();
+
             int sampleMip = Mathf.Clamp(mip, 0, m_MipPixels.Length - 1);
             Color32[] pixels = m_MipPixels[sampleMip];
             Vector2Int size = m_MipSizes[sampleMip];
-            float sourceX = Mathf.Clamp01(u) * size.x - 0.5f;
-            float sourceY = Mathf.Clamp01(v) * size.y - 0.5f;
-            int x0 = Mathf.Clamp(Mathf.FloorToInt(sourceX), 0, size.x - 1);
-            int y0 = Mathf.Clamp(Mathf.FloorToInt(sourceY), 0, size.y - 1);
-            int x1 = Mathf.Min(x0 + 1, size.x - 1);
-            int y1 = Mathf.Min(y0 + 1, size.y - 1);
+            float sampleU = repeat ? Repeat01(u) : Mathf.Clamp01(u);
+            float sampleV = repeat ? Repeat01(v) : Mathf.Clamp01(v);
+            float sourceX = sampleU * size.x - 0.5f;
+            float sourceY = sampleV * size.y - 0.5f;
+            int unwrappedX0 = Mathf.FloorToInt(sourceX);
+            int unwrappedY0 = Mathf.FloorToInt(sourceY);
+            int x0 = repeat ? PositiveModulo(unwrappedX0, size.x) : Mathf.Clamp(unwrappedX0, 0, size.x - 1);
+            int y0 = repeat ? PositiveModulo(unwrappedY0, size.y) : Mathf.Clamp(unwrappedY0, 0, size.y - 1);
+            int x1 = repeat ? PositiveModulo(unwrappedX0 + 1, size.x) : Mathf.Min(x0 + 1, size.x - 1);
+            int y1 = repeat ? PositiveModulo(unwrappedY0 + 1, size.y) : Mathf.Min(y0 + 1, size.y - 1);
             float tx = Mathf.Clamp01(sourceX - x0);
             float ty = Mathf.Clamp01(sourceY - y0);
+
+            if (repeat)
+            {
+                tx = Mathf.Clamp01(sourceX - unwrappedX0);
+                ty = Mathf.Clamp01(sourceY - unwrappedY0);
+            }
 
             Color32 c00 = pixels[y0 * size.x + x0];
             Color32 c10 = pixels[y0 * size.x + x1];
             Color32 c01 = pixels[y1 * size.x + x0];
             Color32 c11 = pixels[y1 * size.x + x1];
             return Bilinear(c00, c10, c01, c11, tx, ty);
+        }
+
+        private static float Repeat01(float value)
+        {
+            return value - Mathf.Floor(value);
+        }
+
+        private static int PositiveModulo(int value, int divisor)
+        {
+            int result = value % divisor;
+            return result < 0 ? result + divisor : result;
         }
 
         private static Color32 Bilinear(

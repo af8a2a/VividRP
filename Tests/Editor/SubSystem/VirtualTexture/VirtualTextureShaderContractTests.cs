@@ -38,6 +38,8 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("float VTComputeRequestedMipLevel"));
             Assert.That(source, Does.Contain("uint VTComputeRequestedMip"));
             Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRange"));
+            Assert.That(source, Does.Contain("float VTComputeRequestedMipLevelGrad"));
+            Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRangeGrad"));
             Assert.That(source, Does.Contain("VTResolvedAddress VTResolveAddress"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVW"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVWLayer"));

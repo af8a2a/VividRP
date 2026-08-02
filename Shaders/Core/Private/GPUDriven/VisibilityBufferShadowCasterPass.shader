@@ -31,10 +31,13 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferShadowCasterPass"
             #pragma vertex Vert
             #pragma fragment Frag
             #pragma shader_feature_local_fragment _ALPHATEST_ON
+            #pragma multi_compile_local_fragment _ VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE
 
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
-            #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #if !defined(VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE)
+                #define VIVID_GPU_DRIVEN_TEXTURE_BACKEND_BINDLESS 1
+            #endif
             #include_with_pragmas "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividSurfaceSampling.hlsl"
 
             #define UNITY_INDIRECT_DRAW_ARGS IndirectDrawArgs

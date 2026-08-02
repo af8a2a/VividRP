@@ -2,10 +2,12 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
-    public sealed class VisibilityBufferGBufferResolvePass : RasterPass
+    public sealed class VisibilityBufferGBufferResolvePass : UnsafePass, IAllowGlobalStateModificationPass
     {
         internal const string VisibilityBufferGBufferResolveShaderName = "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve";
 
@@ -55,7 +57,18 @@ namespace VividRP.Runtime.RenderPass.Core
         private readonly RenderGraphTexture m_DefaultGBuffer2;
         private readonly RenderGraphTexture m_DefaultGBuffer3;
         private readonly RenderGraphTexture m_DefaultGBuffer4;
+        private readonly RenderTargetIdentifier[] m_GBufferColorTargets = new RenderTargetIdentifier[5];
+        private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
+        private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
+        private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_VirtualTextureLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
+
+        [SerializeField, Min(1f)]
+        private float m_VirtualTextureFeedbackSampleRate = 4.0f;
+
         private Material m_Material;
+        private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private int m_FrameIndex;
 
         public VisibilityBufferGBufferResolvePass()
         {
@@ -97,6 +110,8 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
+            m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
             var visibilityBufferDescriptor = m_VisibilityBuffer?.desc;
             var width = ResolveOutputWidth(
                 cameraData.actualWidth,
@@ -116,7 +131,7 @@ namespace VividRP.Runtime.RenderPass.Core
             ConfigurePassOwnedTarget(m_GBuffer4, m_DefaultGBuffer4, width, height, GraphicsFormat.R16G16B16A16_SFloat, false, "GBuffer4");
         }
 
-        public override void Record(RasterPassContext context)
+        public override void Record(UnsafePassContext context)
         {
             if (m_Material == null
                 || !m_VisibilityBuffer.innerHandle.IsValid()
@@ -135,17 +150,47 @@ namespace VividRP.Runtime.RenderPass.Core
 
             var depthTexture = TextureResolveUtility.ResolveTexture(m_DepthTexture.innerHandle) ?? Texture2D.whiteTexture;
 
-            var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
-            mpb.SetTexture(VisibilityBufferId, visibilityTexture);
-            mpb.SetTexture(DepthTextureId, depthTexture);
-            mpb.SetVector(VisibilityBufferScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_VisibilityBuffer.innerHandle));
-            mpb.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
+            VividGPUDrivenSystem system = VividGPUDrivenSystem.HasInstance
+                ? VividGPUDrivenSystem.instance
+                : null;
+            system?.ConfigureTextureBackendKeyword(m_Material);
 
-            CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
+            bool hasFeedback = false;
+            var nativeCmd = context.GetNativeCommandBuffer();
+            if (system?.UsesVirtualTexture == true)
+            {
+                if (!GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
+                        nativeCmd,
+                        m_VirtualTextureFrameData,
+                        m_VirtualTextureSpaceParams,
+                        m_VirtualTextureMipOffsets,
+                        m_VirtualTextureLayerFallbacks,
+                        m_FrameIndex,
+                        Mathf.RoundToInt(m_VirtualTextureFeedbackSampleRate),
+                        out VirtualTextureSpaceBinding binding))
+                {
+                    return;
+                }
+
+                hasFeedback = VirtualTextureFeedbackBindingUtility.BindFeedbackTargets(nativeCmd, binding);
+            }
+
+            m_DrawProperties.Clear();
+            m_DrawProperties.SetTexture(VisibilityBufferId, visibilityTexture);
+            m_DrawProperties.SetTexture(DepthTextureId, depthTexture);
+            m_DrawProperties.SetVector(VisibilityBufferScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_VisibilityBuffer.innerHandle));
+            m_DrawProperties.SetVector(DepthTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_DepthTexture.innerHandle));
+
+            BindGBufferTargets(nativeCmd);
+            CoreUtils.DrawFullScreen(nativeCmd, m_Material, m_DrawProperties, 0);
+            if (hasFeedback)
+                nativeCmd.ClearRandomWriteTargets();
         }
 
         public override void Dispose()
         {
+            m_VirtualTextureFrameData = null;
+            m_FrameIndex = 0;
             if (m_Material != null)
             {
                 CoreUtils.Destroy(m_Material);
@@ -179,6 +224,16 @@ namespace VividRP.Runtime.RenderPass.Core
             texture.desc.EnableRandomWrite = enableRandomWrite;
             texture.desc.BindTextureMS = false;
             texture.desc.Name = name;
+        }
+
+        private void BindGBufferTargets(CommandBuffer cmd)
+        {
+            m_GBufferColorTargets[0] = m_GBuffer0;
+            m_GBufferColorTargets[1] = m_GBuffer1;
+            m_GBufferColorTargets[2] = m_GBuffer2;
+            m_GBufferColorTargets[3] = m_GBuffer3;
+            m_GBufferColorTargets[4] = m_GBuffer4;
+            cmd.SetRenderTarget(m_GBufferColorTargets, BuiltinRenderTextureType.None);
         }
 
         private static int ResolveOutputWidth(

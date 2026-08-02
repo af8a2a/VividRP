@@ -3,6 +3,12 @@ using UnityEngine;
 
 namespace VividRP.Runtime.GPUDriven
 {
+    public enum GPUDrivenTextureBackendMode
+    {
+        VirtualTexture = 0,
+        Bindless = 1,
+    }
+
     internal readonly struct GPUDrivenSurfaceTextureSet
     {
         internal GPUDrivenSurfaceTextureSet(Texture baseColor, Texture normal, Texture mask)
@@ -63,5 +69,12 @@ namespace VividRP.Runtime.GPUDriven
         VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures);
 
         GPUDrivenTextureBackendStats GetStats();
+    }
+
+    internal interface IGPUDrivenVirtualTextureBackend
+    {
+        int VirtualTextureSpaceId { get; }
+
+        int VirtualTextureAllocationId { get; }
     }
 }

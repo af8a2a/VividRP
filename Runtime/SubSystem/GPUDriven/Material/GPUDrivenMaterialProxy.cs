@@ -9,6 +9,14 @@ namespace VividRP.Runtime.GPUDriven
         StandardLit = 0,
     }
 
+    public enum GPUDrivenMaterialMaskMode
+    {
+        None = 0,
+        MetallicSmoothness = 1,
+        Roughness = 2,
+        PackedMetallicOcclusionSmoothness = 3,
+    }
+
     [CreateAssetMenu(menuName = "VividRP/GPUDriven/Material Proxy", fileName = "New GPUDriven Material Proxy")]
     public sealed class GPUDrivenMaterialProxy : ScriptableObject
     {
@@ -32,6 +40,13 @@ namespace VividRP.Runtime.GPUDriven
 
         [SerializeField]
         private float m_BumpScale = 1.0f;
+
+        [SerializeField]
+        private Texture2D m_MaskMap;
+
+        [SerializeField]
+        private GPUDrivenMaterialMaskMode m_MaskMode =
+            GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness;
 
         [SerializeField]
         private float m_Metallic;
@@ -98,6 +113,18 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_BumpScale;
             set => SetValue(ref m_BumpScale, value);
+        }
+
+        public Texture2D MaskMap
+        {
+            get => m_MaskMap;
+            set => SetValue(ref m_MaskMap, value);
+        }
+
+        public GPUDrivenMaterialMaskMode MaskMode
+        {
+            get => m_MaskMode;
+            set => SetValue(ref m_MaskMode, value);
         }
 
         public float Metallic

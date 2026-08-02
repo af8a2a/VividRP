@@ -157,6 +157,47 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryGetDefaultBinding_SkipsPrivateAllocations()
+        {
+            VirtualTextureSpaceDesc privateDesc = CreateDesc(
+                "PrivateBinding",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1);
+            VTProducerHandle privateProducer = VirtualTextureSystem.RegisterProducer(privateDesc, new TestProducer());
+            VTAllocatedVirtualTexture privateAllocation = VirtualTextureSystem.AllocateVirtualTexture(
+                new VTAllocationDesc(
+                    privateDesc.SpaceName,
+                    privateDesc,
+                    privateProducer,
+                    privateSpace: true));
+            int publicSpaceId = VirtualTextureSystem.RegisterSpace(
+                CreateDesc("PublicBinding", cachePageCount: 4, maxUploadsPerFrame: 1));
+            var frameData = new ContextContainer();
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.Update(frameData, commandBuffer);
+
+                VividVirtualTextureFrameData virtualTextureFrameData = frameData.Get<VividVirtualTextureFrameData>();
+                Assert.That(virtualTextureFrameData.BindingCount, Is.EqualTo(2));
+                Assert.That(
+                    virtualTextureFrameData.TryGetBindingForAllocation(
+                        privateAllocation.AllocationId,
+                        out VirtualTextureSpaceBinding privateBinding),
+                    Is.True);
+                Assert.That(privateBinding.PrivateSpace, Is.True);
+                Assert.That(virtualTextureFrameData.TryGetDefaultBinding(out VirtualTextureSpaceBinding defaultBinding), Is.True);
+                Assert.That(defaultBinding.SpaceId, Is.EqualTo(publicSpaceId));
+                Assert.That(defaultBinding.PrivateSpace, Is.False);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
         public void Update_DoesNotCreateFeedbackState_ForPreviewCamera()
         {
             VirtualTextureSystem.RegisterSpace(CreateDesc("PreviewCamera", cachePageCount: 2, maxUploadsPerFrame: 1));

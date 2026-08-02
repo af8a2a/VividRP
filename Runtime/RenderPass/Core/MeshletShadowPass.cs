@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
 using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -25,6 +26,9 @@ namespace VividRP.Runtime.RenderPass.Core
 
         private readonly Material[] m_Materials = new Material[RendererListCount];
         private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();
+        private readonly float[] m_VirtualTextureSpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
+        private readonly float[] m_VirtualTextureMipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
+        private readonly Vector4[] m_VirtualTextureLayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
 
         private bool m_IsActive;
         private int m_CascadeCount;
@@ -34,6 +38,8 @@ namespace VividRP.Runtime.RenderPass.Core
         private ShaderVariablesGlobal m_CameraShaderGlobals;
         private VividShadowData m_ShadowData;
         private Camera m_LODCamera;
+        private VividVirtualTextureFrameData m_VirtualTextureFrameData;
+        private int m_FrameIndex;
 
         public MeshletShadowPass()
         {
@@ -68,6 +74,9 @@ namespace VividRP.Runtime.RenderPass.Core
             m_CameraShaderGlobals = default;
             m_ShadowData = null;
             m_LODCamera = null;
+            m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            var frameCameraData = frameData.GetOrCreate<VividCameraData>();
+            m_FrameIndex = frameCameraData.frameIndex >= 0 ? frameCameraData.frameIndex : Time.frameCount;
 
             if (m_Materials[0] == null)
                 return;
@@ -129,6 +138,20 @@ namespace VividRP.Runtime.RenderPass.Core
             var nativeCmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
             using (new ProfilingScope(nativeCmd, profilingSampler))
             {
+                for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
+                    system.ConfigureTextureBackendKeyword(m_Materials[materialIndex]);
+
+                bool virtualTextureReady = !system.UsesVirtualTexture
+                                           || GPUDrivenVirtualTextureBindingUtility.BindSpaceGlobals(
+                                               nativeCmd,
+                                               m_VirtualTextureFrameData,
+                                               m_VirtualTextureSpaceParams,
+                                               m_VirtualTextureMipOffsets,
+                                               m_VirtualTextureLayerFallbacks,
+                                               m_FrameIndex,
+                                               feedbackSampleRate: 1,
+                                               out _);
+
                 // LOD selection must match the main camera so meshlets do not pop between frames as
                 // cascade orientation changes. Frustum culling still uses the cascade view-projection.
                 VividGPUDrivenCullingContextUtility.BuildLODSelectionContext(
@@ -187,6 +210,11 @@ namespace VividRP.Runtime.RenderPass.Core
                         Material material = m_Materials[rendererListIndex];
                         if (material == null)
                             continue;
+                        if (!virtualTextureReady
+                            && (((VividRendererListID) rendererListIndex & VividRendererListID.AlphaTest) != 0))
+                        {
+                            continue;
+                        }
 
                         m_DrawProperties.Clear();
                         m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, requestsBuffer);
@@ -214,6 +242,8 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Dispose()
         {
+            m_VirtualTextureFrameData = null;
+            m_FrameIndex = 0;
             for (int materialIndex = 0; materialIndex < m_Materials.Length; materialIndex++)
             {
                 if (m_Materials[materialIndex] == null)

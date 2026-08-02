@@ -155,12 +155,14 @@ namespace VividRP.Runtime
 
         internal VirtualTextureSpaceBinding CreateBinding(
             int allocationId,
+            bool privateSpace,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter)
         {
             return new VirtualTextureSpaceBinding(
                 -1,
                 allocationId,
+                privateSpace,
                 SpaceId,
                 Descriptor.SpaceName,
                 ProducerHandle,

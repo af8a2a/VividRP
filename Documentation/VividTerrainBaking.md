@@ -23,7 +23,7 @@ Surface-layer prototype data copies the diffuse, normal, and mask textures toget
 
 Each non-empty chunk is passed through the existing `VividMeshOptimizer` meshoptimizer binding. The bake requests exactly one mesh LOD level; terrain LOD generation and selection are deferred.
 
-No intermediate Unity `Mesh` asset is persisted. A chunk owns a `VividMeshletCollectionAsset` sub-asset whose node, meshlet, vertex, and local-index arrays are serialized into the existing versioned binary blob. The blob uses GZip compression, so repetitive terrain vertex streams and index data do not expand into large YAML arrays.
+No intermediate Unity `Mesh` asset is persisted. A chunk owns a `VividMeshletCollectionAsset` sub-asset whose node, meshlet, vertex, and local-index arrays are serialized into the existing versioned binary blob. Version 2 blobs use platform-independent LZ4 block compression, so repetitive terrain vertex streams and index data do not expand into large YAML arrays. Version 1 GZip blobs remain readable and are rewritten as LZ4 after their data is loaded and the asset is saved again.
 
 Current defaults are:
 

@@ -8,9 +8,12 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
 {
     internal static class VividMeshletCollectionBinarySerializer
     {
-        public const uint CurrentVersion = 1u;
+        public const uint CurrentVersion = 2u;
 
         private const uint Magic = 0x564D4342u;
+        private const uint LegacyGZipVersion = 1u;
+
+        internal const uint LZ4CompressionCodec = 1u;
 
         public static byte[] Serialize(
             int[] meshLODLevelNodeCounts,
@@ -36,18 +39,17 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             byte[] payload = payloadStream.ToArray();
+            byte[] compressedPayload = VividLZ4Codec.Compress(payload);
 
             using var outputStream = new MemoryStream();
             using (var writer = new BinaryWriter(outputStream, Encoding.UTF8, leaveOpen: true))
             {
                 writer.Write(Magic);
                 writer.Write(CurrentVersion);
+                writer.Write(LZ4CompressionCodec);
                 writer.Write(payload.Length);
-            }
-
-            using (var gzipStream = new GZipStream(outputStream, CompressionLevel.Optimal, leaveOpen: true))
-            {
-                gzipStream.Write(payload, 0, payload.Length);
+                writer.Write(compressedPayload.Length);
+                writer.Write(compressedPayload);
             }
 
             return outputStream.ToArray();
@@ -81,39 +83,74 @@ namespace VividRP.Runtime.GPUDriven.Meshlets
             }
 
             uint version = headerReader.ReadUInt32();
-            if (version != CurrentVersion)
+            byte[] payload = version switch
             {
-                throw new InvalidDataException(
-                    $"Unsupported meshlet blob version {version}. Expected {CurrentVersion}."
-                );
-            }
+                LegacyGZipVersion => ReadLegacyGZipPayload(inputStream, headerReader),
+                CurrentVersion => ReadCurrentPayload(inputStream, headerReader),
+                _ => throw new InvalidDataException(
+                    $"Unsupported meshlet blob version {version}. Expected {LegacyGZipVersion} or {CurrentVersion}."
+                ),
+            };
 
-            int payloadLength = headerReader.ReadInt32();
-            if (payloadLength < 0)
-            {
-                throw new InvalidDataException($"Invalid meshlet payload length {payloadLength}.");
-            }
-
-            using var payloadStream = new MemoryStream(payloadLength);
-            using (var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress, leaveOpen: true))
-            {
-                gzipStream.CopyTo(payloadStream);
-            }
-
-            if (payloadLength != 0 && payloadStream.Length != payloadLength)
-            {
-                throw new InvalidDataException(
-                    $"Meshlet payload length mismatch. Expected {payloadLength}, got {payloadStream.Length}."
-                );
-            }
-
-            payloadStream.Position = 0;
+            using var payloadStream = new MemoryStream(payload, writable: false);
             using var payloadReader = new BinaryReader(payloadStream, Encoding.UTF8, leaveOpen: true);
             meshLODLevelNodeCounts = ReadIntArray(payloadReader);
             meshLODNodes = ReadStructArray<VividMeshLODNode>(payloadReader);
             meshlets = ReadStructArray<VividMeshlet>(payloadReader);
             vertexBuffer = ReadStructArray<VividMeshletVertex>(payloadReader);
             indexBuffer = ReadByteArray(payloadReader);
+        }
+
+        private static byte[] ReadCurrentPayload(MemoryStream inputStream, BinaryReader headerReader)
+        {
+            uint compressionCodec = headerReader.ReadUInt32();
+            if (compressionCodec != LZ4CompressionCodec)
+            {
+                throw new InvalidDataException($"Unsupported meshlet compression codec {compressionCodec}.");
+            }
+
+            int payloadLength = ReadPayloadLength(headerReader);
+            int compressedLength = headerReader.ReadInt32();
+            if (compressedLength < 0 || compressedLength != inputStream.Length - inputStream.Position)
+            {
+                throw new InvalidDataException(
+                    $"Invalid LZ4 meshlet payload length {compressedLength}; " +
+                    $"{inputStream.Length - inputStream.Position} bytes remain."
+                );
+            }
+
+            byte[] compressedPayload = headerReader.ReadBytes(compressedLength);
+            return VividLZ4Codec.Decompress(compressedPayload, payloadLength);
+        }
+
+        private static byte[] ReadLegacyGZipPayload(MemoryStream inputStream, BinaryReader headerReader)
+        {
+            int payloadLength = ReadPayloadLength(headerReader);
+            using var payloadStream = new MemoryStream(payloadLength);
+            using (var gzipStream = new GZipStream(inputStream, CompressionMode.Decompress, leaveOpen: true))
+            {
+                gzipStream.CopyTo(payloadStream);
+            }
+
+            if (payloadStream.Length != payloadLength)
+            {
+                throw new InvalidDataException(
+                    $"Meshlet payload length mismatch. Expected {payloadLength}, got {payloadStream.Length}."
+                );
+            }
+
+            return payloadStream.ToArray();
+        }
+
+        private static int ReadPayloadLength(BinaryReader headerReader)
+        {
+            int payloadLength = headerReader.ReadInt32();
+            if (payloadLength < 0)
+            {
+                throw new InvalidDataException($"Invalid meshlet payload length {payloadLength}.");
+            }
+
+            return payloadLength;
         }
 
         private static void WriteIntArray(BinaryWriter writer, int[] values)

@@ -1,8 +1,11 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
+using VividRP.Runtime.GPUDriven;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
@@ -16,7 +19,9 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int OverlayRectId = Shader.PropertyToID("_VTOverlayRect");
         private static readonly int OverlayOpacityId = Shader.PropertyToID("_VTOverlayOpacity");
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VTVisualizationMode");
+        private static readonly int VisualizationLayerId = Shader.PropertyToID("_VTVisualizationLayer");
         private static readonly int VisualizationAvailableId = Shader.PropertyToID("_VTVisualizationAvailable");
+        private static readonly int VisualizationSpaceId = Shader.PropertyToID("_VTVisualizationSpaceId");
 
         [RenderGraphResource(Name = "SourceTexture", Access = AccessFlags.Read)]
         private RenderGraphTexture m_SourceTexture;
@@ -28,22 +33,15 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_OutputTexture;
 
-        [SerializeField, Range(0f, 1f)]
-        private float m_OverlayAmount;
-
-        [SerializeField, Range(0f, 1f)]
-        private float m_Opacity = 1f;
-
-        [SerializeField]
-        private VirtualTextureVisualizationMode m_DefaultVisualizationMode = VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency;
-
         private readonly float[] m_SpaceParams = new float[VirtualTextureSpaceShaderParams.IntCount];
         private readonly float[] m_MipOffsets = new float[VirtualTextureFeedbackProcessor.MaxMipCount];
         private readonly Vector4[] m_LayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
 
         private Material m_Material;
         private VividVirtualTextureFrameData m_VirtualTextureFrameData;
-        private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency;
+        private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.None;
+        private VirtualTextureVisualizationTarget m_ResolvedVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
+        private VirtualTextureVisualizationLayer m_ResolvedVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
         private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
         private float m_ResolvedOpacity = 1f;
         private bool m_ShouldSkipExecution;
@@ -72,11 +70,15 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_VirtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
-            m_ResolvedVisualizationMode = ResolveVisualizationMode(
-                VividRenderingDebugDisplaySettings.Data,
-                m_DefaultVisualizationMode);
-            m_ResolvedOpacity = Mathf.Clamp01(m_Opacity);
-            m_OverlayRect = ResolveOverlayRect(m_OverlayAmount);
+            VividRenderingDebugSettingsData debugData = VividRenderingDebugDisplaySettings.Data;
+            m_ResolvedVisualizationMode = ResolveVisualizationMode(debugData);
+            m_ResolvedVisualizationTarget = debugData?.virtualTextureVisualizationTarget
+                ?? VirtualTextureVisualizationTarget.Auto;
+            m_ResolvedVisualizationLayer = debugData?.virtualTextureVisualizationLayer
+                ?? VirtualTextureVisualizationLayer.BaseColor;
+            m_ResolvedOpacity = debugData?.virtualTextureVisualizationOpacity ?? 1f;
+            m_OverlayRect = ResolveOverlayRect(
+                debugData?.virtualTextureVisualizationOverlayAmount ?? 0f);
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -112,13 +114,19 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetVector(OverlayRectId, m_OverlayRect);
             mpb.SetFloat(OverlayOpacityId, m_ResolvedOpacity);
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
+            mpb.SetInt(VisualizationLayerId, (int)m_ResolvedVisualizationLayer);
 
             VirtualTextureSpaceBinding binding = default;
-            bool hasBinding =
-                m_VirtualTextureFrameData != null
-                && m_VirtualTextureFrameData.TryGetDefaultBinding(out binding)
-                && binding.IsValid;
+            int gpuDrivenAllocationId = VividGPUDrivenSystem.TryGetVirtualTextureAllocationId(out int allocationId)
+                ? allocationId
+                : 0;
+            bool hasBinding = TryResolveVisualizationBinding(
+                m_VirtualTextureFrameData,
+                m_ResolvedVisualizationTarget,
+                gpuDrivenAllocationId,
+                out binding);
             mpb.SetInt(VisualizationAvailableId, hasBinding ? 1 : 0);
+            mpb.SetInt(VisualizationSpaceId, hasBinding ? binding.SpaceId : 0);
 
             if (hasBinding)
                 BindSpaceProperties(mpb, binding);
@@ -139,13 +147,9 @@ namespace VividRP.Runtime.RenderPass.Core
         }
 
         internal static VirtualTextureVisualizationMode ResolveVisualizationMode(
-            VividRenderingDebugSettingsData data,
-            VirtualTextureVisualizationMode passDefault)
+            VividRenderingDebugSettingsData data)
         {
-            if (data == null || data.virtualTextureVisualizationMode == VirtualTextureVisualizationMode.UsePassSettings)
-                return passDefault;
-
-            return data.virtualTextureVisualizationMode;
+            return data?.virtualTextureVisualizationMode ?? VirtualTextureVisualizationMode.None;
         }
 
         internal static Vector4 ResolveOverlayRect(float overlayAmount)
@@ -155,15 +159,93 @@ namespace VividRP.Runtime.RenderPass.Core
             return new Vector4(1f - size, 1f - size, size, size);
         }
 
+        internal static bool TryResolveVisualizationBinding(
+            VividVirtualTextureFrameData frameData,
+            VirtualTextureVisualizationTarget target,
+            int gpuDrivenAllocationId,
+            out VirtualTextureSpaceBinding binding)
+        {
+            binding = default;
+            if (frameData == null)
+                return false;
+
+            switch (target)
+            {
+                case VirtualTextureVisualizationTarget.GPUDriven:
+                    return TryGetGPUDrivenBinding(frameData, gpuDrivenAllocationId, out binding);
+                case VirtualTextureVisualizationTarget.FirstPublic:
+                    return TryGetFirstValidBinding(frameData, includePrivateSpaces: false, out binding);
+                case VirtualTextureVisualizationTarget.FirstAvailable:
+                    return TryGetFirstValidBinding(frameData, includePrivateSpaces: true, out binding);
+                default:
+                    if (TryGetGPUDrivenBinding(frameData, gpuDrivenAllocationId, out binding))
+                        return true;
+                    if (TryGetFirstValidBinding(frameData, includePrivateSpaces: false, out binding))
+                        return true;
+                    return TryGetFirstValidBinding(frameData, includePrivateSpaces: true, out binding);
+            }
+        }
+
+        private static bool TryGetGPUDrivenBinding(
+            VividVirtualTextureFrameData frameData,
+            int gpuDrivenAllocationId,
+            out VirtualTextureSpaceBinding binding)
+        {
+            if (gpuDrivenAllocationId > 0
+                && frameData.TryGetBindingForAllocation(gpuDrivenAllocationId, out binding)
+                && binding.IsValid)
+            {
+                return true;
+            }
+
+            IReadOnlyList<VirtualTextureSpaceBinding> bindings = frameData.Bindings;
+            for (int bindingIndex = 0; bindingIndex < bindings.Count; bindingIndex++)
+            {
+                VirtualTextureSpaceBinding candidate = bindings[bindingIndex];
+                if (!candidate.IsValid
+                    || !string.Equals(
+                        candidate.SpaceName,
+                        VirtualTextureGPUDrivenTextureBackend.SpaceName,
+                        StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                binding = candidate;
+                return true;
+            }
+
+            binding = default;
+            return false;
+        }
+
+        private static bool TryGetFirstValidBinding(
+            VividVirtualTextureFrameData frameData,
+            bool includePrivateSpaces,
+            out VirtualTextureSpaceBinding binding)
+        {
+            IReadOnlyList<VirtualTextureSpaceBinding> bindings = frameData.Bindings;
+            for (int bindingIndex = 0; bindingIndex < bindings.Count; bindingIndex++)
+            {
+                VirtualTextureSpaceBinding candidate = bindings[bindingIndex];
+                if (!candidate.IsValid || (!includePrivateSpaces && candidate.PrivateSpace))
+                    continue;
+
+                binding = candidate;
+                return true;
+            }
+
+            binding = default;
+            return false;
+        }
+
         private void BindSpaceProperties(MaterialPropertyBlock mpb, in VirtualTextureSpaceBinding binding)
         {
             Array.Clear(m_SpaceParams, 0, m_SpaceParams.Length);
             Array.Clear(m_MipOffsets, 0, m_MipOffsets.Length);
             Array.Clear(m_LayerFallbacks, 0, m_LayerFallbacks.Length);
 
-            float[] shaderParams = binding.ShaderParams.ToFloatArray();
-            for (int paramIndex = 0; paramIndex < shaderParams.Length && paramIndex < m_SpaceParams.Length; paramIndex++)
-                m_SpaceParams[paramIndex] = shaderParams[paramIndex];
+            binding.ShaderParams.CopyTo(m_SpaceParams);
 
             int[] mipOffsets = binding.MipOffsets;
             if (mipOffsets != null)

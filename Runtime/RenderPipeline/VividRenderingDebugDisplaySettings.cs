@@ -18,11 +18,36 @@ namespace VividRP.Runtime
 
     public enum VirtualTextureVisualizationMode
     {
-        UsePassSettings = 0,
-        None = 1,
+        None = 0,
+        [InspectorName("Physical Cache")]
         PhysicalCache = 2,
+        [InspectorName("Page Table / Residency")]
         PageTableResidency = 3,
+        [InspectorName("Physical Cache + Residency")]
         PhysicalCacheAndPageTableResidency = 4,
+        [InspectorName("Page Table / Resolved Mip")]
+        PageTableResolvedMip = 5,
+        [InspectorName("Page Table / Physical Page")]
+        PageTablePhysicalPage = 6,
+    }
+
+    public enum VirtualTextureVisualizationTarget
+    {
+        [InspectorName("Auto (Prefer GPUDriven)")]
+        Auto = 0,
+        [InspectorName("GPUDriven Virtual Texture")]
+        GPUDriven = 1,
+        [InspectorName("First Public Space")]
+        FirstPublic = 2,
+        [InspectorName("First Available Space")]
+        FirstAvailable = 3,
+    }
+
+    public enum VirtualTextureVisualizationLayer
+    {
+        BaseColor = 0,
+        Normal = 1,
+        Mask = 2,
     }
 
     internal sealed class VividRenderingDebugDisplaySettings
@@ -167,7 +192,19 @@ namespace VividRP.Runtime
         private VirtualTextureDebugMode m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
 
         [SerializeField]
-        private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
+        private VirtualTextureVisualizationMode m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
+
+        [SerializeField]
+        private VirtualTextureVisualizationTarget m_VirtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
+
+        [SerializeField]
+        private VirtualTextureVisualizationLayer m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
+
+        [SerializeField]
+        private float m_VirtualTextureVisualizationOverlayAmount;
+
+        [SerializeField]
+        private float m_VirtualTextureVisualizationOpacity = 1f;
 
         [SerializeField]
         private VirtualTextureStatsViewMode m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
@@ -405,8 +442,32 @@ namespace VividRP.Runtime
 
         internal VirtualTextureVisualizationMode virtualTextureVisualizationMode
         {
-            get => m_VirtualTextureVisualizationMode;
-            set => m_VirtualTextureVisualizationMode = value;
+            get => NormalizeVirtualTextureVisualizationMode(m_VirtualTextureVisualizationMode);
+            set => m_VirtualTextureVisualizationMode = NormalizeVirtualTextureVisualizationMode(value);
+        }
+
+        internal VirtualTextureVisualizationTarget virtualTextureVisualizationTarget
+        {
+            get => NormalizeVirtualTextureVisualizationTarget(m_VirtualTextureVisualizationTarget);
+            set => m_VirtualTextureVisualizationTarget = NormalizeVirtualTextureVisualizationTarget(value);
+        }
+
+        internal VirtualTextureVisualizationLayer virtualTextureVisualizationLayer
+        {
+            get => NormalizeVirtualTextureVisualizationLayer(m_VirtualTextureVisualizationLayer);
+            set => m_VirtualTextureVisualizationLayer = NormalizeVirtualTextureVisualizationLayer(value);
+        }
+
+        internal float virtualTextureVisualizationOverlayAmount
+        {
+            get => Mathf.Clamp01(m_VirtualTextureVisualizationOverlayAmount);
+            set => m_VirtualTextureVisualizationOverlayAmount = Mathf.Clamp01(value);
+        }
+
+        internal float virtualTextureVisualizationOpacity
+        {
+            get => Mathf.Clamp01(m_VirtualTextureVisualizationOpacity);
+            set => m_VirtualTextureVisualizationOpacity = Mathf.Clamp01(value);
         }
 
         internal VirtualTextureStatsViewMode virtualTextureStatsViewMode
@@ -461,7 +522,7 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_ReflectionProbeAtlasExposure, 0f)
             || !Mathf.Approximately(m_Slider, 50f)
             || m_VirtualTextureDebugMode != VirtualTextureDebugMode.None
-            || m_VirtualTextureVisualizationMode != VirtualTextureVisualizationMode.UsePassSettings
+            || virtualTextureVisualizationMode != VirtualTextureVisualizationMode.None
             || m_VirtualTextureStatsViewMode != VirtualTextureStatsViewMode.Auto
             || m_VirtualTextureStatsCamera != null;
 
@@ -511,9 +572,41 @@ namespace VividRP.Runtime
             m_ReflectionProbeAtlasExposure = 0f;
             m_Slider = 50f;
             m_VirtualTextureDebugMode = VirtualTextureDebugMode.None;
-            m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.UsePassSettings;
+            m_VirtualTextureVisualizationMode = VirtualTextureVisualizationMode.None;
+            m_VirtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
+            m_VirtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
+            m_VirtualTextureVisualizationOverlayAmount = 0f;
+            m_VirtualTextureVisualizationOpacity = 1f;
             m_VirtualTextureStatsViewMode = VirtualTextureStatsViewMode.Auto;
             m_VirtualTextureStatsCamera = null;
+        }
+
+        private static VirtualTextureVisualizationMode NormalizeVirtualTextureVisualizationMode(
+            VirtualTextureVisualizationMode value)
+        {
+            return value == VirtualTextureVisualizationMode.None
+                || value is >= VirtualTextureVisualizationMode.PhysicalCache
+                    and <= VirtualTextureVisualizationMode.PageTablePhysicalPage
+                    ? value
+                    : VirtualTextureVisualizationMode.None;
+        }
+
+        private static VirtualTextureVisualizationTarget NormalizeVirtualTextureVisualizationTarget(
+            VirtualTextureVisualizationTarget value)
+        {
+            return value is >= VirtualTextureVisualizationTarget.Auto
+                and <= VirtualTextureVisualizationTarget.FirstAvailable
+                    ? value
+                    : VirtualTextureVisualizationTarget.Auto;
+        }
+
+        private static VirtualTextureVisualizationLayer NormalizeVirtualTextureVisualizationLayer(
+            VirtualTextureVisualizationLayer value)
+        {
+            return value is >= VirtualTextureVisualizationLayer.BaseColor
+                and <= VirtualTextureVisualizationLayer.Mask
+                    ? value
+                    : VirtualTextureVisualizationLayer.BaseColor;
         }
 
         private static ReferencedPathTracingTransportDebugMode
@@ -825,8 +918,32 @@ namespace VividRP.Runtime
 
             public static readonly NameAndTooltip VirtualTextureVisualizationMode = new()
             {
-                name = "Overlay Mode",
-                tooltip = "Override the virtual texture visualization pass mode, or keep the pass-defined setting."
+                name = "Visualization Mode",
+                tooltip = "Select the virtual texture visualization. None disables the visualization pass output."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationTarget = new()
+            {
+                name = "Visualization Target",
+                tooltip = "Select the virtual texture space visualized by the pass."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationLayer = new()
+            {
+                name = "Physical Cache Layer",
+                tooltip = "Select the Base Color, Normal, or Mask layer displayed by physical-cache views."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationOverlayAmount = new()
+            {
+                name = "Overlay Size",
+                tooltip = "Set the visualization size from the minimum corner overlay to full screen."
+            };
+
+            public static readonly NameAndTooltip VirtualTextureVisualizationOpacity = new()
+            {
+                name = "Opacity",
+                tooltip = "Set the virtual texture visualization opacity."
             };
 
             public static readonly NameAndTooltip VirtualTextureStatsViewMode = new()
@@ -1223,6 +1340,42 @@ namespace VividRP.Runtime
                     Strings.VirtualTextureVisualizationMode,
                     () => data.virtualTextureVisualizationMode,
                     value => data.virtualTextureVisualizationMode = value));
+                var targetField = CreateEnumField(
+                    Strings.VirtualTextureVisualizationTarget,
+                    () => data.virtualTextureVisualizationTarget,
+                    value => data.virtualTextureVisualizationTarget = value);
+                targetField.isHiddenCallback = () =>
+                    data.virtualTextureVisualizationMode == VirtualTextureVisualizationMode.None;
+                foldout.children.Add(targetField);
+                var layerField = CreateEnumField(
+                    Strings.VirtualTextureVisualizationLayer,
+                    () => data.virtualTextureVisualizationLayer,
+                    value => data.virtualTextureVisualizationLayer = value);
+                layerField.isHiddenCallback = () =>
+                    data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalCache
+                    && data.virtualTextureVisualizationMode
+                        != VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency;
+                foldout.children.Add(layerField);
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VirtualTextureVisualizationOverlayAmount,
+                    getter = () => data.virtualTextureVisualizationOverlayAmount,
+                    setter = value => data.virtualTextureVisualizationOverlayAmount = value,
+                    min = () => 0f,
+                    max = () => 1f,
+                    isHiddenCallback = () =>
+                        data.virtualTextureVisualizationMode == VirtualTextureVisualizationMode.None,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VirtualTextureVisualizationOpacity,
+                    getter = () => data.virtualTextureVisualizationOpacity,
+                    setter = value => data.virtualTextureVisualizationOpacity = value,
+                    min = () => 0f,
+                    max = () => 1f,
+                    isHiddenCallback = () =>
+                        data.virtualTextureVisualizationMode == VirtualTextureVisualizationMode.None,
+                });
                 foldout.children.Add(CreateEnumField(
                     Strings.VirtualTextureStatsViewMode,
                     () => data.virtualTextureStatsViewMode,

@@ -5,6 +5,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using VividRP.Editor.GPUDriven;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Bindless;
 using VividRP.Runtime.GPUDriven.Meshlets;
@@ -848,6 +849,171 @@ namespace VividRP.Editor.Tests
                 if (metallicMap != null)
                 {
                     Object.DestroyImmediate(metallicMap);
+                }
+            }
+        }
+
+        [Test]
+        public void Build_AppendsTerrainChunksWithSharedFirstLayerSurfaceBinding()
+        {
+            GameObject gameObject = null;
+            VividTerrainData terrainData = null;
+            VividMeshletCollectionAsset firstCollection = null;
+            VividMeshletCollectionAsset secondCollection = null;
+            Texture2D baseMap = null;
+            Texture2D normalMap = null;
+            Texture2D maskMap = null;
+
+            try
+            {
+                firstCollection = CreateMeshletCollectionAsset(
+                    "TerrainChunk0",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(0.0f, 0.0f, 0.0f), CreateVertex(1.0f, 0.0f, 0.0f), CreateVertex(0.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+                secondCollection = CreateMeshletCollectionAsset(
+                    "TerrainChunk1",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[] { CreateVertex(8.0f, 0.0f, 0.0f), CreateVertex(9.0f, 0.0f, 0.0f), CreateVertex(8.0f, 1.0f, 0.0f) },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                baseMap = new Texture2D(4, 4) { name = "Terrain Base" };
+                normalMap = new Texture2D(4, 4) { name = "Terrain Normal" };
+                maskMap = new Texture2D(4, 4) { name = "Terrain Mask" };
+                var firstLayer = new VividTerrainLayerData(
+                    baseMap,
+                    normalMap,
+                    maskMap,
+                    new Vector2(4.0f, 8.0f),
+                    new Vector2(1.0f, 2.0f),
+                    Color.white,
+                    0.35f,
+                    0.75f,
+                    0.6f
+                );
+                var firstBounds = new Bounds(new Vector3(4.0f, 1.0f, 16.0f), new Vector3(8.0f, 2.0f, 32.0f));
+                var secondBounds = new Bounds(new Vector3(12.0f, 1.0f, 16.0f), new Vector3(8.0f, 2.0f, 32.0f));
+                terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+                terrainData.Initialize(
+                    string.Empty,
+                    "SceneBuilderTerrain",
+                    33,
+                    new Vector3(16.0f, 4.0f, 32.0f),
+                    new Bounds(new Vector3(8.0f, 1.0f, 16.0f), new Vector3(16.0f, 2.0f, 32.0f)),
+                    new Vector2Int(2, 1),
+                    VividTerrainBakeSettings.Default,
+                    null,
+                    new[] { firstLayer },
+                    new[]
+                    {
+                        new VividTerrainChunkData(Vector2Int.zero, Vector2Int.zero, new Vector2Int(16, 32), firstBounds, firstCollection),
+                        new VividTerrainChunkData(new Vector2Int(1, 0), new Vector2Int(16, 0), new Vector2Int(32, 32), secondBounds, secondCollection),
+                    }
+                );
+
+                gameObject = new GameObject("Terrain Scene Builder");
+                VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
+                terrain.SetData(terrainData);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(new FakeBindlessTextureDescriptorAllocator(16));
+                bool staticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    textureBackend,
+                    out bool materialDataChanged,
+                    out bool instanceDataChanged
+                );
+
+                Assert.That(staticDataChanged, Is.True);
+                Assert.That(materialDataChanged, Is.True);
+                Assert.That(instanceDataChanged, Is.True);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
+                Assert.That(sceneData.MeshletCount, Is.EqualTo(2));
+                Assert.That(sceneData.Instances[0].MaterialIndex, Is.EqualTo(sceneData.Instances[1].MaterialIndex));
+                Assert.That(sceneData.Instances[0].AABBMin.x, Is.EqualTo(firstBounds.min.x).Within(0.0001f));
+                Assert.That(sceneData.Instances[1].AABBMin.x, Is.EqualTo(secondBounds.min.x).Within(0.0001f));
+                Assert.That(sceneData.Instances[0].PassMask,
+                    Is.EqualTo(VividInstancePassMask.Main | VividInstancePassMask.Shadows));
+
+                VividMaterialData materialData = sceneData.Materials[0];
+                Assert.That(materialData.TextureTilingOffset.x, Is.EqualTo(4.0f).Within(0.0001f));
+                Assert.That(materialData.TextureTilingOffset.y, Is.EqualTo(4.0f).Within(0.0001f));
+                Assert.That(materialData.TextureTilingOffset.z, Is.EqualTo(-0.25f).Within(0.0001f));
+                Assert.That(materialData.TextureTilingOffset.w, Is.EqualTo(-0.25f).Within(0.0001f));
+                Assert.That(materialData.NormalsStrength, Is.EqualTo(0.6f).Within(0.0001f));
+                Assert.That(materialData.Metallic, Is.EqualTo(0.35f).Within(0.0001f));
+                Assert.That(materialData.Roughness, Is.EqualTo(0.25f).Within(0.0001f));
+                Assert.That(materialData.Padding0,
+                    Is.EqualTo((uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness));
+
+                VividSurfaceBindingData binding = sceneData.SurfaceBindings[(int) materialData.SurfaceBindingIndex];
+                Assert.That(binding.Flags, Is.EqualTo(
+                    VividSurfaceBindingFlags.BaseColor | VividSurfaceBindingFlags.Normal | VividSurfaceBindingFlags.Mask));
+                Assert.That(binding.BaseColorResource, Is.Not.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(binding.NormalResource, Is.Not.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(binding.MaskResource, Is.Not.EqualTo(VividSurfaceBindingData.InvalidResource));
+
+                staticDataChanged = builder.Build(
+                    sceneData,
+                    VividMeshletRendererDatabase.instance,
+                    textureBackend,
+                    out materialDataChanged,
+                    out instanceDataChanged
+                );
+                Assert.That(staticDataChanged, Is.False);
+                Assert.That(materialDataChanged, Is.False);
+                Assert.That(instanceDataChanged, Is.False);
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(2));
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                if (gameObject != null)
+                {
+                    Object.DestroyImmediate(gameObject);
+                }
+
+                if (terrainData != null)
+                {
+                    Object.DestroyImmediate(terrainData);
+                }
+
+                if (firstCollection != null)
+                {
+                    Object.DestroyImmediate(firstCollection);
+                }
+
+                if (secondCollection != null)
+                {
+                    Object.DestroyImmediate(secondCollection);
+                }
+
+                if (baseMap != null)
+                {
+                    Object.DestroyImmediate(baseMap);
+                }
+
+                if (normalMap != null)
+                {
+                    Object.DestroyImmediate(normalMap);
+                }
+
+                if (maskMap != null)
+                {
+                    Object.DestroyImmediate(maskMap);
                 }
             }
         }

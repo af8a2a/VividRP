@@ -11,6 +11,9 @@ namespace VividRP.Editor.TerrainTools
         {
             serializedObject.Update();
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Data"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_ShadowCastingMode"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_ReceiveShadows"));
+            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RenderingLayerMask"));
             serializedObject.ApplyModifiedProperties();
 
             var terrain = (VividTerrain) target;
@@ -34,8 +37,10 @@ namespace VividRP.Editor.TerrainTools
             }
 
             EditorGUILayout.HelpBox(
-                "The meshlet data is baked and compressed. Runtime terrain rendering and LOD management are intentionally not implemented yet.",
-                MessageType.Info
+                data.Layers.Count > 1
+                    ? "GPUDriven terrain rendering is active. This first integration samples the first terrain layer; control-map blending and terrain-specific LOD are not implemented yet."
+                    : "GPUDriven terrain rendering is active. Terrain chunks use the shared meshlet culling, visibility buffer, shadow, and texture backend paths.",
+                data.Layers.Count > 1 ? MessageType.Warning : MessageType.Info
             );
         }
     }

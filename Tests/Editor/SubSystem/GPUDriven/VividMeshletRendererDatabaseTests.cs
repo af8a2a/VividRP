@@ -2,6 +2,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using VividRP.Editor.GPUDriven;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 using Object = UnityEngine.Object;
@@ -12,6 +13,8 @@ namespace VividRP.Editor.Tests
     {
         private static readonly MethodInfo s_LateUpdateMethod =
             typeof(MeshletRenderer).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo s_TerrainLateUpdateMethod =
+            typeof(VividTerrain).GetMethod("LateUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
 
         [SetUp]
         public void SetUp()
@@ -393,6 +396,83 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void VividTerrain_RegistersBakedChunksAndTracksTransformUntilDisabled()
+        {
+            GameObject gameObject = null;
+            VividTerrainData terrainData = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                var chunkBounds = new Bounds(new Vector3(8.0f, 2.0f, 8.0f), new Vector3(16.0f, 4.0f, 16.0f));
+                terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+                terrainData.Initialize(
+                    string.Empty,
+                    "DatabaseTerrain",
+                    17,
+                    new Vector3(16.0f, 4.0f, 16.0f),
+                    chunkBounds,
+                    Vector2Int.one,
+                    VividTerrainBakeSettings.Default,
+                    null,
+                    System.Array.Empty<VividTerrainLayerData>(),
+                    new[]
+                    {
+                        new VividTerrainChunkData(
+                            Vector2Int.zero,
+                            Vector2Int.zero,
+                            new Vector2Int(16, 16),
+                            chunkBounds,
+                            meshletCollection
+                        ),
+                    }
+                );
+
+                gameObject = new GameObject("GPUDriven Terrain");
+                VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
+                terrain.SetData(terrainData);
+
+                Assert.That(VividMeshletRendererDatabase.instance.rendererCount, Is.EqualTo(1));
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetTerrainData(terrain, out var trackedData), Is.True);
+                Assert.That((trackedData.flags & VividMeshletRendererFlags.Valid) != 0, Is.True);
+                Assert.That(trackedData.subMeshCount, Is.EqualTo(1));
+                Assert.That(trackedData.shadowCastingMode, Is.EqualTo(UnityEngine.Rendering.ShadowCastingMode.On));
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetTerrainResources(terrain, out var resources), Is.True);
+                Assert.That(resources.IsTerrain, Is.True);
+                Assert.That(resources.TerrainData, Is.SameAs(terrainData));
+                Assert.That(resources.MeshletCollections, Is.EqualTo(new[] { meshletCollection }));
+                Assert.That(resources.LocalBounds, Is.EqualTo(new[] { chunkBounds }));
+
+                gameObject.transform.position = new Vector3(3.0f, 4.0f, 5.0f);
+                InvokeTerrainLateUpdate(terrain);
+
+                Assert.That(VividMeshletRendererDatabase.instance.TryGetTerrainData(terrain, out trackedData), Is.True);
+                Assert.That(trackedData.worldBounds.center, Is.EqualTo(chunkBounds.center + gameObject.transform.position));
+
+                terrain.enabled = false;
+                Assert.That(VividMeshletRendererDatabase.instance.rendererCount, Is.Zero);
+            }
+            finally
+            {
+                if (gameObject != null)
+                {
+                    Object.DestroyImmediate(gameObject);
+                }
+
+                if (terrainData != null)
+                {
+                    Object.DestroyImmediate(terrainData);
+                }
+
+                if (meshletCollection != null)
+                {
+                    Object.DestroyImmediate(meshletCollection);
+                }
+            }
+        }
+
         private static GameObject CreateMeshRendererObject(string name, out Mesh mesh, out Material material)
         {
             var gameObject = new GameObject(name);
@@ -467,6 +547,12 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(s_LateUpdateMethod, Is.Not.Null);
             s_LateUpdateMethod.Invoke(meshletRenderer, null);
+        }
+
+        private static void InvokeTerrainLateUpdate(VividTerrain terrain)
+        {
+            Assert.That(s_TerrainLateUpdateMethod, Is.Not.Null);
+            s_TerrainLateUpdateMethod.Invoke(terrain, null);
         }
     }
 }

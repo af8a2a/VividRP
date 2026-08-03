@@ -51,9 +51,33 @@ namespace VividRP.Runtime.GPUDriven
             MeshletRenderer = meshletRenderer;
             SourceRenderer = sourceRenderer;
             SourceMesh = sourceMesh;
+            Terrain = null;
+            TerrainData = null;
             SharedMaterials = sourceMaterials ?? Array.Empty<Material>();
             MeshletCollections = meshletCollections ?? Array.Empty<VividMeshletCollectionAsset>();
             MaterialProxies = materialProxies ?? Array.Empty<GPUDrivenMaterialProxy>();
+            LocalBounds = Array.Empty<Bounds>();
+        }
+
+        public VividMeshletRendererResources(
+            VividTerrain terrain,
+            VividTerrainData terrainData,
+            Material sourceMaterial,
+            VividMeshletCollectionAsset[] meshletCollections,
+            Bounds[] localBounds
+        )
+        {
+            MeshletRenderer = null;
+            SourceRenderer = null;
+            SourceMesh = null;
+            Terrain = terrain;
+            TerrainData = terrainData;
+            SharedMaterials = sourceMaterial != null
+                ? new[] { sourceMaterial }
+                : Array.Empty<Material>();
+            MeshletCollections = meshletCollections ?? Array.Empty<VividMeshletCollectionAsset>();
+            MaterialProxies = Array.Empty<GPUDrivenMaterialProxy>();
+            LocalBounds = localBounds ?? Array.Empty<Bounds>();
         }
 
         public MeshletRenderer MeshletRenderer { get; }
@@ -62,11 +86,19 @@ namespace VividRP.Runtime.GPUDriven
 
         public Mesh SourceMesh { get; }
 
+        public VividTerrain Terrain { get; }
+
+        public VividTerrainData TerrainData { get; }
+
         public Material[] SharedMaterials { get; }
 
         public VividMeshletCollectionAsset[] MeshletCollections { get; }
 
         public GPUDrivenMaterialProxy[] MaterialProxies { get; }
+
+        public Bounds[] LocalBounds { get; }
+
+        public bool IsTerrain => Terrain != null;
     }
 
     public sealed class VividMeshletRendererDatabase
@@ -144,6 +176,41 @@ namespace VividRP.Runtime.GPUDriven
             return updatedTrackedData;
         }
 
+        internal VividMeshletRendererRenderData UpdateTerrainData(VividTerrain terrain)
+        {
+            if (terrain == null)
+            {
+                return default;
+            }
+
+            VividMeshletRendererRenderData trackedData = CreateTerrainData(terrain);
+            VividMeshletRendererResources trackedResources = CreateTerrainResources(terrain);
+            StoreRendererData(trackedData, trackedResources);
+            terrain.NotifyTerrainDataSynchronized();
+            return trackedData;
+        }
+
+        internal VividMeshletRendererRenderData UpdateTerrainTransformData(VividTerrain terrain)
+        {
+            if (terrain == null)
+            {
+                return default;
+            }
+
+            EntityId terrainEntityId = terrain.GetEntityId();
+            if (!TryGetRendererData(terrainEntityId, out VividMeshletRendererRenderData trackedData)
+                || !TryGetRendererResources(terrainEntityId, out VividMeshletRendererResources trackedResources))
+            {
+                return UpdateTerrainData(terrain);
+            }
+
+            VividMeshletRendererRenderData updatedTrackedData =
+                CreateTerrainTransformOnlyData(terrain, trackedData);
+            StoreRendererData(updatedTrackedData, trackedResources);
+            terrain.NotifyTerrainDataSynchronized();
+            return updatedTrackedData;
+        }
+
         internal bool TryGetRendererData(MeshletRenderer meshletRenderer, out VividMeshletRendererRenderData trackedData)
         {
             trackedData = default;
@@ -166,6 +233,18 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             return TryGetRendererResources(meshletRenderer.GetEntityId(), out trackedResources);
+        }
+
+        internal bool TryGetTerrainData(VividTerrain terrain, out VividMeshletRendererRenderData trackedData)
+        {
+            trackedData = default;
+            return terrain != null && TryGetRendererData(terrain.GetEntityId(), out trackedData);
+        }
+
+        internal bool TryGetTerrainResources(VividTerrain terrain, out VividMeshletRendererResources trackedResources)
+        {
+            trackedResources = default;
+            return terrain != null && TryGetRendererResources(terrain.GetEntityId(), out trackedResources);
         }
 
         internal bool TryGetRendererData(EntityId meshletRendererEntityId, out VividMeshletRendererRenderData trackedData)
@@ -204,6 +283,23 @@ namespace VividRP.Runtime.GPUDriven
             EntityId meshletRendererEntityId = meshletRenderer.GetEntityId();
             if (meshletRendererEntityId.Equals(EntityId.None)
                 || !m_EntityIdToDataIndex.TryGetValue(meshletRendererEntityId, out int removedIndex))
+            {
+                return;
+            }
+
+            RemoveRendererAt(removedIndex);
+        }
+
+        internal void UnregisterTerrain(VividTerrain terrain)
+        {
+            if (terrain == null)
+            {
+                return;
+            }
+
+            EntityId terrainEntityId = terrain.GetEntityId();
+            if (terrainEntityId.Equals(EntityId.None)
+                || !m_EntityIdToDataIndex.TryGetValue(terrainEntityId, out int removedIndex))
             {
                 return;
             }
@@ -364,6 +460,76 @@ namespace VividRP.Runtime.GPUDriven
             return trackedData;
         }
 
+        private static VividMeshletRendererRenderData CreateTerrainData(VividTerrain terrain)
+        {
+            VividTerrainData terrainData = terrain.Data;
+            Matrix4x4 objectToWorldMatrix = terrain.transform.localToWorldMatrix;
+            Matrix4x4 worldToObjectMatrix = terrain.transform.worldToLocalMatrix;
+            Bounds localBounds = terrainData != null ? terrainData.LocalBounds : default;
+            int chunkCount = terrainData?.Chunks.Count ?? 0;
+
+            return new VividMeshletRendererRenderData
+            {
+                meshletRendererEntityId = terrain.GetEntityId(),
+                sourceRendererEntityId = EntityId.None,
+                sourceMeshEntityId = terrainData != null ? terrainData.GetEntityId() : EntityId.None,
+                objectToWorldMatrix = objectToWorldMatrix,
+                worldToObjectMatrix = worldToObjectMatrix,
+                localBounds = localBounds,
+                worldBounds = TransformBounds(localBounds, objectToWorldMatrix),
+                renderingLayerMask = terrain.RenderingLayerMask,
+                shadowCastingMode = terrain.ShadowCastingMode,
+                motionVectorGenerationMode = MotionVectorGenerationMode.Camera,
+                flags = BuildTerrainFlags(terrain),
+                subMeshCount = chunkCount,
+                materialCount = terrainData != null ? 1 : 0,
+            };
+        }
+
+        private static VividMeshletRendererResources CreateTerrainResources(VividTerrain terrain)
+        {
+            VividTerrainData terrainData = terrain.Data;
+            if (terrainData == null)
+            {
+                return new VividMeshletRendererResources(
+                    terrain,
+                    null,
+                    null,
+                    Array.Empty<VividMeshletCollectionAsset>(),
+                    Array.Empty<Bounds>()
+                );
+            }
+
+            IReadOnlyList<VividTerrainChunkData> chunks = terrainData.Chunks;
+            var meshletCollections = new VividMeshletCollectionAsset[chunks.Count];
+            var localBounds = new Bounds[chunks.Count];
+            for (int chunkIndex = 0; chunkIndex < chunks.Count; chunkIndex++)
+            {
+                meshletCollections[chunkIndex] = chunks[chunkIndex].MeshletCollection;
+                localBounds[chunkIndex] = chunks[chunkIndex].LocalBounds;
+            }
+
+            return new VividMeshletRendererResources(
+                terrain,
+                terrainData,
+                terrainData.SourceMaterial,
+                meshletCollections,
+                localBounds
+            );
+        }
+
+        private static VividMeshletRendererRenderData CreateTerrainTransformOnlyData(
+            VividTerrain terrain,
+            VividMeshletRendererRenderData trackedData
+        )
+        {
+            Matrix4x4 objectToWorldMatrix = terrain.transform.localToWorldMatrix;
+            trackedData.objectToWorldMatrix = objectToWorldMatrix;
+            trackedData.worldToObjectMatrix = terrain.transform.worldToLocalMatrix;
+            trackedData.worldBounds = TransformBounds(trackedData.localBounds, objectToWorldMatrix);
+            return trackedData;
+        }
+
         private static VividMeshletRendererFlags BuildFlags(
             MeshletRenderer meshletRenderer,
             bool isValid
@@ -410,6 +576,44 @@ namespace VividRP.Runtime.GPUDriven
             if (meshletRenderer.sourceWasSkinned)
             {
                 flags |= VividMeshletRendererFlags.Skinned;
+            }
+
+            return flags;
+        }
+
+        private static VividMeshletRendererFlags BuildTerrainFlags(VividTerrain terrain)
+        {
+            VividMeshletRendererFlags flags = VividMeshletRendererFlags.SourceRendererEnabled;
+            GameObject targetGameObject = terrain.gameObject;
+
+            if (targetGameObject.activeInHierarchy)
+            {
+                flags |= VividMeshletRendererFlags.ActiveInHierarchy;
+            }
+
+            if (terrain.enabled)
+            {
+                flags |= VividMeshletRendererFlags.Enabled;
+            }
+
+            if (terrain.HasBakedData)
+            {
+                flags |= VividMeshletRendererFlags.Valid;
+            }
+
+            if (terrain.ShadowCastingMode != ShadowCastingMode.Off)
+            {
+                flags |= VividMeshletRendererFlags.CastShadows;
+            }
+
+            if (terrain.ReceiveShadows)
+            {
+                flags |= VividMeshletRendererFlags.ReceiveShadows;
+            }
+
+            if (targetGameObject.isStatic)
+            {
+                flags |= VividMeshletRendererFlags.Static;
             }
 
             return flags;

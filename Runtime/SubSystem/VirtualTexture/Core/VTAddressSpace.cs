@@ -16,6 +16,9 @@ namespace VividRP.Runtime
         private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
+        private Texture2DArray m_ResidentPageStagingTexture;
+        private Color32[] m_ResidentPageScratchPixels;
+        private IVTPageProducer m_FallbackResidentPageProducer;
 
         internal VTPageTableSpace(
             int spaceId,
@@ -122,6 +125,58 @@ namespace VividRP.Runtime
             return true;
         }
 
+        internal bool TryMakePageResident(
+            in VirtualTexturePageCoord coord,
+            bool locked,
+            int frameIndex)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(Descriptor, coord))
+                return false;
+
+            if (m_PageTableUpdater.TryGetEntry(Descriptor, m_MipOffsets, coord, out VirtualTexturePageTableEntry entry)
+                && entry.Resident)
+            {
+                bool lockUpdated = m_ResidencyManager.TrySetPageLocked(
+                    Descriptor,
+                    m_MipOffsets,
+                    coord,
+                    locked);
+                RebuildAndRefreshPageTable();
+                return lockUpdated;
+            }
+
+            if (!m_ResidencyManager.TryAllocateResidentPage(
+                    Descriptor,
+                    m_MipOffsets,
+                    SpaceId,
+                    coord,
+                    VirtualTextureViewId.Invalid,
+                    frameIndex,
+                    locked,
+                    out VTRequest request))
+            {
+                return false;
+            }
+
+            try
+            {
+                if (!TryUploadResidentPage(request, allowFallbackProducer: false))
+                {
+                    RollbackResidentPage(coord);
+                    return false;
+                }
+            }
+            catch
+            {
+                RollbackResidentPage(coord);
+                throw;
+            }
+
+            m_ResidencyManager.TrySetPageLocked(Descriptor, m_MipOffsets, coord, locked);
+            RebuildAndRefreshPageTable();
+            return true;
+        }
+
         internal bool TryGetPageTableEntry(in VirtualTexturePageCoord coord, out VirtualTexturePageTableEntry entry)
         {
             return m_PageTableUpdater.TryGetEntry(Descriptor, m_MipOffsets, coord, out entry);
@@ -177,6 +232,10 @@ namespace VividRP.Runtime
 
         public void Dispose()
         {
+            CoreUtils.Destroy(m_ResidentPageStagingTexture);
+            m_ResidentPageStagingTexture = null;
+            m_ResidentPageScratchPixels = null;
+            m_FallbackResidentPageProducer = null;
             m_PageTableUpdater.Dispose();
             m_ResidencyManager.Dispose();
         }
@@ -186,92 +245,111 @@ namespace VividRP.Runtime
             int lowestMip = Descriptor.MipCount - 1;
             int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(Descriptor.VirtualPageCountX, lowestMip);
             int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(Descriptor.VirtualPageCountY, lowestMip);
-            IVTPageProducer bootstrapProducer = m_PageProducer;
-            IVTPageProducer fallbackBootstrapProducer = null;
-            Texture2DArray bootstrapTexture = VTPageUploadUtility.CreateStagingTexture(
-                Descriptor.SpaceName,
-                Descriptor.PhysicalPageSize,
-                StackDesc.LayerCount,
-                "Bootstrap");
-            var scratchPixels = new Color32[Descriptor.PhysicalPageSize * Descriptor.PhysicalPageSize];
+            for (int y = 0; y < pageCountY; y++)
+            {
+                for (int x = 0; x < pageCountX; x++)
+                {
+                    var coord = new VirtualTexturePageCoord(x, y, lowestMip);
+                    if (!m_ResidencyManager.TryAllocateResidentPage(
+                            Descriptor,
+                            m_MipOffsets,
+                            SpaceId,
+                            coord,
+                            VirtualTextureViewId.Invalid,
+                            frameIndex: 0,
+                            locked: true,
+                            out VTRequest request))
+                    {
+                        throw new InvalidOperationException(
+                            $"[VividRP] Failed to seed VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
+                    }
 
+                    if (!TryUploadResidentPage(request, allowFallbackProducer: true))
+                    {
+                        throw new InvalidOperationException(
+                            $"[VividRP] Failed to produce VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
+                    }
+                }
+            }
+        }
+
+        private bool TryUploadResidentPage(in VTRequest request, bool allowFallbackProducer)
+        {
+            if (!TryProduceUploadPayload(m_PageProducer, request, out VTPageUploadPayload payload))
+            {
+                if (!allowFallbackProducer)
+                    return false;
+
+                m_FallbackResidentPageProducer ??=
+                    VTRuntimeProducerUtility.CreateAdapter(VTProceduralPageProducer.Instance, Descriptor);
+                if (!TryProduceUploadPayload(m_FallbackResidentPageProducer, request, out payload))
+                    return false;
+            }
+
+            EnsureResidentPageUploadStorage();
             try
             {
-                for (int y = 0; y < pageCountY; y++)
+                VTPageUploadUtility.FinalizePayloadRender(payload, null);
+                for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
                 {
-                    for (int x = 0; x < pageCountX; x++)
-                    {
-                        var coord = new VirtualTexturePageCoord(x, y, lowestMip);
-                        if (!m_ResidencyManager.TryAllocateResidentPage(
-                                Descriptor,
-                                m_MipOffsets,
-                                SpaceId,
-                                coord,
-                                VirtualTextureViewId.Invalid,
-                                frameIndex: 0,
-                                locked: true,
-                                out VTRequest request))
-                        {
-                            throw new InvalidOperationException(
-                                $"[VividRP] Failed to seed VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
-                        }
-
-                        if (!TryProduceUploadPayload(bootstrapProducer, request, out VTPageUploadPayload payload))
-                        {
-                            fallbackBootstrapProducer ??=
-                                VTRuntimeProducerUtility.CreateAdapter(VTProceduralPageProducer.Instance, Descriptor);
-
-                            if (!TryProduceUploadPayload(fallbackBootstrapProducer, request, out payload))
-                            {
-                                throw new InvalidOperationException(
-                                    $"[VividRP] Failed to produce VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
-                            }
-                        }
-
-                        try
-                        {
-                            VTPageUploadUtility.FinalizePayloadRender(payload, null);
-                            for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
-                            {
-                                VTPageUploadUtility.WritePayloadLayerToStagingTexture(
-                                    bootstrapTexture,
-                                    layerIndex,
-                                    scratchPixels,
-                                    payload,
-                                    layerIndex);
-                            }
-                        }
-                        finally
-                        {
-                            payload.Finalizer?.Dispose();
-                        }
-
-                        bootstrapTexture.Apply(false, false);
-                        for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
-                        {
-                            int physicalGroup = PhysicalPool.GetLayerPhysicalGroup(layerIndex);
-                            Texture2DArray physicalCache = PhysicalPool.GetTextureForGroup(physicalGroup);
-                            if (physicalCache == null)
-                                continue;
-
-                            int groupLayerCount = Mathf.Max(1, PhysicalPool.GetGroupLayerCount(physicalGroup));
-                            int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
-                            int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
-                            Graphics.CopyTexture(
-                                bootstrapTexture,
-                                layerIndex,
-                                0,
-                                physicalCache,
-                                destinationSlice,
-                                0);
-                        }
-                    }
+                    VTPageUploadUtility.WritePayloadLayerToStagingTexture(
+                        m_ResidentPageStagingTexture,
+                        layerIndex,
+                        m_ResidentPageScratchPixels,
+                        payload,
+                        layerIndex);
                 }
             }
             finally
             {
-                CoreUtils.Destroy(bootstrapTexture);
+                payload.Finalizer?.Dispose();
             }
+
+            m_ResidentPageStagingTexture.Apply(false, false);
+            for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
+            {
+                int physicalGroup = PhysicalPool.GetLayerPhysicalGroup(layerIndex);
+                Texture2DArray physicalCache = PhysicalPool.GetTextureForGroup(physicalGroup);
+                if (physicalCache == null)
+                    continue;
+
+                int groupLayerCount = Mathf.Max(1, PhysicalPool.GetGroupLayerCount(physicalGroup));
+                int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
+                Graphics.CopyTexture(
+                    m_ResidentPageStagingTexture,
+                    layerIndex,
+                    0,
+                    physicalCache,
+                    destinationSlice,
+                    0);
+            }
+
+            return true;
+        }
+
+        private void EnsureResidentPageUploadStorage()
+        {
+            m_ResidentPageStagingTexture ??= VTPageUploadUtility.CreateStagingTexture(
+                Descriptor.SpaceName,
+                Descriptor.PhysicalPageSize,
+                StackDesc.LayerCount,
+                "ResidentPage");
+            m_ResidentPageScratchPixels ??=
+                new Color32[Descriptor.PhysicalPageSize * Descriptor.PhysicalPageSize];
+        }
+
+        private void RollbackResidentPage(in VirtualTexturePageCoord coord)
+        {
+            m_ResidencyManager.FlushRegion(coord.Mip, new RectInt(coord.X, coord.Y, 1, 1));
+            RebuildAndRefreshPageTable();
+        }
+
+        private void RebuildAndRefreshPageTable()
+        {
+            m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
+            m_PageTableUpdater.RefreshBuffer();
         }
 
         private static void BuildLayerFallbacks(in VirtualTextureSpaceDesc desc, Vector4[] output)

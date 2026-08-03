@@ -70,6 +70,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VividSurfaceSampling.hlsl"));
             Assert.That(source, Does.Contain("PullSurfaceBindingData(materialData.SurfaceBindingIndex)"));
             Assert.That(source, Does.Contain("VividSampleBaseColor(surfaceBindingData, uv)"));
+            Assert.That(source, Does.Contain("clip(albedo.a - materialData.AlphaClipThreshold);"));
             Assert.That(source, Does.Not.Contain("GetBindlessTexture2D("));
             Assert.That(source, Does.Not.Contain("GPUDriven/Bindless.hlsl"));
         }

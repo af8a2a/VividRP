@@ -9,6 +9,12 @@ namespace VividRP.Runtime.GPUDriven
         Bindless = 1,
     }
 
+    internal enum GPUDrivenSurfaceAddressMode
+    {
+        Repeat,
+        Clamp,
+    }
+
     internal readonly struct GPUDrivenSurfaceTextureSet
     {
         internal GPUDrivenSurfaceTextureSet(Texture baseColor, Texture normal, Texture mask)
@@ -16,6 +22,12 @@ namespace VividRP.Runtime.GPUDriven
             BaseColor = baseColor;
             Normal = normal;
             Mask = mask;
+            AddressMode = ResolveAddressMode(baseColor ?? normal ?? mask, out bool unsupportedAddressMode);
+            bool baseColorIsMixed = IsMixedAddressMode(baseColor, AddressMode, ref unsupportedAddressMode);
+            bool normalIsMixed = IsMixedAddressMode(normal, AddressMode, ref unsupportedAddressMode);
+            bool maskIsMixed = IsMixedAddressMode(mask, AddressMode, ref unsupportedAddressMode);
+            HasMixedAddressModes = baseColorIsMixed || normalIsMixed || maskIsMixed;
+            HasUnsupportedAddressMode = unsupportedAddressMode;
         }
 
         internal Texture BaseColor { get; }
@@ -23,6 +35,39 @@ namespace VividRP.Runtime.GPUDriven
         internal Texture Normal { get; }
 
         internal Texture Mask { get; }
+
+        internal GPUDrivenSurfaceAddressMode AddressMode { get; }
+
+        internal bool HasMixedAddressModes { get; }
+
+        internal bool HasUnsupportedAddressMode { get; }
+
+        private static bool IsMixedAddressMode(
+            Texture texture,
+            GPUDrivenSurfaceAddressMode expected,
+            ref bool unsupportedAddressMode)
+        {
+            if (texture == null)
+                return false;
+
+            GPUDrivenSurfaceAddressMode actual = ResolveAddressMode(texture, out bool unsupported);
+            unsupportedAddressMode |= unsupported;
+            return actual != expected;
+        }
+
+        private static GPUDrivenSurfaceAddressMode ResolveAddressMode(
+            Texture texture,
+            out bool unsupported)
+        {
+            unsupported = false;
+            if (texture == null || texture.wrapMode == TextureWrapMode.Repeat)
+                return GPUDrivenSurfaceAddressMode.Repeat;
+            if (texture.wrapMode == TextureWrapMode.Clamp)
+                return GPUDrivenSurfaceAddressMode.Clamp;
+
+            unsupported = true;
+            return GPUDrivenSurfaceAddressMode.Repeat;
+        }
     }
 
     internal readonly struct GPUDrivenTextureBackendStats

@@ -31,9 +31,20 @@ bool VividSurfaceHasMask(const VividSurfaceBindingData bindingData)
     return (bindingData.Flags & VIVIDSURFACEBINDINGFLAGS_MASK) != 0u;
 }
 
+bool VividSurfaceUsesClamp(const VividSurfaceBindingData bindingData)
+{
+    return bindingData.UVScaleBias.x < 0.0f;
+}
+
+float2 VividGetSurfaceBindingUVScale(const VividSurfaceBindingData bindingData)
+{
+    return abs(bindingData.UVScaleBias.xy);
+}
+
 float2 VividApplySurfaceBindingUV(const VividSurfaceBindingData bindingData, const float2 uv)
 {
-    return frac(uv) * bindingData.UVScaleBias.xy + bindingData.UVScaleBias.zw;
+    float2 localUv = VividSurfaceUsesClamp(bindingData) ? saturate(uv) : frac(uv);
+    return localUv * VividGetSurfaceBindingUVScale(bindingData) + bindingData.UVScaleBias.zw;
 }
 
 uint VividGetVirtualTextureResourceLayer(uint resource)
@@ -66,8 +77,9 @@ VividSurfaceSampleContext VividCreateSurfaceSampleContextGrad(
 {
     VividSurfaceSampleContext context;
     context.virtualUv = VividApplySurfaceBindingUV(bindingData, uv);
-    context.virtualUvDdx = uvDdx * bindingData.UVScaleBias.xy;
-    context.virtualUvDdy = uvDdy * bindingData.UVScaleBias.xy;
+    float2 bindingScale = VividGetSurfaceBindingUVScale(bindingData);
+    context.virtualUvDdx = uvDdx * bindingScale;
+    context.virtualUvDdy = uvDdy * bindingScale;
     context.requestedMips = (VTMipRange)0;
     context.lowerResolved = (VTResolvedAddress)0;
     context.upperResolved = (VTResolvedAddress)0;
@@ -204,6 +216,8 @@ float4 VividSampleMaskGrad(
 
 float4 VividSampleBaseColor(const VividSurfaceBindingData bindingData, const float2 uv)
 {
+    // Visibility and shadow passes intentionally skip feedback. Their implicit-gradient
+    // samples resolve through the material's locked mip tail until Resolve loads finer pages.
     VividSurfaceSampleContext context = VividCreateSurfaceSampleContextGrad(
         bindingData,
         uv,

@@ -55,6 +55,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
             uint baseColorResource = ResolveResource(textures.BaseColor, VividSurfaceBindingFlags.BaseColor, ref flags);
             uint normalResource = ResolveResource(textures.Normal, VividSurfaceBindingFlags.Normal, ref flags);
             uint maskResource = ResolveResource(textures.Mask, VividSurfaceBindingFlags.Mask, ref flags);
+            float addressScaleSign = textures.AddressMode == GPUDrivenSurfaceAddressMode.Clamp ? -1.0f : 1.0f;
 
             return new VividSurfaceBindingData
             {
@@ -62,7 +63,7 @@ namespace VividRP.Runtime.GPUDriven.Bindless
                 NormalResource = normalResource,
                 MaskResource = maskResource,
                 Flags = flags,
-                UVScaleBias = new float4(1.0f, 1.0f, 0.0f, 0.0f),
+                UVScaleBias = new float4(addressScaleSign, addressScaleSign, 0.0f, 0.0f),
             };
         }
 

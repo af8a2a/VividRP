@@ -570,6 +570,16 @@ namespace VividRP.Runtime
                    && addressSpace.TrySetPageLocked(coord, locked);
         }
 
+        internal static bool TryMakePageResident(
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            bool locked = true,
+            int frameIndex = 0)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.TryMakePageResident(coord, locked, frameIndex);
+        }
+
         internal static void InjectCompletedReadbackForTesting(CameraType cameraType, params ulong[] requestKeys)
         {
             InjectCompletedReadbackStatsForTesting(

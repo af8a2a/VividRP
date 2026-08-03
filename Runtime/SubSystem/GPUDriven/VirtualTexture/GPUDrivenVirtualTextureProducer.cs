@@ -20,10 +20,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Texture2D baseColor,
                 Texture2D normal,
                 Texture2D mask,
-                int pageSize)
+                int pageSize,
+                bool repeat)
             {
                 PageRegion = pageRegion;
                 MaxMip = maxMip;
+                Repeat = repeat;
                 Sources = new[]
                 {
                     CreateSource(baseColor),
@@ -41,6 +43,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal RectInt PageRegion { get; }
 
             internal int MaxMip { get; }
+
+            internal bool Repeat { get; }
 
             internal VTTexture2DPageProducer[] Sources { get; }
 
@@ -134,7 +138,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             Texture2D baseColor,
             Texture2D normal,
             Texture2D mask,
-            int pageSize)
+            int pageSize,
+            bool repeat)
         {
             if (pageRegion.width <= 0 || pageRegion.height != pageRegion.width)
                 throw new ArgumentException("GPUDriven VT entries must be non-empty square page regions.", nameof(pageRegion));
@@ -155,7 +160,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 baseColor,
                 normal,
                 mask,
-                pageSize);
+                pageSize,
+                repeat);
             for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
             {
                 for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
@@ -242,7 +248,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 {
                     int logicalX = localPageX * desc.PageSize + x - desc.BorderSize;
                     float u = (logicalX + 0.5f) / logicalDimension;
-                    outputPixels[y * physicalPageSize + x] = source.SampleSource(sourceMip, u, v, true);
+                    outputPixels[y * physicalPageSize + x] = source.SampleSource(sourceMip, u, v, entry.Repeat);
                 }
             }
         }

@@ -74,6 +74,18 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.UVScaleBias, Is.EqualTo(new float4(2.0f / 128.0f, 2.0f / 128.0f, 0.0f, 0.0f)));
                 Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
                 Assert.That(backend.AllocatedPageCount, Is.EqualTo(4));
+                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
+                var mipTailCoord = new VirtualTexturePageCoord(0, 0, 1);
+                Assert.That(
+                    VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                        backend.VirtualTextureSpaceId,
+                        mipTailCoord,
+                        out VirtualTexturePageTableEntry mipTailEntry),
+                    Is.True);
+                Assert.That(mipTailEntry.Resident, Is.True);
+                Assert.That(mipTailEntry.Fallback, Is.False);
+                Assert.That(mipTailEntry.Locked, Is.True);
+                Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(backend.VirtualTextureSpaceId), Is.EqualTo(2));
                 Assert.That(backend.BindingRevision, Is.GreaterThan(revisionBefore));
             }
             finally
@@ -101,6 +113,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(second.BaseColorResource, Is.EqualTo(first.BaseColorResource));
                 Assert.That(second.UVScaleBias, Is.EqualTo(first.UVScaleBias));
                 Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
+                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
                 Assert.That(backend.BindingRevision, Is.EqualTo(revisionAfterFirst));
             }
             finally
@@ -123,10 +136,72 @@ namespace VividRP.Editor.Tests
             Assert.That(binding.MaskResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
             Assert.That(binding.UVScaleBias, Is.EqualTo(new float4(1.0f, 1.0f, 0.0f, 0.0f)));
             Assert.That(backend.AtlasEntryCount, Is.Zero);
+            Assert.That(backend.ResidentMipTailCount, Is.Zero);
         }
 
         [Test]
-        public void RepeatSourceSampling_LazilyBuildsReadableMipData()
+        public void CreateSurfaceBinding_EncodesClampAndSeedsLockedMipTail()
+        {
+            Texture2D baseColor = null;
+            try
+            {
+                baseColor = new Texture2D(128, 128)
+                {
+                    wrapMode = TextureWrapMode.Clamp,
+                };
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+
+                VividSurfaceBindingData binding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(baseColor, null, null));
+
+                Assert.That(
+                    binding.UVScaleBias,
+                    Is.EqualTo(new float4(-1.0f / 128.0f, -1.0f / 128.0f, 0.0f, 0.0f)));
+                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
+                var mipTailCoord = new VirtualTexturePageCoord(0, 0, 0);
+                Assert.That(
+                    VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                        backend.VirtualTextureSpaceId,
+                        mipTailCoord,
+                        out VirtualTexturePageTableEntry mipTailEntry),
+                    Is.True);
+                Assert.That(mipTailEntry.Resident, Is.True);
+                Assert.That(mipTailEntry.Locked, Is.True);
+            }
+            finally
+            {
+                Destroy(baseColor);
+            }
+        }
+
+        [Test]
+        public void SurfaceTextureSet_UsesFirstAvailableLayerAndReportsFallbackModes()
+        {
+            Texture2D baseColor = null;
+            Texture2D normal = null;
+            Texture2D mask = null;
+            try
+            {
+                baseColor = new Texture2D(1, 1) { wrapMode = TextureWrapMode.Clamp };
+                normal = new Texture2D(1, 1) { wrapMode = TextureWrapMode.Repeat };
+                mask = new Texture2D(1, 1) { wrapMode = TextureWrapMode.Mirror };
+
+                var textures = new GPUDrivenSurfaceTextureSet(baseColor, normal, mask);
+
+                Assert.That(textures.AddressMode, Is.EqualTo(GPUDrivenSurfaceAddressMode.Clamp));
+                Assert.That(textures.HasMixedAddressModes, Is.True);
+                Assert.That(textures.HasUnsupportedAddressMode, Is.True);
+            }
+            finally
+            {
+                Destroy(baseColor);
+                Destroy(normal);
+                Destroy(mask);
+            }
+        }
+
+        [Test]
+        public void SourceSampling_HonorsRepeatAndClampAfterLazyMipBuild()
         {
             Texture2D source = null;
             try
@@ -142,9 +217,11 @@ namespace VividRP.Editor.Tests
                 source.Apply(false, false);
 
                 var producer = new VTTexture2DPageProducer(source);
-                Color32 sample = producer.SampleSource(0, 0.25f, 0.25f, true);
+                Color32 repeatSample = producer.SampleSource(0, 1.25f, 0.25f, true);
+                Color32 clampSample = producer.SampleSource(0, 1.25f, 0.25f, false);
 
-                Assert.That(sample, Is.EqualTo(new Color32(255, 0, 0, 255)));
+                Assert.That(repeatSample, Is.EqualTo(new Color32(255, 0, 0, 255)));
+                Assert.That(clampSample, Is.EqualTo(new Color32(0, 255, 0, 255)));
             }
             finally
             {
@@ -170,7 +247,28 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VividSampleBaseColorGrad("));
             Assert.That(source, Does.Contain("VividSampleNormalGrad("));
             Assert.That(source, Does.Contain("VividSampleMaskGrad("));
+            Assert.That(source, Does.Contain("VividSurfaceUsesClamp("));
+            Assert.That(source, Does.Contain("saturate(uv)"));
+            Assert.That(source, Does.Contain("frac(uv)"));
+            Assert.That(source, Does.Contain("ddx(uv)"));
+            Assert.That(source, Does.Contain("ddy(uv)"));
             Assert.That(source, Does.Not.Contain("GetBindlessTexture2D("));
+        }
+
+        [Test]
+        public void BindlessSamplingContract_HonorsRepeatAndClampForImplicitAndGradientSamples()
+        {
+            string source = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Public",
+                "GPUDriven",
+                "BindlessSurfaceSampling.hlsl"));
+
+            Assert.That(source, Does.Contain("VividSurfaceUsesClamp("));
+            Assert.That(source, Does.Contain("sampler_LinearClamp"));
+            Assert.That(source, Does.Contain("sampler_LinearRepeat"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_GRAD"));
         }
 
         private static string GetPackageFilePath(params string[] parts)

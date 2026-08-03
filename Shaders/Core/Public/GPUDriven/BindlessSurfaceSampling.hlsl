@@ -8,6 +8,7 @@ struct VividSurfaceSampleContext
     float2 uv;
     float2 uvDdx;
     float2 uvDdy;
+    bool clamp;
 };
 
 bool VividSurfaceHasBaseColor(const VividSurfaceBindingData bindingData)
@@ -25,9 +26,19 @@ bool VividSurfaceHasMask(const VividSurfaceBindingData bindingData)
     return (bindingData.Flags & VIVIDSURFACEBINDINGFLAGS_MASK) != 0u;
 }
 
+bool VividSurfaceUsesClamp(const VividSurfaceBindingData bindingData)
+{
+    return bindingData.UVScaleBias.x < 0.0f;
+}
+
+float2 VividGetSurfaceBindingUVScale(const VividSurfaceBindingData bindingData)
+{
+    return abs(bindingData.UVScaleBias.xy);
+}
+
 float2 VividApplySurfaceBindingUV(const VividSurfaceBindingData bindingData, const float2 uv)
 {
-    return uv * bindingData.UVScaleBias.xy + bindingData.UVScaleBias.zw;
+    return uv * VividGetSurfaceBindingUVScale(bindingData) + bindingData.UVScaleBias.zw;
 }
 
 VividSurfaceSampleContext VividCreateSurfaceSampleContextGrad(
@@ -38,8 +49,10 @@ VividSurfaceSampleContext VividCreateSurfaceSampleContextGrad(
 {
     VividSurfaceSampleContext context;
     context.uv = VividApplySurfaceBindingUV(bindingData, uv);
-    context.uvDdx = uvDdx * bindingData.UVScaleBias.xy;
-    context.uvDdy = uvDdy * bindingData.UVScaleBias.xy;
+    float2 bindingScale = VividGetSurfaceBindingUVScale(bindingData);
+    context.uvDdx = uvDdx * bindingScale;
+    context.uvDdy = uvDdy * bindingScale;
+    context.clamp = VividSurfaceUsesClamp(bindingData);
     return context;
 }
 
@@ -59,7 +72,10 @@ float4 VividSampleBaseColor(const VividSurfaceBindingData bindingData, const flo
     if (VividSurfaceHasBaseColor(bindingData))
     {
         Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(bindingData.BaseColorResource));
-        return SAMPLE_TEXTURE2D(texture, sampler_LinearRepeat, VividApplySurfaceBindingUV(bindingData, uv));
+        float2 sampleUv = VividApplySurfaceBindingUV(bindingData, uv);
+        return VividSurfaceUsesClamp(bindingData)
+            ? SAMPLE_TEXTURE2D(texture, sampler_LinearClamp, sampleUv)
+            : SAMPLE_TEXTURE2D(texture, sampler_LinearRepeat, sampleUv);
     }
 
     return 1.0f.xxxx;
@@ -73,7 +89,9 @@ float4 VividSampleBaseColorGrad(
     if (VividSurfaceHasBaseColor(bindingData))
     {
         Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(bindingData.BaseColorResource));
-        return SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, context.uv, context.uvDdx, context.uvDdy);
+        return context.clamp
+            ? SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearClamp, context.uv, context.uvDdx, context.uvDdy)
+            : SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, context.uv, context.uvDdx, context.uvDdy);
     }
 
     return 1.0f.xxxx;
@@ -97,7 +115,9 @@ float4 VividSampleNormalGrad(
     if (VividSurfaceHasNormal(bindingData))
     {
         Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(bindingData.NormalResource));
-        return SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, context.uv, context.uvDdx, context.uvDdy);
+        return context.clamp
+            ? SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearClamp, context.uv, context.uvDdx, context.uvDdy)
+            : SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, context.uv, context.uvDdx, context.uvDdy);
     }
 
     return float4(0.5f, 0.5f, 1.0f, 0.5f);
@@ -121,7 +141,9 @@ float4 VividSampleMaskGrad(
     if (VividSurfaceHasMask(bindingData))
     {
         Texture2D texture = GetBindlessTexture2D(NonUniformResourceIndex(bindingData.MaskResource));
-        return SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, context.uv, context.uvDdx, context.uvDdy);
+        return context.clamp
+            ? SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearClamp, context.uv, context.uvDdx, context.uvDdy)
+            : SAMPLE_TEXTURE2D_GRAD(texture, sampler_LinearRepeat, context.uv, context.uvDdx, context.uvDdy);
     }
 
     return 1.0f.xxxx;

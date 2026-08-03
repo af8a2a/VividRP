@@ -141,6 +141,32 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ResolveConfiguredTextureBackendMode_DefaultsToVirtualTextureIndependentlyOfFeatureState()
+        {
+            Assert.That(
+                VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(null),
+                Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
+
+            var asset = ScriptableObject.CreateInstance<VividRenderPipelineAsset>();
+            try
+            {
+                Assert.That(asset.EnableGPUDriven, Is.False);
+                Assert.That(
+                    VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(asset),
+                    Is.EqualTo(GPUDrivenTextureBackendMode.VirtualTexture));
+
+                asset.GPUDrivenTextureBackend = GPUDrivenTextureBackendMode.Bindless;
+                Assert.That(
+                    VividGPUDrivenSystem.ResolveConfiguredTextureBackendMode(asset),
+                    Is.EqualTo(GPUDrivenTextureBackendMode.Bindless));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
         public void Deinitialize_DisposesCurrentSingletonInstance()
         {
             var system = VividGPUDrivenSystem.instance;

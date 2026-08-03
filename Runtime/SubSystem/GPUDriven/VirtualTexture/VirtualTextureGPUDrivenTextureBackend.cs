@@ -16,18 +16,23 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int MaxAllocationPageCount = AtlasPageCount / 2;
         internal const string SpaceName = "VividGPUDriven.StaticMesh";
 
-        private const int CachePageCount = 256;
+        private const int CachePageCount = 512;
         private const int MaxUploadsPerFrame = 16;
         private const int FeedbackCapacity = 65536;
         private const int ResourceLayerBitCount = 8;
 
         private readonly struct TextureSetKey : IEquatable<TextureSetKey>
         {
-            internal TextureSetKey(Texture2D baseColor, Texture2D normal, Texture2D mask)
+            internal TextureSetKey(
+                Texture2D baseColor,
+                Texture2D normal,
+                Texture2D mask,
+                GPUDrivenSurfaceAddressMode addressMode)
             {
                 BaseColorId = baseColor != null ? baseColor.GetEntityId() : EntityId.None;
                 NormalId = normal != null ? normal.GetEntityId() : EntityId.None;
                 MaskId = mask != null ? mask.GetEntityId() : EntityId.None;
+                AddressMode = addressMode;
             }
 
             private EntityId BaseColorId { get; }
@@ -36,11 +41,14 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             private EntityId MaskId { get; }
 
+            private GPUDrivenSurfaceAddressMode AddressMode { get; }
+
             public bool Equals(TextureSetKey other)
             {
                 return BaseColorId == other.BaseColorId
                        && NormalId == other.NormalId
-                       && MaskId == other.MaskId;
+                       && MaskId == other.MaskId
+                       && AddressMode == other.AddressMode;
             }
 
             public override bool Equals(object obj)
@@ -50,7 +58,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             public override int GetHashCode()
             {
-                return HashCode.Combine(BaseColorId, NormalId, MaskId);
+                return HashCode.Combine(BaseColorId, NormalId, MaskId, AddressMode);
             }
         }
 
@@ -63,6 +71,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private uint m_BindingRevision = 1;
         private uint m_CreateResourceCallCountThisFrame;
         private int m_AllocatedPageCount;
+        private int m_ResidentMipTailCount;
         private bool m_IsDisposed;
 
         internal VirtualTextureGPUDrivenTextureBackend()
@@ -119,6 +128,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         internal int AllocatedPageCount => m_AllocatedPageCount;
 
+        internal int ResidentMipTailCount => m_ResidentMipTailCount;
+
         public void PrepareFrame()
         {
             ThrowIfDisposed();
@@ -137,7 +148,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             Texture2D baseColor = ResolveTexture2D(textures.BaseColor);
             Texture2D normal = ResolveTexture2D(textures.Normal);
             Texture2D mask = ResolveTexture2D(textures.Mask);
-            var key = new TextureSetKey(baseColor, normal, mask);
+            var key = new TextureSetKey(baseColor, normal, mask, textures.AddressMode);
             if (m_Bindings.TryGetValue(key, out VividSurfaceBindingData existingBinding))
                 return existingBinding;
 
@@ -159,13 +170,48 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             int maxMip = Mathf.RoundToInt(Mathf.Log(allocationPageCount, 2.0f));
-            m_Producer.RegisterEntry(pageRegion, maxMip, baseColor, normal, mask, PageSize);
+            bool repeat = textures.AddressMode == GPUDrivenSurfaceAddressMode.Repeat;
+            WarnAddressModeFallback(textures, baseColor, normal, mask);
+            m_Producer.RegisterEntry(pageRegion, maxMip, baseColor, normal, mask, PageSize, repeat);
+
+            var mipTailCoord = new VirtualTexturePageCoord(
+                pageRegion.x >> maxMip,
+                pageRegion.y >> maxMip,
+                maxMip);
+            bool mipTailResident;
+            try
+            {
+                mipTailResident = VirtualTextureSystem.TryMakePageResident(
+                    VirtualTextureSpaceId,
+                    mipTailCoord,
+                    locked: true,
+                    frameIndex: Time.frameCount);
+            }
+            catch (Exception exception)
+            {
+                mipTailResident = false;
+                Debug.LogWarning(
+                    $"[VividRP] Failed to seed GPUDriven VT mip tail {mipTailCoord}: {exception.Message}");
+            }
+
+            if (!mipTailResident)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] GPUDriven VT mip tail {mipTailCoord} could not be made resident. "
+                    + "The material will use texture fallbacks to keep alpha and shadows deterministic.");
+                VividSurfaceBindingData fallbackBinding = CreateEmptyBinding();
+                m_Bindings.Add(key, fallbackBinding);
+                return fallbackBinding;
+            }
+
+            m_ResidentMipTailCount += 1;
 
             VividSurfaceBindingFlags flags = VividSurfaceBindingFlags.None;
             uint baseColorResource = CreateResource(baseColor, GPUDrivenVirtualTextureProducer.BaseColorLayerIndex, maxMip, VividSurfaceBindingFlags.BaseColor, ref flags);
             uint normalResource = CreateResource(normal, GPUDrivenVirtualTextureProducer.NormalLayerIndex, maxMip, VividSurfaceBindingFlags.Normal, ref flags);
             uint maskResource = CreateResource(mask, GPUDrivenVirtualTextureProducer.MaskLayerIndex, maxMip, VividSurfaceBindingFlags.Mask, ref flags);
             float inverseAtlasPageCount = 1.0f / AtlasPageCount;
+            float addressScaleSign = repeat ? 1.0f : -1.0f;
 
             var binding = new VividSurfaceBindingData
             {
@@ -174,8 +220,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 MaskResource = maskResource,
                 Flags = flags,
                 UVScaleBias = new float4(
-                    pageRegion.width * inverseAtlasPageCount,
-                    pageRegion.height * inverseAtlasPageCount,
+                    addressScaleSign * pageRegion.width * inverseAtlasPageCount,
+                    addressScaleSign * pageRegion.height * inverseAtlasPageCount,
                     pageRegion.x * inverseAtlasPageCount,
                     pageRegion.y * inverseAtlasPageCount),
             };
@@ -345,6 +391,28 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             flags |= flag;
             m_RegisteredTextureIds.Add(texture.GetEntityId());
             return PackResource(layerIndex, maxMip);
+        }
+
+        private static void WarnAddressModeFallback(
+            in GPUDrivenSurfaceTextureSet textures,
+            Texture2D baseColor,
+            Texture2D normal,
+            Texture2D mask)
+        {
+            string materialTextures = $"Base='{baseColor?.name ?? "None"}', Normal='{normal?.name ?? "None"}', Mask='{mask?.name ?? "None"}'";
+            if (textures.HasUnsupportedAddressMode)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] GPUDriven surfaces support Repeat and Clamp address modes. "
+                    + $"Mirror modes fall back to Repeat ({materialTextures}).");
+            }
+
+            if (textures.HasMixedAddressModes)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] GPUDriven surface layers must share one address mode. "
+                    + $"Using {textures.AddressMode} from the first available layer ({materialTextures}).");
+            }
         }
 
         private static VividSurfaceBindingData CreateEmptyBinding()

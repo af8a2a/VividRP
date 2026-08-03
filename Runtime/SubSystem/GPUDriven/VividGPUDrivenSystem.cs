@@ -95,9 +95,8 @@ namespace VividRP.Runtime.GPUDriven
         private static BackendConfiguration CreateDefaultBackendConfiguration()
         {
             VividRenderPipelineAsset asset = VividRenderPipelineAsset.GetActiveAsset();
-            GPUDrivenTextureBackendMode mode = asset?.GPUDrivenTextureBackend
-                                               ?? GPUDrivenTextureBackendMode.Bindless;
-            if (asset == null || !asset.EnableGPUDriven || mode == GPUDrivenTextureBackendMode.Bindless)
+            GPUDrivenTextureBackendMode mode = ResolveConfiguredTextureBackendMode(asset);
+            if (mode == GPUDrivenTextureBackendMode.Bindless)
                 return CreateBindlessBackendConfiguration(null);
 
             var legacyBindlessBackend = new BindlessGPUDrivenTextureBackend();
@@ -105,6 +104,13 @@ namespace VividRP.Runtime.GPUDriven
                 new VirtualTextureGPUDrivenTextureBackend(),
                 legacyBindlessBackend,
                 GPUDrivenTextureBackendMode.VirtualTexture);
+        }
+
+        internal static GPUDrivenTextureBackendMode ResolveConfiguredTextureBackendMode(
+            VividRenderPipelineAsset asset)
+        {
+            return asset?.GPUDrivenTextureBackend
+                   ?? GPUDrivenTextureBackendMode.VirtualTexture;
         }
 
         private static BackendConfiguration CreateBindlessBackendConfiguration(

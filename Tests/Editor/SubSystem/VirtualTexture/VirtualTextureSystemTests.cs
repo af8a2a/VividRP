@@ -72,6 +72,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void TryMakePageResident_ProducesAndLocksRequestedPageImmediately()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("ResidentPage", cachePageCount: 3, maxUploadsPerFrame: 1);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, VTProceduralPageProducer.Instance);
+            var coord = new VirtualTexturePageCoord(1, 2, 0);
+
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(
+                VirtualTextureSystem.TryMakePageResident(spaceId, coord, locked: true, frameIndex: 7),
+                Is.True);
+            Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(2));
+            Assert.That(
+                VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                    spaceId,
+                    coord,
+                    out VirtualTexturePageTableEntry entry),
+                Is.True);
+            Assert.That(entry.Resident, Is.True);
+            Assert.That(entry.Fallback, Is.False);
+            Assert.That(entry.PendingUpload, Is.False);
+            Assert.That(entry.Locked, Is.True);
+            Assert.That(entry.ResolvedMip, Is.EqualTo(0));
+        }
+
+        [Test]
         public void RegisterProducerAndAllocateVirtualTexture_CreateSampleableAllocationBinding()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("AllocatedVT", cachePageCount: 2, maxUploadsPerFrame: 1);

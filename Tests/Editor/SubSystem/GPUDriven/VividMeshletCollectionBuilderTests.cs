@@ -66,6 +66,31 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Generate_PreserveFinestLODLevels_KeepsOriginalLeafMeshletsWhenTruncated()
+        {
+            Mesh mesh = CreateGridMesh(64, 64);
+            var asset = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+
+            try
+            {
+                VividMeshletCollectionBuilder.Parameters parameters = CreateParameters(mesh);
+                parameters.MaxMeshLODLevelCount = 2;
+                parameters.DisableSloppySimplification = true;
+                parameters.PreserveFinestLODLevels = true;
+
+                VividMeshletCollectionBuilder.Generate(asset, parameters);
+
+                Assert.That(asset.MeshLODLevelCount, Is.InRange(1, 2));
+                Assert.That(asset.MeshLODLevelNodeCounts[^1], Is.EqualTo(asset.LeafMeshletCount));
+            }
+            finally
+            {
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        [Test]
         public void Importer_CreatesMeshletAsset_WhenMeshIsAssigned()
         {
             EnsureSupportedPlatform();

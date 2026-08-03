@@ -406,7 +406,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 meshletCollection = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
-                meshletCollection.MeshLODLevelCount = VividTerrainData.SupportedChunkLODCount;
+                meshletCollection.MeshLODLevelCount = VividTerrainData.MinimumChunkLODCount;
                 var chunkBounds = new Bounds(new Vector3(8.0f, 2.0f, 8.0f), new Vector3(16.0f, 4.0f, 16.0f));
                 terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
                 terrainData.Initialize(

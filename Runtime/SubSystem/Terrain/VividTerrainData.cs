@@ -10,6 +10,9 @@ namespace VividRP.Runtime
     {
         public const int DefaultHeightSampleStride = 1;
         public const int DefaultChunkQuadCount = 64;
+        public const int LegacyMaxMeshLODLevelCount = 1;
+        public const int DefaultMaxMeshLODLevelCount = 4;
+        public const int MaximumMeshLODLevelCount = 8;
 
         [SerializeField, Min(1)]
         private int m_HeightSampleStride;
@@ -20,14 +23,23 @@ namespace VividRP.Runtime
         [SerializeField]
         private bool m_OptimizeVertexCache;
 
+        [SerializeField, Range(1, MaximumMeshLODLevelCount)]
+        private int m_MaxMeshLODLevelCount;
+
         public VividTerrainBakeSettings(
             int heightSampleStride,
             int chunkQuadCount,
-            bool optimizeVertexCache = true)
+            bool optimizeVertexCache = true,
+            int maxMeshLODLevelCount = DefaultMaxMeshLODLevelCount)
         {
             m_HeightSampleStride = Mathf.Max(1, heightSampleStride);
             m_ChunkQuadCount = Mathf.Clamp(chunkQuadCount, 1, 256);
             m_OptimizeVertexCache = optimizeVertexCache;
+            m_MaxMeshLODLevelCount = Mathf.Clamp(
+                maxMeshLODLevelCount,
+                LegacyMaxMeshLODLevelCount,
+                MaximumMeshLODLevelCount
+            );
         }
 
         public int HeightSampleStride => Mathf.Max(1, m_HeightSampleStride);
@@ -36,10 +48,19 @@ namespace VividRP.Runtime
 
         public bool OptimizeVertexCache => m_OptimizeVertexCache;
 
+        public int MaxMeshLODLevelCount => m_MaxMeshLODLevelCount <= 0
+            ? LegacyMaxMeshLODLevelCount
+            : Mathf.Clamp(
+                m_MaxMeshLODLevelCount,
+                LegacyMaxMeshLODLevelCount,
+                MaximumMeshLODLevelCount
+            );
+
         public static VividTerrainBakeSettings Default => new(
             DefaultHeightSampleStride,
             DefaultChunkQuadCount,
-            optimizeVertexCache: true);
+            optimizeVertexCache: true,
+            maxMeshLODLevelCount: DefaultMaxMeshLODLevelCount);
     }
 
     [Serializable]
@@ -159,14 +180,17 @@ namespace VividRP.Runtime
 
         public int LODCount => HasGeometry ? Mathf.Max(0, m_MeshletCollection.MeshLODLevelCount) : 0;
 
-        public bool UsesSupportedLODCount => !HasGeometry || LODCount == VividTerrainData.SupportedChunkLODCount;
+        public bool UsesSupportedLODCount => !HasGeometry
+                                             || LODCount is >= VividTerrainData.MinimumChunkLODCount
+                                                 and <= VividTerrainData.MaximumChunkLODCount;
     }
 
     [CreateAssetMenu(menuName = "VividRP/Terrain Data", fileName = "New Vivid Terrain Data")]
     public sealed class VividTerrainData : ScriptableObject
     {
         public const uint CurrentBakeVersion = 1u;
-        public const int SupportedChunkLODCount = 1;
+        public const int MinimumChunkLODCount = VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount;
+        public const int MaximumChunkLODCount = VividTerrainBakeSettings.MaximumMeshLODLevelCount;
 
         [SerializeField, HideInInspector]
         private uint m_BakeVersion = CurrentBakeVersion;
@@ -247,6 +271,33 @@ namespace VividRP.Runtime
             }
         }
 
+        public Vector2Int GeometryChunkLODRange
+        {
+            get
+            {
+                int minimumLODCount = int.MaxValue;
+                int maximumLODCount = 0;
+                if (m_Chunks != null)
+                {
+                    for (int chunkIndex = 0; chunkIndex < m_Chunks.Length; chunkIndex++)
+                    {
+                        VividTerrainChunkData chunk = m_Chunks[chunkIndex];
+                        if (!chunk.HasGeometry)
+                        {
+                            continue;
+                        }
+
+                        minimumLODCount = Mathf.Min(minimumLODCount, chunk.LODCount);
+                        maximumLODCount = Mathf.Max(maximumLODCount, chunk.LODCount);
+                    }
+                }
+
+                return maximumLODCount > 0
+                    ? new Vector2Int(minimumLODCount, maximumLODCount)
+                    : Vector2Int.zero;
+            }
+        }
+
         public bool TryValidate(out string reason)
         {
             if (m_BakeVersion != CurrentBakeVersion)
@@ -303,7 +354,13 @@ namespace VividRP.Runtime
 
                 if (!chunk.UsesSupportedLODCount)
                 {
-                    reason = $"Chunk {chunk.Coordinate} contains {chunk.LODCount} mesh LOD levels; this terrain stage requires exactly {SupportedChunkLODCount}.";
+                    reason = $"Chunk {chunk.Coordinate} contains {chunk.LODCount} mesh LOD levels; supported terrain chunks require {MinimumChunkLODCount}..{MaximumChunkLODCount}.";
+                    return false;
+                }
+
+                if (chunk.HasGeometry && chunk.LODCount > m_BakeSettings.MaxMeshLODLevelCount)
+                {
+                    reason = $"Chunk {chunk.Coordinate} contains {chunk.LODCount} mesh LOD levels, exceeding its baked limit of {m_BakeSettings.MaxMeshLODLevelCount}.";
                     return false;
                 }
             }

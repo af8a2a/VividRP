@@ -33,7 +33,12 @@ namespace VividRP.Editor.TerrainTools
                 EditorGUILayout.Vector3Field("Terrain Size", data.Size);
                 EditorGUILayout.Vector2IntField("Chunk Grid", data.ChunkGridSize);
                 EditorGUILayout.IntField("Geometry Chunks", data.GeometryChunkCount);
-                EditorGUILayout.IntField("Supported LOD Levels", VividTerrainData.SupportedChunkLODCount);
+                EditorGUILayout.IntField("Baked LOD Limit", data.BakeSettings.MaxMeshLODLevelCount);
+                Vector2Int lodRange = data.GeometryChunkLODRange;
+                EditorGUILayout.TextField(
+                    "Chunk LOD Range",
+                    lodRange == Vector2Int.zero ? "No geometry" : $"{lodRange.x}..{lodRange.y}"
+                );
                 EditorGUILayout.IntField("Surface Layers", data.Layers.Count);
             }
 
@@ -48,8 +53,8 @@ namespace VividRP.Editor.TerrainTools
 
             EditorGUILayout.HelpBox(
                 data.Layers.Count > 1
-                    ? "GPUDriven terrain rendering is active. This first integration samples the first terrain layer; control-map blending and multi-LOD terrain selection are not implemented yet."
-                    : "GPUDriven terrain rendering is active. Terrain chunks use the shared meshlet culling, visibility buffer, shadow, and texture backend paths.",
+                    ? "GPUDriven terrain LOD rendering is active. This surface integration still samples only the first terrain layer; control-map blending is not implemented yet."
+                    : "GPUDriven terrain rendering is active. Terrain chunks use the shared meshlet LOD selection, culling, visibility buffer, shadow, and texture backend paths.",
                 data.Layers.Count > 1 ? MessageType.Warning : MessageType.Info
             );
         }

@@ -58,7 +58,7 @@ namespace VividRP.Editor.TerrainTools
                 $"[VividRP] Created VividTerrain copy '{result.Component.name}' and baked " +
                 $"{result.Data.GeometryChunkCount}/{result.Data.Chunks.Count} geometry chunks to '{result.AssetPath}'. " +
                 $"The source Terrain '{terrain.name}' was left unchanged. " +
-                "VividTerrain rendering is not part of this prototype yet.",
+                $"Chunk LOD range: {result.Data.GeometryChunkLODRange.x}..{result.Data.GeometryChunkLODRange.y}.",
                 result.Component
             );
         }

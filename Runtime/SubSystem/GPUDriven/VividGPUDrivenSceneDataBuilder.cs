@@ -579,6 +579,9 @@ namespace VividRP.Runtime.GPUDriven
             if (trackedResources.IsTerrain)
             {
                 bool hasGeometry = false;
+                int maximumLODLevelCount = trackedResources.TerrainData != null
+                    ? trackedResources.TerrainData.BakeSettings.MaxMeshLODLevelCount
+                    : VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount;
                 for (int chunkIndex = 0; chunkIndex < trackedResources.MeshletCollections.Length; chunkIndex++)
                 {
                     VividMeshletCollectionAsset chunkGeometry = trackedResources.MeshletCollections[chunkIndex];
@@ -587,7 +590,8 @@ namespace VividRP.Runtime.GPUDriven
                         continue;
                     }
 
-                    if (chunkGeometry.MeshLODLevelCount != VividTerrainData.SupportedChunkLODCount)
+                    if (chunkGeometry.MeshLODLevelCount < VividTerrainData.MinimumChunkLODCount
+                        || chunkGeometry.MeshLODLevelCount > maximumLODLevelCount)
                     {
                         return false;
                     }

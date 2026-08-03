@@ -99,7 +99,8 @@ namespace VividRP.Editor.TerrainTools
             VividTerrainBakeSettings settings = new(
                 parameters.Settings.HeightSampleStride,
                 parameters.Settings.ChunkQuadCount,
-                parameters.Settings.OptimizeVertexCache
+                parameters.Settings.OptimizeVertexCache,
+                parameters.Settings.MaxMeshLODLevelCount
             );
             int sampleStride = settings.HeightSampleStride;
             int sampledQuadCount = Mathf.CeilToInt((heightmapResolution - 1) / (float) sampleStride);
@@ -166,10 +167,12 @@ namespace VividRP.Editor.TerrainTools
                                         SourceMeshLocalFileID = parameters.SourceTerrainDataLocalFileID,
                                         SubMeshIndex = 0,
                                         OptimizeVertexCache = settings.OptimizeVertexCache,
-                                        MaxMeshLODLevelCount = VividTerrainData.SupportedChunkLODCount,
+                                        MaxMeshLODLevelCount = settings.MaxMeshLODLevelCount,
                                         TargetError = 0.01f,
                                         TargetErrorSloppy = 0.001f,
                                         MinTriangleReductionPerStep = 0.8f,
+                                        DisableSloppySimplification = true,
+                                        PreserveFinestLODLevels = true,
                                         LogErrorHandler = parameters.LogErrorHandler,
                                     }
                                 );

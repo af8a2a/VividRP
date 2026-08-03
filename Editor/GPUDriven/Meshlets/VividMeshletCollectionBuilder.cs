@@ -507,7 +507,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
                 {
                     newMeshLODNodeLevel.Dispose();
 
-                    if (simplifyMode == VividMeshOptimizer.SimplifyMode.Normal)
+                    if (simplifyMode == VividMeshOptimizer.SimplifyMode.Normal
+                        && !parameters.DisableSloppySimplification)
                     {
                         simplifyMode = VividMeshOptimizer.SimplifyMode.Sloppy;
                     }
@@ -545,10 +546,12 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             {
                 while (levels.Length > parameters.MaxMeshLODLevelCount)
                 {
-                    int lastIndex = levels.Length - 1;
-                    MeshLODNodeLevel level = levels[lastIndex];
+                    int removalIndex = parameters.PreserveFinestLODLevels
+                        ? 0
+                        : levels.Length - 1;
+                    MeshLODNodeLevel level = levels[removalIndex];
                     level.Dispose();
-                    levels.RemoveAt(lastIndex);
+                    levels.RemoveAt(removalIndex);
                 }
             }
 
@@ -573,6 +576,8 @@ namespace VividRP.Editor.GPUDriven.Meshlets
             public float TargetError;
             public float TargetErrorSloppy;
             public float MinTriangleReductionPerStep;
+            public bool DisableSloppySimplification;
+            public bool PreserveFinestLODLevels;
         }
 
         private struct MeshLODNode

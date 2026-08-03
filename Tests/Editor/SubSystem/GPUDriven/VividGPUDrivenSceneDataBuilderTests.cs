@@ -1030,7 +1030,7 @@ namespace VividRP.Editor.Tests
                 meshletCollection = CreateMeshletCollectionAsset(
                     "TerrainChunk",
                     0,
-                    VividTerrainData.SupportedChunkLODCount,
+                    VividTerrainData.MinimumChunkLODCount,
                     new[] { CreateMeshLODNode(0, 1, 0) },
                     new[] { CreateMeshlet(0, 0, 3, 1) },
                     new[]
@@ -1077,7 +1077,7 @@ namespace VividRP.Editor.Tests
                 );
                 Assert.That((trackedData.flags & VividMeshletRendererFlags.Valid) != 0, Is.True);
 
-                meshletCollection.MeshLODLevelCount = VividTerrainData.SupportedChunkLODCount + 1;
+                meshletCollection.MeshLODLevelCount = terrainData.BakeSettings.MaxMeshLODLevelCount + 1;
 
                 var sceneData = new VividGPUDrivenSceneData();
                 var builder = new VividGPUDrivenSceneDataBuilder();
@@ -1087,9 +1087,115 @@ namespace VividRP.Editor.Tests
                 builder.Build(sceneData, VividMeshletRendererDatabase.instance, textureBackend);
 
                 Assert.That(terrainData.TryValidate(out string reason), Is.False);
-                Assert.That(reason, Does.Contain("requires exactly 1"));
+                Assert.That(reason, Does.Contain("exceeding its baked limit"));
                 Assert.That(sceneData.InstanceCount, Is.Zero);
                 Assert.That(sceneData.MeshletCount, Is.Zero);
+            }
+            finally
+            {
+                if (gameObject != null)
+                {
+                    Object.DestroyImmediate(gameObject);
+                }
+
+                if (terrainData != null)
+                {
+                    Object.DestroyImmediate(terrainData);
+                }
+
+                if (meshletCollection != null)
+                {
+                    Object.DestroyImmediate(meshletCollection);
+                }
+            }
+        }
+
+        [Test]
+        public void Build_AppendsTerrainChunkLODHierarchyForGPUSelection()
+        {
+            GameObject gameObject = null;
+            VividTerrainData terrainData = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "TerrainChunkLODHierarchy",
+                    0,
+                    2,
+                    new[]
+                    {
+                        CreateMeshLODNode(0, 1, 0),
+                        CreateMeshLODNode(1, 1, 1),
+                    },
+                    new[]
+                    {
+                        CreateMeshlet(0, 0, 3, 1),
+                        CreateMeshlet(3, 3, 3, 1),
+                    },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2, 0, 1, 2 }
+                );
+                var chunkBounds = new Bounds(
+                    new Vector3(8.0f, 2.0f, 8.0f),
+                    new Vector3(16.0f, 4.0f, 16.0f)
+                );
+                terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+                terrainData.Initialize(
+                    string.Empty,
+                    "TerrainLODHierarchy",
+                    17,
+                    new Vector3(16.0f, 4.0f, 16.0f),
+                    chunkBounds,
+                    Vector2Int.one,
+                    new VividTerrainBakeSettings(
+                        1,
+                        16,
+                        optimizeVertexCache: true,
+                        maxMeshLODLevelCount: 2
+                    ),
+                    null,
+                    System.Array.Empty<VividTerrainLayerData>(),
+                    new[]
+                    {
+                        new VividTerrainChunkData(
+                            Vector2Int.zero,
+                            Vector2Int.zero,
+                            new Vector2Int(16, 16),
+                            chunkBounds,
+                            meshletCollection
+                        ),
+                    }
+                );
+
+                gameObject = new GameObject("Terrain LOD Hierarchy");
+                VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
+                terrain.SetData(terrainData);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16)
+                );
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, textureBackend);
+
+                Assert.That(terrainData.IsValid, Is.True);
+                Assert.That(terrainData.GeometryChunkLODRange, Is.EqualTo(new Vector2Int(2, 2)));
+                Assert.That(sceneData.InstanceCount, Is.EqualTo(1));
+                Assert.That(sceneData.MeshLODNodeCount, Is.EqualTo(2));
+                Assert.That(sceneData.MeshletCount, Is.EqualTo(2));
+                Assert.That(sceneData.Instances[0].MeshLODLevelCount, Is.EqualTo(2u));
+                Assert.That(sceneData.Instances[0].TotalMeshLODCount, Is.EqualTo(2u));
+                Assert.That(sceneData.MeshLODNodes[0].LevelIndex, Is.EqualTo(0u));
+                Assert.That(sceneData.MeshLODNodes[1].LevelIndex, Is.EqualTo(1u));
             }
             finally
             {

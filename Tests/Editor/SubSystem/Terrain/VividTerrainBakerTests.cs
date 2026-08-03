@@ -7,6 +7,7 @@ using UnityEditor;
 using UnityEngine;
 using VividRP.Editor.TerrainTools;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 using Object = UnityEngine.Object;
 
@@ -58,7 +59,12 @@ namespace VividRP.Editor.Tests
                 {
                     SourceTerrainData = source,
                     SourceTerrainDataGUID = sourceGuid,
-                    Settings = new VividTerrainBakeSettings(1, 16, optimizeVertexCache: true),
+                    Settings = new VividTerrainBakeSettings(
+                        1,
+                        16,
+                        optimizeVertexCache: true,
+                        maxMeshLODLevelCount: 4
+                    ),
                     ProgressHandler = (progress, _) => progressValues.Add(progress),
                     LogErrorHandler = Assert.Fail,
                 }
@@ -72,6 +78,9 @@ namespace VividRP.Editor.Tests
             Assert.That(baked.ChunkGridSize, Is.EqualTo(new Vector2Int(2, 2)));
             Assert.That(baked.Chunks, Has.Count.EqualTo(4));
             Assert.That(baked.GeometryChunkCount, Is.EqualTo(4));
+            Assert.That(baked.BakeSettings.MaxMeshLODLevelCount, Is.EqualTo(4));
+            Assert.That(baked.GeometryChunkLODRange.x, Is.GreaterThanOrEqualTo(1));
+            Assert.That(baked.GeometryChunkLODRange.y, Is.LessThanOrEqualTo(4));
             Assert.That(baked.LocalBounds.min.y, Is.EqualTo(0.0f).Within(0.0001f));
             Assert.That(baked.LocalBounds.max.y, Is.EqualTo(expectedMaximumHeight).Within(0.0001f));
             Assert.That(progressValues, Is.Not.Empty);
@@ -85,7 +94,7 @@ namespace VividRP.Editor.Tests
             foreach (VividTerrainChunkData chunk in baked.Chunks)
             {
                 Assert.That(chunk.MeshletCollection, Is.Not.Null);
-                Assert.That(chunk.LODCount, Is.EqualTo(VividTerrainData.SupportedChunkLODCount));
+                Assert.That(chunk.LODCount, Is.InRange(1, baked.BakeSettings.MaxMeshLODLevelCount));
                 Assert.That(chunk.UsesSupportedLODCount, Is.True);
                 Assert.That(chunk.MeshletCollection.Meshlets, Is.Not.Empty);
                 Assert.That(chunk.MeshletCollection.VertexBuffer, Is.Not.Empty);
@@ -102,6 +111,47 @@ namespace VividRP.Editor.Tests
             Assert.That(reloaded, Is.Not.Null);
             Assert.That(reloaded.Chunks, Has.Count.EqualTo(4));
             Assert.That(reloaded.Chunks.All(chunk => chunk.HasGeometry), Is.True);
+        }
+
+        [Test]
+        public void Generate_BuildsMultipleLODLevelsAndPreservesChunkBorders()
+        {
+            EnsureSupportedPlatform();
+            TerrainData source = CreateTerrainData("LODSource", out _);
+            var baked = ScriptableObject.CreateInstance<VividTerrainData>();
+
+            try
+            {
+                VividTerrainBaker.Generate(
+                    baked,
+                    new VividTerrainBaker.Parameters
+                    {
+                        SourceTerrainData = source,
+                        Settings = new VividTerrainBakeSettings(
+                            1,
+                            32,
+                            optimizeVertexCache: true,
+                            maxMeshLODLevelCount: 4
+                        ),
+                        LogErrorHandler = Assert.Fail,
+                    }
+                );
+
+                Assert.That(baked.ChunkGridSize, Is.EqualTo(Vector2Int.one));
+                Assert.That(baked.GeometryChunkLODRange.x, Is.GreaterThan(1));
+                Assert.That(baked.GeometryChunkLODRange.y, Is.LessThanOrEqualTo(4));
+                VividTerrainChunkData chunk = baked.Chunks[0];
+                Assert.That(
+                    chunk.MeshletCollection.MeshLODLevelNodeCounts[^1],
+                    Is.EqualTo(chunk.MeshletCollection.LeafMeshletCount)
+                );
+                AssertChunkBordersArePreservedAcrossLODs(chunk, expectedQuadCount: 32);
+            }
+            finally
+            {
+                DestroyGeneratedData(baked);
+                Object.DestroyImmediate(source);
+            }
         }
 
         [Test]
@@ -169,7 +219,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void TerrainData_RejectsChunkWithUnsupportedLODCount()
+        public void TerrainData_RejectsChunkExceedingBakedLODLimit()
         {
             VividTerrainData data = null;
             VividMeshletCollectionAsset meshlets = null;
@@ -177,7 +227,7 @@ namespace VividRP.Editor.Tests
             try
             {
                 meshlets = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
-                meshlets.MeshLODLevelCount = VividTerrainData.SupportedChunkLODCount + 1;
+                meshlets.MeshLODLevelCount = 3;
                 data = ScriptableObject.CreateInstance<VividTerrainData>();
                 data.Initialize(
                     string.Empty,
@@ -186,7 +236,12 @@ namespace VividRP.Editor.Tests
                     new Vector3(16.0f, 4.0f, 16.0f),
                     new Bounds(new Vector3(8.0f, 2.0f, 8.0f), new Vector3(16.0f, 4.0f, 16.0f)),
                     Vector2Int.one,
-                    VividTerrainBakeSettings.Default,
+                    new VividTerrainBakeSettings(
+                        1,
+                        16,
+                        optimizeVertexCache: true,
+                        maxMeshLODLevelCount: 2
+                    ),
                     null,
                     Array.Empty<VividTerrainLayerData>(),
                     new[]
@@ -203,8 +258,8 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(data.IsValid, Is.False);
                 Assert.That(data.TryValidate(out string reason), Is.False);
-                Assert.That(reason, Does.Contain("requires exactly 1"));
-                Assert.That(data.Chunks[0].UsesSupportedLODCount, Is.False);
+                Assert.That(reason, Does.Contain("exceeding its baked limit of 2"));
+                Assert.That(data.Chunks[0].UsesSupportedLODCount, Is.True);
             }
             finally
             {
@@ -218,6 +273,23 @@ namespace VividRP.Editor.Tests
                     Object.DestroyImmediate(meshlets);
                 }
             }
+        }
+
+        [Test]
+        public void BakeSettings_PreserveLegacySingleLODAndDefaultNewBakesToFourLODs()
+        {
+            Assert.That(
+                default(VividTerrainBakeSettings).MaxMeshLODLevelCount,
+                Is.EqualTo(VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount)
+            );
+            Assert.That(
+                VividTerrainBakeSettings.Default.MaxMeshLODLevelCount,
+                Is.EqualTo(VividTerrainBakeSettings.DefaultMaxMeshLODLevelCount)
+            );
+            Assert.That(
+                new VividTerrainBakeSettings(1, 64, maxMeshLODLevelCount: 3).MaxMeshLODLevelCount,
+                Is.EqualTo(3)
+            );
         }
 
         [Test]
@@ -292,6 +364,69 @@ namespace VividRP.Editor.Tests
             terrainData.SetHeights(0, 0, heights);
             expectedMaximumHeight = 5.0f;
             return terrainData;
+        }
+
+        private static void AssertChunkBordersArePreservedAcrossLODs(
+            in VividTerrainChunkData chunk,
+            int expectedQuadCount)
+        {
+            VividMeshletCollectionAsset collection = chunk.MeshletCollection;
+            Assert.That(collection, Is.Not.Null);
+            Assert.That(collection.MeshLODLevelCount, Is.GreaterThan(1));
+
+            Bounds bounds = chunk.LocalBounds;
+            float stepX = bounds.size.x / expectedQuadCount;
+            float stepZ = bounds.size.z / expectedQuadCount;
+            for (int levelIndex = 0; levelIndex < collection.MeshLODLevelCount; levelIndex++)
+            {
+                var borderCoordinates = new HashSet<Vector2Int>();
+                foreach (var node in collection.MeshLODNodes)
+                {
+                    if (node.LevelIndex != (uint) levelIndex)
+                    {
+                        continue;
+                    }
+
+                    for (uint meshletOffset = 0; meshletOffset < node.MeshletCount; meshletOffset++)
+                    {
+                        VividMeshlet meshlet = collection.Meshlets[(int) (node.MeshletStartIndex + meshletOffset)];
+                        for (uint vertexOffset = 0; vertexOffset < meshlet.VertexCount; vertexOffset++)
+                        {
+                            var position = collection.VertexBuffer[(int) (meshlet.VertexOffset + vertexOffset)].Position;
+                            int x = Mathf.RoundToInt((position.x - bounds.min.x) / stepX);
+                            int y = Mathf.RoundToInt((position.z - bounds.min.z) / stepZ);
+                            if (x == 0 || y == 0 || x == expectedQuadCount || y == expectedQuadCount)
+                            {
+                                borderCoordinates.Add(new Vector2Int(x, y));
+                            }
+                        }
+                    }
+                }
+
+                for (int coordinate = 0; coordinate <= expectedQuadCount; coordinate++)
+                {
+                    Assert.That(
+                        borderCoordinates,
+                        Does.Contain(new Vector2Int(coordinate, 0)),
+                        $"LOD {levelIndex} removed a bottom border vertex."
+                    );
+                    Assert.That(
+                        borderCoordinates,
+                        Does.Contain(new Vector2Int(coordinate, expectedQuadCount)),
+                        $"LOD {levelIndex} removed a top border vertex."
+                    );
+                    Assert.That(
+                        borderCoordinates,
+                        Does.Contain(new Vector2Int(0, coordinate)),
+                        $"LOD {levelIndex} removed a left border vertex."
+                    );
+                    Assert.That(
+                        borderCoordinates,
+                        Does.Contain(new Vector2Int(expectedQuadCount, coordinate)),
+                        $"LOD {levelIndex} removed a right border vertex."
+                    );
+                }
+            }
         }
 
         private static byte[] ReadMeshletBlob(VividMeshletCollectionAsset meshlets)

@@ -1,6 +1,6 @@
-# VividTerrain baking prototype
+# VividTerrain single-LOD chunk path
 
-`VividTerrain` is a data-only GPUDriven terrain prototype. This stage converts a Unity `Terrain` into package-owned terrain metadata and meshlet geometry; it does not render the baked data yet.
+`VividTerrain` converts a Unity `Terrain` into package-owned terrain metadata and meshlet geometry. Each non-empty chunk enters GPUDriven as an independent instance and reuses the meshlet instance culling, meshlet culling, visibility-buffer resolve, shadow, and active texture-backend paths.
 
 ## Conversion workflow
 
@@ -9,7 +9,7 @@
 3. VividRP creates a `VividTerrainData` asset beside the source `TerrainData` asset when it lives under `Assets`; otherwise the output is created under `Assets`.
 4. VividRP duplicates the source Terrain GameObject as a sibling, removes the `Terrain` renderer only from the duplicate, and adds `VividTerrain` to that copy.
 
-The source GameObject, its `Terrain` component, and its `TerrainData` asset are never modified. The duplicate keeps the other copied components, children, and any `TerrainCollider`. Because rendering is outside this prototype, the new VividTerrain copy is not visible yet; the original Terrain continues rendering normally. Undo removes the generated scene copy, while the generated data asset remains in the project and can be removed manually if it is no longer needed.
+The source GameObject, its `Terrain` component, and its `TerrainData` asset are never modified. The duplicate keeps the other copied components, children, and any `TerrainCollider`. The duplicate is rendered by GPUDriven when that subsystem is active. The original Terrain remains enabled, so disable it when comparing or replacing the source rendering to avoid overlapping geometry. Undo removes the generated scene copy, while the generated data asset remains in the project and can be removed manually if it is no longer needed.
 
 ## Baked data
 
@@ -21,7 +21,7 @@ Surface-layer prototype data copies the diffuse, normal, and mask textures toget
 
 ## Meshlet storage
 
-Each non-empty chunk is passed through the existing `VividMeshOptimizer` meshoptimizer binding. The bake requests exactly one mesh LOD level; terrain LOD generation and selection are deferred.
+Each non-empty chunk is passed through the existing `VividMeshOptimizer` meshoptimizer binding. The bake requests exactly one mesh LOD level. `VividTerrainData` validates this contract, and the scene builder rejects the whole terrain if any non-empty chunk contains a different LOD count. Empty chunks produced by terrain holes remain valid and do not create GPU instances.
 
 No intermediate Unity `Mesh` asset is persisted. A chunk owns a `VividMeshletCollectionAsset` sub-asset whose node, meshlet, vertex, and local-index arrays are serialized into the existing versioned binary blob. Version 2 blobs use platform-independent LZ4 block compression, so repetitive terrain vertex streams and index data do not expand into large YAML arrays. Version 1 GZip blobs remain readable and are rewritten as LZ4 after their data is loaded and the asset is saved again.
 
@@ -31,4 +31,4 @@ Current defaults are:
 - Chunk size: 64 x 64 quads
 - meshoptimizer vertex-cache optimization: enabled
 
-The runtime-facing asset already exposes source identity, terrain size, local bounds, chunk grid coordinates, heightmap sample ranges, surface layers, and compressed meshlet collections. GPU buffer upload, rendering, LOD, streaming, and culling integration are intentionally deferred.
+The runtime-facing asset exposes source identity, terrain size, local bounds, row-major chunk grid coordinates, heightmap sample ranges, surface layers, and compressed meshlet collections. Multiple terrain layers are preserved in the asset, but this stage renders only the first layer through the shared Base/Normal/Mask surface binding. Control-map blending, multi-LOD generation and selection, seam handling between different LODs, and chunk streaming are intentionally deferred.

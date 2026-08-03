@@ -578,15 +578,24 @@ namespace VividRP.Runtime.GPUDriven
 
             if (trackedResources.IsTerrain)
             {
+                bool hasGeometry = false;
                 for (int chunkIndex = 0; chunkIndex < trackedResources.MeshletCollections.Length; chunkIndex++)
                 {
-                    if (trackedResources.MeshletCollections[chunkIndex] != null)
+                    VividMeshletCollectionAsset chunkGeometry = trackedResources.MeshletCollections[chunkIndex];
+                    if (chunkGeometry == null)
                     {
-                        return true;
+                        continue;
                     }
+
+                    if (chunkGeometry.MeshLODLevelCount != VividTerrainData.SupportedChunkLODCount)
+                    {
+                        return false;
+                    }
+
+                    hasGeometry = true;
                 }
 
-                return false;
+                return hasGeometry;
             }
 
             return true;

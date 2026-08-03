@@ -156,12 +156,17 @@ namespace VividRP.Runtime
         public VividMeshletCollectionAsset MeshletCollection => m_MeshletCollection;
 
         public bool HasGeometry => m_MeshletCollection != null;
+
+        public int LODCount => HasGeometry ? Mathf.Max(0, m_MeshletCollection.MeshLODLevelCount) : 0;
+
+        public bool UsesSupportedLODCount => !HasGeometry || LODCount == VividTerrainData.SupportedChunkLODCount;
     }
 
     [CreateAssetMenu(menuName = "VividRP/Terrain Data", fileName = "New Vivid Terrain Data")]
     public sealed class VividTerrainData : ScriptableObject
     {
         public const uint CurrentBakeVersion = 1u;
+        public const int SupportedChunkLODCount = 1;
 
         [SerializeField, HideInInspector]
         private uint m_BakeVersion = CurrentBakeVersion;
@@ -218,16 +223,17 @@ namespace VividRP.Runtime
 
         public IReadOnlyList<VividTerrainChunkData> Chunks => m_Chunks;
 
-        public bool IsValid => m_BakeVersion == CurrentBakeVersion
-                               && m_SourceHeightmapResolution >= 2
-                               && m_ChunkGridSize.x > 0
-                               && m_ChunkGridSize.y > 0
-                               && m_Chunks is { Length: > 0 };
+        public bool IsValid => TryValidate(out _);
 
         public int GeometryChunkCount
         {
             get
             {
+                if (m_Chunks == null)
+                {
+                    return 0;
+                }
+
                 int count = 0;
                 for (int chunkIndex = 0; chunkIndex < m_Chunks.Length; chunkIndex++)
                 {
@@ -239,6 +245,71 @@ namespace VividRP.Runtime
 
                 return count;
             }
+        }
+
+        public bool TryValidate(out string reason)
+        {
+            if (m_BakeVersion != CurrentBakeVersion)
+            {
+                reason = $"Bake version {m_BakeVersion} is not supported; expected {CurrentBakeVersion}.";
+                return false;
+            }
+
+            if (m_SourceHeightmapResolution < 2)
+            {
+                reason = "Source heightmap resolution must be at least 2.";
+                return false;
+            }
+
+            if (m_ChunkGridSize.x <= 0 || m_ChunkGridSize.y <= 0)
+            {
+                reason = "Chunk grid dimensions must both be positive.";
+                return false;
+            }
+
+            long expectedChunkCount = (long) m_ChunkGridSize.x * m_ChunkGridSize.y;
+            if (m_Chunks == null || m_Chunks.LongLength != expectedChunkCount)
+            {
+                reason = $"Chunk grid {m_ChunkGridSize.x}x{m_ChunkGridSize.y} expects {expectedChunkCount} chunks, but the asset contains {m_Chunks?.LongLength ?? 0}.";
+                return false;
+            }
+
+            int maximumHeightmapSample = m_SourceHeightmapResolution - 1;
+            for (int chunkIndex = 0; chunkIndex < m_Chunks.Length; chunkIndex++)
+            {
+                VividTerrainChunkData chunk = m_Chunks[chunkIndex];
+                var expectedCoordinate = new Vector2Int(
+                    chunkIndex % m_ChunkGridSize.x,
+                    chunkIndex / m_ChunkGridSize.x
+                );
+                if (chunk.Coordinate != expectedCoordinate)
+                {
+                    reason = $"Chunk {chunkIndex} has coordinate {chunk.Coordinate}; expected row-major coordinate {expectedCoordinate}.";
+                    return false;
+                }
+
+                Vector2Int sampleMin = chunk.HeightmapSampleMin;
+                Vector2Int sampleMax = chunk.HeightmapSampleMax;
+                if (sampleMin.x < 0
+                    || sampleMin.y < 0
+                    || sampleMax.x <= sampleMin.x
+                    || sampleMax.y <= sampleMin.y
+                    || sampleMax.x > maximumHeightmapSample
+                    || sampleMax.y > maximumHeightmapSample)
+                {
+                    reason = $"Chunk {chunk.Coordinate} has invalid heightmap sample range {sampleMin}..{sampleMax}.";
+                    return false;
+                }
+
+                if (!chunk.UsesSupportedLODCount)
+                {
+                    reason = $"Chunk {chunk.Coordinate} contains {chunk.LODCount} mesh LOD levels; this terrain stage requires exactly {SupportedChunkLODCount}.";
+                    return false;
+                }
+            }
+
+            reason = string.Empty;
+            return true;
         }
 
         internal void Initialize(

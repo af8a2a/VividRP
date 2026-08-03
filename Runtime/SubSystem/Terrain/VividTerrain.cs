@@ -28,7 +28,7 @@ namespace VividRP.Runtime
 
         public VividTerrainData Data => m_Data;
 
-        public bool HasBakedData => m_Data != null && m_Data.IsValid;
+        public bool HasBakedData => TryValidateData(out _);
 
         public Bounds LocalBounds => m_Data != null ? m_Data.LocalBounds : default;
 
@@ -37,6 +37,17 @@ namespace VividRP.Runtime
         public bool ReceiveShadows => m_ReceiveShadows;
 
         public uint RenderingLayerMask => m_RenderingLayerMask;
+
+        public bool TryValidateData(out string reason)
+        {
+            if (m_Data == null)
+            {
+                reason = "No VividTerrainData asset is assigned.";
+                return false;
+            }
+
+            return m_Data.TryValidate(out reason);
+        }
 
         public void SetData(VividTerrainData data)
         {

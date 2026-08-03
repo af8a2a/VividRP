@@ -1019,6 +1019,98 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_RejectsTerrainWhenChunkChangesToUnsupportedLODCount()
+        {
+            GameObject gameObject = null;
+            VividTerrainData terrainData = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+
+            try
+            {
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "TerrainChunk",
+                    0,
+                    VividTerrainData.SupportedChunkLODCount,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 }
+                );
+                var chunkBounds = new Bounds(
+                    new Vector3(8.0f, 2.0f, 8.0f),
+                    new Vector3(16.0f, 4.0f, 16.0f)
+                );
+                terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+                terrainData.Initialize(
+                    string.Empty,
+                    "RuntimeLODMutation",
+                    17,
+                    new Vector3(16.0f, 4.0f, 16.0f),
+                    chunkBounds,
+                    Vector2Int.one,
+                    VividTerrainBakeSettings.Default,
+                    null,
+                    System.Array.Empty<VividTerrainLayerData>(),
+                    new[]
+                    {
+                        new VividTerrainChunkData(
+                            Vector2Int.zero,
+                            Vector2Int.zero,
+                            new Vector2Int(16, 16),
+                            chunkBounds,
+                            meshletCollection
+                        ),
+                    }
+                );
+
+                gameObject = new GameObject("Terrain Unsupported LOD");
+                VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
+                terrain.SetData(terrainData);
+                Assert.That(
+                    VividMeshletRendererDatabase.instance.TryGetTerrainData(terrain, out var trackedData),
+                    Is.True
+                );
+                Assert.That((trackedData.flags & VividMeshletRendererFlags.Valid) != 0, Is.True);
+
+                meshletCollection.MeshLODLevelCount = VividTerrainData.SupportedChunkLODCount + 1;
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16)
+                );
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, textureBackend);
+
+                Assert.That(terrainData.TryValidate(out string reason), Is.False);
+                Assert.That(reason, Does.Contain("requires exactly 1"));
+                Assert.That(sceneData.InstanceCount, Is.Zero);
+                Assert.That(sceneData.MeshletCount, Is.Zero);
+            }
+            finally
+            {
+                if (gameObject != null)
+                {
+                    Object.DestroyImmediate(gameObject);
+                }
+
+                if (terrainData != null)
+                {
+                    Object.DestroyImmediate(terrainData);
+                }
+
+                if (meshletCollection != null)
+                {
+                    Object.DestroyImmediate(meshletCollection);
+                }
+            }
+        }
+
+        [Test]
         public void PrepareFrame_DoesNotAllocate_WhenFallbackMaterialSceneIsStable()
         {
             GameObject gameObject = null;

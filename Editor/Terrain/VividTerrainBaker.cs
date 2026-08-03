@@ -166,7 +166,7 @@ namespace VividRP.Editor.TerrainTools
                                         SourceMeshLocalFileID = parameters.SourceTerrainDataLocalFileID,
                                         SubMeshIndex = 0,
                                         OptimizeVertexCache = settings.OptimizeVertexCache,
-                                        MaxMeshLODLevelCount = 1,
+                                        MaxMeshLODLevelCount = VividTerrainData.SupportedChunkLODCount,
                                         TargetError = 0.01f,
                                         TargetErrorSloppy = 0.001f,
                                         MinTriangleReductionPerStep = 0.8f,

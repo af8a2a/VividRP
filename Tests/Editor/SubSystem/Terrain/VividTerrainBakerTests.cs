@@ -85,7 +85,8 @@ namespace VividRP.Editor.Tests
             foreach (VividTerrainChunkData chunk in baked.Chunks)
             {
                 Assert.That(chunk.MeshletCollection, Is.Not.Null);
-                Assert.That(chunk.MeshletCollection.MeshLODLevelCount, Is.EqualTo(1));
+                Assert.That(chunk.LODCount, Is.EqualTo(VividTerrainData.SupportedChunkLODCount));
+                Assert.That(chunk.UsesSupportedLODCount, Is.True);
                 Assert.That(chunk.MeshletCollection.Meshlets, Is.Not.Empty);
                 Assert.That(chunk.MeshletCollection.VertexBuffer, Is.Not.Empty);
                 Assert.That(chunk.MeshletCollection.IndexBuffer, Is.Not.Empty);
@@ -164,6 +165,58 @@ namespace VividRP.Editor.Tests
             {
                 DestroyGeneratedData(baked);
                 Object.DestroyImmediate(source);
+            }
+        }
+
+        [Test]
+        public void TerrainData_RejectsChunkWithUnsupportedLODCount()
+        {
+            VividTerrainData data = null;
+            VividMeshletCollectionAsset meshlets = null;
+
+            try
+            {
+                meshlets = ScriptableObject.CreateInstance<VividMeshletCollectionAsset>();
+                meshlets.MeshLODLevelCount = VividTerrainData.SupportedChunkLODCount + 1;
+                data = ScriptableObject.CreateInstance<VividTerrainData>();
+                data.Initialize(
+                    string.Empty,
+                    "UnsupportedLOD",
+                    17,
+                    new Vector3(16.0f, 4.0f, 16.0f),
+                    new Bounds(new Vector3(8.0f, 2.0f, 8.0f), new Vector3(16.0f, 4.0f, 16.0f)),
+                    Vector2Int.one,
+                    VividTerrainBakeSettings.Default,
+                    null,
+                    Array.Empty<VividTerrainLayerData>(),
+                    new[]
+                    {
+                        new VividTerrainChunkData(
+                            Vector2Int.zero,
+                            Vector2Int.zero,
+                            new Vector2Int(16, 16),
+                            new Bounds(new Vector3(8.0f, 2.0f, 8.0f), new Vector3(16.0f, 4.0f, 16.0f)),
+                            meshlets
+                        ),
+                    }
+                );
+
+                Assert.That(data.IsValid, Is.False);
+                Assert.That(data.TryValidate(out string reason), Is.False);
+                Assert.That(reason, Does.Contain("requires exactly 1"));
+                Assert.That(data.Chunks[0].UsesSupportedLODCount, Is.False);
+            }
+            finally
+            {
+                if (data != null)
+                {
+                    Object.DestroyImmediate(data);
+                }
+
+                if (meshlets != null)
+                {
+                    Object.DestroyImmediate(meshlets);
+                }
             }
         }
 

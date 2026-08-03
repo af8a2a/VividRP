@@ -40,7 +40,7 @@ namespace VividRP.Editor.Tests
             Assert.That(resources.RenderLists, Has.Length.EqualTo(1));
             Assert.That(resources.RenderLists[0].Name, Is.EqualTo("RenderList"));
             Assert.That(resources.RenderLists[0].Access, Is.EqualTo(AccessFlags.Read));
-            Assert.That(resources.RenderLists[0].RenderList.desc.ShaderTagNames, Is.EqualTo(new[] { GBufferPass.VirtualTextureGBufferShaderTagName }));
+            Assert.That(resources.RenderLists[0].RenderList.desc.ShaderTagNames, Is.EqualTo(new[] { VirtualTextureFeedbackPass.VirtualTextureGBufferShaderTagName }));
             Assert.That(resources.RenderLists[0].RenderList.desc.RendererConfiguration, Is.EqualTo(PerObjectData.Lightmaps));
             Assert.That(resources.Textures, Has.Length.EqualTo(6));
 
@@ -89,7 +89,7 @@ namespace VividRP.Editor.Tests
             var renderList = GetFieldValue<RenderGraphRenderList>(pass, "m_RenderList");
             Assert.That(
                 renderList.desc.ShaderTagNames,
-                Is.EqualTo(new[] { GBufferPass.VirtualTextureGPUDrivenDecalGBufferShaderTagName }));
+                Is.EqualTo(new[] { VirtualTextureFeedbackPass.VirtualTextureGPUDrivenDecalGBufferShaderTagName }));
         }
 
         [Test]
@@ -102,7 +102,7 @@ namespace VividRP.Editor.Tests
             pass.Prepare(frameData);
 
             var renderList = GetFieldValue<RenderGraphRenderList>(pass, "m_RenderList");
-            Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[] { GBufferPass.VirtualTextureGBufferShaderTagName }));
+            Assert.That(renderList.desc.ShaderTagNames, Is.EqualTo(new[] { VirtualTextureFeedbackPass.VirtualTextureGBufferShaderTagName }));
         }
 
         [Test]

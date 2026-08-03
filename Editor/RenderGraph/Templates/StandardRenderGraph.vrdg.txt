@@ -2636,26 +2636,6 @@ MonoBehaviour:
           m_PortDirection: 1
           m_PortOrientation: 0
           m_Title: source (R)
-    - rid: 5830558519488413719
-      type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphRenderList, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
-      data:
-        m_Value:
-          desc:
-            ShaderTagNames:
-            - VividForward
-            - SRPDefaultUnlit
-            RenderQueueRange: 1
-            SortingCriteria: 59
-            LayerMask:
-              serializedVersion: 2
-              m_Bits: 4294967295
-            RenderingLayerMask: 4294967295
-            RendererConfiguration: 0
-            ExcludeObjectMotionVectors: 0
-            OverrideMaterial: {fileID: 0}
-            OverrideMaterialPassIndex: 0
-            OverrideShader: {fileID: 0}
-            OverrideShaderPassIndex: 0
     - rid: 5830558519488413720
       type: {class: 'Constant`1[[VividRP.Runtime.RenderGraphTexture, VividRP.Runtime]]', ns: Unity.GraphToolkit.Editor, asm: UnityEditor.GraphToolkitModule}
       data:
@@ -4004,7 +3984,6 @@ MonoBehaviour:
           - m_LayeredOffsetBuffer
           - m_LayeredLightListBuffer
           - m_LogBaseBuffer
-          - m_VirtualTextureRenderList
           m_ValueList:
           - rid: 8515051663678505427
           - rid: 8515051663678505428
@@ -4013,7 +3992,6 @@ MonoBehaviour:
           - rid: 8515051919211233345
           - rid: 8515051919211233346
           - rid: 8515051919211233347
-          - rid: 5830558519488413719
         m_InputPortInfos:
           expandedPortsById:
             m_KeyList: []

@@ -18,6 +18,11 @@ namespace VividRP.Editor.Tests
             {
                 return GetNodeOptionByName(RenderPassPortUtility.GetOverrideOptionName(fieldName)) != null;
             }
+
+            internal bool TryGetVirtualTextureFeedbackSampleRate(out float value)
+            {
+                return TryGetFloatParameterValue("m_VirtualTextureFeedbackSampleRate", out value);
+            }
         }
 
         [Serializable]
@@ -32,7 +37,7 @@ namespace VividRP.Editor.Tests
             var node = new AutoRegisteredGBufferPassNode();
 
             Assert.That(node.GetInputPortByName("m_RenderList"), Is.Not.Null);
-            Assert.That(node.GetInputPortByName("m_VirtualTextureRenderList"), Is.Not.Null);
+            Assert.That(node.GetInputPortByName("m_VirtualTextureRenderList"), Is.Null);
             Assert.That(node.GetInputPortByName("m_DecalDataBuffer"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_LayeredOffsetBuffer"), Is.Not.Null);
             Assert.That(node.GetInputPortByName("m_LayeredLightListBuffer"), Is.Not.Null);
@@ -44,6 +49,7 @@ namespace VividRP.Editor.Tests
             Assert.That(node.GetOutputPortByName("m_GBuffer3"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBuffer4"), Is.Not.Null);
             Assert.That(node.GetOutputPortByName("m_GBufferDepth_Out"), Is.Not.Null);
+            Assert.That(node.TryGetVirtualTextureFeedbackSampleRate(out _), Is.False);
         }
 
         [Test]

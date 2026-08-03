@@ -7,14 +7,17 @@ namespace VividRP.Runtime.RenderPass.Core
 {
     public sealed class VirtualTextureFeedbackPass : UnsafePass, IAllowGlobalStateModificationPass, IRenderGraphSideEffectPass
     {
+        internal const string VirtualTextureGBufferShaderTagName = "VividVTGBuffer";
+        internal const string VirtualTextureGPUDrivenDecalGBufferShaderTagName = "VividVTGBufferGPUDrivenDecal";
+
         private static readonly string[] s_DefaultShaderTagNames =
         {
-            GBufferPass.VirtualTextureGBufferShaderTagName,
+            VirtualTextureGBufferShaderTagName,
         };
 
         private static readonly string[] s_GPUDrivenDecalShaderTagNames =
         {
-            GBufferPass.VirtualTextureGPUDrivenDecalGBufferShaderTagName,
+            VirtualTextureGPUDrivenDecalGBufferShaderTagName,
         };
 
         [RenderGraphResource(Name = "RenderList", Access = AccessFlags.Read)]
@@ -75,7 +78,7 @@ namespace VividRP.Runtime.RenderPass.Core
             profilingSampler = new ProfilingSampler(nameof(VirtualTextureFeedbackPass));
             m_RenderList = new RenderGraphRenderList
             {
-                desc = RenderGraphRenderListDesc.CreateOpaque(GBufferPass.VirtualTextureGBufferShaderTagName),
+                desc = RenderGraphRenderListDesc.CreateOpaque(VirtualTextureGBufferShaderTagName),
             };
             m_RenderList.desc.RendererConfiguration = PerObjectData.Lightmaps;
 

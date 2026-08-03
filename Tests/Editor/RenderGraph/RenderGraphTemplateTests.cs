@@ -78,6 +78,14 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void StandardTemplate_GBufferPassDoesNotContainVirtualTextureInputs()
+        {
+            var content = RenderGraphEditorGraph.LoadStandardGraphTemplateContent();
+
+            Assert.That(content, Does.Not.Contain("m_VirtualTextureRenderList"));
+        }
+
+        [Test]
         public void StandardTemplateMenuPath_IsRegisteredUnderVividRpCreateMenu()
         {
             Assert.That(

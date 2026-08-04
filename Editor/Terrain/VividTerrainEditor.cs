@@ -40,6 +40,7 @@ namespace VividRP.Editor.TerrainTools
                     lodRange == Vector2Int.zero ? "No geometry" : $"{lodRange.x}..{lodRange.y}"
                 );
                 EditorGUILayout.IntField("Surface Layers", data.Layers.Count);
+                EditorGUILayout.IntField("Control Maps", data.ControlMaps.Count);
             }
 
             if (!terrain.TryValidateData(out string validationReason))
@@ -51,12 +52,30 @@ namespace VividRP.Editor.TerrainTools
                 return;
             }
 
-            EditorGUILayout.HelpBox(
-                data.Layers.Count > 1
-                    ? "GPUDriven terrain LOD rendering is active. This surface integration still samples only the first terrain layer; control-map blending is not implemented yet."
-                    : "GPUDriven terrain rendering is active. Terrain chunks use the shared meshlet LOD selection, culling, visibility buffer, shadow, and texture backend paths.",
-                data.Layers.Count > 1 ? MessageType.Warning : MessageType.Info
-            );
+            if (data.Layers.Count > VividTerrainData.MaximumSurfaceLayerCount)
+            {
+                EditorGUILayout.HelpBox(
+                    $"GPUDriven terrain supports the first {VividTerrainData.MaximumSurfaceLayerCount} surface layers. "
+                    + $"This asset contains {data.Layers.Count}; additional layers are ignored.",
+                    MessageType.Warning
+                );
+            }
+            else if (!data.HasCompleteControlMapData)
+            {
+                EditorGUILayout.HelpBox(
+                    "This baked asset does not contain all required control maps. Re-bake it to enable multi-layer blending; until then the first layer is used.",
+                    MessageType.Warning
+                );
+            }
+            else
+            {
+                EditorGUILayout.HelpBox(
+                    data.SupportedSurfaceLayerCount > 1
+                        ? $"GPUDriven terrain LOD rendering is active with control-map blending across {data.SupportedSurfaceLayerCount} layers."
+                        : "GPUDriven terrain rendering is active. Terrain chunks use the shared meshlet LOD selection, culling, visibility buffer, shadow, and texture backend paths.",
+                    MessageType.Info
+                );
+            }
         }
     }
 }

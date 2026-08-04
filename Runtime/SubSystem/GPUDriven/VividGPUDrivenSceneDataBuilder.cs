@@ -674,26 +674,66 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
-            GPUDrivenSurfaceTextureSet surfaceTextures;
             VividMaterialData materialData;
             if (terrainData != null && terrainData.Layers.Count > 0)
             {
-                VividTerrainLayerData layer = terrainData.Layers[0];
-                surfaceTextures = new GPUDrivenSurfaceTextureSet(
-                    layer.DiffuseTexture,
-                    layer.NormalMapTexture,
-                    layer.MaskMapTexture
-                );
-                materialData = CreateTerrainMaterialData(terrainData, layer, surfaceBindingIndex);
+                int supportedLayerCount = terrainData.SupportedSurfaceLayerCount;
+                uint terrainMaterialIndex = VividSurfaceBindingData.InvalidResource;
+                bool usesLayerBlend = supportedLayerCount > 1;
+                for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
+                {
+                    VividTerrainLayerData layer = terrainData.Layers[layerIndex];
+                    uint layerSurfaceBindingIndex = AppendSurfaceBinding(
+                        sceneData,
+                        textureBackend,
+                        new GPUDrivenSurfaceTextureSet(
+                            layer.DiffuseTexture,
+                            layer.NormalMapTexture,
+                            layer.MaskMapTexture)
+                    );
+                    if (usesLayerBlend)
+                    {
+                        sceneData.MutableTerrainLayers.Add(CreateTerrainLayerGPUData(
+                            terrainData,
+                            layer,
+                            layerSurfaceBindingIndex));
+                    }
+                }
+
+                if (usesLayerBlend)
+                {
+                    uint controlBindingIndex0 = AppendTerrainControlBinding(
+                        sceneData,
+                        textureBackend,
+                        terrainData,
+                        0);
+                    uint controlBindingIndex1 = supportedLayerCount > 4
+                        ? AppendTerrainControlBinding(sceneData, textureBackend, terrainData, 1)
+                        : VividSurfaceBindingData.InvalidResource;
+                    terrainMaterialIndex = (uint) sceneData.TerrainMaterialCount;
+                    sceneData.MutableTerrainMaterials.Add(new VividTerrainMaterialData
+                    {
+                        LayerStartIndex = (uint) (sceneData.TerrainLayerCount - supportedLayerCount),
+                        LayerCount = (uint) supportedLayerCount,
+                        ControlBindingIndex0 = controlBindingIndex0,
+                        ControlBindingIndex1 = controlBindingIndex1,
+                    });
+                }
+
+                materialData = CreateTerrainMaterialData(
+                    terrainData,
+                    terrainData.Layers[0],
+                    surfaceBindingIndex,
+                    terrainMaterialIndex);
             }
             else
             {
-                surfaceTextures = ExtractSurfaceTextures(sourceMaterial);
+                GPUDrivenSurfaceTextureSet surfaceTextures = ExtractSurfaceTextures(sourceMaterial);
                 materialData = CreateMaterialData(sourceMaterial, surfaceBindingIndex);
+                sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
             }
 
             materialIndex = sceneData.MaterialCount;
-            sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
             sceneData.MutableMaterials.Add(materialData);
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             if (terrainData != null)
@@ -718,20 +758,33 @@ namespace VividRP.Runtime.GPUDriven
                 uint hash = 2166136261u;
                 hash = (hash ^ (uint) terrainData.Layers.Count) * 16777619u;
                 hash = (hash ^ GetObjectRevisionId(terrainData.SourceMaterial)) * 16777619u;
-                if (terrainData.Layers.Count == 0)
+                int supportedLayerCount = terrainData.SupportedSurfaceLayerCount;
+                if (supportedLayerCount == 0)
                 {
                     return hash;
                 }
 
-                VividTerrainLayerData layer = terrainData.Layers[0];
-                hash = (hash ^ GetObjectRevisionId(layer.DiffuseTexture)) * 16777619u;
-                hash = (hash ^ GetObjectRevisionId(layer.NormalMapTexture)) * 16777619u;
-                hash = (hash ^ GetObjectRevisionId(layer.MaskMapTexture)) * 16777619u;
-                hash = (hash ^ (uint) layer.TileSize.GetHashCode()) * 16777619u;
-                hash = (hash ^ (uint) layer.TileOffset.GetHashCode()) * 16777619u;
-                hash = (hash ^ (uint) layer.Metallic.GetHashCode()) * 16777619u;
-                hash = (hash ^ (uint) layer.Smoothness.GetHashCode()) * 16777619u;
-                hash = (hash ^ (uint) layer.NormalScale.GetHashCode()) * 16777619u;
+                for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
+                {
+                    VividTerrainLayerData layer = terrainData.Layers[layerIndex];
+                    hash = (hash ^ GetObjectRevisionId(layer.DiffuseTexture)) * 16777619u;
+                    hash = (hash ^ GetObjectRevisionId(layer.NormalMapTexture)) * 16777619u;
+                    hash = (hash ^ GetObjectRevisionId(layer.MaskMapTexture)) * 16777619u;
+                    hash = (hash ^ (uint) layer.TileSize.GetHashCode()) * 16777619u;
+                    hash = (hash ^ (uint) layer.TileOffset.GetHashCode()) * 16777619u;
+                    hash = (hash ^ (uint) layer.Metallic.GetHashCode()) * 16777619u;
+                    hash = (hash ^ (uint) layer.Smoothness.GetHashCode()) * 16777619u;
+                    hash = (hash ^ (uint) layer.NormalScale.GetHashCode()) * 16777619u;
+                }
+
+                hash = (hash ^ (uint) terrainData.ControlMaps.Count) * 16777619u;
+                int controlMapCount = Mathf.Min(
+                    terrainData.ControlMaps.Count,
+                    VividTerrainData.MaximumControlMapCount);
+                for (int controlMapIndex = 0; controlMapIndex < controlMapCount; controlMapIndex++)
+                {
+                    hash = (hash ^ GetObjectRevisionId(terrainData.ControlMaps[controlMapIndex])) * 16777619u;
+                }
                 return hash;
             }
         }
@@ -876,20 +929,17 @@ namespace VividRP.Runtime.GPUDriven
         private static VividMaterialData CreateTerrainMaterialData(
             VividTerrainData terrainData,
             in VividTerrainLayerData layer,
-            uint surfaceBindingIndex
+            uint surfaceBindingIndex,
+            uint terrainMaterialIndex
         )
         {
-            Vector2 tileSize = layer.TileSize;
-            Vector3 terrainSize = terrainData.Size;
-            float tileScaleX = Mathf.Abs(tileSize.x) > Mathf.Epsilon ? terrainSize.x / tileSize.x : 1.0f;
-            float tileScaleY = Mathf.Abs(tileSize.y) > Mathf.Epsilon ? terrainSize.z / tileSize.y : 1.0f;
-            float tileOffsetX = Mathf.Abs(tileSize.x) > Mathf.Epsilon ? -layer.TileOffset.x / tileSize.x : 0.0f;
-            float tileOffsetY = Mathf.Abs(tileSize.y) > Mathf.Epsilon ? -layer.TileOffset.y / tileSize.y : 0.0f;
+            float4 textureTilingOffset = GetTerrainLayerTilingOffset(terrainData, layer);
+            bool usesLayerBlend = terrainMaterialIndex != VividSurfaceBindingData.InvalidResource;
 
             return new VividMaterialData
             {
                 AlbedoColor = new float4(1.0f),
-                TextureTilingOffset = new float4(tileScaleX, tileScaleY, tileOffsetX, tileOffsetY),
+                TextureTilingOffset = textureTilingOffset,
                 Emission = new float4(0.0f),
                 SurfaceBindingIndex = surfaceBindingIndex,
                 NormalsStrength = layer.NormalScale,
@@ -898,14 +948,78 @@ namespace VividRP.Runtime.GPUDriven
                 SpecularAAScreenSpaceVariance = 0.0f,
                 SpecularAAThreshold = 0.0f,
                 GeometryFlags = VividGeometryFlags.None,
-                MaterialFlags = VividMaterialFlags.None,
+                MaterialFlags = usesLayerBlend ? VividMaterialFlags.Terrain : VividMaterialFlags.None,
                 RendererListID = VividRendererListID.Default,
                 AlphaClipThreshold = 0.0f,
                 Padding0 = layer.MaskMapTexture != null
                     ? (uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
                     : (uint) GPUDrivenMaterialMaskMode.None,
-                Padding1 = 0,
+                Padding1 = usesLayerBlend ? terrainMaterialIndex : 0u,
             };
+        }
+
+        private static VividTerrainLayerGPUData CreateTerrainLayerGPUData(
+            VividTerrainData terrainData,
+            in VividTerrainLayerData layer,
+            uint surfaceBindingIndex)
+        {
+            return new VividTerrainLayerGPUData
+            {
+                TextureTilingOffset = GetTerrainLayerTilingOffset(terrainData, layer),
+                SurfaceBindingIndex = surfaceBindingIndex,
+                NormalsStrength = layer.NormalScale,
+                Roughness = 1.0f - Mathf.Clamp01(layer.Smoothness),
+                Metallic = Mathf.Clamp01(layer.Metallic),
+                MaskMode = layer.MaskMapTexture != null
+                    ? (uint) GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
+                    : (uint) GPUDrivenMaterialMaskMode.None,
+            };
+        }
+
+        private static float4 GetTerrainLayerTilingOffset(
+            VividTerrainData terrainData,
+            in VividTerrainLayerData layer)
+        {
+            Vector2 tileSize = layer.TileSize;
+            Vector3 terrainSize = terrainData.Size;
+            float tileScaleX = Mathf.Abs(tileSize.x) > Mathf.Epsilon ? terrainSize.x / tileSize.x : 1.0f;
+            float tileScaleY = Mathf.Abs(tileSize.y) > Mathf.Epsilon ? terrainSize.z / tileSize.y : 1.0f;
+            float tileOffsetX = Mathf.Abs(tileSize.x) > Mathf.Epsilon ? -layer.TileOffset.x / tileSize.x : 0.0f;
+            float tileOffsetY = Mathf.Abs(tileSize.y) > Mathf.Epsilon ? -layer.TileOffset.y / tileSize.y : 0.0f;
+            return new float4(tileScaleX, tileScaleY, tileOffsetX, tileOffsetY);
+        }
+
+        private static uint AppendTerrainControlBinding(
+            VividGPUDrivenSceneData sceneData,
+            IGPUDrivenTextureBackend textureBackend,
+            VividTerrainData terrainData,
+            int controlMapIndex)
+        {
+            if (controlMapIndex < 0 || controlMapIndex >= terrainData.ControlMaps.Count)
+            {
+                return VividSurfaceBindingData.InvalidResource;
+            }
+
+            Texture2D controlMap = terrainData.ControlMaps[controlMapIndex];
+            if (controlMap == null)
+            {
+                return VividSurfaceBindingData.InvalidResource;
+            }
+
+            return AppendSurfaceBinding(
+                sceneData,
+                textureBackend,
+                new GPUDrivenSurfaceTextureSet(null, null, controlMap));
+        }
+
+        private static uint AppendSurfaceBinding(
+            VividGPUDrivenSceneData sceneData,
+            IGPUDrivenTextureBackend textureBackend,
+            in GPUDrivenSurfaceTextureSet surfaceTextures)
+        {
+            uint surfaceBindingIndex = (uint) sceneData.SurfaceBindingCount;
+            sceneData.MutableSurfaceBindings.Add(textureBackend.CreateSurfaceBinding(surfaceTextures));
+            return surfaceBindingIndex;
         }
 
         private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(GPUDrivenMaterialProxy materialProxy)

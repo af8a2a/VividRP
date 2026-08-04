@@ -1019,6 +1019,149 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Build_AppendsTerrainLayerAndControlBindingsForMultiLayerTerrain()
+        {
+            GameObject gameObject = null;
+            VividTerrainData terrainData = null;
+            VividMeshletCollectionAsset meshletCollection = null;
+            var textures = new List<Texture2D>();
+
+            try
+            {
+                meshletCollection = CreateMeshletCollectionAsset(
+                    "TerrainControlBlendChunk",
+                    0,
+                    1,
+                    new[] { CreateMeshLODNode(0, 1, 0) },
+                    new[] { CreateMeshlet(0, 0, 3, 1) },
+                    new[]
+                    {
+                        CreateVertex(0.0f, 0.0f, 0.0f),
+                        CreateVertex(1.0f, 0.0f, 0.0f),
+                        CreateVertex(0.0f, 1.0f, 0.0f),
+                    },
+                    new byte[] { 0, 1, 2 }
+                );
+
+                Texture2D baseMap0 = CreateTerrainTexture("Terrain Base 0", textures);
+                Texture2D normalMap0 = CreateTerrainTexture("Terrain Normal 0", textures);
+                Texture2D maskMap0 = CreateTerrainTexture("Terrain Mask 0", textures);
+                Texture2D baseMap1 = CreateTerrainTexture("Terrain Base 1", textures);
+                Texture2D normalMap1 = CreateTerrainTexture("Terrain Normal 1", textures);
+                Texture2D controlMap = CreateTerrainTexture("Terrain Control 0", textures);
+                controlMap.wrapMode = TextureWrapMode.Clamp;
+
+                var layers = new[]
+                {
+                    new VividTerrainLayerData(
+                        baseMap0,
+                        normalMap0,
+                        maskMap0,
+                        new Vector2(4.0f, 8.0f),
+                        Vector2.zero,
+                        Color.white,
+                        0.25f,
+                        0.7f,
+                        0.5f),
+                    new VividTerrainLayerData(
+                        baseMap1,
+                        normalMap1,
+                        null,
+                        new Vector2(8.0f, 16.0f),
+                        new Vector2(2.0f, 4.0f),
+                        Color.white,
+                        0.6f,
+                        0.2f,
+                        0.8f),
+                };
+                var chunkBounds = new Bounds(
+                    new Vector3(8.0f, 2.0f, 16.0f),
+                    new Vector3(16.0f, 4.0f, 32.0f));
+                terrainData = ScriptableObject.CreateInstance<VividTerrainData>();
+                terrainData.Initialize(
+                    string.Empty,
+                    "TerrainControlBlend",
+                    33,
+                    new Vector3(16.0f, 4.0f, 32.0f),
+                    chunkBounds,
+                    Vector2Int.one,
+                    VividTerrainBakeSettings.Default,
+                    null,
+                    layers,
+                    new[]
+                    {
+                        new VividTerrainChunkData(
+                            Vector2Int.zero,
+                            Vector2Int.zero,
+                            new Vector2Int(32, 32),
+                            chunkBounds,
+                            meshletCollection),
+                    },
+                    new[] { controlMap }
+                );
+
+                gameObject = new GameObject("Terrain Control Blend Scene Builder");
+                VividTerrain terrain = gameObject.AddComponent<VividTerrain>();
+                terrain.SetData(terrainData);
+
+                var sceneData = new VividGPUDrivenSceneData();
+                var builder = new VividGPUDrivenSceneDataBuilder();
+                using var textureBackend = new BindlessGPUDrivenTextureBackend(
+                    new FakeBindlessTextureDescriptorAllocator(16));
+
+                builder.Build(sceneData, VividMeshletRendererDatabase.instance, textureBackend);
+
+                Assert.That(sceneData.MaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.SurfaceBindingCount, Is.EqualTo(3));
+                Assert.That(sceneData.TerrainMaterialCount, Is.EqualTo(1));
+                Assert.That(sceneData.TerrainLayerCount, Is.EqualTo(2));
+
+                VividMaterialData materialData = sceneData.Materials[0];
+                Assert.That(
+                    materialData.MaterialFlags & VividMaterialFlags.Terrain,
+                    Is.EqualTo(VividMaterialFlags.Terrain));
+                Assert.That(materialData.SurfaceBindingIndex, Is.EqualTo(0u));
+                Assert.That(materialData.Padding1, Is.EqualTo(0u));
+
+                VividTerrainMaterialData terrainMaterialData = sceneData.TerrainMaterials[0];
+                Assert.That(terrainMaterialData.LayerStartIndex, Is.EqualTo(0u));
+                Assert.That(terrainMaterialData.LayerCount, Is.EqualTo(2u));
+                Assert.That(terrainMaterialData.ControlBindingIndex0, Is.EqualTo(2u));
+                Assert.That(
+                    terrainMaterialData.ControlBindingIndex1,
+                    Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+
+                Assert.That(sceneData.TerrainLayers[0].SurfaceBindingIndex, Is.EqualTo(0u));
+                Assert.That(sceneData.TerrainLayers[1].SurfaceBindingIndex, Is.EqualTo(1u));
+                Assert.That(sceneData.TerrainLayers[1].TextureTilingOffset.x, Is.EqualTo(2.0f).Within(0.0001f));
+                Assert.That(sceneData.TerrainLayers[1].TextureTilingOffset.y, Is.EqualTo(2.0f).Within(0.0001f));
+                Assert.That(sceneData.TerrainLayers[1].TextureTilingOffset.z, Is.EqualTo(-0.25f).Within(0.0001f));
+                Assert.That(sceneData.TerrainLayers[1].TextureTilingOffset.w, Is.EqualTo(-0.25f).Within(0.0001f));
+
+                VividSurfaceBindingData controlBinding = sceneData.SurfaceBindings[2];
+                Assert.That(controlBinding.Flags, Is.EqualTo(VividSurfaceBindingFlags.Mask));
+                Assert.That(controlBinding.BaseColorResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(controlBinding.NormalResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(controlBinding.MaskResource, Is.Not.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(controlBinding.UVScaleBias.x, Is.LessThan(0.0f));
+            }
+            finally
+            {
+                if (gameObject != null)
+                    Object.DestroyImmediate(gameObject);
+                if (terrainData != null)
+                    Object.DestroyImmediate(terrainData);
+                if (meshletCollection != null)
+                    Object.DestroyImmediate(meshletCollection);
+                for (int textureIndex = 0; textureIndex < textures.Count; textureIndex++)
+                {
+                    if (textures[textureIndex] != null)
+                        Object.DestroyImmediate(textures[textureIndex]);
+                }
+            }
+        }
+
+        [Test]
         public void Build_RejectsTerrainWhenChunkChangesToUnsupportedLODCount()
         {
             GameObject gameObject = null;
@@ -1363,6 +1506,16 @@ namespace VividRP.Editor.Tests
             asset.VertexBuffer = vertices;
             asset.IndexBuffer = indices;
             return asset;
+        }
+
+        private static Texture2D CreateTerrainTexture(string name, List<Texture2D> textures)
+        {
+            var texture = new Texture2D(4, 4)
+            {
+                name = name,
+            };
+            textures.Add(texture);
+            return texture;
         }
 
         private static VividMeshLODNode CreateMeshLODNode(uint meshletStartIndex, uint meshletCount, uint levelIndex)

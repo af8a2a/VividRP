@@ -155,6 +155,57 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Generate_CapturesTerrainLayersAndControlMapsForGPUDrivenBlending()
+        {
+            EnsureSupportedPlatform();
+            TerrainData source = CreateTerrainData("ControlMapSource", out _);
+            var firstLayer = new TerrainLayer { name = "Control Layer 0" };
+            var secondLayer = new TerrainLayer { name = "Control Layer 1" };
+            var baked = ScriptableObject.CreateInstance<VividTerrainData>();
+
+            try
+            {
+                source.terrainLayers = new[] { firstLayer, secondLayer };
+                source.alphamapResolution = 8;
+                var alphamaps = new float[8, 8, 2];
+                for (int y = 0; y < 8; y++)
+                {
+                    for (int x = 0; x < 8; x++)
+                    {
+                        float secondLayerWeight = x / 7.0f;
+                        alphamaps[y, x, 0] = 1.0f - secondLayerWeight;
+                        alphamaps[y, x, 1] = secondLayerWeight;
+                    }
+                }
+                source.SetAlphamaps(0, 0, alphamaps);
+
+                VividTerrainBaker.Generate(
+                    baked,
+                    new VividTerrainBaker.Parameters
+                    {
+                        SourceTerrainData = source,
+                        Settings = new VividTerrainBakeSettings(1, 32, optimizeVertexCache: false),
+                        LogErrorHandler = Assert.Fail,
+                    }
+                );
+
+                Assert.That(baked.Layers, Has.Count.EqualTo(2));
+                Assert.That(baked.ControlMaps, Has.Count.EqualTo(1));
+                Assert.That(baked.ControlMaps[0], Is.SameAs(source.alphamapTextures[0]));
+                Assert.That(baked.SupportedSurfaceLayerCount, Is.EqualTo(2));
+                Assert.That(baked.RequiredControlMapCount, Is.EqualTo(1));
+                Assert.That(baked.HasCompleteControlMapData, Is.True);
+            }
+            finally
+            {
+                DestroyGeneratedData(baked);
+                Object.DestroyImmediate(source);
+                Object.DestroyImmediate(firstLayer);
+                Object.DestroyImmediate(secondLayer);
+            }
+        }
+
+        [Test]
         public void Generate_UsesSampleStrideAndRetainsLastHeightmapEdge()
         {
             EnsureSupportedPlatform();

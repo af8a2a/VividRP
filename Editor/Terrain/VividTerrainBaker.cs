@@ -216,7 +216,8 @@ namespace VividRP.Editor.TerrainTools
                     settings,
                     parameters.SourceMaterial,
                     CaptureLayers(terrainData.terrainLayers),
-                    chunks.ToArray()
+                    chunks.ToArray(),
+                    CaptureControlMaps(terrainData)
                 );
             }
             catch
@@ -482,6 +483,25 @@ namespace VividRP.Editor.TerrainTools
             }
 
             return layers;
+        }
+
+        private static Texture2D[] CaptureControlMaps(TerrainData terrainData)
+        {
+            Texture2D[] sourceControlMaps = terrainData != null
+                ? terrainData.alphamapTextures
+                : null;
+            if (sourceControlMaps == null || sourceControlMaps.Length == 0)
+            {
+                return Array.Empty<Texture2D>();
+            }
+
+            int controlMapCount = Mathf.Min(
+                sourceControlMaps.Length,
+                VividTerrainData.MaximumControlMapCount
+            );
+            var controlMaps = new Texture2D[controlMapCount];
+            Array.Copy(sourceControlMaps, controlMaps, controlMapCount);
+            return controlMaps;
         }
 
         private static void DestroyGeneratedData(VividTerrainData data)

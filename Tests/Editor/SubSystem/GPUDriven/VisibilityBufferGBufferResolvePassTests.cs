@@ -153,6 +153,11 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("VividCreateSurfaceSampleContextGrad("));
             Assert.That(shaderSource, Does.Contain("VividSurfaceHasNormal("));
             Assert.That(shaderSource, Does.Contain("VividSampleMaskGrad("));
+            Assert.That(shaderSource, Does.Contain("ResolveTerrainSurfaceSamples("));
+            Assert.That(shaderSource, Does.Contain("LoadTerrainControlWeights("));
+            Assert.That(shaderSource, Does.Contain("PullTerrainMaterialData("));
+            Assert.That(shaderSource, Does.Contain("PullTerrainLayerData("));
+            Assert.That(shaderSource, Does.Contain("VIVIDMATERIALFLAGS_TERRAIN"));
             Assert.That(shaderSource, Does.Contain("VIVID_VT_ENABLE_FEEDBACK_RW"));
             Assert.That(shaderSource, Does.Contain("VIVID_GPU_DRIVEN_TEXTURE_BACKEND_VIRTUAL_TEXTURE"));
             Assert.That(shaderSource, Does.Not.Contain("GetBindlessTexture2D("));

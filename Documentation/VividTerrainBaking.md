@@ -17,7 +17,9 @@ The baker reads the source heightmap once and creates a regular grid in Terrain-
 
 Terrain holes are respected. A sampled quad that covers any source hole texel is omitted, which deliberately avoids bridging a hole when baking with a coarse sample stride.
 
-Surface-layer prototype data copies the diffuse, normal, and mask textures together with tiling and core material scalar values from each `TerrainLayer`. Alphamap/control texture baking is not part of this stage.
+Surface data copies up to eight layers of diffuse, normal, and mask textures together with tiling and core material scalar values from each `TerrainLayer`. The first two RGBA alphamap textures are retained as control maps, covering four layers per texture.
+
+Multi-layer terrain uses the same backend-neutral Surface Binding protocol as static meshes. Each terrain layer receives one Base/Normal/Mask binding, while each control map reuses the linear Mask resource slot. With the Virtual Texture backend this keeps layer textures and control maps in the shared GPUDriven VT space, uses explicit gradients reconstructed by the GBuffer Resolve pass, and emits feedback only for the control maps and layers sampled by the current pixel. Control weights are clamped and normalized before Base, tangent-space Normal, Metallic, Occlusion, and Roughness values are blended. A legacy asset without captured control maps falls back deterministically to its first layer until it is rebaked.
 
 ## Meshlet storage
 
@@ -34,4 +36,4 @@ Current defaults are:
 - Maximum chunk LOD levels: 4
 - meshoptimizer vertex-cache optimization: enabled
 
-The runtime-facing asset exposes source identity, terrain size, local bounds, row-major chunk grid coordinates, heightmap sample ranges, the configured LOD limit, actual per-chunk LOD counts, surface layers, and compressed meshlet collections. Assets baked before Terrain LOD was introduced deserialize the missing LOD setting as one and remain valid without rebaking. Multiple terrain layers are preserved in the asset, but this stage renders only the first layer through the shared Base/Normal/Mask surface binding. Control-map blending, geomorphing, and chunk streaming are intentionally deferred.
+The runtime-facing asset exposes source identity, terrain size, local bounds, row-major chunk grid coordinates, heightmap sample ranges, the configured LOD limit, actual per-chunk LOD counts, surface layers, control maps, and compressed meshlet collections. Assets baked before Terrain LOD was introduced deserialize the missing LOD setting as one and remain valid without rebaking. Assets baked before control-map support remain valid and render their first layer until rebaked. More than eight surface layers are retained in the asset for source fidelity, but GPUDriven currently renders only the first eight. Geomorphing and chunk streaming remain deferred.

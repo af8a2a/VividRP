@@ -7,6 +7,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividInstanceData> m_Instances = new();
         private readonly List<VividMaterialData> m_Materials = new();
         private readonly List<VividSurfaceBindingData> m_SurfaceBindings = new();
+        private readonly List<VividTerrainMaterialData> m_TerrainMaterials = new();
+        private readonly List<VividTerrainLayerGPUData> m_TerrainLayers = new();
         private readonly List<VividMeshLODNode> m_MeshLODNodes = new();
         private readonly List<VividMeshlet> m_Meshlets = new();
         private readonly List<VividMeshletVertex> m_Vertices = new();
@@ -17,6 +19,10 @@ namespace VividRP.Runtime.GPUDriven
         public IReadOnlyList<VividMaterialData> Materials => m_Materials;
 
         public IReadOnlyList<VividSurfaceBindingData> SurfaceBindings => m_SurfaceBindings;
+
+        public IReadOnlyList<VividTerrainMaterialData> TerrainMaterials => m_TerrainMaterials;
+
+        public IReadOnlyList<VividTerrainLayerGPUData> TerrainLayers => m_TerrainLayers;
 
         public IReadOnlyList<VividMeshLODNode> MeshLODNodes => m_MeshLODNodes;
 
@@ -32,6 +38,10 @@ namespace VividRP.Runtime.GPUDriven
 
         public int SurfaceBindingCount => m_SurfaceBindings.Count;
 
+        public int TerrainMaterialCount => m_TerrainMaterials.Count;
+
+        public int TerrainLayerCount => m_TerrainLayers.Count;
+
         public int MeshLODNodeCount => m_MeshLODNodes.Count;
 
         public int MeshletCount => m_Meshlets.Count;
@@ -45,6 +55,10 @@ namespace VividRP.Runtime.GPUDriven
         internal List<VividMaterialData> MutableMaterials => m_Materials;
 
         internal List<VividSurfaceBindingData> MutableSurfaceBindings => m_SurfaceBindings;
+
+        internal List<VividTerrainMaterialData> MutableTerrainMaterials => m_TerrainMaterials;
+
+        internal List<VividTerrainLayerGPUData> MutableTerrainLayers => m_TerrainLayers;
 
         internal List<VividMeshLODNode> MutableMeshLODNodes => m_MeshLODNodes;
 
@@ -69,11 +83,18 @@ namespace VividRP.Runtime.GPUDriven
             m_SurfaceBindings.Clear();
         }
 
+        internal void ClearTerrainMaterials()
+        {
+            m_TerrainMaterials.Clear();
+            m_TerrainLayers.Clear();
+        }
+
         internal void ClearDynamic()
         {
             ClearInstances();
             ClearMaterials();
             ClearSurfaceBindings();
+            ClearTerrainMaterials();
         }
 
         internal void Clear()

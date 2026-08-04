@@ -285,28 +285,240 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                 return abs(visibilityDepth - sceneDepth) <= depthTolerance;
             }
 
+            #define VIVID_MAX_TERRAIN_LAYERS 8u
+
+            void ApplyMaskSample(
+                const uint maskMode,
+                const float4 maskSample,
+                inout float perceptualRoughness,
+                inout float metallic,
+                inout float ambientOcclusion)
+            {
+                if (maskMode == 1u)
+                {
+                    metallic = maskSample.r;
+                    perceptualRoughness = 1.0f - maskSample.a;
+                }
+                else if (maskMode == 2u)
+                {
+                    perceptualRoughness = maskSample.r;
+                }
+                else if (maskMode == 3u)
+                {
+                    metallic = maskSample.r;
+                    ambientOcclusion = maskSample.g;
+                    perceptualRoughness = 1.0f - maskSample.a;
+                }
+            }
+
+            void LoadTerrainControlWeights(
+                const VividTerrainMaterialData terrainMaterialData,
+                const InterpolatedUV terrainUv,
+                const float4 positionCS,
+                out float weights[8])
+            {
+                [unroll]
+                for (uint layerIndex = 0u; layerIndex < VIVID_MAX_TERRAIN_LAYERS; ++layerIndex)
+                    weights[layerIndex] = 0.0f;
+
+                [unroll]
+                for (uint controlMapIndex = 0u; controlMapIndex < 2u; ++controlMapIndex)
+                {
+                    uint controlBindingIndex = controlMapIndex == 0u
+                        ? terrainMaterialData.ControlBindingIndex0
+                        : terrainMaterialData.ControlBindingIndex1;
+                    if (controlBindingIndex == 0xFFFFFFFFu || controlBindingIndex >= _SurfaceBindingDataCount)
+                        continue;
+
+                    VividSurfaceBindingData controlBinding = PullSurfaceBindingData(controlBindingIndex);
+                    if (!VividSurfaceHasMask(controlBinding))
+                        continue;
+
+                    VividSurfaceSampleContext controlSampleContext = VividCreateSurfaceSampleContextGrad(
+                        controlBinding,
+                        terrainUv.uv,
+                        terrainUv.ddx,
+                        terrainUv.ddy,
+                        positionCS);
+                    float4 controlWeights = VividSampleMaskGrad(controlBinding, controlSampleContext);
+                    uint weightOffset = controlMapIndex * 4u;
+                    weights[weightOffset + 0u] = controlWeights.r;
+                    weights[weightOffset + 1u] = controlWeights.g;
+                    weights[weightOffset + 2u] = controlWeights.b;
+                    weights[weightOffset + 3u] = controlWeights.a;
+                }
+
+                uint layerCount = min(terrainMaterialData.LayerCount, VIVID_MAX_TERRAIN_LAYERS);
+                float weightSum = 0.0f;
+                [unroll]
+                for (uint layerIndex = 0u; layerIndex < VIVID_MAX_TERRAIN_LAYERS; ++layerIndex)
+                {
+                    weights[layerIndex] = layerIndex < layerCount
+                        ? max(weights[layerIndex], 0.0f)
+                        : 0.0f;
+                    weightSum += weights[layerIndex];
+                }
+
+                if (weightSum > 1e-5f)
+                {
+                    float inverseWeightSum = rcp(weightSum);
+                    [unroll]
+                    for (uint layerIndex = 0u; layerIndex < VIVID_MAX_TERRAIN_LAYERS; ++layerIndex)
+                        weights[layerIndex] *= inverseWeightSum;
+                }
+                else if (layerCount > 0u)
+                {
+                    weights[0] = 1.0f;
+                }
+            }
+
+            void ResolveTerrainSurfaceSamples(
+                const VividMaterialData materialData,
+                const InterpolatedUV terrainUv,
+                const float4 positionCS,
+                out float3 baseColor,
+                out float3 normalTS,
+                out bool hasNormal,
+                out float perceptualRoughness,
+                out float metallic,
+                out float ambientOcclusion)
+            {
+                VividTerrainMaterialData terrainMaterialData = PullTerrainMaterialData(materialData.Padding1);
+                float weights[8];
+                LoadTerrainControlWeights(terrainMaterialData, terrainUv, positionCS, weights);
+
+                baseColor = 0.0f;
+                normalTS = 0.0f;
+                hasNormal = false;
+                perceptualRoughness = 0.0f;
+                metallic = 0.0f;
+                ambientOcclusion = 0.0f;
+
+                uint layerCount = min(terrainMaterialData.LayerCount, VIVID_MAX_TERRAIN_LAYERS);
+                [unroll]
+                for (uint layerIndex = 0u; layerIndex < VIVID_MAX_TERRAIN_LAYERS; ++layerIndex)
+                {
+                    if (layerIndex >= layerCount || weights[layerIndex] <= 0.0f)
+                        continue;
+
+                    VividTerrainLayerGPUData layerData = PullTerrainLayerData(
+                        terrainMaterialData.LayerStartIndex + layerIndex);
+                    VividSurfaceBindingData layerBinding = PullSurfaceBindingData(layerData.SurfaceBindingIndex);
+                    InterpolatedUV layerUv = terrainUv;
+                    ApplyTilingOffset(layerUv, layerData.TextureTilingOffset);
+                    VividSurfaceSampleContext layerSampleContext = VividCreateSurfaceSampleContextGrad(
+                        layerBinding,
+                        layerUv.uv,
+                        layerUv.ddx,
+                        layerUv.ddy,
+                        positionCS);
+
+                    float weight = weights[layerIndex];
+                    baseColor += VividSampleBaseColorGrad(layerBinding, layerSampleContext).rgb * weight;
+
+                    float3 layerNormalTS = float3(0.0f, 0.0f, 1.0f);
+                    if (VividSurfaceHasNormal(layerBinding))
+                    {
+                        layerNormalTS = UnpackVividNormalScale(
+                            VividSampleNormalGrad(layerBinding, layerSampleContext),
+                            layerData.NormalsStrength);
+                        hasNormal = true;
+                    }
+                    normalTS += layerNormalTS * weight;
+
+                    float layerPerceptualRoughness = layerData.Roughness;
+                    float layerMetallic = layerData.Metallic;
+                    float layerAmbientOcclusion = 1.0f;
+                    if (VividSurfaceHasMask(layerBinding))
+                    {
+                        ApplyMaskSample(
+                            layerData.MaskMode,
+                            VividSampleMaskGrad(layerBinding, layerSampleContext),
+                            layerPerceptualRoughness,
+                            layerMetallic,
+                            layerAmbientOcclusion);
+                    }
+                    perceptualRoughness += layerPerceptualRoughness * weight;
+                    metallic += layerMetallic * weight;
+                    ambientOcclusion += layerAmbientOcclusion * weight;
+                }
+
+                normalTS = SafeNormalize(normalTS);
+            }
+
             VividGBufferSurfaceData ResolveSurfaceData(
                 const TriangleData triangleData,
                 const VividBarycentricDerivatives barycentric,
                 const float4 positionCS)
             {
-                InterpolatedUV uv = InterpolateUV(
+                InterpolatedUV terrainUv = InterpolateUV(
                     barycentric,
                     triangleData.vertex0,
                     triangleData.vertex1,
                     triangleData.vertex2);
-                ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
 
-                VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
-                    triangleData.surfaceBindingData,
-                    uv.uv,
-                    uv.ddx,
-                    uv.ddy,
-                    positionCS);
-                float4 albedoSample = SampleAlbedoTextureGrad(
-                    triangleData.surfaceBindingData,
-                    surfaceSampleContext);
-                float3 baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
+                float3 baseColor;
+                float3 sampledNormalTS = float3(0.0f, 0.0f, 1.0f);
+                bool hasSampledNormal = false;
+                float perceptualRoughness;
+                float metallic;
+                float ambientOcclusion;
+                bool isTerrain = (triangleData.materialData.MaterialFlags & VIVIDMATERIALFLAGS_TERRAIN) != 0u
+                    && triangleData.materialData.Padding1 < _TerrainMaterialDataCount;
+
+                UNITY_BRANCH
+                if (isTerrain)
+                {
+                    ResolveTerrainSurfaceSamples(
+                        triangleData.materialData,
+                        terrainUv,
+                        positionCS,
+                        baseColor,
+                        sampledNormalTS,
+                        hasSampledNormal,
+                        perceptualRoughness,
+                        metallic,
+                        ambientOcclusion);
+                }
+                else
+                {
+                    InterpolatedUV uv = terrainUv;
+                    ApplyTilingOffset(uv, triangleData.materialData.TextureTilingOffset);
+                    VividSurfaceSampleContext surfaceSampleContext = VividCreateSurfaceSampleContextGrad(
+                        triangleData.surfaceBindingData,
+                        uv.uv,
+                        uv.ddx,
+                        uv.ddy,
+                        positionCS);
+                    float4 albedoSample = SampleAlbedoTextureGrad(
+                        triangleData.surfaceBindingData,
+                        surfaceSampleContext);
+                    baseColor = albedoSample.rgb * triangleData.materialData.AlbedoColor.rgb;
+                    perceptualRoughness = triangleData.materialData.Roughness;
+                    metallic = triangleData.materialData.Metallic;
+                    ambientOcclusion = 1.0f;
+
+                    if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
+                    {
+                        sampledNormalTS = SampleNormalTSGrad(
+                            triangleData.materialData,
+                            triangleData.surfaceBindingData,
+                            surfaceSampleContext);
+                        hasSampledNormal = true;
+                    }
+
+                    if (VividSurfaceHasMask(triangleData.surfaceBindingData))
+                    {
+                        ApplyMaskSample(
+                            triangleData.materialData.Padding0,
+                            VividSampleMaskGrad(
+                                triangleData.surfaceBindingData,
+                                surfaceSampleContext),
+                            perceptualRoughness,
+                            metallic,
+                            ambientOcclusion);
+                    }
+                }
 
                 const float normalFlipSign = ComputeDoubleSidedNormalFlipSign(triangleData);
                 const float3 vertexNormalWS0 = normalFlipSign * TransformInstanceObjectToWorldNormal(
@@ -332,7 +544,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                     triangleData.positionWS2);
 
                 UNITY_BRANCH
-                if (VividSurfaceHasNormal(triangleData.surfaceBindingData))
+                if (hasSampledNormal)
                 {
                     float4 tangentOS = InterpolateWithBarycentricNoDerivatives(
                         barycentric,
@@ -351,38 +563,7 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferGBufferResolve"
                             * GetInstanceOddNegativeScaleSign(triangleData.instanceData)
                             * normalFlipSign;
                         float3x3 tangentToWorld = CreateInstanceTangentToWorld(normalWS, tangentWS, tangentSign);
-                        float3 normalTS = SampleNormalTSGrad(
-                            triangleData.materialData,
-                            triangleData.surfaceBindingData,
-                            surfaceSampleContext);
-                        normalWS = TransformTangentToWorld(normalTS, tangentToWorld, true);
-                    }
-                }
-
-                float perceptualRoughness = triangleData.materialData.Roughness;
-                float metallic = triangleData.materialData.Metallic;
-                float ambientOcclusion = 1.0f;
-                UNITY_BRANCH
-                if (VividSurfaceHasMask(triangleData.surfaceBindingData))
-                {
-                    float4 maskSample = VividSampleMaskGrad(
-                        triangleData.surfaceBindingData,
-                        surfaceSampleContext);
-                    const uint maskMode = triangleData.materialData.Padding0;
-                    if (maskMode == 1u)
-                    {
-                        metallic = maskSample.r;
-                        perceptualRoughness = 1.0f - maskSample.a;
-                    }
-                    else if (maskMode == 2u)
-                    {
-                        perceptualRoughness = maskSample.r;
-                    }
-                    else if (maskMode == 3u)
-                    {
-                        metallic = maskSample.r;
-                        ambientOcclusion = maskSample.g;
-                        perceptualRoughness = 1.0f - maskSample.a;
+                        normalWS = TransformTangentToWorld(sampledNormalTS, tangentToWorld, true);
                     }
                 }
 

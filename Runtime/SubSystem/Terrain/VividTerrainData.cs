@@ -189,6 +189,8 @@ namespace VividRP.Runtime
     public sealed class VividTerrainData : ScriptableObject
     {
         public const uint CurrentBakeVersion = 1u;
+        public const int MaximumSurfaceLayerCount = 8;
+        public const int MaximumControlMapCount = MaximumSurfaceLayerCount / 4;
         public const int MinimumChunkLODCount = VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount;
         public const int MaximumChunkLODCount = VividTerrainBakeSettings.MaximumMeshLODLevelCount;
 
@@ -223,6 +225,9 @@ namespace VividRP.Runtime
         private VividTerrainLayerData[] m_Layers = Array.Empty<VividTerrainLayerData>();
 
         [SerializeField]
+        private Texture2D[] m_ControlMaps = Array.Empty<Texture2D>();
+
+        [SerializeField]
         private VividTerrainChunkData[] m_Chunks = Array.Empty<VividTerrainChunkData>();
 
         public uint BakeVersion => m_BakeVersion;
@@ -244,6 +249,31 @@ namespace VividRP.Runtime
         public Material SourceMaterial => m_SourceMaterial;
 
         public IReadOnlyList<VividTerrainLayerData> Layers => m_Layers;
+
+        public IReadOnlyList<Texture2D> ControlMaps => m_ControlMaps ?? Array.Empty<Texture2D>();
+
+        public int SupportedSurfaceLayerCount => Mathf.Min(Layers.Count, MaximumSurfaceLayerCount);
+
+        public int RequiredControlMapCount => SupportedSurfaceLayerCount > 1
+            ? Mathf.CeilToInt(SupportedSurfaceLayerCount / 4.0f)
+            : 0;
+
+        public bool HasCompleteControlMapData
+        {
+            get
+            {
+                if (ControlMaps.Count < RequiredControlMapCount)
+                    return false;
+
+                for (int controlMapIndex = 0; controlMapIndex < RequiredControlMapCount; controlMapIndex++)
+                {
+                    if (ControlMaps[controlMapIndex] == null)
+                        return false;
+                }
+
+                return true;
+            }
+        }
 
         public IReadOnlyList<VividTerrainChunkData> Chunks => m_Chunks;
 
@@ -379,7 +409,8 @@ namespace VividRP.Runtime
             VividTerrainBakeSettings bakeSettings,
             Material sourceMaterial,
             VividTerrainLayerData[] layers,
-            VividTerrainChunkData[] chunks)
+            VividTerrainChunkData[] chunks,
+            Texture2D[] controlMaps = null)
         {
             m_BakeVersion = CurrentBakeVersion;
             m_SourceTerrainDataGUID = sourceTerrainDataGUID ?? string.Empty;
@@ -391,6 +422,7 @@ namespace VividRP.Runtime
             m_BakeSettings = bakeSettings;
             m_SourceMaterial = sourceMaterial;
             m_Layers = layers ?? Array.Empty<VividTerrainLayerData>();
+            m_ControlMaps = controlMaps ?? Array.Empty<Texture2D>();
             m_Chunks = chunks ?? Array.Empty<VividTerrainChunkData>();
         }
     }

@@ -11,6 +11,9 @@
 #define VIVIDSURFACEBINDINGFLAGS_NORMAL 2u
 #define VIVIDSURFACEBINDINGFLAGS_MASK 4u
 
+#define VIVIDMATERIALFLAGS_UNLIT 1u
+#define VIVIDMATERIALFLAGS_TERRAIN 2u
+
 #define VIVIDRENDERERLISTID_CULL_FRONT 1u
 #define VIVIDRENDERERLISTID_CULL_OFF 2u
 #define VIVIDRENDERERLISTID_ALPHA_TEST 4u
@@ -66,6 +69,29 @@ struct VividSurfaceBindingData
     uint Flags;
 
     float4 UVScaleBias;
+};
+
+struct VividTerrainMaterialData
+{
+    uint LayerStartIndex;
+    uint LayerCount;
+    uint ControlBindingIndex0;
+    uint ControlBindingIndex1;
+};
+
+struct VividTerrainLayerGPUData
+{
+    float4 TextureTilingOffset;
+
+    uint SurfaceBindingIndex;
+    float NormalsStrength;
+    float Roughness;
+    float Metallic;
+
+    uint MaskMode;
+    uint Padding0;
+    uint Padding1;
+    uint Padding2;
 };
 
 struct VividMeshLODNode
@@ -174,6 +200,10 @@ uint _InstanceDataCount;
 StructuredBuffer<VividMaterialData> _MaterialData;
 StructuredBuffer<VividSurfaceBindingData> _SurfaceBindingData;
 uint _SurfaceBindingDataCount;
+StructuredBuffer<VividTerrainMaterialData> _TerrainMaterialData;
+uint _TerrainMaterialDataCount;
+StructuredBuffer<VividTerrainLayerGPUData> _TerrainLayerData;
+uint _TerrainLayerDataCount;
 StructuredBuffer<VividMeshLODNode> _MeshLODNodes;
 StructuredBuffer<VividMeshlet> _Meshlets;
 uint _MeshLODNodeCount;
@@ -192,6 +222,16 @@ VividMaterialData PullMaterialData(const uint materialIndex)
 VividSurfaceBindingData PullSurfaceBindingData(const uint surfaceBindingIndex)
 {
     return _SurfaceBindingData[surfaceBindingIndex];
+}
+
+VividTerrainMaterialData PullTerrainMaterialData(const uint terrainMaterialIndex)
+{
+    return _TerrainMaterialData[terrainMaterialIndex];
+}
+
+VividTerrainLayerGPUData PullTerrainLayerData(const uint terrainLayerIndex)
+{
+    return _TerrainLayerData[terrainLayerIndex];
 }
 
 VividMeshLODNode PullMeshLODNode(const uint nodeIndex)

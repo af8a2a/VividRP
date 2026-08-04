@@ -58,6 +58,7 @@ namespace VividRP.Runtime.GPUDriven
     {
         None = 0,
         Unlit = 1 << 0,
+        Terrain = 1 << 1,
     }
 
     [GenerateHLSL(PackingRules.Exact)]
@@ -117,6 +118,33 @@ namespace VividRP.Runtime.GPUDriven
         public float4 UVScaleBias;
 
         public const uint InvalidResource = uint.MaxValue;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividTerrainMaterialData
+    {
+        public uint LayerStartIndex;
+        public uint LayerCount;
+        public uint ControlBindingIndex0;
+        public uint ControlBindingIndex1;
+    }
+
+    [GenerateHLSL(PackingRules.Exact, needAccessors = false)]
+    [StructLayout(LayoutKind.Sequential)]
+    public struct VividTerrainLayerGPUData
+    {
+        public float4 TextureTilingOffset;
+
+        public uint SurfaceBindingIndex;
+        public float NormalsStrength;
+        public float Roughness;
+        public float Metallic;
+
+        public uint MaskMode;
+        public uint Padding0;
+        public uint Padding1;
+        public uint Padding2;
     }
 
     [GenerateHLSL]

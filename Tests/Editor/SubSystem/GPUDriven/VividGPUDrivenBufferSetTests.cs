@@ -15,6 +15,8 @@ namespace VividRP.Editor.Tests
         {
             Assert.That(UnsafeUtility.SizeOf<VividMaterialData>(), Is.EqualTo(96));
             Assert.That(UnsafeUtility.SizeOf<VividSurfaceBindingData>(), Is.EqualTo(32));
+            Assert.That(UnsafeUtility.SizeOf<VividTerrainMaterialData>(), Is.EqualTo(16));
+            Assert.That(UnsafeUtility.SizeOf<VividTerrainLayerGPUData>(), Is.EqualTo(48));
         }
 
         [Test]
@@ -249,6 +251,46 @@ namespace VividRP.Editor.Tests
             bufferSet.Dispose();
 
             Assert.That(bufferSet.SurfaceBindingDataBuffer, Is.Null);
+        }
+
+        [Test]
+        public void Upload_CreatesAndDisposesTerrainMaterialBuffers()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.MutableTerrainMaterials.Add(new VividTerrainMaterialData
+            {
+                LayerStartIndex = 0u,
+                LayerCount = 2u,
+            });
+            sceneData.MutableTerrainLayers.Add(new VividTerrainLayerGPUData
+            {
+                TextureTilingOffset = new float4(2.0f, 2.0f, 0.0f, 0.0f),
+                SurfaceBindingIndex = 0u,
+            });
+            sceneData.MutableTerrainLayers.Add(new VividTerrainLayerGPUData
+            {
+                TextureTilingOffset = new float4(4.0f, 4.0f, 0.0f, 0.0f),
+                SurfaceBindingIndex = 1u,
+            });
+
+            var bufferSet = new VividGPUDrivenBufferSet();
+            bufferSet.Upload(sceneData);
+
+            Assert.That(bufferSet.TerrainMaterialCount, Is.EqualTo(1));
+            Assert.That(bufferSet.TerrainLayerCount, Is.EqualTo(2));
+            Assert.That(bufferSet.TerrainMaterialDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.TerrainLayerDataBuffer, Is.Not.Null);
+            Assert.That(bufferSet.TerrainMaterialDataBuffer.count, Is.EqualTo(1));
+            Assert.That(bufferSet.TerrainLayerDataBuffer.count, Is.EqualTo(2));
+
+            var terrainMaterials = new VividTerrainMaterialData[1];
+            bufferSet.TerrainMaterialDataBuffer.GetData(terrainMaterials);
+            Assert.That(terrainMaterials[0].LayerCount, Is.EqualTo(2u));
+
+            bufferSet.Dispose();
+
+            Assert.That(bufferSet.TerrainMaterialDataBuffer, Is.Null);
+            Assert.That(bufferSet.TerrainLayerDataBuffer, Is.Null);
         }
 
         [Test]

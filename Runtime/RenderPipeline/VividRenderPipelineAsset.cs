@@ -66,6 +66,9 @@ namespace VividRP.Runtime
         private bool m_EnableGPUDriven;
 
         [SerializeField]
+        private bool m_EnableGPUDrivenOcclusionCulling = true;
+
+        [SerializeField]
         private GPUDriven.GPUDrivenTextureBackendMode m_GPUDrivenTextureBackend =
             GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture;
 
@@ -164,6 +167,12 @@ namespace VividRP.Runtime
         {
             get => m_EnableGPUDriven;
             set => m_EnableGPUDriven = value;
+        }
+
+        public bool EnableGPUDrivenOcclusionCulling
+        {
+            get => m_EnableGPUDrivenOcclusionCulling;
+            set => m_EnableGPUDrivenOcclusionCulling = value;
         }
 
         public GPUDriven.GPUDrivenTextureBackendMode GPUDrivenTextureBackend

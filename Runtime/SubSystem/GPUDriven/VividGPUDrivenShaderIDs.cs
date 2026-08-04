@@ -38,6 +38,25 @@ namespace VividRP.Runtime.GPUDriven
         public static readonly int _VisibleMeshletRenderRequestCounter = Shader.PropertyToID(nameof(_VisibleMeshletRenderRequestCounter));
         public static readonly int _VisibleRendererListMeshletCounts = Shader.PropertyToID(nameof(_VisibleRendererListMeshletCounts));
         public static readonly int _VisibleMeshletIndirectDrawArgs = Shader.PropertyToID(nameof(_VisibleMeshletIndirectDrawArgs));
+        public static readonly int _OccludedMeshletRenderRequests = Shader.PropertyToID(nameof(_OccludedMeshletRenderRequests));
+        public static readonly int _OccludedMeshletRenderRequestCounter = Shader.PropertyToID(nameof(_OccludedMeshletRenderRequestCounter));
+        public static readonly int _OccludedMeshletIndirectDispatchArgs = Shader.PropertyToID(nameof(_OccludedMeshletIndirectDispatchArgs));
+        public static readonly int _RecoveredMeshletRenderRequests = Shader.PropertyToID(nameof(_RecoveredMeshletRenderRequests));
+        public static readonly int _RecoveredRendererListMeshletCounts = Shader.PropertyToID(nameof(_RecoveredRendererListMeshletCounts));
+        public static readonly int _RecoveredMeshletIndirectDrawArgs = Shader.PropertyToID(nameof(_RecoveredMeshletIndirectDrawArgs));
+        public static readonly int _OccluderDepthPyramid = Shader.PropertyToID(nameof(_OccluderDepthPyramid));
+        public static readonly int _OccluderDepthPyramidDestination = Shader.PropertyToID(nameof(_OccluderDepthPyramidDestination));
+        public static readonly int _InputDepth = Shader.PropertyToID(nameof(_InputDepth));
+        public static readonly int _OccluderViewProjectionMatrix = Shader.PropertyToID(nameof(_OccluderViewProjectionMatrix));
+        public static readonly int _OccluderDepthPyramidSize = Shader.PropertyToID(nameof(_OccluderDepthPyramidSize));
+        public static readonly int _OccluderDepthPyramidTextureSize = Shader.PropertyToID(nameof(_OccluderDepthPyramidTextureSize));
+        public static readonly int _OccluderDepthPyramidMipCount = Shader.PropertyToID(nameof(_OccluderDepthPyramidMipCount));
+        public static readonly int _OccluderSourceMip = Shader.PropertyToID(nameof(_OccluderSourceMip));
+        public static readonly int _OccluderSourceSize = Shader.PropertyToID(nameof(_OccluderSourceSize));
+        public static readonly int _OccluderDestinationSize = Shader.PropertyToID(nameof(_OccluderDestinationSize));
+        public static readonly int _OcclusionTestMode = Shader.PropertyToID(nameof(_OcclusionTestMode));
+        public static readonly int _OcclusionDepthBias = Shader.PropertyToID(nameof(_OcclusionDepthBias));
+        public static readonly int _OccludedMeshletCapacity = Shader.PropertyToID(nameof(_OccludedMeshletCapacity));
         public static readonly int _ForcedMeshLODNodeDepth = Shader.PropertyToID(nameof(_ForcedMeshLODNodeDepth));
         public static readonly int _MeshLODErrorThreshold = Shader.PropertyToID(nameof(_MeshLODErrorThreshold));
     }

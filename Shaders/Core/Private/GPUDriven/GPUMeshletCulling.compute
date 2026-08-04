@@ -1,4 +1,13 @@
 #pragma kernel CS
+#pragma kernel CSOcclusionTestAll
+#pragma kernel CSFixupOccludedMeshletIndirectArgs
+#pragma kernel CSPrepareOcclusionRetest
+#pragma kernel CSOcclusionTestCulled
+// Keep the old entry point during live script/shader reloads. Unity can import the
+// compute shader before the matching managed assembly has finished reloading.
+#pragma kernel CSOcclusionRetest
+#pragma kernel CSCopyOccluderDepth
+#pragma kernel CSDownsampleOccluderDepth
 
 #pragma use_dxc
 
@@ -13,55 +22,416 @@ StructuredBuffer<VividMeshletRenderRequestPacked> _CandidateMeshletRenderRequest
 RWStructuredBuffer<VividMeshletRenderRequestPacked> _VisibleMeshletRenderRequests;
 RWStructuredBuffer<uint> _VisibleRendererListMeshletCounts;
 RWByteAddressBuffer _VisibleMeshletIndirectDrawArgs;
+RWStructuredBuffer<VividMeshletRenderRequestPacked> _OccludedMeshletRenderRequests;
+RWStructuredBuffer<uint> _OccludedMeshletRenderRequestCounter;
+RWStructuredBuffer<uint> _OccludedMeshletIndirectDispatchArgs;
+RWStructuredBuffer<VividMeshletRenderRequestPacked> _RecoveredMeshletRenderRequests;
+RWStructuredBuffer<uint> _RecoveredRendererListMeshletCounts;
+RWByteAddressBuffer _RecoveredMeshletIndirectDrawArgs;
 
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+Texture2D<float> _InputDepth;
+Texture2D<float> _OccluderDepthPyramid;
+RWTexture2D<float> _OccluderDepthPyramidDestination;
+
+float4x4 _OccluderViewProjectionMatrix;
+float4 _OccluderDepthPyramidSize;
+float4 _OccluderDepthPyramidTextureSize;
+uint _OccluderDepthPyramidMipCount;
+uint _OccluderSourceMip;
+float4 _OccluderSourceSize;
+float4 _OccluderDestinationSize;
+uint _OcclusionTestMode;
+float _OcclusionDepthBias;
+uint _OccludedMeshletCapacity;
+
+bool IsFiniteFloat4(const float4 value)
 {
-    const uint candidateIndex = dispatchThreadID.x;
-    if (candidateIndex >= _VisibleMeshletRenderRequestCounter[0])
+    return all(value == value) && all(abs(value) < 3.402823466e+38f);
+}
+
+float FarthestDepth(const float lhs, const float rhs)
+{
+#if UNITY_REVERSED_Z
+    return min(lhs, rhs);
+#else
+    return max(lhs, rhs);
+#endif
+}
+
+float FarthestDepth4(const float4 depths)
+{
+    return FarthestDepth(
+        FarthestDepth(depths.x, depths.y),
+        FarthestDepth(depths.z, depths.w));
+}
+
+bool IsVisibleAgainstOccluderDepth(const float occluderDepth, const float queryClosestDepth)
+{
+#if UNITY_REVERSED_Z
+    return saturate(queryClosestDepth + _OcclusionDepthBias) > occluderDepth;
+#else
+    return saturate(queryClosestDepth - _OcclusionDepthBias) < occluderDepth;
+#endif
+}
+
+bool TryBuildConservativeOcclusionQuery(
+    const float4 boundingSphereWS,
+    out uint2 minPixel,
+    out uint2 maxPixel,
+    out float queryClosestDepth)
+{
+    float2 minUv = float2(1.0f, 1.0f);
+    float2 maxUv = float2(0.0f, 0.0f);
+#if UNITY_REVERSED_Z
+    queryClosestDepth = 0.0f;
+#else
+    queryClosestDepth = 1.0f;
+#endif
+
+    [unroll]
+    for (uint cornerIndex = 0u; cornerIndex < 8u; ++cornerIndex)
     {
-        return;
+        const float3 cornerSign = float3(
+            (cornerIndex & 1u) != 0u ? 1.0f : -1.0f,
+            (cornerIndex & 2u) != 0u ? 1.0f : -1.0f,
+            (cornerIndex & 4u) != 0u ? 1.0f : -1.0f);
+        const float3 cornerWS = boundingSphereWS.xyz + cornerSign * boundingSphereWS.w;
+        float4 cornerCS = mul(_OccluderViewProjectionMatrix, float4(cornerWS, 1.0f));
+        if (!IsFiniteFloat4(cornerCS) || cornerCS.w <= 1e-5f)
+        {
+            minPixel = 0u;
+            maxPixel = 0u;
+            return false;
+        }
+
+#if UNITY_UV_STARTS_AT_TOP
+        cornerCS.y = -cornerCS.y;
+#endif
+        const float3 cornerNdc = cornerCS.xyz / cornerCS.w;
+        if (!IsFiniteFloat4(float4(cornerNdc, 0.0f)))
+        {
+            minPixel = 0u;
+            maxPixel = 0u;
+            return false;
+        }
+
+        const float2 cornerUv = cornerNdc.xy * 0.5f + 0.5f;
+        minUv = min(minUv, cornerUv);
+        maxUv = max(maxUv, cornerUv);
+#if UNITY_REVERSED_Z
+        queryClosestDepth = max(queryClosestDepth, cornerNdc.z);
+#else
+        queryClosestDepth = min(queryClosestDepth, cornerNdc.z);
+#endif
     }
 
-    const VividGPUCullingContext cullingContext = _CullingContexts[0];
-    const VividMeshletRenderRequestPacked renderRequest = _CandidateMeshletRenderRequests[candidateIndex];
-
-    if (renderRequest.MeshletID >= _MeshletCount)
+    const float2 pyramidSize = max(_OccluderDepthPyramidSize.xy, 1.0f);
+    const float2 expandedMinPixel = minUv * pyramidSize - 2.0f;
+    const float2 expandedMaxPixel = maxUv * pyramidSize + 2.0f;
+    if (any(expandedMinPixel < 0.0f)
+        || any(expandedMaxPixel >= pyramidSize)
+        || any(expandedMaxPixel < expandedMinPixel))
     {
-        return;
+        minPixel = 0u;
+        maxPixel = 0u;
+        return false;
     }
 
-    const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
-    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
-    const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
-    const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
-    const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
-
-    if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
-        !LightSphereCulling(cullingContext, boundingSphereWS))
+    const float2 footprintSize = expandedMaxPixel - expandedMinPixel + 1.0f;
+    if (max(footprintSize.x, footprintSize.y) > max(pyramidSize.x, pyramidSize.y) * 0.5f)
     {
-        return;
+        minPixel = 0u;
+        maxPixel = 0u;
+        return false;
     }
 
-    if ((rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
-        !ConeCulling(cullingContext, instanceData, meshlet))
+    minPixel = uint2(floor(expandedMinPixel));
+    maxPixel = uint2(floor(expandedMaxPixel));
+    return true;
+}
+
+bool IsMeshletVisibleAfterOcclusion(const float4 boundingSphereWS)
+{
+    if (_OcclusionTestMode == 0u
+        || _OccluderDepthPyramidMipCount == 0u
+        || any(_OccluderDepthPyramidSize.xy <= 0.0f))
     {
-        return;
+        return true;
     }
 
+    uint2 minPixel;
+    uint2 maxPixel;
+    float queryClosestDepth;
+    if (!TryBuildConservativeOcclusionQuery(
+            boundingSphereWS,
+            minPixel,
+            maxPixel,
+            queryClosestDepth))
+    {
+        return true;
+    }
+
+    uint mipLevel = 0u;
+    [unroll]
+    for (uint mipIndex = 0u; mipIndex < 16u; ++mipIndex)
+    {
+        mipLevel = mipIndex;
+        const uint2 minCoord = minPixel >> mipIndex;
+        const uint2 maxCoord = maxPixel >> mipIndex;
+        if (all(maxCoord - minCoord <= 1u))
+            break;
+    }
+
+    if (mipLevel >= _OccluderDepthPyramidMipCount)
+        return true;
+
+    const uint2 mipSize = max(uint2(1u, 1u), uint2(_OccluderDepthPyramidTextureSize.xy) >> mipLevel);
+    const uint2 minCoord = minPixel >> mipLevel;
+    const uint2 maxCoord = maxPixel >> mipLevel;
+    // Hardware mip chains truncate odd dimensions. Queries reaching a truncated
+    // tail must fail open instead of sampling the preceding texel block.
+    if (any(maxCoord >= mipSize))
+        return true;
+
+    if (any(maxCoord - minCoord > 1u))
+        return true;
+
+    const float4 occluderDepths = float4(
+        _OccluderDepthPyramid.Load(int3(minCoord, mipLevel)),
+        _OccluderDepthPyramid.Load(int3(uint2(maxCoord.x, minCoord.y), mipLevel)),
+        _OccluderDepthPyramid.Load(int3(uint2(minCoord.x, maxCoord.y), mipLevel)),
+        _OccluderDepthPyramid.Load(int3(maxCoord, mipLevel)));
+    const float occluderDepth = FarthestDepth4(occluderDepths);
+    return IsVisibleAgainstOccluderDepth(occluderDepth, queryClosestDepth);
+}
+
+void AppendVisibleMeshlet(
+    const VividMeshletRenderRequestPacked renderRequest,
+    const uint rendererListIndex)
+{
     const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
 
     uint localWriteOffset;
     _VisibleMeshletIndirectDrawArgs.InterlockedAdd(
         drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET,
         1u,
-        localWriteOffset
-    );
+        localWriteOffset);
 
     const uint startInstance = _VisibleMeshletIndirectDrawArgs.Load(
-        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET
-    );
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
     const uint writeIndex = startInstance + localWriteOffset;
     _VisibleMeshletRenderRequests[writeIndex] = renderRequest;
     InterlockedAdd(_VisibleRendererListMeshletCounts[rendererListIndex], 1u);
+}
+
+bool TryResolveCulledMeshlet(
+    const uint candidateIndex,
+    out VividMeshletRenderRequestPacked renderRequest,
+    out uint rendererListIndex,
+    out float4 boundingSphereWS)
+{
+    if (candidateIndex >= _VisibleMeshletRenderRequestCounter[0])
+    {
+        renderRequest.InstanceID_LOD = 0u;
+        renderRequest.MeshletID = 0u;
+        rendererListIndex = 0u;
+        boundingSphereWS = 0.0f;
+        return false;
+    }
+
+    const VividGPUCullingContext cullingContext = _CullingContexts[0];
+    renderRequest = _CandidateMeshletRenderRequests[candidateIndex];
+
+    if (renderRequest.MeshletID >= _MeshletCount)
+    {
+        rendererListIndex = 0u;
+        boundingSphereWS = 0.0f;
+        return false;
+    }
+
+    const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
+    rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
+    const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+    boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+
+    if (!FrustumVsSphere(cullingContext, boundingSphereWS) ||
+        !LightSphereCulling(cullingContext, boundingSphereWS))
+    {
+        return false;
+    }
+
+    if ((rendererListIndex & VIVIDRENDERERLISTID_CULL_OFF) == 0u &&
+        !ConeCulling(cullingContext, instanceData, meshlet))
+    {
+        return false;
+    }
+
+    return true;
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    VividMeshletRenderRequestPacked renderRequest;
+    uint rendererListIndex;
+    float4 boundingSphereWS;
+    if (!TryResolveCulledMeshlet(
+            dispatchThreadID.x,
+            renderRequest,
+            rendererListIndex,
+            boundingSphereWS))
+    {
+        return;
+    }
+
+    AppendVisibleMeshlet(renderRequest, rendererListIndex);
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSOcclusionTestAll(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    VividMeshletRenderRequestPacked renderRequest;
+    uint rendererListIndex;
+    float4 boundingSphereWS;
+    if (!TryResolveCulledMeshlet(
+            dispatchThreadID.x,
+            renderRequest,
+            rendererListIndex,
+            boundingSphereWS))
+    {
+        return;
+    }
+
+    if (!IsMeshletVisibleAfterOcclusion(boundingSphereWS))
+    {
+        uint occludedIndex;
+        InterlockedAdd(_OccludedMeshletRenderRequestCounter[0], 1u, occludedIndex);
+        if (occludedIndex < _OccludedMeshletCapacity)
+        {
+            _OccludedMeshletRenderRequests[occludedIndex] = renderRequest;
+            return;
+        }
+    }
+
+    AppendVisibleMeshlet(renderRequest, rendererListIndex);
+}
+
+[numthreads(1, 1, 1)]
+void CSFixupOccludedMeshletIndirectArgs(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    if (dispatchThreadID.x != 0u)
+        return;
+
+    const uint occludedCount = min(_OccludedMeshletRenderRequestCounter[0], _OccludedMeshletCapacity);
+    _OccludedMeshletIndirectDispatchArgs[0] = (occludedCount + THREAD_GROUP_SIZE - 1u) / THREAD_GROUP_SIZE;
+    _OccludedMeshletIndirectDispatchArgs[1] = 1u;
+    _OccludedMeshletIndirectDispatchArgs[2] = 1u;
+}
+
+[numthreads(VIVIDRENDERERLISTID_COUNT, 1, 1)]
+void CSPrepareOcclusionRetest(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint rendererListIndex = dispatchThreadID.x;
+    if (rendererListIndex >= VIVIDRENDERERLISTID_COUNT)
+        return;
+
+    const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
+    const uint firstPassStart = _VisibleMeshletIndirectDrawArgs.Load(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    _RecoveredMeshletIndirectDrawArgs.Store4(
+        drawArgsAddress,
+        uint4(
+            VIVID_MAX_MESHLET_INDICES,
+            0u,
+            0u,
+            firstPassStart));
+    _RecoveredRendererListMeshletCounts[rendererListIndex] = 0u;
+}
+
+void ExecuteOcclusionTestCulled(const uint3 dispatchThreadID)
+{
+    const uint occludedIndex = dispatchThreadID.x;
+    const uint occludedCount = min(_OccludedMeshletRenderRequestCounter[0], _OccludedMeshletCapacity);
+    if (occludedIndex >= occludedCount)
+        return;
+
+    const VividMeshletRenderRequestPacked renderRequest = _OccludedMeshletRenderRequests[occludedIndex];
+    if (renderRequest.MeshletID >= _MeshletCount)
+        return;
+
+    const VividInstanceData instanceData = PullInstanceData(renderRequest.InstanceID_LOD);
+    const VividMaterialData materialData = PullMaterialData(instanceData.MaterialIndex);
+    const uint rendererListIndex = min(GetRendererListID(instanceData, materialData), VIVIDRENDERERLISTID_COUNT - 1u);
+    const VividMeshlet meshlet = PullMeshletData(renderRequest.MeshletID);
+    const float4 boundingSphereWS = TransformSphere(meshlet.BoundingSphere, instanceData.ObjectToWorldMatrix);
+    if (!IsMeshletVisibleAfterOcclusion(boundingSphereWS))
+        return;
+
+    const uint drawArgsAddress = GetIndirectDrawArgsByteAddress(rendererListIndex);
+    uint localWriteOffset;
+    _RecoveredMeshletIndirectDrawArgs.InterlockedAdd(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_INSTANCE_COUNT_OFFSET,
+        1u,
+        localWriteOffset);
+    const uint startInstance = _RecoveredMeshletIndirectDrawArgs.Load(
+        drawArgsAddress + VIVID_INDIRECT_DRAW_ARGS_START_INSTANCE_OFFSET);
+    _RecoveredMeshletRenderRequests[startInstance + localWriteOffset] = renderRequest;
+    InterlockedAdd(_RecoveredRendererListMeshletCounts[rendererListIndex], 1u);
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSOcclusionTestCulled(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    ExecuteOcclusionTestCulled(dispatchThreadID);
+}
+
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void CSOcclusionRetest(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    ExecuteOcclusionTestCulled(dispatchThreadID);
+}
+
+[numthreads(8, 8, 1)]
+void CSCopyOccluderDepth(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 pixelCoord = dispatchThreadID.xy;
+    const uint2 destinationSize = uint2(_OccluderDestinationSize.xy);
+    if (any(pixelCoord >= destinationSize))
+        return;
+
+    const uint2 inputSize = uint2(_OccluderSourceSize.xy);
+    if (all(pixelCoord < inputSize))
+    {
+        _OccluderDepthPyramidDestination[pixelCoord] = _InputDepth.Load(int3(pixelCoord, 0));
+        return;
+    }
+
+#if UNITY_REVERSED_Z
+    _OccluderDepthPyramidDestination[pixelCoord] = 0.0f;
+#else
+    _OccluderDepthPyramidDestination[pixelCoord] = 1.0f;
+#endif
+}
+
+[numthreads(8, 8, 1)]
+void CSDownsampleOccluderDepth(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const uint2 destinationCoord = dispatchThreadID.xy;
+    const uint2 destinationSize = uint2(_OccluderDestinationSize.xy);
+    if (any(destinationCoord >= destinationSize))
+        return;
+
+    const uint2 sourceBase = destinationCoord * 2u;
+    const uint2 sourceMax = max(uint2(_OccluderSourceSize.xy), 1u) - 1u;
+    const uint2 sourceCoord00 = min(sourceBase, sourceMax);
+    const uint2 sourceCoord10 = min(sourceBase + uint2(1u, 0u), sourceMax);
+    const uint2 sourceCoord01 = min(sourceBase + uint2(0u, 1u), sourceMax);
+    const uint2 sourceCoord11 = min(sourceBase + uint2(1u, 1u), sourceMax);
+    const float4 sourceDepths = float4(
+        _OccluderDepthPyramid.Load(int3(sourceCoord00, _OccluderSourceMip)),
+        _OccluderDepthPyramid.Load(int3(sourceCoord10, _OccluderSourceMip)),
+        _OccluderDepthPyramid.Load(int3(sourceCoord01, _OccluderSourceMip)),
+        _OccluderDepthPyramid.Load(int3(sourceCoord11, _OccluderSourceMip)));
+    _OccluderDepthPyramidDestination[destinationCoord] = FarthestDepth4(sourceDepths);
 }

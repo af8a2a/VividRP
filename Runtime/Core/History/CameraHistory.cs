@@ -164,6 +164,9 @@ namespace VividRP.Runtime
 
         public static readonly CameraHistoryId TsrResurrectionMeta =
             CameraHistoryId.Create("TSRResurrectionMeta");
+
+        public static readonly CameraHistoryId GPUDrivenOccluderDepthPyramid =
+            CameraHistoryId.Create("GPUDrivenOccluderDepthPyramid");
     }
 
     /// <summary>

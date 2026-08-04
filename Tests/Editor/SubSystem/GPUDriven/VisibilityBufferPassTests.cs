@@ -27,6 +27,7 @@ namespace VividRP.Editor.Tests
 
             Assert.That(resources.Textures, Has.Length.EqualTo(2));
             Assert.That(resources.Buffers, Has.Length.EqualTo(2));
+            Assert.That(renderPass, Is.InstanceOf<UnsafePass>());
 
             Assert.That(visibilityEntry.Access, Is.EqualTo(AccessFlags.Write));
             Assert.That(visibilityEntry.AttachmentIndex, Is.EqualTo(0));
@@ -129,12 +130,18 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("rendererListIndex * IndirectDrawArgsByteStride"));
             Assert.That(passSource, Does.Contain("private readonly MaterialPropertyBlock m_DrawProperties = new MaterialPropertyBlock();"));
             Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);"));
-            Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, visibleMeshletIndirectArgsBuffer);"));
+            Assert.That(passSource, Does.Contain("m_DrawProperties.SetBuffer(s_UnityIndirectDrawArgsId, indirectArgsBuffer);"));
             Assert.That(passSource, Does.Contain("m_DrawProperties.SetInteger(s_UnityBaseCommandIdId, rendererListIndex);"));
             Assert.That(passSource, Does.Contain("m_DrawProperties);"));
             Assert.That(passSource, Does.Not.Contain("material.SetBuffer(s_VisibleMeshletRenderRequestsId, visibleMeshletRenderRequestsBuffer);"));
             Assert.That(passSource, Does.Contain("CoreUtils.SetKeyword(material, s_AlphaTestKeyword"));
             Assert.That(passSource, Does.Contain("TryGetCurrentVisibleMeshletBuffers("));
+            Assert.That(passSource, Does.Contain("public sealed class VisibilityBufferPass : UnsafePass"));
+            Assert.That(passSource, Does.Contain("GenerateCurrentOccluderDepthPyramid(nativeCmd);"));
+            Assert.That(passSource, Does.Contain("VividGPUDrivenOcclusionHistorySystem.CommitCurrent("));
+            Assert.That(passSource, Does.Contain("system.DispatchOcclusionRetest("));
+            Assert.That(passSource, Does.Contain("m_RecoveredMeshletRenderRequestsBuffer"));
+            Assert.That(passSource, Does.Contain("m_RecoveredMeshletIndirectDrawArgsBuffer"));
         }
 
         [Test]

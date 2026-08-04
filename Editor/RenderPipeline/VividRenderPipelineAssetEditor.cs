@@ -94,6 +94,15 @@ namespace VividRP.Editor.RenderPipeline
             };
             root.Add(gpuDrivenField);
 
+            var gpuDrivenOcclusionCullingField = new PropertyField(
+                serializedObject.FindProperty("m_EnableGPUDrivenOcclusionCulling"),
+                "GPUDriven Occlusion Culling")
+            {
+                name = "vivid-rp-asset-gpu-driven-occlusion-culling-field",
+                tooltip = "Uses a conservative previous-frame far-depth pyramid and a same-frame recovery pass for main-view meshlet occlusion culling.",
+            };
+            root.Add(gpuDrivenOcclusionCullingField);
+
             var gpuDrivenTextureBackendField = new PropertyField(
                 serializedObject.FindProperty("m_GPUDrivenTextureBackend"),
                 "GPUDriven Texture Backend")

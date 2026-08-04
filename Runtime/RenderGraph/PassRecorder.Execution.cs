@@ -276,6 +276,27 @@ namespace VividRP.Runtime
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             gpuDrivenFrameData.visibleMeshletRenderRequestsBuffer = visibleMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.visibleMeshletIndirectDrawArgsBuffer = visibleMeshletIndirectDrawArgsBuffer;
+            gpuDrivenFrameData.ResetOcclusion();
+        }
+
+        internal static void SetGPUDrivenOcclusionFrameData(
+            bool enabled,
+            bool historyValid,
+            GPUDriven.VividGPUDrivenCullingBuffers buffers)
+        {
+            var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
+            gpuDrivenFrameData.ResetOcclusion();
+            if (!enabled || buffers == null || !buffers.SupportsOcclusion)
+                return;
+
+            gpuDrivenFrameData.occlusionCullingEnabled = true;
+            gpuDrivenFrameData.occlusionHistoryValid = historyValid;
+            gpuDrivenFrameData.occludedMeshletRenderRequestsBuffer = buffers.OccludedMeshletRenderRequestsBuffer;
+            gpuDrivenFrameData.occludedMeshletRenderRequestCounterBuffer = buffers.OccludedMeshletRenderRequestCounterBuffer;
+            gpuDrivenFrameData.occludedMeshletIndirectDispatchArgsBuffer = buffers.OccludedMeshletIndirectDispatchArgsBuffer;
+            gpuDrivenFrameData.recoveredMeshletRenderRequestsBuffer = buffers.RecoveredMeshletRenderRequestsBuffer;
+            gpuDrivenFrameData.recoveredRendererListMeshletCountsBuffer = buffers.RecoveredRendererListMeshletCountsBuffer;
+            gpuDrivenFrameData.recoveredMeshletIndirectDrawArgsBuffer = buffers.RecoveredMeshletIndirectDrawArgsBuffer;
         }
 
         internal static ContextContainer GetFrameData()

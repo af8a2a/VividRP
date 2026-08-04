@@ -30,6 +30,12 @@ namespace VividRP.Editor.Tests
             Assert.That(bufferSet.GPUMeshletCullingIndirectDispatchArgsBuffer, Is.Not.Null);
             Assert.That(bufferSet.VisibleMeshletRenderRequestsBuffer, Is.Not.Null);
             Assert.That(bufferSet.VisibleMeshletIndirectDrawArgsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.OccludedMeshletRenderRequestsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.OccludedMeshletRenderRequestCounterBuffer, Is.Not.Null);
+            Assert.That(bufferSet.OccludedMeshletIndirectDispatchArgsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.RecoveredMeshletRenderRequestsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.RecoveredRendererListMeshletCountsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.RecoveredMeshletIndirectDrawArgsBuffer, Is.Not.Null);
             Assert.That(bufferSet.CandidateMeshletRenderRequestsBuffer.count, Is.EqualTo(4));
             Assert.That(bufferSet.GPUMeshletCullingIndirectDispatchArgsBuffer.count, Is.EqualTo(3));
             Assert.That(bufferSet.VisibleMeshletIndirectDrawArgsBuffer.count, Is.EqualTo((int) VividRendererListID.Count * 4));
@@ -39,6 +45,24 @@ namespace VividRP.Editor.Tests
                 Is.EqualTo(GraphicsBuffer.Target.Raw | GraphicsBuffer.Target.IndirectArguments)
             );
             Assert.That(bufferSet.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(4));
+        }
+
+        [Test]
+        public void EnsureCapacity_DoesNotAllocateOcclusionBuffers_WhenOcclusionIsUnsupported()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            using var bufferSet = new VividGPUDrivenCullingBuffers(supportsOcclusion: false);
+
+            bufferSet.EnsureCapacity(sceneData);
+
+            Assert.That(bufferSet.SupportsOcclusion, Is.False);
+            Assert.That(bufferSet.VisibleMeshletRenderRequestsBuffer, Is.Not.Null);
+            Assert.That(bufferSet.OccludedMeshletRenderRequestsBuffer, Is.Null);
+            Assert.That(bufferSet.OccludedMeshletRenderRequestCounterBuffer, Is.Null);
+            Assert.That(bufferSet.OccludedMeshletIndirectDispatchArgsBuffer, Is.Null);
+            Assert.That(bufferSet.RecoveredMeshletRenderRequestsBuffer, Is.Null);
+            Assert.That(bufferSet.RecoveredRendererListMeshletCountsBuffer, Is.Null);
+            Assert.That(bufferSet.RecoveredMeshletIndirectDrawArgsBuffer, Is.Null);
         }
 
         [Test]
@@ -95,6 +119,9 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("cmd.SetBufferData(MeshletListBuildIndirectArgsBuffer, m_InitialIndirectDispatchArgsUpload);"));
             Assert.That(source, Does.Contain("cmd.SetBufferData(VisibleRendererListMeshletCountsBuffer, m_ZeroRendererListCountsUpload);"));
             Assert.That(source, Does.Contain("cmd.SetBufferData(VisibleMeshletIndirectDrawArgsBuffer, m_ZeroIndirectDrawArgsWordsUpload);"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(OccludedMeshletRenderRequestCounterBuffer, m_ZeroUintUpload);"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(OccludedMeshletIndirectDispatchArgsBuffer, m_InitialIndirectDispatchArgsUpload);"));
+            Assert.That(source, Does.Contain("cmd.SetBufferData(RecoveredMeshletIndirectDrawArgsBuffer, m_ZeroIndirectDrawArgsWordsUpload);"));
             Assert.That(source, Does.Not.Contain("static readonly uint[] s_Zero"));
             Assert.That(source, Does.Not.Contain("IndirectDispatchArgs[] s_InitialIndirectDispatchArgs"));
         }

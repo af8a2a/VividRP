@@ -324,6 +324,51 @@ namespace VividRP.Runtime.GPUDriven
             string cameraName = null
         )
         {
+            CullInternal(
+                camera,
+                cmd,
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute,
+                passMask,
+                default,
+                cameraName);
+        }
+
+        internal void CullMainView(
+            Camera camera,
+            CommandBuffer cmd,
+            ComputeShader gpuInstanceCullingCompute,
+            ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
+            in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
+            string cameraName = null)
+        {
+            CullInternal(
+                camera,
+                cmd,
+                gpuInstanceCullingCompute,
+                meshletListBuildCompute,
+                gpuMeshletCullingCompute,
+                fixupVisibleMeshletIndirectDrawArgsCompute,
+                VividInstancePassMask.Main,
+                occlusionParameters,
+                cameraName);
+        }
+
+        private void CullInternal(
+            Camera camera,
+            CommandBuffer cmd,
+            ComputeShader gpuInstanceCullingCompute,
+            ComputeShader meshletListBuildCompute,
+            ComputeShader gpuMeshletCullingCompute,
+            ComputeShader fixupVisibleMeshletIndirectDrawArgsCompute,
+            VividInstancePassMask passMask,
+            in VividGPUDrivenOcclusionCullingParameters occlusionParameters,
+            string cameraName)
+        {
             ThrowIfDisposed();
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullMarker.Auto())
@@ -339,11 +384,37 @@ namespace VividRP.Runtime.GPUDriven
                     fixupVisibleMeshletIndirectDrawArgsCompute,
                     passMask,
                     ForcedMeshLODNodeDepth,
-                    MeshLODErrorThreshold
+                    MeshLODErrorThreshold,
+                    occlusionParameters
                 );
             }
 
             ReportStats(camera, cameraName);
+        }
+
+        internal bool DispatchOcclusionRetest(
+            CommandBuffer cmd,
+            ComputeShader gpuMeshletCullingCompute,
+            RTHandle currentOccluderDepthPyramid,
+            Matrix4x4 currentViewProjectionMatrix,
+            int width,
+            int height,
+            int textureWidth,
+            int textureHeight,
+            int mipCount)
+        {
+            ThrowIfDisposed();
+            return m_CullingDispatcher.DispatchOcclusionRetest(
+                cmd,
+                m_BufferSet,
+                gpuMeshletCullingCompute,
+                currentOccluderDepthPyramid,
+                currentViewProjectionMatrix,
+                width,
+                height,
+                textureWidth,
+                textureHeight,
+                mipCount);
         }
 
         public void CullShadowCascade(
@@ -393,7 +464,7 @@ namespace VividRP.Runtime.GPUDriven
             Array.Resize(ref m_ShadowCullingDispatchers, requiredCount);
             for (int i = previousCount; i < requiredCount; i++)
             {
-                m_ShadowCullingDispatchers[i] = new VividGPUDrivenCullingDispatcher();
+                m_ShadowCullingDispatchers[i] = new VividGPUDrivenCullingDispatcher(supportsOcclusion: false);
             }
         }
 
@@ -435,6 +506,7 @@ namespace VividRP.Runtime.GPUDriven
             if (m_LegacyBindlessBackend != null && !ReferenceEquals(m_LegacyBindlessBackend, m_TextureBackend))
                 m_LegacyBindlessBackend.Dispose();
             m_IsDisposed = true;
+            VividGPUDrivenOcclusionHistorySystem.Clear();
             VividGPUDrivenStatsRegistry.Clear();
         }
 
@@ -508,19 +580,40 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             Camera cullingCamera = ResolveCullingCameraForDebug(camera);
+            VividGPUDrivenOcclusionHistorySystem.PurgeDestroyedCameras();
 
             VividRPCoreResources resources;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenResolveResourcesMarker.Auto())
             {
                 resources = PipelineResourceManager.Get<VividRPCoreResources>();
             }
-            gpuDrivenSystem.Cull(
+            bool occlusionCullingEnabled = asset.EnableGPUDrivenOcclusionCulling
+                && ReferenceEquals(cullingCamera, camera)
+                && !camera.stereoEnabled
+                && resources?.GPUMeshletCullingCompute != null;
+            var temporalData = frameData.GetOrCreate<VividTemporalData>();
+            int occlusionWidth = cameraData.actualWidth > 0
+                ? cameraData.actualWidth
+                : Mathf.Max(1, cameraData.pixelWidth > 0 ? cameraData.pixelWidth : Screen.width);
+            int occlusionHeight = cameraData.actualHeight > 0
+                ? cameraData.actualHeight
+                : Mathf.Max(1, cameraData.pixelHeight > 0 ? cameraData.pixelHeight : Screen.height);
+            bool hasOcclusionHistory = VividGPUDrivenOcclusionHistorySystem.TryGetPreviousParameters(
+                camera,
+                occlusionCullingEnabled,
+                temporalData.resetPostProcessingHistory,
+                occlusionWidth,
+                occlusionHeight,
+                out var occlusionParameters);
+
+            gpuDrivenSystem.CullMainView(
                 cullingCamera,
                 cmd,
                 resources.GPUInstanceCullingCompute,
                 resources.MeshletListBuildCompute,
                 resources.GPUMeshletCullingCompute,
                 resources.FixupVisibleMeshletIndirectDrawArgsCompute,
+                occlusionParameters,
                 cameraName: cameraData.cameraName);
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenBindGlobalsMarker.Auto())
             {
@@ -532,6 +625,10 @@ namespace VividRP.Runtime.GPUDriven
                 PassRecorder.SetGPUDrivenFrameData(
                     gpuDrivenSystem.VisibleMeshletRenderRequestsBuffer,
                     gpuDrivenSystem.VisibleMeshletIndirectDrawArgsBuffer);
+                PassRecorder.SetGPUDrivenOcclusionFrameData(
+                    occlusionCullingEnabled,
+                    hasOcclusionHistory,
+                    gpuDrivenSystem.CullingBufferSet);
             }
         }
 

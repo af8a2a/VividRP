@@ -255,23 +255,33 @@ namespace VividRP.Runtime
 
         private static void UpdateCore(ContextContainer frameData, CommandBuffer cmd)
         {
-            if (!IsInitialized)
-                Initialize();
+            VividVirtualTextureFrameData virtualTextureFrameData;
+            VividCameraData cameraData;
+            Camera camera;
+            VirtualTextureViewId activeViewId;
+            CameraType activeCameraType;
+            VirtualTextureViewId cachePriorityViewId;
+            VirtualTextureFeedbackViewSignature activeViewSignature;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFrameSetupMarker.Auto())
+            {
+                if (!IsInitialized)
+                    Initialize();
 
-            VividVirtualTextureFrameData virtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
-            virtualTextureFrameData?.Reset();
-            s_FeedbackCameraSystem.PurgeDestroyedCameras();
+                virtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
+                virtualTextureFrameData?.Reset();
+                s_FeedbackCameraSystem.PurgeDestroyedCameras();
 
-            VividCameraData cameraData = TryGetCameraData(frameData);
-            Camera camera = cameraData?.camera;
-            VirtualTextureViewId activeViewId = VirtualTextureViewId.FromCameraData(cameraData);
-            CameraType activeCameraType = camera != null ? camera.cameraType : default;
-            VirtualTextureViewId cachePriorityViewId = ResolveCachePriorityViewId(activeViewId, activeCameraType);
-            VirtualTextureFeedbackViewSignature activeViewSignature =
-                VirtualTextureFeedbackViewSignature.FromCameraData(cameraData);
+                cameraData = TryGetCameraData(frameData);
+                camera = cameraData?.camera;
+                activeViewId = VirtualTextureViewId.FromCameraData(cameraData);
+                activeCameraType = camera != null ? camera.cameraType : default;
+                cachePriorityViewId = ResolveCachePriorityViewId(activeViewId, activeCameraType);
+                activeViewSignature = VirtualTextureFeedbackViewSignature.FromCameraData(cameraData);
+            }
 
             int lastReadbackFrame = -1;
-            CollectCompletedReadbacks(camera, activeViewId, activeCameraType, ref lastReadbackFrame);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackMarker.Auto())
+                CollectCompletedReadbacks(camera, activeViewId, activeCameraType, ref lastReadbackFrame);
 
             int faultCount = 0;
             int feedbackOverflowCount = 0;
@@ -280,34 +290,48 @@ namespace VividRP.Runtime
             int activeViewFeedbackOverflowCount = 0;
             int activeViewFallbackSampleCount = 0;
             int activeViewLastReadbackFrame = -1;
-            for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackStatsMarker.Auto())
             {
-                VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
-                faultCount += batch.RequestCount;
-                feedbackOverflowCount += batch.FeedbackOverflowCount;
-                fallbackSampleCount += batch.FallbackSampleCount;
-
-                if (IsBatchFromView(batch, activeViewId, activeCameraType))
+                for (int batchIndex = 0; batchIndex < s_CompletedReadbacks.Count; batchIndex++)
                 {
-                    activeViewFaultCount += batch.RequestCount;
-                    activeViewFeedbackOverflowCount += batch.FeedbackOverflowCount;
-                    activeViewFallbackSampleCount += batch.FallbackSampleCount;
-                    activeViewLastReadbackFrame = Mathf.Max(activeViewLastReadbackFrame, batch.FrameIndex);
+                    VirtualTextureFeedbackBatch batch = s_CompletedReadbacks[batchIndex];
+                    faultCount += batch.RequestCount;
+                    feedbackOverflowCount += batch.FeedbackOverflowCount;
+                    fallbackSampleCount += batch.FallbackSampleCount;
+
+                    if (IsBatchFromView(batch, activeViewId, activeCameraType))
+                    {
+                        activeViewFaultCount += batch.RequestCount;
+                        activeViewFeedbackOverflowCount += batch.FeedbackOverflowCount;
+                        activeViewFallbackSampleCount += batch.FallbackSampleCount;
+                        activeViewLastReadbackFrame = Mathf.Max(activeViewLastReadbackFrame, batch.FrameIndex);
+                    }
                 }
             }
 
-            VirtualTextureFeedbackProcessor.Aggregate(
-                s_CompletedReadbacks,
-                s_AggregationScratch,
-                s_AggregatedRequests,
-                cachePriorityViewId);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateMarker.Auto())
+            {
+                VirtualTextureFeedbackProcessor.Aggregate(
+                    s_CompletedReadbacks,
+                    s_AggregationScratch,
+                    s_AggregatedRequests,
+                    cachePriorityViewId);
+            }
+
             int deduplicatedRequestCount = s_AggregatedRequests.Count;
-            int activeViewDeduplicatedRequestCount = CountRequestsFromView(
-                s_AggregatedRequests,
-                activeViewId,
-                activeCameraType);
-            GroupRequestsBySpace(s_AggregatedRequests);
-            ResolvePrefetchBiasBySpace(cachePriorityViewId);
+            int activeViewDeduplicatedRequestCount;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackCountActiveViewMarker.Auto())
+            {
+                activeViewDeduplicatedRequestCount = CountRequestsFromView(
+                    s_AggregatedRequests,
+                    activeViewId,
+                    activeCameraType);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto())
+                GroupRequestsBySpace(s_AggregatedRequests);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrefetchBiasMarker.Auto())
+                ResolvePrefetchBiasBySpace(cachePriorityViewId);
 
             int frameIndex = ResolveFrameIndex(frameData);
             int evictionCount = 0;
@@ -315,45 +339,68 @@ namespace VividRP.Runtime
             int pendingMipGapMax = 0;
             int pendingMipGapSampleCount = 0;
             int prefetchRequestCount = 0;
-            s_UploadScheduler.BeginFrame();
-            s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsBeginFrameMarker.Auto())
+                s_UploadScheduler.BeginFrame();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
+                s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);
             foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
                 VTPageTableSpace addressSpace = pair.Value;
                 VTResidencyProcessResult residencyResult;
                 s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
-                if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
-                    residencyResult = addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, prefetchBias, frameIndex);
-                else
-                    residencyResult = addressSpace.ProcessRequests(null, cachePriorityViewId, prefetchBias, frameIndex);
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyMarker.Auto())
+                {
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyProcessRequestsMarker.Auto())
+                    {
+                        if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
+                            residencyResult = addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, prefetchBias, frameIndex);
+                        else
+                            residencyResult = addressSpace.ProcessRequests(null, cachePriorityViewId, prefetchBias, frameIndex);
+                    }
 
-                evictionCount += residencyResult.EvictionCount;
-                pendingMipGapSum += residencyResult.PendingMipGapSum;
-                pendingMipGapMax = Mathf.Max(pendingMipGapMax, residencyResult.PendingMipGapMax);
-                pendingMipGapSampleCount += residencyResult.PendingMipGapSampleCount;
-                prefetchRequestCount += residencyResult.PrefetchRequestCount;
-                addressSpace.CollectPendingUploads(s_UploadScheduler, cmd);
+                    evictionCount += residencyResult.EvictionCount;
+                    pendingMipGapSum += residencyResult.PendingMipGapSum;
+                    pendingMipGapMax = Mathf.Max(pendingMipGapMax, residencyResult.PendingMipGapMax);
+                    pendingMipGapSampleCount += residencyResult.PendingMipGapSampleCount;
+                    prefetchRequestCount += residencyResult.PrefetchRequestCount;
+                }
+
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingMarker.Auto())
+                    addressSpace.CollectPendingUploads(s_UploadScheduler, cmd);
             }
 
-            s_UploadScheduler.FinalizeUploads(cmd);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeMarker.Auto())
+                s_UploadScheduler.FinalizeUploads(cmd);
             int inFlightUploadBatchCount = s_UploadScheduler.InFlightBatchCount;
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
-            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
             {
-                pair.Value.RebuildPageTableIfDirty();
-                pair.Value.RefreshPageTableBuffer();
+                foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
+                {
+                    pair.Value.RebuildPageTableIfDirty();
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableRefreshMarker.Auto())
+                        pair.Value.RefreshPageTableBuffer();
+                }
             }
 
-            ClearGroupedRequests();
-            s_AggregatedRequests.Clear();
-            s_CompletedReadbacks.Clear();
-            s_PrefetchBiasBySpace.Clear();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureCleanupMarker.Auto())
+            {
+                ClearGroupedRequests();
+                s_AggregatedRequests.Clear();
+                s_CompletedReadbacks.Clear();
+                s_PrefetchBiasBySpace.Clear();
+            }
 
-            bool supportsFeedback = IsFeedbackSupported(camera);
-            VirtualTextureFeedbackCameraState cameraFeedbackState = supportsFeedback
-                ? s_FeedbackCameraSystem.GetOrCreateBase(camera)
-                : null;
+            bool supportsFeedback;
+            VirtualTextureFeedbackCameraState cameraFeedbackState;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
+            {
+                supportsFeedback = IsFeedbackSupported(camera);
+                cameraFeedbackState = supportsFeedback
+                    ? s_FeedbackCameraSystem.GetOrCreateBase(camera)
+                    : null;
+            }
 
             int residentPageCount = 0;
             int freePageCount = 0;
@@ -366,117 +413,89 @@ namespace VividRP.Runtime
                 VTPageTableSpace addressSpace = pair.Value;
                 ComputeBuffer feedbackRequests = null;
                 ComputeBuffer feedbackCounter = null;
-                feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
-
-                if (supportsFeedback && cameraFeedbackState != null)
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
                 {
-                    VirtualTextureFeedbackBufferState feedbackBufferState =
-                        cameraFeedbackState.GetOrCreateSpaceState(addressSpace.SpaceId);
-                    if (!feedbackBufferState.TryPrepareForFrame(
-                            cmd,
-                            addressSpace.Descriptor.SpaceName,
-                            camera,
-                            activeViewId,
-                            activeViewSignature,
-                            addressSpace.StackDesc.FeedbackCapacity,
-                            frameIndex,
-                            addressSpace.PendingRequestCount > 0
-                            || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId),
-                            out feedbackRequests,
-                            out feedbackCounter,
-                            out string feedbackStatus)
-                        && string.IsNullOrEmpty(statusMessage)
-                        && !string.IsNullOrEmpty(feedbackStatus))
+                    feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
+
+                    if (supportsFeedback && cameraFeedbackState != null)
                     {
-                        statusMessage = feedbackStatus;
+                        VirtualTextureFeedbackBufferState feedbackBufferState =
+                            cameraFeedbackState.GetOrCreateSpaceState(addressSpace.SpaceId);
+                        if (!feedbackBufferState.TryPrepareForFrame(
+                                cmd,
+                                addressSpace.Descriptor.SpaceName,
+                                camera,
+                                activeViewId,
+                                activeViewSignature,
+                                addressSpace.StackDesc.FeedbackCapacity,
+                                frameIndex,
+                                addressSpace.PendingRequestCount > 0
+                                || s_UploadScheduler.HasInFlightUploadForSpace(addressSpace.SpaceId),
+                                out feedbackRequests,
+                                out feedbackCounter,
+                                out string feedbackStatus)
+                            && string.IsNullOrEmpty(statusMessage)
+                            && !string.IsNullOrEmpty(feedbackStatus))
+                        {
+                            statusMessage = feedbackStatus;
+                        }
                     }
                 }
 
-                residentPageCount += addressSpace.ResidentPageCount;
-                freePageCount += addressSpace.FreePageCount;
-                pendingUploadCount += addressSpace.PendingRequestCount;
-                int allocationId = s_AllocationIdBySpaceId.TryGetValue(addressSpace.SpaceId, out int mappedAllocationId)
-                    ? mappedAllocationId
-                    : 0;
-                bool privateSpace = allocationId > 0
-                                    && s_Allocations.TryGetValue(allocationId, out VTAllocatedVirtualTexture allocation)
-                                    && allocation.Description.PrivateSpace;
-                virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(
-                    allocationId,
-                    privateSpace,
-                    feedbackRequests,
-                    feedbackCounter));
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureBindingsMarker.Auto())
+                {
+                    residentPageCount += addressSpace.ResidentPageCount;
+                    freePageCount += addressSpace.FreePageCount;
+                    pendingUploadCount += addressSpace.PendingRequestCount;
+                    int allocationId = s_AllocationIdBySpaceId.TryGetValue(addressSpace.SpaceId, out int mappedAllocationId)
+                        ? mappedAllocationId
+                        : 0;
+                    bool privateSpace = allocationId > 0
+                                        && s_Allocations.TryGetValue(allocationId, out VTAllocatedVirtualTexture allocation)
+                                        && allocation.Description.PrivateSpace;
+                    virtualTextureFrameData?.AddBinding(addressSpace.CreateBinding(
+                        allocationId,
+                        privateSpace,
+                        feedbackRequests,
+                        feedbackCounter));
+                }
             }
 
-            VTPhysicalPoolStats physicalPoolStats = CollectPhysicalPoolStats();
+            VTPhysicalPoolStats physicalPoolStats;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto())
+                physicalPoolStats = CollectPhysicalPoolStats();
             residentPageCount = physicalPoolStats.ResidentPageCount;
             freePageCount = physicalPoolStats.FreePageCount;
 
-            var globalStats = new VTDebugStats(
-                s_PageTableSpaces.Count,
-                residentPageCount,
-                freePageCount,
-                pendingUploadCount,
-                evictionCount,
-                faultCount,
-                deduplicatedRequestCount,
-                feedbackOverflowCount,
-                inFlightUploadBatchCount,
-                duplicateUploadCount,
-                skippedUploadCount,
-                fallbackSampleCount,
-                lastReadbackFrame,
-                statusMessage,
-                VirtualTextureViewId.Invalid,
-                default,
-                null,
-                -1,
-                0,
-                0,
-                0,
-                0,
-                false,
-                feedbackCapacity,
-                false,
-                physicalPoolStats.PoolCount,
-                physicalPoolStats.ResidentPageCount,
-                physicalPoolStats.FreePageCount,
-                physicalPoolStats.LockedPageCount,
-                physicalPoolStats.EvictedPageCount,
-                pendingMipGapSum,
-                pendingMipGapMax,
-                pendingMipGapSampleCount,
-                prefetchRequestCount);
-            VirtualTextureStatsRegistry.Report(globalStats);
-
-            if (camera != null)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsMarker.Auto())
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsReportGlobalMarker.Auto())
             {
-                var viewStats = new VTDebugStats(
+                var globalStats = new VTDebugStats(
                     s_PageTableSpaces.Count,
                     residentPageCount,
                     freePageCount,
                     pendingUploadCount,
                     evictionCount,
-                    activeViewFaultCount,
-                    activeViewDeduplicatedRequestCount,
-                    activeViewFeedbackOverflowCount,
+                    faultCount,
+                    deduplicatedRequestCount,
+                    feedbackOverflowCount,
                     inFlightUploadBatchCount,
                     duplicateUploadCount,
                     skippedUploadCount,
-                    activeViewFallbackSampleCount,
-                    activeViewLastReadbackFrame,
+                    fallbackSampleCount,
+                    lastReadbackFrame,
                     statusMessage,
-                    activeViewId,
-                    camera.cameraType,
-                    ResolveCameraName(cameraData, camera),
-                    frameIndex,
-                    cameraData?.actualWidth ?? 0,
-                    cameraData?.actualHeight ?? 0,
-                    cameraData?.pixelWidth ?? 0,
-                    cameraData?.pixelHeight ?? 0,
-                    supportsFeedback,
+                    VirtualTextureViewId.Invalid,
+                    default,
+                    null,
+                    -1,
+                    0,
+                    0,
+                    0,
+                    0,
+                    false,
                     feedbackCapacity,
-                    true,
+                    false,
                     physicalPoolStats.PoolCount,
                     physicalPoolStats.ResidentPageCount,
                     physicalPoolStats.FreePageCount,
@@ -486,7 +505,51 @@ namespace VividRP.Runtime
                     pendingMipGapMax,
                     pendingMipGapSampleCount,
                     prefetchRequestCount);
-                VirtualTextureStatsRegistry.ReportView(viewStats);
+                VirtualTextureStatsRegistry.Report(globalStats);
+            }
+
+            if (camera != null)
+            {
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsMarker.Auto())
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsReportViewMarker.Auto())
+                {
+                    var viewStats = new VTDebugStats(
+                        s_PageTableSpaces.Count,
+                        residentPageCount,
+                        freePageCount,
+                        pendingUploadCount,
+                        evictionCount,
+                        activeViewFaultCount,
+                        activeViewDeduplicatedRequestCount,
+                        activeViewFeedbackOverflowCount,
+                        inFlightUploadBatchCount,
+                        duplicateUploadCount,
+                        skippedUploadCount,
+                        activeViewFallbackSampleCount,
+                        activeViewLastReadbackFrame,
+                        statusMessage,
+                        activeViewId,
+                        camera.cameraType,
+                        ResolveCameraName(cameraData, camera),
+                        frameIndex,
+                        cameraData?.actualWidth ?? 0,
+                        cameraData?.actualHeight ?? 0,
+                        cameraData?.pixelWidth ?? 0,
+                        cameraData?.pixelHeight ?? 0,
+                        supportsFeedback,
+                        feedbackCapacity,
+                        true,
+                        physicalPoolStats.PoolCount,
+                        physicalPoolStats.ResidentPageCount,
+                        physicalPoolStats.FreePageCount,
+                        physicalPoolStats.LockedPageCount,
+                        physicalPoolStats.EvictedPageCount,
+                        pendingMipGapSum,
+                        pendingMipGapMax,
+                        pendingMipGapSampleCount,
+                        prefetchRequestCount);
+                    VirtualTextureStatsRegistry.ReportView(viewStats);
+                }
             }
         }
 

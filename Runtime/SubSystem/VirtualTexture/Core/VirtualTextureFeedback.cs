@@ -279,56 +279,63 @@ namespace VividRP.Runtime
             if (batches == null)
                 return;
 
-            for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateAccumulateMarker.Auto())
             {
-                VirtualTextureFeedbackBatch batch = batches[batchIndex];
-                int cameraPriority = GetCameraPriority(batch.CameraType);
-                bool isActiveViewBatch = IsActiveViewBatch(batch, activeViewId);
-                for (int requestIndex = 0; requestIndex < batch.RequestCount; requestIndex++)
+                for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
                 {
-                    ulong key = batch.Requests[requestIndex];
-                    if (faultAccumulators.TryGetValue(key, out FaultAccumulator accumulator))
+                    VirtualTextureFeedbackBatch batch = batches[batchIndex];
+                    int cameraPriority = GetCameraPriority(batch.CameraType);
+                    bool isActiveViewBatch = IsActiveViewBatch(batch, activeViewId);
+                    for (int requestIndex = 0; requestIndex < batch.RequestCount; requestIndex++)
                     {
-                        accumulator.HitCount += 1;
-                        if (isActiveViewBatch)
+                        ulong key = batch.Requests[requestIndex];
+                        if (faultAccumulators.TryGetValue(key, out FaultAccumulator accumulator))
                         {
-                            accumulator.IsActiveView = true;
-                            accumulator.ViewId = ResolveFeedbackViewId(batch, activeViewId);
-                        }
-                        else if (!accumulator.IsActiveView && cameraPriority < accumulator.CameraPriority)
-                        {
-                            accumulator.ViewId = batch.ViewId;
-                        }
+                            accumulator.HitCount += 1;
+                            if (isActiveViewBatch)
+                            {
+                                accumulator.IsActiveView = true;
+                                accumulator.ViewId = ResolveFeedbackViewId(batch, activeViewId);
+                            }
+                            else if (!accumulator.IsActiveView && cameraPriority < accumulator.CameraPriority)
+                            {
+                                accumulator.ViewId = batch.ViewId;
+                            }
 
-                        accumulator.CameraPriority = Mathf.Min(accumulator.CameraPriority, cameraPriority);
-                        faultAccumulators[key] = accumulator;
-                    }
-                    else
-                    {
-                        faultAccumulators[key] = new FaultAccumulator
+                            accumulator.CameraPriority = Mathf.Min(accumulator.CameraPriority, cameraPriority);
+                            faultAccumulators[key] = accumulator;
+                        }
+                        else
                         {
-                            HitCount = 1,
-                            CameraPriority = cameraPriority,
-                            ViewId = isActiveViewBatch ? ResolveFeedbackViewId(batch, activeViewId) : batch.ViewId,
-                            IsActiveView = isActiveViewBatch,
-                        };
+                            faultAccumulators[key] = new FaultAccumulator
+                            {
+                                HitCount = 1,
+                                CameraPriority = cameraPriority,
+                                ViewId = isActiveViewBatch ? ResolveFeedbackViewId(batch, activeViewId) : batch.ViewId,
+                                IsActiveView = isActiveViewBatch,
+                            };
+                        }
                     }
                 }
             }
 
-            foreach (KeyValuePair<ulong, FaultAccumulator> pair in faultAccumulators)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateDecodeMarker.Auto())
             {
-                DecodeKey(pair.Key, out int spaceId, out VirtualTexturePageCoord pageCoord);
-                output.Add(new VirtualTextureAggregatedFeedbackRequest(
-                    spaceId,
-                    pageCoord,
-                    pair.Value.HitCount,
-                    pair.Value.CameraPriority,
-                    pair.Value.ViewId,
-                    pair.Value.IsActiveView));
+                foreach (KeyValuePair<ulong, FaultAccumulator> pair in faultAccumulators)
+                {
+                    DecodeKey(pair.Key, out int spaceId, out VirtualTexturePageCoord pageCoord);
+                    output.Add(new VirtualTextureAggregatedFeedbackRequest(
+                        spaceId,
+                        pageCoord,
+                        pair.Value.HitCount,
+                        pair.Value.CameraPriority,
+                        pair.Value.ViewId,
+                        pair.Value.IsActiveView));
+                }
             }
 
-            output.Sort(s_RequestComparer);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateSortMarker.Auto())
+                output.Sort(s_RequestComparer);
         }
 
         private static VirtualTextureViewId ResolveFeedbackViewId(
@@ -653,8 +660,10 @@ namespace VividRP.Runtime
             if (cmd == null || camera == null)
                 return false;
 
-            EnsureCapacity(spaceName, feedbackCapacity);
-            PollReadbacks();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsEnsureCapacityMarker.Auto())
+                EnsureCapacity(spaceName, feedbackCapacity);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsPollMarker.Auto())
+                PollReadbacks();
 
             int readBufferIndex = 1 - m_WriteBufferIndex;
             BufferPairState readPair = m_BufferPairs[readBufferIndex];
@@ -669,7 +678,8 @@ namespace VividRP.Runtime
                     readPair.LastViewSignature,
                     m_LastCompletedReadbackSignature))
             {
-                ScheduleReadback(readPair, m_RequestCapacity);
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsScheduleReadbackMarker.Auto())
+                    ScheduleReadback(readPair, m_RequestCapacity);
                 m_LastScheduledReadbackFrame = frameIndex;
             }
 
@@ -680,7 +690,8 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsResetCounterMarker.Auto())
+                cmd.SetBufferData(writePair.CounterBuffer, m_ZeroCounterData);
             writePair.WasWritten = true;
             writePair.LastViewId = viewId;
             writePair.LastCameraType = camera.cameraType;
@@ -698,35 +709,39 @@ namespace VividRP.Runtime
             if (output == null)
                 return;
 
-            PollReadbacks();
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackPollMarker.Auto())
+                PollReadbacks();
 
-            for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackReadbackCollectBatchesMarker.Auto())
             {
-                BufferPairState pair = m_BufferPairs[bufferIndex];
-                if (!pair.HasCompletedReadback)
-                    continue;
+                for (int bufferIndex = 0; bufferIndex < m_BufferPairs.Length; bufferIndex++)
+                {
+                    BufferPairState pair = m_BufferPairs[bufferIndex];
+                    if (!pair.HasCompletedReadback)
+                        continue;
 
-                int completedRequestCount = SaturatingUIntToInt(pair.CompletedCount);
-                int requestCount = Mathf.Min(pair.CompletedRequests.Length, completedRequestCount);
-                int overflowCount = Mathf.Max(0, completedRequestCount - pair.CompletedRequests.Length);
-                int fallbackSampleCount = pair.CompletedFallbackSampleCount;
-                output.Add(new VirtualTextureFeedbackBatch(
-                    pair.LastViewId,
-                    pair.LastCameraType,
-                    pair.CompletedRequests,
-                    requestCount,
-                    pair.ScheduledFrameIndex,
-                    overflowCount,
-                    fallbackSampleCount));
-                lastReadbackFrame = Mathf.Max(lastReadbackFrame, pair.ScheduledFrameIndex);
-                m_HasCompletedReadbackResult = true;
-                m_LastCompletedReadbackWasEmpty = requestCount == 0
-                                                  && overflowCount == 0
-                                                  && fallbackSampleCount == 0;
-                m_LastCompletedReadbackSignature = pair.LastViewSignature;
-                pair.HasCompletedReadback = false;
-                pair.CompletedCount = 0u;
-                pair.CompletedFallbackSampleCount = 0;
+                    int completedRequestCount = SaturatingUIntToInt(pair.CompletedCount);
+                    int requestCount = Mathf.Min(pair.CompletedRequests.Length, completedRequestCount);
+                    int overflowCount = Mathf.Max(0, completedRequestCount - pair.CompletedRequests.Length);
+                    int fallbackSampleCount = pair.CompletedFallbackSampleCount;
+                    output.Add(new VirtualTextureFeedbackBatch(
+                        pair.LastViewId,
+                        pair.LastCameraType,
+                        pair.CompletedRequests,
+                        requestCount,
+                        pair.ScheduledFrameIndex,
+                        overflowCount,
+                        fallbackSampleCount));
+                    lastReadbackFrame = Mathf.Max(lastReadbackFrame, pair.ScheduledFrameIndex);
+                    m_HasCompletedReadbackResult = true;
+                    m_LastCompletedReadbackWasEmpty = requestCount == 0
+                                                      && overflowCount == 0
+                                                      && fallbackSampleCount == 0;
+                    m_LastCompletedReadbackSignature = pair.LastViewSignature;
+                    pair.HasCompletedReadback = false;
+                    pair.CompletedCount = 0u;
+                    pair.CompletedFallbackSampleCount = 0;
+                }
             }
         }
 

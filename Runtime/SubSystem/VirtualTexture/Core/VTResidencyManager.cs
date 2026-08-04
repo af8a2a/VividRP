@@ -263,34 +263,7 @@ namespace VividRP.Runtime
             if (requests == null)
                 return new VTResidencyProcessResult(evictionCount, pageTableChanged);
 
-            for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
-            {
-                VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
-                if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
-                    continue;
-
-                AccumulatePendingMipGap(
-                    desc,
-                    mipOffsets,
-                    request.PageCoord,
-                    ref pendingMipGapSum,
-                    ref pendingMipGapMax,
-                    ref pendingMipGapSampleCount);
-
-                TryProcessRequest(
-                    desc,
-                    mipOffsets,
-                    spaceId,
-                    request,
-                    activeViewId,
-                    frameIndex,
-                    isPrefetch: false,
-                    ref allocatedThisFrame,
-                    ref evictionCount,
-                    ref pageTableChanged);
-            }
-
-            if (desc.NeighborPrefetchCount > 0 && allocatedThisFrame < desc.MaxUploadsPerFrame)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyDemandMarker.Auto())
             {
                 for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
                 {
@@ -298,20 +271,53 @@ namespace VividRP.Runtime
                     if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                         continue;
 
-                    prefetchRequestCount += ProcessNeighborPrefetchRequests(
+                    AccumulatePendingMipGap(
+                        desc,
+                        mipOffsets,
+                        request.PageCoord,
+                        ref pendingMipGapSum,
+                        ref pendingMipGapMax,
+                        ref pendingMipGapSampleCount);
+
+                    TryProcessRequest(
                         desc,
                         mipOffsets,
                         spaceId,
                         request,
                         activeViewId,
-                        prefetchBias,
                         frameIndex,
+                        isPrefetch: false,
                         ref allocatedThisFrame,
                         ref evictionCount,
                         ref pageTableChanged);
+                }
+            }
 
-                    if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
-                        break;
+            if (desc.NeighborPrefetchCount > 0 && allocatedThisFrame < desc.MaxUploadsPerFrame)
+            {
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPrefetchMarker.Auto())
+                {
+                    for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+                    {
+                        VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
+                        if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                            continue;
+
+                        prefetchRequestCount += ProcessNeighborPrefetchRequests(
+                            desc,
+                            mipOffsets,
+                            spaceId,
+                            request,
+                            activeViewId,
+                            prefetchBias,
+                            frameIndex,
+                            ref allocatedThisFrame,
+                            ref evictionCount,
+                            ref pageTableChanged);
+
+                        if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
+                            break;
+                    }
                 }
             }
 

@@ -369,6 +369,89 @@ namespace VividRP.Editor.Tests
             Assert.That(virtualTextureSource, Does.Contain("PrepareFrameSubsystemVirtualTextureMarker.Auto()"));
         }
 
+        [Test]
+        public void VirtualTextureUpdate_UsesStableMarkers_ForSpikeAttribution()
+        {
+            var profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
+            var virtualTextureSystemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
+            var feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureFeedback.cs"));
+            var addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
+            var residencySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTResidencyManager.cs"));
+            var uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
+            var instrumentedSource = virtualTextureSystemSource
+                                     + feedbackSource
+                                     + addressSpaceSource
+                                     + residencySource
+                                     + uploadSchedulerSource;
+
+            var markerPaths = new[]
+            {
+                "VirtualTextureSystem/FrameSetup",
+                "VirtualTextureSystem/Feedback/CollectReadbacks/Poll",
+                "VirtualTextureSystem/Feedback/Aggregate/Accumulate",
+                "VirtualTextureSystem/Feedback/Aggregate/Decode",
+                "VirtualTextureSystem/Feedback/Aggregate/Sort",
+                "VirtualTextureSystem/Feedback/GroupBySpace",
+                "VirtualTextureSystem/Feedback/PrefetchBias",
+                "VirtualTextureSystem/Residency/ProcessRequests/Demand",
+                "VirtualTextureSystem/Residency/ProcessRequests/Prefetch",
+                "VirtualTextureSystem/Uploads/CollectPending/GatherProducerTasks",
+                "VirtualTextureSystem/Uploads/CollectPending/RequestPageData",
+                "VirtualTextureSystem/Uploads/CollectPending/ProducePageData",
+                "VirtualTextureSystem/Uploads/Finalize/Prepare",
+                "VirtualTextureSystem/Uploads/Finalize/Sort",
+                "VirtualTextureSystem/Uploads/Finalize/ScheduleBatches/RenderPayloads",
+                "VirtualTextureSystem/Uploads/Finalize/ScheduleBatches/RenderPayloads/Finalize",
+                "VirtualTextureSystem/Uploads/Finalize/ScheduleBatches/RenderPayloads/WriteStaging",
+                "VirtualTextureSystem/Uploads/Finalize/ScheduleBatches/ApplyStaging",
+                "VirtualTextureSystem/Uploads/Finalize/ScheduleBatches/CopyToCache",
+                "VirtualTextureSystem/PageTable/Rebuild",
+                "VirtualTextureSystem/PageTable/RefreshBuffer",
+                "VirtualTextureSystem/Feedback/PrepareTargets/EnsureCapacity",
+                "VirtualTextureSystem/Feedback/PrepareTargets/ScheduleReadback",
+                "VirtualTextureSystem/Bindings",
+                "VirtualTextureSystem/Stats/PhysicalPools",
+                "VirtualTextureSystem/Stats/ReportView",
+            };
+            foreach (string markerPath in markerPaths)
+                Assert.That(profilingSource, Does.Contain(markerPath), markerPath);
+
+            var markerUsages = new[]
+            {
+                "PrepareFrameSubsystemVirtualTextureFrameSetupMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackReadbackMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackAggregateMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackAggregateAccumulateMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackAggregateDecodeMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackAggregateSortMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackPrefetchBiasMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureResidencyDemandMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureResidencyPrefetchMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsCollectPendingGatherTasksMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRequestPageMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsCollectPendingProducePageMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizePrepareMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizeSortMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizeRenderPayloadsMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizePayloadRenderMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizeWriteStagingMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizeApplyStagingMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureUploadsFinalizeCopyToCacheMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTexturePageTableRebuildMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTexturePageTableRefreshMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsEnsureCapacityMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsScheduleReadbackMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureBindingsMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto()",
+                "PrepareFrameSubsystemVirtualTextureStatsReportViewMarker.Auto()",
+            };
+            foreach (string markerUsage in markerUsages)
+                Assert.That(instrumentedSource, Does.Contain(markerUsage), markerUsage);
+
+            Assert.That(instrumentedSource, Does.Not.Contain("new ProfilerMarker"));
+        }
+
         private static string GetPackageFilePath(params string[] relativeParts)
         {
             var path = Path.Combine("Packages", "VividRP");

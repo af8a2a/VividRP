@@ -466,37 +466,44 @@ namespace VividRP.Runtime
                 int requestCount = 0;
                 try
                 {
-                    for (int uploadIndex = 0; uploadIndex < count; uploadIndex++)
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeRenderPayloadsMarker.Auto())
                     {
-                        QueuedUpload upload = uploads[startIndex + uploadIndex];
-                        VTPageUploadPayload payload = upload.Payload;
-                        if (!payload.IsValid || upload.PhysicalPool == null)
+                        for (int uploadIndex = 0; uploadIndex < count; uploadIndex++)
                         {
-                            skippedUploadCount += 1;
-                            continue;
-                        }
+                            QueuedUpload upload = uploads[startIndex + uploadIndex];
+                            VTPageUploadPayload payload = upload.Payload;
+                            if (!payload.IsValid || upload.PhysicalPool == null)
+                            {
+                                skippedUploadCount += 1;
+                                continue;
+                            }
 
-                        if (requestCount >= batch.Capacity)
-                        {
-                            skippedUploadCount += 1;
-                            continue;
-                        }
+                            if (requestCount >= batch.Capacity)
+                            {
+                                skippedUploadCount += 1;
+                                continue;
+                            }
 
-                        VTPageUploadUtility.FinalizePayloadRender(payload, cmd);
-                        int baseSlice = requestCount * batch.LayerCount;
-                        for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
-                        {
-                            VTPageUploadUtility.WritePayloadLayerToStagingTexture(
-                                batch.StagingTexture,
-                                baseSlice + layerIndex,
-                                scratchPixels,
-                                payload,
-                                layerIndex);
-                        }
+                            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizePayloadRenderMarker.Auto())
+                                VTPageUploadUtility.FinalizePayloadRender(payload, cmd);
+                            int baseSlice = requestCount * batch.LayerCount;
+                            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeWriteStagingMarker.Auto())
+                            {
+                                for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
+                                {
+                                    VTPageUploadUtility.WritePayloadLayerToStagingTexture(
+                                        batch.StagingTexture,
+                                        baseSlice + layerIndex,
+                                        scratchPixels,
+                                        payload,
+                                        layerIndex);
+                                }
+                            }
 
-                        batch.SetRequest(requestCount, payload.Request);
-                        batch.SetPhysicalPool(requestCount, upload.PhysicalPool);
-                        requestCount += 1;
+                            batch.SetRequest(requestCount, payload.Request);
+                            batch.SetPhysicalPool(requestCount, upload.PhysicalPool);
+                            requestCount += 1;
+                        }
                     }
                 }
                 finally
@@ -507,37 +514,45 @@ namespace VividRP.Runtime
                 if (requestCount == 0)
                     return false;
 
-                batch.SealRequests(requestCount);
-                batch.StagingTexture.Apply(false, false);
-                for (int uploadIndex = 0; uploadIndex < requestCount; uploadIndex++)
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeApplyStagingMarker.Auto())
                 {
-                    VTRequest request = batch.GetRequest(uploadIndex);
-                    VTPhysicalPool physicalPool = batch.GetPhysicalPool(uploadIndex);
-                    if (physicalPool == null)
-                        continue;
+                    batch.SealRequests(requestCount);
+                    batch.StagingTexture.Apply(false, false);
+                }
 
-                    int sourceBaseSlice = uploadIndex * batch.LayerCount;
-                    for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeCopyToCacheMarker.Auto())
+                {
+                    for (int uploadIndex = 0; uploadIndex < requestCount; uploadIndex++)
                     {
-                        int physicalGroup = physicalPool.GetLayerPhysicalGroup(layerIndex);
-                        Texture2DArray physicalCache = physicalPool.GetTextureForGroup(physicalGroup);
-                        if (physicalCache == null)
+                        VTRequest request = batch.GetRequest(uploadIndex);
+                        VTPhysicalPool physicalPool = batch.GetPhysicalPool(uploadIndex);
+                        if (physicalPool == null)
                             continue;
 
-                        int groupLayerCount = Mathf.Max(1, physicalPool.GetGroupLayerCount(physicalGroup));
-                        int physicalLayerIndex = physicalPool.GetLayerPhysicalLayerIndex(layerIndex);
-                        int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
-                        cmd.CopyTexture(
-                            batch.StagingTexture,
-                            sourceBaseSlice + layerIndex,
-                            0,
-                            physicalCache,
-                            destinationSlice,
-                            0);
+                        int sourceBaseSlice = uploadIndex * batch.LayerCount;
+                        for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
+                        {
+                            int physicalGroup = physicalPool.GetLayerPhysicalGroup(layerIndex);
+                            Texture2DArray physicalCache = physicalPool.GetTextureForGroup(physicalGroup);
+                            if (physicalCache == null)
+                                continue;
+
+                            int groupLayerCount = Mathf.Max(1, physicalPool.GetGroupLayerCount(physicalGroup));
+                            int physicalLayerIndex = physicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                            int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
+                            cmd.CopyTexture(
+                                batch.StagingTexture,
+                                sourceBaseSlice + layerIndex,
+                                0,
+                                physicalCache,
+                                destinationSlice,
+                                0);
+                        }
                     }
                 }
 
-                batch.Submit(fenceFactory.Create(cmd));
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeSubmitMarker.Auto())
+                    batch.Submit(fenceFactory.Create(cmd));
                 return true;
             }
 
@@ -771,38 +786,43 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            EnsureScratchPixels(GetMaxQueuedPhysicalPageSize());
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizePrepareMarker.Auto())
+                EnsureScratchPixels(GetMaxQueuedPhysicalPageSize());
             bool scheduledAny = false;
-            m_QueuedUploads.Sort(QueuedUploadComparer.Instance);
-            int startIndex = 0;
-            while (startIndex < m_QueuedUploads.Count)
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeSortMarker.Auto())
+                m_QueuedUploads.Sort(QueuedUploadComparer.Instance);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeScheduleMarker.Auto())
             {
-                UploadPoolKey key = m_QueuedUploads[startIndex].Key;
-                int count = 1;
-                while (startIndex + count < m_QueuedUploads.Count
-                       && m_QueuedUploads[startIndex + count].Key.Equals(key))
+                int startIndex = 0;
+                while (startIndex < m_QueuedUploads.Count)
                 {
-                    count += 1;
-                }
+                    UploadPoolKey key = m_QueuedUploads[startIndex].Key;
+                    int count = 1;
+                    while (startIndex + count < m_QueuedUploads.Count
+                           && m_QueuedUploads[startIndex + count].Key.Equals(key))
+                    {
+                        count += 1;
+                    }
 
-                if (m_Pools.TryGetValue(key, out UploadPool pool))
-                {
-                    scheduledAny |= pool.ScheduleUploads(
-                        m_QueuedUploads,
-                        startIndex,
-                        count,
-                        m_ScratchPixels,
-                        cmd,
-                        s_FenceFactory,
-                        ref m_LastSkippedUploadCount);
-                }
-                else
-                {
-                    m_LastSkippedUploadCount += count;
-                    DisposePayloads(m_QueuedUploads, startIndex, count);
-                }
+                    if (m_Pools.TryGetValue(key, out UploadPool pool))
+                    {
+                        scheduledAny |= pool.ScheduleUploads(
+                            m_QueuedUploads,
+                            startIndex,
+                            count,
+                            m_ScratchPixels,
+                            cmd,
+                            s_FenceFactory,
+                            ref m_LastSkippedUploadCount);
+                    }
+                    else
+                    {
+                        m_LastSkippedUploadCount += count;
+                        DisposePayloads(m_QueuedUploads, startIndex, count);
+                    }
 
-                startIndex += count;
+                    startIndex += count;
+                }
             }
 
             m_QueuedUploads.Clear();

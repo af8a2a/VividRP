@@ -90,6 +90,9 @@ namespace VividRP.Editor.Tests
 
             Assert.That(settings.visualizationMode, Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
             Assert.That(settings.exposure, Is.EqualTo(2.5f));
+            Assert.That(
+                settings.wireframeThickness,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness));
         }
 
         [Test]
@@ -126,6 +129,7 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
                     VisibilityBufferDebugVisualizationMode.ClusterLOD;
                 VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 4f;
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness = 7f;
 
                 var pass = new VisibilityBufferDebugPass
                 {
@@ -143,6 +147,7 @@ namespace VividRP.Editor.Tests
                     GetFieldValue<VisibilityBufferDebugVisualizationMode>(pass, "m_ResolvedVisualizationMode"),
                     Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
                 Assert.That(GetFieldValue<float>(pass, "m_ResolvedExposure"), Is.EqualTo(4f));
+                Assert.That(GetFieldValue<float>(pass, "m_ResolvedWireframeThickness"), Is.EqualTo(7f));
             }
             finally
             {
@@ -151,17 +156,22 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VisibilityBufferDebugShader_SupportsClusterAndClusterLodModes()
+        public void VisibilityBufferDebugShader_SupportsSharedVisualizationModes()
         {
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("GPUDriven/VividGPUDrivenCommon.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("GPUDriven/VividVisibilityBuffer.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("GPUDriven/VividBarycentric.hlsl\""));
             Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_INSTANCE"));
             Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_CLUSTER"));
             Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_CLUSTER_LOD"));
             Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_TRIANGLE"));
+            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_WIREFRAME"));
+            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_BUFFER_DEBUG_BARYCENTRIC"));
             Assert.That(shaderSource, Does.Contain("ResolveClusterLODLevel"));
+            Assert.That(shaderSource, Does.Contain("ResolveDebugBarycentric"));
+            Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric"));
             Assert.That(shaderSource, Does.Contain("PullInstanceData"));
             Assert.That(shaderSource, Does.Contain("PullMeshLODNode"));
             Assert.That(shaderSource, Does.Contain("_MeshLODNodeCount"));

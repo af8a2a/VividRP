@@ -68,6 +68,7 @@ namespace VividRP.Runtime
     {
         internal const ReGIRDebugVisualizationMode DefaultReGIRDebugMode = ReGIRDebugVisualizationMode.None;
         internal const float DefaultReGIRDebugOpacity = 0.45f;
+        internal const float DefaultVisibilityBufferWireframeThickness = 10f;
         internal const ReferencedPathTracingTransportDebugMode
             DefaultReferencedPathTracingTransportDebugMode =
                 ReferencedPathTracingTransportDebugMode.Combined;
@@ -169,6 +170,10 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private float m_VisibilityBufferDebugExposure;
+
+        [SerializeField]
+        private float m_VisibilityBufferWireframeThickness =
+            DefaultVisibilityBufferWireframeThickness;
 
         [SerializeField]
         private bool m_ForceMeshletCullingFromMainCamera;
@@ -388,14 +393,20 @@ namespace VividRP.Runtime
 
         internal VisibilityBufferDebugVisualizationMode visibilityBufferDebugMode
         {
-            get => m_VisibilityBufferDebugMode;
-            set => m_VisibilityBufferDebugMode = value;
+            get => NormalizeVisibilityBufferDebugMode(m_VisibilityBufferDebugMode);
+            set => m_VisibilityBufferDebugMode = NormalizeVisibilityBufferDebugMode(value);
         }
 
         internal float visibilityBufferDebugExposure
         {
-            get => m_VisibilityBufferDebugExposure;
-            set => m_VisibilityBufferDebugExposure = value;
+            get => Mathf.Clamp(m_VisibilityBufferDebugExposure, -16f, 16f);
+            set => m_VisibilityBufferDebugExposure = Mathf.Clamp(value, -16f, 16f);
+        }
+
+        internal float visibilityBufferWireframeThickness
+        {
+            get => Mathf.Max(0.1f, m_VisibilityBufferWireframeThickness);
+            set => m_VisibilityBufferWireframeThickness = Mathf.Max(0.1f, value);
         }
 
         internal bool forceMeshletCullingFromMainCamera
@@ -515,6 +526,9 @@ namespace VividRP.Runtime
             || !Mathf.Approximately(m_MaterialDebugExposure, 0f)
             || m_VisibilityBufferDebugMode != VisibilityBufferDebugVisualizationMode.Cluster
             || !Mathf.Approximately(m_VisibilityBufferDebugExposure, 0f)
+            || !Mathf.Approximately(
+                visibilityBufferWireframeThickness,
+                DefaultVisibilityBufferWireframeThickness)
             || m_ForceMeshletCullingFromMainCamera
             || reflectionProbeAtlasDebugMode != ReflectionProbeAtlasDebugMode.None
             || m_ReflectionProbeAtlasArraySlice != 0
@@ -565,6 +579,8 @@ namespace VividRP.Runtime
             m_MaterialDebugExposure = 0f;
             m_VisibilityBufferDebugMode = VisibilityBufferDebugVisualizationMode.Cluster;
             m_VisibilityBufferDebugExposure = 0f;
+            m_VisibilityBufferWireframeThickness =
+                DefaultVisibilityBufferWireframeThickness;
             m_ForceMeshletCullingFromMainCamera = false;
             m_ReflectionProbeAtlasDebugMode = ReflectionProbeAtlasDebugMode.None;
             m_ReflectionProbeAtlasArraySlice = 0;
@@ -589,6 +605,15 @@ namespace VividRP.Runtime
                     and <= VirtualTextureVisualizationMode.PageTablePhysicalPage
                     ? value
                     : VirtualTextureVisualizationMode.None;
+        }
+
+        private static VisibilityBufferDebugVisualizationMode NormalizeVisibilityBufferDebugMode(
+            VisibilityBufferDebugVisualizationMode value)
+        {
+            return value is >= VisibilityBufferDebugVisualizationMode.Instance
+                and <= VisibilityBufferDebugVisualizationMode.BarycentricCoordinates
+                    ? value
+                    : VisibilityBufferDebugVisualizationMode.Cluster;
         }
 
         private static VirtualTextureVisualizationTarget NormalizeVirtualTextureVisualizationTarget(
@@ -872,6 +897,12 @@ namespace VividRP.Runtime
             {
                 name = "Exposure",
                 tooltip = "Exposure compensation applied to the visibility buffer debug view."
+            };
+
+            public static readonly NameAndTooltip VisibilityBufferWireframeThickness = new()
+            {
+                name = "Wireframe Thickness",
+                tooltip = "Wire thickness in pixels when the resolve visualization mode is Wireframe."
             };
 
             public static readonly NameAndTooltip ForceMeshletCullingFromMainCamera = new()
@@ -1256,6 +1287,16 @@ namespace VividRP.Runtime
                     setter = value => data.visibilityBufferDebugExposure = value,
                     min = () => -16f,
                     max = () => 16f,
+                });
+                foldout.children.Add(new DebugUI.FloatField
+                {
+                    nameAndTooltip = Strings.VisibilityBufferWireframeThickness,
+                    getter = () => data.visibilityBufferWireframeThickness,
+                    setter = value => data.visibilityBufferWireframeThickness = value,
+                    min = () => 0.1f,
+                    isHiddenCallback = () =>
+                        data.visibilityBufferDebugMode
+                            != VisibilityBufferDebugVisualizationMode.Wireframe,
                 });
                 foldout.children.Add(new DebugUI.BoolField
                 {

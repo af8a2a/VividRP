@@ -19,17 +19,23 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/Core.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividGPUDrivenCommon.hlsl"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl"
+            #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl"
 
             #define VIVID_VISIBILITY_BUFFER_DEBUG_INSTANCE 0
             #define VIVID_VISIBILITY_BUFFER_DEBUG_CLUSTER 1
             #define VIVID_VISIBILITY_BUFFER_DEBUG_CLUSTER_LOD 2
             #define VIVID_VISIBILITY_BUFFER_DEBUG_TRIANGLE 3
+            #define VIVID_VISIBILITY_BUFFER_DEBUG_WIREFRAME 4
+            #define VIVID_VISIBILITY_BUFFER_DEBUG_BARYCENTRIC 5
 
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
+            StructuredBuffer<VividMeshletVertex> _SharedVertexBuffer;
+            ByteAddressBuffer _SharedIndexBuffer;
 
             float4 _VisibilityBufferScaleBias;
             int _VisualizationMode;
             float _DebugExposure;
+            float _WireframeThickness;
 
             struct Attributes
             {
@@ -77,6 +83,43 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                 return true;
             }
 
+            uint PullDebugIndex(const VividMeshlet meshlet, const uint indexID)
+            {
+                const uint absoluteIndexID = meshlet.TriangleOffset + indexID;
+                const uint packedIndices = _SharedIndexBuffer.Load((absoluteIndexID / 4u) * 4u);
+                const uint shiftAmount = (absoluteIndexID % 4u) * 8u;
+                return (packedIndices >> shiftAmount) & 0xFFu;
+            }
+
+            float4 PullDebugClipPosition(
+                const VividInstanceData instanceData,
+                const VividMeshlet meshlet,
+                const uint indexID)
+            {
+                uint vertexIndex = PullDebugIndex(meshlet, indexID);
+                VividMeshletVertex vertex = _SharedVertexBuffer[meshlet.VertexOffset + vertexIndex];
+                float3 positionWS = TransformPosition(instanceData.ObjectToWorldMatrix, vertex.Position.xyz);
+                return TransformWorldToHClip(positionWS);
+            }
+
+            VividBarycentricDerivatives ResolveDebugBarycentric(
+                VividVisibilityBufferValue value,
+                float4 positionCS)
+            {
+                VividInstanceData instanceData = PullInstanceData(value.InstanceID);
+                VividMeshlet meshlet = PullMeshletData(value.MeshletID);
+                float4 clipPosition0 = PullDebugClipPosition(instanceData, meshlet, value.IndexID + 0u);
+                float4 clipPosition1 = PullDebugClipPosition(instanceData, meshlet, value.IndexID + 1u);
+                float4 clipPosition2 = PullDebugClipPosition(instanceData, meshlet, value.IndexID + 2u);
+                float2 pixelNdc = ScreenCoordsToNDC(positionCS);
+                return CalculateFullBarycentric(
+                    clipPosition0,
+                    clipPosition1,
+                    clipPosition2,
+                    pixelNdc,
+                    _ScreenSize.zw);
+            }
+
             uint ResolveClusterLODLevel(VividVisibilityBufferValue value)
             {
                 if (value.InstanceID >= _InstanceDataCount || _MeshLODNodeCount == 0u)
@@ -121,6 +164,28 @@ Shader "Hidden/VividRP/VisibilityBufferDebug"
                     return 0;
 
                 float exposureMultiplier = exp2(_DebugExposure);
+                if (_VisualizationMode == VIVID_VISIBILITY_BUFFER_DEBUG_BARYCENTRIC)
+                {
+                    VividBarycentricDerivatives barycentric = ResolveDebugBarycentric(
+                        value,
+                        input.positionCS);
+                    return float4(saturate(barycentric.lambda) * exposureMultiplier, 1.0);
+                }
+
+                if (_VisualizationMode == VIVID_VISIBILITY_BUFFER_DEBUG_WIREFRAME)
+                {
+                    VividBarycentricDerivatives barycentric = ResolveDebugBarycentric(
+                        value,
+                        input.positionCS);
+                    float baryMinValue = min(
+                        barycentric.lambda.x,
+                        min(barycentric.lambda.y, barycentric.lambda.z));
+                    float threshold = _ScreenSize.z * _WireframeThickness;
+                    float wireBlend = smoothstep(threshold, threshold + 0.01, baryMinValue);
+                    float3 faceColor = HashColor(value.MeshletID) * exposureMultiplier;
+                    return float4(lerp(1.0.xxx, faceColor, wireBlend), 1.0);
+                }
+
                 return float4(HashColor(ResolveDebugSeed(value)) * exposureMultiplier, 1.0);
             }
             ENDHLSL

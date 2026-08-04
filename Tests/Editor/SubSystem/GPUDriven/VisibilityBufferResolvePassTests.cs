@@ -13,6 +13,18 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VisibilityBufferResolvePassTests
     {
+        [SetUp]
+        public void SetUp()
+        {
+            VividRenderingDebugDisplaySettings.Data.Reset();
+        }
+
+        [TearDown]
+        public void TearDown()
+        {
+            VividRenderingDebugDisplaySettings.Data.Reset();
+        }
+
         [Test]
         public void Initialize_RegistersVisibilityDepthInputsAndColorOutput()
         {
@@ -56,15 +68,59 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VisibilityBufferResolvePassSource_BindsTexturesAndDrawsFullscreen()
+        public void Prepare_UsesSharedRenderingDebuggerVisibilitySettings()
+        {
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
+                VisibilityBufferDebugVisualizationMode.ClusterLOD;
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 3f;
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness = 6f;
+            var pass = new VisibilityBufferResolvePass();
+
+            pass.Prepare(new ContextContainer());
+
+            Assert.That(
+                GetFieldValue<VisibilityBufferDebugVisualizationMode>(pass, "m_ResolvedDebugMode"),
+                Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
+            Assert.That(GetFieldValue<float>(pass, "m_ResolvedExposure"), Is.EqualTo(3f));
+            Assert.That(GetFieldValue<float>(pass, "m_ResolvedWireframeThickness"), Is.EqualTo(6f));
+        }
+
+        [Test]
+        public void ResolveSettings_UsesDebuggerDefaults_WhenDataIsUnavailable()
+        {
+            var settings = VisibilityBufferResolvePass.ResolveSettings(null);
+
+            Assert.That(
+                settings.debugMode,
+                Is.EqualTo(VisibilityBufferDebugVisualizationMode.Cluster));
+            Assert.That(settings.exposure, Is.EqualTo(0f));
+            Assert.That(
+                settings.wireframeThickness,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness));
+        }
+
+        [Test]
+        public void ResolvePass_DoesNotExposeSerializedDebugParameters()
+        {
+            var serializedDebugFields = typeof(VisibilityBufferResolvePass)
+                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)
+                .Where(field => field.GetCustomAttribute<SerializeField>() != null)
+                .ToArray();
+
+            Assert.That(serializedDebugFields, Is.Empty);
+        }
+
+        [Test]
+        public void VisibilityBufferResolvePassSource_BindsDebuggerSettingsAndDrawsFullscreen()
         {
             var passSource = File.ReadAllText(GetPassSourcePath());
 
             Assert.That(passSource, Does.Contain("CoreUtils.DrawFullScreen("));
             Assert.That(passSource, Does.Contain("m_VisibilityBuffer"));
             Assert.That(passSource, Does.Contain("m_DepthTexture"));
-            Assert.That(passSource, Does.Contain("m_DebugMode"));
-            Assert.That(passSource, Does.Contain("m_WireframeThickness"));
+            Assert.That(passSource, Does.Contain("VividRenderingDebugDisplaySettings.Data"));
+            Assert.That(passSource, Does.Not.Contain("private VisibilityBufferResolveDebugMode m_DebugMode"));
+            Assert.That(passSource, Does.Not.Contain("private float m_WireframeThickness"));
         }
 
         [Test]
@@ -72,9 +128,10 @@ namespace VividRP.Editor.Tests
         {
             var shaderSource = File.ReadAllText(GetShaderSourcePath());
 
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividVisibilityBuffer.hlsl\""));
-            Assert.That(shaderSource, Does.Contain("#include \"Packages/com.af8a2a.vividrp/Shaders/Core/Public/GPUDriven/VividBarycentric.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("GPUDriven/VividVisibilityBuffer.hlsl\""));
+            Assert.That(shaderSource, Does.Contain("GPUDriven/VividBarycentric.hlsl\""));
             Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_RESOLVE_DEBUG_WIREFRAME"));
+            Assert.That(shaderSource, Does.Contain("VIVID_VISIBILITY_RESOLVE_DEBUG_CLUSTER_LOD"));
             Assert.That(shaderSource, Does.Contain("UnpackVisibilityBufferValue("));
             Assert.That(shaderSource, Does.Contain("IsPackedVisibilityBufferValueValid("));
             Assert.That(shaderSource, Does.Contain("CalculateFullBarycentric("));
@@ -83,6 +140,9 @@ namespace VividRP.Editor.Tests
             Assert.That(shaderSource, Does.Contain("ResolveVisibilityDepth("));
             Assert.That(shaderSource, Does.Contain("IsVisibilitySampleVisible("));
             Assert.That(shaderSource, Does.Contain("IsSceneDepthValid("));
+            Assert.That(shaderSource, Does.Contain("ResolveClusterLODLevel("));
+            Assert.That(shaderSource, Does.Contain("PullMeshLODNode("));
+            Assert.That(shaderSource, Does.Contain("_MeshLODNodeCount"));
         }
 
         private static RenderGraphTexture GetTextureField(VisibilityBufferResolvePass pass, string fieldName)
@@ -91,6 +151,16 @@ namespace VividRP.Editor.Tests
 
             Assert.That(field, Is.Not.Null);
             return (RenderGraphTexture) field.GetValue(pass);
+        }
+
+        private static T GetFieldValue<T>(VisibilityBufferResolvePass pass, string fieldName)
+        {
+            var field = typeof(VisibilityBufferResolvePass).GetField(
+                fieldName,
+                BindingFlags.Instance | BindingFlags.NonPublic);
+
+            Assert.That(field, Is.Not.Null);
+            return (T)field.GetValue(pass);
         }
 
         private static string GetPassSourcePath()

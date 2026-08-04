@@ -11,6 +11,8 @@ namespace VividRP.Runtime.RenderPass.Core
         Cluster = 1,
         ClusterLOD = 2,
         Triangle = 3,
+        Wireframe = 4,
+        BarycentricCoordinates = 5,
     }
 
     public sealed class VisibilityBufferDebugPass : RasterPass
@@ -21,6 +23,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private static readonly int VisibilityBufferScaleBiasId = Shader.PropertyToID("_VisibilityBufferScaleBias");
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VisualizationMode");
         private static readonly int DebugExposureId = Shader.PropertyToID("_DebugExposure");
+        private static readonly int WireframeThicknessId = Shader.PropertyToID("_WireframeThickness");
 
         [RenderGraphResource(Name = "VisibilityBuffer", Access = AccessFlags.Read)]
         private RenderGraphTexture m_VisibilityBuffer;
@@ -41,19 +44,24 @@ namespace VividRP.Runtime.RenderPass.Core
         private Material m_Material;
         private VisibilityBufferDebugVisualizationMode m_ResolvedVisualizationMode = VisibilityBufferDebugVisualizationMode.Cluster;
         private float m_ResolvedExposure;
+        private float m_ResolvedWireframeThickness =
+            VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness;
         private bool m_ShouldSkipExecution;
 
         internal readonly struct VisibilityBufferDebugSettingsData
         {
             public readonly VisibilityBufferDebugVisualizationMode visualizationMode;
             public readonly float exposure;
+            public readonly float wireframeThickness;
 
             public VisibilityBufferDebugSettingsData(
                 VisibilityBufferDebugVisualizationMode visualizationMode,
-                float exposure)
+                float exposure,
+                float wireframeThickness)
             {
                 this.visualizationMode = visualizationMode;
                 this.exposure = exposure;
+                this.wireframeThickness = wireframeThickness;
             }
         }
 
@@ -106,6 +114,7 @@ namespace VividRP.Runtime.RenderPass.Core
                 m_Exposure);
             m_ResolvedVisualizationMode = resolvedSettings.visualizationMode;
             m_ResolvedExposure = resolvedSettings.exposure;
+            m_ResolvedWireframeThickness = resolvedSettings.wireframeThickness;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -144,6 +153,7 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetVector(VisibilityBufferScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_VisibilityBuffer.innerHandle));
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
             mpb.SetFloat(DebugExposureId, m_ResolvedExposure);
+            mpb.SetFloat(WireframeThicknessId, m_ResolvedWireframeThickness);
 
             CoreUtils.DrawFullScreen(context.cmd, m_Material, mpb, 0);
         }
@@ -168,12 +178,14 @@ namespace VividRP.Runtime.RenderPass.Core
             {
                 return new VisibilityBufferDebugSettingsData(
                     defaultVisualizationMode,
-                    Mathf.Clamp(defaultExposure, -16f, 16f));
+                    Mathf.Clamp(defaultExposure, -16f, 16f),
+                    VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness);
             }
 
             return new VisibilityBufferDebugSettingsData(
                 data.visibilityBufferDebugMode,
-                Mathf.Clamp(data.visibilityBufferDebugExposure, -16f, 16f));
+                Mathf.Clamp(data.visibilityBufferDebugExposure, -16f, 16f),
+                data.visibilityBufferWireframeThickness);
         }
 
         private void ConfigureOutputTexture(int width, int height)

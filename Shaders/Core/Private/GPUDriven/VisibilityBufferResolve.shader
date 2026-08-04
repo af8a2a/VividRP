@@ -26,9 +26,10 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
 
             #define VIVID_VISIBILITY_RESOLVE_DEBUG_INSTANCE_ID 0
             #define VIVID_VISIBILITY_RESOLVE_DEBUG_MESHLET_ID 1
-            #define VIVID_VISIBILITY_RESOLVE_DEBUG_TRIANGLE_ID 2
-            #define VIVID_VISIBILITY_RESOLVE_DEBUG_WIREFRAME 3
-            #define VIVID_VISIBILITY_RESOLVE_DEBUG_BARYCENTRIC 4
+            #define VIVID_VISIBILITY_RESOLVE_DEBUG_CLUSTER_LOD 2
+            #define VIVID_VISIBILITY_RESOLVE_DEBUG_TRIANGLE_ID 3
+            #define VIVID_VISIBILITY_RESOLVE_DEBUG_WIREFRAME 4
+            #define VIVID_VISIBILITY_RESOLVE_DEBUG_BARYCENTRIC 5
 
             TYPED_TEXTURE2D(float2, _VisibilityBuffer);
             TEXTURE2D(_DepthTexture);
@@ -182,6 +183,29 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
                 return result;
             }
 
+            uint ResolveClusterLODLevel(VividVisibilityBufferValue value)
+            {
+                if (value.InstanceID >= _InstanceDataCount || _MeshLODNodeCount == 0u)
+                    return 0u;
+
+                VividInstanceData instanceData = PullInstanceData(value.InstanceID);
+                uint nodeStart = min(instanceData.TopMeshLODStartIndex, _MeshLODNodeCount);
+                uint nodeCount = min(instanceData.TotalMeshLODCount, _MeshLODNodeCount - nodeStart);
+                uint nodeEnd = nodeStart + nodeCount;
+
+                UNITY_LOOP
+                for (uint nodeIndex = nodeStart; nodeIndex < nodeEnd; ++nodeIndex)
+                {
+                    VividMeshLODNode node = PullMeshLODNode(nodeIndex);
+                    uint meshletStart = node.MeshletStartIndex;
+                    uint meshletEnd = meshletStart + node.MeshletCount;
+                    if (value.MeshletID >= meshletStart && value.MeshletID < meshletEnd)
+                        return node.LevelIndex;
+                }
+
+                return 0u;
+            }
+
             float4 Frag(Varyings input) : SV_Target
             {
                 float sceneDepth;
@@ -215,6 +239,12 @@ Shader "Hidden/VividRP/GPUDriven/VisibilityBufferResolve"
 
                 if (_ResolveDebugMode == VIVID_VISIBILITY_RESOLVE_DEBUG_MESHLET_ID)
                     return float4(HashColor(visibilityBufferValue.MeshletID) * exposureMultiplier, 1.0f);
+
+                if (_ResolveDebugMode == VIVID_VISIBILITY_RESOLVE_DEBUG_CLUSTER_LOD)
+                {
+                    uint clusterLOD = ResolveClusterLODLevel(visibilityBufferValue);
+                    return float4(HashColor(clusterLOD) * exposureMultiplier, 1.0f);
+                }
 
                 uint triangleID = visibilityBufferValue.IndexID / 3u;
                 if (_ResolveDebugMode == VIVID_VISIBILITY_RESOLVE_DEBUG_TRIANGLE_ID)

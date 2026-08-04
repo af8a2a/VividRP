@@ -1,3 +1,4 @@
+using System;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
@@ -5,6 +6,7 @@ using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime.RenderPass.Core
 {
+    [Obsolete("Use VisibilityBufferDebugVisualizationMode from RenderingDebugger instead.")]
     public enum VisibilityBufferResolveDebugMode
     {
         InstanceID = 0,
@@ -12,6 +14,8 @@ namespace VividRP.Runtime.RenderPass.Core
         TriangleID = 2,
         Wireframe = 3,
         BarycentricCoordinates = 4,
+        [InspectorName("Cluster LOD")]
+        ClusterLOD = 5,
     }
 
     public sealed class VisibilityBufferResolvePass : RasterPass
@@ -39,19 +43,29 @@ namespace VividRP.Runtime.RenderPass.Core
             BindingMode = RenderGraphResourceBindingMode.PassOwnedOverrideable)]
         private RenderGraphTexture m_OutputTexture;
 
-        [SerializeField]
-        private VisibilityBufferResolveDebugMode m_DebugMode = VisibilityBufferResolveDebugMode.MeshletID;
-
-        [SerializeField, Range(-16f, 16f)]
-        private float m_Exposure;
-
-        [SerializeField, Min(0.1f)]
-        private float m_WireframeThickness = 10f;
-
         private Material m_Material;
         private float m_ResolvedExposure;
-        private float m_ResolvedWireframeThickness = 10f;
-        private VisibilityBufferResolveDebugMode m_ResolvedDebugMode = VisibilityBufferResolveDebugMode.MeshletID;
+        private float m_ResolvedWireframeThickness =
+            VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness;
+        private VisibilityBufferDebugVisualizationMode m_ResolvedDebugMode =
+            VisibilityBufferDebugVisualizationMode.Cluster;
+
+        internal readonly struct VisibilityBufferResolveDebugSettingsData
+        {
+            public readonly VisibilityBufferDebugVisualizationMode debugMode;
+            public readonly float exposure;
+            public readonly float wireframeThickness;
+
+            public VisibilityBufferResolveDebugSettingsData(
+                VisibilityBufferDebugVisualizationMode debugMode,
+                float exposure,
+                float wireframeThickness)
+            {
+                this.debugMode = debugMode;
+                this.exposure = exposure;
+                this.wireframeThickness = wireframeThickness;
+            }
+        }
 
         public VisibilityBufferResolvePass()
         {
@@ -81,9 +95,10 @@ namespace VividRP.Runtime.RenderPass.Core
 
         public override void Prepare(ContextContainer frameData)
         {
-            m_ResolvedDebugMode = m_DebugMode;
-            m_ResolvedExposure = Mathf.Clamp(m_Exposure, -16f, 16f);
-            m_ResolvedWireframeThickness = Mathf.Max(0.1f, m_WireframeThickness);
+            var resolvedSettings = ResolveSettings(VividRenderingDebugDisplaySettings.Data);
+            m_ResolvedDebugMode = resolvedSettings.debugMode;
+            m_ResolvedExposure = resolvedSettings.exposure;
+            m_ResolvedWireframeThickness = resolvedSettings.wireframeThickness;
 
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             var width = RenderGraphTextureDescUtility.ResolveMaxExplicitWidth(
@@ -157,5 +172,21 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OutputTexture.desc.Name = "OutputTexture";
         }
 
+        internal static VisibilityBufferResolveDebugSettingsData ResolveSettings(
+            VividRenderingDebugSettingsData data)
+        {
+            if (data == null)
+            {
+                return new VisibilityBufferResolveDebugSettingsData(
+                    VisibilityBufferDebugVisualizationMode.Cluster,
+                    0f,
+                    VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness);
+            }
+
+            return new VisibilityBufferResolveDebugSettingsData(
+                data.visibilityBufferDebugMode,
+                Mathf.Clamp(data.visibilityBufferDebugExposure, -16f, 16f),
+                data.visibilityBufferWireframeThickness);
+        }
     }
 }

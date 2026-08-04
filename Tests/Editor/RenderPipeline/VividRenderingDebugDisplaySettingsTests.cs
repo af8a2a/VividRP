@@ -60,6 +60,18 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Material -> Exposure"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Visibility Buffer"), Is.Not.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Mode"),
+                Is.Not.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Exposure"),
+                Is.Not.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Wireframe Thickness"),
+                Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Reflection Probe Atlas -> Slice"), Is.Not.Null);
@@ -339,6 +351,7 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode =
                 VisibilityBufferDebugVisualizationMode.ClusterLOD;
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 3f;
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness = 4f;
             VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
@@ -347,7 +360,60 @@ namespace VividRP.Editor.Tests
                 VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode,
                 Is.EqualTo(VisibilityBufferDebugVisualizationMode.Cluster));
             Assert.That(VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure, Is.EqualTo(0f));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness,
+                Is.EqualTo(VividRenderingDebugSettingsData.DefaultVisibilityBufferWireframeThickness));
             Assert.That(VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera, Is.False);
+        }
+
+        [Test]
+        public void VisibilityBufferWidgets_ExposeOneSharedModeAndWireframeVisibility()
+        {
+            var modeWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Mode")
+                as DebugUI.EnumField;
+            var exposureWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Exposure")
+                as DebugUI.FloatField;
+            var wireframeWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Wireframe Thickness")
+                as DebugUI.FloatField;
+
+            Assert.That(modeWidget, Is.Not.Null);
+            Assert.That(exposureWidget, Is.Not.Null);
+            Assert.That(wireframeWidget, Is.Not.Null);
+            Assert.That(wireframeWidget.isHiddenCallback(), Is.True);
+
+            var clusterLODIndex = Array.IndexOf(
+                modeWidget.enumValues,
+                (int)VisibilityBufferDebugVisualizationMode.ClusterLOD);
+            Assert.That(clusterLODIndex, Is.GreaterThanOrEqualTo(0));
+            modeWidget.setIndex(clusterLODIndex);
+            exposureWidget.setter(32f);
+
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugMode,
+                Is.EqualTo(VisibilityBufferDebugVisualizationMode.ClusterLOD));
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure,
+                Is.EqualTo(16f));
+            Assert.That(wireframeWidget.isHiddenCallback(), Is.True);
+
+            modeWidget.setter((int)VisibilityBufferDebugVisualizationMode.Wireframe);
+            wireframeWidget.setter(0f);
+
+            Assert.That(wireframeWidget.isHiddenCallback(), Is.False);
+            Assert.That(
+                VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness,
+                Is.EqualTo(0.1f));
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Resolve Mode"),
+                Is.Null);
+            Assert.That(
+                DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Resolve Exposure"),
+                Is.Null);
         }
 
         [Test]
@@ -563,6 +629,11 @@ namespace VividRP.Editor.Tests
 
             VividRenderingDebugDisplaySettings.Data.Reset();
             VividRenderingDebugDisplaySettings.Data.visibilityBufferDebugExposure = 1f;
+
+            Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
+
+            VividRenderingDebugDisplaySettings.Data.Reset();
+            VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness = 2f;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.True);
         }

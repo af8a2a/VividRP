@@ -908,7 +908,7 @@ namespace VividRP.Runtime
             public static readonly NameAndTooltip ForceMeshletCullingFromMainCamera = new()
             {
                 name = "Force Culling From Main Camera",
-                tooltip = "Use the scene MainCamera when building meshlet GPU culling parameters."
+                tooltip = "Use the scene MainCamera and its camera-relative HZB history when building meshlet GPU culling parameters."
             };
 
             public static readonly NameAndTooltip ReflectionProbeAtlasDebugMode = new()
@@ -1304,7 +1304,34 @@ namespace VividRP.Runtime
                     getter = () => data.forceMeshletCullingFromMainCamera,
                     setter = value => data.forceMeshletCullingFromMainCamera = value,
                 });
+                foldout.children.Add(new DebugUI.Value
+                {
+                    displayName = "Occlusion Observation",
+                    getter = GetGPUDrivenOcclusionObservationStatus,
+                    isHiddenCallback = () => !data.forceMeshletCullingFromMainCamera,
+                });
                 return foldout;
+            }
+
+            private static object GetGPUDrivenOcclusionObservationStatus()
+            {
+                var asset = VividRenderPipelineAsset.GetActiveAsset();
+                if (asset == null || !asset.EnableGPUDrivenOcclusionCulling)
+                    return "Disabled in Pipeline Asset";
+
+                Camera mainCamera = Camera.main;
+                if (mainCamera == null)
+                    mainCamera = UnityEngine.Object.FindFirstObjectByType<Camera>(FindObjectsInactive.Exclude);
+                if (mainCamera == null)
+                    return "Waiting for culling camera";
+
+                string cameraName = string.IsNullOrEmpty(mainCamera.name) ? "Camera" : mainCamera.name;
+                return GPUDriven.VividGPUDrivenOcclusionHistorySystem.TryGetObservationParameters(
+                    mainCamera,
+                    out _,
+                    out _)
+                    ? $"Ready ({cameraName} HZB pair)"
+                    : $"Waiting for two HZB frames ({cameraName})";
             }
 
             private static DebugUI.Foldout CreateReflectionProbeAtlasFoldout(VividRenderingDebugSettingsData data)

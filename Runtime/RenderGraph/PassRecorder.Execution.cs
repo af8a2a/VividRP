@@ -282,7 +282,9 @@ namespace VividRP.Runtime
         internal static void SetGPUDrivenOcclusionFrameData(
             bool enabled,
             bool historyValid,
-            GPUDriven.VividGPUDrivenCullingBuffers buffers)
+            GPUDriven.VividGPUDrivenCullingBuffers buffers,
+            bool observationMode = false,
+            GPUDriven.VividGPUDrivenOcclusionCullingParameters observationRetestParameters = default)
         {
             var gpuDrivenFrameData = s_FrameData.GetOrCreate<VividGPUDrivenFrameData>();
             gpuDrivenFrameData.ResetOcclusion();
@@ -291,12 +293,14 @@ namespace VividRP.Runtime
 
             gpuDrivenFrameData.occlusionCullingEnabled = true;
             gpuDrivenFrameData.occlusionHistoryValid = historyValid;
+            gpuDrivenFrameData.occlusionObservationMode = observationMode;
             gpuDrivenFrameData.occludedMeshletRenderRequestsBuffer = buffers.OccludedMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.occludedMeshletRenderRequestCounterBuffer = buffers.OccludedMeshletRenderRequestCounterBuffer;
             gpuDrivenFrameData.occludedMeshletIndirectDispatchArgsBuffer = buffers.OccludedMeshletIndirectDispatchArgsBuffer;
             gpuDrivenFrameData.recoveredMeshletRenderRequestsBuffer = buffers.RecoveredMeshletRenderRequestsBuffer;
             gpuDrivenFrameData.recoveredRendererListMeshletCountsBuffer = buffers.RecoveredRendererListMeshletCountsBuffer;
             gpuDrivenFrameData.recoveredMeshletIndirectDrawArgsBuffer = buffers.RecoveredMeshletIndirectDrawArgsBuffer;
+            gpuDrivenFrameData.observationRetestParameters = observationRetestParameters;
         }
 
         internal static ContextContainer GetFrameData()

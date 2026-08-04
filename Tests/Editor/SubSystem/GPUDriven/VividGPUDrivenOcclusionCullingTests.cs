@@ -1,6 +1,7 @@
 using System.IO;
 using NUnit.Framework;
 using UnityEngine;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.Tests
@@ -64,6 +65,47 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 source,
                 Does.Contain("new VividGPUDrivenCullingDispatcher(supportsOcclusion: false)"));
+        }
+
+        [Test]
+        public void MainCameraObservation_UsesTwoCameraOwnedHistorySnapshots()
+        {
+            string historySource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenOcclusionHistory.cs"));
+            string systemSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VividGPUDrivenSystem.cs"));
+
+            Assert.That(historySource, Does.Contain("HasPreviousParameters"));
+            Assert.That(historySource, Does.Contain("HasLatestParameters"));
+            Assert.That(historySource, Does.Contain("TryGetObservationParameters("));
+            Assert.That(historySource, Does.Contain("ReferenceEquals(history, state.History)"));
+            Assert.That(historySource, Does.Contain("AreCompatibleSnapshots("));
+            Assert.That(systemSource, Does.Contain("occlusionObservationMode"));
+            Assert.That(systemSource, Does.Contain("TryGetObservationParameters("));
+            Assert.That(systemSource, Does.Not.Contain("&& ReferenceEquals(cullingCamera, camera)"));
+        }
+
+        [Test]
+        public void GPUDrivenFrameData_ResetClearsOcclusionObservationState()
+        {
+            var frameData = new VividGPUDrivenFrameData
+            {
+                occlusionCullingEnabled = true,
+                occlusionHistoryValid = true,
+                occlusionObservationMode = true,
+            };
+
+            frameData.Reset();
+
+            Assert.That(frameData.occlusionCullingEnabled, Is.False);
+            Assert.That(frameData.occlusionHistoryValid, Is.False);
+            Assert.That(frameData.occlusionObservationMode, Is.False);
         }
 
         private static string GetPackageFilePath(params string[] relativeParts)

@@ -67,6 +67,7 @@ namespace VividRP.Runtime.RenderPass.Core
         private int m_OccluderMipCount;
         private bool m_OcclusionCullingEnabled;
         private bool m_OcclusionHistoryValid;
+        private bool m_OcclusionObservationMode;
         private int m_FrameIndex;
 
         public VisibilityBufferPass()
@@ -236,7 +237,17 @@ namespace VividRP.Runtime.RenderPass.Core
                     virtualTextureReady,
                     virtualTextureBinding);
 
-                if (!CanExecuteOcclusion(system))
+                if (m_OcclusionObservationMode)
+                {
+                    ExecuteOcclusionRecovery(
+                        nativeCmd,
+                        system,
+                        virtualTextureReady,
+                        virtualTextureBinding);
+                    return;
+                }
+
+                if (!CanGenerateCurrentOccluderDepthPyramid(system))
                     return;
 
                 GenerateCurrentOccluderDepthPyramid(nativeCmd);
@@ -253,26 +264,8 @@ namespace VividRP.Runtime.RenderPass.Core
                 if (!m_OcclusionHistoryValid)
                     return;
 
-                system.BindGlobals(nativeCmd);
-                if (!system.DispatchOcclusionRetest(
-                        nativeCmd,
-                        m_MeshletCullingCompute,
-                        m_CurrentOccluderDepthPyramid,
-                        m_CurrentViewProjectionMatrix,
-                        m_OccluderWidth,
-                        m_OccluderHeight,
-                        m_OccluderTextureWidth,
-                        m_OccluderTextureHeight,
-                        m_OccluderMipCount))
-                {
-                    return;
-                }
-
-                BindVisibilityTargets(nativeCmd, clearTargets: false);
-                DrawRendererLists(
+                ExecuteOcclusionRecovery(
                     nativeCmd,
-                    m_RecoveredMeshletRenderRequestsBuffer,
-                    m_RecoveredMeshletIndirectDrawArgsBuffer,
                     system,
                     virtualTextureReady,
                     virtualTextureBinding);
@@ -307,11 +300,17 @@ namespace VividRP.Runtime.RenderPass.Core
                 || m_Camera == null
                 || m_MeshletCullingCompute == null
                 || m_CopyOccluderDepthKernel < 0
-                || m_DownsampleOccluderDepthKernel < 0
-                || m_Depth?.desc == null
-                || m_Depth.desc.MsaaSamples != MSAASamples.None
-                || m_Depth.desc.Dimension != TextureDimension.Tex2D
-                || m_Depth.desc.Slices > 1)
+                || m_DownsampleOccluderDepthKernel < 0)
+            {
+                return;
+            }
+
+            bool observationMode = gpuDrivenFrameData.occlusionObservationMode;
+            if (!observationMode
+                && (m_Depth?.desc == null
+                    || m_Depth.desc.MsaaSamples != MSAASamples.None
+                    || m_Depth.desc.Dimension != TextureDimension.Tex2D
+                    || m_Depth.desc.Slices > 1))
             {
                 return;
             }
@@ -330,6 +329,30 @@ namespace VividRP.Runtime.RenderPass.Core
                 || m_RecoveredMeshletIndirectDrawArgsBuffer == null)
             {
                 ResetOcclusionFrameState();
+                return;
+            }
+
+            if (observationMode)
+            {
+                var retestParameters = gpuDrivenFrameData.observationRetestParameters;
+                if (!retestParameters.IsEnabled)
+                {
+                    ResetOcclusionFrameState();
+                    return;
+                }
+
+                m_CurrentOccluderDepthPyramid = retestParameters.DepthPyramid;
+                m_CurrentViewProjectionMatrix = retestParameters.ViewProjectionMatrix;
+                m_OccluderWidth = retestParameters.Width;
+                m_OccluderHeight = retestParameters.Height;
+                m_OccluderTextureWidth = retestParameters.TextureWidth;
+                m_OccluderTextureHeight = retestParameters.TextureHeight;
+                m_OccluderMipCount = retestParameters.MipCount;
+                PassRecorder.ImportTextureForPass(this, m_CurrentOccluderDepthPyramid, AccessFlags.Read);
+                ImportOcclusionBuffers();
+                m_OcclusionCullingEnabled = true;
+                m_OcclusionHistoryValid = true;
+                m_OcclusionObservationMode = true;
                 return;
             }
 
@@ -352,25 +375,74 @@ namespace VividRP.Runtime.RenderPass.Core
             }
 
             PassRecorder.ImportTextureForPass(this, m_CurrentOccluderDepthPyramid, AccessFlags.ReadWrite);
+            ImportOcclusionBuffers();
+            m_OcclusionCullingEnabled = true;
+            m_OcclusionHistoryValid = gpuDrivenFrameData.occlusionHistoryValid;
+        }
+
+        private void ImportOcclusionBuffers()
+        {
             PassRecorder.ImportBufferForPass(this, m_OccludedMeshletRenderRequestsBuffer, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, m_OccludedMeshletRenderRequestCounterBuffer, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, m_OccludedMeshletIndirectDispatchArgsBuffer, AccessFlags.Read);
             PassRecorder.ImportBufferForPass(this, m_RecoveredMeshletRenderRequestsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, m_RecoveredRendererListMeshletCountsBuffer, AccessFlags.ReadWrite);
             PassRecorder.ImportBufferForPass(this, m_RecoveredMeshletIndirectDrawArgsBuffer, AccessFlags.ReadWrite);
-            m_OcclusionCullingEnabled = true;
-            m_OcclusionHistoryValid = gpuDrivenFrameData.occlusionHistoryValid;
         }
 
-        private bool CanExecuteOcclusion(VividGPUDrivenSystem system)
+        private bool CanGenerateCurrentOccluderDepthPyramid(VividGPUDrivenSystem system)
         {
             return m_OcclusionCullingEnabled
+                && !m_OcclusionObservationMode
                 && system != null
                 && m_MeshletCullingCompute != null
                 && m_CopyOccluderDepthKernel >= 0
                 && m_DownsampleOccluderDepthKernel >= 0
                 && m_CurrentOccluderDepthPyramid != null
                 && m_Depth?.innerHandle.IsValid() == true;
+        }
+
+        private bool ExecuteOcclusionRecovery(
+            CommandBuffer cmd,
+            VividGPUDrivenSystem system,
+            bool virtualTextureReady,
+            in VirtualTextureSpaceBinding virtualTextureBinding)
+        {
+            if (!m_OcclusionCullingEnabled
+                || !m_OcclusionHistoryValid
+                || system == null
+                || m_MeshletCullingCompute == null
+                || m_CurrentOccluderDepthPyramid == null
+                || m_RecoveredMeshletRenderRequestsBuffer == null
+                || m_RecoveredMeshletIndirectDrawArgsBuffer == null)
+            {
+                return false;
+            }
+
+            system.BindGlobals(cmd);
+            if (!system.DispatchOcclusionRetest(
+                    cmd,
+                    m_MeshletCullingCompute,
+                    m_CurrentOccluderDepthPyramid,
+                    m_CurrentViewProjectionMatrix,
+                    m_OccluderWidth,
+                    m_OccluderHeight,
+                    m_OccluderTextureWidth,
+                    m_OccluderTextureHeight,
+                    m_OccluderMipCount))
+            {
+                return false;
+            }
+
+            BindVisibilityTargets(cmd, clearTargets: false);
+            DrawRendererLists(
+                cmd,
+                m_RecoveredMeshletRenderRequestsBuffer,
+                m_RecoveredMeshletIndirectDrawArgsBuffer,
+                system,
+                virtualTextureReady,
+                virtualTextureBinding);
+            return true;
         }
 
         private void GenerateCurrentOccluderDepthPyramid(CommandBuffer cmd)
@@ -521,6 +593,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_OccluderMipCount = 0;
             m_OcclusionCullingEnabled = false;
             m_OcclusionHistoryValid = false;
+            m_OcclusionObservationMode = false;
         }
 
         private static void ConfigureMaterial(Material material, VividRendererListID rendererListID)

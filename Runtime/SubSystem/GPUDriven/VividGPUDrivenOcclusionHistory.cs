@@ -52,23 +52,24 @@ namespace VividRP.Runtime.GPUDriven
 
     internal sealed class VividGPUDrivenOcclusionHistoryState : CameraRelativeState
     {
-        internal bool HasValidMetadata;
-        internal Matrix4x4 ViewProjectionMatrix = Matrix4x4.identity;
-        internal int Width;
-        internal int Height;
-        internal int TextureWidth;
-        internal int TextureHeight;
-        internal int MipCount;
+        internal CameraHistoryTexture History;
+        internal bool HasLatestParameters;
+        internal bool HasPreviousParameters;
+        internal VividGPUDrivenOcclusionCullingParameters LatestParameters;
+        internal VividGPUDrivenOcclusionCullingParameters PreviousParameters;
+
+        internal void InvalidateSnapshots()
+        {
+            History = null;
+            HasLatestParameters = false;
+            HasPreviousParameters = false;
+            LatestParameters = default;
+            PreviousParameters = default;
+        }
 
         public override void Dispose()
         {
-            HasValidMetadata = false;
-            ViewProjectionMatrix = Matrix4x4.identity;
-            Width = 0;
-            Height = 0;
-            TextureWidth = 0;
-            TextureHeight = 0;
-            MipCount = 0;
+            InvalidateSnapshots();
         }
     }
 
@@ -118,10 +119,10 @@ namespace VividRP.Runtime.GPUDriven
                 || camera.stereoEnabled
                 || !s_States.TryGetBase(camera, out var state)
                 || state == null
-                || !state.HasValidMetadata
-                || state.Width != currentWidth
-                || state.Height != currentHeight
-                || !IsFinite(state.ViewProjectionMatrix))
+                || !state.HasLatestParameters
+                || state.LatestParameters.Width != currentWidth
+                || state.LatestParameters.Height != currentHeight
+                || !IsUsableSnapshot(state.LatestParameters))
             {
                 return false;
             }
@@ -131,8 +132,9 @@ namespace VividRP.Runtime.GPUDriven
                     CameraHistoryIds.GPUDrivenOccluderDepthPyramid,
                     out var history)
                 || history == null
+                || !ReferenceEquals(history, state.History)
                 || !history.IsValid(1)
-                || !IsCompatible(state, history.Descriptor))
+                || !IsCompatible(state.LatestParameters, history.Descriptor))
             {
                 return false;
             }
@@ -143,14 +145,56 @@ namespace VividRP.Runtime.GPUDriven
 
             parameters = new VividGPUDrivenOcclusionCullingParameters(
                 previous,
-                state.ViewProjectionMatrix,
-                state.Width,
-                state.Height,
-                state.TextureWidth,
-                state.TextureHeight,
-                state.MipCount,
+                state.LatestParameters.ViewProjectionMatrix,
+                state.LatestParameters.Width,
+                state.LatestParameters.Height,
+                state.LatestParameters.TextureWidth,
+                state.LatestParameters.TextureHeight,
+                state.LatestParameters.MipCount,
                 ConservativeDepthBias);
             return true;
+        }
+
+        internal static bool TryGetObservationParameters(
+            Camera camera,
+            out VividGPUDrivenOcclusionCullingParameters testAllParameters,
+            out VividGPUDrivenOcclusionCullingParameters testCulledParameters)
+        {
+            testAllParameters = default;
+            testCulledParameters = default;
+            if (camera == null
+                || camera.stereoEnabled
+                || !s_States.TryGetBase(camera, out var state)
+                || state == null
+                || !state.HasPreviousParameters
+                || !state.HasLatestParameters
+                || !IsUsableSnapshot(state.PreviousParameters)
+                || !IsUsableSnapshot(state.LatestParameters)
+                || !AreCompatibleSnapshots(state.PreviousParameters, state.LatestParameters))
+            {
+                return false;
+            }
+
+            var cameraHistory = camera.GetVividCameraHistory();
+            if (!cameraHistory.TryGetTexture(
+                    CameraHistoryIds.GPUDrivenOccluderDepthPyramid,
+                    out var history)
+                || history == null
+                || !ReferenceEquals(history, state.History)
+                || !IsCompatible(state.LatestParameters, history.Descriptor))
+            {
+                return false;
+            }
+
+            testAllParameters = state.PreviousParameters;
+            testCulledParameters = state.LatestParameters;
+            return true;
+        }
+
+        internal static void InvalidateSnapshots(Camera camera)
+        {
+            if (camera != null && s_States.TryGetBase(camera, out var state))
+                state?.InvalidateSnapshots();
         }
 
         internal static bool CommitCurrent(
@@ -175,14 +219,38 @@ namespace VividRP.Runtime.GPUDriven
                 return false;
             }
 
+            RTHandle current = history.GetCurrent();
+            if (current == null)
+                return false;
+
+            var currentParameters = new VividGPUDrivenOcclusionCullingParameters(
+                current,
+                viewProjectionMatrix,
+                width,
+                height,
+                textureWidth,
+                textureHeight,
+                Mathf.Clamp(mipCount, 1, MaxMipCount),
+                ConservativeDepthBias);
             var state = s_States.GetOrCreateBase(camera);
-            state.HasValidMetadata = true;
-            state.ViewProjectionMatrix = viewProjectionMatrix;
-            state.Width = width;
-            state.Height = height;
-            state.TextureWidth = textureWidth;
-            state.TextureHeight = textureHeight;
-            state.MipCount = Mathf.Clamp(mipCount, 1, MaxMipCount);
+            bool continuesSameHistory = ReferenceEquals(state.History, history)
+                && state.HasLatestParameters
+                && IsUsableSnapshot(state.LatestParameters)
+                && !ReferenceEquals(state.LatestParameters.DepthPyramid, current);
+            if (continuesSameHistory)
+            {
+                state.PreviousParameters = state.LatestParameters;
+                state.HasPreviousParameters = true;
+            }
+            else if (!ReferenceEquals(state.History, history) || !state.HasLatestParameters)
+            {
+                state.PreviousParameters = default;
+                state.HasPreviousParameters = false;
+            }
+
+            state.History = history;
+            state.LatestParameters = currentParameters;
+            state.HasLatestParameters = true;
             history.MarkWritten();
             return true;
         }
@@ -222,7 +290,7 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         private static bool IsCompatible(
-            VividGPUDrivenOcclusionHistoryState state,
+            in VividGPUDrivenOcclusionCullingParameters parameters,
             in CameraHistoryTextureDescriptor descriptor)
         {
             return descriptor.Dimension == TextureDimension.Tex2D
@@ -231,13 +299,33 @@ namespace VividRP.Runtime.GPUDriven
                 && descriptor.ColorFormat == GraphicsFormat.R32_SFloat
                 && descriptor.EnableRandomWrite
                 && descriptor.UseMipMap
-                && state.Width > 0
-                && state.Height > 0
-                && state.TextureWidth == descriptor.Width
-                && state.TextureHeight == descriptor.Height
-                && state.Width <= state.TextureWidth
-                && state.Height <= state.TextureHeight
-                && state.MipCount == CalculateMipCount(descriptor.Width, descriptor.Height);
+                && parameters.Width > 0
+                && parameters.Height > 0
+                && parameters.TextureWidth == descriptor.Width
+                && parameters.TextureHeight == descriptor.Height
+                && parameters.Width <= parameters.TextureWidth
+                && parameters.Height <= parameters.TextureHeight
+                && parameters.MipCount == CalculateMipCount(descriptor.Width, descriptor.Height);
+        }
+
+        private static bool AreCompatibleSnapshots(
+            in VividGPUDrivenOcclusionCullingParameters previous,
+            in VividGPUDrivenOcclusionCullingParameters latest)
+        {
+            return previous.Width == latest.Width
+                && previous.Height == latest.Height
+                && previous.TextureWidth == latest.TextureWidth
+                && previous.TextureHeight == latest.TextureHeight
+                && previous.MipCount == latest.MipCount
+                && !ReferenceEquals(previous.DepthPyramid, latest.DepthPyramid);
+        }
+
+        private static bool IsUsableSnapshot(
+            in VividGPUDrivenOcclusionCullingParameters parameters)
+        {
+            return parameters.IsEnabled
+                && parameters.DepthPyramid.rt != null
+                && IsFinite(parameters.ViewProjectionMatrix);
         }
 
         private static bool IsFinite(Matrix4x4 matrix)

@@ -378,11 +378,16 @@ namespace VividRP.Editor.Tests
             var wireframeWidget = DebugManager.instance.GetItem(
                     "Rendering -> VividRP Debug -> Visibility Buffer -> Wireframe Thickness")
                 as DebugUI.FloatField;
+            var observationStatusWidget = DebugManager.instance.GetItem(
+                    "Rendering -> VividRP Debug -> Visibility Buffer -> Occlusion Observation")
+                as DebugUI.Value;
 
             Assert.That(modeWidget, Is.Not.Null);
             Assert.That(exposureWidget, Is.Not.Null);
             Assert.That(wireframeWidget, Is.Not.Null);
+            Assert.That(observationStatusWidget, Is.Not.Null);
             Assert.That(wireframeWidget.isHiddenCallback(), Is.True);
+            Assert.That(observationStatusWidget.isHiddenCallback(), Is.True);
 
             var clusterLODIndex = Array.IndexOf(
                 modeWidget.enumValues,
@@ -403,6 +408,8 @@ namespace VividRP.Editor.Tests
             wireframeWidget.setter(0f);
 
             Assert.That(wireframeWidget.isHiddenCallback(), Is.False);
+            VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = true;
+            Assert.That(observationStatusWidget.isHiddenCallback(), Is.False);
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.visibilityBufferWireframeThickness,
                 Is.EqualTo(0.1f));
@@ -414,6 +421,7 @@ namespace VividRP.Editor.Tests
                 DebugManager.instance.GetItem(
                     "Rendering -> VividRP Debug -> Visibility Buffer -> Resolve Exposure"),
                 Is.Null);
+            VividRenderingDebugDisplaySettings.Data.forceMeshletCullingFromMainCamera = false;
         }
 
         [Test]

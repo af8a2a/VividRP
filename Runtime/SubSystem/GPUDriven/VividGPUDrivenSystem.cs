@@ -587,9 +587,10 @@ namespace VividRP.Runtime.GPUDriven
             {
                 resources = PipelineResourceManager.Get<VividRPCoreResources>();
             }
-            bool occlusionCullingEnabled = asset.EnableGPUDrivenOcclusionCulling
-                && ReferenceEquals(cullingCamera, camera)
+            bool occlusionObservationMode = !ReferenceEquals(cullingCamera, camera);
+            bool occlusionFeatureSupported = asset.EnableGPUDrivenOcclusionCulling
                 && !camera.stereoEnabled
+                && !cullingCamera.stereoEnabled
                 && resources?.GPUMeshletCullingCompute != null;
             var temporalData = frameData.GetOrCreate<VividTemporalData>();
             int occlusionWidth = cameraData.actualWidth > 0
@@ -598,13 +599,34 @@ namespace VividRP.Runtime.GPUDriven
             int occlusionHeight = cameraData.actualHeight > 0
                 ? cameraData.actualHeight
                 : Mathf.Max(1, cameraData.pixelHeight > 0 ? cameraData.pixelHeight : Screen.height);
-            bool hasOcclusionHistory = VividGPUDrivenOcclusionHistorySystem.TryGetPreviousParameters(
-                camera,
-                occlusionCullingEnabled,
-                temporalData.resetPostProcessingHistory,
-                occlusionWidth,
-                occlusionHeight,
-                out var occlusionParameters);
+            bool hasOcclusionHistory;
+            bool occlusionCullingEnabled;
+            VividGPUDrivenOcclusionCullingParameters occlusionParameters = default;
+            VividGPUDrivenOcclusionCullingParameters observationRetestParameters = default;
+            if (occlusionObservationMode)
+            {
+                hasOcclusionHistory = occlusionFeatureSupported
+                    && VividGPUDrivenOcclusionHistorySystem.TryGetObservationParameters(
+                        cullingCamera,
+                        out occlusionParameters,
+                        out observationRetestParameters);
+                occlusionCullingEnabled = hasOcclusionHistory;
+                if (!hasOcclusionHistory)
+                    occlusionParameters = default;
+            }
+            else
+            {
+                occlusionCullingEnabled = occlusionFeatureSupported;
+                hasOcclusionHistory = VividGPUDrivenOcclusionHistorySystem.TryGetPreviousParameters(
+                    camera,
+                    occlusionCullingEnabled,
+                    temporalData.resetPostProcessingHistory,
+                    occlusionWidth,
+                    occlusionHeight,
+                    out occlusionParameters);
+                if (occlusionCullingEnabled && !hasOcclusionHistory)
+                    VividGPUDrivenOcclusionHistorySystem.InvalidateSnapshots(camera);
+            }
 
             gpuDrivenSystem.CullMainView(
                 cullingCamera,
@@ -628,7 +650,9 @@ namespace VividRP.Runtime.GPUDriven
                 PassRecorder.SetGPUDrivenOcclusionFrameData(
                     occlusionCullingEnabled,
                     hasOcclusionHistory,
-                    gpuDrivenSystem.CullingBufferSet);
+                    gpuDrivenSystem.CullingBufferSet,
+                    occlusionObservationMode,
+                    observationRetestParameters);
             }
         }
 

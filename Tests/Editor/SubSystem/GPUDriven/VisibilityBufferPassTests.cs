@@ -142,6 +142,11 @@ namespace VividRP.Editor.Tests
             Assert.That(passSource, Does.Contain("system.DispatchOcclusionRetest("));
             Assert.That(passSource, Does.Contain("m_RecoveredMeshletRenderRequestsBuffer"));
             Assert.That(passSource, Does.Contain("m_RecoveredMeshletIndirectDrawArgsBuffer"));
+            Assert.That(passSource, Does.Contain("gpuDrivenFrameData.occlusionObservationMode"));
+            Assert.That(passSource, Does.Contain("gpuDrivenFrameData.observationRetestParameters"));
+            Assert.That(
+                passSource,
+                Does.Contain("PassRecorder.ImportTextureForPass(this, m_CurrentOccluderDepthPyramid, AccessFlags.Read);"));
         }
 
         [Test]

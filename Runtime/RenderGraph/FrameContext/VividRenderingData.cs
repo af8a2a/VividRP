@@ -19,12 +19,14 @@ namespace VividRP.Runtime
         public GraphicsBuffer visibleMeshletIndirectDrawArgsBuffer;
         public bool occlusionCullingEnabled;
         public bool occlusionHistoryValid;
+        public bool occlusionObservationMode;
         public GraphicsBuffer occludedMeshletRenderRequestsBuffer;
         public GraphicsBuffer occludedMeshletRenderRequestCounterBuffer;
         public GraphicsBuffer occludedMeshletIndirectDispatchArgsBuffer;
         public GraphicsBuffer recoveredMeshletRenderRequestsBuffer;
         public GraphicsBuffer recoveredRendererListMeshletCountsBuffer;
         public GraphicsBuffer recoveredMeshletIndirectDrawArgsBuffer;
+        internal GPUDriven.VividGPUDrivenOcclusionCullingParameters observationRetestParameters;
 
         public override void Reset()
         {
@@ -37,12 +39,14 @@ namespace VividRP.Runtime
         {
             occlusionCullingEnabled = false;
             occlusionHistoryValid = false;
+            occlusionObservationMode = false;
             occludedMeshletRenderRequestsBuffer = null;
             occludedMeshletRenderRequestCounterBuffer = null;
             occludedMeshletIndirectDispatchArgsBuffer = null;
             recoveredMeshletRenderRequestsBuffer = null;
             recoveredRendererListMeshletCountsBuffer = null;
             recoveredMeshletIndirectDrawArgsBuffer = null;
+            observationRetestParameters = default;
         }
     }
 

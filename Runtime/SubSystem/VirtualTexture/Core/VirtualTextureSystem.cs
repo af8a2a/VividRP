@@ -774,6 +774,19 @@ namespace VividRP.Runtime
                 : 0;
         }
 
+        internal static int GetResidencyClassificationCapacityForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.ResidencyClassificationCapacity
+                : 0;
+        }
+
+        internal static bool WasLastResidencyClassificationParallelForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.LastResidencyClassificationUsedParallelJob;
+        }
+
         internal static int GetPhysicalPoolCountForTesting()
         {
             return s_PhysicalPools.Count;

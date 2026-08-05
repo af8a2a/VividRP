@@ -79,6 +79,11 @@ namespace VividRP.Runtime
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
+        internal int ResidencyClassificationCapacity => m_ResidencyManager.ClassificationCapacity;
+
+        internal bool LastResidencyClassificationUsedParallelJob =>
+            m_ResidencyManager.LastClassificationUsedParallelJob;
+
         internal int[] MipOffsets => m_MipOffsets;
 
         internal VTResidencyProcessResult ProcessRequests(

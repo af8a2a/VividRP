@@ -1,9 +1,11 @@
 using System.IO;
 using System.Linq;
 using NUnit.Framework;
+using Unity.Collections;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
+using Unity.Jobs;
 using UnityEngine.Rendering;
 using VividRP.Runtime;
 
@@ -942,6 +944,116 @@ namespace VividRP.Editor.Tests
             }
         }
 
+        [Test]
+        public void ResidencyClassificationJob_ClassifiesStateAndResolvesResidentMipGap()
+        {
+            var inputs = new NativeArray<VTResidencyClassificationInput>(4, Allocator.TempJob);
+            var pageStateFlags = new NativeArray<byte>(21, Allocator.TempJob);
+            var mipOffsets = new NativeArray<int>(new[] { 0, 16, 20 }, Allocator.TempJob);
+            var results = new NativeArray<VTResidencyClassificationResult>(4, Allocator.TempJob);
+
+            try
+            {
+                inputs[0] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(0, 0, 0));
+                inputs[1] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(1, 0, 0));
+                inputs[2] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(3, 3, 0));
+                inputs[3] = new VTResidencyClassificationInput(new VirtualTexturePageCoord(4, 0, 0));
+                pageStateFlags[0] = VTResidencyClassificationJob.ResidentFlag;
+                pageStateFlags[1] = VTResidencyClassificationJob.PendingFlag;
+                pageStateFlags[16] = VTResidencyClassificationJob.ResidentFlag;
+                pageStateFlags[20] = VTResidencyClassificationJob.ResidentFlag;
+
+                var job = new VTResidencyClassificationJob
+                {
+                    Inputs = inputs,
+                    PageStateFlags = pageStateFlags,
+                    MipOffsets = mipOffsets,
+                    Results = results,
+                    VirtualPageCountX = 4,
+                    VirtualPageCountY = 4,
+                    MipCount = 3,
+                };
+                job.Run(inputs.Length);
+
+                AssertClassification(
+                    results[0],
+                    pageIndex: 0,
+                    mipGap: 0,
+                    VTResidencyRequestClassification.Resident);
+                AssertClassification(
+                    results[1],
+                    pageIndex: 1,
+                    mipGap: 1,
+                    VTResidencyRequestClassification.Pending);
+                AssertClassification(
+                    results[2],
+                    pageIndex: 15,
+                    mipGap: 2,
+                    VTResidencyRequestClassification.Missing);
+                AssertClassification(
+                    results[3],
+                    pageIndex: -1,
+                    mipGap: -1,
+                    VTResidencyRequestClassification.Invalid);
+            }
+            finally
+            {
+                results.Dispose();
+                mipOffsets.Dispose();
+                pageStateFlags.Dispose();
+                inputs.Dispose();
+            }
+        }
+
+        [Test]
+        public void Update_ReusesClassificationBuffers_AndSelectsParallelPathForLargeBatches()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "BurstClassification",
+                cachePageCount: 4,
+                maxUploadsPerFrame: 1,
+                virtualPageCountX: 16,
+                virtualPageCountY: 16,
+                mipCount: 5,
+                feedbackCapacity: 128));
+            var requestKeys = new ulong[65];
+            for (int requestIndex = 0; requestIndex < requestKeys.Length; requestIndex++)
+            {
+                requestKeys[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    spaceId,
+                    new VirtualTexturePageCoord(requestIndex % 16, requestIndex / 16, 0));
+            }
+
+            var commandBuffer = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKeys);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(
+                    VirtualTextureSystem.WasLastResidencyClassificationParallelForTesting(spaceId),
+                    Is.True);
+                Assert.That(
+                    VirtualTextureSystem.GetResidencyClassificationCapacityForTesting(spaceId),
+                    Is.EqualTo(128));
+
+                commandBuffer.Clear();
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKeys[0]);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(
+                    VirtualTextureSystem.WasLastResidencyClassificationParallelForTesting(spaceId),
+                    Is.False);
+                Assert.That(
+                    VirtualTextureSystem.GetResidencyClassificationCapacityForTesting(spaceId),
+                    Is.EqualTo(128));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
         private static ContextContainer CreateFrameData(Camera camera, int frameIndex)
         {
             var frameData = new ContextContainer();
@@ -960,20 +1072,35 @@ namespace VividRP.Editor.Tests
             string name,
             int cachePageCount,
             int maxUploadsPerFrame,
-            int neighborPrefetchCount = 0)
+            int neighborPrefetchCount = 0,
+            int virtualPageCountX = 4,
+            int virtualPageCountY = 4,
+            int mipCount = 3,
+            int feedbackCapacity = 32)
         {
             return new VirtualTextureSpaceDesc(
                 name,
                 pageSize: 128,
                 borderSize: 4,
-                virtualPageCountX: 4,
-                virtualPageCountY: 4,
-                mipCount: 3,
+                virtualPageCountX: virtualPageCountX,
+                virtualPageCountY: virtualPageCountY,
+                mipCount: mipCount,
                 cachePageCount: cachePageCount,
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
-                feedbackCapacity: 32,
+                feedbackCapacity: feedbackCapacity,
                 neighborPrefetchCount: neighborPrefetchCount);
+        }
+
+        private static void AssertClassification(
+            in VTResidencyClassificationResult result,
+            int pageIndex,
+            int mipGap,
+            VTResidencyRequestClassification classification)
+        {
+            Assert.That(result.PageIndex, Is.EqualTo(pageIndex));
+            Assert.That(result.MipGap, Is.EqualTo(mipGap));
+            Assert.That(result.Classification, Is.EqualTo(classification));
         }
 
         private static Vector4 ToVector(Color32 color)

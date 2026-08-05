@@ -1,11 +1,136 @@
 using System;
 using System.Collections.Generic;
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Jobs;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    internal enum VTResidencyRequestClassification : byte
+    {
+        Invalid = 0,
+        Resident = 1,
+        Pending = 2,
+        Missing = 3,
+    }
+
+    internal readonly struct VTResidencyClassificationInput
+    {
+        internal VTResidencyClassificationInput(in VirtualTexturePageCoord coord)
+        {
+            X = coord.X;
+            Y = coord.Y;
+            Mip = coord.Mip;
+        }
+
+        internal readonly int X;
+
+        internal readonly int Y;
+
+        internal readonly int Mip;
+    }
+
+    internal readonly struct VTResidencyClassificationResult
+    {
+        internal VTResidencyClassificationResult(
+            int pageIndex,
+            int mipGap,
+            VTResidencyRequestClassification classification)
+        {
+            PageIndex = pageIndex;
+            MipGap = mipGap;
+            Classification = classification;
+        }
+
+        internal readonly int PageIndex;
+
+        internal readonly int MipGap;
+
+        internal readonly VTResidencyRequestClassification Classification;
+    }
+
+    [BurstCompile]
+    internal struct VTResidencyClassificationJob : IJobParallelFor
+    {
+        internal const byte ResidentFlag = 1 << 0;
+        internal const byte PendingFlag = 1 << 1;
+
+        [ReadOnly]
+        public NativeArray<VTResidencyClassificationInput> Inputs;
+
+        [ReadOnly]
+        public NativeArray<byte> PageStateFlags;
+
+        [ReadOnly]
+        public NativeArray<int> MipOffsets;
+
+        [WriteOnly]
+        public NativeArray<VTResidencyClassificationResult> Results;
+
+        public int VirtualPageCountX;
+        public int VirtualPageCountY;
+        public int MipCount;
+
+        public void Execute(int index)
+        {
+            VTResidencyClassificationInput input = Inputs[index];
+            if (!IsCoordValid(input.X, input.Y, input.Mip))
+            {
+                Results[index] = new VTResidencyClassificationResult(
+                    pageIndex: -1,
+                    mipGap: -1,
+                    VTResidencyRequestClassification.Invalid);
+                return;
+            }
+
+            int pageIndex = GetFlatIndex(input.X, input.Y, input.Mip);
+            byte pageFlags = PageStateFlags[pageIndex];
+            VTResidencyRequestClassification classification = (pageFlags & ResidentFlag) != 0
+                ? VTResidencyRequestClassification.Resident
+                : (pageFlags & PendingFlag) != 0
+                    ? VTResidencyRequestClassification.Pending
+                    : VTResidencyRequestClassification.Missing;
+            int mipGap = ResolveMipGap(input.X, input.Y, input.Mip);
+            Results[index] = new VTResidencyClassificationResult(pageIndex, mipGap, classification);
+        }
+
+        private int ResolveMipGap(int x, int y, int requestedMip)
+        {
+            for (int mip = requestedMip; mip < MipCount; mip++)
+            {
+                int mipDelta = mip - requestedMip;
+                int ancestorIndex = GetFlatIndex(x >> mipDelta, y >> mipDelta, mip);
+                if ((PageStateFlags[ancestorIndex] & ResidentFlag) != 0)
+                    return mipDelta;
+            }
+
+            return -1;
+        }
+
+        private bool IsCoordValid(int x, int y, int mip)
+        {
+            if (mip < 0 || mip >= MipCount || x < 0 || y < 0)
+                return false;
+
+            return x < GetPageCount(VirtualPageCountX, mip)
+                   && y < GetPageCount(VirtualPageCountY, mip);
+        }
+
+        private int GetFlatIndex(int x, int y, int mip)
+        {
+            return MipOffsets[mip] + y * GetPageCount(VirtualPageCountX, mip) + x;
+        }
+
+        private static int GetPageCount(int virtualPageCount, int mip)
+        {
+            int pageCount = virtualPageCount >> mip;
+            return pageCount > 0 ? pageCount : 1;
+        }
+    }
+
     internal readonly struct VTPageResidencyState
     {
         internal VTPageResidencyState(
@@ -70,6 +195,9 @@ namespace VividRP.Runtime
 
     internal sealed class VTResidencyManager : IDisposable, IVTPhysicalPoolOwner
     {
+        private const int k_InlineClassificationThreshold = 64;
+        private const int k_ClassificationBatchSize = 64;
+
         private static readonly Vector2Int[] s_NeighborOffsets =
         {
             new(-1, 0),
@@ -94,14 +222,20 @@ namespace VividRP.Runtime
         private readonly VirtualTextureSpaceDesc m_Desc;
         private readonly int[] m_MipOffsets;
         private readonly VTPageRuntimeState[] m_PageStates;
+        private NativeArray<byte> m_PageStateFlags;
+        private NativeArray<int> m_NativeMipOffsets;
         private readonly int[] m_PageMips;
         private readonly VTPhysicalPool m_PhysicalPool;
         private readonly List<VTRequest> m_PendingRequests = new();
         private readonly int[] m_PendingRequestIndices;
         private readonly List<int> m_DirtyPageTableUpdates = new();
 
+        private NativeArray<VTResidencyClassificationInput> m_ClassificationInputs;
+        private NativeArray<VTResidencyClassificationResult> m_ClassificationResults;
+
         private int m_ResidentPageCount;
         private bool m_PageTableDirty;
+        private bool m_LastClassificationUsedParallelJob;
 
         internal VTResidencyManager(
             int spaceId,
@@ -120,6 +254,13 @@ namespace VividRP.Runtime
             m_MipOffsets = mipOffsets;
             m_PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));
             m_PageStates = new VTPageRuntimeState[totalPageCount];
+            m_PageStateFlags = new NativeArray<byte>(
+                totalPageCount,
+                Allocator.Persistent,
+                NativeArrayOptions.ClearMemory);
+            m_NativeMipOffsets = new NativeArray<int>(
+                mipOffsets,
+                Allocator.Persistent);
             m_PendingRequestIndices = new int[totalPageCount];
             for (int pageIndex = 0; pageIndex < m_PageStates.Length; pageIndex++)
             {
@@ -145,6 +286,12 @@ namespace VividRP.Runtime
         internal IReadOnlyList<VTRequest> PendingRequests => m_PendingRequests;
 
         internal IReadOnlyList<int> DirtyPageTableUpdates => m_DirtyPageTableUpdates;
+
+        internal int ClassificationCapacity => m_ClassificationInputs.IsCreated
+            ? m_ClassificationInputs.Length
+            : 0;
+
+        internal bool LastClassificationUsedParallelJob => m_LastClassificationUsedParallelJob;
 
         internal bool TryAllocateResidentPage(
             in VirtualTextureSpaceDesc desc,
@@ -196,7 +343,7 @@ namespace VividRP.Runtime
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = locked;
-                m_PageStates[pageIndex] = pageState;
+                SetPageState(pageIndex, pageState);
                 m_ResidentPageCount += 1;
                 MarkPageTableDirty(pageIndex);
                 request = new VTRequest(
@@ -235,7 +382,7 @@ namespace VividRP.Runtime
             pageState.PendingUpload = false;
             pageState.Resident = true;
             pageState.Locked = locked;
-            m_PageStates[pageIndex] = pageState;
+            SetPageState(pageIndex, pageState);
             m_ResidentPageCount += 1;
             MarkPageTableDirty(pageIndex);
             request = new VTRequest(
@@ -297,7 +444,7 @@ namespace VividRP.Runtime
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = locked;
-                m_PageStates[pageIndex] = pageState;
+                SetPageState(pageIndex, pageState);
                 m_ResidentPageCount += 1;
                 MarkPageTableDirty(pageIndex);
                 return true;
@@ -329,7 +476,7 @@ namespace VividRP.Runtime
             pageState.PendingUpload = true;
             pageState.Resident = false;
             pageState.Locked = locked;
-            m_PageStates[pageIndex] = pageState;
+            SetPageState(pageIndex, pageState);
             AddPendingRequest(pageIndex, new VTRequest(
                 spaceId,
                 coord,
@@ -360,39 +507,43 @@ namespace VividRP.Runtime
             int prefetchRequestCount = 0;
             bool pageTableChanged = false;
 
-            if (requests == null)
+            if (requests == null || requests.Count == 0)
+            {
+                m_LastClassificationUsedParallelJob = false;
                 return new VTResidencyProcessResult(evictionCount, pageTableChanged);
+            }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyDemandMarker.Auto())
             {
-                for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+                ClassifyRequests(requests);
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyApplyMarker.Auto())
                 {
-                    VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
-                    if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
-                        continue;
-
-                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyMipGapMarker.Auto())
+                    for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
                     {
-                        AccumulatePendingMipGap(
-                            desc,
-                            mipOffsets,
-                            request.PageCoord,
-                            ref pendingMipGapSum,
-                            ref pendingMipGapMax,
-                            ref pendingMipGapSampleCount);
-                    }
+                        VTResidencyClassificationResult classification = m_ClassificationResults[requestIndex];
+                        if (classification.Classification == VTResidencyRequestClassification.Invalid)
+                            continue;
 
-                    TryProcessRequest(
-                        desc,
-                        mipOffsets,
-                        spaceId,
-                        request,
-                        activeViewId,
-                        frameIndex,
-                        isPrefetch: false,
-                        ref allocatedThisFrame,
-                        ref evictionCount,
-                        ref pageTableChanged);
+                        if (classification.MipGap >= 0)
+                        {
+                            pendingMipGapSum += classification.MipGap;
+                            pendingMipGapMax = Mathf.Max(pendingMipGapMax, classification.MipGap);
+                            pendingMipGapSampleCount += 1;
+                        }
+
+                        TryProcessClassifiedRequest(
+                            desc,
+                            spaceId,
+                            requests[requestIndex],
+                            activeViewId,
+                            frameIndex,
+                            isPrefetch: false,
+                            classification.PageIndex,
+                            classification.Classification,
+                            ref allocatedThisFrame,
+                            ref evictionCount,
+                            ref pageTableChanged);
+                    }
                 }
             }
 
@@ -455,7 +606,7 @@ namespace VividRP.Runtime
 
             pageState.PendingUpload = false;
             pageState.Resident = true;
-            m_PageStates[pageIndex] = pageState;
+            SetPageState(pageIndex, pageState);
             m_ResidentPageCount += 1;
             RemovePendingRequest(pageIndex, request.Generation);
             m_PhysicalPool.Touch(
@@ -482,7 +633,7 @@ namespace VividRP.Runtime
                 return true;
 
             pageState.Locked = locked;
-            m_PageStates[pageIndex] = pageState;
+            SetPageState(pageIndex, pageState);
             if (pageState.PhysicalPageId >= 0)
             {
                 m_PhysicalPool.TrySetLocked(
@@ -554,7 +705,7 @@ namespace VividRP.Runtime
             pageState.PendingUpload = false;
             pageState.Locked = false;
             pageState.PhysicalPageId = -1;
-            m_PageStates[pageIndex] = pageState;
+            SetPageState(pageIndex, pageState);
             RemovePendingRequest(pageIndex, generation);
             MarkPageTableDirty(pageIndex);
             return true;
@@ -566,6 +717,15 @@ namespace VividRP.Runtime
             m_PendingRequests.Clear();
             m_DirtyPageTableUpdates.Clear();
             m_PageTableDirty = false;
+
+            if (m_ClassificationInputs.IsCreated)
+                m_ClassificationInputs.Dispose();
+            if (m_ClassificationResults.IsCreated)
+                m_ClassificationResults.Dispose();
+            if (m_PageStateFlags.IsCreated)
+                m_PageStateFlags.Dispose();
+            if (m_NativeMipOffsets.IsCreated)
+                m_NativeMipOffsets.Dispose();
         }
 
         private static VirtualTextureViewId ResolveEvictionViewId(
@@ -602,6 +762,71 @@ namespace VividRP.Runtime
             return viewId.IsValid || viewId.IsCameraTypeOnly;
         }
 
+        private void ClassifyRequests(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests)
+        {
+            int requestCount = requests.Count;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationMarker.Auto())
+            {
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationPrepareMarker.Auto())
+                {
+                    EnsureClassificationCapacity(requestCount);
+                    for (int requestIndex = 0; requestIndex < requestCount; requestIndex++)
+                    {
+                        m_ClassificationInputs[requestIndex] = new VTResidencyClassificationInput(
+                            requests[requestIndex].PageCoord);
+                    }
+                }
+
+                var job = new VTResidencyClassificationJob
+                {
+                    Inputs = m_ClassificationInputs,
+                    PageStateFlags = m_PageStateFlags,
+                    MipOffsets = m_NativeMipOffsets,
+                    Results = m_ClassificationResults,
+                    VirtualPageCountX = m_Desc.VirtualPageCountX,
+                    VirtualPageCountY = m_Desc.VirtualPageCountY,
+                    MipCount = m_Desc.MipCount,
+                };
+
+                m_LastClassificationUsedParallelJob = requestCount > k_InlineClassificationThreshold;
+                if (m_LastClassificationUsedParallelJob)
+                {
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationScheduleMarker.Auto())
+                    {
+                        job.Schedule(requestCount, k_ClassificationBatchSize).Complete();
+                    }
+                }
+                else
+                {
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationRunInlineMarker.Auto())
+                    {
+                        job.Run(requestCount);
+                    }
+                }
+            }
+        }
+
+        private void EnsureClassificationCapacity(int requiredCapacity)
+        {
+            if (requiredCapacity <= ClassificationCapacity)
+                return;
+
+            int newCapacity = Mathf.NextPowerOfTwo(Mathf.Max(1, requiredCapacity));
+            if (m_ClassificationInputs.IsCreated)
+                m_ClassificationInputs.Dispose();
+            if (m_ClassificationResults.IsCreated)
+                m_ClassificationResults.Dispose();
+
+            m_ClassificationInputs = new NativeArray<VTResidencyClassificationInput>(
+                newCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+            m_ClassificationResults = new NativeArray<VTResidencyClassificationResult>(
+                newCapacity,
+                Allocator.Persistent,
+                NativeArrayOptions.UninitializedMemory);
+        }
+
         private bool TryProcessRequest(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
@@ -614,18 +839,47 @@ namespace VividRP.Runtime
             ref int evictionCount,
             ref bool pageTableChanged)
         {
-            int pageIndex;
-            VTPageRuntimeState pageState;
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationMarker.Auto())
-            {
-                if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
-                    return false;
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                return false;
 
-                pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord);
-                pageState = m_PageStates[pageIndex];
-            }
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord);
+            VTResidencyRequestClassification classification = ClassifyPageState(m_PageStates[pageIndex]);
+            return TryProcessClassifiedRequest(
+                desc,
+                spaceId,
+                request,
+                activeViewId,
+                frameIndex,
+                isPrefetch,
+                pageIndex,
+                classification,
+                ref allocatedThisFrame,
+                ref evictionCount,
+                ref pageTableChanged);
+        }
 
-            if (pageState.Resident)
+        private bool TryProcessClassifiedRequest(
+            in VirtualTextureSpaceDesc desc,
+            int spaceId,
+            in VirtualTextureAggregatedFeedbackRequest request,
+            VirtualTextureViewId activeViewId,
+            int frameIndex,
+            bool isPrefetch,
+            int pageIndex,
+            VTResidencyRequestClassification classification,
+            ref int allocatedThisFrame,
+            ref int evictionCount,
+            ref bool pageTableChanged)
+        {
+            if (pageIndex < 0 || pageIndex >= m_PageStates.Length)
+                return false;
+
+            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+            VTResidencyRequestClassification currentClassification = ClassifyPageState(pageState);
+            if (classification != currentClassification)
+                classification = currentClassification;
+
+            if (classification == VTResidencyRequestClassification.Resident)
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyResidentTouchMarker.Auto())
                 {
@@ -639,7 +893,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (pageState.PendingUpload)
+            if (classification == VTResidencyRequestClassification.Pending)
             {
                 if (!isPrefetch)
                 {
@@ -689,7 +943,7 @@ namespace VividRP.Runtime
                 pageState.PendingUpload = false;
                 pageState.Resident = true;
                 pageState.Locked = false;
-                m_PageStates[pageIndex] = pageState;
+                SetPageState(pageIndex, pageState);
                 m_ResidentPageCount += 1;
                 MarkPageTableDirty(pageIndex);
                 pageTableChanged = true;
@@ -740,7 +994,7 @@ namespace VividRP.Runtime
             pageState.LastAllocationFrame = frameIndex;
             pageState.PendingUpload = true;
             pageState.Resident = false;
-            m_PageStates[pageIndex] = pageState;
+            SetPageState(pageIndex, pageState);
             MarkPageTableDirty(pageIndex);
             AddPendingRequest(pageIndex, new VTRequest(
                 spaceId,
@@ -884,51 +1138,6 @@ namespace VividRP.Runtime
             }
         }
 
-        private void AccumulatePendingMipGap(
-            in VirtualTextureSpaceDesc desc,
-            int[] mipOffsets,
-            in VirtualTexturePageCoord coord,
-            ref int pendingMipGapSum,
-            ref int pendingMipGapMax,
-            ref int pendingMipGapSampleCount)
-        {
-            if (!TryResolveResidentMip(desc, mipOffsets, coord, out int resolvedMip))
-                return;
-
-            int mipGap = Mathf.Max(0, resolvedMip - coord.Mip);
-            pendingMipGapSum += mipGap;
-            pendingMipGapMax = Mathf.Max(pendingMipGapMax, mipGap);
-            pendingMipGapSampleCount += 1;
-        }
-
-        private bool TryResolveResidentMip(
-            in VirtualTextureSpaceDesc desc,
-            int[] mipOffsets,
-            in VirtualTexturePageCoord coord,
-            out int resolvedMip)
-        {
-            resolvedMip = 0;
-            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, coord))
-                return false;
-
-            for (int mip = coord.Mip; mip < desc.MipCount; mip++)
-            {
-                int mipDelta = mip - coord.Mip;
-                var ancestorCoord = new VirtualTexturePageCoord(coord.X >> mipDelta, coord.Y >> mipDelta, mip);
-                if (!VirtualTextureSpaceUtility.IsCoordValid(desc, ancestorCoord))
-                    continue;
-
-                int ancestorIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, ancestorCoord);
-                if (!m_PageStates[ancestorIndex].Resident)
-                    continue;
-
-                resolvedMip = mip;
-                return true;
-            }
-
-            return false;
-        }
-
         private void UpdatePendingRequestPriority(
             int pageIndex,
             int priority,
@@ -992,6 +1201,27 @@ namespace VividRP.Runtime
                 return cameraPriority < request.CameraPriority;
 
             return priority > request.Priority;
+        }
+
+        private static VTResidencyRequestClassification ClassifyPageState(in VTPageRuntimeState pageState)
+        {
+            if (pageState.Resident)
+                return VTResidencyRequestClassification.Resident;
+            if (pageState.PendingUpload)
+                return VTResidencyRequestClassification.Pending;
+
+            return VTResidencyRequestClassification.Missing;
+        }
+
+        private void SetPageState(int pageIndex, in VTPageRuntimeState pageState)
+        {
+            m_PageStates[pageIndex] = pageState;
+            byte flags = 0;
+            if (pageState.Resident)
+                flags |= VTResidencyClassificationJob.ResidentFlag;
+            if (pageState.PendingUpload)
+                flags |= VTResidencyClassificationJob.PendingFlag;
+            m_PageStateFlags[pageIndex] = flags;
         }
 
         private void MarkPageTableDirty(int pageIndex)

@@ -881,6 +881,7 @@ namespace VividRP.Editor.Tests
             string nativeAggregatorSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTFeedbackNativeAggregator.cs"));
             string debugStatsSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTDebugStats.cs"));
             string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
+            string residencySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTResidencyManager.cs"));
             string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
 
             Assert.That(systemSource, Does.Contain("private static VTFeedbackNativeAggregator s_FeedbackAggregator;"));
@@ -921,7 +922,14 @@ namespace VividRP.Editor.Tests
             Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.Add"));
             Assert.That(systemSource, Does.Contain("s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);"));
             Assert.That(addressSpaceSource, Does.Contain("CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)"));
+            Assert.That(addressSpaceSource, Does.Contain("m_CachedPendingRequestRevision"));
+            Assert.That(addressSpaceSource, Does.Contain("PendingUploadSortEntry"));
+            Assert.That(addressSpaceSource, Does.Contain("FilterInFlightRequests("));
+            Assert.That(addressSpaceSource, Does.Not.Contain("IsRequestInFlight(request)"));
             Assert.That(addressSpaceSource, Does.Not.Contain("request => TryCommitRequestInternal"));
+            Assert.That(residencySource, Does.Contain("IncrementPendingRequestRevision();"));
+            Assert.That(uploadSchedulerSource, Does.Contain("internal int FilterInFlightRequests("));
+            Assert.That(uploadSchedulerSource, Does.Not.Contain("CountInFlightDuplicates"));
             Assert.That(uploadSchedulerSource, Does.Contain("CommitCompletedUploads(IVTUploadRequestCommitterResolver committerResolver)"));
             Assert.That(uploadSchedulerSource, Does.Not.Contain("Func<VTRequest"));
         }

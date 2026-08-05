@@ -896,16 +896,48 @@ namespace VividRP.Runtime
             m_LastSkippedUploadCount += Mathf.Max(0, skippedUploadCount);
         }
 
-        internal void CountInFlightDuplicates(IReadOnlyList<VTRequest> pendingRequests)
+        internal int FilterInFlightRequests(
+            IReadOnlyList<VTRequest> pendingRequests,
+            List<VTRequest> output)
+        {
+            if (output == null)
+                throw new ArgumentNullException(nameof(output));
+
+            output.Clear();
+            if (pendingRequests == null)
+                return 0;
+
+            int duplicateCount = 0;
+            for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
+            {
+                VTRequest request = pendingRequests[requestIndex];
+                if (IsRequestInFlight(request))
+                {
+                    duplicateCount += 1;
+                    continue;
+                }
+
+                output.Add(request);
+            }
+
+            m_LastDuplicateUploadCount += duplicateCount;
+            return duplicateCount;
+        }
+
+        internal int CountInFlightRequests(IReadOnlyList<VTRequest> pendingRequests)
         {
             if (pendingRequests == null)
-                return;
+                return 0;
 
+            int duplicateCount = 0;
             for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
             {
                 if (IsRequestInFlight(pendingRequests[requestIndex]))
-                    m_LastDuplicateUploadCount += 1;
+                    duplicateCount += 1;
             }
+
+            m_LastDuplicateUploadCount += duplicateCount;
+            return duplicateCount;
         }
 
         internal bool HasInFlightUploadForSpace(int spaceId)

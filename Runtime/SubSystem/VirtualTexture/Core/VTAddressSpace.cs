@@ -16,8 +16,13 @@ namespace VividRP.Runtime
         private readonly IVTPageProducer m_PageProducer;
         private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
+        private readonly List<PendingUploadSortEntry> m_PendingUploadSortEntries = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
-        private readonly PendingUploadRequestComparer m_PendingUploadRequestComparer;
+        private readonly List<VTRequest> m_EligiblePendingRequests = new();
+        private uint m_CachedPendingRequestRevision;
+        private int m_PendingOrderCacheBuildCount;
+        private int m_PendingOrderCacheHitCount;
+        private bool m_HasPendingOrderCache;
         private Texture2DArray m_ResidentPageStagingTexture;
         private Color32[] m_ResidentPageScratchPixels;
         private IVTPageProducer m_FallbackResidentPageProducer;
@@ -46,10 +51,6 @@ namespace VividRP.Runtime
                 TotalPageCount,
                 m_MipOffsets,
                 PhysicalPool);
-            m_PendingUploadRequestComparer = new PendingUploadRequestComparer(
-                m_ResidencyManager,
-                desc,
-                m_MipOffsets);
             m_PageTableUpdater = new VTPageTableUpdater(desc.SpaceName, TotalPageCount);
             m_PageProducer = producer.PageProducer;
             BootstrapLowestMip();
@@ -77,6 +78,12 @@ namespace VividRP.Runtime
         internal int FreePageCount => m_ResidencyManager.FreePageCount;
 
         internal int PendingRequestCount => m_ResidencyManager.PendingRequestCount;
+
+        internal uint PendingRequestRevision => m_ResidencyManager.PendingRequestRevision;
+
+        internal int PendingOrderCacheBuildCount => m_PendingOrderCacheBuildCount;
+
+        internal int PendingOrderCacheHitCount => m_PendingOrderCacheHitCount;
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
@@ -437,31 +444,31 @@ namespace VividRP.Runtime
             int capacity;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
             {
-                uploadScheduler.CountInFlightDuplicates(pendingRequests);
                 capacity = uploadScheduler.GetAvailableBatchCapacity(Descriptor.SpaceName, Descriptor);
             }
 
             if (capacity <= 0)
             {
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
+                    uploadScheduler.CountInFlightRequests(pendingRequests);
                 uploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
                 return;
             }
 
-            int skippedUploadCount = 0;
             IReadOnlyList<VTRequest> orderedRequests;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingOrderMarker.Auto())
                 orderedRequests = GetOrderedPendingRequests(pendingRequests);
-            for (int requestIndex = 0; requestIndex < orderedRequests.Count; requestIndex++)
+            int skippedUploadCount;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
             {
-                VTRequest request = orderedRequests[requestIndex];
-                bool isRequestInFlight;
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
-                    isRequestInFlight = uploadScheduler.IsRequestInFlight(request);
-                if (isRequestInFlight)
-                {
-                    skippedUploadCount += 1;
-                    continue;
-                }
+                skippedUploadCount = uploadScheduler.FilterInFlightRequests(
+                    orderedRequests,
+                    m_EligiblePendingRequests);
+            }
+
+            for (int requestIndex = 0; requestIndex < m_EligiblePendingRequests.Count; requestIndex++)
+            {
+                VTRequest request = m_EligiblePendingRequests[requestIndex];
 
                 if (m_UploadPayloads.Count >= capacity)
                 {
@@ -545,39 +552,90 @@ namespace VividRP.Runtime
 
         private IReadOnlyList<VTRequest> GetOrderedPendingRequests(IReadOnlyList<VTRequest> pendingRequests)
         {
-            if (pendingRequests == null || pendingRequests.Count <= 1)
-                return pendingRequests ?? Array.Empty<VTRequest>();
+            if (pendingRequests == null || pendingRequests.Count == 0)
+                return Array.Empty<VTRequest>();
+            if (pendingRequests.Count == 1)
+                return pendingRequests;
 
+            uint pendingRequestRevision = m_ResidencyManager.PendingRequestRevision;
+            if (m_HasPendingOrderCache
+                && m_CachedPendingRequestRevision == pendingRequestRevision
+                && m_SortedPendingRequests.Count == pendingRequests.Count)
+            {
+                m_PendingOrderCacheHitCount += 1;
+                return m_SortedPendingRequests;
+            }
+
+            m_PendingUploadSortEntries.Clear();
             m_SortedPendingRequests.Clear();
             for (int requestIndex = 0; requestIndex < pendingRequests.Count; requestIndex++)
-                m_SortedPendingRequests.Add(pendingRequests[requestIndex]);
+            {
+                VTRequest request = pendingRequests[requestIndex];
+                bool locked = m_ResidencyManager.IsPageLocked(
+                    Descriptor,
+                    m_MipOffsets,
+                    request.PageCoord);
+                m_PendingUploadSortEntries.Add(new PendingUploadSortEntry(request, locked));
+            }
 
-            m_SortedPendingRequests.Sort(m_PendingUploadRequestComparer);
+            if (m_PendingUploadSortEntries.Count > 1)
+                m_PendingUploadSortEntries.Sort(PendingUploadRequestComparer.Instance);
+
+            for (int entryIndex = 0; entryIndex < m_PendingUploadSortEntries.Count; entryIndex++)
+                m_SortedPendingRequests.Add(m_PendingUploadSortEntries[entryIndex].Request);
+
+            m_CachedPendingRequestRevision = pendingRequestRevision;
+            m_HasPendingOrderCache = true;
+            m_PendingOrderCacheBuildCount += 1;
             return m_SortedPendingRequests;
         }
 
-        private sealed class PendingUploadRequestComparer : IComparer<VTRequest>
+        private readonly struct PendingUploadSortEntry
         {
-            private readonly VTResidencyManager m_ResidencyManager;
-            private readonly VirtualTextureSpaceDesc m_Desc;
-            private readonly int[] m_MipOffsets;
-
-            internal PendingUploadRequestComparer(
-                VTResidencyManager residencyManager,
-                in VirtualTextureSpaceDesc desc,
-                int[] mipOffsets)
+            internal PendingUploadSortEntry(in VTRequest request, bool locked)
             {
-                m_ResidencyManager = residencyManager;
-                m_Desc = desc;
-                m_MipOffsets = mipOffsets;
+                Request = request;
+                Locked = locked;
+                IsActiveView = request.IsActiveView;
+                CameraPriority = request.CameraPriority;
+                Priority = request.Priority;
+                RequestFrame = request.RequestFrame;
+                Mip = request.PageCoord.Mip;
+                Y = request.PageCoord.Y;
+                X = request.PageCoord.X;
             }
 
-            public int Compare(VTRequest left, VTRequest right)
+            internal VTRequest Request { get; }
+
+            internal bool Locked { get; }
+
+            internal bool IsActiveView { get; }
+
+            internal int CameraPriority { get; }
+
+            internal int Priority { get; }
+
+            internal int RequestFrame { get; }
+
+            internal int Mip { get; }
+
+            internal int Y { get; }
+
+            internal int X { get; }
+        }
+
+        private sealed class PendingUploadRequestComparer : IComparer<PendingUploadSortEntry>
+        {
+            internal static readonly PendingUploadRequestComparer Instance = new();
+
+            private PendingUploadRequestComparer()
             {
-                bool leftLocked = m_ResidencyManager.IsPageLocked(m_Desc, m_MipOffsets, left.PageCoord);
-                bool rightLocked = m_ResidencyManager.IsPageLocked(m_Desc, m_MipOffsets, right.PageCoord);
-                if (leftLocked != rightLocked)
-                    return leftLocked ? -1 : 1;
+            }
+
+            public int Compare(PendingUploadSortEntry left, PendingUploadSortEntry right)
+            {
+                if (left.Locked != right.Locked)
+                    return left.Locked ? -1 : 1;
 
                 if (left.IsActiveView != right.IsActiveView)
                     return left.IsActiveView ? -1 : 1;
@@ -594,15 +652,15 @@ namespace VividRP.Runtime
                 if (frameCompare != 0)
                     return frameCompare;
 
-                int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
+                int mipCompare = left.Mip.CompareTo(right.Mip);
                 if (mipCompare != 0)
                     return mipCompare;
 
-                int yCompare = left.PageCoord.Y.CompareTo(right.PageCoord.Y);
+                int yCompare = left.Y.CompareTo(right.Y);
                 if (yCompare != 0)
                     return yCompare;
 
-                return left.PageCoord.X.CompareTo(right.PageCoord.X);
+                return left.X.CompareTo(right.X);
             }
         }
 

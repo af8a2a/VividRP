@@ -49,9 +49,12 @@ namespace VividRP.Editor.Tests
 
             internal int CancelCount { get; private set; }
 
+            internal List<VirtualTexturePageCoord> RequestedCoords { get; } = new();
+
             public VTPageRequestStatus RequestPageData(in VirtualTextureSpaceDesc desc, in VTRequest request)
             {
                 RequestCount += 1;
+                RequestedCoords.Add(request.PageCoord);
                 return Status;
             }
 
@@ -77,6 +80,7 @@ namespace VividRP.Editor.Tests
                 ProduceCount = 0;
                 GatherTaskCount = 0;
                 CancelCount = 0;
+                RequestedCoords.Clear();
             }
         }
 
@@ -349,6 +353,37 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void UploadOrder_ReusesCachedSortUntilPendingRevisionChanges()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "PendingOrderCache",
+                maxUploadsPerFrame: 2);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var secondCoord = new VirtualTexturePageCoord(1, 0, 0);
+
+            IssueFeedback(spaceId, firstCoord, secondCoord);
+
+            uint initialRevision = VirtualTextureSystem.GetPendingRequestRevisionForTesting(spaceId);
+            int initialBuildCount = VirtualTextureSystem.GetPendingOrderCacheBuildCountForTesting(spaceId);
+            int initialHitCount = VirtualTextureSystem.GetPendingOrderCacheHitCountForTesting(spaceId);
+            Assert.That(initialRevision, Is.GreaterThan(0u));
+            Assert.That(initialBuildCount, Is.EqualTo(1));
+
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingRequestRevisionForTesting(spaceId), Is.EqualTo(initialRevision));
+            Assert.That(VirtualTextureSystem.GetPendingOrderCacheBuildCountForTesting(spaceId), Is.EqualTo(initialBuildCount));
+            Assert.That(VirtualTextureSystem.GetPendingOrderCacheHitCountForTesting(spaceId), Is.EqualTo(initialHitCount + 1));
+
+            IssueFeedback(spaceId, firstCoord, firstCoord);
+
+            Assert.That(VirtualTextureSystem.GetPendingRequestRevisionForTesting(spaceId), Is.GreaterThan(initialRevision));
+            Assert.That(VirtualTextureSystem.GetPendingOrderCacheBuildCountForTesting(spaceId), Is.EqualTo(initialBuildCount + 1));
+        }
+
+        [Test]
         public void Uploads_RespectFrameMemoryBudget_AndKeepPageTablePending()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("MemoryBudget");
@@ -538,31 +573,50 @@ namespace VividRP.Editor.Tests
         [Test]
         public void QueueResident_PromotesExistingFeedbackPendingRequestToLockedPriority()
         {
-            VirtualTextureSpaceDesc desc = CreateDesc("PromotePendingResident");
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "PromotePendingResident",
+                maxUploadsPerFrame: 2);
             var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
             int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
             var coord = new VirtualTexturePageCoord(0, 0, 0);
+            var otherCoord = new VirtualTexturePageCoord(1, 0, 0);
 
-            IssueFeedback(spaceId, coord);
+            IssueFeedback(spaceId, coord, otherCoord);
             Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
                 spaceId,
                 out IReadOnlyList<VirtualTextureUploadRequest> feedbackRequests), Is.True);
-            Assert.That(feedbackRequests, Has.Count.EqualTo(1));
-            Assert.That(feedbackRequests[0].Priority, Is.LessThan(int.MaxValue));
+            Assert.That(feedbackRequests, Has.Count.EqualTo(2));
+            Assert.That(
+                feedbackRequests.Single(request => request.PageCoord.Equals(coord)).Priority,
+                Is.LessThan(int.MaxValue));
+            uint feedbackRevision = VirtualTextureSystem.GetPendingRequestRevisionForTesting(spaceId);
+            int feedbackOrderBuildCount = VirtualTextureSystem.GetPendingOrderCacheBuildCountForTesting(spaceId);
 
             Assert.That(VirtualTextureSystem.TryQueuePageResident(spaceId, coord, true, frameIndex: 2), Is.True);
 
             Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
                 spaceId,
                 out IReadOnlyList<VirtualTextureUploadRequest> lockedRequests), Is.True);
-            Assert.That(lockedRequests, Has.Count.EqualTo(1));
-            Assert.That(lockedRequests[0].Priority, Is.EqualTo(int.MaxValue));
+            Assert.That(lockedRequests, Has.Count.EqualTo(2));
+            Assert.That(
+                lockedRequests.Single(request => request.PageCoord.Equals(coord)).Priority,
+                Is.EqualTo(int.MaxValue));
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
                 coord,
                 out VirtualTexturePageTableEntry pendingEntry), Is.True);
             Assert.That(pendingEntry.PendingUpload, Is.True);
             Assert.That(pendingEntry.Locked, Is.True);
+            Assert.That(VirtualTextureSystem.GetPendingRequestRevisionForTesting(spaceId), Is.GreaterThan(feedbackRevision));
+
+            producer.ResetCounters();
+            UpdateOnce();
+
+            Assert.That(
+                VirtualTextureSystem.GetPendingOrderCacheBuildCountForTesting(spaceId),
+                Is.EqualTo(feedbackOrderBuildCount + 1));
+            Assert.That(producer.RequestedCoords, Is.Not.Empty);
+            Assert.That(producer.RequestedCoords[0], Is.EqualTo(coord));
         }
 
         [Test]

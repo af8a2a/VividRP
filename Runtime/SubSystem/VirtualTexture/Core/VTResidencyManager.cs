@@ -234,6 +234,7 @@ namespace VividRP.Runtime
         private NativeArray<VTResidencyClassificationResult> m_ClassificationResults;
 
         private int m_ResidentPageCount;
+        private uint m_PendingRequestRevision;
         private bool m_PageTableDirty;
         private bool m_LastClassificationUsedParallelJob;
 
@@ -278,6 +279,8 @@ namespace VividRP.Runtime
         internal int FreePageCount => m_PhysicalPool.FreePageCount;
 
         internal int PendingRequestCount => m_PendingRequests.Count;
+
+        internal uint PendingRequestRevision => m_PendingRequestRevision;
 
         internal VTPhysicalPool PhysicalPool => m_PhysicalPool;
 
@@ -634,6 +637,8 @@ namespace VividRP.Runtime
 
             pageState.Locked = locked;
             SetPageState(pageIndex, pageState);
+            if (pageState.PendingUpload)
+                IncrementPendingRequestRevision();
             if (pageState.PhysicalPageId >= 0)
             {
                 m_PhysicalPool.TrySetLocked(
@@ -1163,6 +1168,7 @@ namespace VividRP.Runtime
                 Mathf.Min(request.RequestFrame, frameIndex),
                 cameraPriority,
                 isActiveView);
+            IncrementPendingRequestRevision();
         }
 
         private void PromotePendingRequestToLocked(
@@ -1177,7 +1183,7 @@ namespace VividRP.Runtime
                 VirtualTextureViewId.Invalid,
                 frameIndex,
                 updateAffinity: false);
-            m_PendingRequests[requestIndex] = new VTRequest(
+            var promotedRequest = new VTRequest(
                 request.SpaceId,
                 request.PageCoord,
                 request.PhysicalPageId,
@@ -1186,6 +1192,11 @@ namespace VividRP.Runtime
                 Mathf.Min(request.RequestFrame, frameIndex),
                 int.MinValue,
                 request.IsActiveView);
+            if (promotedRequest.Equals(request))
+                return;
+
+            m_PendingRequests[requestIndex] = promotedRequest;
+            IncrementPendingRequestRevision();
         }
 
         private static bool IsPendingRequestPriorityImproved(
@@ -1238,6 +1249,7 @@ namespace VividRP.Runtime
             int requestIndex = m_PendingRequests.Count;
             m_PendingRequests.Add(request);
             m_PendingRequestIndices[pageIndex] = requestIndex;
+            IncrementPendingRequestRevision();
         }
 
         private bool TryGetPendingRequest(int pageIndex, out int requestIndex, out VTRequest request)
@@ -1277,6 +1289,15 @@ namespace VividRP.Runtime
 
             m_PendingRequests.RemoveAt(lastRequestIndex);
             m_PendingRequestIndices[pageIndex] = -1;
+            IncrementPendingRequestRevision();
+        }
+
+        private void IncrementPendingRequestRevision()
+        {
+            unchecked
+            {
+                m_PendingRequestRevision += 1u;
+            }
         }
 
         private static int[] BuildPageMipTable(

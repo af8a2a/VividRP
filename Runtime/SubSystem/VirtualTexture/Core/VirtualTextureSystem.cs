@@ -769,6 +769,27 @@ namespace VividRP.Runtime
                 : 0;
         }
 
+        internal static uint GetPendingRequestRevisionForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PendingRequestRevision
+                : 0u;
+        }
+
+        internal static int GetPendingOrderCacheBuildCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PendingOrderCacheBuildCount
+                : 0;
+        }
+
+        internal static int GetPendingOrderCacheHitCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PendingOrderCacheHitCount
+                : 0;
+        }
+
         internal static int GetResidencyClassificationCapacityForTesting(int spaceId)
         {
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)

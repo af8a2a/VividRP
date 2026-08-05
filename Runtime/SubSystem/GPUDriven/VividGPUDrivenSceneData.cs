@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UnityEngine;
 
 namespace VividRP.Runtime.GPUDriven
 {
@@ -13,6 +14,8 @@ namespace VividRP.Runtime.GPUDriven
         private readonly List<VividMeshlet> m_Meshlets = new();
         private readonly List<VividMeshletVertex> m_Vertices = new();
         private readonly List<byte> m_Indices = new();
+        private int m_MaxMeshletListBuildJobCount;
+        private int m_MaxVisibleMeshletRenderRequestCount;
 
         public IReadOnlyList<VividInstanceData> Instances => m_Instances;
 
@@ -50,6 +53,10 @@ namespace VividRP.Runtime.GPUDriven
 
         public int IndexCount => m_Indices.Count;
 
+        internal int MaxMeshletListBuildJobCount => Mathf.Max(1, m_MaxMeshletListBuildJobCount);
+
+        internal int MaxVisibleMeshletRenderRequestCount => Mathf.Max(1, m_MaxVisibleMeshletRenderRequestCount);
+
         internal List<VividInstanceData> MutableInstances => m_Instances;
 
         internal List<VividMaterialData> MutableMaterials => m_Materials;
@@ -68,9 +75,30 @@ namespace VividRP.Runtime.GPUDriven
 
         internal List<byte> MutableIndices => m_Indices;
 
+        internal void AddInstance(
+            in VividInstanceData instanceData,
+            int maxVisibleMeshletRenderRequestCount)
+        {
+            m_Instances.Add(instanceData);
+
+            uint maxNodesPerJob = global::VividRP.Runtime.GPUDriven.Meshlets.VividMeshletListBuildJob.MaxLODNodesPerThreadGroup;
+            if (maxNodesPerJob == 0)
+                maxNodesPerJob = 1;
+
+            ulong jobCount = ((ulong) instanceData.TotalMeshLODCount + maxNodesPerJob - 1u) / maxNodesPerJob;
+            m_MaxMeshletListBuildJobCount = SaturatingAdd(
+                m_MaxMeshletListBuildJobCount,
+                jobCount > int.MaxValue ? int.MaxValue : (int) jobCount);
+            m_MaxVisibleMeshletRenderRequestCount = SaturatingAdd(
+                m_MaxVisibleMeshletRenderRequestCount,
+                Mathf.Max(0, maxVisibleMeshletRenderRequestCount));
+        }
+
         internal void ClearInstances()
         {
             m_Instances.Clear();
+            m_MaxMeshletListBuildJobCount = 0;
+            m_MaxVisibleMeshletRenderRequestCount = 0;
         }
 
         internal void ClearMaterials()
@@ -104,6 +132,16 @@ namespace VividRP.Runtime.GPUDriven
             m_Meshlets.Clear();
             m_Vertices.Clear();
             m_Indices.Clear();
+        }
+
+        private static int SaturatingAdd(int current, int increment)
+        {
+            if (increment <= 0)
+                return current;
+
+            return current > int.MaxValue - increment
+                ? int.MaxValue
+                : current + increment;
         }
     }
 }

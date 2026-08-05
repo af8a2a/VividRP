@@ -110,8 +110,15 @@ namespace VividRP.Runtime.GPUDriven
                 throw new ArgumentNullException(nameof(sceneBuffers));
             }
 
-            BufferSet.EnsureCapacity(sceneData);
-            BufferSet.Reset(cmd);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchEnsureCapacityMarker.Auto())
+            {
+                BufferSet.EnsureCapacity(sceneData);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchResetBuffersMarker.Auto())
+            {
+                BufferSet.Reset(cmd);
+            }
 
             if (sceneData.InstanceCount == 0 ||
                 sceneBuffers.InstanceDataBuffer == null ||
@@ -126,19 +133,40 @@ namespace VividRP.Runtime.GPUDriven
                 return;
             }
 
-            EnsureKernels(
-                gpuInstanceCullingCompute,
-                meshletListBuildCompute,
-                gpuMeshletCullingCompute,
-                fixupVisibleMeshletIndirectDrawArgsCompute
-            );
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchEnsureKernelsMarker.Auto())
+            {
+                EnsureKernels(
+                    gpuInstanceCullingCompute,
+                    meshletListBuildCompute,
+                    gpuMeshletCullingCompute,
+                    fixupVisibleMeshletIndirectDrawArgsCompute
+                );
+            }
 
-            BufferSet.UploadContexts(cmd, cullingContext, lodSelectionContext);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchUploadContextsMarker.Auto())
+            {
+                BufferSet.UploadContexts(cmd, cullingContext, lodSelectionContext);
+            }
 
-            DispatchGPUInstanceCulling(cmd, sceneData.InstanceCount, sceneBuffers);
-            DispatchMeshletListBuild(cmd, sceneBuffers, forcedMeshLODNodeDepth, meshLODErrorThreshold);
-            DispatchFixupVisibleMeshletIndirectDrawArgs(cmd);
-            DispatchGPUMeshletCulling(cmd, sceneBuffers, occlusionParameters);
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchInstanceCullingMarker.Auto())
+            {
+                DispatchGPUInstanceCulling(cmd, sceneData.InstanceCount, sceneBuffers);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletListBuildMarker.Auto())
+            {
+                DispatchMeshletListBuild(cmd, sceneBuffers, forcedMeshLODNodeDepth, meshLODErrorThreshold);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchFixupDrawArgsMarker.Auto())
+            {
+                DispatchFixupVisibleMeshletIndirectDrawArgs(cmd);
+            }
+
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenCullDispatchMeshletCullingMarker.Auto())
+            {
+                DispatchGPUMeshletCulling(cmd, sceneBuffers, occlusionParameters);
+            }
         }
 
         public void BindGlobals(CommandBuffer cmd)

@@ -16,11 +16,13 @@ namespace VividRP.Editor.Tests
             {
                 MeshletCount = 4,
             });
-            sceneData.MutableInstances.Add(new VividInstanceData
-            {
-                TopMeshLODStartIndex = 0,
-                TotalMeshLODCount = 1,
-            });
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    TopMeshLODStartIndex = 0,
+                    TotalMeshLODCount = 1,
+                },
+                maxVisibleMeshletRenderRequestCount: 4);
 
             using var bufferSet = new VividGPUDrivenCullingBuffers();
             bufferSet.EnsureCapacity(sceneData);

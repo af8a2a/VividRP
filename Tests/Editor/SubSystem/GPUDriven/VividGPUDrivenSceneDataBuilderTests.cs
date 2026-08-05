@@ -72,6 +72,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.MeshletCount, Is.EqualTo(1));
                 Assert.That(sceneData.VertexCount, Is.EqualTo(3));
                 Assert.That(sceneData.IndexCount, Is.EqualTo(3));
+                Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(2));
+                Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(2));
                 Assert.That(sceneData.Instances[0].MaterialIndex, Is.EqualTo(sceneData.Instances[1].MaterialIndex));
                 Assert.That(sceneData.Instances[0].TopMeshLODStartIndex, Is.EqualTo(sceneData.Instances[1].TopMeshLODStartIndex));
             }
@@ -236,6 +238,8 @@ namespace VividRP.Editor.Tests
                 );
                 Assert.That(firstMaterialDataChanged, Is.True);
                 Assert.That(firstInstanceDataChanged, Is.True);
+                Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(1));
 
                 bool staticDataChanged = builder.Build(
                     sceneData,
@@ -248,6 +252,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(staticDataChanged, Is.False);
                 Assert.That(materialDataChanged, Is.False);
                 Assert.That(instanceDataChanged, Is.False);
+                Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(1));
+                Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(1));
             }
             finally
             {
@@ -580,6 +586,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(sceneData.Instances[0].TotalMeshLODCount, Is.EqualTo(1u));
                 Assert.That(sceneData.Instances[1].TopMeshLODStartIndex, Is.EqualTo(1u));
                 Assert.That(sceneData.Instances[1].TotalMeshLODCount, Is.EqualTo(2u));
+                Assert.That(sceneData.MaxMeshletListBuildJobCount, Is.EqualTo(2));
+                Assert.That(sceneData.MaxVisibleMeshletRenderRequestCount, Is.EqualTo(3));
                 Assert.That(sceneData.MeshLODNodes[1].MeshletStartIndex, Is.EqualTo(1u));
                 Assert.That(sceneData.MeshLODNodes[2].MeshletStartIndex, Is.EqualTo(2u));
                 Assert.That(sceneData.Meshlets[1].VertexOffset, Is.EqualTo(3u));

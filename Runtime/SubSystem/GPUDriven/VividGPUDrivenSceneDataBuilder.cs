@@ -547,12 +547,13 @@ namespace VividRP.Runtime.GPUDriven
                     ? trackedResources.LocalBounds[subMeshIndex]
                     : trackedData.localBounds;
 
-                sceneData.MutableInstances.Add(CreateInstanceData(
-                    trackedData,
-                    materialIndex,
-                    meshMetadata,
-                    localBounds
-                ));
+                sceneData.AddInstance(
+                    CreateInstanceData(
+                        trackedData,
+                        materialIndex,
+                        meshMetadata,
+                        localBounds),
+                    meshMetadata.MaxVisibleMeshletRenderRequestCount);
             }
         }
 
@@ -631,11 +632,15 @@ namespace VividRP.Runtime.GPUDriven
             }
 
             VividMeshLODNode[] sourceMeshLODNodes = meshletCollection.MeshLODNodes ?? Array.Empty<VividMeshLODNode>();
+            int maxVisibleMeshletRenderRequestCount = 0;
             for (int nodeIndex = 0; nodeIndex < sourceMeshLODNodes.Length; nodeIndex++)
             {
                 VividMeshLODNode node = sourceMeshLODNodes[nodeIndex];
                 node.MeshletStartIndex += meshletBaseOffset;
                 sceneData.MutableMeshLODNodes.Add(node);
+                maxVisibleMeshletRenderRequestCount = (int) Math.Min(
+                    int.MaxValue,
+                    (ulong) maxVisibleMeshletRenderRequestCount + node.MeshletCount);
             }
 
             sceneData.MutableVertices.AddRange(meshletCollection.VertexBuffer ?? Array.Empty<VividMeshletVertex>());
@@ -645,7 +650,8 @@ namespace VividRP.Runtime.GPUDriven
                 meshLODStartIndex,
                 (uint) sourceMeshLODNodes.Length,
                 (uint) Mathf.Max(1, meshletCollection.MeshLODLevelCount),
-                meshletCollection.ContentVersion
+                meshletCollection.ContentVersion,
+                maxVisibleMeshletRenderRequestCount
             );
 
             m_MeshMetadataByObjectId[objectId] = metadata;
@@ -1329,12 +1335,18 @@ namespace VividRP.Runtime.GPUDriven
 
         private readonly struct MeshletAssetMetadata
         {
-            public MeshletAssetMetadata(uint topMeshLODStartIndex, uint totalMeshLODCount, uint meshLODLevelCount, uint assetVersion)
+            public MeshletAssetMetadata(
+                uint topMeshLODStartIndex,
+                uint totalMeshLODCount,
+                uint meshLODLevelCount,
+                uint assetVersion,
+                int maxVisibleMeshletRenderRequestCount)
             {
                 TopMeshLODStartIndex = topMeshLODStartIndex;
                 TotalMeshLODCount = totalMeshLODCount;
                 MeshLODLevelCount = meshLODLevelCount;
                 AssetVersion = assetVersion;
+                MaxVisibleMeshletRenderRequestCount = maxVisibleMeshletRenderRequestCount;
             }
 
             public uint TopMeshLODStartIndex { get; }
@@ -1344,6 +1356,8 @@ namespace VividRP.Runtime.GPUDriven
             public uint MeshLODLevelCount { get; }
 
             public uint AssetVersion { get; }
+
+            public int MaxVisibleMeshletRenderRequestCount { get; }
         }
 
         private readonly struct MaterialMetadata

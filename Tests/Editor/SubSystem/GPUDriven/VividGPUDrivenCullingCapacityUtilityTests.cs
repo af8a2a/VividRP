@@ -12,14 +12,18 @@ namespace VividRP.Editor.Tests
             var sceneData = new VividGPUDrivenSceneData();
             uint maxNodesPerJob = VividMeshletListBuildJob.MaxLODNodesPerThreadGroup;
 
-            sceneData.MutableInstances.Add(new VividInstanceData
-            {
-                TotalMeshLODCount = 1,
-            });
-            sceneData.MutableInstances.Add(new VividInstanceData
-            {
-                TotalMeshLODCount = maxNodesPerJob + 1,
-            });
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    TotalMeshLODCount = 1,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    TotalMeshLODCount = maxNodesPerJob + 1,
+                },
+                maxVisibleMeshletRenderRequestCount: 1);
 
             int jobCount = VividGPUDrivenCullingCapacityUtility.GetMaxMeshletListBuildJobCount(sceneData);
 
@@ -27,36 +31,36 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void GetMaxVisibleMeshletRenderRequestCount_SumsReferencedNodeMeshletCounts_WhenInstancesReferenceNodeRanges()
+        public void GetMaxVisibleMeshletRenderRequestCount_ReturnsSceneDataCachedAggregate()
         {
             var sceneData = new VividGPUDrivenSceneData();
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
-            {
-                MeshletCount = 2,
-            });
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
-            {
-                MeshletCount = 3,
-            });
-            sceneData.MutableMeshLODNodes.Add(new VividMeshLODNode
-            {
-                MeshletCount = 5,
-            });
-
-            sceneData.MutableInstances.Add(new VividInstanceData
-            {
-                TopMeshLODStartIndex = 0,
-                TotalMeshLODCount = 2,
-            });
-            sceneData.MutableInstances.Add(new VividInstanceData
-            {
-                TopMeshLODStartIndex = 1,
-                TotalMeshLODCount = 2,
-            });
+            sceneData.AddInstance(default, maxVisibleMeshletRenderRequestCount: 5);
+            sceneData.AddInstance(default, maxVisibleMeshletRenderRequestCount: 8);
 
             int requestCount = VividGPUDrivenCullingCapacityUtility.GetMaxVisibleMeshletRenderRequestCount(sceneData);
 
             Assert.That(requestCount, Is.EqualTo(13));
+        }
+
+        [Test]
+        public void ClearInstances_ResetsCachedCullingCapacities()
+        {
+            var sceneData = new VividGPUDrivenSceneData();
+            sceneData.AddInstance(
+                new VividInstanceData
+                {
+                    TotalMeshLODCount = VividMeshletListBuildJob.MaxLODNodesPerThreadGroup + 1,
+                },
+                maxVisibleMeshletRenderRequestCount: 12);
+
+            sceneData.ClearInstances();
+
+            Assert.That(
+                VividGPUDrivenCullingCapacityUtility.GetMaxMeshletListBuildJobCount(sceneData),
+                Is.EqualTo(1));
+            Assert.That(
+                VividGPUDrivenCullingCapacityUtility.GetMaxVisibleMeshletRenderRequestCount(sceneData),
+                Is.EqualTo(1));
         }
     }
 }

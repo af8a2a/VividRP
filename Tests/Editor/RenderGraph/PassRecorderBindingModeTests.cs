@@ -113,6 +113,39 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AreImportedBufferHandlesEqual_DoesNotAllocateOrRequireResourceRegistry()
+        {
+            var constructor = typeof(BufferHandle).GetConstructor(
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(int), typeof(bool) },
+                null);
+            Assert.That(constructor, Is.Not.Null);
+
+            var left = (BufferHandle)constructor.Invoke(new object[] { 1, false });
+            var right = (BufferHandle)constructor.Invoke(new object[] { 2, false });
+            Assert.That(left.IsValid(), Is.True);
+            Assert.That(right.IsValid(), Is.True);
+            Assert.That(PassRecorder.AreImportedBufferHandlesEqual(left, left), Is.True);
+            Assert.That(PassRecorder.AreImportedBufferHandlesEqual(left, right), Is.False);
+
+            var allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+            var sameHandlesEqual = true;
+            var differentHandlesEqual = false;
+            for (var index = 0; index < 32; index++)
+            {
+                sameHandlesEqual &= PassRecorder.AreImportedBufferHandlesEqual(left, left);
+                differentHandlesEqual |= PassRecorder.AreImportedBufferHandlesEqual(left, right);
+            }
+
+            var allocatedBytes = GC.GetAllocatedBytesForCurrentThread() - allocatedBefore;
+
+            Assert.That(sameHandlesEqual, Is.True);
+            Assert.That(differentHandlesEqual, Is.False);
+            Assert.That(allocatedBytes, Is.Zero);
+        }
+
+        [Test]
         public void Compile_SharesCtorOwnedResource_WithDownstreamPassFieldBinding()
         {
             var graphAsset = ScriptableObject.CreateInstance<RenderGraphData>();

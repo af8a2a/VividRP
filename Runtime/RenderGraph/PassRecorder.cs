@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -51,10 +52,12 @@ namespace VividRP.Runtime
 
             public bool Equals(ImportedPassHandle other)
             {
-                return TextureHandle.Equals(other.TextureHandle)
-                    && BufferHandle.Equals(other.BufferHandle)
-                    && IsBuffer == other.IsBuffer
-                    && Access == other.Access;
+                if (IsBuffer != other.IsBuffer || Access != other.Access)
+                    return false;
+
+                return IsBuffer
+                    ? AreImportedBufferHandlesEqual(BufferHandle, other.BufferHandle)
+                    : TextureHandle.Equals(other.TextureHandle);
             }
 
             public override bool Equals(object obj)
@@ -66,6 +69,16 @@ namespace VividRP.Runtime
             {
                 return HashCode.Combine(TextureHandle, BufferHandle, IsBuffer, Access);
             }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static unsafe bool AreImportedBufferHandlesEqual(BufferHandle left, BufferHandle right)
+        {
+            // BufferHandle has no typed equality, while converting it to GraphicsBuffer requires the execution-time registry.
+            return UnsafeUtility.MemCmp(
+                UnsafeUtility.AddressOf(ref left),
+                UnsafeUtility.AddressOf(ref right),
+                UnsafeUtility.SizeOf<BufferHandle>()) == 0;
         }
 
         private class ComputePassData

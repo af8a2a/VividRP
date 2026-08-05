@@ -19,6 +19,24 @@ namespace VividRP.Editor.Tests
             public string Name { get; }
         }
 
+        private sealed class PhysicalPoolOwner : IVTPhysicalPoolOwner
+        {
+            internal PhysicalPoolOwner(int spaceId)
+            {
+                SpaceId = spaceId;
+            }
+
+            public int SpaceId { get; }
+
+            internal int LastInvalidatedPageIndex { get; private set; } = -1;
+
+            public bool OnPhysicalPageInvalidated(int pageIndex, int generation)
+            {
+                LastInvalidatedPageIndex = pageIndex;
+                return true;
+            }
+        }
+
         [TearDown]
         public void TearDown()
         {
@@ -43,6 +61,22 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.ResidentPageCount, Is.EqualTo(2));
             Assert.That(stats.FreePageCount, Is.EqualTo(firstDesc.CachePageCount - 2));
             Assert.That(stats.LockedPageCount, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void PhysicalPageIdentity_UsesAConsistentProducerKeyForHashLookup()
+        {
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+            var firstHandleIdentity = new VTPhysicalPageIdentity(new VTProducerHandle(1), "First", coord);
+            var sameHandleIdentity = new VTPhysicalPageIdentity(new VTProducerHandle(1), "Second", coord);
+            var namedIdentity = new VTPhysicalPageIdentity(VTProducerHandle.Invalid, "First", coord);
+            var sameNamedIdentity = new VTPhysicalPageIdentity(VTProducerHandle.Invalid, "First", coord);
+
+            Assert.That(firstHandleIdentity.Equals(sameHandleIdentity), Is.True);
+            Assert.That(firstHandleIdentity.GetHashCode(), Is.EqualTo(sameHandleIdentity.GetHashCode()));
+            Assert.That(namedIdentity.Equals(sameNamedIdentity), Is.True);
+            Assert.That(namedIdentity.GetHashCode(), Is.EqualTo(sameNamedIdentity.GetHashCode()));
+            Assert.That(firstHandleIdentity.Equals(namedIdentity), Is.False);
         }
 
         [Test]
@@ -130,6 +164,130 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void ProcessRequests_DoesNotAttachStaleIdentityAfterPhysicalPageReuse()
+        {
+            var producer = new NamedProducer("ReusedIdentityProducer");
+            VirtualTextureSpaceDesc desc = CreateDesc("ReusedIdentityA", cachePageCount: 2);
+            int firstSpaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(
+                CreateDesc("ReusedIdentityB", cachePageCount: 2),
+                producer);
+            var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var replacementCoord = new VirtualTexturePageCoord(1, 0, 0);
+
+            RequestPage(firstSpaceId, firstCoord);
+            RequestPage(firstSpaceId, replacementCoord);
+            IssueFeedback(secondSpaceId, firstCoord);
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(secondSpaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                secondSpaceId,
+                firstCoord,
+                out VirtualTexturePageTableEntry entry), Is.True);
+            Assert.That(entry.PendingUpload, Is.True);
+            Assert.That(entry.Resident, Is.False);
+        }
+
+        [Test]
+        public void PhysicalPageLookup_PreservesDuplicateIdentityChainWhenFirstSlotIsFlushed()
+        {
+            VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 2);
+            var firstOwner = new PhysicalPoolOwner(1);
+            var secondOwner = new PhysicalPoolOwner(2);
+            var producerHandle = new VTProducerHandle(1);
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+
+            try
+            {
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    firstOwner,
+                    producerHandle,
+                    pageIndex: 10,
+                    coord,
+                    frameIndex: 0,
+                    out int firstPhysicalPageId), Is.True);
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    secondOwner,
+                    producerHandle,
+                    pageIndex: 20,
+                    coord,
+                    frameIndex: 0,
+                    out int secondPhysicalPageId), Is.True);
+                Assert.That(firstPhysicalPageId, Is.LessThan(secondPhysicalPageId));
+
+                Assert.That(pool.TryFindPhysicalPage(
+                    producerHandle,
+                    "IndexedProducer",
+                    coord,
+                    out int foundPhysicalPageId,
+                    out _), Is.True);
+                Assert.That(foundPhysicalPageId, Is.EqualTo(firstPhysicalPageId));
+
+                Assert.That(pool.FlushOwner(firstOwner), Is.EqualTo(1));
+                Assert.That(pool.TryFindPhysicalPage(
+                    producerHandle,
+                    "IndexedProducer",
+                    coord,
+                    out foundPhysicalPageId,
+                    out _), Is.True);
+                Assert.That(foundPhysicalPageId, Is.EqualTo(secondPhysicalPageId));
+            }
+            finally
+            {
+                pool.Dispose();
+            }
+        }
+
+        [Test]
+        public void Touch_DeduplicatesLruMutationWithinTheSameFrame()
+        {
+            VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 2);
+            var owner = new PhysicalPoolOwner(1);
+            var producerHandle = new VTProducerHandle(1);
+
+            try
+            {
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 10,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    frameIndex: 0,
+                    out int firstPhysicalPageId), Is.True);
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 20,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    frameIndex: 0,
+                    out int secondPhysicalPageId), Is.True);
+
+                pool.Touch(firstPhysicalPageId, VirtualTextureViewId.Invalid, frameIndex: 1, updateAffinity: false);
+                pool.Touch(secondPhysicalPageId, VirtualTextureViewId.Invalid, frameIndex: 1, updateAffinity: false);
+                pool.Touch(firstPhysicalPageId, VirtualTextureViewId.Invalid, frameIndex: 1, updateAffinity: false);
+
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 30,
+                    new VirtualTexturePageCoord(2, 0, 0),
+                    frameIndex: 2,
+                    out int reusedPhysicalPageId), Is.True);
+                Assert.That(reusedPhysicalPageId, Is.EqualTo(firstPhysicalPageId));
+                Assert.That(owner.LastInvalidatedPageIndex, Is.EqualTo(10));
+            }
+            finally
+            {
+                pool.Dispose();
+            }
+        }
+
+        [Test]
         public void FlushProducer_ClearsOnlyMatchingProducerPages()
         {
             var firstProducer = new NamedProducer("FlushProducerA");
@@ -208,7 +366,7 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.FreePageCount, Is.EqualTo(stats.PhysicalPoolFreePageCount));
         }
 
-        private static VirtualTextureSpaceDesc CreateDesc(string name)
+        private static VirtualTextureSpaceDesc CreateDesc(string name, int cachePageCount = 6)
         {
             return new VirtualTextureSpaceDesc(
                 name,
@@ -217,7 +375,7 @@ namespace VividRP.Editor.Tests
                 virtualPageCountX: 4,
                 virtualPageCountY: 4,
                 mipCount: 3,
-                cachePageCount: 6,
+                cachePageCount: cachePageCount,
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: 4,
                 feedbackCapacity: 32);
@@ -256,6 +414,52 @@ namespace VividRP.Editor.Tests
                 virtualPageCountY: 4,
                 mipCount: 3,
                 stackDesc);
+        }
+
+        private static VTPhysicalPool CreatePhysicalPoolForTesting(int pageCount)
+        {
+            var layers = new[]
+            {
+                new VTLayerDesc(
+                    VTLayerSemantic.BaseColor,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    sRGB: false,
+                    new Color32(255, 255, 255, 255)),
+            };
+            return new VTPhysicalPool(
+                "IndexedPool",
+                new VTPhysicalPoolDesc(
+                    pageSize: 4,
+                    borderSize: 0,
+                    pageCount,
+                    layers));
+        }
+
+        private static bool TryAllocatePhysicalPage(
+            VTPhysicalPool pool,
+            IVTPhysicalPoolOwner owner,
+            VTProducerHandle producerHandle,
+            int pageIndex,
+            in VirtualTexturePageCoord coord,
+            int frameIndex,
+            out int physicalPageId)
+        {
+            return pool.TryAllocatePage(
+                owner,
+                producerHandle,
+                "IndexedProducer",
+                pageIndex,
+                pageMip: coord.Mip,
+                coord,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                updateAffinity: false,
+                frameIndex,
+                locked: false,
+                pendingUpload: false,
+                out physicalPageId,
+                out _,
+                out _);
         }
 
         private static VirtualTextureUploadRequest RequestPage(

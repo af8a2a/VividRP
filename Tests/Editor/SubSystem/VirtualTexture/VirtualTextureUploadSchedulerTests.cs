@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.Experimental.Rendering;
@@ -562,6 +563,40 @@ namespace VividRP.Editor.Tests
                 out VirtualTexturePageTableEntry pendingEntry), Is.True);
             Assert.That(pendingEntry.PendingUpload, Is.True);
             Assert.That(pendingEntry.Locked, Is.True);
+        }
+
+        [Test]
+        public void PendingRequestIndex_RemainsValidAfterSwapBackRemoval()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "PendingRequestIndex",
+                maxUploadsPerFrame: 3);
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            var firstCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var removedCoord = new VirtualTexturePageCoord(1, 0, 0);
+            var movedCoord = new VirtualTexturePageCoord(2, 0, 0);
+
+            IssueFeedback(spaceId, firstCoord, removedCoord, movedCoord);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out IReadOnlyList<VirtualTextureUploadRequest> initialRequests), Is.True);
+            Assert.That(initialRequests, Has.Count.EqualTo(3));
+
+            VirtualTextureUploadRequest removedRequest = initialRequests.Single(
+                request => request.PageCoord.Equals(removedCoord));
+            Assert.That(VirtualTextureSystem.CommitUpload(removedRequest), Is.True);
+
+            IssueFeedback(spaceId, movedCoord, movedCoord);
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out IReadOnlyList<VirtualTextureUploadRequest> updatedRequests), Is.True);
+            Assert.That(updatedRequests, Has.Count.EqualTo(2));
+            Assert.That(updatedRequests.Single(
+                request => request.PageCoord.Equals(movedCoord)).Priority, Is.EqualTo(2));
+            Assert.That(updatedRequests.Single(
+                request => request.PageCoord.Equals(firstCoord)).Priority, Is.EqualTo(1));
         }
 
         [Test]

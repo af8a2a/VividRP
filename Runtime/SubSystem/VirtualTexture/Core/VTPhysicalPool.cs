@@ -319,8 +319,11 @@ namespace VividRP.Runtime
 
         public bool Equals(VTPhysicalPageIdentity other)
         {
-            bool sameProducer = ProducerHandle.IsValid && other.ProducerHandle.IsValid
-                ? ProducerHandle.Equals(other.ProducerHandle)
+            bool eitherHandleIsValid = ProducerHandle.IsValid || other.ProducerHandle.IsValid;
+            bool sameProducer = eitherHandleIsValid
+                ? ProducerHandle.IsValid
+                  && other.ProducerHandle.IsValid
+                  && ProducerHandle.Equals(other.ProducerHandle)
                 : !string.IsNullOrEmpty(ProducerName)
                   && string.Equals(ProducerName, other.ProducerName, StringComparison.Ordinal);
             return sameProducer && PageCoord.Equals(other.PageCoord);
@@ -376,6 +379,9 @@ namespace VividRP.Runtime
         private readonly Stack<int> m_FreePhysicalPages;
         private readonly LinkedList<int> m_LruPhysicalPages = new();
         private readonly LinkedListNode<int>[] m_LruNodes;
+        private readonly int[] m_LastLruTouchFrames;
+        private readonly int[] m_NextPhysicalPageWithSameIdentity;
+        private readonly Dictionary<VTPhysicalPageIdentity, int> m_PhysicalPageLookup;
         private readonly List<PhysicalPageBinding>[] m_Bindings;
         private readonly Texture2DArray[] m_Textures;
 
@@ -396,9 +402,16 @@ namespace VividRP.Runtime
             }
 
             m_LruNodes = new LinkedListNode<int>[m_Slots.Length];
+            m_LastLruTouchFrames = new int[m_Slots.Length];
+            m_NextPhysicalPageWithSameIdentity = new int[m_Slots.Length];
+            m_PhysicalPageLookup = new Dictionary<VTPhysicalPageIdentity, int>(m_Slots.Length);
             m_Bindings = new List<PhysicalPageBinding>[m_Slots.Length];
             for (int slotIndex = 0; slotIndex < m_Bindings.Length; slotIndex++)
+            {
+                m_LastLruTouchFrames[slotIndex] = int.MinValue;
+                m_NextPhysicalPageWithSameIdentity[slotIndex] = -1;
                 m_Bindings[slotIndex] = new List<PhysicalPageBinding>(1);
+            }
 
             m_FreePhysicalPages = new Stack<int>(m_Slots.Length);
             for (int slotIndex = m_Slots.Length - 1; slotIndex >= 0; slotIndex--)
@@ -536,6 +549,7 @@ namespace VividRP.Runtime
             slotState.AffinityViewId = VirtualTextureViewId.Invalid;
             slotState.LastAffinityFrame = -1;
             m_Slots[physicalPageId] = slotState;
+            AddPhysicalPageLookup(physicalPageId, slotState.Identity);
             m_Bindings[physicalPageId].Clear();
             AddBinding(physicalPageId, owner, pageIndex, locked);
             Touch(physicalPageId, allocationViewId, frameIndex, updateAffinity);
@@ -583,15 +597,15 @@ namespace VividRP.Runtime
             out int generation)
         {
             var identity = new VTPhysicalPageIdentity(producerHandle, producerName, pageCoord);
-            for (int slotIndex = 0; slotIndex < m_Slots.Length; slotIndex++)
+            if (m_PhysicalPageLookup.TryGetValue(identity, out int slotIndex))
             {
                 PhysicalPageSlotState slotState = m_Slots[slotIndex];
-                if (!IsOccupied(slotState) || !slotState.Identity.Equals(identity))
-                    continue;
-
-                physicalPageId = slotIndex;
-                generation = slotState.Generation;
-                return true;
+                if (IsOccupied(slotState) && slotState.Identity.Equals(identity))
+                {
+                    physicalPageId = slotIndex;
+                    generation = slotState.Generation;
+                    return true;
+                }
             }
 
             physicalPageId = -1;
@@ -644,6 +658,11 @@ namespace VividRP.Runtime
                 slotState.LastAffinityFrame = frameIndex;
                 m_Slots[physicalPageId] = slotState;
             }
+
+            if (m_LastLruTouchFrames[physicalPageId] == frameIndex)
+                return;
+
+            m_LastLruTouchFrames[physicalPageId] = frameIndex;
 
             LinkedListNode<int> node = m_LruNodes[physicalPageId];
             if (node == null)
@@ -725,6 +744,7 @@ namespace VividRP.Runtime
         public void Dispose()
         {
             m_LruPhysicalPages.Clear();
+            m_PhysicalPageLookup.Clear();
             m_FreePhysicalPages.Clear();
             for (int slotIndex = 0; slotIndex < m_Bindings.Length; slotIndex++)
                 m_Bindings[slotIndex].Clear();
@@ -962,6 +982,7 @@ namespace VividRP.Runtime
         private void ClearPhysicalPage(int physicalPageId, bool releaseToFreeList)
         {
             PhysicalPageSlotState slotState = m_Slots[physicalPageId];
+            RemovePhysicalPageLookup(physicalPageId, slotState.Identity);
             slotState.Owner = null;
             slotState.SpaceId = 0;
             slotState.VirtualPageIndex = -1;
@@ -975,6 +996,7 @@ namespace VividRP.Runtime
             slotState.PendingUpload = false;
             slotState.Locked = false;
             m_Slots[physicalPageId] = slotState;
+            m_LastLruTouchFrames[physicalPageId] = int.MinValue;
             m_Bindings[physicalPageId].Clear();
 
             if (!releaseToFreeList)
@@ -985,6 +1007,66 @@ namespace VividRP.Runtime
                 m_LruPhysicalPages.Remove(node);
 
             m_FreePhysicalPages.Push(physicalPageId);
+        }
+
+        private void AddPhysicalPageLookup(int physicalPageId, in VTPhysicalPageIdentity identity)
+        {
+            m_NextPhysicalPageWithSameIdentity[physicalPageId] = -1;
+            if (!m_PhysicalPageLookup.TryGetValue(identity, out int firstPhysicalPageId))
+            {
+                m_PhysicalPageLookup.Add(identity, physicalPageId);
+                return;
+            }
+
+            if (physicalPageId < firstPhysicalPageId)
+            {
+                m_NextPhysicalPageWithSameIdentity[physicalPageId] = firstPhysicalPageId;
+                m_PhysicalPageLookup[identity] = physicalPageId;
+                return;
+            }
+
+            int previousPhysicalPageId = firstPhysicalPageId;
+            int nextPhysicalPageId = m_NextPhysicalPageWithSameIdentity[previousPhysicalPageId];
+            while (nextPhysicalPageId >= 0 && nextPhysicalPageId < physicalPageId)
+            {
+                previousPhysicalPageId = nextPhysicalPageId;
+                nextPhysicalPageId = m_NextPhysicalPageWithSameIdentity[previousPhysicalPageId];
+            }
+
+            m_NextPhysicalPageWithSameIdentity[physicalPageId] = nextPhysicalPageId;
+            m_NextPhysicalPageWithSameIdentity[previousPhysicalPageId] = physicalPageId;
+        }
+
+        private void RemovePhysicalPageLookup(int physicalPageId, in VTPhysicalPageIdentity identity)
+        {
+            if (!m_PhysicalPageLookup.TryGetValue(identity, out int firstPhysicalPageId))
+                return;
+
+            int nextPhysicalPageId = m_NextPhysicalPageWithSameIdentity[physicalPageId];
+            if (firstPhysicalPageId == physicalPageId)
+            {
+                if (nextPhysicalPageId >= 0)
+                    m_PhysicalPageLookup[identity] = nextPhysicalPageId;
+                else
+                    m_PhysicalPageLookup.Remove(identity);
+
+                m_NextPhysicalPageWithSameIdentity[physicalPageId] = -1;
+                return;
+            }
+
+            int previousPhysicalPageId = firstPhysicalPageId;
+            while (previousPhysicalPageId >= 0)
+            {
+                if (m_NextPhysicalPageWithSameIdentity[previousPhysicalPageId] == physicalPageId)
+                {
+                    m_NextPhysicalPageWithSameIdentity[previousPhysicalPageId] = nextPhysicalPageId;
+                    break;
+                }
+
+                previousPhysicalPageId = m_NextPhysicalPageWithSameIdentity[previousPhysicalPageId];
+            }
+
+            m_NextPhysicalPageWithSameIdentity[physicalPageId] = -1;
         }
 
         private int FindEvictionCandidate(int frameIndex, VirtualTextureViewId activeViewId)

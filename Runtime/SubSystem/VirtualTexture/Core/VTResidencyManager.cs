@@ -97,6 +97,7 @@ namespace VividRP.Runtime
         private readonly int[] m_PageMips;
         private readonly VTPhysicalPool m_PhysicalPool;
         private readonly List<VTRequest> m_PendingRequests = new();
+        private readonly int[] m_PendingRequestIndices;
         private readonly List<int> m_DirtyPageTableUpdates = new();
 
         private int m_ResidentPageCount;
@@ -119,8 +120,12 @@ namespace VividRP.Runtime
             m_MipOffsets = mipOffsets;
             m_PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));
             m_PageStates = new VTPageRuntimeState[totalPageCount];
+            m_PendingRequestIndices = new int[totalPageCount];
             for (int pageIndex = 0; pageIndex < m_PageStates.Length; pageIndex++)
+            {
                 m_PageStates[pageIndex].PhysicalPageId = -1;
+                m_PendingRequestIndices[pageIndex] = -1;
+            }
 
             m_PageMips = BuildPageMipTable(desc, mipOffsets, totalPageCount);
         }
@@ -270,11 +275,7 @@ namespace VividRP.Runtime
             if (pageState.PendingUpload)
             {
                 TrySetPageLocked(desc, mipOffsets, coord, locked);
-                PromotePendingRequestToLocked(
-                    desc,
-                    mipOffsets,
-                    pageIndex,
-                    frameIndex);
+                PromotePendingRequestToLocked(pageIndex, frameIndex);
                 return true;
             }
 
@@ -329,7 +330,7 @@ namespace VividRP.Runtime
             pageState.Resident = false;
             pageState.Locked = locked;
             m_PageStates[pageIndex] = pageState;
-            m_PendingRequests.Add(new VTRequest(
+            AddPendingRequest(pageIndex, new VTRequest(
                 spaceId,
                 coord,
                 physicalPageId,
@@ -370,13 +371,16 @@ namespace VividRP.Runtime
                     if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                         continue;
 
-                    AccumulatePendingMipGap(
-                        desc,
-                        mipOffsets,
-                        request.PageCoord,
-                        ref pendingMipGapSum,
-                        ref pendingMipGapMax,
-                        ref pendingMipGapSampleCount);
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyMipGapMarker.Auto())
+                    {
+                        AccumulatePendingMipGap(
+                            desc,
+                            mipOffsets,
+                            request.PageCoord,
+                            ref pendingMipGapSum,
+                            ref pendingMipGapMax,
+                            ref pendingMipGapSampleCount);
+                    }
 
                     TryProcessRequest(
                         desc,
@@ -453,7 +457,7 @@ namespace VividRP.Runtime
             pageState.Resident = true;
             m_PageStates[pageIndex] = pageState;
             m_ResidentPageCount += 1;
-            RemovePendingRequest(pageIndex, request.Generation, desc, mipOffsets);
+            RemovePendingRequest(pageIndex, request.Generation);
             m_PhysicalPool.Touch(
                 pageState.PhysicalPageId,
                 VirtualTextureViewId.Invalid,
@@ -551,7 +555,7 @@ namespace VividRP.Runtime
             pageState.Locked = false;
             pageState.PhysicalPageId = -1;
             m_PageStates[pageIndex] = pageState;
-            RemovePendingRequest(pageIndex, generation, m_Desc, m_MipOffsets);
+            RemovePendingRequest(pageIndex, generation);
             MarkPageTableDirty(pageIndex);
             return true;
         }
@@ -610,18 +614,28 @@ namespace VividRP.Runtime
             ref int evictionCount,
             ref bool pageTableChanged)
         {
-            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
-                return false;
+            int pageIndex;
+            VTPageRuntimeState pageState;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationMarker.Auto())
+            {
+                if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                    return false;
 
-            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord);
-            VTPageRuntimeState pageState = m_PageStates[pageIndex];
+                pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord);
+                pageState = m_PageStates[pageIndex];
+            }
+
             if (pageState.Resident)
             {
-                m_PhysicalPool.Touch(
-                    pageState.PhysicalPageId,
-                    request.ViewId,
-                    frameIndex,
-                    !isPrefetch && request.IsActiveView);
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyResidentTouchMarker.Auto())
+                {
+                    m_PhysicalPool.Touch(
+                        pageState.PhysicalPageId,
+                        request.ViewId,
+                        frameIndex,
+                        !isPrefetch && request.IsActiveView);
+                }
+
                 return false;
             }
 
@@ -629,16 +643,17 @@ namespace VividRP.Runtime
             {
                 if (!isPrefetch)
                 {
-                    UpdatePendingRequestPriority(
-                        desc,
-                        mipOffsets,
-                        pageIndex,
-                        request.HitCount,
-                        request.CameraPriority,
-                        request.IsActiveView,
-                        request.ViewId,
-                        request.IsActiveView,
-                        frameIndex);
+                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPendingPriorityMarker.Auto())
+                    {
+                        UpdatePendingRequestPriority(
+                            pageIndex,
+                            request.HitCount,
+                            request.CameraPriority,
+                            request.IsActiveView,
+                            request.ViewId,
+                            request.IsActiveView,
+                            frameIndex);
+                    }
                 }
 
                 return false;
@@ -648,7 +663,12 @@ namespace VividRP.Runtime
                 return false;
 
             VirtualTextureViewId attachViewId = isPrefetch ? VirtualTextureViewId.Invalid : request.ViewId;
-            if (m_PhysicalPool.TryAttachResidentPage(
+            bool attached;
+            int sharedPhysicalPageId;
+            int sharedGeneration;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyAttachLookupMarker.Auto())
+            {
+                attached = m_PhysicalPool.TryAttachResidentPage(
                     this,
                     m_ProducerHandle,
                     m_ProducerName,
@@ -657,8 +677,11 @@ namespace VividRP.Runtime
                     attachViewId,
                     frameIndex,
                     locked: false,
-                    out int sharedPhysicalPageId,
-                    out int sharedGeneration))
+                    out sharedPhysicalPageId,
+                    out sharedGeneration);
+            }
+
+            if (attached)
             {
                 pageState.PhysicalPageId = sharedPhysicalPageId;
                 pageState.Generation = sharedGeneration;
@@ -680,7 +703,13 @@ namespace VividRP.Runtime
                 ? VirtualTextureViewId.Invalid
                 : request.ViewId;
             bool updateAffinity = !isPrefetch && HasViewAffinity(request.ViewId);
-            if (!m_PhysicalPool.TryAllocatePage(
+            bool allocated;
+            int physicalPageId;
+            int generation;
+            bool evicted;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyAllocateEvictMarker.Auto())
+            {
+                allocated = m_PhysicalPool.TryAllocatePage(
                     this,
                     m_ProducerHandle,
                     m_ProducerName,
@@ -693,9 +722,12 @@ namespace VividRP.Runtime
                     frameIndex,
                     locked: false,
                     pendingUpload: true,
-                    out int physicalPageId,
-                    out int generation,
-                    out bool evicted))
+                    out physicalPageId,
+                    out generation,
+                    out evicted);
+            }
+
+            if (!allocated)
             {
                 return false;
             }
@@ -710,7 +742,7 @@ namespace VividRP.Runtime
             pageState.Resident = false;
             m_PageStates[pageIndex] = pageState;
             MarkPageTableDirty(pageIndex);
-            m_PendingRequests.Add(new VTRequest(
+            AddPendingRequest(pageIndex, new VTRequest(
                 spaceId,
                 request.PageCoord,
                 physicalPageId,
@@ -898,8 +930,6 @@ namespace VividRP.Runtime
         }
 
         private void UpdatePendingRequestPriority(
-            in VirtualTextureSpaceDesc desc,
-            int[] mipOffsets,
             int pageIndex,
             int priority,
             int cameraPriority,
@@ -908,57 +938,45 @@ namespace VividRP.Runtime
             bool updateAffinity,
             int frameIndex)
         {
-            for (int requestIndex = 0; requestIndex < m_PendingRequests.Count; requestIndex++)
-            {
-                VTRequest request = m_PendingRequests[requestIndex];
-                if (VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord) != pageIndex)
-                    continue;
-
-                m_PhysicalPool.Touch(request.PhysicalPageId, viewId, frameIndex, updateAffinity);
-                if (!IsPendingRequestPriorityImproved(request, priority, cameraPriority, isActiveView))
-                    return;
-
-                m_PendingRequests[requestIndex] = new VTRequest(
-                    request.SpaceId,
-                    request.PageCoord,
-                    request.PhysicalPageId,
-                    request.Generation,
-                    priority,
-                    Mathf.Min(request.RequestFrame, frameIndex),
-                    cameraPriority,
-                    isActiveView);
+            if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest request))
                 return;
-            }
+
+            m_PhysicalPool.Touch(request.PhysicalPageId, viewId, frameIndex, updateAffinity);
+            if (!IsPendingRequestPriorityImproved(request, priority, cameraPriority, isActiveView))
+                return;
+
+            m_PendingRequests[requestIndex] = new VTRequest(
+                request.SpaceId,
+                request.PageCoord,
+                request.PhysicalPageId,
+                request.Generation,
+                priority,
+                Mathf.Min(request.RequestFrame, frameIndex),
+                cameraPriority,
+                isActiveView);
         }
 
         private void PromotePendingRequestToLocked(
-            in VirtualTextureSpaceDesc desc,
-            int[] mipOffsets,
             int pageIndex,
             int frameIndex)
         {
-            for (int requestIndex = 0; requestIndex < m_PendingRequests.Count; requestIndex++)
-            {
-                VTRequest request = m_PendingRequests[requestIndex];
-                if (VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord) != pageIndex)
-                    continue;
-
-                m_PhysicalPool.Touch(
-                    request.PhysicalPageId,
-                    VirtualTextureViewId.Invalid,
-                    frameIndex,
-                    updateAffinity: false);
-                m_PendingRequests[requestIndex] = new VTRequest(
-                    request.SpaceId,
-                    request.PageCoord,
-                    request.PhysicalPageId,
-                    request.Generation,
-                    int.MaxValue,
-                    Mathf.Min(request.RequestFrame, frameIndex),
-                    int.MinValue,
-                    request.IsActiveView);
+            if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest request))
                 return;
-            }
+
+            m_PhysicalPool.Touch(
+                request.PhysicalPageId,
+                VirtualTextureViewId.Invalid,
+                frameIndex,
+                updateAffinity: false);
+            m_PendingRequests[requestIndex] = new VTRequest(
+                request.SpaceId,
+                request.PageCoord,
+                request.PhysicalPageId,
+                request.Generation,
+                int.MaxValue,
+                Mathf.Min(request.RequestFrame, frameIndex),
+                int.MinValue,
+                request.IsActiveView);
         }
 
         private static bool IsPendingRequestPriorityImproved(
@@ -985,30 +1003,50 @@ namespace VividRP.Runtime
             m_DirtyPageTableUpdates.Add(pageIndex);
         }
 
-        private void RemovePendingRequest(
-            int pageIndex,
-            int generation,
-            in VirtualTextureSpaceDesc desc,
-            int[] mipOffsets)
+        private void AddPendingRequest(int pageIndex, in VTRequest request)
         {
-            if (pageIndex < 0)
-                return;
+            int requestIndex = m_PendingRequests.Count;
+            m_PendingRequests.Add(request);
+            m_PendingRequestIndices[pageIndex] = requestIndex;
+        }
 
-            for (int requestIndex = m_PendingRequests.Count - 1; requestIndex >= 0; requestIndex--)
+        private bool TryGetPendingRequest(int pageIndex, out int requestIndex, out VTRequest request)
+        {
+            requestIndex = pageIndex >= 0 && pageIndex < m_PendingRequestIndices.Length
+                ? m_PendingRequestIndices[pageIndex]
+                : -1;
+            if (requestIndex < 0 || requestIndex >= m_PendingRequests.Count)
             {
-                VTRequest request = m_PendingRequests[requestIndex];
-                if (request.Generation != generation)
-                    continue;
+                request = default;
+                return false;
+            }
 
-                if (mipOffsets != null
-                    && VirtualTextureSpaceUtility.GetFlatIndex(desc, mipOffsets, request.PageCoord) != pageIndex)
-                {
-                    continue;
-                }
+            request = m_PendingRequests[requestIndex];
+            return true;
+        }
 
-                m_PendingRequests.RemoveAt(requestIndex);
+        private void RemovePendingRequest(int pageIndex, int generation)
+        {
+            if (!TryGetPendingRequest(pageIndex, out int requestIndex, out VTRequest request)
+                || request.Generation != generation)
+            {
                 return;
             }
+
+            int lastRequestIndex = m_PendingRequests.Count - 1;
+            if (requestIndex != lastRequestIndex)
+            {
+                VTRequest movedRequest = m_PendingRequests[lastRequestIndex];
+                m_PendingRequests[requestIndex] = movedRequest;
+                int movedPageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                    m_Desc,
+                    m_MipOffsets,
+                    movedRequest.PageCoord);
+                m_PendingRequestIndices[movedPageIndex] = requestIndex;
+            }
+
+            m_PendingRequests.RemoveAt(lastRequestIndex);
+            m_PendingRequestIndices[pageIndex] = -1;
         }
 
         private static int[] BuildPageMipTable(

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using NUnit.Framework;
+using Unity.Collections;
 using UnityEngine;
 using VividRP.Runtime;
 
@@ -76,28 +77,153 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Aggregate_WritesIntoReusableOutput_WhenScratchIsProvided()
+        public void NativeAggregator_ReusesCapacity_WhenFollowingFrameIsEmpty()
         {
             ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(1, new VirtualTexturePageCoord(0, 0, 0));
             var batches = new List<VirtualTextureFeedbackBatch>
             {
                 new(CameraType.Game, new[] { requestKey, requestKey }, 2, 9),
             };
-            var scratch = new VirtualTextureFeedbackProcessor.Scratch();
-            var output = new List<VirtualTextureAggregatedFeedbackRequest>
+            using var aggregator = new VTFeedbackNativeAggregator();
+
+            aggregator.Aggregate(
+                batches,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
+
+            Assert.That(aggregator.AggregatedRequests.Length, Is.EqualTo(1));
+            Assert.That(aggregator.AggregatedRequests[0].SpaceId, Is.EqualTo(1));
+            Assert.That(aggregator.AggregatedRequests[0].HitCount, Is.EqualTo(2));
+            Assert.That(aggregator.RequestCapacity, Is.EqualTo(2));
+            Assert.That(aggregator.BatchCapacity, Is.EqualTo(1));
+            Assert.That(aggregator.LastUsedParallelJobs, Is.False);
+
+            aggregator.Aggregate(
+                null,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
+
+            Assert.That(aggregator.AggregatedRequests.Length, Is.Zero);
+            Assert.That(aggregator.SpaceRanges.Length, Is.Zero);
+            Assert.That(aggregator.RequestCapacity, Is.EqualTo(2));
+            Assert.That(aggregator.BatchCapacity, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void NativeAggregator_GroupsBySpace_WhilePreservingPriorityOrder()
+        {
+            ulong spaceOneLow = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(0, 0, 0));
+            ulong spaceOneHigh = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(1, 0, 0));
+            ulong spaceTwo = VirtualTextureFeedbackProcessor.EncodeKey(
+                2,
+                new VirtualTexturePageCoord(0, 0, 0));
+            var batches = new List<VirtualTextureFeedbackBatch>
             {
-                new(99, new VirtualTexturePageCoord(9, 9, 0), 1, 2),
+                new(CameraType.SceneView, new[] { spaceOneLow }, 1, 9),
+                new(CameraType.Game, new[] { spaceTwo, spaceOneHigh, spaceOneHigh }, 3, 9),
             };
+            using var aggregator = new VTFeedbackNativeAggregator();
 
-            VirtualTextureFeedbackProcessor.Aggregate(batches, scratch, output);
+            aggregator.Aggregate(
+                batches,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
 
-            Assert.That(output.Count, Is.EqualTo(1));
-            Assert.That(output[0].SpaceId, Is.EqualTo(1));
-            Assert.That(output[0].HitCount, Is.EqualTo(2));
+            Assert.That(aggregator.TryGetRequestsForSpace(1, out var spaceOneRequests), Is.True);
+            Assert.That(spaceOneRequests.Length, Is.EqualTo(2));
+            Assert.That(spaceOneRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
+            Assert.That(spaceOneRequests[0].HitCount, Is.EqualTo(2));
+            Assert.That(spaceOneRequests[1].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(0, 0, 0)));
+            Assert.That(aggregator.TryGetRequestsForSpace(2, out var spaceTwoRequests), Is.True);
+            Assert.That(spaceTwoRequests.Length, Is.EqualTo(1));
+            Assert.That(aggregator.TryGetRequestsForSpace(3, out _), Is.False);
+        }
 
-            VirtualTextureFeedbackProcessor.Aggregate(null, scratch, output);
+        [Test]
+        public void NativeAggregator_ConsumesNativeReadback_AndPreservesActiveViewPriority()
+        {
+            ulong sharedRequest = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(3, 2, 0));
+            ulong backgroundRequest = VirtualTextureFeedbackProcessor.EncodeKey(
+                1,
+                new VirtualTexturePageCoord(0, 0, 0));
+            using var nativeRequests = new NativeArray<ulong>(
+                new[] { sharedRequest, sharedRequest },
+                Allocator.TempJob);
+            var activeViewId = VirtualTextureViewId.FromCameraType(CameraType.Game);
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(
+                    VirtualTextureViewId.FromCameraType(CameraType.SceneView),
+                    CameraType.SceneView,
+                    new[] { backgroundRequest, backgroundRequest, backgroundRequest },
+                    3,
+                    20),
+                new(activeViewId, CameraType.Game, nativeRequests, nativeRequests.Length, 20),
+            };
+            using var aggregator = new VTFeedbackNativeAggregator();
 
-            Assert.That(output.Count, Is.EqualTo(0));
+            aggregator.Aggregate(
+                batches,
+                activeViewId,
+                activeViewId,
+                CameraType.Game);
+
+            Assert.That(batches[1].ManagedRequests, Is.Null);
+            Assert.That(batches[1].NativeRequests.IsCreated, Is.True);
+            Assert.That(aggregator.AggregatedRequests.Length, Is.EqualTo(2));
+            Assert.That(aggregator.AggregatedRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(3, 2, 0)));
+            Assert.That(aggregator.AggregatedRequests[0].HitCount, Is.EqualTo(2));
+            Assert.That(aggregator.AggregatedRequests[0].IsActiveView, Is.True);
+            Assert.That(aggregator.AggregatedRequests[0].ViewId, Is.EqualTo(activeViewId));
+            Assert.That(aggregator.ActiveViewRequestCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void NativeAggregator_UsesParallelJobs_ForLargeRequestBatches()
+        {
+            var requests = new ulong[65];
+            for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
+            {
+                requests[requestIndex] = VirtualTextureFeedbackProcessor.EncodeKey(
+                    requestIndex < 33 ? 1 : 2,
+                    new VirtualTexturePageCoord(requestIndex, 0, 0));
+            }
+
+            var batches = new List<VirtualTextureFeedbackBatch>
+            {
+                new(CameraType.Game, requests, requests.Length, 12),
+            };
+            using var aggregator = new VTFeedbackNativeAggregator();
+
+            aggregator.Aggregate(
+                batches,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
+
+            Assert.That(aggregator.LastUsedParallelJobs, Is.True);
+            Assert.That(aggregator.RequestCapacity, Is.EqualTo(128));
+            Assert.That(aggregator.AggregatedRequests.Length, Is.EqualTo(65));
+            Assert.That(aggregator.SpaceRanges.Length, Is.EqualTo(2));
+
+            aggregator.Aggregate(
+                batches,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
+
+            Assert.That(aggregator.LastUsedParallelJobs, Is.True);
+            Assert.That(aggregator.AggregatedRequests.Length, Is.EqualTo(65));
+            Assert.That(aggregator.SpaceRanges.Length, Is.EqualTo(2));
         }
 
         [Test]

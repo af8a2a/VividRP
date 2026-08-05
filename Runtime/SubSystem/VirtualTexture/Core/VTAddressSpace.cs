@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -87,7 +88,7 @@ namespace VividRP.Runtime
         internal int[] MipOffsets => m_MipOffsets;
 
         internal VTResidencyProcessResult ProcessRequests(
-            IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
             Vector2Int prefetchBias,
             int frameIndex)

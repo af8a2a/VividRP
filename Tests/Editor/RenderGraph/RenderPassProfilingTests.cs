@@ -375,11 +375,13 @@ namespace VividRP.Editor.Tests
             var profilingSource = File.ReadAllText(GetPackageFilePath("Runtime", "RenderGraph", "RenderPassProfiling.cs"));
             var virtualTextureSystemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
             var feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureFeedback.cs"));
+            var nativeAggregatorSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTFeedbackNativeAggregator.cs"));
             var addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
             var residencySource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTResidencyManager.cs"));
             var uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
             var instrumentedSource = virtualTextureSystemSource
                                      + feedbackSource
+                                     + nativeAggregatorSource
                                      + addressSpaceSource
                                      + residencySource
                                      + uploadSchedulerSource;

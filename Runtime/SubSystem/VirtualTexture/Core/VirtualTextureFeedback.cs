@@ -37,8 +37,28 @@ namespace VividRP.Runtime
         {
             ViewId = viewId;
             CameraType = cameraType;
-            Requests = requests ?? Array.Empty<ulong>();
-            RequestCount = Mathf.Clamp(requestCount, 0, Requests.Length);
+            ManagedRequests = requests ?? Array.Empty<ulong>();
+            NativeRequests = default;
+            RequestCount = Mathf.Clamp(requestCount, 0, ManagedRequests.Length);
+            FrameIndex = frameIndex;
+            FeedbackOverflowCount = Mathf.Max(0, feedbackOverflowCount);
+            FallbackSampleCount = Mathf.Max(0, fallbackSampleCount);
+        }
+
+        internal VirtualTextureFeedbackBatch(
+            VirtualTextureViewId viewId,
+            CameraType cameraType,
+            NativeArray<ulong> requests,
+            int requestCount,
+            int frameIndex,
+            int feedbackOverflowCount = 0,
+            int fallbackSampleCount = 0)
+        {
+            ViewId = viewId;
+            CameraType = cameraType;
+            ManagedRequests = null;
+            NativeRequests = requests;
+            RequestCount = Mathf.Clamp(requestCount, 0, requests.IsCreated ? requests.Length : 0);
             FrameIndex = frameIndex;
             FeedbackOverflowCount = Mathf.Max(0, feedbackOverflowCount);
             FallbackSampleCount = Mathf.Max(0, fallbackSampleCount);
@@ -48,7 +68,13 @@ namespace VividRP.Runtime
 
         internal CameraType CameraType { get; }
 
-        internal ulong[] Requests { get; }
+        internal ulong[] ManagedRequests { get; }
+
+        internal NativeArray<ulong> NativeRequests { get; }
+
+        internal int RequestCapacity => NativeRequests.IsCreated
+            ? NativeRequests.Length
+            : ManagedRequests?.Length ?? 0;
 
         internal int RequestCount { get; }
 
@@ -57,6 +83,41 @@ namespace VividRP.Runtime
         internal int FeedbackOverflowCount { get; }
 
         internal int FallbackSampleCount { get; }
+
+        internal ulong GetRequest(int requestIndex)
+        {
+            return NativeRequests.IsCreated
+                ? NativeRequests[requestIndex]
+                : ManagedRequests[requestIndex];
+        }
+
+        internal void CopyRequestsTo(
+            NativeArray<ulong> destination,
+            int destinationIndex,
+            int requestCount)
+        {
+            int copyCount = Mathf.Clamp(requestCount, 0, RequestCount);
+            if (copyCount == 0)
+                return;
+
+            if (NativeRequests.IsCreated)
+            {
+                NativeArray<ulong>.Copy(
+                    NativeRequests,
+                    0,
+                    destination,
+                    destinationIndex,
+                    copyCount);
+                return;
+            }
+
+            NativeArray<ulong>.Copy(
+                ManagedRequests,
+                0,
+                destination,
+                destinationIndex,
+                copyCount);
+        }
     }
 
     internal readonly struct VirtualTextureAggregatedFeedbackRequest
@@ -190,22 +251,6 @@ namespace VividRP.Runtime
         internal const int MaxMipCount = 16;
         private const int SpaceIdMask = (1 << SpaceIdBitCount) - 1;
         private const int PageCoordMask = (1 << PageCoordBitCount) - 1;
-        private static readonly IComparer<VirtualTextureAggregatedFeedbackRequest> s_RequestComparer = AggregatedRequestComparer.Instance;
-
-        internal struct FaultAccumulator
-        {
-            public int HitCount;
-            public int CameraPriority;
-            public VirtualTextureViewId ViewId;
-            public bool IsActiveView;
-        }
-
-        internal sealed class Scratch
-        {
-            private readonly Dictionary<ulong, FaultAccumulator> m_FaultAccumulators = new();
-
-            internal Dictionary<ulong, FaultAccumulator> FaultAccumulators => m_FaultAccumulators;
-        }
 
         internal static ulong EncodeKey(int spaceId, in VirtualTexturePageCoord pageCoord)
         {
@@ -249,103 +294,27 @@ namespace VividRP.Runtime
             IReadOnlyList<VirtualTextureFeedbackBatch> batches)
         {
             var aggregated = new List<VirtualTextureAggregatedFeedbackRequest>();
-            Aggregate(batches, new Scratch(), aggregated);
+            using var aggregator = new VTFeedbackNativeAggregator();
+            aggregator.Aggregate(
+                batches,
+                VirtualTextureViewId.Invalid,
+                VirtualTextureViewId.Invalid,
+                default);
+            NativeArray<VirtualTextureAggregatedFeedbackRequest> nativeRequests = aggregator.AggregatedRequests;
+            for (int requestIndex = 0; requestIndex < nativeRequests.Length; requestIndex++)
+                aggregated.Add(nativeRequests[requestIndex]);
+
             return aggregated;
         }
 
-        internal static void Aggregate(
-            IReadOnlyList<VirtualTextureFeedbackBatch> batches,
-            Scratch scratch,
-            List<VirtualTextureAggregatedFeedbackRequest> output)
-        {
-            Aggregate(batches, scratch, output, VirtualTextureViewId.Invalid);
-        }
-
-        internal static void Aggregate(
-            IReadOnlyList<VirtualTextureFeedbackBatch> batches,
-            Scratch scratch,
-            List<VirtualTextureAggregatedFeedbackRequest> output,
-            VirtualTextureViewId activeViewId)
-        {
-            if (scratch == null)
-                throw new ArgumentNullException(nameof(scratch));
-            if (output == null)
-                throw new ArgumentNullException(nameof(output));
-
-            output.Clear();
-            Dictionary<ulong, FaultAccumulator> faultAccumulators = scratch.FaultAccumulators;
-            faultAccumulators.Clear();
-
-            if (batches == null)
-                return;
-
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateAccumulateMarker.Auto())
-            {
-                for (int batchIndex = 0; batchIndex < batches.Count; batchIndex++)
-                {
-                    VirtualTextureFeedbackBatch batch = batches[batchIndex];
-                    int cameraPriority = GetCameraPriority(batch.CameraType);
-                    bool isActiveViewBatch = IsActiveViewBatch(batch, activeViewId);
-                    for (int requestIndex = 0; requestIndex < batch.RequestCount; requestIndex++)
-                    {
-                        ulong key = batch.Requests[requestIndex];
-                        if (faultAccumulators.TryGetValue(key, out FaultAccumulator accumulator))
-                        {
-                            accumulator.HitCount += 1;
-                            if (isActiveViewBatch)
-                            {
-                                accumulator.IsActiveView = true;
-                                accumulator.ViewId = ResolveFeedbackViewId(batch, activeViewId);
-                            }
-                            else if (!accumulator.IsActiveView && cameraPriority < accumulator.CameraPriority)
-                            {
-                                accumulator.ViewId = batch.ViewId;
-                            }
-
-                            accumulator.CameraPriority = Mathf.Min(accumulator.CameraPriority, cameraPriority);
-                            faultAccumulators[key] = accumulator;
-                        }
-                        else
-                        {
-                            faultAccumulators[key] = new FaultAccumulator
-                            {
-                                HitCount = 1,
-                                CameraPriority = cameraPriority,
-                                ViewId = isActiveViewBatch ? ResolveFeedbackViewId(batch, activeViewId) : batch.ViewId,
-                                IsActiveView = isActiveViewBatch,
-                            };
-                        }
-                    }
-                }
-            }
-
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateDecodeMarker.Auto())
-            {
-                foreach (KeyValuePair<ulong, FaultAccumulator> pair in faultAccumulators)
-                {
-                    DecodeKey(pair.Key, out int spaceId, out VirtualTexturePageCoord pageCoord);
-                    output.Add(new VirtualTextureAggregatedFeedbackRequest(
-                        spaceId,
-                        pageCoord,
-                        pair.Value.HitCount,
-                        pair.Value.CameraPriority,
-                        pair.Value.ViewId,
-                        pair.Value.IsActiveView));
-                }
-            }
-
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateSortMarker.Auto())
-                output.Sort(s_RequestComparer);
-        }
-
-        private static VirtualTextureViewId ResolveFeedbackViewId(
+        internal static VirtualTextureViewId ResolveFeedbackViewId(
             in VirtualTextureFeedbackBatch batch,
             in VirtualTextureViewId activeViewId)
         {
             return activeViewId.IsValid ? activeViewId : batch.ViewId;
         }
 
-        private static bool IsActiveViewBatch(
+        internal static bool IsActiveViewBatch(
             in VirtualTextureFeedbackBatch batch,
             VirtualTextureViewId activeViewId)
         {
@@ -358,51 +327,6 @@ namespace VividRP.Runtime
                 : batch.CameraType == activeViewId.CameraType;
         }
 
-        private static int CompareRequests(
-            VirtualTextureAggregatedFeedbackRequest left,
-            VirtualTextureAggregatedFeedbackRequest right)
-        {
-            if (left.IsActiveView != right.IsActiveView)
-                return left.IsActiveView ? -1 : 1;
-
-            int cameraCompare = left.CameraPriority.CompareTo(right.CameraPriority);
-            if (cameraCompare != 0)
-                return cameraCompare;
-
-            int hitCompare = right.HitCount.CompareTo(left.HitCount);
-            if (hitCompare != 0)
-                return hitCompare;
-
-            int mipCompare = left.PageCoord.Mip.CompareTo(right.PageCoord.Mip);
-            if (mipCompare != 0)
-                return mipCompare;
-
-            int spaceCompare = left.SpaceId.CompareTo(right.SpaceId);
-            if (spaceCompare != 0)
-                return spaceCompare;
-
-            int yCompare = left.PageCoord.Y.CompareTo(right.PageCoord.Y);
-            if (yCompare != 0)
-                return yCompare;
-
-            return left.PageCoord.X.CompareTo(right.PageCoord.X);
-        }
-
-        private sealed class AggregatedRequestComparer : IComparer<VirtualTextureAggregatedFeedbackRequest>
-        {
-            internal static readonly AggregatedRequestComparer Instance = new();
-
-            private AggregatedRequestComparer()
-            {
-            }
-
-            public int Compare(
-                VirtualTextureAggregatedFeedbackRequest left,
-                VirtualTextureAggregatedFeedbackRequest right)
-            {
-                return CompareRequests(left, right);
-            }
-        }
     }
 
     internal sealed class VirtualTextureFeedbackCameraState : CameraRelativeState
@@ -476,7 +400,7 @@ namespace VividRP.Runtime
             public NativeArray<uint> CounterReadbackData;
             public AsyncGPUReadbackRequest RequestsReadbackRequest;
             public AsyncGPUReadbackRequest CounterReadbackRequest;
-            public ulong[] CompletedRequests = Array.Empty<ulong>();
+            public bool CompletedRequestsValid;
             public uint CompletedCount;
             public int CompletedFallbackSampleCount;
 
@@ -499,7 +423,7 @@ namespace VividRP.Runtime
                 CounterReadbackRequest = default;
                 LastViewId = VirtualTextureViewId.Invalid;
                 LastViewSignature = VirtualTextureFeedbackViewSignature.Invalid;
-                CompletedRequests = Array.Empty<ulong>();
+                CompletedRequestsValid = false;
                 CompletedCount = 0u;
                 CompletedFallbackSampleCount = 0;
                 ScheduledFrameIndex = -1;
@@ -530,7 +454,6 @@ namespace VividRP.Runtime
                     FeedbackCounterElementCount,
                     Allocator.Persistent,
                     NativeArrayOptions.UninitializedMemory);
-                EnsureCompletedRequestCapacity(requestCapacity);
             }
 
             public void PollReadback()
@@ -545,14 +468,9 @@ namespace VividRP.Runtime
             private void CompleteRequestsReadback(AsyncGPUReadbackRequest request)
             {
                 RequestReadbackPending = false;
-                if (!request.hasError && RequestsReadbackData.IsCreated)
+                CompletedRequestsValid = !request.hasError && RequestsReadbackData.IsCreated;
+                if (!CompletedRequestsValid)
                 {
-                    EnsureCompletedRequestCapacity(RequestsReadbackData.Length);
-                    RequestsReadbackData.CopyTo(CompletedRequests);
-                }
-                else
-                {
-                    CompletedRequests = Array.Empty<ulong>();
                     CompletedCount = 0u;
                     CompletedFallbackSampleCount = 0;
                 }
@@ -577,18 +495,6 @@ namespace VividRP.Runtime
                 }
 
                 CompleteReadbackIfReady();
-            }
-
-            private void EnsureCompletedRequestCapacity(int capacity)
-            {
-                if (capacity <= 0)
-                {
-                    CompletedRequests = Array.Empty<ulong>();
-                    return;
-                }
-
-                if (CompletedRequests.Length != capacity)
-                    CompletedRequests = new ulong[capacity];
             }
 
             private void DisposeReadbackData()
@@ -721,13 +627,16 @@ namespace VividRP.Runtime
                         continue;
 
                     int completedRequestCount = SaturatingUIntToInt(pair.CompletedCount);
-                    int requestCount = Mathf.Min(pair.CompletedRequests.Length, completedRequestCount);
-                    int overflowCount = Mathf.Max(0, completedRequestCount - pair.CompletedRequests.Length);
+                    int requestCapacity = pair.CompletedRequestsValid && pair.RequestsReadbackData.IsCreated
+                        ? pair.RequestsReadbackData.Length
+                        : 0;
+                    int requestCount = Mathf.Min(requestCapacity, completedRequestCount);
+                    int overflowCount = Mathf.Max(0, completedRequestCount - requestCapacity);
                     int fallbackSampleCount = pair.CompletedFallbackSampleCount;
                     output.Add(new VirtualTextureFeedbackBatch(
                         pair.LastViewId,
                         pair.LastCameraType,
-                        pair.CompletedRequests,
+                        pair.RequestsReadbackData,
                         requestCount,
                         pair.ScheduledFrameIndex,
                         overflowCount,
@@ -739,6 +648,7 @@ namespace VividRP.Runtime
                                                       && fallbackSampleCount == 0;
                     m_LastCompletedReadbackSignature = pair.LastViewSignature;
                     pair.HasCompletedReadback = false;
+                    pair.CompletedRequestsValid = false;
                     pair.CompletedCount = 0u;
                     pair.CompletedFallbackSampleCount = 0;
                 }
@@ -875,6 +785,7 @@ namespace VividRP.Runtime
             pair.ReadbackPending = true;
             pair.RequestReadbackPending = true;
             pair.CounterReadbackPending = true;
+            pair.CompletedRequestsValid = false;
 
             pair.RequestsReadbackRequest = AsyncGPUReadback.RequestIntoNativeArray(
                 ref pair.RequestsReadbackData,

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
 
@@ -17,14 +18,12 @@ namespace VividRP.Runtime
         private static readonly VirtualTextureFeedbackCameraSystem s_FeedbackCameraSystem = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_CompletedReadbacks = new();
         private static readonly List<VirtualTextureFeedbackBatch> s_InjectedReadbacks = new();
-        private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();
-        private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();
-        private static readonly Dictionary<int, List<VirtualTextureAggregatedFeedbackRequest>> s_GroupedRequests = new();
         private static readonly Dictionary<FeedbackMotionKey, FeedbackMotionState> s_FeedbackMotionStates = new();
         private static readonly Dictionary<int, Vector2Int> s_PrefetchBiasBySpace = new();
         private static readonly List<FeedbackMotionKey> s_FeedbackMotionKeysToRemove = new();
         private static readonly UploadCommitterResolver s_UploadCommitterResolver = new();
         private static VTUploadScheduler s_UploadScheduler = new();
+        private static VTFeedbackNativeAggregator s_FeedbackAggregator;
 
         private static int s_NextSpaceId = 1;
         private static int s_NextAllocationId = 1;
@@ -80,6 +79,7 @@ namespace VividRP.Runtime
 
         protected override void OnInitialize()
         {
+            s_FeedbackAggregator = new VTFeedbackNativeAggregator();
         }
 
         protected override void OnDeinitialize()
@@ -99,9 +99,8 @@ namespace VividRP.Runtime
             s_ProducerRegistry.Dispose();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
-            s_AggregatedRequests.Clear();
-            ClearGroupedRequests();
-            s_GroupedRequests.Clear();
+            s_FeedbackAggregator?.Dispose();
+            s_FeedbackAggregator = null;
             s_FeedbackMotionStates.Clear();
             s_PrefetchBiasBySpace.Clear();
             s_FeedbackMotionKeysToRemove.Clear();
@@ -311,25 +310,16 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackAggregateMarker.Auto())
             {
-                VirtualTextureFeedbackProcessor.Aggregate(
+                s_FeedbackAggregator.Aggregate(
                     s_CompletedReadbacks,
-                    s_AggregationScratch,
-                    s_AggregatedRequests,
-                    cachePriorityViewId);
-            }
-
-            int deduplicatedRequestCount = s_AggregatedRequests.Count;
-            int activeViewDeduplicatedRequestCount;
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackCountActiveViewMarker.Auto())
-            {
-                activeViewDeduplicatedRequestCount = CountRequestsFromView(
-                    s_AggregatedRequests,
+                    cachePriorityViewId,
                     activeViewId,
                     activeCameraType);
             }
 
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackGroupBySpaceMarker.Auto())
-                GroupRequestsBySpace(s_AggregatedRequests);
+            int deduplicatedRequestCount = s_FeedbackAggregator.AggregatedRequests.Length;
+            int activeViewDeduplicatedRequestCount = s_FeedbackAggregator.ActiveViewRequestCount;
+
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrefetchBiasMarker.Auto())
                 ResolvePrefetchBiasBySpace(cachePriorityViewId);
 
@@ -352,10 +342,16 @@ namespace VividRP.Runtime
                 {
                     using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyProcessRequestsMarker.Auto())
                     {
-                        if (s_GroupedRequests.TryGetValue(addressSpace.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
+                        if (s_FeedbackAggregator.TryGetRequestsForSpace(
+                                addressSpace.SpaceId,
+                                out NativeSlice<VirtualTextureAggregatedFeedbackRequest> spaceRequests))
+                        {
                             residencyResult = addressSpace.ProcessRequests(spaceRequests, cachePriorityViewId, prefetchBias, frameIndex);
+                        }
                         else
-                            residencyResult = addressSpace.ProcessRequests(null, cachePriorityViewId, prefetchBias, frameIndex);
+                        {
+                            residencyResult = addressSpace.ProcessRequests(default, cachePriorityViewId, prefetchBias, frameIndex);
+                        }
                     }
 
                     evictionCount += residencyResult.EvictionCount;
@@ -389,8 +385,7 @@ namespace VividRP.Runtime
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureCleanupMarker.Auto())
             {
-                ClearGroupedRequests();
-                s_AggregatedRequests.Clear();
+                s_FeedbackAggregator.Clear();
                 s_CompletedReadbacks.Clear();
                 s_PrefetchBiasBySpace.Clear();
             }
@@ -1053,8 +1048,6 @@ namespace VividRP.Runtime
             s_FeedbackCameraSystem.RemoveSpaceState(spaceId);
             RemoveQueuedFeedbackForSpace(s_CompletedReadbacks, spaceId);
             RemoveQueuedFeedbackForSpace(s_InjectedReadbacks, spaceId);
-            s_AggregatedRequests.RemoveAll(request => request.SpaceId == spaceId);
-            s_GroupedRequests.Remove(spaceId);
             RemoveFeedbackMotionStateForSpace(spaceId);
         }
 
@@ -1118,13 +1111,13 @@ namespace VividRP.Runtime
             for (int batchIndex = batches.Count - 1; batchIndex >= 0; batchIndex--)
             {
                 VirtualTextureFeedbackBatch batch = batches[batchIndex];
-                int requestCount = Mathf.Min(batch.RequestCount, batch.Requests.Length);
+                int requestCount = Mathf.Min(batch.RequestCount, batch.RequestCapacity);
                 int keptCount = 0;
                 ulong[] keptRequests = null;
 
                 for (int requestIndex = 0; requestIndex < requestCount; requestIndex++)
                 {
-                    ulong key = batch.Requests[requestIndex];
+                    ulong key = batch.GetRequest(requestIndex);
                     VirtualTextureFeedbackProcessor.DecodeKey(
                         key,
                         out int requestSpaceId,
@@ -1158,42 +1151,24 @@ namespace VividRP.Runtime
             }
         }
 
-        private static void GroupRequestsBySpace(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests)
-        {
-            ClearGroupedRequests();
-            if (aggregatedRequests == null)
-                return;
-
-            for (int requestIndex = 0; requestIndex < aggregatedRequests.Count; requestIndex++)
-            {
-                VirtualTextureAggregatedFeedbackRequest request = aggregatedRequests[requestIndex];
-                if (!s_PageTableSpaces.TryGetValue(request.SpaceId, out VTPageTableSpace addressSpace))
-                    continue;
-
-                if (!VirtualTextureSpaceUtility.IsCoordValid(addressSpace.Descriptor, request.PageCoord))
-                    continue;
-
-                if (!s_GroupedRequests.TryGetValue(request.SpaceId, out List<VirtualTextureAggregatedFeedbackRequest> requests))
-                {
-                    requests = new List<VirtualTextureAggregatedFeedbackRequest>();
-                    s_GroupedRequests.Add(request.SpaceId, requests);
-                }
-
-                requests.Add(request);
-            }
-        }
-
         private static void ResolvePrefetchBiasBySpace(VirtualTextureViewId viewId)
         {
             s_PrefetchBiasBySpace.Clear();
-            foreach (KeyValuePair<int, List<VirtualTextureAggregatedFeedbackRequest>> pair in s_GroupedRequests)
+            foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
             {
-                List<VirtualTextureAggregatedFeedbackRequest> requests = pair.Value;
-                if (requests == null || requests.Count == 0)
+                if (!s_FeedbackAggregator.TryGetRequestsForSpace(
+                        pair.Key,
+                        out NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests)
+                    || requests.Length == 0
+                    || !TryComputeFeedbackCentroid(
+                        requests,
+                        pair.Value.Descriptor,
+                        out Vector2 centroid))
+                {
                     continue;
+                }
 
                 FeedbackMotionKey key = new(pair.Key, viewId);
-                Vector2 centroid = ComputeFeedbackCentroid(requests);
                 Vector2Int bias = Vector2Int.zero;
                 if (s_FeedbackMotionStates.TryGetValue(key, out FeedbackMotionState previousState))
                     bias = QuantizePrefetchBias(centroid - previousState.Centroid);
@@ -1204,13 +1179,19 @@ namespace VividRP.Runtime
             }
         }
 
-        private static Vector2 ComputeFeedbackCentroid(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests)
+        private static bool TryComputeFeedbackCentroid(
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
+            in VirtualTextureSpaceDesc desc,
+            out Vector2 centroid)
         {
             Vector2 weightedSum = Vector2.zero;
             int totalWeight = 0;
-            for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+            for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
             {
                 VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
+                if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                    continue;
+
                 int mipScale = 1 << Mathf.Clamp(request.PageCoord.Mip, 0, 20);
                 int weight = Mathf.Max(1, request.HitCount);
                 weightedSum += new Vector2(
@@ -1219,7 +1200,8 @@ namespace VividRP.Runtime
                 totalWeight += weight;
             }
 
-            return totalWeight > 0 ? weightedSum / totalWeight : Vector2.zero;
+            centroid = totalWeight > 0 ? weightedSum / totalWeight : Vector2.zero;
+            return totalWeight > 0;
         }
 
         private static Vector2Int QuantizePrefetchBias(Vector2 delta)
@@ -1234,12 +1216,6 @@ namespace VividRP.Runtime
             return new Vector2Int(x, y);
         }
 
-        private static void ClearGroupedRequests()
-        {
-            foreach (KeyValuePair<int, List<VirtualTextureAggregatedFeedbackRequest>> pair in s_GroupedRequests)
-                pair.Value.Clear();
-        }
-
         private static bool IsBatchFromView(
             in VirtualTextureFeedbackBatch batch,
             VirtualTextureViewId viewId,
@@ -1252,28 +1228,6 @@ namespace VividRP.Runtime
                 ? batch.ViewId.Equals(viewId)
                   || (!batch.ViewId.IsValid && batch.CameraType == cameraType)
                 : batch.CameraType == viewId.CameraType;
-        }
-
-        private static int CountRequestsFromView(
-            IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
-            VirtualTextureViewId viewId,
-            CameraType cameraType)
-        {
-            if (requests == null)
-                return 0;
-
-            int count = 0;
-            for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
-            {
-                VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
-                if ((viewId.IsValid && request.ViewId.Equals(viewId))
-                    || (!request.ViewId.IsValid && request.ViewId.CameraType == cameraType))
-                {
-                    count += 1;
-                }
-            }
-
-            return count;
         }
 
         private static VirtualTextureViewId ResolveCachePriorityViewId(

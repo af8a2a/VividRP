@@ -878,20 +878,25 @@ namespace VividRP.Editor.Tests
         {
             string systemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
             string feedbackSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureFeedback.cs"));
+            string nativeAggregatorSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTFeedbackNativeAggregator.cs"));
             string debugStatsSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTDebugStats.cs"));
             string addressSpaceSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTAddressSpace.cs"));
             string uploadSchedulerSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VTUploadScheduler.cs"));
 
-            Assert.That(systemSource, Does.Contain("private static readonly VirtualTextureFeedbackProcessor.Scratch s_AggregationScratch = new();"));
-            Assert.That(systemSource, Does.Contain("private static readonly List<VirtualTextureAggregatedFeedbackRequest> s_AggregatedRequests = new();"));
-            Assert.That(systemSource, Does.Contain("VirtualTextureFeedbackProcessor.Aggregate("));
+            Assert.That(systemSource, Does.Contain("private static VTFeedbackNativeAggregator s_FeedbackAggregator;"));
+            Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Aggregate("));
             Assert.That(systemSource, Does.Contain("cachePriorityViewId);"));
-            Assert.That(systemSource, Does.Contain("ClearGroupedRequests();"));
+            Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Clear();"));
+            Assert.That(systemSource, Does.Contain("out NativeSlice<VirtualTextureAggregatedFeedbackRequest> spaceRequests"));
             Assert.That(systemSource, Does.Contain("VirtualTextureViewId.FromCameraData(cameraData);"));
             Assert.That(systemSource, Does.Not.Contain("s_AddressSpaces.Values"));
-            Assert.That(systemSource, Does.Not.Contain("s_GroupedRequests.Values"));
-            Assert.That(feedbackSource, Does.Contain("internal sealed class Scratch"));
-            Assert.That(feedbackSource, Does.Contain("private static readonly IComparer<VirtualTextureAggregatedFeedbackRequest> s_RequestComparer = AggregatedRequestComparer.Instance;"));
+            Assert.That(systemSource, Does.Not.Contain("s_GroupedRequests"));
+            Assert.That(systemSource, Does.Not.Contain("s_AggregatedRequests"));
+            Assert.That(feedbackSource, Does.Not.Contain("internal sealed class Scratch"));
+            Assert.That(nativeAggregatorSource, Does.Contain("NativeList<VirtualTextureAggregatedFeedbackRequest>"));
+            Assert.That(nativeAggregatorSource, Does.Contain("SortJobDefer"));
+            Assert.That(nativeAggregatorSource, Does.Contain("[BurstCompile]"));
+            Assert.That(nativeAggregatorSource, Does.Contain("VTFeedbackAggregateInlineJob"));
             Assert.That(feedbackSource, Does.Contain("internal Dictionary<Camera, VirtualTextureFeedbackCameraState> EnumerateStates()"));
             Assert.That(feedbackSource, Does.Contain("internal Dictionary<int, VirtualTextureFeedbackBufferState> EnumerateSpaceStates()"));
             Assert.That(feedbackSource, Does.Contain("m_ZeroCounterData = new NativeArray<uint>("));
@@ -901,6 +906,9 @@ namespace VividRP.Editor.Tests
             Assert.That(feedbackSource, Does.Contain("AsyncGPUReadback.RequestIntoNativeArray("));
             Assert.That(feedbackSource, Does.Contain("ref pair.RequestsReadbackData"));
             Assert.That(feedbackSource, Does.Contain("ref pair.CounterReadbackData"));
+            Assert.That(feedbackSource, Does.Contain("NativeArray<ulong> NativeRequests"));
+            Assert.That(feedbackSource, Does.Not.Contain("RequestsReadbackData.CopyTo"));
+            Assert.That(feedbackSource, Does.Not.Contain("ulong[] CompletedRequests"));
             Assert.That(feedbackSource, Does.Not.Contain("Action<AsyncGPUReadbackRequest>"));
             Assert.That(feedbackSource, Does.Not.Contain("ReadbackCallback"));
             Assert.That(feedbackSource, Does.Not.Contain("request => HandleRequestsReadback"));

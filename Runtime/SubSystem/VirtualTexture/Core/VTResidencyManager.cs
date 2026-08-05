@@ -494,7 +494,7 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
             int spaceId,
-            IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests,
+            NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
             Vector2Int prefetchBias,
             int frameIndex)
@@ -507,7 +507,7 @@ namespace VividRP.Runtime
             int prefetchRequestCount = 0;
             bool pageTableChanged = false;
 
-            if (requests == null || requests.Count == 0)
+            if (requests.Length == 0)
             {
                 m_LastClassificationUsedParallelJob = false;
                 return new VTResidencyProcessResult(evictionCount, pageTableChanged);
@@ -518,7 +518,7 @@ namespace VividRP.Runtime
                 ClassifyRequests(requests);
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyApplyMarker.Auto())
                 {
-                    for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+                    for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
                     {
                         VTResidencyClassificationResult classification = m_ClassificationResults[requestIndex];
                         if (classification.Classification == VTResidencyRequestClassification.Invalid)
@@ -551,7 +551,7 @@ namespace VividRP.Runtime
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPrefetchMarker.Auto())
                 {
-                    for (int requestIndex = 0; requestIndex < requests.Count; requestIndex++)
+                    for (int requestIndex = 0; requestIndex < requests.Length; requestIndex++)
                     {
                         VirtualTextureAggregatedFeedbackRequest request = requests[requestIndex];
                         if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
@@ -762,9 +762,9 @@ namespace VividRP.Runtime
             return viewId.IsValid || viewId.IsCameraTypeOnly;
         }
 
-        private void ClassifyRequests(IReadOnlyList<VirtualTextureAggregatedFeedbackRequest> requests)
+        private void ClassifyRequests(NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests)
         {
-            int requestCount = requests.Count;
+            int requestCount = requests.Length;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationMarker.Auto())
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyClassificationPrepareMarker.Auto())

@@ -164,7 +164,11 @@ namespace VividRP.Runtime
         void RetireRequests(IReadOnlyList<VTRequest> liveRequests);
     }
 
-    internal interface IVTPageFinalizer : IDisposable
+    internal interface IVTPageUploadFinalizer : IDisposable
+    {
+    }
+
+    internal interface IVTPageFinalizer : IVTPageUploadFinalizer
     {
         void FinalizeRender(CommandBuffer cmd);
 
@@ -182,9 +186,16 @@ namespace VividRP.Runtime
             Color32[] scratchPixels);
     }
 
+    internal interface IVTGpuPageFinalizer : IVTPageUploadFinalizer
+    {
+        int LayerCount { get; }
+
+        void RecordGpuUpload(CommandBuffer cmd, RenderTexture stagingTexture, int baseSlice);
+    }
+
     internal readonly struct VTPageUploadPayload
     {
-        internal VTPageUploadPayload(in VTRequest request, IVTPageFinalizer finalizer)
+        internal VTPageUploadPayload(in VTRequest request, IVTPageUploadFinalizer finalizer)
         {
             Request = request;
             Finalizer = finalizer ?? throw new ArgumentNullException(nameof(finalizer));
@@ -192,9 +203,9 @@ namespace VividRP.Runtime
 
         internal VTRequest Request { get; }
 
-        internal IVTPageFinalizer Finalizer { get; }
+        internal IVTPageUploadFinalizer Finalizer { get; }
 
-        internal bool IsValid => Finalizer != null;
+        internal bool IsValid => Finalizer is IVTPageFinalizer or IVTGpuPageFinalizer;
     }
 
     internal interface IVTPageProducer : VTProducer
@@ -205,7 +216,7 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             in VTRequest request);
 
-        IVTPageFinalizer ProducePageData(
+        IVTPageUploadFinalizer ProducePageData(
             in VirtualTextureSpaceDesc desc,
             in VTRequest request);
 
@@ -334,7 +345,7 @@ namespace VividRP.Runtime
                 : VTPageRequestStatus.Invalid;
         }
 
-        public IVTPageFinalizer ProducePageData(
+        public IVTPageUploadFinalizer ProducePageData(
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {

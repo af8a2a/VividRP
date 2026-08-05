@@ -97,6 +97,8 @@ MonoBehaviour:
     ResourceObject: {fileID: 4800000, guid: 164ed41d2ffc5c042a908c9741e4b9c7, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/FixupVisibleMeshletIndirectDrawArgs
     ResourceObject: {fileID: 7200000, guid: 93ae7629a5b753742b1f9d6722e4c3c2, type: 3}
+  - ResourceName: Shaders/Core/Private/GPUDriven/GPUDrivenVirtualTexturePageProducer.compute
+    ResourceObject: {fileID: 7200000, guid: b9eff6517b7029546a3c3663bfd1aeb3, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/GPUInstanceCulling
     ResourceObject: {fileID: 7200000, guid: d516b15c49ff807418f906def327fb32, type: 3}
   - ResourceName: Shaders/Core/Private/GPUDriven/GPUMeshletCulling

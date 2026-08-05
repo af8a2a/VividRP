@@ -238,7 +238,7 @@ namespace VividRP.Runtime
             return VTPageRequestStatus.Pending;
         }
 
-        public IVTPageFinalizer ProducePageData(
+        public IVTPageUploadFinalizer ProducePageData(
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {

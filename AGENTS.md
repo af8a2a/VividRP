@@ -63,7 +63,7 @@
 - Keep `ResourceEntry` serialization compatibility in mind when renaming fields; `ResourceObject` already carries a migration attribute from the older `Asset` name.
 
 ## Testing Guidelines
-1. Validate C# and shader changes with focused, non-Unity-test checks whenever possible. Use .NET assembly compilation for C# code, MCP-based Unity console inspection, DXC shader compilation, or equivalent targeted checks to confirm the result of a code change.
+1. Validate C# and shader changes with focused, non-Unity-test checks whenever possible. Use C# Roslyn or .NET assembly compilation for C# code, MCP-based Unity console inspection, DXC shader compilation, or equivalent targeted checks to confirm the result of a code change.
 2. Run Unity Test Framework unit tests only when Unity Editor is not running. If an open Unity Editor prevents `-batchmode` tests from running, treat that as an active interactive user session: do not use computer-use, UI automation, or similar means to start Unity tests proactively; instead, state in the final task handoff that the user should run the relevant Unity tests manually.
 
 ## Commit & Pull Request Guidelines

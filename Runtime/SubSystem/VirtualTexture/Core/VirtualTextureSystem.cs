@@ -374,6 +374,9 @@ namespace VividRP.Runtime
             int inFlightUploadBatchCount = s_UploadScheduler.InFlightBatchCount;
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
+            int cpuProducedPageCount = s_UploadScheduler.LastCpuProducedPageCount;
+            int gpuProducedPageCount = s_UploadScheduler.LastGpuProducedPageCount;
+            int gpuDispatchCount = s_UploadScheduler.LastGpuDispatchCount;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
             {
                 foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
@@ -504,7 +507,10 @@ namespace VividRP.Runtime
                     pendingMipGapSum,
                     pendingMipGapMax,
                     pendingMipGapSampleCount,
-                    prefetchRequestCount);
+                    prefetchRequestCount,
+                    cpuProducedPageCount,
+                    gpuProducedPageCount,
+                    gpuDispatchCount);
                 VirtualTextureStatsRegistry.Report(globalStats);
             }
 
@@ -547,7 +553,10 @@ namespace VividRP.Runtime
                         pendingMipGapSum,
                         pendingMipGapMax,
                         pendingMipGapSampleCount,
-                        prefetchRequestCount);
+                        prefetchRequestCount,
+                        cpuProducedPageCount,
+                        gpuProducedPageCount,
+                        gpuDispatchCount);
                     VirtualTextureStatsRegistry.ReportView(viewStats);
                 }
             }
@@ -643,6 +652,16 @@ namespace VividRP.Runtime
                    && addressSpace.TryMakePageResident(coord, locked, frameIndex);
         }
 
+        internal static bool TryQueuePageResident(
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            bool locked = true,
+            int frameIndex = 0)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.TryQueuePageResident(coord, locked, frameIndex);
+        }
+
         internal static void InjectCompletedReadbackForTesting(CameraType cameraType, params ulong[] requestKeys)
         {
             InjectCompletedReadbackStatsForTesting(
@@ -715,6 +734,14 @@ namespace VividRP.Runtime
         }
 
         internal static bool TryGetPageTableEntryForTesting(
+            int spaceId,
+            in VirtualTexturePageCoord coord,
+            out VirtualTexturePageTableEntry entry)
+        {
+            return TryGetPageTableEntry(spaceId, coord, out entry);
+        }
+
+        internal static bool TryGetPageTableEntry(
             int spaceId,
             in VirtualTexturePageCoord coord,
             out VirtualTexturePageTableEntry entry)
@@ -824,6 +851,21 @@ namespace VividRP.Runtime
         internal static void SetUploadMemoryBudgetForTesting(int maxUploadBytesPerFrame)
         {
             s_UploadScheduler.MaxUploadBytesPerFrame = maxUploadBytesPerFrame;
+        }
+
+        internal static int GetGpuUploadStagingTextureCountForTesting()
+        {
+            return s_UploadScheduler.GpuStagingTextureCount;
+        }
+
+        internal static int GetCpuUploadStagingTextureCountForTesting()
+        {
+            return s_UploadScheduler.CpuStagingTextureCount;
+        }
+
+        internal static int GetUploadScratchPixelCountForTesting()
+        {
+            return s_UploadScheduler.ScratchPixelCount;
         }
 
         private sealed class UploadCommitterResolver : IVTUploadRequestCommitterResolver

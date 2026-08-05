@@ -201,7 +201,7 @@ namespace VividRP.Editor.Tests
                 expectedNormalProducer.WritePage(desc, request, expectedNormalPixels);
 
                 var producer = new VividVirtualTextureAssetProducer(asset);
-                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                IVTPageFinalizer finalizer = (IVTPageFinalizer)producer.ProducePageData(desc, request);
                 Assert.That(finalizer, Is.InstanceOf<IVTMultiLayerPageFinalizer>());
                 var multiLayerFinalizer = (IVTMultiLayerPageFinalizer)finalizer;
                 Assert.That(multiLayerFinalizer.LayerCount, Is.EqualTo(2));
@@ -298,7 +298,7 @@ namespace VividRP.Editor.Tests
 
                 completionSource.SetResult(expectedBytes);
                 Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Available));
-                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                IVTPageFinalizer finalizer = (IVTPageFinalizer)producer.ProducePageData(desc, request);
                 Assert.That(finalizer, Is.Not.Null);
                 Assert.That(producer.PendingStreamTaskCountForTesting, Is.EqualTo(0));
 
@@ -431,7 +431,7 @@ namespace VividRP.Editor.Tests
                 var producer = new VividVirtualTextureAssetProducer(asset);
                 Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Available));
 
-                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                IVTPageFinalizer finalizer = (IVTPageFinalizer)producer.ProducePageData(desc, request);
                 Assert.That(finalizer, Is.Not.Null);
 
                 var stagingTexture = new Texture2DArray(

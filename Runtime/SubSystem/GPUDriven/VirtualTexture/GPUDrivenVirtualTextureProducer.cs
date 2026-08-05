@@ -12,6 +12,20 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int MaskLayerIndex = 2;
         internal const int LayerCount = 3;
 
+        private const int ThreadGroupSize = 8;
+
+        private static readonly int s_BaseColorTextureId = Shader.PropertyToID("_BaseColorTexture");
+        private static readonly int s_NormalTextureId = Shader.PropertyToID("_NormalTexture");
+        private static readonly int s_MaskTextureId = Shader.PropertyToID("_MaskTexture");
+        private static readonly int s_OutputPagesId = Shader.PropertyToID("_OutputPages");
+        private static readonly int s_PageCoordId = Shader.PropertyToID("_VTPageCoord");
+        private static readonly int s_EntryPageRegionId = Shader.PropertyToID("_VTEntryPageRegion");
+        private static readonly int s_PageLayoutId = Shader.PropertyToID("_VTPageLayout");
+        private static readonly int s_SourceMipOffsetsId = Shader.PropertyToID("_VTSourceMipOffsets");
+        private static readonly int s_BaseColorFallbackId = Shader.PropertyToID("_VTBaseColorFallback");
+        private static readonly int s_NormalFallbackId = Shader.PropertyToID("_VTNormalFallback");
+        private static readonly int s_MaskFallbackId = Shader.PropertyToID("_VTMaskFallback");
+
         private sealed class AtlasEntry
         {
             internal AtlasEntry(
@@ -26,18 +40,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 PageRegion = pageRegion;
                 MaxMip = maxMip;
                 Repeat = repeat;
-                Sources = new[]
-                {
-                    CreateSource(baseColor),
-                    CreateSource(normal),
-                    CreateSource(mask),
-                };
+                Sources = new[] { baseColor, normal, mask };
                 SourceMipOffsets = new[]
                 {
                     ComputeSourceMipOffset(baseColor, pageRegion.width, pageSize),
                     ComputeSourceMipOffset(normal, pageRegion.width, pageSize),
                     ComputeSourceMipOffset(mask, pageRegion.width, pageSize),
                 };
+                PresenceMask = (baseColor != null ? 1 : 0)
+                               | (normal != null ? 2 : 0)
+                               | (mask != null ? 4 : 0);
             }
 
             internal RectInt PageRegion { get; }
@@ -46,67 +58,37 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             internal bool Repeat { get; }
 
-            internal VTTexture2DPageProducer[] Sources { get; }
+            internal Texture2D[] Sources { get; }
 
             internal int[] SourceMipOffsets { get; }
 
-            private static VTTexture2DPageProducer CreateSource(Texture2D texture)
-            {
-                return texture != null ? new VTTexture2DPageProducer(texture) : null;
-            }
-
-            private static int ComputeSourceMipOffset(Texture2D texture, int pageCount, int pageSize)
-            {
-                if (texture == null)
-                    return 0;
-
-                int virtualDimension = Mathf.Max(1, pageCount * pageSize);
-                int sourceDimension = Mathf.Max(1, Mathf.Max(texture.width, texture.height));
-                float ratio = (float) sourceDimension / virtualDimension;
-                return Mathf.RoundToInt(Mathf.Log(ratio, 2.0f));
-            }
+            internal int PresenceMask { get; }
         }
 
-        private sealed class Finalizer : IVTMultiLayerPageFinalizer
+        private sealed class Finalizer : IVTGpuPageFinalizer
         {
             private readonly GPUDrivenVirtualTextureProducer m_Producer;
+            private readonly AtlasEntry m_Entry;
             private readonly VirtualTextureSpaceDesc m_Desc;
             private readonly VTRequest m_Request;
 
             internal Finalizer(
                 GPUDrivenVirtualTextureProducer producer,
+                AtlasEntry entry,
                 in VirtualTextureSpaceDesc desc,
                 in VTRequest request)
             {
                 m_Producer = producer;
+                m_Entry = entry;
                 m_Desc = desc;
                 m_Request = request;
             }
 
             public int LayerCount => GPUDrivenVirtualTextureProducer.LayerCount;
 
-            public void FinalizeRender(CommandBuffer cmd)
+            public void RecordGpuUpload(CommandBuffer cmd, RenderTexture stagingTexture, int baseSlice)
             {
-            }
-
-            public void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels)
-            {
-                FinalizeUploadLayer(stagingTexture, slice, BaseColorLayerIndex, scratchPixels);
-            }
-
-            public void FinalizeUploadLayer(
-                Texture2DArray stagingTexture,
-                int slice,
-                int layerIndex,
-                Color32[] scratchPixels)
-            {
-                if (stagingTexture == null)
-                    throw new ArgumentNullException(nameof(stagingTexture));
-                if (scratchPixels == null)
-                    throw new ArgumentNullException(nameof(scratchPixels));
-
-                m_Producer.WritePageLayer(m_Desc, m_Request, layerIndex, scratchPixels);
-                stagingTexture.SetPixels32(scratchPixels, slice, 0);
+                m_Producer.RecordPageUpload(cmd, stagingTexture, baseSlice, m_Entry, m_Desc, m_Request);
             }
 
             public void Dispose()
@@ -116,12 +98,24 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         private readonly List<AtlasEntry> m_Entries = new();
         private readonly AtlasEntry[,] m_EntriesByBasePage;
+        private readonly ComputeShader m_ComputeShader;
+        private readonly int m_Kernel;
 
-        internal GPUDrivenVirtualTextureProducer(string name, in VirtualTextureSpaceDesc desc)
+        internal GPUDrivenVirtualTextureProducer(
+            string name,
+            in VirtualTextureSpaceDesc desc,
+            ComputeShader computeShader)
         {
             Name = !string.IsNullOrWhiteSpace(name)
                 ? name
                 : throw new ArgumentException("Producer name must be non-empty.", nameof(name));
+            m_ComputeShader = computeShader != null
+                ? computeShader
+                : throw new ArgumentNullException(nameof(computeShader));
+            if (!m_ComputeShader.HasKernel("CS"))
+                throw new ArgumentException("GPUDriven VT page producer compute shader is missing the 'CS' kernel.", nameof(computeShader));
+
+            m_Kernel = m_ComputeShader.FindKernel("CS");
             ProducerDesc = VTProducerDesc.FromSpaceDesc(Name, desc);
             m_EntriesByBasePage = new AtlasEntry[desc.VirtualPageCountX, desc.VirtualPageCountY];
         }
@@ -145,13 +139,21 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 throw new ArgumentException("GPUDriven VT entries must be non-empty square page regions.", nameof(pageRegion));
             if (maxMip < 0)
                 throw new ArgumentOutOfRangeException(nameof(maxMip));
-
             if (pageRegion.xMin < 0
                 || pageRegion.yMin < 0
                 || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
                 || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
             {
                 throw new ArgumentOutOfRangeException(nameof(pageRegion));
+            }
+
+            for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
+            {
+                for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
+                {
+                    if (m_EntriesByBasePage[pageX, pageY] != null)
+                        throw new InvalidOperationException("GPUDriven VT atlas entries must not overlap.");
+                }
             }
 
             var entry = new AtlasEntry(
@@ -165,38 +167,60 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
             {
                 for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
-                {
-                    if (m_EntriesByBasePage[pageX, pageY] != null)
-                        throw new InvalidOperationException("GPUDriven VT atlas entries must not overlap.");
-                }
-            }
-
-            for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
-            {
-                for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
                     m_EntriesByBasePage[pageX, pageY] = entry;
             }
 
             m_Entries.Add(entry);
         }
 
+        internal bool UnregisterEntry(RectInt pageRegion)
+        {
+            if (pageRegion.width <= 0
+                || pageRegion.xMin < 0
+                || pageRegion.yMin < 0
+                || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
+                || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
+            {
+                return false;
+            }
+
+            AtlasEntry entry = m_EntriesByBasePage[pageRegion.xMin, pageRegion.yMin];
+            if (entry == null || !entry.PageRegion.Equals(pageRegion))
+                return false;
+
+            for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
+            {
+                for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
+                {
+                    if (ReferenceEquals(m_EntriesByBasePage[pageX, pageY], entry))
+                        m_EntriesByBasePage[pageX, pageY] = null;
+                }
+            }
+
+            return m_Entries.Remove(entry);
+        }
+
         public VTPageRequestStatus RequestPageData(
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
-            return VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord)
+            if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
+                return VTPageRequestStatus.Invalid;
+
+            return FindEntry(request.PageCoord) != null
                 ? VTPageRequestStatus.Available
                 : VTPageRequestStatus.Invalid;
         }
 
-        public IVTPageFinalizer ProducePageData(
+        public IVTPageUploadFinalizer ProducePageData(
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
             if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                 return null;
 
-            return new Finalizer(this, desc, request);
+            AtlasEntry entry = FindEntry(request.PageCoord);
+            return entry != null ? new Finalizer(this, entry, desc, request) : null;
         }
 
         public void GatherTasks(List<IVTPageProducerTask> tasks)
@@ -209,48 +233,90 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
         }
 
-        private void WritePageLayer(
-            in VirtualTextureSpaceDesc desc,
-            in VTRequest request,
-            int layerIndex,
-            Color32[] outputPixels)
+        internal static int ComputeSourceMipOffset(Texture2D texture, int pageCount, int pageSize)
         {
-            if (layerIndex < 0 || layerIndex >= LayerCount)
-                throw new ArgumentOutOfRangeException(nameof(layerIndex));
+            if (texture == null)
+                return 0;
 
-            int physicalPageSize = desc.PhysicalPageSize;
-            int pixelCount = physicalPageSize * physicalPageSize;
-            if (outputPixels.Length < pixelCount)
-                throw new ArgumentException("Output pixel buffer is smaller than the physical VT page.", nameof(outputPixels));
+            int virtualDimension = Mathf.Max(1, pageCount * pageSize);
+            int sourceDimension = Mathf.Max(1, Mathf.Max(texture.width, texture.height));
+            float ratio = (float)sourceDimension / virtualDimension;
+            return Mathf.RoundToInt(Mathf.Log(ratio, 2.0f));
+        }
 
-            AtlasEntry entry = FindEntry(request.PageCoord);
-            VTTexture2DPageProducer source = entry?.Sources[layerIndex];
-            if (entry == null || source == null)
-            {
-                FillFallback(desc.StackDesc.GetLayer(layerIndex).FallbackColor, outputPixels, pixelCount);
-                return;
-            }
+        private void RecordPageUpload(
+            CommandBuffer cmd,
+            RenderTexture stagingTexture,
+            int baseSlice,
+            AtlasEntry entry,
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request)
+        {
+            if (cmd == null)
+                throw new ArgumentNullException(nameof(cmd));
+            if (stagingTexture == null)
+                throw new ArgumentNullException(nameof(stagingTexture));
+
+            Texture2D baseColor = entry.Sources[BaseColorLayerIndex];
+            Texture2D normal = entry.Sources[NormalLayerIndex];
+            Texture2D mask = entry.Sources[MaskLayerIndex];
+            int presenceMask = (baseColor != null ? 1 : 0)
+                               | (normal != null ? 2 : 0)
+                               | (mask != null ? 4 : 0);
+            Texture fallbackTexture = Texture2D.whiteTexture;
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_Kernel,
+                s_BaseColorTextureId,
+                baseColor != null ? baseColor : fallbackTexture);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_Kernel,
+                s_NormalTextureId,
+                normal != null ? normal : fallbackTexture);
+            cmd.SetComputeTextureParam(
+                m_ComputeShader,
+                m_Kernel,
+                s_MaskTextureId,
+                mask != null ? mask : fallbackTexture);
+            cmd.SetComputeTextureParam(m_ComputeShader, m_Kernel, s_OutputPagesId, stagingTexture);
 
             VirtualTexturePageCoord coord = request.PageCoord;
-            int entryPageXAtMip = entry.PageRegion.x >> coord.Mip;
-            int entryPageYAtMip = entry.PageRegion.y >> coord.Mip;
-            int entryPageCountAtMip = Mathf.Max(1, entry.PageRegion.width >> coord.Mip);
-            int localPageX = coord.X - entryPageXAtMip;
-            int localPageY = coord.Y - entryPageYAtMip;
-            int logicalDimension = entryPageCountAtMip * desc.PageSize;
-            int sourceMip = Mathf.Max(0, coord.Mip + entry.SourceMipOffsets[layerIndex]);
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_PageCoordId,
+                new Vector4(coord.X, coord.Y, coord.Mip, baseSlice));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_EntryPageRegionId,
+                new Vector4(entry.PageRegion.x, entry.PageRegion.y, entry.PageRegion.width, entry.MaxMip));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_PageLayoutId,
+                new Vector4(desc.PageSize, desc.BorderSize, desc.PhysicalPageSize, entry.Repeat ? 1.0f : 0.0f));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_SourceMipOffsetsId,
+                new Vector4(
+                    entry.SourceMipOffsets[BaseColorLayerIndex],
+                    entry.SourceMipOffsets[NormalLayerIndex],
+                    entry.SourceMipOffsets[MaskLayerIndex],
+                    presenceMask));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_BaseColorFallbackId,
+                ToVector(desc.StackDesc.GetLayer(BaseColorLayerIndex).FallbackColor));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_NormalFallbackId,
+                ToVector(desc.StackDesc.GetLayer(NormalLayerIndex).FallbackColor));
+            cmd.SetComputeVectorParam(
+                m_ComputeShader,
+                s_MaskFallbackId,
+                ToVector(desc.StackDesc.GetLayer(MaskLayerIndex).FallbackColor));
 
-            for (int y = 0; y < physicalPageSize; y++)
-            {
-                int logicalY = localPageY * desc.PageSize + y - desc.BorderSize;
-                float v = (logicalY + 0.5f) / logicalDimension;
-                for (int x = 0; x < physicalPageSize; x++)
-                {
-                    int logicalX = localPageX * desc.PageSize + x - desc.BorderSize;
-                    float u = (logicalX + 0.5f) / logicalDimension;
-                    outputPixels[y * physicalPageSize + x] = source.SampleSource(sourceMip, u, v, entry.Repeat);
-                }
-            }
+            int groupCount = Mathf.CeilToInt(desc.PhysicalPageSize / (float)ThreadGroupSize);
+            cmd.DispatchCompute(m_ComputeShader, m_Kernel, groupCount, groupCount, 1);
         }
 
         private AtlasEntry FindEntry(in VirtualTexturePageCoord coord)
@@ -269,10 +335,14 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return entry != null && coord.Mip <= entry.MaxMip ? entry : null;
         }
 
-        private static void FillFallback(Color32 fallback, Color32[] outputPixels, int pixelCount)
+        private static Vector4 ToVector(Color32 color)
         {
-            for (int pixelIndex = 0; pixelIndex < pixelCount; pixelIndex++)
-                outputPixels[pixelIndex] = fallback;
+            const float inverseByte = 1.0f / 255.0f;
+            return new Vector4(
+                color.r * inverseByte,
+                color.g * inverseByte,
+                color.b * inverseByte,
+                color.a * inverseByte);
         }
     }
 }

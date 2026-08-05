@@ -701,6 +701,12 @@ namespace VividRP.Runtime
 
         internal int PrefetchRequestCount => m_Stats.PrefetchRequestCount;
 
+        internal int CpuProducedPageCount => m_Stats.CpuProducedPageCount;
+
+        internal int GpuProducedPageCount => m_Stats.GpuProducedPageCount;
+
+        internal int GpuDispatchCount => m_Stats.GpuDispatchCount;
+
         internal bool IsViewSpecific => m_Stats.IsViewSpecific;
 
         internal string ViewLabel => m_Stats.ViewLabel;

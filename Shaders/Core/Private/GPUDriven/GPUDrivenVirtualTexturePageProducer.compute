@@ -1,0 +1,87 @@
+#pragma kernel CS
+
+#pragma use_dxc
+#pragma target 5.0
+
+Texture2D<float4> _BaseColorTexture;
+Texture2D<float4> _NormalTexture;
+Texture2D<float4> _MaskTexture;
+SamplerState sampler_LinearRepeat;
+SamplerState sampler_LinearClamp;
+
+RWTexture2DArray<float4> _OutputPages;
+
+float4 _VTPageCoord;
+float4 _VTEntryPageRegion;
+float4 _VTPageLayout;
+float4 _VTSourceMipOffsets;
+float4 _VTBaseColorFallback;
+float4 _VTNormalFallback;
+float4 _VTMaskFallback;
+
+float4 SampleSource(Texture2D<float4> sourceTexture, float2 uv, float mip, bool repeat)
+{
+    return repeat
+        ? sourceTexture.SampleLevel(sampler_LinearRepeat, uv, mip)
+        : sourceTexture.SampleLevel(sampler_LinearClamp, uv, mip);
+}
+
+float3 EncodeLinearToSRGB(float3 value)
+{
+    value = max(value, 0.0);
+    const float3 threshold = float3(0.0031308, 0.0031308, 0.0031308);
+    const float3 useLowSegment = 1.0 - step(threshold, value);
+    const float3 lowSegment = value * 12.92;
+    const float3 highSegment = 1.055 * pow(value, 1.0 / 2.4) - 0.055;
+    return saturate(lerp(highSegment, lowSegment, useLowSegment));
+}
+
+[numthreads(8, 8, 1)]
+void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
+{
+    const int physicalPageSize = (int)_VTPageLayout.z;
+    if (dispatchThreadID.x >= physicalPageSize || dispatchThreadID.y >= physicalPageSize)
+    {
+        return;
+    }
+
+    const int2 pageCoord = (int2)_VTPageCoord.xy;
+    const int requestMip = (int)_VTPageCoord.z;
+    const int baseSlice = (int)_VTPageCoord.w;
+    const int2 entryOrigin = (int2)_VTEntryPageRegion.xy;
+    const int entryPageCount = (int)_VTEntryPageRegion.z;
+    const int pageSize = (int)_VTPageLayout.x;
+    const int borderSize = (int)_VTPageLayout.y;
+    const bool repeat = _VTPageLayout.w > 0.5;
+
+    const int entryPageCountAtMip = max(1, entryPageCount >> requestMip);
+    const int2 entryOriginAtMip = entryOrigin >> requestMip;
+    const int2 localPage = pageCoord - entryOriginAtMip;
+    const int logicalDimension = entryPageCountAtMip * pageSize;
+    const int2 logicalPixel = localPage * pageSize + (int2)dispatchThreadID.xy - borderSize;
+    const float2 uv = ((float2)logicalPixel + 0.5) / logicalDimension;
+
+    const uint presenceMask = (uint)_VTSourceMipOffsets.w;
+    const float baseColorMip = max(0.0, requestMip + _VTSourceMipOffsets.x);
+    const float normalMip = max(0.0, requestMip + _VTSourceMipOffsets.y);
+    const float maskMip = max(0.0, requestMip + _VTSourceMipOffsets.z);
+
+    float4 baseColor = _VTBaseColorFallback;
+    if ((presenceMask & 1u) != 0u)
+    {
+        baseColor = SampleSource(_BaseColorTexture, uv, baseColorMip, repeat);
+        baseColor.rgb = EncodeLinearToSRGB(baseColor.rgb);
+    }
+
+    const float4 normal = (presenceMask & 2u) != 0u
+        ? SampleSource(_NormalTexture, uv, normalMip, repeat)
+        : _VTNormalFallback;
+    const float4 mask = (presenceMask & 4u) != 0u
+        ? SampleSource(_MaskTexture, uv, maskMip, repeat)
+        : _VTMaskFallback;
+
+    const uint2 outputPixel = dispatchThreadID.xy;
+    _OutputPages[uint3(outputPixel, baseSlice + 0)] = baseColor;
+    _OutputPages[uint3(outputPixel, baseSlice + 1)] = normal;
+    _OutputPages[uint3(outputPixel, baseSlice + 2)] = mask;
+}

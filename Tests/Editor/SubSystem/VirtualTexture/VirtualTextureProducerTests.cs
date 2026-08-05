@@ -164,7 +164,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(producer, Is.Not.Null);
                 Assert.That(producer.RequestPageData(desc, request), Is.EqualTo(VTPageRequestStatus.Available));
 
-                IVTPageFinalizer finalizer = producer.ProducePageData(desc, request);
+                IVTPageFinalizer finalizer = (IVTPageFinalizer)producer.ProducePageData(desc, request);
                 Assert.That(finalizer, Is.Not.Null);
 
                 var stagingTexture = new Texture2DArray(

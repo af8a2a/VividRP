@@ -54,7 +54,7 @@ namespace VividRP.Editor.Tests
                 return Status;
             }
 
-            public IVTPageFinalizer ProducePageData(in VirtualTextureSpaceDesc desc, in VTRequest request)
+            public IVTPageUploadFinalizer ProducePageData(in VirtualTextureSpaceDesc desc, in VTRequest request)
             {
                 ProduceCount += 1;
                 return new SolidColorFinalizer(request);
@@ -108,6 +108,124 @@ namespace VividRP.Editor.Tests
 
             public void Dispose()
             {
+            }
+        }
+
+        private sealed class RecordingCpuFinalizer : IVTPageFinalizer
+        {
+            internal int FinalizeRenderCount { get; private set; }
+
+            internal int FinalizeUploadCount { get; private set; }
+
+            internal bool IsDisposed { get; private set; }
+
+            public void FinalizeRender(CommandBuffer cmd)
+            {
+                FinalizeRenderCount += 1;
+            }
+
+            public void FinalizeUpload(Texture2DArray stagingTexture, int slice, Color32[] scratchPixels)
+            {
+                FinalizeUploadCount += 1;
+                for (int pixelIndex = 0; pixelIndex < scratchPixels.Length; pixelIndex++)
+                    scratchPixels[pixelIndex] = new Color32(16, 32, 48, 255);
+                stagingTexture.SetPixels32(scratchPixels, slice, 0);
+            }
+
+            public void Dispose()
+            {
+                IsDisposed = true;
+            }
+        }
+
+        private sealed class RecordingGpuFinalizer : IVTGpuPageFinalizer
+        {
+            internal RecordingGpuFinalizer(int layerCount)
+            {
+                LayerCount = layerCount;
+            }
+
+            public int LayerCount { get; }
+
+            internal int RecordCount { get; private set; }
+
+            internal int BaseSlice { get; private set; } = -1;
+
+            internal RenderTexture StagingTexture { get; private set; }
+
+            internal bool IsDisposed { get; private set; }
+
+            public void RecordGpuUpload(CommandBuffer cmd, RenderTexture stagingTexture, int baseSlice)
+            {
+                RecordCount += 1;
+                BaseSlice = baseSlice;
+                StagingTexture = stagingTexture;
+            }
+
+            public void Dispose()
+            {
+                IsDisposed = true;
+            }
+        }
+
+        private sealed class RecordingFinalizerProducer : IVTPageProducer
+        {
+            private readonly System.Func<VirtualTexturePageCoord, bool> m_UseGpu;
+            private readonly int m_GpuLayerCount;
+
+            internal RecordingFinalizerProducer(
+                in VirtualTextureSpaceDesc desc,
+                System.Func<VirtualTexturePageCoord, bool> useGpu,
+                int gpuLayerCount = 1)
+            {
+                ProducerDesc = VTProducerDesc.FromSpaceDesc(nameof(RecordingFinalizerProducer), desc);
+                m_UseGpu = useGpu;
+                m_GpuLayerCount = gpuLayerCount;
+            }
+
+            public string Name => nameof(RecordingFinalizerProducer);
+
+            public VTProducerDesc ProducerDesc { get; }
+
+            internal List<RecordingCpuFinalizer> CpuFinalizers { get; } = new();
+
+            internal List<RecordingGpuFinalizer> GpuFinalizers { get; } = new();
+
+            internal List<VirtualTexturePageCoord> ProducedCoords { get; } = new();
+
+            public VTPageRequestStatus RequestPageData(in VirtualTextureSpaceDesc desc, in VTRequest request)
+            {
+                return VTPageRequestStatus.Available;
+            }
+
+            public IVTPageUploadFinalizer ProducePageData(in VirtualTextureSpaceDesc desc, in VTRequest request)
+            {
+                ProducedCoords.Add(request.PageCoord);
+                if (m_UseGpu(request.PageCoord))
+                {
+                    var finalizer = new RecordingGpuFinalizer(m_GpuLayerCount);
+                    GpuFinalizers.Add(finalizer);
+                    return finalizer;
+                }
+
+                var cpuFinalizer = new RecordingCpuFinalizer();
+                CpuFinalizers.Add(cpuFinalizer);
+                return cpuFinalizer;
+            }
+
+            public void GatherTasks(List<IVTPageProducerTask> tasks)
+            {
+            }
+
+            public void CancelRequest(in VirtualTextureSpaceDesc desc, in VTRequest request)
+            {
+            }
+
+            internal void ResetRecords()
+            {
+                CpuFinalizers.Clear();
+                GpuFinalizers.Clear();
+                ProducedCoords.Clear();
             }
         }
 
@@ -289,12 +407,161 @@ namespace VividRP.Editor.Tests
             Assert.That(producer.ProduceCount, Is.EqualTo(3));
             Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(3));
             Assert.That(VirtualTextureStatsRegistry.LastStats.InFlightUploadBatchCount, Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetCpuUploadStagingTextureCountForTesting(), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.Zero);
 
             m_FenceFactory.Handles[0].IsPassed = true;
             UpdateOnce();
 
             Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(0));
             Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(spaceId), Is.EqualTo(4));
+        }
+
+        [Test]
+        public void Uploads_GpuOnlyBatch_RecordsOneDispatchPerPageAndDoesNotAllocateCpuScratch()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("GpuOnly", maxUploadsPerFrame: 2);
+            var producer = new RecordingFinalizerProducer(desc, _ => true);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetRecords();
+
+            IssueFeedback(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0));
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(producer.GpuFinalizers, Has.Count.EqualTo(2));
+            Assert.That(producer.GpuFinalizers[0].RecordCount, Is.EqualTo(1));
+            Assert.That(producer.GpuFinalizers[1].RecordCount, Is.EqualTo(1));
+            Assert.That(
+                new[] { producer.GpuFinalizers[0].BaseSlice, producer.GpuFinalizers[1].BaseSlice },
+                Is.EquivalentTo(new[] { 0, 1 }));
+            Assert.That(producer.GpuFinalizers[0].StagingTexture, Is.SameAs(producer.GpuFinalizers[1].StagingTexture));
+            Assert.That(producer.GpuFinalizers[0].IsDisposed, Is.True);
+            Assert.That(producer.GpuFinalizers[1].IsDisposed, Is.True);
+            Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetCpuUploadStagingTextureCountForTesting(), Is.Zero);
+            Assert.That(VirtualTextureSystem.GetUploadScratchPixelCountForTesting(), Is.Zero);
+
+            VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(stats.GpuProducedPageCount, Is.EqualTo(2));
+            Assert.That(stats.GpuDispatchCount, Is.EqualTo(2));
+            Assert.That(stats.CpuProducedPageCount, Is.Zero);
+
+            UpdateOnce();
+            VirtualTextureStats resetStats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(resetStats.GpuProducedPageCount, Is.Zero);
+            Assert.That(resetStats.GpuDispatchCount, Is.Zero);
+            Assert.That(resetStats.CpuProducedPageCount, Is.Zero);
+        }
+
+        [Test]
+        public void Uploads_MixedCpuAndGpuBatch_UsesPackedSlicesAndReportsBothProducerTypes()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("MixedCpuGpu", maxUploadsPerFrame: 2);
+            var producer = new RecordingFinalizerProducer(desc, coord => coord.X == 1);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetRecords();
+
+            IssueFeedback(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0));
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(producer.CpuFinalizers, Has.Count.EqualTo(1));
+            Assert.That(producer.GpuFinalizers, Has.Count.EqualTo(1));
+            Assert.That(producer.CpuFinalizers[0].FinalizeRenderCount, Is.EqualTo(1));
+            Assert.That(producer.CpuFinalizers[0].FinalizeUploadCount, Is.EqualTo(1));
+            Assert.That(producer.CpuFinalizers[0].IsDisposed, Is.True);
+            Assert.That(producer.GpuFinalizers[0].RecordCount, Is.EqualTo(1));
+            Assert.That(producer.GpuFinalizers[0].BaseSlice, Is.InRange(0, 1));
+            Assert.That(producer.GpuFinalizers[0].IsDisposed, Is.True);
+            Assert.That(VirtualTextureSystem.GetCpuUploadStagingTextureCountForTesting(), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetUploadScratchPixelCountForTesting(), Is.GreaterThan(0));
+
+            VirtualTextureStats stats = VirtualTextureStatsRegistry.LastStats;
+            Assert.That(stats.GpuProducedPageCount, Is.EqualTo(1));
+            Assert.That(stats.GpuDispatchCount, Is.EqualTo(1));
+            Assert.That(stats.CpuProducedPageCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void Uploads_GpuFinalizerWithWrongLayerCount_IsRejectedWithoutDispatchOrFence()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("WrongGpuLayerCount");
+            var producer = new RecordingFinalizerProducer(desc, _ => true, gpuLayerCount: 2);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetRecords();
+
+            IssueFeedback(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+
+            Assert.That(m_FenceFactory.Handles, Is.Empty);
+            Assert.That(producer.GpuFinalizers, Has.Count.EqualTo(1));
+            Assert.That(producer.GpuFinalizers[0].RecordCount, Is.Zero);
+            Assert.That(producer.GpuFinalizers[0].IsDisposed, Is.True);
+            Assert.That(VirtualTextureSystem.GetGpuUploadStagingTextureCountForTesting(), Is.Zero);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.SkippedUploadCount, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void QueueResident_IsIdempotentLockedAndPrioritizedAheadOfFeedback()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("LockedResidentPriority", maxUploadsPerFrame: 1);
+            var producer = new RecordingFinalizerProducer(desc, _ => false);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            producer.ResetRecords();
+            var lockedCoord = new VirtualTexturePageCoord(1, 0, 0);
+            var feedbackCoord = new VirtualTexturePageCoord(0, 0, 0);
+
+            Assert.That(VirtualTextureSystem.TryQueuePageResident(spaceId, lockedCoord, true, frameIndex: 1), Is.True);
+            Assert.That(VirtualTextureSystem.TryQueuePageResident(spaceId, lockedCoord, true, frameIndex: 2), Is.True);
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                lockedCoord,
+                out VirtualTexturePageTableEntry pendingEntry), Is.True);
+            Assert.That(pendingEntry.PendingUpload, Is.True);
+            Assert.That(pendingEntry.Resident, Is.False);
+            Assert.That(pendingEntry.Locked, Is.True);
+
+            IssueFeedback(spaceId, feedbackCoord);
+
+            Assert.That(producer.ProducedCoords, Has.Count.EqualTo(1));
+            Assert.That(producer.ProducedCoords[0], Is.EqualTo(lockedCoord));
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+        }
+
+        [Test]
+        public void QueueResident_PromotesExistingFeedbackPendingRequestToLockedPriority()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("PromotePendingResident");
+            var producer = new StatusPageProducer(desc, VTPageRequestStatus.Pending);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, producer);
+            var coord = new VirtualTexturePageCoord(0, 0, 0);
+
+            IssueFeedback(spaceId, coord);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out IReadOnlyList<VirtualTextureUploadRequest> feedbackRequests), Is.True);
+            Assert.That(feedbackRequests, Has.Count.EqualTo(1));
+            Assert.That(feedbackRequests[0].Priority, Is.LessThan(int.MaxValue));
+
+            Assert.That(VirtualTextureSystem.TryQueuePageResident(spaceId, coord, true, frameIndex: 2), Is.True);
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(
+                spaceId,
+                out IReadOnlyList<VirtualTextureUploadRequest> lockedRequests), Is.True);
+            Assert.That(lockedRequests, Has.Count.EqualTo(1));
+            Assert.That(lockedRequests[0].Priority, Is.EqualTo(int.MaxValue));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                coord,
+                out VirtualTexturePageTableEntry pendingEntry), Is.True);
+            Assert.That(pendingEntry.PendingUpload, Is.True);
+            Assert.That(pendingEntry.Locked, Is.True);
         }
 
         [Test]
@@ -320,6 +587,23 @@ namespace VividRP.Editor.Tests
             Assert.That(largeProducer.RequestCount, Is.EqualTo(3));
             Assert.That(largeProducer.ProduceCount, Is.EqualTo(3));
             Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(largeSpaceId), Is.EqualTo(3));
+
+            m_FenceFactory.Handles[0].IsPassed = true;
+            UpdateOnce();
+
+            VirtualTextureSpaceDesc laterDesc = CreateDesc("LaterLargeSharedPool", maxUploadsPerFrame: 3);
+            var laterProducer = new StatusPageProducer(laterDesc, VTPageRequestStatus.Available);
+            int laterSpaceId = VirtualTextureSystem.RegisterAddressSpace(laterDesc, laterProducer);
+            laterProducer.ResetCounters();
+            IssueFeedback(
+                laterSpaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0),
+                new VirtualTexturePageCoord(2, 0, 0));
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(3));
+            Assert.That(laterProducer.ProduceCount, Is.EqualTo(3));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(laterSpaceId), Is.EqualTo(3));
         }
 
         [Test]

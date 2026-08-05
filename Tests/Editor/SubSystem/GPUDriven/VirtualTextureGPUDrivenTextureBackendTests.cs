@@ -2,6 +2,9 @@ using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
+using UnityEngine.TestTools;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
@@ -11,16 +14,58 @@ namespace VividRP.Editor.Tests
 {
     public sealed class VirtualTextureGPUDrivenTextureBackendTests
     {
+        private sealed class TestCapabilities : IGPUDrivenVirtualTextureRuntimeCapabilities
+        {
+            internal bool SupportsCompute { get; set; } = true;
+
+            internal bool SupportsLoadStore { get; set; } = true;
+
+            internal CopyTextureSupport CopySupport { get; set; } =
+                CopyTextureSupport.Basic | CopyTextureSupport.RTToTexture;
+
+            public bool SupportsComputeShaders => SupportsCompute;
+
+            public CopyTextureSupport CopyTextureSupport => CopySupport;
+
+            public bool IsFormatSupported(GraphicsFormat format, GraphicsFormatUsage usage)
+            {
+                return SupportsLoadStore;
+            }
+        }
+
+        private sealed class ManualFenceHandle : IVTUploadFenceHandle
+        {
+            public bool IsPassed { get; set; }
+        }
+
+        private sealed class ManualFenceFactory : IVTUploadFenceFactory
+        {
+            internal readonly System.Collections.Generic.List<ManualFenceHandle> Handles = new();
+
+            public IVTUploadFenceHandle Create(CommandBuffer cmd)
+            {
+                var handle = new ManualFenceHandle();
+                Handles.Add(handle);
+                return handle;
+            }
+        }
+
+        private ManualFenceFactory m_FenceFactory;
+
         [SetUp]
         public void SetUp()
         {
             VirtualTextureSystem.Deinitialize();
+            m_FenceFactory = new ManualFenceFactory();
+            VirtualTextureSystem.SetUploadFenceFactoryForTesting(m_FenceFactory);
         }
 
         [TearDown]
         public void TearDown()
         {
+            VirtualTextureSystem.SetUploadFenceFactoryForTesting(null);
             VirtualTextureSystem.Deinitialize();
+            m_FenceFactory = null;
         }
 
         [Test]
@@ -43,6 +88,69 @@ namespace VividRP.Editor.Tests
                 Is.True);
             Assert.That(allocation.AllocationId, Is.EqualTo(backend.VirtualTextureAllocationId));
             Assert.That(allocation.Description.PrivateSpace, Is.True);
+        }
+
+        [Test]
+        public void Constructor_IsUnavailableWhenGpuProducerShaderIsMissing()
+        {
+            const string reason = "GPUDriven VT page producer compute shader resource is missing.";
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {reason}");
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(null, new TestCapabilities());
+
+            Assert.That(backend.IsAvailable, Is.False);
+            Assert.That(backend.VirtualTextureSpaceId, Is.Zero);
+            Assert.That(backend.UnavailableReason, Is.EqualTo(reason));
+        }
+
+        [Test]
+        public void Constructor_IsUnavailableWhenComputeShadersAreUnsupported()
+        {
+            const string reason = "The active graphics device does not support compute shaders.";
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {reason}");
+            var capabilities = new TestCapabilities { SupportsCompute = false };
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(GetPageProducerCompute(), capabilities);
+
+            Assert.That(backend.IsAvailable, Is.False);
+            Assert.That(backend.VirtualTextureSpaceId, Is.Zero);
+            Assert.That(backend.UnavailableReason, Is.EqualTo(reason));
+        }
+
+        [Test]
+        public void Constructor_IsUnavailableWhenUavLoadStoreIsUnsupported()
+        {
+            var capabilities = new TestCapabilities { SupportsLoadStore = false };
+            LogAssert.Expect(
+                LogType.Warning,
+                new System.Text.RegularExpressions.Regex(
+                    "GPUDriven virtual texture backend is unavailable: .*UAV load/store"));
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(GetPageProducerCompute(), capabilities);
+
+            Assert.That(backend.IsAvailable, Is.False);
+            Assert.That(backend.VirtualTextureSpaceId, Is.Zero);
+            Assert.That(backend.UnavailableReason, Does.Contain("UAV load/store"));
+        }
+
+        [Test]
+        public void Constructor_IsUnavailableWhenRenderTextureArrayCopyIsUnsupported()
+        {
+            const string reason = "The active graphics device cannot copy a RenderTexture array into the VT Texture2DArray cache.";
+            LogAssert.Expect(
+                LogType.Warning,
+                $"[VividRP] GPUDriven virtual texture backend is unavailable: {reason}");
+            var capabilities = new TestCapabilities { CopySupport = CopyTextureSupport.Basic };
+
+            using var backend = new VirtualTextureGPUDrivenTextureBackend(GetPageProducerCompute(), capabilities);
+
+            Assert.That(backend.IsAvailable, Is.False);
+            Assert.That(backend.VirtualTextureSpaceId, Is.Zero);
+            Assert.That(backend.UnavailableReason, Is.EqualTo(reason));
         }
 
         [Test]
@@ -74,7 +182,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.UVScaleBias, Is.EqualTo(new float4(2.0f / 128.0f, 2.0f / 128.0f, 0.0f, 0.0f)));
                 Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
                 Assert.That(backend.AllocatedPageCount, Is.EqualTo(4));
-                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.ResidentMipTailCount, Is.Zero);
                 var mipTailCoord = new VirtualTexturePageCoord(0, 0, 1);
                 Assert.That(
                     VirtualTextureSystem.TryGetPageTableEntryForTesting(
@@ -82,10 +191,11 @@ namespace VividRP.Editor.Tests
                         mipTailCoord,
                         out VirtualTexturePageTableEntry mipTailEntry),
                     Is.True);
-                Assert.That(mipTailEntry.Resident, Is.True);
-                Assert.That(mipTailEntry.Fallback, Is.False);
+                Assert.That(mipTailEntry.Resident, Is.False);
+                Assert.That(mipTailEntry.PendingUpload, Is.True);
+                Assert.That(mipTailEntry.Fallback, Is.True);
                 Assert.That(mipTailEntry.Locked, Is.True);
-                Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(backend.VirtualTextureSpaceId), Is.EqualTo(2));
+                Assert.That(VirtualTextureSystem.GetResidentPageCountForTesting(backend.VirtualTextureSpaceId), Is.EqualTo(1));
                 Assert.That(backend.BindingRevision, Is.GreaterThan(revisionBefore));
             }
             finally
@@ -113,7 +223,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(second.BaseColorResource, Is.EqualTo(first.BaseColorResource));
                 Assert.That(second.UVScaleBias, Is.EqualTo(first.UVScaleBias));
                 Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
-                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.ResidentMipTailCount, Is.Zero);
                 Assert.That(backend.BindingRevision, Is.EqualTo(revisionAfterFirst));
             }
             finally
@@ -140,6 +251,49 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateSurfaceBinding_RollsBackAtlasRegionWhenLockedMipTailCannotBeQueued()
+        {
+            var textures = new System.Collections.Generic.List<Texture2D>();
+            try
+            {
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+                int availableTailPages = backend.VirtualTextureSpaceDesc.CachePageCount - 1;
+                for (int textureIndex = 0; textureIndex < availableTailPages; textureIndex++)
+                {
+                    var texture = new Texture2D(1, 1);
+                    textures.Add(texture);
+                    VividSurfaceBindingData binding = backend.CreateSurfaceBinding(
+                        new GPUDrivenSurfaceTextureSet(texture, null, null));
+                    Assert.That(binding.Flags, Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                }
+
+                int atlasEntryCountBeforeFailure = backend.AtlasEntryCount;
+                int allocatedPageCountBeforeFailure = backend.AllocatedPageCount;
+                uint revisionBeforeFailure = backend.BindingRevision;
+                var rejectedTexture = new Texture2D(1, 1);
+                textures.Add(rejectedTexture);
+                LogAssert.Expect(
+                    LogType.Warning,
+                    new System.Text.RegularExpressions.Regex("GPUDriven VT mip tail .* could not be queued"));
+
+                VividSurfaceBindingData rejectedBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(rejectedTexture, null, null));
+
+                Assert.That(rejectedBinding.Flags, Is.EqualTo(VividSurfaceBindingFlags.None));
+                Assert.That(rejectedBinding.BaseColorResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(atlasEntryCountBeforeFailure));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(allocatedPageCountBeforeFailure));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(availableTailPages));
+                Assert.That(backend.BindingRevision, Is.EqualTo(revisionBeforeFailure));
+            }
+            finally
+            {
+                for (int textureIndex = 0; textureIndex < textures.Count; textureIndex++)
+                    Destroy(textures[textureIndex]);
+            }
+        }
+
+        [Test]
         public void CreateSurfaceBinding_EncodesClampAndSeedsLockedMipTail()
         {
             Texture2D baseColor = null;
@@ -157,7 +311,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(
                     binding.UVScaleBias,
                     Is.EqualTo(new float4(-1.0f / 128.0f, -1.0f / 128.0f, 0.0f, 0.0f)));
-                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.ResidentMipTailCount, Is.Zero);
                 var mipTailCoord = new VirtualTexturePageCoord(0, 0, 0);
                 Assert.That(
                     VirtualTextureSystem.TryGetPageTableEntryForTesting(
@@ -165,8 +320,32 @@ namespace VividRP.Editor.Tests
                         mipTailCoord,
                         out VirtualTexturePageTableEntry mipTailEntry),
                     Is.True);
-                Assert.That(mipTailEntry.Resident, Is.True);
+                Assert.That(mipTailEntry.Resident, Is.False);
+                Assert.That(mipTailEntry.PendingUpload, Is.True);
                 Assert.That(mipTailEntry.Locked, Is.True);
+
+                uint revisionBeforeUpload = backend.BindingRevision;
+                UpdateOnce();
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.GpuProducedPageCount, Is.EqualTo(1));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.GpuDispatchCount, Is.EqualTo(1));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.CpuProducedPageCount, Is.Zero);
+
+                m_FenceFactory.Handles[0].IsPassed = true;
+                UpdateOnce();
+                backend.PrepareFrame();
+
+                Assert.That(
+                    VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                        backend.VirtualTextureSpaceId,
+                        mipTailCoord,
+                        out VirtualTexturePageTableEntry residentEntry),
+                    Is.True);
+                Assert.That(residentEntry.Resident, Is.True);
+                Assert.That(residentEntry.PendingUpload, Is.False);
+                Assert.That(residentEntry.Locked, Is.True);
+                Assert.That(backend.ResidentMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.BindingRevision, Is.EqualTo(revisionBeforeUpload));
             }
             finally
             {
@@ -230,6 +409,77 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void GpuPageProducerContract_WritesThreeLayersWithoutCpuPixelReadbackOrUpload()
+        {
+            string producerSource = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "GPUDriven",
+                "VirtualTexture",
+                "GPUDrivenVirtualTextureProducer.cs"));
+            string computeSource = File.ReadAllText(GetPackageFilePath(
+                "Shaders",
+                "Core",
+                "Private",
+                "GPUDriven",
+                "GPUDrivenVirtualTexturePageProducer.compute"));
+
+            Assert.That(producerSource, Does.Contain("IVTGpuPageFinalizer"));
+            Assert.That(producerSource, Does.Contain("DispatchCompute"));
+            Assert.That(producerSource, Does.Contain("SourceMipOffsets"));
+            Assert.That(producerSource, Does.Not.Contain("VTTexture2DPageProducer"));
+            Assert.That(producerSource, Does.Not.Contain("GetPixels32"));
+            Assert.That(producerSource, Does.Not.Contain("ReadPixels"));
+            Assert.That(producerSource, Does.Not.Contain("SetPixels32"));
+            Assert.That(producerSource, Does.Not.Contain(".Apply("));
+
+            Assert.That(computeSource, Does.Contain("RWTexture2DArray<float4> _OutputPages"));
+            Assert.That(computeSource, Does.Contain("[numthreads(8, 8, 1)]"));
+            Assert.That(computeSource, Does.Contain("SampleLevel(sampler_LinearRepeat"));
+            Assert.That(computeSource, Does.Contain("SampleLevel(sampler_LinearClamp"));
+            Assert.That(computeSource, Does.Contain("EncodeLinearToSRGB"));
+            Assert.That(computeSource, Does.Contain("_VTBaseColorFallback"));
+            Assert.That(computeSource, Does.Contain("_VTNormalFallback"));
+            Assert.That(computeSource, Does.Contain("_VTMaskFallback"));
+            Assert.That(computeSource, Does.Contain("baseSlice + 0"));
+            Assert.That(computeSource, Does.Contain("baseSlice + 1"));
+            Assert.That(computeSource, Does.Contain("baseSlice + 2"));
+        }
+
+        [Test]
+        public void GpuPageProducer_ComputesSourceMipOffsetFromVirtualAllocationScale()
+        {
+            Texture2D halfResolution = null;
+            Texture2D matchingResolution = null;
+            Texture2D doubleResolution = null;
+            try
+            {
+                halfResolution = new Texture2D(64, 64);
+                matchingResolution = new Texture2D(128, 128);
+                doubleResolution = new Texture2D(256, 256);
+
+                Assert.That(GPUDrivenVirtualTextureProducer.ComputeSourceMipOffset(
+                    halfResolution,
+                    pageCount: 1,
+                    pageSize: 128), Is.EqualTo(-1));
+                Assert.That(GPUDrivenVirtualTextureProducer.ComputeSourceMipOffset(
+                    matchingResolution,
+                    pageCount: 1,
+                    pageSize: 128), Is.Zero);
+                Assert.That(GPUDrivenVirtualTextureProducer.ComputeSourceMipOffset(
+                    doubleResolution,
+                    pageCount: 1,
+                    pageSize: 128), Is.EqualTo(1));
+            }
+            finally
+            {
+                Destroy(halfResolution);
+                Destroy(matchingResolution);
+                Destroy(doubleResolution);
+            }
+        }
+
+        [Test]
         public void SurfaceSamplingContract_UsesOneResolveContextForGradientsAndFeedback()
         {
             string source = File.ReadAllText(GetPackageFilePath(
@@ -288,6 +538,20 @@ namespace VividRP.Editor.Tests
             }
 
             return Path.Combine(candidates[2], Path.Combine(parts));
+        }
+
+        private static ComputeShader GetPageProducerCompute()
+        {
+            ComputeShader computeShader = PipelineResourceManager.Get<VividRPCoreResources>()
+                ?.GPUDrivenVirtualTexturePageProducerCompute;
+            Assert.That(computeShader, Is.Not.Null, "GPUDriven VT page producer resource was not synchronized.");
+            return computeShader;
+        }
+
+        private static void UpdateOnce()
+        {
+            using var commandBuffer = new CommandBuffer();
+            VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
         }
 
         private static void Destroy(Object value)

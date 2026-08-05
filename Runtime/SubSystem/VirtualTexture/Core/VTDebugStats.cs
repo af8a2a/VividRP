@@ -96,7 +96,10 @@ namespace VividRP.Runtime
             int pendingMipGapSum = 0,
             int pendingMipGapMax = 0,
             int pendingMipGapSampleCount = 0,
-            int prefetchRequestCount = 0)
+            int prefetchRequestCount = 0,
+            int cpuProducedPageCount = 0,
+            int gpuProducedPageCount = 0,
+            int gpuDispatchCount = 0)
         {
             ActiveSpaceCount = activeSpaceCount;
             ResidentPageCount = residentPageCount;
@@ -132,6 +135,9 @@ namespace VividRP.Runtime
             PendingMipGapMax = pendingMipGapMax;
             PendingMipGapSampleCount = pendingMipGapSampleCount;
             PrefetchRequestCount = prefetchRequestCount;
+            CpuProducedPageCount = cpuProducedPageCount;
+            GpuProducedPageCount = gpuProducedPageCount;
+            GpuDispatchCount = gpuDispatchCount;
         }
 
         internal int ActiveSpaceCount { get; }
@@ -202,6 +208,12 @@ namespace VividRP.Runtime
 
         internal int PrefetchRequestCount { get; }
 
+        internal int CpuProducedPageCount { get; }
+
+        internal int GpuProducedPageCount { get; }
+
+        internal int GpuDispatchCount { get; }
+
         internal float PendingMipGapAverage => PendingMipGapSampleCount > 0
             ? PendingMipGapSum / (float)PendingMipGapSampleCount
             : 0f;
@@ -265,7 +277,10 @@ namespace VividRP.Runtime
                 PendingMipGapSum,
                 PendingMipGapMax,
                 PendingMipGapSampleCount,
-                PrefetchRequestCount);
+                PrefetchRequestCount,
+                CpuProducedPageCount,
+                GpuProducedPageCount,
+                GpuDispatchCount);
         }
     }
 
@@ -472,7 +487,10 @@ namespace VividRP.Runtime
                 s_LastStats.PendingMipGapSum,
                 s_LastStats.PendingMipGapMax,
                 s_LastStats.PendingMipGapSampleCount,
-                s_LastStats.PrefetchRequestCount);
+                s_LastStats.PrefetchRequestCount,
+                s_LastStats.CpuProducedPageCount,
+                s_LastStats.GpuProducedPageCount,
+                s_LastStats.GpuDispatchCount);
         }
 
         private static int ResolveCameraActualWidth(Camera camera)

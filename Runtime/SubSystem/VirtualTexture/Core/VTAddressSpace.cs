@@ -6,6 +6,29 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    internal readonly struct VTPendingUploadCandidate
+    {
+        internal VTPendingUploadCandidate(
+            VTPageTableSpace addressSpace,
+            in VTRequest request,
+            bool locked,
+            int fairnessRank)
+        {
+            AddressSpace = addressSpace;
+            Request = request;
+            Locked = locked;
+            FairnessRank = fairnessRank;
+        }
+
+        internal VTPageTableSpace AddressSpace { get; }
+
+        internal VTRequest Request { get; }
+
+        internal bool Locked { get; }
+
+        internal int FairnessRank { get; }
+    }
+
     internal sealed class VTPageTableSpace : IDisposable, IVTUploadRequestCommitter
     {
         private readonly int[] m_MipOffsets;
@@ -14,7 +37,7 @@ namespace VividRP.Runtime
         private readonly VirtualTextureSpaceShaderParams m_ShaderParams;
         private readonly Vector4[] m_LayerFallbacks = new Vector4[VTStackDesc.MaxLayerCount];
         private readonly IVTPageProducer m_PageProducer;
-        private readonly List<VTPageUploadPayload> m_UploadPayloads = new();
+        private readonly List<VTPendingUploadCandidate> m_LocalUploadCandidates = new();
         private readonly List<IVTPageProducerTask> m_ProducerTasks = new();
         private readonly List<PendingUploadSortEntry> m_PendingUploadSortEntries = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
@@ -96,11 +119,27 @@ namespace VividRP.Runtime
 
         internal int[] MipOffsets => m_MipOffsets;
 
+        internal bool RequiresNewPhysicalPage(in VirtualTexturePageCoord coord)
+        {
+            if (!VirtualTextureSpaceUtility.IsCoordValid(Descriptor, coord))
+                return false;
+
+            int pageIndex = VirtualTextureSpaceUtility.GetFlatIndex(
+                Descriptor,
+                m_MipOffsets,
+                coord);
+            VTPageResidencyState pageState = m_ResidencyManager.GetPageState(pageIndex);
+            return !pageState.Resident && !pageState.PendingUpload;
+        }
+
         internal VTResidencyProcessResult ProcessRequests(
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
             Vector2Int prefetchBias,
-            int frameIndex)
+            int frameIndex,
+            int maxNewRequests = int.MaxValue,
+            bool allowNeighborPrefetch = true,
+            bool rebuildPageTable = true)
         {
             VTResidencyProcessResult result = m_ResidencyManager.ProcessRequests(
                 Descriptor,
@@ -109,7 +148,12 @@ namespace VividRP.Runtime
                 requests,
                 activeViewId,
                 prefetchBias,
-                frameIndex);
+                frameIndex,
+                maxNewRequests,
+                allowNeighborPrefetch);
+
+            if (!rebuildPageTable)
+                return result;
 
             if (result.PageTableChanged)
             {
@@ -128,7 +172,18 @@ namespace VividRP.Runtime
 
         internal void CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)
         {
-            SchedulePendingUploads(uploadScheduler, cmd);
+            m_LocalUploadCandidates.Clear();
+            CollectPendingUploadCandidates(uploadScheduler, fairnessRank: 0, m_LocalUploadCandidates);
+
+            int skippedUploadCount = 0;
+            for (int candidateIndex = 0; candidateIndex < m_LocalUploadCandidates.Count; candidateIndex++)
+            {
+                if (!TrySchedulePendingUpload(uploadScheduler, cmd, m_LocalUploadCandidates[candidateIndex].Request))
+                    skippedUploadCount += 1;
+            }
+
+            uploadScheduler?.AddSkippedUploadCount(skippedUploadCount);
+            m_LocalUploadCandidates.Clear();
         }
 
         internal bool TryCommitRequest(in VTRequest request)
@@ -436,9 +491,13 @@ namespace VividRP.Runtime
             }
         }
 
-        private void SchedulePendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)
+        internal void CollectPendingUploadCandidates(
+            VTUploadScheduler uploadScheduler,
+            int fairnessRank,
+            List<VTPendingUploadCandidate> output)
         {
-            m_UploadPayloads.Clear();
+            if (output == null)
+                throw new ArgumentNullException(nameof(output));
 
             IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
             if (pendingRequests == null || pendingRequests.Count == 0)
@@ -447,7 +506,7 @@ namespace VividRP.Runtime
                 return;
             }
 
-            if (uploadScheduler == null || m_PageProducer == null || cmd == null || !uploadScheduler.IsEnabled)
+            if (uploadScheduler == null || m_PageProducer == null || !uploadScheduler.IsEnabled)
             {
                 uploadScheduler?.AddSkippedUploadCount(pendingRequests.Count);
                 return;
@@ -463,87 +522,70 @@ namespace VividRP.Runtime
                 m_ProducerTasks.Clear();
             }
 
-            int capacity;
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
-            {
-                capacity = uploadScheduler.GetAvailableBatchCapacity(Descriptor.SpaceName, Descriptor);
-            }
-
-            if (capacity <= 0)
-            {
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
-                    uploadScheduler.CountInFlightRequests(pendingRequests);
-                uploadScheduler.AddSkippedUploadCount(pendingRequests.Count);
-                return;
-            }
-
             IReadOnlyList<VTRequest> orderedRequests;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingOrderMarker.Auto())
                 orderedRequests = GetOrderedPendingRequests(pendingRequests);
-            int skippedUploadCount;
+            int duplicateUploadCount;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingInFlightMarker.Auto())
             {
-                skippedUploadCount = uploadScheduler.FilterInFlightRequests(
+                duplicateUploadCount = uploadScheduler.FilterInFlightRequests(
                     orderedRequests,
                     m_EligiblePendingRequests);
             }
 
+            uploadScheduler.AddSkippedUploadCount(duplicateUploadCount);
             for (int requestIndex = 0; requestIndex < m_EligiblePendingRequests.Count; requestIndex++)
             {
                 VTRequest request = m_EligiblePendingRequests[requestIndex];
+                bool locked = m_ResidencyManager.IsPageLocked(
+                    Descriptor,
+                    m_MipOffsets,
+                    request.PageCoord);
+                output.Add(new VTPendingUploadCandidate(this, request, locked, fairnessRank));
+            }
+        }
 
-                if (m_UploadPayloads.Count >= capacity)
-                {
-                    skippedUploadCount += 1;
-                    continue;
-                }
+        internal bool TrySchedulePendingUpload(
+            VTUploadScheduler uploadScheduler,
+            CommandBuffer cmd,
+            in VTRequest request)
+        {
+            if (uploadScheduler == null || m_PageProducer == null || cmd == null || !uploadScheduler.IsEnabled)
+                return false;
 
-                VTPageRequestStatus status;
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRequestPageMarker.Auto())
-                    status = m_PageProducer.RequestPageData(Descriptor, request);
-                if (status != VTPageRequestStatus.Available)
-                {
-                    if (status == VTPageRequestStatus.Invalid)
-                        m_PageProducer.CancelRequest(Descriptor, request);
+            VTPageRequestStatus status;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRequestPageMarker.Auto())
+                status = m_PageProducer.RequestPageData(Descriptor, request);
+            if (status != VTPageRequestStatus.Available)
+            {
+                if (status == VTPageRequestStatus.Invalid)
+                    m_PageProducer.CancelRequest(Descriptor, request);
 
-                    skippedUploadCount += 1;
-                    continue;
-                }
-
-                if (!uploadScheduler.TryReserveUpload(Descriptor.SpaceName, Descriptor))
-                {
-                    skippedUploadCount += 1;
-                    continue;
-                }
-
-                IVTPageUploadFinalizer finalizer;
-                using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingProducePageMarker.Auto())
-                    finalizer = m_PageProducer.ProducePageData(Descriptor, request);
-                if (finalizer == null)
-                {
-                    uploadScheduler.ReleaseUploadReservation(Descriptor);
-                    skippedUploadCount += 1;
-                    continue;
-                }
-
-                m_UploadPayloads.Add(new VTPageUploadPayload(request, finalizer));
+                return false;
             }
 
-            uploadScheduler.AddSkippedUploadCount(skippedUploadCount);
+            if (!uploadScheduler.TryReserveUpload(Descriptor.SpaceName, Descriptor))
+                return false;
+
+            IVTPageUploadFinalizer finalizer;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingProducePageMarker.Auto())
+                finalizer = m_PageProducer.ProducePageData(Descriptor, request);
+            if (finalizer == null)
+            {
+                uploadScheduler.ReleaseUploadReservation(Descriptor);
+                return false;
+            }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingEnqueueMarker.Auto())
             {
-                for (int payloadIndex = 0; payloadIndex < m_UploadPayloads.Count; payloadIndex++)
-                {
-                    uploadScheduler.EnqueueReservedUpload(
-                        Descriptor.SpaceName,
-                        Descriptor,
-                        m_ResidencyManager.PhysicalPool,
-                        m_UploadPayloads[payloadIndex]);
-                }
+                uploadScheduler.EnqueueReservedUpload(
+                    Descriptor.SpaceName,
+                    Descriptor,
+                    m_ResidencyManager.PhysicalPool,
+                    new VTPageUploadPayload(request, finalizer));
             }
 
-            m_UploadPayloads.Clear();
+            return true;
         }
 
         private bool TryProduceUploadPayload(

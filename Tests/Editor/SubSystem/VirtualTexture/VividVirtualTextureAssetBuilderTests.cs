@@ -524,6 +524,84 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void AssetProducer_AppliesGlobalBackpressureAcrossStreamedAssets()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+            VividVirtualTextureAssetProducer firstProducer = null;
+            VividVirtualTextureAssetProducer secondProducer = null;
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    PageSize = 2,
+                    BorderSize = 1,
+                    MipCount = 2,
+                    FallbackColor = new Color32(0, 0, 0, 255),
+                    StreamDataPath = streamDataPath,
+                });
+
+                var pendingTasks = new List<TaskCompletionSource<byte[]>>();
+                VividVirtualTextureAssetProducer.SetMaxPendingStreamReadCountForTesting(1);
+                VividVirtualTextureAssetProducer.SetStreamReadHandlersForTesting(
+                    (path, byteOffset, byteSize, cancellationToken) =>
+                    {
+                        var completionSource = new TaskCompletionSource<byte[]>();
+                        cancellationToken.Register(() => completionSource.TrySetCanceled());
+                        pendingTasks.Add(completionSource);
+                        return completionSource.Task;
+                    });
+
+                VirtualTextureSpaceDesc desc = builtData.CreateSpaceDesc(
+                    "GlobalStreamBackpressure",
+                    cachePageCount: 3,
+                    maxUploadsPerFrame: 2,
+                    feedbackCapacity: 16);
+                firstProducer = new VividVirtualTextureAssetProducer(asset);
+                secondProducer = new VividVirtualTextureAssetProducer(asset);
+                var firstRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    0,
+                    1,
+                    1,
+                    0);
+                var secondRequest = new VTRequest(
+                    2,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    1,
+                    1,
+                    1,
+                    0);
+
+                Assert.That(firstProducer.RequestPageData(desc, firstRequest), Is.EqualTo(VTPageRequestStatus.Pending));
+                Assert.That(secondProducer.RequestPageData(desc, secondRequest), Is.EqualTo(VTPageRequestStatus.Saturated));
+                Assert.That(pendingTasks, Has.Count.EqualTo(1));
+                Assert.That(VividVirtualTextureAssetProducer.GlobalPendingStreamReadCountForTesting, Is.EqualTo(1));
+
+                firstProducer.CancelRequest(desc, firstRequest);
+                Assert.That(pendingTasks[0].Task.IsCanceled, Is.True);
+                Assert.That(VividVirtualTextureAssetProducer.GlobalPendingStreamReadCountForTesting, Is.EqualTo(0));
+
+                Assert.That(secondProducer.RequestPageData(desc, secondRequest), Is.EqualTo(VTPageRequestStatus.Pending));
+                Assert.That(pendingTasks, Has.Count.EqualTo(2));
+                Assert.That(VividVirtualTextureAssetProducer.GlobalPendingStreamReadCountForTesting, Is.EqualTo(1));
+            }
+            finally
+            {
+                firstProducer?.Dispose();
+                secondProducer?.Dispose();
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
         public void AssetProducer_WritesBakedPage_WhenSourceTextureIsGone()
         {
             Texture2D sourceTexture = CreateSourceTexture(4, 4, readable: true);

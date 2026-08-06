@@ -8,6 +8,53 @@ using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
 {
+    internal static class VTVirtualTextureStreamRequestGate
+    {
+        internal const int DefaultMaxPendingReadCount = 64;
+
+        private static int s_MaxPendingReadCount = DefaultMaxPendingReadCount;
+        private static int s_PendingReadCount;
+        private static int s_LastSaturatedRequestCount;
+
+        internal static int PendingReadCount => s_PendingReadCount;
+
+        internal static int LastSaturatedRequestCount => s_LastSaturatedRequestCount;
+
+        internal static bool TryAcquire()
+        {
+            if (s_PendingReadCount >= s_MaxPendingReadCount)
+            {
+                s_LastSaturatedRequestCount += 1;
+                return false;
+            }
+
+            s_PendingReadCount += 1;
+            return true;
+        }
+
+        internal static void Release()
+        {
+            s_PendingReadCount = Mathf.Max(0, s_PendingReadCount - 1);
+        }
+
+        internal static void BeginFrame()
+        {
+            s_LastSaturatedRequestCount = 0;
+        }
+
+        internal static void SetMaxPendingReadCountForTesting(int maxPendingReadCount)
+        {
+            s_MaxPendingReadCount = Mathf.Max(1, maxPendingReadCount);
+        }
+
+        internal static void ResetForTesting()
+        {
+            s_MaxPendingReadCount = DefaultMaxPendingReadCount;
+            s_PendingReadCount = 0;
+            s_LastSaturatedRequestCount = 0;
+        }
+    }
+
     internal sealed class VividVirtualTextureAssetProducer : IVTPageProducer, IVTPageRequestRetirement, IDisposable
     {
         private readonly struct TileKey : IEquatable<TileKey>
@@ -44,11 +91,17 @@ namespace VividRP.Runtime
         private sealed class StreamTileTask : IVTPageProducerTask, IDisposable
         {
             private readonly CancellationTokenSource m_CancellationTokenSource;
+            private bool m_OwnsGlobalReadSlot;
+            private bool m_IsDisposed;
 
-            internal StreamTileTask(Task<byte[]> task, CancellationTokenSource cancellationTokenSource)
+            internal StreamTileTask(
+                Task<byte[]> task,
+                CancellationTokenSource cancellationTokenSource,
+                bool ownsGlobalReadSlot)
             {
                 Task = task ?? throw new ArgumentNullException(nameof(task));
                 m_CancellationTokenSource = cancellationTokenSource;
+                m_OwnsGlobalReadSlot = ownsGlobalReadSlot;
             }
 
             internal Task<byte[]> Task { get; }
@@ -67,8 +120,18 @@ namespace VividRP.Runtime
 
             public void Dispose()
             {
+                if (m_IsDisposed)
+                    return;
+
                 Cancel();
                 m_CancellationTokenSource?.Dispose();
+                if (m_OwnsGlobalReadSlot)
+                {
+                    VTVirtualTextureStreamRequestGate.Release();
+                    m_OwnsGlobalReadSlot = false;
+                }
+
+                m_IsDisposed = true;
             }
         }
 
@@ -223,10 +286,14 @@ namespace VividRP.Runtime
                 return VTPageRequestStatus.Invalid;
 
             TileKey key = new(request.PageCoord);
-            StreamTileTask task = GetOrStartStreamTask(
-                key,
-                location,
-                synchronous: request.PageCoord.Mip == m_BuiltData.MipCount - 1);
+            if (!TryGetOrStartStreamTask(
+                    key,
+                    location,
+                    synchronous: request.PageCoord.Mip == m_BuiltData.MipCount - 1,
+                    out StreamTileTask task))
+            {
+                return VTPageRequestStatus.Saturated;
+            }
 
             if (task.IsCompletedSuccessfully)
                 return VTPageRequestStatus.Available;
@@ -338,21 +405,47 @@ namespace VividRP.Runtime
         {
             s_StreamReadHandler = ReadRangeAsync;
             s_SynchronousStreamReadHandler = ReadRange;
+            VTVirtualTextureStreamRequestGate.ResetForTesting();
         }
 
-        private StreamTileTask GetOrStartStreamTask(
+        internal static void SetMaxPendingStreamReadCountForTesting(int maxPendingReadCount)
+        {
+            VTVirtualTextureStreamRequestGate.SetMaxPendingReadCountForTesting(maxPendingReadCount);
+        }
+
+        internal static int GlobalPendingStreamReadCountForTesting =>
+            VTVirtualTextureStreamRequestGate.PendingReadCount;
+
+        private bool TryGetOrStartStreamTask(
             in TileKey key,
             in VividVirtualTextureTilePayloadLocation location,
-            bool synchronous)
+            bool synchronous,
+            out StreamTileTask task)
         {
-            if (m_StreamTasks.TryGetValue(key, out StreamTileTask existingTask))
-                return existingTask;
+            if (m_StreamTasks.TryGetValue(key, out task))
+                return true;
 
-            StreamTileTask task = synchronous
-                ? CreateCompletedStreamTask(location)
-                : CreateAsyncStreamTask(location);
+            if (!synchronous && !VTVirtualTextureStreamRequestGate.TryAcquire())
+            {
+                task = null;
+                return false;
+            }
+
+            try
+            {
+                task = synchronous
+                    ? CreateCompletedStreamTask(location)
+                    : CreateAsyncStreamTask(location);
+            }
+            catch
+            {
+                if (!synchronous)
+                    VTVirtualTextureStreamRequestGate.Release();
+                throw;
+            }
+
             m_StreamTasks.Add(key, task);
-            return task;
+            return true;
         }
 
         private StreamTileTask CreateCompletedStreamTask(in VividVirtualTextureTilePayloadLocation location)
@@ -363,23 +456,34 @@ namespace VividRP.Runtime
                     m_ResolvedStreamDataPath,
                     location.ByteOffset,
                     location.ByteSize);
-                return new StreamTileTask(Task.FromResult(data), null);
+                return new StreamTileTask(Task.FromResult(data), null, ownsGlobalReadSlot: false);
             }
             catch (Exception exception)
             {
-                return new StreamTileTask(Task.FromException<byte[]>(exception), null);
+                return new StreamTileTask(
+                    Task.FromException<byte[]>(exception),
+                    null,
+                    ownsGlobalReadSlot: false);
             }
         }
 
         private StreamTileTask CreateAsyncStreamTask(in VividVirtualTextureTilePayloadLocation location)
         {
             var cancellationTokenSource = new CancellationTokenSource();
-            Task<byte[]> task = s_StreamReadHandler(
-                m_ResolvedStreamDataPath,
-                location.ByteOffset,
-                location.ByteSize,
-                cancellationTokenSource.Token);
-            return new StreamTileTask(task, cancellationTokenSource);
+            try
+            {
+                Task<byte[]> task = s_StreamReadHandler(
+                    m_ResolvedStreamDataPath,
+                    location.ByteOffset,
+                    location.ByteSize,
+                    cancellationTokenSource.Token);
+                return new StreamTileTask(task, cancellationTokenSource, ownsGlobalReadSlot: true);
+            }
+            catch
+            {
+                cancellationTokenSource.Dispose();
+                throw;
+            }
         }
 
         private void RemoveStreamTask(in TileKey key)

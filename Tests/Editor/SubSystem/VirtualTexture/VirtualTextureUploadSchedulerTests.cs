@@ -461,6 +461,87 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Residency_UsesGlobalPageBudgetAcrossSpaces_AndKeepsHighestPriorityRequest()
+        {
+            VirtualTextureSpaceDesc lowDesc = CreateDesc("GlobalResidencyLow");
+            VirtualTextureSpaceDesc highDesc = CreateDesc("GlobalResidencyHigh");
+            var lowProducer = new StatusPageProducer(lowDesc, VTPageRequestStatus.Pending);
+            var highProducer = new StatusPageProducer(highDesc, VTPageRequestStatus.Pending);
+            int lowSpaceId = VirtualTextureSystem.RegisterAddressSpace(lowDesc, lowProducer);
+            int highSpaceId = VirtualTextureSystem.RegisterAddressSpace(highDesc, highProducer);
+            var lowCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var highCoord = new VirtualTexturePageCoord(1, 0, 0);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(1);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.SceneView,
+                    VirtualTextureFeedbackProcessor.EncodeKey(lowSpaceId, lowCoord));
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(highSpaceId, highCoord),
+                    VirtualTextureFeedbackProcessor.EncodeKey(highSpaceId, highCoord));
+
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(highSpaceId), Is.EqualTo(1));
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(lowSpaceId), Is.EqualTo(0));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
+        public void Uploads_MergeCandidatesAcrossSpaces_BeforeApplyingGlobalBackpressure()
+        {
+            VirtualTextureSpaceDesc lowDesc = CreateDesc("GlobalUploadLow");
+            VirtualTextureSpaceDesc highDesc = CreateDesc("GlobalUploadHigh");
+            var lowProducer = new StatusPageProducer(lowDesc, VTPageRequestStatus.Pending);
+            var highProducer = new StatusPageProducer(highDesc, VTPageRequestStatus.Pending);
+            int lowSpaceId = VirtualTextureSystem.RegisterAddressSpace(lowDesc, lowProducer);
+            int highSpaceId = VirtualTextureSystem.RegisterAddressSpace(highDesc, highProducer);
+            var lowCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var highCoord = new VirtualTexturePageCoord(1, 0, 0);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(2);
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.SceneView,
+                    VirtualTextureFeedbackProcessor.EncodeKey(lowSpaceId, lowCoord));
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(
+                    CameraType.Game,
+                    VirtualTextureFeedbackProcessor.EncodeKey(highSpaceId, highCoord),
+                    VirtualTextureFeedbackProcessor.EncodeKey(highSpaceId, highCoord),
+                    VirtualTextureFeedbackProcessor.EncodeKey(highSpaceId, highCoord));
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(lowSpaceId), Is.EqualTo(1));
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(highSpaceId), Is.EqualTo(1));
+
+                lowProducer.Status = VTPageRequestStatus.Available;
+                highProducer.Status = VTPageRequestStatus.Available;
+                lowProducer.ResetCounters();
+                highProducer.ResetCounters();
+                VirtualTextureSystem.SetUploadPageBudgetForTesting(1);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+
+                Assert.That(highProducer.ProduceCount, Is.EqualTo(1));
+                Assert.That(lowProducer.ProduceCount, Is.EqualTo(0));
+                Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        [Test]
         public void Uploads_FinalizeMultipleTilesInOneFrame_WhenBatchCapacityAllows()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("MultiFinalize", maxUploadsPerFrame: 3);

@@ -142,6 +142,8 @@ namespace VividRP.Runtime
 
     internal sealed class VTUploadScheduler : IDisposable
     {
+        private const int k_DefaultMaxUploadsPerFrame = 64;
+
         private readonly struct UploadPoolKey : IEquatable<UploadPoolKey>
         {
             internal UploadPoolKey(in VirtualTextureSpaceDesc desc)
@@ -803,7 +805,9 @@ namespace VividRP.Runtime
         private readonly Dictionary<UploadPoolKey, int> m_QueuedCountsByKey = new();
         private readonly List<QueuedUpload> m_QueuedUploads = new();
         private Color32[] m_ScratchPixels = Array.Empty<Color32>();
+        private int m_MaxUploadsPerFrame = k_DefaultMaxUploadsPerFrame;
         private int m_MaxUploadBytesPerFrame = int.MaxValue;
+        private int m_ReservedUploadCountThisFrame;
         private int m_ReservedUploadBytesThisFrame;
         private int m_LastDuplicateUploadCount;
         private int m_LastSkippedUploadCount;
@@ -812,6 +816,12 @@ namespace VividRP.Runtime
         private int m_LastGpuDispatchCount;
 
         internal bool IsEnabled => true;
+
+        internal int MaxUploadsPerFrame
+        {
+            get => m_MaxUploadsPerFrame;
+            set => m_MaxUploadsPerFrame = value <= 0 ? int.MaxValue : value;
+        }
 
         internal int MaxUploadBytesPerFrame
         {
@@ -880,6 +890,7 @@ namespace VividRP.Runtime
         internal void BeginFrame()
         {
             ResetLastScheduleStats();
+            m_ReservedUploadCountThisFrame = 0;
             m_ReservedUploadBytesThisFrame = 0;
             if (m_QueuedUploads.Count > 0)
                 DisposeQueuedUploads();
@@ -1025,6 +1036,9 @@ namespace VividRP.Runtime
 
         internal bool TryReserveUpload(string spaceName, in VirtualTextureSpaceDesc desc)
         {
+            if (m_ReservedUploadCountThisFrame >= m_MaxUploadsPerFrame)
+                return false;
+
             int uploadByteSize = ComputeUploadByteSize(desc);
             if (m_ReservedUploadBytesThisFrame > m_MaxUploadBytesPerFrame - uploadByteSize)
                 return false;
@@ -1035,6 +1049,7 @@ namespace VividRP.Runtime
             UploadPoolKey key = new(desc);
             m_QueuedCountsByKey.TryGetValue(key, out int queuedCount);
             m_QueuedCountsByKey[key] = queuedCount + 1;
+            m_ReservedUploadCountThisFrame += 1;
             m_ReservedUploadBytesThisFrame += uploadByteSize;
             return true;
         }
@@ -1055,6 +1070,7 @@ namespace VividRP.Runtime
             }
 
             int uploadByteSize = ComputeUploadByteSize(key);
+            m_ReservedUploadCountThisFrame = Mathf.Max(0, m_ReservedUploadCountThisFrame - 1);
             m_ReservedUploadBytesThisFrame = Mathf.Max(0, m_ReservedUploadBytesThisFrame - uploadByteSize);
         }
 

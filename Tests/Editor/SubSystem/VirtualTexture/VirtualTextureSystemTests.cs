@@ -448,7 +448,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Update_DefersBackgroundViewFeedback_UntilBackgroundCameraRenders()
+        public void Update_MergesBackgroundViewFeedback_DuringActiveCameraUpdate()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("ViewFeedbackIsolation", cachePageCount: 4, maxUploadsPerFrame: 2));
             ulong backgroundViewRequest = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(1, 0, 0));
@@ -466,15 +466,16 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(CreateFrameData(activeCamera, frameIndex: 31), commandBuffer);
 
                 Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var activeRequests), Is.True);
-                Assert.That(activeRequests.Count, Is.EqualTo(0));
-                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(0));
+                Assert.That(activeRequests.Count, Is.EqualTo(1));
+                Assert.That(activeRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(1));
 
                 VirtualTextureSystem.Update(CreateFrameData(backgroundCamera, frameIndex: 32), commandBuffer);
 
                 Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var backgroundRequests), Is.True);
                 Assert.That(backgroundRequests.Count, Is.EqualTo(1));
                 Assert.That(backgroundRequests[0].PageCoord, Is.EqualTo(new VirtualTexturePageCoord(1, 0, 0)));
-                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(1));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.FaultCount, Is.EqualTo(0));
             }
             finally
             {
@@ -888,7 +889,9 @@ namespace VividRP.Editor.Tests
             Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Aggregate("));
             Assert.That(systemSource, Does.Contain("cachePriorityViewId);"));
             Assert.That(systemSource, Does.Contain("s_FeedbackAggregator.Clear();"));
-            Assert.That(systemSource, Does.Contain("out NativeSlice<VirtualTextureAggregatedFeedbackRequest> spaceRequests"));
+            Assert.That(systemSource, Does.Contain("NativeArray<VirtualTextureAggregatedFeedbackRequest> aggregatedRequests"));
+            Assert.That(systemSource, Does.Contain("new NativeSlice<VirtualTextureAggregatedFeedbackRequest>("));
+            Assert.That(systemSource, Does.Contain("CollectAndSchedulePendingUploads(frameIndex, cmd);"));
             Assert.That(systemSource, Does.Contain("VirtualTextureViewId.FromCameraData(cameraData);"));
             Assert.That(systemSource, Does.Not.Contain("s_AddressSpaces.Values"));
             Assert.That(systemSource, Does.Not.Contain("s_GroupedRequests"));

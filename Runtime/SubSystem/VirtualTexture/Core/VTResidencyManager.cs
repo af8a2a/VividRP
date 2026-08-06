@@ -170,7 +170,8 @@ namespace VividRP.Runtime
             int pendingMipGapSum = 0,
             int pendingMipGapMax = 0,
             int pendingMipGapSampleCount = 0,
-            int prefetchRequestCount = 0)
+            int prefetchRequestCount = 0,
+            int allocatedRequestCount = 0)
         {
             EvictionCount = evictionCount;
             PageTableChanged = pageTableChanged;
@@ -178,6 +179,7 @@ namespace VividRP.Runtime
             PendingMipGapMax = pendingMipGapMax;
             PendingMipGapSampleCount = pendingMipGapSampleCount;
             PrefetchRequestCount = prefetchRequestCount;
+            AllocatedRequestCount = allocatedRequestCount;
         }
 
         internal int EvictionCount { get; }
@@ -191,6 +193,8 @@ namespace VividRP.Runtime
         internal int PendingMipGapSampleCount { get; }
 
         internal int PrefetchRequestCount { get; }
+
+        internal int AllocatedRequestCount { get; }
     }
 
     internal sealed class VTResidencyManager : IDisposable, IVTPhysicalPoolOwner
@@ -500,10 +504,15 @@ namespace VividRP.Runtime
             NativeSlice<VirtualTextureAggregatedFeedbackRequest> requests,
             VirtualTextureViewId activeViewId,
             Vector2Int prefetchBias,
-            int frameIndex)
+            int frameIndex,
+            int maxNewRequests,
+            bool allowNeighborPrefetch)
         {
             int evictionCount = 0;
             int allocatedThisFrame = 0;
+            int allocationLimit = Mathf.Min(
+                desc.MaxUploadsPerFrame,
+                Mathf.Max(0, maxNewRequests));
             int pendingMipGapSum = 0;
             int pendingMipGapMax = 0;
             int pendingMipGapSampleCount = 0;
@@ -540,7 +549,8 @@ namespace VividRP.Runtime
                             requests[requestIndex],
                             activeViewId,
                             frameIndex,
-                            isPrefetch: false,
+                            false,
+                            allocationLimit,
                             classification.PageIndex,
                             classification.Classification,
                             ref allocatedThisFrame,
@@ -550,7 +560,9 @@ namespace VividRP.Runtime
                 }
             }
 
-            if (desc.NeighborPrefetchCount > 0 && allocatedThisFrame < desc.MaxUploadsPerFrame)
+            if (allowNeighborPrefetch
+                && desc.NeighborPrefetchCount > 0
+                && allocatedThisFrame < allocationLimit)
             {
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureResidencyPrefetchMarker.Auto())
                 {
@@ -568,11 +580,12 @@ namespace VividRP.Runtime
                             activeViewId,
                             prefetchBias,
                             frameIndex,
+                            allocationLimit,
                             ref allocatedThisFrame,
                             ref evictionCount,
                             ref pageTableChanged);
 
-                        if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
+                        if (allocatedThisFrame >= allocationLimit)
                             break;
                     }
                 }
@@ -584,7 +597,8 @@ namespace VividRP.Runtime
                 pendingMipGapSum,
                 pendingMipGapMax,
                 pendingMipGapSampleCount,
-                prefetchRequestCount);
+                prefetchRequestCount,
+                allocatedThisFrame);
         }
 
         internal bool TryCommitRequest(
@@ -840,6 +854,7 @@ namespace VividRP.Runtime
             VirtualTextureViewId activeViewId,
             int frameIndex,
             bool isPrefetch,
+            int allocationLimit,
             ref int allocatedThisFrame,
             ref int evictionCount,
             ref bool pageTableChanged)
@@ -856,6 +871,7 @@ namespace VividRP.Runtime
                 activeViewId,
                 frameIndex,
                 isPrefetch,
+                allocationLimit,
                 pageIndex,
                 classification,
                 ref allocatedThisFrame,
@@ -870,6 +886,7 @@ namespace VividRP.Runtime
             VirtualTextureViewId activeViewId,
             int frameIndex,
             bool isPrefetch,
+            int allocationLimit,
             int pageIndex,
             VTResidencyRequestClassification classification,
             ref int allocatedThisFrame,
@@ -918,7 +935,7 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (allocatedThisFrame >= desc.MaxUploadsPerFrame)
+            if (allocatedThisFrame >= allocationLimit)
                 return false;
 
             VirtualTextureViewId attachViewId = isPrefetch ? VirtualTextureViewId.Invalid : request.ViewId;
@@ -1023,6 +1040,7 @@ namespace VividRP.Runtime
             VirtualTextureViewId activeViewId,
             Vector2Int prefetchBias,
             int frameIndex,
+            int allocationLimit,
             ref int allocatedThisFrame,
             ref int evictionCount,
             ref bool pageTableChanged)
@@ -1037,6 +1055,7 @@ namespace VividRP.Runtime
                 request,
                 activeViewId,
                 frameIndex,
+                allocationLimit,
                 prefetchBias.x,
                 0,
                 pageCountX,
@@ -1052,6 +1071,7 @@ namespace VividRP.Runtime
                 request,
                 activeViewId,
                 frameIndex,
+                allocationLimit,
                 0,
                 prefetchBias.y,
                 pageCountX,
@@ -1063,7 +1083,7 @@ namespace VividRP.Runtime
 
             for (int offsetIndex = 0; offsetIndex < s_NeighborOffsets.Length; offsetIndex++)
             {
-                if (allocatedThisFrame >= desc.MaxUploadsPerFrame
+                if (allocatedThisFrame >= allocationLimit
                     || scheduledPrefetchCount >= desc.NeighborPrefetchCount)
                 {
                     break;
@@ -1083,6 +1103,7 @@ namespace VividRP.Runtime
                     request,
                     activeViewId,
                     frameIndex,
+                    allocationLimit,
                     offset.x,
                     offset.y,
                     pageCountX,
@@ -1103,6 +1124,7 @@ namespace VividRP.Runtime
             in VirtualTextureAggregatedFeedbackRequest request,
             VirtualTextureViewId activeViewId,
             int frameIndex,
+            int allocationLimit,
             int offsetX,
             int offsetY,
             int pageCountX,
@@ -1113,7 +1135,7 @@ namespace VividRP.Runtime
             ref int scheduledPrefetchCount)
         {
             if ((offsetX == 0 && offsetY == 0)
-                || allocatedThisFrame >= desc.MaxUploadsPerFrame
+                || allocatedThisFrame >= allocationLimit
                 || scheduledPrefetchCount >= desc.NeighborPrefetchCount)
             {
                 return;
@@ -1134,7 +1156,8 @@ namespace VividRP.Runtime
                     prefetchRequest,
                     activeViewId,
                     frameIndex,
-                    isPrefetch: true,
+                    true,
+                    allocationLimit,
                     ref allocatedThisFrame,
                     ref evictionCount,
                     ref pageTableChanged))

@@ -116,6 +116,15 @@ namespace VividRP.Runtime.GPUDriven
         GPUDrivenTextureBackendStats GetStats();
     }
 
+    internal interface IGPUDrivenTextureBindingLifecycle
+    {
+        void BeginSurfaceBindingUpdate();
+
+        void EndSurfaceBindingUpdate();
+
+        void CancelSurfaceBindingUpdate();
+    }
+
     internal interface IGPUDrivenVirtualTextureBackend
     {
         int VirtualTextureSpaceId { get; }

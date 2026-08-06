@@ -12,6 +12,7 @@ namespace VividRP.Runtime
         private readonly GraphicsBuffer m_PageTableBuffer;
 
         private bool m_PageTableDirty;
+        private int m_RebuildCount;
 
         internal VTPageTableUpdater(string spaceName, int totalPageCount)
         {
@@ -30,11 +31,14 @@ namespace VividRP.Runtime
 
         internal GraphicsBuffer PageTableBuffer => m_PageTableBuffer;
 
+        internal int RebuildCount => m_RebuildCount;
+
         internal void Rebuild(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
             VTResidencyManager residencyManager)
         {
+            m_RebuildCount += 1;
             for (int mip = desc.MipCount - 1; mip >= 0; mip--)
             {
                 int mipWidth = VirtualTextureSpaceUtility.GetPageCountX(desc.VirtualPageCountX, mip);

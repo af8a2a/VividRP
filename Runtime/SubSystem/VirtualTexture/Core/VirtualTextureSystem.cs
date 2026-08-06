@@ -627,8 +627,26 @@ namespace VividRP.Runtime
             if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
                 return 0;
 
-            s_UploadScheduler.CancelUploadsForSpace(spaceId);
+            s_UploadScheduler.CancelUploadsForRegion(spaceId, mip, pageRegion);
             return addressSpace.FlushRegion(mip, pageRegion);
+        }
+
+        internal static int FlushRegions(int spaceId, IReadOnlyList<VTPageRegion> pageRegions)
+        {
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                || pageRegions == null
+                || pageRegions.Count == 0)
+            {
+                return 0;
+            }
+
+            for (int regionIndex = 0; regionIndex < pageRegions.Count; regionIndex++)
+            {
+                VTPageRegion region = pageRegions[regionIndex];
+                s_UploadScheduler.CancelUploadsForRegion(spaceId, region.Mip, region.PageRegion);
+            }
+
+            return addressSpace.FlushRegions(pageRegions);
         }
 
         internal static bool SetPageLocked(int spaceId, in VirtualTexturePageCoord coord, bool locked = true)
@@ -766,6 +784,13 @@ namespace VividRP.Runtime
         {
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                 ? addressSpace.PendingRequestCount
+                : 0;
+        }
+
+        internal static int GetPageTableRebuildCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableRebuildCount
                 : 0;
         }
 

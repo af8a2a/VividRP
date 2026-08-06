@@ -395,11 +395,24 @@ namespace VividRP.Runtime
 
             internal int CancelRequestsForSpace(int spaceId)
             {
+                return CancelRequests(request => request.SpaceId == spaceId);
+            }
+
+            internal int CancelRequestsForRegion(int spaceId, int mip, RectInt pageRegion)
+            {
+                return CancelRequests(request =>
+                    request.SpaceId == spaceId
+                    && request.PageCoord.Mip == mip
+                    && pageRegion.Contains(new Vector2Int(request.PageCoord.X, request.PageCoord.Y)));
+            }
+
+            private int CancelRequests(Predicate<VTRequest> shouldCancel)
+            {
                 int removedCount = 0;
                 int writeIndex = 0;
                 for (int readIndex = 0; readIndex < m_RequestCount; readIndex++)
                 {
-                    if (m_Requests[readIndex].SpaceId == spaceId)
+                    if (shouldCancel(m_Requests[readIndex]))
                     {
                         m_PhysicalPools[readIndex] = null;
                         m_UsesGpuStaging[readIndex] = false;
@@ -584,6 +597,15 @@ namespace VividRP.Runtime
                 int removedCount = 0;
                 for (int batchIndex = 0; batchIndex < m_Batches.Count; batchIndex++)
                     removedCount += m_Batches[batchIndex].CancelRequestsForSpace(spaceId);
+
+                return removedCount;
+            }
+
+            internal int CancelRequestsForRegion(int spaceId, int mip, RectInt pageRegion)
+            {
+                int removedCount = 0;
+                for (int batchIndex = 0; batchIndex < m_Batches.Count; batchIndex++)
+                    removedCount += m_Batches[batchIndex].CancelRequestsForRegion(spaceId, mip, pageRegion);
 
                 return removedCount;
             }
@@ -977,6 +999,28 @@ namespace VividRP.Runtime
 
             foreach (UploadPool pool in m_Pools.Values)
                 pool.CancelRequestsForSpace(spaceId);
+        }
+
+        internal void CancelUploadsForRegion(int spaceId, int mip, RectInt pageRegion)
+        {
+            for (int uploadIndex = m_QueuedUploads.Count - 1; uploadIndex >= 0; uploadIndex--)
+            {
+                QueuedUpload upload = m_QueuedUploads[uploadIndex];
+                VTRequest request = upload.Payload.Request;
+                if (request.SpaceId != spaceId
+                    || request.PageCoord.Mip != mip
+                    || !pageRegion.Contains(new Vector2Int(request.PageCoord.X, request.PageCoord.Y)))
+                {
+                    continue;
+                }
+
+                upload.Payload.Finalizer?.Dispose();
+                ReleaseUploadReservation(upload.Key);
+                m_QueuedUploads.RemoveAt(uploadIndex);
+            }
+
+            foreach (UploadPool pool in m_Pools.Values)
+                pool.CancelRequestsForRegion(spaceId, mip, pageRegion);
         }
 
         internal bool TryReserveUpload(string spaceName, in VirtualTextureSpaceDesc desc)

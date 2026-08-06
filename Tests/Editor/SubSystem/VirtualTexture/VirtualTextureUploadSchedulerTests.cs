@@ -304,6 +304,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void FlushRegion_CancelsOnlyUploadsInsideReleasedRegion()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("RegionCancel", maxUploadsPerFrame: 2);
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new TestRuntimeProducer());
+            var releasedCoord = new VirtualTexturePageCoord(0, 0, 0);
+            var retainedCoord = new VirtualTexturePageCoord(1, 0, 0);
+
+            IssueFeedback(spaceId, releasedCoord, retainedCoord);
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(2));
+
+            Assert.That(
+                VirtualTextureSystem.FlushRegion(spaceId, 0, new RectInt(0, 0, 1, 1)),
+                Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+            m_FenceFactory.Handles[0].IsPassed = true;
+            UpdateOnce();
+
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.Zero);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                releasedCoord,
+                out VirtualTexturePageTableEntry releasedEntry), Is.True);
+            Assert.That(releasedEntry.Resident, Is.False);
+            Assert.That(releasedEntry.PendingUpload, Is.False);
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                retainedCoord,
+                out VirtualTexturePageTableEntry retainedEntry), Is.True);
+            Assert.That(retainedEntry.Resident, Is.True);
+            Assert.That(retainedEntry.PendingUpload, Is.False);
+        }
+
+        [Test]
         public void Uploads_StallCleanly_WhenBothBatchesAreInFlight()
         {
             int spaceId = VirtualTextureSystem.RegisterAddressSpace(CreateDesc("DoubleBuffer"), new TestRuntimeProducer());

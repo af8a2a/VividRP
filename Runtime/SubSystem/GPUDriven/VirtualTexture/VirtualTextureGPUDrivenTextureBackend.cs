@@ -36,6 +36,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
     internal sealed class VirtualTextureGPUDrivenTextureBackend :
         IGPUDrivenTextureBackend,
+        IGPUDrivenTextureBindingLifecycle,
         IGPUDrivenVirtualTextureBackend
     {
         internal const int PageSize = 128;
@@ -90,18 +91,40 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
         }
 
-        private readonly Dictionary<TextureSetKey, VividSurfaceBindingData> m_Bindings = new();
+        private sealed class BindingEntry
+        {
+            internal TextureSetKey Key;
+            internal VividSurfaceBindingData Binding;
+            internal Texture2D BaseColor;
+            internal Texture2D Normal;
+            internal Texture2D Mask;
+            internal RectInt PageRegion;
+            internal VirtualTexturePageCoord MipTailCoord;
+            internal int MaxMip;
+            internal uint LastTouchedUpdate;
+            internal uint CreatedUpdate;
+            internal bool HasAllocation;
+            internal bool MipTailResident;
+        }
+
+        private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings = new();
         private readonly HashSet<EntityId> m_RegisteredTextureIds = new();
         private readonly HashSet<EntityId> m_UnsupportedTextureWarningIds = new();
-        private readonly List<VirtualTexturePageCoord> m_PendingMipTailCoords = new();
+        private readonly List<BindingEntry> m_PendingMipTailEntries = new();
+        private readonly List<BindingEntry> m_ReleaseEntries = new();
+        private readonly List<VTPageRegion> m_ReleaseRegions = new();
+        private readonly List<RectInt> m_ReleaseAtlasRegions = new();
         private readonly bool[,] m_AllocatedPages = new bool[AtlasPageCount, AtlasPageCount];
         private readonly GPUDrivenVirtualTextureProducer m_Producer;
 
         private uint m_BindingRevision = 1;
+        private uint m_SurfaceBindingUpdate = 1;
         private uint m_CreateResourceCallCountThisFrame;
         private int m_AllocatedPageCount;
         private int m_QueuedMipTailCount;
         private int m_ResidentMipTailCount;
+        private bool m_SurfaceBindingUpdateActive;
+        private bool m_RetrySurfaceBindingUpdate;
         private bool m_IsDisposed;
 
         internal VirtualTextureGPUDrivenTextureBackend()
@@ -187,18 +210,26 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (!IsAvailable)
                 return;
 
-            for (int tailIndex = m_PendingMipTailCoords.Count - 1; tailIndex >= 0; tailIndex--)
+            if (m_RetrySurfaceBindingUpdate)
             {
+                m_RetrySurfaceBindingUpdate = false;
+                IncrementBindingRevision();
+            }
+
+            for (int tailIndex = m_PendingMipTailEntries.Count - 1; tailIndex >= 0; tailIndex--)
+            {
+                BindingEntry bindingEntry = m_PendingMipTailEntries[tailIndex];
                 if (VirtualTextureSystem.TryGetPageTableEntry(
                         VirtualTextureSpaceId,
-                        m_PendingMipTailCoords[tailIndex],
+                        bindingEntry.MipTailCoord,
                         out VirtualTexturePageTableEntry entry)
                     && entry.Resident
                     && entry.Locked)
                 {
-                    int lastTailIndex = m_PendingMipTailCoords.Count - 1;
-                    m_PendingMipTailCoords[tailIndex] = m_PendingMipTailCoords[lastTailIndex];
-                    m_PendingMipTailCoords.RemoveAt(lastTailIndex);
+                    int lastTailIndex = m_PendingMipTailEntries.Count - 1;
+                    m_PendingMipTailEntries[tailIndex] = m_PendingMipTailEntries[lastTailIndex];
+                    m_PendingMipTailEntries.RemoveAt(lastTailIndex);
+                    bindingEntry.MipTailResident = true;
                     m_ResidentMipTailCount += 1;
                 }
             }
@@ -208,6 +239,57 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         {
             ThrowIfDisposed();
             m_CreateResourceCallCountThisFrame = 0;
+        }
+
+        public void BeginSurfaceBindingUpdate()
+        {
+            ThrowIfDisposed();
+            if (m_SurfaceBindingUpdateActive)
+                throw new InvalidOperationException("A GPUDriven VT surface binding update is already active.");
+
+            unchecked
+            {
+                m_SurfaceBindingUpdate += 1;
+                if (m_SurfaceBindingUpdate == 0)
+                    m_SurfaceBindingUpdate = 1;
+            }
+
+            m_SurfaceBindingUpdateActive = true;
+        }
+
+        public void EndSurfaceBindingUpdate()
+        {
+            ThrowIfDisposed();
+            if (!m_SurfaceBindingUpdateActive)
+                return;
+
+            m_ReleaseEntries.Clear();
+            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            {
+                if (bindingEntry.LastTouchedUpdate != m_SurfaceBindingUpdate)
+                    m_ReleaseEntries.Add(bindingEntry);
+            }
+
+            m_SurfaceBindingUpdateActive = false;
+            ReleaseBindingEntries(m_ReleaseEntries);
+            m_ReleaseEntries.Clear();
+        }
+
+        public void CancelSurfaceBindingUpdate()
+        {
+            if (m_IsDisposed || !m_SurfaceBindingUpdateActive)
+                return;
+
+            m_ReleaseEntries.Clear();
+            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            {
+                if (bindingEntry.CreatedUpdate == m_SurfaceBindingUpdate)
+                    m_ReleaseEntries.Add(bindingEntry);
+            }
+
+            m_SurfaceBindingUpdateActive = false;
+            ReleaseBindingEntries(m_ReleaseEntries);
+            m_ReleaseEntries.Clear();
         }
 
         public VividSurfaceBindingData CreateSurfaceBinding(in GPUDrivenSurfaceTextureSet textures)
@@ -220,14 +302,22 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             Texture2D normal = ResolveTexture2D(textures.Normal);
             Texture2D mask = ResolveTexture2D(textures.Mask);
             var key = new TextureSetKey(baseColor, normal, mask, textures.AddressMode);
-            if (m_Bindings.TryGetValue(key, out VividSurfaceBindingData existingBinding))
-                return existingBinding;
+            if (m_Bindings.TryGetValue(key, out BindingEntry existingEntry))
+            {
+                TouchBindingEntry(existingEntry);
+                return existingEntry.Binding;
+            }
 
             if (baseColor == null && normal == null && mask == null)
             {
-                VividSurfaceBindingData emptyBinding = CreateEmptyBinding();
-                m_Bindings.Add(key, emptyBinding);
-                return emptyBinding;
+                var emptyEntry = new BindingEntry
+                {
+                    Key = key,
+                    Binding = CreateEmptyBinding(),
+                };
+                TouchNewBindingEntry(emptyEntry);
+                m_Bindings.Add(key, emptyEntry);
+                return emptyEntry.Binding;
             }
 
             int allocationPageCount = ResolveAllocationPageCount(baseColor, normal, mask);
@@ -235,9 +325,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             {
                 Debug.LogWarning(
                     $"[VividRP] GPUDriven VT atlas is full. Could not allocate a {allocationPageCount}x{allocationPageCount} page region.");
-                VividSurfaceBindingData emptyBinding = CreateEmptyBinding();
-                m_Bindings.Add(key, emptyBinding);
-                return emptyBinding;
+                m_RetrySurfaceBindingUpdate = true;
+                return CreateEmptyBinding();
             }
 
             int maxMip = Mathf.RoundToInt(Mathf.Log(allocationPageCount, 2.0f));
@@ -272,13 +361,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Debug.LogWarning(
                     $"[VividRP] GPUDriven VT mip tail {mipTailCoord} could not be queued. "
                     + "The material will use texture fallbacks to keep alpha and shadows deterministic.");
-                VividSurfaceBindingData fallbackBinding = CreateEmptyBinding();
-                m_Bindings.Add(key, fallbackBinding);
-                return fallbackBinding;
+                m_RetrySurfaceBindingUpdate = true;
+                return CreateEmptyBinding();
             }
-
-            m_PendingMipTailCoords.Add(mipTailCoord);
-            m_QueuedMipTailCount += 1;
 
             VividSurfaceBindingFlags flags = VividSurfaceBindingFlags.None;
             uint baseColorResource = CreateResource(baseColor, GPUDrivenVirtualTextureProducer.BaseColorLayerIndex, maxMip, VividSurfaceBindingFlags.BaseColor, ref flags);
@@ -300,7 +385,22 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     pageRegion.y * inverseAtlasPageCount),
             };
 
-            m_Bindings.Add(key, binding);
+            var bindingEntry = new BindingEntry
+            {
+                Key = key,
+                Binding = binding,
+                BaseColor = baseColor,
+                Normal = normal,
+                Mask = mask,
+                PageRegion = pageRegion,
+                MipTailCoord = mipTailCoord,
+                MaxMip = maxMip,
+                HasAllocation = true,
+            };
+            TouchNewBindingEntry(bindingEntry);
+            m_Bindings.Add(key, bindingEntry);
+            m_PendingMipTailEntries.Add(bindingEntry);
+            m_QueuedMipTailCount += 1;
             m_CreateResourceCallCountThisFrame += 1;
             IncrementBindingRevision();
             return binding;
@@ -328,7 +428,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_Bindings.Clear();
             m_RegisteredTextureIds.Clear();
             m_UnsupportedTextureWarningIds.Clear();
-            m_PendingMipTailCoords.Clear();
+            m_PendingMipTailEntries.Clear();
+            m_ReleaseEntries.Clear();
+            m_ReleaseRegions.Clear();
+            m_ReleaseAtlasRegions.Clear();
             m_IsDisposed = true;
         }
 
@@ -517,6 +620,92 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 for (int x = startX; x < startX + size; x++)
                     m_AllocatedPages[x, y] = true;
             }
+        }
+
+        private void TouchBindingEntry(BindingEntry bindingEntry)
+        {
+            if (m_SurfaceBindingUpdateActive)
+                bindingEntry.LastTouchedUpdate = m_SurfaceBindingUpdate;
+        }
+
+        private void TouchNewBindingEntry(BindingEntry bindingEntry)
+        {
+            if (!m_SurfaceBindingUpdateActive)
+                return;
+
+            bindingEntry.LastTouchedUpdate = m_SurfaceBindingUpdate;
+            bindingEntry.CreatedUpdate = m_SurfaceBindingUpdate;
+        }
+
+        private void ReleaseBindingEntries(IReadOnlyList<BindingEntry> bindingEntries)
+        {
+            if (bindingEntries == null || bindingEntries.Count == 0)
+                return;
+
+            bool releasedAllocation = false;
+            m_ReleaseRegions.Clear();
+            m_ReleaseAtlasRegions.Clear();
+            for (int entryIndex = 0; entryIndex < bindingEntries.Count; entryIndex++)
+            {
+                BindingEntry bindingEntry = bindingEntries[entryIndex];
+                if (bindingEntry == null || !m_Bindings.Remove(bindingEntry.Key))
+                    continue;
+
+                if (!bindingEntry.HasAllocation)
+                    continue;
+
+                releasedAllocation = true;
+                m_ReleaseAtlasRegions.Add(bindingEntry.PageRegion);
+                m_Producer?.UnregisterEntry(bindingEntry.PageRegion);
+                if (!bindingEntry.MipTailResident)
+                    m_PendingMipTailEntries.Remove(bindingEntry);
+                else
+                    m_ResidentMipTailCount = Mathf.Max(0, m_ResidentMipTailCount - 1);
+                m_QueuedMipTailCount = Mathf.Max(0, m_QueuedMipTailCount - 1);
+
+                for (int mip = 0; mip <= bindingEntry.MaxMip; mip++)
+                    m_ReleaseRegions.Add(new VTPageRegion(mip, GetRegionAtMip(bindingEntry.PageRegion, mip)));
+            }
+
+            if (m_ReleaseRegions.Count > 0
+                && VirtualTextureSpaceId > 0
+                && VirtualTextureSystem.IsInitialized)
+            {
+                VirtualTextureSystem.FlushRegions(VirtualTextureSpaceId, m_ReleaseRegions);
+            }
+
+            for (int regionIndex = 0; regionIndex < m_ReleaseAtlasRegions.Count; regionIndex++)
+                ReleasePageRegion(m_ReleaseAtlasRegions[regionIndex]);
+
+            RebuildRegisteredTextureIds();
+            if (releasedAllocation)
+                IncrementBindingRevision();
+        }
+
+        private void RebuildRegisteredTextureIds()
+        {
+            m_RegisteredTextureIds.Clear();
+            foreach (BindingEntry bindingEntry in m_Bindings.Values)
+            {
+                RegisterTextureId(bindingEntry.BaseColor);
+                RegisterTextureId(bindingEntry.Normal);
+                RegisterTextureId(bindingEntry.Mask);
+            }
+        }
+
+        private void RegisterTextureId(Texture2D texture)
+        {
+            if (texture != null)
+                m_RegisteredTextureIds.Add(texture.GetEntityId());
+        }
+
+        private static RectInt GetRegionAtMip(RectInt pageRegion, int mip)
+        {
+            int xMin = pageRegion.xMin >> mip;
+            int yMin = pageRegion.yMin >> mip;
+            int xMax = ((pageRegion.xMax - 1) >> mip) + 1;
+            int yMax = ((pageRegion.yMax - 1) >> mip) + 1;
+            return new RectInt(xMin, yMin, xMax - xMin, yMax - yMin);
         }
 
         private uint CreateResource(

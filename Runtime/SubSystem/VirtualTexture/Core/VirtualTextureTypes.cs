@@ -43,6 +43,19 @@ namespace VividRP.Runtime
         }
     }
 
+    internal readonly struct VTPageRegion
+    {
+        internal VTPageRegion(int mip, RectInt pageRegion)
+        {
+            Mip = mip;
+            PageRegion = pageRegion;
+        }
+
+        internal int Mip { get; }
+
+        internal RectInt PageRegion { get; }
+    }
+
     internal readonly struct VirtualTextureViewId : IEquatable<VirtualTextureViewId>
     {
         internal static readonly VirtualTextureViewId Invalid = new(EntityId.None, default, false);

@@ -155,21 +155,35 @@ namespace VividRP.Runtime.GPUDriven
                 m_MaterialIndexByObjectId.Clear();
             }
 
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataAppendRenderersMarker.Auto())
+            IGPUDrivenTextureBindingLifecycle bindingLifecycle = materialDataChanged
+                ? textureBackend as IGPUDrivenTextureBindingLifecycle
+                : null;
+            bindingLifecycle?.BeginSurfaceBindingUpdate();
+            try
             {
-                IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
-                IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
-                int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
-
-                for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+                using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataAppendRenderersMarker.Auto())
                 {
-                    AppendRendererSceneData(
-                        sceneData,
-                        rendererData[rendererIndex],
-                        rendererResources[rendererIndex],
-                        textureBackend
-                    );
+                    IReadOnlyList<VividMeshletRendererRenderData> rendererData = database.rendererData;
+                    IReadOnlyList<VividMeshletRendererResources> rendererResources = database.rendererResources;
+                    int rendererCount = Mathf.Min(rendererData.Count, rendererResources.Count);
+
+                    for (int rendererIndex = 0; rendererIndex < rendererCount; rendererIndex++)
+                    {
+                        AppendRendererSceneData(
+                            sceneData,
+                            rendererData[rendererIndex],
+                            rendererResources[rendererIndex],
+                            textureBackend
+                        );
+                    }
                 }
+
+                bindingLifecycle?.EndSurfaceBindingUpdate();
+            }
+            catch
+            {
+                bindingLifecycle?.CancelSurfaceBindingUpdate();
+                throw;
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemGPUDrivenPrepareFrameBuildSceneDataInstanceDiffMarker.Auto())

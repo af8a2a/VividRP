@@ -85,6 +85,8 @@ namespace VividRP.Runtime
 
         internal int PendingOrderCacheHitCount => m_PendingOrderCacheHitCount;
 
+        internal int PageTableRebuildCount => m_PageTableUpdater.RebuildCount;
+
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
         internal int ResidencyClassificationCapacity => m_ResidencyManager.ClassificationCapacity;
@@ -240,6 +242,26 @@ namespace VividRP.Runtime
         internal int FlushRegion(int mip, RectInt pageRegion)
         {
             int flushedCount = m_ResidencyManager.FlushRegion(mip, pageRegion);
+            if (flushedCount <= 0)
+                return 0;
+
+            m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
+            m_ResidencyManager.ClearDirtyPageTableUpdates();
+            return flushedCount;
+        }
+
+        internal int FlushRegions(IReadOnlyList<VTPageRegion> pageRegions)
+        {
+            if (pageRegions == null || pageRegions.Count == 0)
+                return 0;
+
+            int flushedCount = 0;
+            for (int regionIndex = 0; regionIndex < pageRegions.Count; regionIndex++)
+            {
+                VTPageRegion region = pageRegions[regionIndex];
+                flushedCount += m_ResidencyManager.FlushRegion(region.Mip, region.PageRegion);
+            }
+
             if (flushedCount <= 0)
                 return 0;
 

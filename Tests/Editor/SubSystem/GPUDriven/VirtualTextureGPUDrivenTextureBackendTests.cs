@@ -234,6 +234,132 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SurfaceBindingUpdate_ReleasesUntouchedEntriesAndReusesAtlasRegion()
+        {
+            Texture2D firstTexture = null;
+            Texture2D secondTexture = null;
+            Texture2D replacementTexture = null;
+            try
+            {
+                firstTexture = new Texture2D(256, 256);
+                secondTexture = new Texture2D(256, 256);
+                replacementTexture = new Texture2D(256, 256);
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+
+                backend.BeginSurfaceBindingUpdate();
+                VividSurfaceBindingData firstBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(firstTexture, null, null));
+                VividSurfaceBindingData secondBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(secondTexture, null, null));
+                backend.EndSurfaceBindingUpdate();
+
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(2));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(8));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(2));
+
+                backend.BeginSurfaceBindingUpdate();
+                VividSurfaceBindingData retainedBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(secondTexture, null, null));
+                backend.EndSurfaceBindingUpdate();
+
+                Assert.That(retainedBinding.UVScaleBias, Is.EqualTo(secondBinding.UVScaleBias));
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(4));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.GetStats().RegisteredResourceCount, Is.EqualTo(1));
+
+                backend.BeginSurfaceBindingUpdate();
+                backend.EndSurfaceBindingUpdate();
+                VividSurfaceBindingData replacementBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(replacementTexture, null, null));
+
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(4));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
+                Assert.That(replacementBinding.UVScaleBias, Is.EqualTo(firstBinding.UVScaleBias));
+            }
+            finally
+            {
+                Destroy(firstTexture);
+                Destroy(secondTexture);
+                Destroy(replacementTexture);
+            }
+        }
+
+        [Test]
+        public void SurfaceBindingUpdate_BatchesReleasedRegionsIntoOnePageTableRebuild()
+        {
+            Texture2D firstTexture = null;
+            Texture2D secondTexture = null;
+            try
+            {
+                firstTexture = new Texture2D(256, 256);
+                secondTexture = new Texture2D(256, 256);
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+
+                backend.BeginSurfaceBindingUpdate();
+                backend.CreateSurfaceBinding(new GPUDrivenSurfaceTextureSet(firstTexture, null, null));
+                backend.CreateSurfaceBinding(new GPUDrivenSurfaceTextureSet(secondTexture, null, null));
+                backend.EndSurfaceBindingUpdate();
+                int rebuildCountBeforeRelease = VirtualTextureSystem.GetPageTableRebuildCountForTesting(
+                    backend.VirtualTextureSpaceId);
+
+                backend.BeginSurfaceBindingUpdate();
+                backend.EndSurfaceBindingUpdate();
+
+                Assert.That(
+                    VirtualTextureSystem.GetPageTableRebuildCountForTesting(backend.VirtualTextureSpaceId),
+                    Is.EqualTo(rebuildCountBeforeRelease + 1));
+                Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(backend.VirtualTextureSpaceId), Is.Zero);
+                Assert.That(backend.AtlasEntryCount, Is.Zero);
+                Assert.That(backend.AllocatedPageCount, Is.Zero);
+                Assert.That(backend.QueuedMipTailCount, Is.Zero);
+                Assert.That(backend.ResidentMipTailCount, Is.Zero);
+            }
+            finally
+            {
+                Destroy(firstTexture);
+                Destroy(secondTexture);
+            }
+        }
+
+        [Test]
+        public void SurfaceBindingUpdate_CancelKeepsPreviousEntriesAndReleasesNewEntries()
+        {
+            Texture2D retainedTexture = null;
+            Texture2D transientTexture = null;
+            try
+            {
+                retainedTexture = new Texture2D(128, 128);
+                transientTexture = new Texture2D(128, 128);
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+
+                backend.BeginSurfaceBindingUpdate();
+                VividSurfaceBindingData retainedBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(retainedTexture, null, null));
+                backend.EndSurfaceBindingUpdate();
+
+                backend.BeginSurfaceBindingUpdate();
+                backend.CreateSurfaceBinding(new GPUDrivenSurfaceTextureSet(retainedTexture, null, null));
+                backend.CreateSurfaceBinding(new GPUDrivenSurfaceTextureSet(transientTexture, null, null));
+                backend.CancelSurfaceBindingUpdate();
+
+                VividSurfaceBindingData bindingAfterCancel = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(retainedTexture, null, null));
+                Assert.That(bindingAfterCancel.UVScaleBias, Is.EqualTo(retainedBinding.UVScaleBias));
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(1));
+                Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
+                Assert.That(backend.GetStats().RegisteredResourceCount, Is.EqualTo(1));
+            }
+            finally
+            {
+                Destroy(retainedTexture);
+                Destroy(transientTexture);
+            }
+        }
+
+        [Test]
         public void CreateSurfaceBinding_NoTexturesUsesBackendNeutralFallback()
         {
             using var backend = new VirtualTextureGPUDrivenTextureBackend();

@@ -4,6 +4,18 @@ using UnityEngine.Experimental.Rendering;
 
 namespace VividRP.Runtime
 {
+    public enum VividVirtualTextureBuildProfile
+    {
+        Generic = 0,
+        GPUDrivenSurface = 1,
+    }
+
+    public enum VividVirtualTextureAddressMode
+    {
+        Repeat = 0,
+        Clamp = 1,
+    }
+
     public enum VividVirtualTextureCodec
     {
         RawRGBA32 = 0,
@@ -286,6 +298,18 @@ namespace VividRP.Runtime
         public int ChunkCount => m_BuiltData != null ? m_BuiltData.ChunkCount : 0;
 
         public int TileCount => m_BuiltData != null ? m_BuiltData.TileCount : 0;
+
+        public VividVirtualTextureBuildProfile BuildProfile => m_BuiltData != null
+            ? m_BuiltData.BuildProfile
+            : VividVirtualTextureBuildProfile.Generic;
+
+        public int ContentLayerMask => m_BuiltData != null ? m_BuiltData.ContentLayerMask : 0;
+
+        public uint ContentVersion => m_BuiltData != null ? m_BuiltData.ContentVersion : 0u;
+
+        public VividVirtualTextureAddressMode AddressMode => m_BuiltData != null
+            ? m_BuiltData.AddressMode
+            : VividVirtualTextureAddressMode.Repeat;
 
         internal void Initialize(VividVirtualTextureBuiltData builtData)
         {

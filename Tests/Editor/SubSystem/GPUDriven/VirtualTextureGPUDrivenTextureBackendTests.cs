@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.TestTools;
+using VividRP.Editor;
 using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.VirtualTexture;
@@ -230,6 +231,62 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Destroy(baseColor);
+            }
+        }
+
+        [Test]
+        public void CreateSurfaceBinding_StreamedAsset_UsesSidecarAndCpuPageFinalizer()
+        {
+            Texture2D sourceTexture = new Texture2D(256, 256, TextureFormat.RGBA32, true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = Path.Combine(Path.GetTempPath(), $"GPUDriven_{System.Guid.NewGuid():N}.stream");
+
+            try
+            {
+                sourceTexture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    StreamDataPath = streamDataPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                });
+                Object.DestroyImmediate(sourceTexture);
+                sourceTexture = null;
+
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+                backend.BeginSurfaceBindingUpdate();
+                var binding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(asset, null, null, null));
+                backend.EndSurfaceBindingUpdate();
+
+                Assert.That(binding.Flags, Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                Assert.That(binding.BaseColorResource & 0xFFu, Is.EqualTo(0u));
+                Assert.That(binding.BaseColorResource >> 8, Is.EqualTo(1u));
+                Assert.That(binding.NormalResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(binding.MaskResource, Is.EqualTo(VividSurfaceBindingData.InvalidResource));
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
+                Assert.That(backend.StreamedAtlasEntryCount, Is.EqualTo(1));
+
+                UpdateOnce();
+                Assert.That(VirtualTextureStatsRegistry.LastStats.CpuProducedPageCount, Is.EqualTo(1));
+                Assert.That(VirtualTextureStatsRegistry.LastStats.GpuProducedPageCount, Is.Zero);
+                Assert.That(VirtualTextureStatsRegistry.LastStats.GpuDispatchCount, Is.Zero);
+
+                backend.BeginSurfaceBindingUpdate();
+                backend.EndSurfaceBindingUpdate();
+                Assert.That(backend.AtlasEntryCount, Is.Zero);
+                Assert.That(backend.StreamedAtlasEntryCount, Is.Zero);
+                Assert.That(backend.AllocatedPageCount, Is.Zero);
+            }
+            finally
+            {
+                if (sourceTexture != null)
+                    Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+                if (File.Exists(streamDataPath))
+                    File.Delete(streamDataPath);
             }
         }
 

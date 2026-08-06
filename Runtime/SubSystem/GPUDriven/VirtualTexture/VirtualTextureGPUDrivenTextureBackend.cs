@@ -53,16 +53,23 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private readonly struct TextureSetKey : IEquatable<TextureSetKey>
         {
             internal TextureSetKey(
+                VividVirtualTextureAsset streamedAsset,
                 Texture2D baseColor,
                 Texture2D normal,
                 Texture2D mask,
                 GPUDrivenSurfaceAddressMode addressMode)
             {
-                BaseColorId = baseColor != null ? baseColor.GetEntityId() : EntityId.None;
-                NormalId = normal != null ? normal.GetEntityId() : EntityId.None;
-                MaskId = mask != null ? mask.GetEntityId() : EntityId.None;
+                StreamedAssetId = streamedAsset != null ? streamedAsset.GetEntityId() : EntityId.None;
+                ContentVersion = streamedAsset != null ? streamedAsset.ContentVersion : 0u;
+                BaseColorId = streamedAsset == null && baseColor != null ? baseColor.GetEntityId() : EntityId.None;
+                NormalId = streamedAsset == null && normal != null ? normal.GetEntityId() : EntityId.None;
+                MaskId = streamedAsset == null && mask != null ? mask.GetEntityId() : EntityId.None;
                 AddressMode = addressMode;
             }
+
+            private EntityId StreamedAssetId { get; }
+
+            private uint ContentVersion { get; }
 
             private EntityId BaseColorId { get; }
 
@@ -74,7 +81,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             public bool Equals(TextureSetKey other)
             {
-                return BaseColorId == other.BaseColorId
+                return StreamedAssetId == other.StreamedAssetId
+                       && ContentVersion == other.ContentVersion
+                       && BaseColorId == other.BaseColorId
                        && NormalId == other.NormalId
                        && MaskId == other.MaskId
                        && AddressMode == other.AddressMode;
@@ -87,7 +96,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             public override int GetHashCode()
             {
-                return HashCode.Combine(BaseColorId, NormalId, MaskId, AddressMode);
+                return HashCode.Combine(
+                    StreamedAssetId,
+                    ContentVersion,
+                    BaseColorId,
+                    NormalId,
+                    MaskId,
+                    AddressMode);
             }
         }
 
@@ -98,6 +113,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal Texture2D BaseColor;
             internal Texture2D Normal;
             internal Texture2D Mask;
+            internal VividVirtualTextureAsset StreamedAsset;
             internal RectInt PageRegion;
             internal VirtualTexturePageCoord MipTailCoord;
             internal int MaxMip;
@@ -110,6 +126,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private readonly Dictionary<TextureSetKey, BindingEntry> m_Bindings = new();
         private readonly HashSet<EntityId> m_RegisteredTextureIds = new();
         private readonly HashSet<EntityId> m_UnsupportedTextureWarningIds = new();
+        private readonly HashSet<EntityId> m_InvalidStreamedAssetWarningIds = new();
         private readonly List<BindingEntry> m_PendingMipTailEntries = new();
         private readonly List<BindingEntry> m_ReleaseEntries = new();
         private readonly List<VTPageRegion> m_ReleaseRegions = new();
@@ -197,6 +214,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal VirtualTextureSpaceDesc VirtualTextureSpaceDesc { get; }
 
         internal int AtlasEntryCount => m_Producer?.EntryCount ?? 0;
+
+        internal int StreamedAtlasEntryCount => m_Producer?.StreamedEntryCount ?? 0;
 
         internal int AllocatedPageCount => m_AllocatedPageCount;
 
@@ -298,17 +317,23 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             if (!IsAvailable || m_Producer == null)
                 return CreateEmptyBinding();
 
-            Texture2D baseColor = ResolveTexture2D(textures.BaseColor);
-            Texture2D normal = ResolveTexture2D(textures.Normal);
-            Texture2D mask = ResolveTexture2D(textures.Mask);
-            var key = new TextureSetKey(baseColor, normal, mask, textures.AddressMode);
+            VividVirtualTextureAsset streamedAsset = ResolveStreamedAsset(textures.StreamedVirtualTexture);
+            Texture2D baseColor = streamedAsset == null ? ResolveTexture2D(textures.BaseColor) : null;
+            Texture2D normal = streamedAsset == null ? ResolveTexture2D(textures.Normal) : null;
+            Texture2D mask = streamedAsset == null ? ResolveTexture2D(textures.Mask) : null;
+            GPUDrivenSurfaceAddressMode addressMode = streamedAsset != null
+                ? streamedAsset.AddressMode == VividVirtualTextureAddressMode.Clamp
+                    ? GPUDrivenSurfaceAddressMode.Clamp
+                    : GPUDrivenSurfaceAddressMode.Repeat
+                : textures.AddressMode;
+            var key = new TextureSetKey(streamedAsset, baseColor, normal, mask, addressMode);
             if (m_Bindings.TryGetValue(key, out BindingEntry existingEntry))
             {
                 TouchBindingEntry(existingEntry);
                 return existingEntry.Binding;
             }
 
-            if (baseColor == null && normal == null && mask == null)
+            if (streamedAsset == null && baseColor == null && normal == null && mask == null)
             {
                 var emptyEntry = new BindingEntry
                 {
@@ -320,7 +345,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return emptyEntry.Binding;
             }
 
-            int allocationPageCount = ResolveAllocationPageCount(baseColor, normal, mask);
+            int allocationPageCount = streamedAsset != null
+                ? streamedAsset.VirtualPageCountX
+                : ResolveAllocationPageCount(baseColor, normal, mask);
             if (!TryAllocatePageRegion(allocationPageCount, out RectInt pageRegion))
             {
                 Debug.LogWarning(
@@ -329,10 +356,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return CreateEmptyBinding();
             }
 
-            int maxMip = Mathf.RoundToInt(Mathf.Log(allocationPageCount, 2.0f));
-            bool repeat = textures.AddressMode == GPUDrivenSurfaceAddressMode.Repeat;
-            WarnAddressModeFallback(textures, baseColor, normal, mask);
-            m_Producer.RegisterEntry(pageRegion, maxMip, baseColor, normal, mask, PageSize, repeat);
+            int maxMip = streamedAsset != null
+                ? streamedAsset.MipCount - 1
+                : Mathf.RoundToInt(Mathf.Log(allocationPageCount, 2.0f));
+            bool repeat = addressMode == GPUDrivenSurfaceAddressMode.Repeat;
+            if (streamedAsset == null)
+                WarnAddressModeFallback(textures, baseColor, normal, mask);
+            if (streamedAsset != null)
+                m_Producer.RegisterStreamedEntry(pageRegion, streamedAsset);
+            else
+                m_Producer.RegisterEntry(pageRegion, maxMip, baseColor, normal, mask, PageSize, repeat);
 
             var mipTailCoord = new VirtualTexturePageCoord(
                 pageRegion.x >> maxMip,
@@ -366,9 +399,18 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             VividSurfaceBindingFlags flags = VividSurfaceBindingFlags.None;
-            uint baseColorResource = CreateResource(baseColor, GPUDrivenVirtualTextureProducer.BaseColorLayerIndex, maxMip, VividSurfaceBindingFlags.BaseColor, ref flags);
-            uint normalResource = CreateResource(normal, GPUDrivenVirtualTextureProducer.NormalLayerIndex, maxMip, VividSurfaceBindingFlags.Normal, ref flags);
-            uint maskResource = CreateResource(mask, GPUDrivenVirtualTextureProducer.MaskLayerIndex, maxMip, VividSurfaceBindingFlags.Mask, ref flags);
+            int contentLayerMask = streamedAsset != null ? streamedAsset.ContentLayerMask : 0;
+            uint baseColorResource = streamedAsset != null
+                ? CreateStreamedResource(contentLayerMask, 1, GPUDrivenVirtualTextureProducer.BaseColorLayerIndex, maxMip, VividSurfaceBindingFlags.BaseColor, ref flags)
+                : CreateResource(baseColor, GPUDrivenVirtualTextureProducer.BaseColorLayerIndex, maxMip, VividSurfaceBindingFlags.BaseColor, ref flags);
+            uint normalResource = streamedAsset != null
+                ? CreateStreamedResource(contentLayerMask, 2, GPUDrivenVirtualTextureProducer.NormalLayerIndex, maxMip, VividSurfaceBindingFlags.Normal, ref flags)
+                : CreateResource(normal, GPUDrivenVirtualTextureProducer.NormalLayerIndex, maxMip, VividSurfaceBindingFlags.Normal, ref flags);
+            uint maskResource = streamedAsset != null
+                ? CreateStreamedResource(contentLayerMask, 4, GPUDrivenVirtualTextureProducer.MaskLayerIndex, maxMip, VividSurfaceBindingFlags.Mask, ref flags)
+                : CreateResource(mask, GPUDrivenVirtualTextureProducer.MaskLayerIndex, maxMip, VividSurfaceBindingFlags.Mask, ref flags);
+            if (streamedAsset != null)
+                m_RegisteredTextureIds.Add(streamedAsset.GetEntityId());
             float inverseAtlasPageCount = 1.0f / AtlasPageCount;
             float addressScaleSign = repeat ? 1.0f : -1.0f;
 
@@ -389,9 +431,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             {
                 Key = key,
                 Binding = binding,
-                BaseColor = baseColor,
-                Normal = normal,
-                Mask = mask,
+                BaseColor = streamedAsset == null ? baseColor : null,
+                Normal = streamedAsset == null ? normal : null,
+                Mask = streamedAsset == null ? mask : null,
+                StreamedAsset = streamedAsset,
                 PageRegion = pageRegion,
                 MipTailCoord = mipTailCoord,
                 MaxMip = maxMip,
@@ -428,6 +471,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_Bindings.Clear();
             m_RegisteredTextureIds.Clear();
             m_UnsupportedTextureWarningIds.Clear();
+            m_InvalidStreamedAssetWarningIds.Clear();
             m_PendingMipTailEntries.Clear();
             m_ReleaseEntries.Clear();
             m_ReleaseRegions.Clear();
@@ -539,6 +583,38 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Debug.LogWarning(
                     $"[VividRP] GPUDriven VT supports Texture2D sources only. Texture '{texture.name}' ({texture.GetType().Name}) was skipped.",
                     texture);
+            }
+
+            return null;
+        }
+
+        private VividVirtualTextureAsset ResolveStreamedAsset(VividVirtualTextureAsset asset)
+        {
+            if (asset == null)
+                return null;
+
+            VividVirtualTextureBuiltData builtData = asset.BuiltData;
+            bool valid = builtData != null
+                         && builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
+                         && builtData.PageSize == PageSize
+                         && builtData.BorderSize == BorderSize
+                         && builtData.VirtualPageCountX == builtData.VirtualPageCountY
+                         && builtData.VirtualPageCountX > 0
+                         && builtData.VirtualPageCountX <= MaxAllocationPageCount
+                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountX)
+                         && builtData.MipCount == Mathf.RoundToInt(Mathf.Log(builtData.VirtualPageCountX, 2.0f)) + 1
+                         && builtData.MatchesStack(VirtualTextureSpaceDesc.StackDesc)
+                         && (builtData.HasInlineRawData || builtData.HasStreamData);
+            if (valid)
+                return asset;
+
+            EntityId assetId = asset.GetEntityId();
+            if (m_InvalidStreamedAssetWarningIds.Add(assetId))
+            {
+                Debug.LogWarning(
+                    $"[VividRP] Streamed VT asset '{asset.name}' is not a compatible GPUDrivenSurface build. "
+                    + "The material will use its Texture2D fallback producer until the asset is rebuilt.",
+                    asset);
             }
 
             return null;
@@ -690,6 +766,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 RegisterTextureId(bindingEntry.BaseColor);
                 RegisterTextureId(bindingEntry.Normal);
                 RegisterTextureId(bindingEntry.Mask);
+                if (bindingEntry.StreamedAsset != null)
+                    m_RegisteredTextureIds.Add(bindingEntry.StreamedAsset.GetEntityId());
             }
         }
 
@@ -720,6 +798,21 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             flags |= flag;
             m_RegisteredTextureIds.Add(texture.GetEntityId());
+            return PackResource(layerIndex, maxMip);
+        }
+
+        private static uint CreateStreamedResource(
+            int contentLayerMask,
+            int layerBit,
+            int layerIndex,
+            int maxMip,
+            VividSurfaceBindingFlags flag,
+            ref VividSurfaceBindingFlags flags)
+        {
+            if ((contentLayerMask & layerBit) == 0)
+                return VividSurfaceBindingData.InvalidResource;
+
+            flags |= flag;
             return PackResource(layerIndex, maxMip);
         }
 

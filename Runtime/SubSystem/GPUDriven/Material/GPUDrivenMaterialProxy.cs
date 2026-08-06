@@ -45,6 +45,9 @@ namespace VividRP.Runtime.GPUDriven
         private Texture2D m_MaskMap;
 
         [SerializeField]
+        private VividVirtualTextureAsset m_StreamedVirtualTexture;
+
+        [SerializeField]
         private GPUDrivenMaterialMaskMode m_MaskMode =
             GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness;
 
@@ -119,6 +122,12 @@ namespace VividRP.Runtime.GPUDriven
         {
             get => m_MaskMap;
             set => SetValue(ref m_MaskMap, value);
+        }
+
+        public VividVirtualTextureAsset StreamedVirtualTexture
+        {
+            get => m_StreamedVirtualTexture;
+            set => SetValue(ref m_StreamedVirtualTexture, value);
         }
 
         public GPUDrivenMaterialMaskMode MaskMode

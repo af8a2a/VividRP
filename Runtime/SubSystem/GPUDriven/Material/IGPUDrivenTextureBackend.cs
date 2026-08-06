@@ -18,7 +18,17 @@ namespace VividRP.Runtime.GPUDriven
     internal readonly struct GPUDrivenSurfaceTextureSet
     {
         internal GPUDrivenSurfaceTextureSet(Texture baseColor, Texture normal, Texture mask)
+            : this(null, baseColor, normal, mask)
         {
+        }
+
+        internal GPUDrivenSurfaceTextureSet(
+            VividVirtualTextureAsset streamedVirtualTexture,
+            Texture baseColor,
+            Texture normal,
+            Texture mask)
+        {
+            StreamedVirtualTexture = streamedVirtualTexture;
             BaseColor = baseColor;
             Normal = normal;
             Mask = mask;
@@ -31,6 +41,8 @@ namespace VividRP.Runtime.GPUDriven
         }
 
         internal Texture BaseColor { get; }
+
+        internal VividVirtualTextureAsset StreamedVirtualTexture { get; }
 
         internal Texture Normal { get; }
 

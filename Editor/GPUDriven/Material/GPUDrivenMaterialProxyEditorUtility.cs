@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEngine;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 
 namespace VividRP.Editor.GPUDriven
@@ -132,6 +133,18 @@ namespace VividRP.Editor.GPUDriven
 
             warnings.AddRange(syncResult.Warnings);
 
+            if (syncResult.Success)
+            {
+                if (!BuildOrRefreshStreamedVirtualTexture(materialProxy, out string streamedAssetPath, out bool streamedAssetCreated, out string streamError))
+                {
+                    warnings.Add(streamError);
+                }
+                else if (streamedAssetCreated && !string.IsNullOrEmpty(streamedAssetPath))
+                {
+                    createdAssetPaths.Add(streamedAssetPath);
+                }
+            }
+
             if (changed || wasCreated || syncResult.Changed)
             {
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
@@ -218,6 +231,15 @@ namespace VividRP.Editor.GPUDriven
 
                     warnings.AddRange(syncResult.Warnings);
                 }
+
+                if (!BuildOrRefreshStreamedVirtualTexture(materialProxy, out string streamedAssetPath, out bool streamedAssetCreated, out string streamError))
+                {
+                    warnings.Add(streamError);
+                }
+                else if (streamedAssetCreated && !string.IsNullOrEmpty(streamedAssetPath))
+                {
+                    createdAssetPaths.Add(streamedAssetPath);
+                }
             }
 
             Undo.RecordObject(meshletRenderer, "Bind GPUDriven Material Proxies");
@@ -286,12 +308,25 @@ namespace VividRP.Editor.GPUDriven
             }
 
             GPUDrivenMaterialProxySyncResult syncResult = GPUDrivenMaterialProxySyncUtility.SyncFromSourceMaterial(materialProxy, sourceMaterial);
-            if (syncResult.Success && syncResult.Changed)
+            var warnings = new List<string>(syncResult.Warnings);
+            uint revisionAfterSync = materialProxy.Revision;
+            if (syncResult.Success
+                && !BuildOrRefreshStreamedVirtualTexture(materialProxy, out _, out _, out string streamError))
+            {
+                warnings.Add(streamError);
+            }
+
+            bool changed = syncResult.Changed || materialProxy.Revision != revisionAfterSync;
+            if (syncResult.Success && changed)
             {
                 VividMeshletRendererDatabase.instance.UpdateRendererData(meshletRenderer);
             }
 
-            return syncResult;
+            return new GPUDrivenMaterialProxySyncResult(
+                syncResult.Success,
+                changed,
+                syncResult.ErrorMessage,
+                warnings.ToArray());
         }
 
         public static GPUDrivenMaterialProxySyncResult SyncMaterialProxiesFromSourceMaterials(MeshletRenderer meshletRenderer)
@@ -340,6 +375,10 @@ namespace VividRP.Editor.GPUDriven
 
                 changed |= syncResult.Changed;
                 warnings.AddRange(syncResult.Warnings);
+                uint revisionAfterSync = materialProxy.Revision;
+                if (!BuildOrRefreshStreamedVirtualTexture(materialProxy, out _, out _, out string streamError))
+                    warnings.Add(streamError);
+                changed |= materialProxy.Revision != revisionAfterSync;
             }
 
             if (changed)
@@ -348,6 +387,111 @@ namespace VividRP.Editor.GPUDriven
             }
 
             return new GPUDrivenMaterialProxySyncResult(true, changed, string.Empty, warnings.ToArray());
+        }
+
+        internal static bool BuildOrRefreshStreamedVirtualTexture(
+            GPUDrivenMaterialProxy materialProxy,
+            out string assetPath,
+            out bool wasCreated,
+            out string errorMessage)
+        {
+            assetPath = string.Empty;
+            wasCreated = false;
+            errorMessage = string.Empty;
+            if (materialProxy == null)
+            {
+                errorMessage = "GPUDriven material proxy is null.";
+                return false;
+            }
+
+            if (materialProxy.BaseMap == null && materialProxy.BumpMap == null && materialProxy.MaskMap == null)
+            {
+                if (materialProxy.StreamedVirtualTexture != null)
+                {
+                    Undo.RecordObject(materialProxy, "Clear GPUDriven Streamed VT Asset");
+                    materialProxy.StreamedVirtualTexture = null;
+                    EditorUtility.SetDirty(materialProxy);
+                    AssetDatabase.SaveAssetIfDirty(materialProxy);
+                }
+
+                return true;
+            }
+
+            string proxyAssetPath = AssetDatabase.GetAssetPath(materialProxy);
+            if (string.IsNullOrWhiteSpace(proxyAssetPath))
+            {
+                errorMessage = "Save the GPUDriven material proxy as an asset before building its streamed VT data.";
+                return false;
+            }
+
+            string directory = Path.GetDirectoryName(proxyAssetPath)?.Replace('\\', '/') ?? "Assets";
+            string assetName = Path.GetFileNameWithoutExtension(proxyAssetPath) + "_Surface." + VividVirtualTextureAssetImporter.Extension;
+            assetPath = Path.Combine(directory, assetName).Replace('\\', '/');
+
+            try
+            {
+                if (AssetDatabase.LoadMainAssetAtPath(assetPath) == null)
+                {
+                    File.WriteAllText(assetPath, string.Empty);
+                    AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+                    wasCreated = true;
+                }
+
+                if (AssetImporter.GetAtPath(assetPath) is not VividVirtualTextureAssetImporter importer)
+                {
+                    errorMessage = $"'{assetPath}' is not a Vivid virtual texture asset.";
+                    return false;
+                }
+
+                Undo.RecordObject(importer, "Build GPUDriven Streamed VT Asset");
+                importer.SourceTexture = materialProxy.BaseMap;
+                importer.NormalTexture = materialProxy.BumpMap;
+                importer.MaskTexture = materialProxy.MaskMap;
+                importer.BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
+                importer.AddressMode = ResolveAddressMode(materialProxy);
+                importer.PageSize = 128;
+                importer.BorderSize = 4;
+                importer.MipCount = 0;
+                importer.FallbackColor = Color.white;
+                importer.NormalFallbackColor = new Color(0.5f, 0.5f, 1.0f, 0.5f);
+                importer.MaskFallbackColor = Color.white;
+                EditorUtility.SetDirty(importer);
+                importer.SaveAndReimport();
+
+                VividVirtualTextureAsset streamedAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(assetPath);
+                if (streamedAsset == null || streamedAsset.BuiltData == null)
+                {
+                    errorMessage = $"Failed to import GPUDriven streamed VT asset '{assetPath}'.";
+                    return false;
+                }
+
+                if (materialProxy.StreamedVirtualTexture != streamedAsset)
+                {
+                    Undo.RecordObject(materialProxy, "Bind GPUDriven Streamed VT Asset");
+                    materialProxy.StreamedVirtualTexture = streamedAsset;
+                    EditorUtility.SetDirty(materialProxy);
+                    AssetDatabase.SaveAssetIfDirty(materialProxy);
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                errorMessage = $"Failed to build GPUDriven streamed VT asset: {exception.Message}";
+                return false;
+            }
+        }
+
+        private static VividVirtualTextureAddressMode ResolveAddressMode(GPUDrivenMaterialProxy materialProxy)
+        {
+            Texture texture = materialProxy.BaseMap != null
+                ? materialProxy.BaseMap
+                : materialProxy.BumpMap != null
+                    ? materialProxy.BumpMap
+                    : materialProxy.MaskMap;
+            return texture != null && texture.wrapMode == TextureWrapMode.Clamp
+                ? VividVirtualTextureAddressMode.Clamp
+                : VividVirtualTextureAddressMode.Repeat;
         }
 
         private static void RefreshSource(MeshletRenderer meshletRenderer, string undoLabel)

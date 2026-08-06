@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using UnityEditor;
 using UnityEditor.AssetImporters;
+using UnityEditor.Build;
 using UnityEngine;
 using VividRP.Runtime;
 using Debug = UnityEngine.Debug;
@@ -10,7 +12,7 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [ScriptedImporter(1, Extension)]
+    [ScriptedImporter(2, Extension)]
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";
@@ -20,6 +22,10 @@ namespace VividRP.Editor
         public Texture2D NormalTexture;
 
         public Texture2D MaskTexture;
+
+        public VividVirtualTextureBuildProfile BuildProfile;
+
+        public VividVirtualTextureAddressMode AddressMode = VividVirtualTextureAddressMode.Clamp;
 
         [Min(1)]
         public int PageSize = 128;
@@ -43,10 +49,12 @@ namespace VividRP.Editor
             ctx.AddObjectToAsset(nameof(VividVirtualTextureAsset), asset);
             ctx.SetMainObject(asset);
 
-            if (SourceTexture == null)
+            if ((BuildProfile == VividVirtualTextureBuildProfile.Generic && SourceTexture == null)
+                || (SourceTexture == null && NormalTexture == null && MaskTexture == null))
                 return;
 
-            string sourceTexturePath = AssetDatabase.GetAssetPath(SourceTexture);
+            Texture2D primaryTexture = SourceTexture != null ? SourceTexture : NormalTexture != null ? NormalTexture : MaskTexture;
+            string sourceTexturePath = AssetDatabase.GetAssetPath(primaryTexture);
             if (!string.IsNullOrEmpty(sourceTexturePath))
                 ctx.DependsOnSourceAsset(sourceTexturePath);
             if (NormalTexture != null)
@@ -68,6 +76,7 @@ namespace VividRP.Editor
             ctx.AddObjectToAsset(nameof(VividVirtualTextureBuiltData), builtData);
 
             var timer = Stopwatch.StartNew();
+            string virtualTextureGUID = AssetDatabase.AssetPathToGUID(ctx.assetPath);
             VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
             {
                 SourceTexture = SourceTexture,
@@ -83,6 +92,9 @@ namespace VividRP.Editor
                 MaskFallbackColor = (Color32)MaskFallbackColor,
                 StreamDataPath = ctx.assetPath + ".stream",
                 LogErrorHandler = message => ctx.LogImportError(message),
+                BuildProfile = BuildProfile,
+                AddressMode = AddressMode,
+                RuntimeStreamDataPath = GetRuntimeStreamDataPath(virtualTextureGUID),
             });
 
             timer.Stop();
@@ -151,6 +163,54 @@ namespace VividRP.Editor
             EditorUtility.SetDirty(importer);
             importer.SaveAndReimport();
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
+        }
+
+        internal static string GetRuntimeStreamDataPath(string virtualTextureGUID)
+        {
+            string fileName = !string.IsNullOrWhiteSpace(virtualTextureGUID)
+                ? virtualTextureGUID
+                : "UnidentifiedVirtualTexture";
+            return $"VividRP/VirtualTextures/{fileName}.stream";
+        }
+    }
+
+    internal sealed class VividVirtualTextureBuildPlayerProcessor : BuildPlayerProcessor
+    {
+        public override void PrepareForBuild(BuildPlayerContext buildPlayerContext)
+        {
+            if (buildPlayerContext == null)
+                throw new ArgumentNullException(nameof(buildPlayerContext));
+
+            string projectRoot = Path.GetFullPath(Path.Combine(Application.dataPath, ".."));
+            string[] assetGUIDs = AssetDatabase.FindAssets($"t:{nameof(VividVirtualTextureAsset)}");
+            for (int assetIndex = 0; assetIndex < assetGUIDs.Length; assetIndex++)
+            {
+                string assetPath = AssetDatabase.GUIDToAssetPath(assetGUIDs[assetIndex]);
+                VividVirtualTextureAsset asset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(assetPath);
+                VividVirtualTextureBuiltData builtData = asset != null ? asset.BuiltData : null;
+                if (builtData == null || !builtData.HasStreamData)
+                    continue;
+
+                string sourcePath = ResolveSourcePath(projectRoot, builtData.StreamDataPath);
+                if (!File.Exists(sourcePath))
+                {
+                    throw new BuildFailedException(
+                        $"Virtual texture asset '{assetPath}' is missing stream data '{sourcePath}'. Reimport the asset before building the Player.");
+                }
+
+                string runtimePath = !string.IsNullOrWhiteSpace(builtData.RuntimeStreamDataPath)
+                    ? builtData.RuntimeStreamDataPath
+                    : VividVirtualTextureAssetImporter.GetRuntimeStreamDataPath(assetGUIDs[assetIndex]);
+                buildPlayerContext.AddAdditionalPathToStreamingAssets(sourcePath, runtimePath);
+            }
+        }
+
+        private static string ResolveSourcePath(string projectRoot, string streamDataPath)
+        {
+            string normalizedPath = streamDataPath.Replace('\\', '/');
+            return Path.IsPathRooted(normalizedPath)
+                ? Path.GetFullPath(normalizedPath)
+                : Path.GetFullPath(Path.Combine(projectRoot, normalizedPath));
         }
     }
 }

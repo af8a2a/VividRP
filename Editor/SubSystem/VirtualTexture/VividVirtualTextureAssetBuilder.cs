@@ -9,6 +9,10 @@ namespace VividRP.Editor
 {
     internal static class VividVirtualTextureAssetBuilder
     {
+        private const int GPUDrivenPageSize = 128;
+        private const int GPUDrivenBorderSize = 4;
+        private const int GPUDrivenMaxPageCount = 64;
+
         internal struct Parameters
         {
             public Texture2D SourceTexture;
@@ -24,6 +28,9 @@ namespace VividRP.Editor
             public Color32 MaskFallbackColor;
             public string StreamDataPath;
             public Action<string> LogErrorHandler;
+            public VividVirtualTextureBuildProfile BuildProfile;
+            public VividVirtualTextureAddressMode AddressMode;
+            public string RuntimeStreamDataPath;
         }
 
         internal static void Generate(
@@ -35,14 +42,22 @@ namespace VividRP.Editor
                 throw new ArgumentNullException(nameof(asset));
             if (builtData == null)
                 throw new ArgumentNullException(nameof(builtData));
-            if (parameters.SourceTexture == null)
+            Texture2D primaryTexture = ResolvePrimaryTexture(parameters);
+            if (primaryTexture == null)
+                throw new ArgumentException("At least one source texture is required.", nameof(parameters));
+            if (parameters.BuildProfile == VividVirtualTextureBuildProfile.Generic && parameters.SourceTexture == null)
                 throw new ArgumentNullException(nameof(parameters.SourceTexture));
 
-            int pageSize = Mathf.Max(1, parameters.PageSize);
-            int borderSize = Mathf.Max(0, parameters.BorderSize);
-            int virtualPageCountX = Mathf.Max(1, Mathf.CeilToInt(parameters.SourceTexture.width / (float)pageSize));
-            int virtualPageCountY = Mathf.Max(1, Mathf.CeilToInt(parameters.SourceTexture.height / (float)pageSize));
-            int mipCount = parameters.MipCount > 0
+            bool gpuDrivenSurface = parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface;
+            int pageSize = gpuDrivenSurface ? GPUDrivenPageSize : Mathf.Max(1, parameters.PageSize);
+            int borderSize = gpuDrivenSurface ? GPUDrivenBorderSize : Mathf.Max(0, parameters.BorderSize);
+            ResolveVirtualPageCounts(
+                parameters,
+                primaryTexture,
+                pageSize,
+                out int virtualPageCountX,
+                out int virtualPageCountY);
+            int mipCount = !gpuDrivenSurface && parameters.MipCount > 0
                 ? Mathf.Clamp(parameters.MipCount, 1, VirtualTextureFeedbackProcessor.MaxMipCount)
                 : ComputeMipCount(virtualPageCountX, virtualPageCountY);
             VividVirtualTextureLayerDescriptor[] layers = CreateLayerDescriptors(parameters);
@@ -64,72 +79,111 @@ namespace VividRP.Editor
             int totalTileCount = VirtualTextureSpaceUtility.GetTotalPageCount(virtualPageCountX, virtualPageCountY, mipCount);
             var tiles = new List<VividVirtualTextureTileDescriptor>(totalTileCount);
             var chunks = new List<VividVirtualTextureChunkDescriptor>(mipCount);
-            var rawData = new List<byte>(totalTileCount * desc.PhysicalPageSize * desc.PhysicalPageSize * 4 * layers.Length);
+            bool writeStreamData = !string.IsNullOrWhiteSpace(parameters.StreamDataPath);
+            var rawData = writeStreamData
+                ? null
+                : new List<byte>(totalTileCount * desc.PhysicalPageSize * desc.PhysicalPageSize * 4 * layers.Length);
             var mipTileOffsets = new int[mipCount];
             var pagePixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
+            var pageBytes = new byte[pagePixels.Length * 4];
             VTTexture2DPageProducer[] producers = CreateLayerProducers(parameters);
+            int[] sourceMipOffsets = CreateSourceMipOffsets(
+                producers,
+                gpuDrivenSurface,
+                virtualPageCountX,
+                virtualPageCountY,
+                pageSize);
+            string streamDataPath = writeStreamData
+                ? parameters.StreamDataPath.Replace('\\', '/')
+                : string.Empty;
+            FileStream stream = null;
 
-            for (int mip = 0; mip < mipCount; mip++)
+            try
             {
-                mipTileOffsets[mip] = tiles.Count;
-                int chunkIndex = chunks.Count;
-                int chunkByteOffset = rawData.Count;
-                int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(virtualPageCountX, mip);
-                int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(virtualPageCountY, mip);
-
-                for (int y = 0; y < pageCountY; y++)
+                if (writeStreamData)
                 {
-                    for (int x = 0; x < pageCountX; x++)
-                    {
-                        int tileByteOffset = rawData.Count - chunkByteOffset;
-                        var coord = new VirtualTexturePageCoord(x, y, mip);
-                        var request = new VTRequest(
-                            0,
-                            coord,
-                            physicalPageId: 0,
-                            generation: 0,
-                            priority: 0,
-                            requestFrame: 0);
-
-                        for (int layerIndex = 0; layerIndex < producers.Length; layerIndex++)
-                        {
-                            producers[layerIndex].WritePage(desc, request, pagePixels);
-                            AppendRGBA32(pagePixels, rawData);
-                        }
-
-                        tiles.Add(new VividVirtualTextureTileDescriptor(
-                            mip,
-                            x,
-                            y,
-                            chunkIndex,
-                            tileByteOffset,
-                            pagePixels.Length * 4 * producers.Length));
-                    }
+                    string directory = Path.GetDirectoryName(streamDataPath);
+                    if (!string.IsNullOrWhiteSpace(directory))
+                        Directory.CreateDirectory(directory);
+                    stream = new FileStream(
+                        streamDataPath,
+                        FileMode.Create,
+                        FileAccess.Write,
+                        FileShare.Read,
+                        bufferSize: 1024 * 1024,
+                        FileOptions.SequentialScan);
                 }
 
-                chunks.Add(new VividVirtualTextureChunkDescriptor(
-                    firstMip: mip,
-                    mipCount: 1,
-                    byteOffset: chunkByteOffset,
-                    byteSize: rawData.Count - chunkByteOffset,
-                    codec: VividVirtualTextureCodec.RawRGBA32));
-            }
+                for (int mip = 0; mip < mipCount; mip++)
+                {
+                    mipTileOffsets[mip] = tiles.Count;
+                    int chunkIndex = chunks.Count;
+                    int chunkByteOffset = GetDataByteCount(rawData, stream);
+                    int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(virtualPageCountX, mip);
+                    int pageCountY = VirtualTextureSpaceUtility.GetPageCountY(virtualPageCountY, mip);
 
-            byte[] rawBytes = rawData.ToArray();
-            byte[] inlineRawData = rawBytes;
-            string streamDataPath = string.Empty;
-            int streamDataByteSize = 0;
-            if (!string.IsNullOrWhiteSpace(parameters.StreamDataPath))
+                    for (int y = 0; y < pageCountY; y++)
+                    {
+                        for (int x = 0; x < pageCountX; x++)
+                        {
+                            int tileByteOffset = GetDataByteCount(rawData, stream) - chunkByteOffset;
+                            var coord = new VirtualTexturePageCoord(x, y, mip);
+                            var request = new VTRequest(
+                                0,
+                                coord,
+                                physicalPageId: 0,
+                                generation: 0,
+                                priority: 0,
+                                requestFrame: 0);
+
+                            for (int layerIndex = 0; layerIndex < producers.Length; layerIndex++)
+                            {
+                                if (producers[layerIndex] != null)
+                                {
+                                    bool repeat = gpuDrivenSurface
+                                                  && parameters.AddressMode == VividVirtualTextureAddressMode.Repeat;
+                                    producers[layerIndex].WritePage(
+                                        desc,
+                                        request,
+                                        pagePixels,
+                                        repeat,
+                                        sourceMipOffsets[layerIndex]);
+                                }
+                                else
+                                {
+                                    Fill(pagePixels, layers[layerIndex].FallbackColor);
+                                }
+
+                                AppendRGBA32(pagePixels, pageBytes, rawData, stream);
+                            }
+
+                            tiles.Add(new VividVirtualTextureTileDescriptor(
+                                mip,
+                                x,
+                                y,
+                                chunkIndex,
+                                tileByteOffset,
+                                pagePixels.Length * 4 * producers.Length));
+                        }
+                    }
+
+                    chunks.Add(new VividVirtualTextureChunkDescriptor(
+                        firstMip: mip,
+                        mipCount: 1,
+                        byteOffset: chunkByteOffset,
+                        byteSize: GetDataByteCount(rawData, stream) - chunkByteOffset,
+                        codec: VividVirtualTextureCodec.RawRGBA32));
+                }
+            }
+            finally
             {
-                streamDataPath = parameters.StreamDataPath.Replace('\\', '/');
-                string directory = Path.GetDirectoryName(streamDataPath);
-                if (!string.IsNullOrWhiteSpace(directory))
-                    Directory.CreateDirectory(directory);
-
-                File.WriteAllBytes(streamDataPath, rawBytes);
-                inlineRawData = Array.Empty<byte>();
-                streamDataByteSize = rawBytes.Length;
+                stream?.Dispose();
             }
+
+            byte[] inlineRawData = rawData != null ? rawData.ToArray() : Array.Empty<byte>();
+            int streamDataByteSize = writeStreamData
+                ? checked((int) new FileInfo(streamDataPath).Length)
+                : 0;
 
             builtData.Initialize(
                 parameters.SourceTextureGUID,
@@ -145,12 +199,42 @@ namespace VividRP.Editor
                 mipTileOffsets,
                 inlineRawData,
                 streamDataPath,
-                streamDataByteSize);
+                streamDataByteSize,
+                parameters.BuildProfile,
+                ComputeContentLayerMask(parameters),
+                ComputeContentVersion(parameters, pageSize, borderSize, virtualPageCountX, virtualPageCountY, mipCount),
+                parameters.AddressMode,
+                parameters.RuntimeStreamDataPath);
             asset.Initialize(builtData);
         }
 
         private static VividVirtualTextureLayerDescriptor[] CreateLayerDescriptors(in Parameters parameters)
         {
+            if (parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface)
+            {
+                return new[]
+                {
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.R8G8B8A8_SRGB,
+                        sRGB: true,
+                        new Color32(255, 255, 255, 255),
+                        physicalGroup: 0),
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.Normal,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: false,
+                        new Color32(128, 128, 255, 128),
+                        physicalGroup: 0),
+                    new VividVirtualTextureLayerDescriptor(
+                        VTLayerSemantic.Mask,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: false,
+                        new Color32(255, 255, 255, 255),
+                        physicalGroup: 0),
+                };
+            }
+
             var layers = new List<VividVirtualTextureLayerDescriptor>
             {
                 new(
@@ -203,6 +287,16 @@ namespace VividRP.Editor
 
         private static VTTexture2DPageProducer[] CreateLayerProducers(in Parameters parameters)
         {
+            if (parameters.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface)
+            {
+                return new[]
+                {
+                    CreateProducer(parameters.SourceTexture),
+                    CreateProducer(parameters.NormalTexture),
+                    CreateProducer(parameters.MaskTexture),
+                };
+            }
+
             var producers = new List<VTTexture2DPageProducer>
             {
                 new(parameters.SourceTexture),
@@ -214,6 +308,128 @@ namespace VividRP.Editor
                 producers.Add(new VTTexture2DPageProducer(parameters.MaskTexture));
 
             return producers.ToArray();
+        }
+
+        private static VTTexture2DPageProducer CreateProducer(Texture2D texture)
+        {
+            return texture != null ? new VTTexture2DPageProducer(texture) : null;
+        }
+
+        private static int[] CreateSourceMipOffsets(
+            VTTexture2DPageProducer[] producers,
+            bool gpuDrivenSurface,
+            int virtualPageCountX,
+            int virtualPageCountY,
+            int pageSize)
+        {
+            var offsets = new int[producers.Length];
+            if (!gpuDrivenSurface)
+                return offsets;
+
+            int virtualDimension = Mathf.Max(1, Mathf.Max(virtualPageCountX, virtualPageCountY) * pageSize);
+            for (int layerIndex = 0; layerIndex < producers.Length; layerIndex++)
+            {
+                Texture2D texture = producers[layerIndex]?.SourceTexture;
+                if (texture == null)
+                    continue;
+
+                int sourceDimension = Mathf.Max(1, Mathf.Max(texture.width, texture.height));
+                offsets[layerIndex] = Mathf.RoundToInt(Mathf.Log(sourceDimension / (float) virtualDimension, 2.0f));
+            }
+
+            return offsets;
+        }
+
+        private static Texture2D ResolvePrimaryTexture(in Parameters parameters)
+        {
+            return parameters.SourceTexture ?? parameters.NormalTexture ?? parameters.MaskTexture;
+        }
+
+        private static void ResolveVirtualPageCounts(
+            in Parameters parameters,
+            Texture2D primaryTexture,
+            int pageSize,
+            out int pageCountX,
+            out int pageCountY)
+        {
+            if (parameters.BuildProfile != VividVirtualTextureBuildProfile.GPUDrivenSurface)
+            {
+                pageCountX = Mathf.Max(1, Mathf.CeilToInt(primaryTexture.width / (float) pageSize));
+                pageCountY = Mathf.Max(1, Mathf.CeilToInt(primaryTexture.height / (float) pageSize));
+                return;
+            }
+
+            int maxDimension = 1;
+            ResolveMaxDimension(parameters.SourceTexture, ref maxDimension);
+            ResolveMaxDimension(parameters.NormalTexture, ref maxDimension);
+            ResolveMaxDimension(parameters.MaskTexture, ref maxDimension);
+            int requiredPageCount = Mathf.Max(1, Mathf.CeilToInt(maxDimension / (float) pageSize));
+            int squarePageCount = Mathf.Min(GPUDrivenMaxPageCount, Mathf.NextPowerOfTwo(requiredPageCount));
+            pageCountX = squarePageCount;
+            pageCountY = squarePageCount;
+        }
+
+        private static void ResolveMaxDimension(Texture2D texture, ref int maxDimension)
+        {
+            if (texture != null)
+                maxDimension = Mathf.Max(maxDimension, texture.width, texture.height);
+        }
+
+        private static int ComputeContentLayerMask(in Parameters parameters)
+        {
+            return (parameters.SourceTexture != null ? 1 : 0)
+                   | (parameters.NormalTexture != null ? 2 : 0)
+                   | (parameters.MaskTexture != null ? 4 : 0);
+        }
+
+        private static uint ComputeContentVersion(
+            in Parameters parameters,
+            int pageSize,
+            int borderSize,
+            int pageCountX,
+            int pageCountY,
+            int mipCount)
+        {
+            unchecked
+            {
+                uint hash = 2166136261u;
+                hash = AppendHash(hash, (int) parameters.BuildProfile);
+                hash = AppendHash(hash, pageSize);
+                hash = AppendHash(hash, borderSize);
+                hash = AppendHash(hash, pageCountX);
+                hash = AppendHash(hash, pageCountY);
+                hash = AppendHash(hash, mipCount);
+                hash = AppendHash(hash, (int) parameters.AddressMode);
+                hash = AppendTextureHash(hash, parameters.SourceTexture);
+                hash = AppendTextureHash(hash, parameters.NormalTexture);
+                hash = AppendTextureHash(hash, parameters.MaskTexture);
+                return hash != 0 ? hash : 1u;
+            }
+        }
+
+        private static uint AppendTextureHash(uint hash, Texture2D texture)
+        {
+            if (texture == null)
+                return AppendHash(hash, 0);
+
+            hash = AppendHash(hash, texture.width);
+            hash = AppendHash(hash, texture.height);
+            hash = AppendHash(hash, (int) texture.graphicsFormat);
+            return AppendHash(hash, texture.imageContentsHash.GetHashCode());
+        }
+
+        private static uint AppendHash(uint hash, int value)
+        {
+            unchecked
+            {
+                return (hash ^ (uint) value) * 16777619u;
+            }
+        }
+
+        private static void Fill(Color32[] pixels, Color32 color)
+        {
+            for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
+                pixels[pixelIndex] = color;
         }
 
         private static Color32 ResolveFallback(Color32 configured, Color32 defaultColor)
@@ -230,8 +446,9 @@ namespace VividRP.Editor
             if (!string.IsNullOrWhiteSpace(asset.name))
                 return asset.name;
 
-            if (!string.IsNullOrWhiteSpace(parameters.SourceTexture.name))
-                return parameters.SourceTexture.name;
+            Texture2D primaryTexture = ResolvePrimaryTexture(parameters);
+            if (primaryTexture != null && !string.IsNullOrWhiteSpace(primaryTexture.name))
+                return primaryTexture.name;
 
             if (!string.IsNullOrWhiteSpace(parameters.SourceTexturePath))
                 return Path.GetFileNameWithoutExtension(parameters.SourceTexturePath);
@@ -249,16 +466,31 @@ namespace VividRP.Editor
             return mipCount;
         }
 
-        private static void AppendRGBA32(Color32[] pixels, List<byte> output)
+        private static int GetDataByteCount(List<byte> rawData, FileStream stream)
+        {
+            return rawData != null ? rawData.Count : checked((int) stream.Position);
+        }
+
+        private static void AppendRGBA32(
+            Color32[] pixels,
+            byte[] pageBytes,
+            List<byte> output,
+            FileStream stream)
         {
             for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
             {
+                int byteIndex = pixelIndex * 4;
                 Color32 pixel = pixels[pixelIndex];
-                output.Add(pixel.r);
-                output.Add(pixel.g);
-                output.Add(pixel.b);
-                output.Add(pixel.a);
+                pageBytes[byteIndex] = pixel.r;
+                pageBytes[byteIndex + 1] = pixel.g;
+                pageBytes[byteIndex + 2] = pixel.b;
+                pageBytes[byteIndex + 3] = pixel.a;
             }
+
+            if (stream != null)
+                stream.Write(pageBytes, 0, pageBytes.Length);
+            else
+                output.AddRange(pageBytes);
         }
     }
 }

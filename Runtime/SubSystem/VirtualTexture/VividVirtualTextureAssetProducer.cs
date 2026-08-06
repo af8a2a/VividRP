@@ -179,7 +179,9 @@ namespace VividRP.Runtime
             m_BuiltData = asset.BuiltData != null
                 ? asset.BuiltData
                 : throw new ArgumentException("Virtual texture asset must contain built data.", nameof(asset));
-            m_ResolvedStreamDataPath = ResolveStreamDataPath(m_BuiltData.StreamDataPath);
+            m_ResolvedStreamDataPath = ResolveStreamDataPath(
+                m_BuiltData.StreamDataPath,
+                m_BuiltData.RuntimeStreamDataPath);
 
             string producerName = string.IsNullOrWhiteSpace(asset.name)
                 ? nameof(VividVirtualTextureAsset)
@@ -389,8 +391,17 @@ namespace VividRP.Runtime
             m_StreamTasks.Remove(key);
         }
 
-        private static string ResolveStreamDataPath(string streamDataPath)
+        private static string ResolveStreamDataPath(
+            string streamDataPath,
+            string runtimeStreamDataPath)
         {
+            if (!Application.isEditor && !string.IsNullOrWhiteSpace(runtimeStreamDataPath))
+            {
+                return Path.GetFullPath(Path.Combine(
+                    Application.streamingAssetsPath,
+                    runtimeStreamDataPath.Replace('/', Path.DirectorySeparatorChar)));
+            }
+
             if (string.IsNullOrWhiteSpace(streamDataPath))
                 return string.Empty;
 

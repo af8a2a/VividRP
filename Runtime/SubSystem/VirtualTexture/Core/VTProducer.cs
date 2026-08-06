@@ -538,6 +538,25 @@ namespace VividRP.Runtime
             in VTRequest request,
             Color32[] outputPixels)
         {
+            WritePage(desc, request, outputPixels, repeat: false);
+        }
+
+        internal void WritePage(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            Color32[] outputPixels,
+            bool repeat)
+        {
+            WritePage(desc, request, outputPixels, repeat, sourceMipOffset: 0);
+        }
+
+        internal void WritePage(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request,
+            Color32[] outputPixels,
+            bool repeat,
+            int sourceMipOffset)
+        {
             if (outputPixels == null)
                 throw new ArgumentNullException(nameof(outputPixels));
 
@@ -558,13 +577,21 @@ namespace VividRP.Runtime
 
             for (int y = 0; y < physicalPageSize; y++)
             {
-                int logicalY = Mathf.Clamp(pageOriginY + y - desc.BorderSize, 0, logicalHeight - 1);
+                int logicalY = pageOriginY + y - desc.BorderSize;
+                if (!repeat)
+                    logicalY = Mathf.Clamp(logicalY, 0, logicalHeight - 1);
                 float v = (logicalY + 0.5f) / logicalHeight;
                 for (int x = 0; x < physicalPageSize; x++)
                 {
-                    int logicalX = Mathf.Clamp(pageOriginX + x - desc.BorderSize, 0, logicalWidth - 1);
+                    int logicalX = pageOriginX + x - desc.BorderSize;
+                    if (!repeat)
+                        logicalX = Mathf.Clamp(logicalX, 0, logicalWidth - 1);
                     float u = (logicalX + 0.5f) / logicalWidth;
-                    outputPixels[y * physicalPageSize + x] = SampleSource(coord.Mip, u, v, false);
+                    outputPixels[y * physicalPageSize + x] = SampleSource(
+                        coord.Mip + sourceMipOffset,
+                        u,
+                        v,
+                        repeat);
                 }
             }
         }

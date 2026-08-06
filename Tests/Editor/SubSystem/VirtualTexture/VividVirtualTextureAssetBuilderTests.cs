@@ -9,6 +9,7 @@ using UnityEngine;
 using UnityEngine.Experimental.Rendering;
 using VividRP.Editor;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven.VirtualTexture;
 using Object = UnityEngine.Object;
 
 namespace VividRP.Editor.Tests
@@ -142,6 +143,133 @@ namespace VividRP.Editor.Tests
             finally
             {
                 Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
+        public void Generate_GPUDrivenSurfaceProfile_BuildsFixedThreeLayerSquareStack()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(256, 128, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    PageSize = 16,
+                    BorderSize = 0,
+                    MipCount = 1,
+                    StreamDataPath = streamDataPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                });
+
+                Assert.That(asset.BuildProfile, Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
+                Assert.That(asset.PageSize, Is.EqualTo(128));
+                Assert.That(asset.BorderSize, Is.EqualTo(4));
+                Assert.That(asset.VirtualPageCountX, Is.EqualTo(2));
+                Assert.That(asset.VirtualPageCountY, Is.EqualTo(2));
+                Assert.That(asset.MipCount, Is.EqualTo(2));
+                Assert.That(asset.ContentLayerMask, Is.EqualTo(1));
+                Assert.That(asset.ContentVersion, Is.Not.Zero);
+                Assert.That(asset.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
+                Assert.That(builtData.LayerCount, Is.EqualTo(3));
+                Assert.That(builtData.Layers[0].Semantic, Is.EqualTo(VTLayerSemantic.BaseColor));
+                Assert.That(builtData.Layers[0].Format, Is.EqualTo(GraphicsFormat.R8G8B8A8_SRGB));
+                Assert.That(builtData.Layers[0].SRGB, Is.True);
+                Assert.That(builtData.Layers[1].Semantic, Is.EqualTo(VTLayerSemantic.Normal));
+                Assert.That(builtData.Layers[1].FallbackColor, Is.EqualTo(new Color32(128, 128, 255, 128)));
+                Assert.That(builtData.Layers[2].Semantic, Is.EqualTo(VTLayerSemantic.Mask));
+                Assert.That(builtData.Layers[2].FallbackColor, Is.EqualTo(new Color32(255, 255, 255, 255)));
+                Assert.That(builtData.HasStreamData, Is.True);
+                Assert.That(builtData.HasInlineRawData, Is.False);
+
+                int layerByteSize = builtData.PhysicalPageSize * builtData.PhysicalPageSize * 4;
+                Assert.That(builtData.Tiles[0].ByteSize, Is.EqualTo(layerByteSize * 3));
+                Assert.That(new FileInfo(streamDataPath).Length, Is.EqualTo(builtData.RawDataByteSize));
+            }
+            finally
+            {
+                Object.DestroyImmediate(sourceTexture);
+                Object.DestroyImmediate(asset);
+                Object.DestroyImmediate(builtData);
+            }
+        }
+
+        [Test]
+        public void GPUDrivenProducer_TranslatesAtlasRequestsAndStreamsAssetPageData()
+        {
+            Texture2D sourceTexture = CreateSourceTexture(256, 256, readable: true);
+            VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
+            VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
+            string streamDataPath = CreateTempStreamDataPath();
+            GPUDrivenVirtualTextureProducer producer = null;
+
+            try
+            {
+                VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
+                {
+                    SourceTexture = sourceTexture,
+                    StreamDataPath = streamDataPath,
+                    BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface,
+                });
+                byte[] streamBytes = File.ReadAllBytes(streamDataPath);
+                Object.DestroyImmediate(sourceTexture);
+                sourceTexture = null;
+
+                var localCoord = new VirtualTexturePageCoord(1, 0, 0);
+                Assert.That(builtData.TryGetTilePayloadLocation(localCoord, out VividVirtualTextureTilePayloadLocation location), Is.True);
+                int capturedOffset = -1;
+                int capturedSize = -1;
+                var completionSource = new TaskCompletionSource<byte[]>();
+                VividVirtualTextureAssetProducer.SetStreamReadHandlersForTesting(
+                    (path, byteOffset, byteSize, cancellationToken) =>
+                    {
+                        capturedOffset = byteOffset;
+                        capturedSize = byteSize;
+                        return completionSource.Task;
+                    });
+
+                VirtualTextureSpaceDesc globalDesc = CreateGPUDrivenSpaceDesc();
+                ComputeShader computeShader = PipelineResourceManager.Get<VividRPCoreResources>()
+                    ?.GPUDrivenVirtualTexturePageProducerCompute;
+                Assert.That(computeShader, Is.Not.Null);
+                producer = new GPUDrivenVirtualTextureProducer("StreamedAtlas", globalDesc, computeShader);
+                producer.RegisterStreamedEntry(new RectInt(4, 2, 2, 2), asset);
+                var globalRequest = new VTRequest(
+                    1,
+                    new VirtualTexturePageCoord(5, 2, 0),
+                    0,
+                    1,
+                    1,
+                    0);
+
+                Assert.That(producer.RequestPageData(globalDesc, globalRequest), Is.EqualTo(VTPageRequestStatus.Pending));
+                Assert.That(capturedOffset, Is.EqualTo(location.ByteOffset));
+                Assert.That(capturedSize, Is.EqualTo(location.ByteSize));
+                Assert.That(producer.PendingStreamTaskCount, Is.EqualTo(1));
+
+                var payload = new byte[location.ByteSize];
+                Array.Copy(streamBytes, location.ByteOffset, payload, 0, payload.Length);
+                completionSource.SetResult(payload);
+
+                Assert.That(producer.RequestPageData(globalDesc, globalRequest), Is.EqualTo(VTPageRequestStatus.Available));
+                IVTPageUploadFinalizer finalizer = producer.ProducePageData(globalDesc, globalRequest);
+                Assert.That(finalizer, Is.InstanceOf<IVTMultiLayerPageFinalizer>());
+                Assert.That(finalizer, Is.Not.InstanceOf<IVTGpuPageFinalizer>());
+                Assert.That(producer.PendingStreamTaskCount, Is.Zero);
+                finalizer.Dispose();
+            }
+            finally
+            {
+                producer?.Dispose();
+                VividVirtualTextureAssetProducer.ResetStreamReadHandlersForTesting();
+                if (sourceTexture != null)
+                    Object.DestroyImmediate(sourceTexture);
                 Object.DestroyImmediate(asset);
                 Object.DestroyImmediate(builtData);
             }
@@ -529,6 +657,10 @@ namespace VividRP.Editor.Tests
             Assert.That(vtAsset.BuiltData.HasStreamData, Is.True);
             Assert.That(vtAsset.BuiltData.HasInlineRawData, Is.False);
             Assert.That(File.Exists(vtAsset.BuiltData.StreamDataPath), Is.True);
+            Assert.That(
+                vtAsset.BuiltData.RuntimeStreamDataPath,
+                Is.EqualTo(VividVirtualTextureAssetImporter.GetRuntimeStreamDataPath(
+                    AssetDatabase.AssetPathToGUID(vtAssetPath))));
         }
 
         private static Texture2D CreateSourceTexture(int width, int height, bool readable)
@@ -572,6 +704,40 @@ namespace VividRP.Editor.Tests
             string path = Path.Combine(Path.GetTempPath(), $"VividVT_{Guid.NewGuid():N}.stream");
             m_TempFiles.Add(path);
             return path;
+        }
+
+        private static VirtualTextureSpaceDesc CreateGPUDrivenSpaceDesc()
+        {
+            var layers = new[]
+            {
+                new VTLayerDesc(
+                    VTLayerSemantic.BaseColor,
+                    GraphicsFormat.R8G8B8A8_SRGB,
+                    true,
+                    new Color32(255, 255, 255, 255)),
+                new VTLayerDesc(
+                    VTLayerSemantic.Normal,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    false,
+                    new Color32(128, 128, 255, 128)),
+                new VTLayerDesc(
+                    VTLayerSemantic.Mask,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    false,
+                    new Color32(255, 255, 255, 255)),
+            };
+            return new VirtualTextureSpaceDesc(
+                "GPUDrivenStreamedTest",
+                8,
+                8,
+                4,
+                new VTStackDesc(
+                    128,
+                    4,
+                    cachePageCount: 8,
+                    layers,
+                    maxUploadsPerFrame: 4,
+                    feedbackCapacity: 64));
         }
 
         private static byte[] ToRGBA32Bytes(Color32[] pixels)

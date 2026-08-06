@@ -49,6 +49,21 @@ namespace VividRP.Runtime
         [SerializeField]
         private byte[] m_RawData = Array.Empty<byte>();
 
+        [SerializeField]
+        private VividVirtualTextureBuildProfile m_BuildProfile;
+
+        [SerializeField]
+        private int m_ContentLayerMask = 1;
+
+        [SerializeField]
+        private uint m_ContentVersion = 1;
+
+        [SerializeField]
+        private VividVirtualTextureAddressMode m_AddressMode;
+
+        [SerializeField]
+        private string m_RuntimeStreamDataPath = string.Empty;
+
         public string SourceTextureGUID => m_SourceTextureGUID;
 
         public string SourceTexturePath => m_SourceTexturePath;
@@ -81,6 +96,16 @@ namespace VividRP.Runtime
 
         public bool HasStreamData => !string.IsNullOrWhiteSpace(m_StreamDataPath) && m_StreamDataByteSize > 0;
 
+        public VividVirtualTextureBuildProfile BuildProfile => m_BuildProfile;
+
+        public int ContentLayerMask => m_ContentLayerMask;
+
+        public uint ContentVersion => m_ContentVersion;
+
+        public VividVirtualTextureAddressMode AddressMode => m_AddressMode;
+
+        public string RuntimeStreamDataPath => m_RuntimeStreamDataPath;
+
         public IReadOnlyList<VividVirtualTextureLayerDescriptor> Layers => m_Layers;
 
         public IReadOnlyList<VividVirtualTextureChunkDescriptor> Chunks => m_Chunks;
@@ -105,7 +130,12 @@ namespace VividRP.Runtime
             int[] mipTileOffsets,
             byte[] rawData,
             string streamDataPath = null,
-            int streamDataByteSize = 0)
+            int streamDataByteSize = 0,
+            VividVirtualTextureBuildProfile buildProfile = VividVirtualTextureBuildProfile.Generic,
+            int contentLayerMask = 1,
+            uint contentVersion = 1,
+            VividVirtualTextureAddressMode addressMode = VividVirtualTextureAddressMode.Clamp,
+            string runtimeStreamDataPath = null)
         {
             m_SourceTextureGUID = sourceTextureGUID ?? string.Empty;
             m_SourceTexturePath = sourceTexturePath ?? string.Empty;
@@ -121,6 +151,11 @@ namespace VividRP.Runtime
             m_RawData = rawData ?? Array.Empty<byte>();
             m_StreamDataPath = streamDataPath ?? string.Empty;
             m_StreamDataByteSize = Mathf.Max(0, streamDataByteSize);
+            m_BuildProfile = buildProfile;
+            m_ContentLayerMask = Mathf.Max(0, contentLayerMask);
+            m_ContentVersion = contentVersion != 0 ? contentVersion : 1u;
+            m_AddressMode = addressMode;
+            m_RuntimeStreamDataPath = runtimeStreamDataPath ?? string.Empty;
         }
 
         internal VirtualTextureSpaceDesc CreateSpaceDesc(
@@ -246,7 +281,7 @@ namespace VividRP.Runtime
             return layers;
         }
 
-        private bool MatchesStack(in VTStackDesc stackDesc)
+        internal bool MatchesStack(in VTStackDesc stackDesc)
         {
             if (stackDesc.LayerCount != Mathf.Max(1, LayerCount))
                 return false;

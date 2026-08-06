@@ -480,7 +480,7 @@ namespace VividRP.Runtime.GPUDriven
 
                     EntityId materialProxyId = materialProxy.GetEntityId();
                     if (!m_MaterialMetadataByObjectId.TryGetValue(materialProxyId, out MaterialMetadata metadata) ||
-                        metadata.Revision != materialProxy.Revision)
+                        metadata.Revision != ComputeMaterialProxyRevision(materialProxy))
                     {
                         return true;
                     }
@@ -868,7 +868,9 @@ namespace VividRP.Runtime.GPUDriven
             m_MaterialIndexByObjectId.Add(objectId, materialIndex);
             if (materialProxy != null)
             {
-                m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(materialIndex, materialProxy.Revision);
+                m_MaterialMetadataByObjectId[objectId] = new MaterialMetadata(
+                    materialIndex,
+                    ComputeMaterialProxyRevision(materialProxy));
             }
             return materialIndex;
         }
@@ -1045,10 +1047,27 @@ namespace VividRP.Runtime.GPUDriven
         private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(GPUDrivenMaterialProxy materialProxy)
         {
             return new GPUDrivenSurfaceTextureSet(
+                materialProxy != null ? materialProxy.StreamedVirtualTexture : null,
                 materialProxy != null ? materialProxy.BaseMap : null,
                 materialProxy != null ? materialProxy.BumpMap : null,
                 materialProxy != null ? materialProxy.MaskMap : null
             );
+        }
+
+        private static uint ComputeMaterialProxyRevision(GPUDrivenMaterialProxy materialProxy)
+        {
+            if (materialProxy == null)
+                return 0u;
+
+            unchecked
+            {
+                uint hash = 2166136261u;
+                hash = (hash ^ materialProxy.Revision) * 16777619u;
+                VividVirtualTextureAsset asset = materialProxy.StreamedVirtualTexture;
+                hash = (hash ^ GetObjectRevisionId(asset)) * 16777619u;
+                hash = (hash ^ (asset != null ? asset.ContentVersion : 0u)) * 16777619u;
+                return hash;
+            }
         }
 
         private static GPUDrivenSurfaceTextureSet ExtractSurfaceTextures(Material material)

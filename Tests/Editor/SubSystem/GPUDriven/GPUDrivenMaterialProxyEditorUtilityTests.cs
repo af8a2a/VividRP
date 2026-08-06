@@ -3,6 +3,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEngine;
 using VividRP.Editor.GPUDriven;
+using VividRP.Runtime;
 using VividRP.Runtime.GPUDriven;
 using Object = UnityEngine.Object;
 
@@ -171,6 +172,48 @@ namespace VividRP.Editor.Tests
                 Object.DestroyImmediate(gameObject);
                 Object.DestroyImmediate(nonPersistentMaterial);
             }
+        }
+
+        [Test]
+        public void BuildOrRefreshStreamedVirtualTexture_CreatesGpuSurfaceAssetAndBindsProxy()
+        {
+            string texturePath = TempFolder + "/SurfaceTexture.asset";
+            string proxyPath = TempFolder + "/SurfaceProxy.asset";
+            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, true)
+            {
+                name = "SurfaceTexture",
+                wrapMode = TextureWrapMode.Repeat,
+            };
+            texture.SetPixels32(new[]
+            {
+                new Color32(255, 0, 0, 255),
+                new Color32(0, 255, 0, 255),
+                new Color32(0, 0, 255, 255),
+                new Color32(255, 255, 255, 255),
+            });
+            texture.Apply(true, false);
+            AssetDatabase.CreateAsset(texture, texturePath);
+
+            var materialProxy = ScriptableObject.CreateInstance<GPUDrivenMaterialProxy>();
+            materialProxy.BaseMap = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+            AssetDatabase.CreateAsset(materialProxy, proxyPath);
+
+            bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                materialProxy,
+                out string assetPath,
+                out bool wasCreated,
+                out string errorMessage);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.True);
+            Assert.That(assetPath, Is.EqualTo(TempFolder + "/SurfaceProxy_Surface.vividvt"));
+            Assert.That(materialProxy.StreamedVirtualTexture, Is.Not.Null);
+            Assert.That(materialProxy.StreamedVirtualTexture.BuildProfile, Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
+            Assert.That(materialProxy.StreamedVirtualTexture.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
+            Assert.That(materialProxy.StreamedVirtualTexture.ContentLayerMask, Is.EqualTo(1));
+            Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.HasStreamData, Is.True);
+            Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.RuntimeStreamDataPath, Is.Not.Empty);
+            Assert.That(File.Exists(materialProxy.StreamedVirtualTexture.BuiltData.StreamDataPath), Is.True);
         }
 
         private static GameObject CreateMeshletRendererObject(

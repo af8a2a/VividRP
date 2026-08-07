@@ -49,15 +49,15 @@ void CS(const uint3 dispatchThreadID : SV_DispatchThreadID)
     const int requestMip = (int)_VTPageCoord.z;
     const int baseSlice = (int)_VTPageCoord.w;
     const int2 entryOrigin = (int2)_VTEntryPageRegion.xy;
-    const int entryPageCount = (int)_VTEntryPageRegion.z;
+    const int2 entryPageCount = (int2)_VTEntryPageRegion.zw;
     const int pageSize = (int)_VTPageLayout.x;
     const int borderSize = (int)_VTPageLayout.y;
     const bool repeat = _VTPageLayout.w > 0.5;
 
-    const int entryPageCountAtMip = max(1, entryPageCount >> requestMip);
+    const int2 entryPageCountAtMip = max(int2(1, 1), entryPageCount >> requestMip);
     const int2 entryOriginAtMip = entryOrigin >> requestMip;
     const int2 localPage = pageCoord - entryOriginAtMip;
-    const int logicalDimension = entryPageCountAtMip * pageSize;
+    const int2 logicalDimension = entryPageCountAtMip * pageSize;
     const int2 logicalPixel = localPage * pageSize + (int2)dispatchThreadID.xy - borderSize;
     const float2 uv = ((float2)logicalPixel + 0.5) / logicalDimension;
 

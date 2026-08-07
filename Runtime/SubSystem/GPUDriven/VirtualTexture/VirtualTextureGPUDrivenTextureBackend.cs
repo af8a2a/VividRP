@@ -116,8 +116,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             internal Texture2D Mask;
             internal VividVirtualTextureAsset StreamedAsset;
             internal RectInt PageRegion;
-            internal VirtualTexturePageCoord MipTailCoord;
+            internal GPUDrivenVirtualTextureAtlasAllocator.Allocation AtlasAllocation;
+            internal VirtualTexturePageCoord[] MipTailCoords;
             internal int MaxMip;
+            internal int ResidentMipTailPageCount;
             internal uint LastTouchedUpdate;
             internal uint CreatedUpdate;
             internal bool HasAllocation;
@@ -131,17 +133,20 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private readonly List<BindingEntry> m_PendingMipTailEntries = new();
         private readonly List<BindingEntry> m_ReleaseEntries = new();
         private readonly List<VTPageRegion> m_ReleaseRegions = new();
-        private readonly List<RectInt> m_ReleaseAtlasRegions = new();
-        private readonly bool[,] m_AllocatedPages = new bool[AtlasPageCount, AtlasPageCount];
+        private readonly List<BindingEntry> m_ReleaseAllocationEntries = new();
+        private readonly GPUDrivenVirtualTextureAtlasAllocator m_AtlasAllocator = new(
+            AtlasPageCount,
+            MaxAllocationPageCount);
         private readonly GPUDrivenVirtualTextureProducer m_Producer;
 
         private uint m_BindingRevision = 1;
         private uint m_SurfaceBindingUpdate = 1;
         private uint m_CreateResourceCallCountThisFrame;
-        private int m_AllocatedPageCount;
         private int m_AtlasAllocationFailureCount;
         private int m_QueuedMipTailCount;
         private int m_ResidentMipTailCount;
+        private int m_QueuedMipTailPageCount;
+        private int m_ResidentMipTailPageCount;
         private string m_LastAtlasAllocationFailureReason = string.Empty;
         private bool m_SurfaceBindingUpdateActive;
         private bool m_RetrySurfaceBindingUpdate;
@@ -220,17 +225,21 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
         internal int StreamedAtlasEntryCount => m_Producer?.StreamedEntryCount ?? 0;
 
-        internal int AllocatedPageCount => m_AllocatedPageCount;
+        internal int AllocatedPageCount => m_AtlasAllocator.AllocatedPageCount;
 
         internal int AtlasAllocationFailureCount => m_AtlasAllocationFailureCount;
 
         internal string LastAtlasAllocationFailureReason => m_LastAtlasAllocationFailureReason;
 
-        internal int LargestFreeAllocationPageCount => GetLargestFreeAllocationPageCount();
+        internal int LargestFreeAllocationPageCount => m_AtlasAllocator.GetLargestFreeSquarePageCount();
 
         internal int ResidentMipTailCount => m_ResidentMipTailCount;
 
         internal int QueuedMipTailCount => m_QueuedMipTailCount;
+
+        internal int ResidentMipTailPageCount => m_ResidentMipTailPageCount;
+
+        internal int QueuedMipTailPageCount => m_QueuedMipTailPageCount;
 
         public void PrepareFrame()
         {
@@ -247,19 +256,31 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             for (int tailIndex = m_PendingMipTailEntries.Count - 1; tailIndex >= 0; tailIndex--)
             {
                 BindingEntry bindingEntry = m_PendingMipTailEntries[tailIndex];
-                if (VirtualTextureSystem.TryGetPageTableEntry(
-                        VirtualTextureSpaceId,
-                        bindingEntry.MipTailCoord,
-                        out VirtualTexturePageTableEntry entry)
-                    && entry.Resident
-                    && entry.Locked)
+                int residentPageCount = 0;
+                for (int pageIndex = 0; pageIndex < bindingEntry.MipTailCoords.Length; pageIndex++)
                 {
-                    int lastTailIndex = m_PendingMipTailEntries.Count - 1;
-                    m_PendingMipTailEntries[tailIndex] = m_PendingMipTailEntries[lastTailIndex];
-                    m_PendingMipTailEntries.RemoveAt(lastTailIndex);
-                    bindingEntry.MipTailResident = true;
-                    m_ResidentMipTailCount += 1;
+                    if (VirtualTextureSystem.TryGetPageTableEntry(
+                            VirtualTextureSpaceId,
+                            bindingEntry.MipTailCoords[pageIndex],
+                            out VirtualTexturePageTableEntry entry)
+                        && entry.Resident
+                        && entry.Locked)
+                    {
+                        residentPageCount += 1;
+                    }
                 }
+
+                int residentPageDelta = residentPageCount - bindingEntry.ResidentMipTailPageCount;
+                bindingEntry.ResidentMipTailPageCount = residentPageCount;
+                m_ResidentMipTailPageCount = Mathf.Max(0, m_ResidentMipTailPageCount + residentPageDelta);
+                if (residentPageCount != bindingEntry.MipTailCoords.Length)
+                    continue;
+
+                int lastTailIndex = m_PendingMipTailEntries.Count - 1;
+                m_PendingMipTailEntries[tailIndex] = m_PendingMipTailEntries[lastTailIndex];
+                m_PendingMipTailEntries.RemoveAt(lastTailIndex);
+                bindingEntry.MipTailResident = true;
+                m_ResidentMipTailCount += 1;
             }
         }
 
@@ -354,59 +375,84 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 return emptyEntry.Binding;
             }
 
-            int allocationPageCount = streamedAsset != null
-                ? streamedAsset.VirtualPageCountX
-                : ResolveAllocationPageCount(baseColor, normal, mask);
-            if (!TryAllocatePageRegion(allocationPageCount, out RectInt pageRegion))
+            Vector2Int allocationPageCounts = streamedAsset != null
+                ? new Vector2Int(streamedAsset.VirtualPageCountX, streamedAsset.VirtualPageCountY)
+                : ResolveAllocationPageCounts(baseColor, normal, mask);
+            if (!m_AtlasAllocator.TryAllocate(
+                    allocationPageCounts.x,
+                    allocationPageCounts.y,
+                    out GPUDrivenVirtualTextureAtlasAllocator.Allocation atlasAllocation))
             {
                 m_AtlasAllocationFailureCount += 1;
-                int largestFreeAllocation = GetLargestFreeAllocationPageCount();
+                int largestFreeAllocation = m_AtlasAllocator.GetLargestFreeSquarePageCount();
                 m_LastAtlasAllocationFailureReason =
-                    $"GPUDriven VT atlas is full. Could not allocate a {allocationPageCount}x{allocationPageCount} page region. "
-                    + $"Used {m_AllocatedPageCount}/{VirtualPageCapacity} virtual pages; "
+                    $"GPUDriven VT atlas is full. Could not allocate a {allocationPageCounts.x}x{allocationPageCounts.y} page region. "
+                    + $"Used {m_AtlasAllocator.AllocatedPageCount}/{VirtualPageCapacity} virtual pages; "
                     + $"largest aligned free region is {largestFreeAllocation}x{largestFreeAllocation}.";
                 Debug.LogWarning($"[VividRP] {m_LastAtlasAllocationFailureReason}");
                 m_RetrySurfaceBindingUpdate = true;
                 return CreateEmptyBinding();
             }
 
-            int maxMip = streamedAsset != null
-                ? streamedAsset.MipCount - 1
-                : Mathf.RoundToInt(Mathf.Log(allocationPageCount, 2.0f));
+            RectInt pageRegion = atlasAllocation.PageRegion;
+            int maxMip = atlasAllocation.MaxMip;
             bool repeat = addressMode == GPUDrivenSurfaceAddressMode.Repeat;
             if (streamedAsset == null)
                 WarnAddressModeFallback(textures, baseColor, normal, mask);
-            if (streamedAsset != null)
-                m_Producer.RegisterStreamedEntry(pageRegion, streamedAsset);
-            else
-                m_Producer.RegisterEntry(pageRegion, maxMip, baseColor, normal, mask, PageSize, repeat);
-
-            var mipTailCoord = new VirtualTexturePageCoord(
-                pageRegion.x >> maxMip,
-                pageRegion.y >> maxMip,
-                maxMip);
-            bool mipTailQueued;
             try
             {
-                mipTailQueued = VirtualTextureSystem.TryQueuePageResident(
-                    VirtualTextureSpaceId,
-                    mipTailCoord,
-                    locked: true,
-                    frameIndex: Time.frameCount);
+                if (streamedAsset != null)
+                    m_Producer.RegisterStreamedEntry(pageRegion, streamedAsset);
+                else
+                    m_Producer.RegisterEntry(pageRegion, maxMip, baseColor, normal, mask, PageSize, repeat);
             }
-            catch (Exception exception)
+            catch
             {
-                mipTailQueued = false;
-                Debug.LogWarning(
-                    $"[VividRP] Failed to queue GPUDriven VT mip tail {mipTailCoord}: {exception.Message}");
+                m_AtlasAllocator.Release(atlasAllocation);
+                throw;
             }
 
-            if (!mipTailQueued)
+            RectInt mipTailRegion = GetRegionAtMip(pageRegion, maxMip);
+            VirtualTexturePageCoord[] mipTailCoords = CreatePageCoords(mipTailRegion, maxMip);
+            int queuedMipTailPageCount = 0;
+            VirtualTexturePageCoord failedMipTailCoord = default;
+            string mipTailFailureReason = string.Empty;
+            for (int pageIndex = 0; pageIndex < mipTailCoords.Length; pageIndex++)
             {
+                failedMipTailCoord = mipTailCoords[pageIndex];
+                try
+                {
+                    if (!VirtualTextureSystem.TryQueuePageResident(
+                            VirtualTextureSpaceId,
+                            failedMipTailCoord,
+                            locked: true,
+                            frameIndex: Time.frameCount))
+                    {
+                        break;
+                    }
+                }
+                catch (Exception exception)
+                {
+                    mipTailFailureReason = exception.Message;
+                    break;
+                }
+
+                queuedMipTailPageCount += 1;
+            }
+
+            if (queuedMipTailPageCount != mipTailCoords.Length)
+            {
+                if (queuedMipTailPageCount > 0)
+                    VirtualTextureSystem.FlushRegion(VirtualTextureSpaceId, maxMip, mipTailRegion);
                 m_Producer.UnregisterEntry(pageRegion);
-                ReleasePageRegion(pageRegion);
+                m_AtlasAllocator.Release(atlasAllocation);
+                if (!string.IsNullOrWhiteSpace(mipTailFailureReason))
+                {
+                    Debug.LogWarning(
+                        $"[VividRP] Failed to queue GPUDriven VT mip tail {failedMipTailCoord}: {mipTailFailureReason}");
+                }
                 Debug.LogWarning(
-                    $"[VividRP] GPUDriven VT mip tail {mipTailCoord} could not be queued. "
+                    $"[VividRP] GPUDriven VT mip tail {failedMipTailCoord} could not be queued. "
                     + "The material will use texture fallbacks to keep alpha and shadows deterministic.");
                 m_RetrySurfaceBindingUpdate = true;
                 return CreateEmptyBinding();
@@ -450,7 +496,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Mask = streamedAsset == null ? mask : null,
                 StreamedAsset = streamedAsset,
                 PageRegion = pageRegion,
-                MipTailCoord = mipTailCoord,
+                AtlasAllocation = atlasAllocation,
+                MipTailCoords = mipTailCoords,
                 MaxMip = maxMip,
                 HasAllocation = true,
             };
@@ -458,6 +505,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_Bindings.Add(key, bindingEntry);
             m_PendingMipTailEntries.Add(bindingEntry);
             m_QueuedMipTailCount += 1;
+            m_QueuedMipTailPageCount += mipTailCoords.Length;
             m_CreateResourceCallCountThisFrame += 1;
             IncrementBindingRevision();
             return binding;
@@ -469,7 +517,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return new GPUDrivenTextureBackendStats(
                 poolCount: IsAvailable ? 1u : 0u,
                 resourceCapacity: VirtualPageCapacity,
-                allocatedResourceCount: (uint) m_AllocatedPageCount,
+                allocatedResourceCount: (uint) m_AtlasAllocator.AllocatedPageCount,
                 createResourceCallCountThisFrame: m_CreateResourceCallCountThisFrame,
                 registeredResourceCount: m_RegisteredTextureIds.Count);
         }
@@ -489,7 +537,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_PendingMipTailEntries.Clear();
             m_ReleaseEntries.Clear();
             m_ReleaseRegions.Clear();
-            m_ReleaseAtlasRegions.Clear();
+            m_ReleaseAllocationEntries.Clear();
             m_IsDisposed = true;
         }
 
@@ -614,11 +662,15 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                          && builtData.BuildProfile == VividVirtualTextureBuildProfile.GPUDrivenSurface
                          && builtData.PageSize == PageSize
                          && builtData.BorderSize == BorderSize
-                         && builtData.VirtualPageCountX == builtData.VirtualPageCountY
                          && builtData.VirtualPageCountX > 0
+                         && builtData.VirtualPageCountY > 0
                          && builtData.VirtualPageCountX <= MaxAllocationPageCount
+                         && builtData.VirtualPageCountY <= MaxAllocationPageCount
                          && Mathf.IsPowerOfTwo(builtData.VirtualPageCountX)
-                         && builtData.MipCount == Mathf.RoundToInt(Mathf.Log(builtData.VirtualPageCountX, 2.0f)) + 1
+                         && Mathf.IsPowerOfTwo(builtData.VirtualPageCountY)
+                         && builtData.MipCount == ComputeMaxMip(
+                             builtData.VirtualPageCountX,
+                             builtData.VirtualPageCountY) + 1
                          && builtData.MatchesStack(VirtualTextureSpaceDesc.StackDesc)
                          && (builtData.HasInlineRawData || builtData.HasStreamData);
             if (valid)
@@ -636,101 +688,33 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             return null;
         }
 
-        private static int ResolveAllocationPageCount(Texture2D baseColor, Texture2D normal, Texture2D mask)
+        private static Vector2Int ResolveAllocationPageCounts(
+            Texture2D baseColor,
+            Texture2D normal,
+            Texture2D mask)
         {
-            int maxDimension = 1;
-            ResolveMaxDimension(baseColor, ref maxDimension);
-            ResolveMaxDimension(normal, ref maxDimension);
-            ResolveMaxDimension(mask, ref maxDimension);
-            int requiredPages = Mathf.Max(1, Mathf.CeilToInt((float) maxDimension / PageSize));
-            return Mathf.Min(MaxAllocationPageCount, Mathf.NextPowerOfTwo(requiredPages));
+            int maxWidth = 1;
+            int maxHeight = 1;
+            ResolveMaxDimensions(baseColor, ref maxWidth, ref maxHeight);
+            ResolveMaxDimensions(normal, ref maxWidth, ref maxHeight);
+            ResolveMaxDimensions(mask, ref maxWidth, ref maxHeight);
+            int requiredPagesX = Mathf.Max(1, Mathf.CeilToInt((float) maxWidth / PageSize));
+            int requiredPagesY = Mathf.Max(1, Mathf.CeilToInt((float) maxHeight / PageSize));
+            return new Vector2Int(
+                Mathf.Min(MaxAllocationPageCount, Mathf.NextPowerOfTwo(requiredPagesX)),
+                Mathf.Min(MaxAllocationPageCount, Mathf.NextPowerOfTwo(requiredPagesY)));
         }
 
-        private static void ResolveMaxDimension(Texture2D texture, ref int maxDimension)
+        private static void ResolveMaxDimensions(
+            Texture2D texture,
+            ref int maxWidth,
+            ref int maxHeight)
         {
-            if (texture != null)
-                maxDimension = Mathf.Max(maxDimension, texture.width, texture.height);
-        }
+            if (texture == null)
+                return;
 
-        private bool TryAllocatePageRegion(int pageCount, out RectInt region)
-        {
-            int size = Mathf.Clamp(Mathf.NextPowerOfTwo(pageCount), 1, MaxAllocationPageCount);
-            if (!TryFindFreePageRegion(size, out region))
-                return false;
-
-            MarkPageRegionAllocated(region.x, region.y, size);
-            m_AllocatedPageCount += size * size;
-            return true;
-        }
-
-        private bool TryFindFreePageRegion(int size, out RectInt region)
-        {
-            for (int y = 0; y + size <= AtlasPageCount; y += size)
-            {
-                for (int x = 0; x + size <= AtlasPageCount; x += size)
-                {
-                    if (!IsPageRegionFree(x, y, size))
-                        continue;
-
-                    region = new RectInt(x, y, size, size);
-                    return true;
-                }
-            }
-
-            region = default;
-            return false;
-        }
-
-        private int GetLargestFreeAllocationPageCount()
-        {
-            for (int size = MaxAllocationPageCount; size >= 1; size >>= 1)
-            {
-                if (TryFindFreePageRegion(size, out _))
-                    return size;
-            }
-
-            return 0;
-        }
-
-        private bool IsPageRegionFree(int startX, int startY, int size)
-        {
-            for (int y = startY; y < startY + size; y++)
-            {
-                for (int x = startX; x < startX + size; x++)
-                {
-                    if (m_AllocatedPages[x, y])
-                        return false;
-                }
-            }
-
-            return true;
-        }
-
-        private void ReleasePageRegion(RectInt region)
-        {
-            int releasedPageCount = 0;
-            for (int y = region.yMin; y < region.yMax; y++)
-            {
-                for (int x = region.xMin; x < region.xMax; x++)
-                {
-                    if (!m_AllocatedPages[x, y])
-                        continue;
-
-                    m_AllocatedPages[x, y] = false;
-                    releasedPageCount += 1;
-                }
-            }
-
-            m_AllocatedPageCount = Mathf.Max(0, m_AllocatedPageCount - releasedPageCount);
-        }
-
-        private void MarkPageRegionAllocated(int startX, int startY, int size)
-        {
-            for (int y = startY; y < startY + size; y++)
-            {
-                for (int x = startX; x < startX + size; x++)
-                    m_AllocatedPages[x, y] = true;
-            }
+            maxWidth = Mathf.Max(maxWidth, texture.width);
+            maxHeight = Mathf.Max(maxHeight, texture.height);
         }
 
         private void TouchBindingEntry(BindingEntry bindingEntry)
@@ -755,7 +739,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             bool releasedAllocation = false;
             m_ReleaseRegions.Clear();
-            m_ReleaseAtlasRegions.Clear();
+            m_ReleaseAllocationEntries.Clear();
             for (int entryIndex = 0; entryIndex < bindingEntries.Count; entryIndex++)
             {
                 BindingEntry bindingEntry = bindingEntries[entryIndex];
@@ -766,13 +750,18 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     continue;
 
                 releasedAllocation = true;
-                m_ReleaseAtlasRegions.Add(bindingEntry.PageRegion);
-                m_Producer?.UnregisterEntry(bindingEntry.PageRegion);
+                m_ReleaseAllocationEntries.Add(bindingEntry);
                 if (!bindingEntry.MipTailResident)
                     m_PendingMipTailEntries.Remove(bindingEntry);
                 else
                     m_ResidentMipTailCount = Mathf.Max(0, m_ResidentMipTailCount - 1);
                 m_QueuedMipTailCount = Mathf.Max(0, m_QueuedMipTailCount - 1);
+                m_QueuedMipTailPageCount = Mathf.Max(
+                    0,
+                    m_QueuedMipTailPageCount - bindingEntry.MipTailCoords.Length);
+                m_ResidentMipTailPageCount = Mathf.Max(
+                    0,
+                    m_ResidentMipTailPageCount - bindingEntry.ResidentMipTailPageCount);
 
                 for (int mip = 0; mip <= bindingEntry.MaxMip; mip++)
                     m_ReleaseRegions.Add(new VTPageRegion(mip, GetRegionAtMip(bindingEntry.PageRegion, mip)));
@@ -785,8 +774,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 VirtualTextureSystem.FlushRegions(VirtualTextureSpaceId, m_ReleaseRegions);
             }
 
-            for (int regionIndex = 0; regionIndex < m_ReleaseAtlasRegions.Count; regionIndex++)
-                ReleasePageRegion(m_ReleaseAtlasRegions[regionIndex]);
+            for (int entryIndex = 0; entryIndex < m_ReleaseAllocationEntries.Count; entryIndex++)
+            {
+                BindingEntry bindingEntry = m_ReleaseAllocationEntries[entryIndex];
+                m_Producer?.UnregisterEntry(bindingEntry.PageRegion);
+                m_AtlasAllocator.Release(bindingEntry.AtlasAllocation);
+            }
 
             RebuildRegisteredTextureIds();
             if (releasedAllocation)
@@ -819,6 +812,28 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             int xMax = ((pageRegion.xMax - 1) >> mip) + 1;
             int yMax = ((pageRegion.yMax - 1) >> mip) + 1;
             return new RectInt(xMin, yMin, xMax - xMin, yMax - yMin);
+        }
+
+        private static VirtualTexturePageCoord[] CreatePageCoords(RectInt pageRegion, int mip)
+        {
+            var coords = new VirtualTexturePageCoord[pageRegion.width * pageRegion.height];
+            int pageIndex = 0;
+            for (int y = pageRegion.yMin; y < pageRegion.yMax; y++)
+            {
+                for (int x = pageRegion.xMin; x < pageRegion.xMax; x++)
+                    coords[pageIndex++] = new VirtualTexturePageCoord(x, y, mip);
+            }
+
+            return coords;
+        }
+
+        private static int ComputeMaxMip(int pageCountX, int pageCountY)
+        {
+            int minPageCount = Mathf.Max(1, Mathf.Min(pageCountX, pageCountY));
+            int maxMip = 0;
+            while ((minPageCount >>= 1) > 0)
+                maxMip += 1;
+            return maxMip;
         }
 
         private uint CreateResource(

@@ -149,7 +149,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Generate_GPUDrivenSurfaceProfile_BuildsFixedThreeLayerSquareStack()
+        public void Generate_GPUDrivenSurfaceProfile_BuildsFixedThreeLayerRectangularStack()
         {
             Texture2D sourceTexture = CreateSourceTexture(256, 128, readable: true);
             VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
@@ -172,8 +172,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(asset.PageSize, Is.EqualTo(128));
                 Assert.That(asset.BorderSize, Is.EqualTo(4));
                 Assert.That(asset.VirtualPageCountX, Is.EqualTo(2));
-                Assert.That(asset.VirtualPageCountY, Is.EqualTo(2));
-                Assert.That(asset.MipCount, Is.EqualTo(2));
+                Assert.That(asset.VirtualPageCountY, Is.EqualTo(1));
+                Assert.That(asset.MipCount, Is.EqualTo(1));
                 Assert.That(asset.ContentLayerMask, Is.EqualTo(1));
                 Assert.That(asset.ContentVersion, Is.Not.Zero);
                 Assert.That(asset.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
@@ -203,7 +203,7 @@ namespace VividRP.Editor.Tests
         [Test]
         public void GPUDrivenProducer_TranslatesAtlasRequestsAndStreamsAssetPageData()
         {
-            Texture2D sourceTexture = CreateSourceTexture(256, 256, readable: true);
+            Texture2D sourceTexture = CreateSourceTexture(256, 128, readable: true);
             VividVirtualTextureAsset asset = ScriptableObject.CreateInstance<VividVirtualTextureAsset>();
             VividVirtualTextureBuiltData builtData = ScriptableObject.CreateInstance<VividVirtualTextureBuiltData>();
             string streamDataPath = CreateTempStreamDataPath();
@@ -239,7 +239,7 @@ namespace VividRP.Editor.Tests
                     ?.GPUDrivenVirtualTexturePageProducerCompute;
                 Assert.That(computeShader, Is.Not.Null);
                 producer = new GPUDrivenVirtualTextureProducer("StreamedAtlas", globalDesc, computeShader);
-                producer.RegisterStreamedEntry(new RectInt(4, 2, 2, 2), asset);
+                producer.RegisterStreamedEntry(new RectInt(4, 2, 2, 1), asset);
                 var globalRequest = new VTRequest(
                     1,
                     new VirtualTexturePageCoord(5, 2, 0),

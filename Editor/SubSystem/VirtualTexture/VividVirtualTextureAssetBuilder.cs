@@ -59,7 +59,9 @@ namespace VividRP.Editor
                 out int virtualPageCountY);
             int mipCount = !gpuDrivenSurface && parameters.MipCount > 0
                 ? Mathf.Clamp(parameters.MipCount, 1, VirtualTextureFeedbackProcessor.MaxMipCount)
-                : ComputeMipCount(virtualPageCountX, virtualPageCountY);
+                : gpuDrivenSurface
+                    ? ComputeGPUDrivenMipCount(virtualPageCountX, virtualPageCountY)
+                    : ComputeMipCount(virtualPageCountX, virtualPageCountY);
             VividVirtualTextureLayerDescriptor[] layers = CreateLayerDescriptors(parameters);
             VTLayerDesc[] stackLayers = CreateStackLayers(layers);
 
@@ -326,15 +328,17 @@ namespace VividRP.Editor
             if (!gpuDrivenSurface)
                 return offsets;
 
-            int virtualDimension = Mathf.Max(1, Mathf.Max(virtualPageCountX, virtualPageCountY) * pageSize);
+            int virtualWidth = Mathf.Max(1, virtualPageCountX * pageSize);
+            int virtualHeight = Mathf.Max(1, virtualPageCountY * pageSize);
             for (int layerIndex = 0; layerIndex < producers.Length; layerIndex++)
             {
                 Texture2D texture = producers[layerIndex]?.SourceTexture;
                 if (texture == null)
                     continue;
 
-                int sourceDimension = Mathf.Max(1, Mathf.Max(texture.width, texture.height));
-                offsets[layerIndex] = Mathf.RoundToInt(Mathf.Log(sourceDimension / (float) virtualDimension, 2.0f));
+                float ratioX = texture.width / (float) virtualWidth;
+                float ratioY = texture.height / (float) virtualHeight;
+                offsets[layerIndex] = Mathf.RoundToInt(Mathf.Log(Mathf.Max(ratioX, ratioY), 2.0f));
             }
 
             return offsets;
@@ -359,20 +363,27 @@ namespace VividRP.Editor
                 return;
             }
 
-            int maxDimension = 1;
-            ResolveMaxDimension(parameters.SourceTexture, ref maxDimension);
-            ResolveMaxDimension(parameters.NormalTexture, ref maxDimension);
-            ResolveMaxDimension(parameters.MaskTexture, ref maxDimension);
-            int requiredPageCount = Mathf.Max(1, Mathf.CeilToInt(maxDimension / (float) pageSize));
-            int squarePageCount = Mathf.Min(GPUDrivenMaxPageCount, Mathf.NextPowerOfTwo(requiredPageCount));
-            pageCountX = squarePageCount;
-            pageCountY = squarePageCount;
+            int maxWidth = 1;
+            int maxHeight = 1;
+            ResolveMaxDimensions(parameters.SourceTexture, ref maxWidth, ref maxHeight);
+            ResolveMaxDimensions(parameters.NormalTexture, ref maxWidth, ref maxHeight);
+            ResolveMaxDimensions(parameters.MaskTexture, ref maxWidth, ref maxHeight);
+            int requiredPageCountX = Mathf.Max(1, Mathf.CeilToInt(maxWidth / (float) pageSize));
+            int requiredPageCountY = Mathf.Max(1, Mathf.CeilToInt(maxHeight / (float) pageSize));
+            pageCountX = Mathf.Min(GPUDrivenMaxPageCount, Mathf.NextPowerOfTwo(requiredPageCountX));
+            pageCountY = Mathf.Min(GPUDrivenMaxPageCount, Mathf.NextPowerOfTwo(requiredPageCountY));
         }
 
-        private static void ResolveMaxDimension(Texture2D texture, ref int maxDimension)
+        private static void ResolveMaxDimensions(
+            Texture2D texture,
+            ref int maxWidth,
+            ref int maxHeight)
         {
-            if (texture != null)
-                maxDimension = Mathf.Max(maxDimension, texture.width, texture.height);
+            if (texture == null)
+                return;
+
+            maxWidth = Mathf.Max(maxWidth, texture.width);
+            maxHeight = Mathf.Max(maxHeight, texture.height);
         }
 
         private static int ComputeContentLayerMask(in Parameters parameters)
@@ -461,6 +472,16 @@ namespace VividRP.Editor
             int maxPageCount = Mathf.Max(1, Mathf.Max(virtualPageCountX, virtualPageCountY));
             int mipCount = 1;
             while ((maxPageCount >>= 1) > 0 && mipCount < VirtualTextureFeedbackProcessor.MaxMipCount)
+                mipCount += 1;
+
+            return mipCount;
+        }
+
+        internal static int ComputeGPUDrivenMipCount(int virtualPageCountX, int virtualPageCountY)
+        {
+            int minPageCount = Mathf.Max(1, Mathf.Min(virtualPageCountX, virtualPageCountY));
+            int mipCount = 1;
+            while ((minPageCount >>= 1) > 0 && mipCount < VirtualTextureFeedbackProcessor.MaxMipCount)
                 mipCount += 1;
 
             return mipCount;

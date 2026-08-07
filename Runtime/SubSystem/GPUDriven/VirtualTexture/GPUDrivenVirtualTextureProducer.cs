@@ -46,9 +46,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 Sources = new[] { baseColor, normal, mask };
                 SourceMipOffsets = new[]
                 {
-                    ComputeSourceMipOffset(baseColor, pageRegion.width, pageSize),
-                    ComputeSourceMipOffset(normal, pageRegion.width, pageSize),
-                    ComputeSourceMipOffset(mask, pageRegion.width, pageSize),
+                    ComputeSourceMipOffset(baseColor, pageRegion.width, pageRegion.height, pageSize),
+                    ComputeSourceMipOffset(normal, pageRegion.width, pageRegion.height, pageSize),
+                    ComputeSourceMipOffset(mask, pageRegion.width, pageRegion.height, pageSize),
                 };
                 PresenceMask = (baseColor != null ? 1 : 0)
                                | (normal != null ? 2 : 0)
@@ -197,26 +197,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             int pageSize,
             bool repeat)
         {
-            if (pageRegion.width <= 0 || pageRegion.height != pageRegion.width)
-                throw new ArgumentException("GPUDriven VT entries must be non-empty square page regions.", nameof(pageRegion));
-            if (maxMip < 0)
-                throw new ArgumentOutOfRangeException(nameof(maxMip));
-            if (pageRegion.xMin < 0
-                || pageRegion.yMin < 0
-                || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
-                || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
-            {
-                throw new ArgumentOutOfRangeException(nameof(pageRegion));
-            }
-
-            for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
-            {
-                for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
-                {
-                    if (m_EntriesByBasePage[pageX, pageY] != null)
-                        throw new InvalidOperationException("GPUDriven VT atlas entries must not overlap.");
-                }
-            }
+            ValidatePageRegion(pageRegion, maxMip);
+            ValidateAndReservePageRegion(pageRegion);
 
             var entry = new AtlasEntry(
                 pageRegion,
@@ -226,23 +208,18 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 mask,
                 pageSize,
                 repeat);
-            for (int pageY = pageRegion.yMin; pageY < pageRegion.yMax; pageY++)
-            {
-                for (int pageX = pageRegion.xMin; pageX < pageRegion.xMax; pageX++)
-                    m_EntriesByBasePage[pageX, pageY] = entry;
-            }
-
-            m_Entries.Add(entry);
+            StoreEntry(entry);
         }
 
         internal void RegisterStreamedEntry(RectInt pageRegion, VividVirtualTextureAsset asset)
         {
             if (asset == null)
                 throw new ArgumentNullException(nameof(asset));
-            if (pageRegion.width <= 0 || pageRegion.height != pageRegion.width)
-                throw new ArgumentException("GPUDriven VT entries must be non-empty square page regions.", nameof(pageRegion));
             if (asset.VirtualPageCountX != pageRegion.width || asset.VirtualPageCountY != pageRegion.height)
                 throw new ArgumentException("The streamed VT asset dimensions must match its atlas page region.", nameof(asset));
+
+            int maxMip = asset.MipCount - 1;
+            ValidatePageRegion(pageRegion, maxMip);
 
             ValidateAndReservePageRegion(pageRegion);
             VirtualTextureSpaceDesc localDesc = asset.CreateSpaceDesc(
@@ -377,14 +354,20 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             m_IsDisposed = true;
         }
 
-        internal static int ComputeSourceMipOffset(Texture2D texture, int pageCount, int pageSize)
+        internal static int ComputeSourceMipOffset(
+            Texture2D texture,
+            int pageCountX,
+            int pageCountY,
+            int pageSize)
         {
             if (texture == null)
                 return 0;
 
-            int virtualDimension = Mathf.Max(1, pageCount * pageSize);
-            int sourceDimension = Mathf.Max(1, Mathf.Max(texture.width, texture.height));
-            float ratio = (float)sourceDimension / virtualDimension;
+            int virtualWidth = Mathf.Max(1, pageCountX * pageSize);
+            int virtualHeight = Mathf.Max(1, pageCountY * pageSize);
+            float ratioX = texture.width / (float) virtualWidth;
+            float ratioY = texture.height / (float) virtualHeight;
+            float ratio = Mathf.Max(ratioX, ratioY);
             return Mathf.RoundToInt(Mathf.Log(ratio, 2.0f));
         }
 
@@ -433,7 +416,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             cmd.SetComputeVectorParam(
                 m_ComputeShader,
                 s_EntryPageRegionId,
-                new Vector4(entry.PageRegion.x, entry.PageRegion.y, entry.PageRegion.width, entry.MaxMip));
+                new Vector4(
+                    entry.PageRegion.x,
+                    entry.PageRegion.y,
+                    entry.PageRegion.width,
+                    entry.PageRegion.height));
             cmd.SetComputeVectorParam(
                 m_ComputeShader,
                 s_PageLayoutId,
@@ -476,7 +463,42 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             }
 
             AtlasEntry entry = m_EntriesByBasePage[basePageX, basePageY];
-            return entry != null && coord.Mip <= entry.MaxMip ? entry : null;
+            if (entry == null || coord.Mip > entry.MaxMip)
+                return null;
+
+            int entryX = entry.PageRegion.x >> coord.Mip;
+            int entryY = entry.PageRegion.y >> coord.Mip;
+            int entryWidth = Mathf.Max(1, entry.PageRegion.width >> coord.Mip);
+            int entryHeight = Mathf.Max(1, entry.PageRegion.height >> coord.Mip);
+            return coord.X >= entryX
+                   && coord.Y >= entryY
+                   && coord.X < entryX + entryWidth
+                   && coord.Y < entryY + entryHeight
+                ? entry
+                : null;
+        }
+
+        private static void ValidatePageRegion(RectInt pageRegion, int maxMip)
+        {
+            if (pageRegion.width <= 0 || pageRegion.height <= 0)
+                throw new ArgumentException("GPUDriven VT entries must be non-empty page regions.", nameof(pageRegion));
+            if (!Mathf.IsPowerOfTwo(pageRegion.width) || !Mathf.IsPowerOfTwo(pageRegion.height))
+                throw new ArgumentException("GPUDriven VT entry dimensions must be powers of two.", nameof(pageRegion));
+            if (maxMip < 0 || maxMip != ComputeMaxMip(pageRegion.width, pageRegion.height))
+                throw new ArgumentOutOfRangeException(nameof(maxMip));
+
+            int alignment = 1 << maxMip;
+            if ((pageRegion.x & (alignment - 1)) != 0 || (pageRegion.y & (alignment - 1)) != 0)
+                throw new ArgumentException("GPUDriven VT entries must be aligned to their maximum mip.", nameof(pageRegion));
+        }
+
+        private static int ComputeMaxMip(int pageCountX, int pageCountY)
+        {
+            int pageCount = Mathf.Max(1, Mathf.Min(pageCountX, pageCountY));
+            int maxMip = 0;
+            while ((pageCount >>= 1) > 0)
+                maxMip += 1;
+            return maxMip;
         }
 
         private void ValidateAndReservePageRegion(RectInt pageRegion)

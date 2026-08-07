@@ -428,13 +428,74 @@ namespace VividRP.Editor.GPUDriven
             string assetName = Path.GetFileNameWithoutExtension(proxyAssetPath) + "_Surface." + VividVirtualTextureAssetImporter.Extension;
             assetPath = Path.Combine(directory, assetName).Replace('\\', '/');
 
+            if (!BuildOrRefreshStreamedVirtualTexture(
+                    assetPath,
+                    materialProxy.BaseMap,
+                    materialProxy.BumpMap,
+                    materialProxy.MaskMap,
+                    materialProxy.MaskMode,
+                    ResolveAddressMode(materialProxy),
+                    out VividVirtualTextureAsset streamedAsset,
+                    out wasCreated,
+                    out errorMessage))
+            {
+                return false;
+            }
+
+            if (materialProxy.StreamedVirtualTexture != streamedAsset)
+            {
+                Undo.RecordObject(materialProxy, "Bind GPUDriven Streamed VT Asset");
+                materialProxy.StreamedVirtualTexture = streamedAsset;
+                EditorUtility.SetDirty(materialProxy);
+                AssetDatabase.SaveAssetIfDirty(materialProxy);
+            }
+
+            return true;
+        }
+
+        internal static bool BuildOrRefreshStreamedVirtualTexture(
+            string assetPath,
+            Texture2D baseMap,
+            Texture2D normalMap,
+            Texture2D maskMap,
+            GPUDrivenMaterialMaskMode maskMode,
+            VividVirtualTextureAddressMode addressMode,
+            out VividVirtualTextureAsset streamedAsset,
+            out bool wasCreated,
+            out string errorMessage)
+        {
+            streamedAsset = null;
+            wasCreated = false;
+            errorMessage = string.Empty;
+            if (string.IsNullOrWhiteSpace(assetPath))
+            {
+                errorMessage = "A streamed VT asset path is required.";
+                return false;
+            }
+
+            if (baseMap == null && normalMap == null && maskMap == null)
+            {
+                errorMessage = "A streamed VT asset requires at least one source texture.";
+                return false;
+            }
+
             try
             {
                 if (AssetDatabase.LoadMainAssetAtPath(assetPath) == null)
                 {
-                    File.WriteAllText(assetPath, string.Empty);
+                    File.WriteAllText(assetPath, VividVirtualTextureAssetImporter.Version3Marker);
                     AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
                     wasCreated = true;
+                }
+                else if (!string.Equals(
+                             File.ReadAllText(assetPath).Trim(),
+                             VividVirtualTextureAssetImporter.Version3Marker,
+                             StringComparison.Ordinal))
+                {
+                    // Early streamed GPUDriven assets were created as empty importer source files.
+                    // Rebuild them as schema-v3 assets so DesktopBCn/Zstd settings are honored.
+                    File.WriteAllText(assetPath, VividVirtualTextureAssetImporter.Version3Marker);
+                    AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
                 }
 
                 if (AssetImporter.GetAtPath(assetPath) is not VividVirtualTextureAssetImporter importer)
@@ -444,11 +505,19 @@ namespace VividRP.Editor.GPUDriven
                 }
 
                 Undo.RecordObject(importer, "Build GPUDriven Streamed VT Asset");
-                importer.SourceTexture = materialProxy.BaseMap;
-                importer.NormalTexture = materialProxy.BumpMap;
-                importer.MaskTexture = materialProxy.MaskMap;
+                importer.SourceTexture = baseMap;
+                importer.NormalTexture = normalMap;
+                importer.MaskTexture = maskMap;
                 importer.BuildProfile = VividVirtualTextureBuildProfile.GPUDrivenSurface;
-                importer.AddressMode = ResolveAddressMode(materialProxy);
+                importer.AddressMode = addressMode;
+                importer.StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+                importer.StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+                importer.MaskStorage = maskMode == GPUDrivenMaterialMaskMode.Roughness
+                    ? VividVirtualTextureMaskStorage.SingleChannelR
+                    : VividVirtualTextureMaskStorage.PackedRGBA;
+                importer.BCQuality = VividVirtualTextureBCQuality.Normal;
+                importer.ZstdLevel = 3;
+                importer.ChunkTargetKiB = 256;
                 importer.PageSize = 128;
                 importer.BorderSize = 4;
                 importer.MipCount = 0;
@@ -458,19 +527,11 @@ namespace VividRP.Editor.GPUDriven
                 EditorUtility.SetDirty(importer);
                 importer.SaveAndReimport();
 
-                VividVirtualTextureAsset streamedAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(assetPath);
+                streamedAsset = AssetDatabase.LoadAssetAtPath<VividVirtualTextureAsset>(assetPath);
                 if (streamedAsset == null || streamedAsset.BuiltData == null)
                 {
                     errorMessage = $"Failed to import GPUDriven streamed VT asset '{assetPath}'.";
                     return false;
-                }
-
-                if (materialProxy.StreamedVirtualTexture != streamedAsset)
-                {
-                    Undo.RecordObject(materialProxy, "Bind GPUDriven Streamed VT Asset");
-                    materialProxy.StreamedVirtualTexture = streamedAsset;
-                    EditorUtility.SetDirty(materialProxy);
-                    AssetDatabase.SaveAssetIfDirty(materialProxy);
                 }
 
                 return true;

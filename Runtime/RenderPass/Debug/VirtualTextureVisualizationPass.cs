@@ -12,12 +12,9 @@ namespace VividRP.Runtime.RenderPass.Core
     public sealed class VirtualTextureVisualizationPass : RasterPass
     {
         internal const string VirtualTextureVisualizationShaderName = "Hidden/VividRP/VirtualTextureVisualization";
-        internal const float MinOverlayViewportFraction = 0.35f;
 
         private static readonly int SourceTextureId = Shader.PropertyToID("_SourceTexture");
         private static readonly int SourceTextureScaleBiasId = Shader.PropertyToID("_SourceTextureScaleBias");
-        private static readonly int OverlayRectId = Shader.PropertyToID("_VTOverlayRect");
-        private static readonly int OverlayOpacityId = Shader.PropertyToID("_VTOverlayOpacity");
         private static readonly int VisualizationModeId = Shader.PropertyToID("_VTVisualizationMode");
         private static readonly int VisualizationLayerId = Shader.PropertyToID("_VTVisualizationLayer");
         private static readonly int VisualizationAvailableId = Shader.PropertyToID("_VTVisualizationAvailable");
@@ -42,8 +39,6 @@ namespace VividRP.Runtime.RenderPass.Core
         private VirtualTextureVisualizationMode m_ResolvedVisualizationMode = VirtualTextureVisualizationMode.None;
         private VirtualTextureVisualizationTarget m_ResolvedVisualizationTarget = VirtualTextureVisualizationTarget.Auto;
         private VirtualTextureVisualizationLayer m_ResolvedVisualizationLayer = VirtualTextureVisualizationLayer.BaseColor;
-        private Vector4 m_OverlayRect = new(0.65f, 0.65f, MinOverlayViewportFraction, MinOverlayViewportFraction);
-        private float m_ResolvedOpacity = 1f;
         private bool m_ShouldSkipExecution;
 
         public VirtualTextureVisualizationPass()
@@ -77,9 +72,6 @@ namespace VividRP.Runtime.RenderPass.Core
                 ?? VirtualTextureVisualizationTarget.Auto;
             m_ResolvedVisualizationLayer = debugData?.virtualTextureVisualizationLayer
                 ?? VirtualTextureVisualizationLayer.BaseColor;
-            m_ResolvedOpacity = debugData?.virtualTextureVisualizationOpacity ?? 1f;
-            m_OverlayRect = ResolveOverlayRect(
-                debugData?.virtualTextureVisualizationOverlayAmount ?? 0f);
 
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_ShouldSkipExecution = DebugPassCameraUtility.ShouldSkipExecution(cameraData);
@@ -112,8 +104,6 @@ namespace VividRP.Runtime.RenderPass.Core
             var mpb = context.renderGraphPool.GetTempMaterialPropertyBlock();
             mpb.SetTexture(SourceTextureId, sourceTexture != null ? sourceTexture : Texture2D.blackTexture);
             mpb.SetVector(SourceTextureScaleBiasId, TextureScaleBiasUtility.GetScaleBias(m_SourceTexture?.innerHandle));
-            mpb.SetVector(OverlayRectId, m_OverlayRect);
-            mpb.SetFloat(OverlayOpacityId, m_ResolvedOpacity);
             mpb.SetInt(VisualizationModeId, (int)m_ResolvedVisualizationMode);
             mpb.SetInt(VisualizationLayerId, (int)m_ResolvedVisualizationLayer);
 
@@ -151,13 +141,6 @@ namespace VividRP.Runtime.RenderPass.Core
             VividRenderingDebugSettingsData data)
         {
             return data?.virtualTextureVisualizationMode ?? VirtualTextureVisualizationMode.None;
-        }
-
-        internal static Vector4 ResolveOverlayRect(float overlayAmount)
-        {
-            float normalizedOverlayAmount = Mathf.Clamp01(overlayAmount);
-            float size = Mathf.Lerp(MinOverlayViewportFraction, 1f, normalizedOverlayAmount);
-            return new Vector4(1f - size, 1f - size, size, size);
         }
 
         internal static bool TryResolveVisualizationBinding(

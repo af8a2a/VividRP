@@ -165,6 +165,10 @@ namespace VividRP.Runtime
 
         internal static VTStreamChunkManager Shared => s_Shared ??= new VTStreamChunkManager();
 
+        internal static long SharedReadyByteCount => s_Shared?.m_ReadyByteCount ?? 0L;
+
+        internal static long SharedDecodedCacheBudget => s_Shared?.m_DecodedCacheBudget ?? 0L;
+
         internal static void ResetShared()
         {
             VTStreamChunkManager previous = s_Shared;

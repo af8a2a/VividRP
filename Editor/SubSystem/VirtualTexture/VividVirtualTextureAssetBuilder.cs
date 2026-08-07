@@ -106,7 +106,7 @@ namespace VividRP.Editor
             var mipTileOffsets = new int[mipCount];
             var pagePixels = new Color32[desc.PhysicalPageSize * desc.PhysicalPageSize];
             var pageBytes = new byte[pagePixels.Length * 4];
-            VTTexture2DPageProducer[] producers = CreateDesktopLayerProducers(parameters);
+            VTTexture2DPageProducer[] producers = CreateLayerProducers(parameters);
             int[] sourceMipOffsets = CreateSourceMipOffsets(
                 producers,
                 gpuDrivenSurface,
@@ -316,7 +316,7 @@ namespace VividRP.Editor
                     maxUploadsPerFrame: 1,
                     feedbackCapacity: 16));
 
-            VTTexture2DPageProducer[] producers = CreateLayerProducers(parameters);
+            VTTexture2DPageProducer[] producers = CreateDesktopLayerProducers(parameters);
             int[] sourceMipOffsets = CreateSourceMipOffsets(
                 producers,
                 gpuDrivenSurface,
@@ -591,6 +591,20 @@ namespace VividRP.Editor
             out int[] tileByteOffsets,
             out int[] tileByteSizes)
         {
+            if (producers == null || producers.Length != layers.Length)
+            {
+                throw new InvalidOperationException(
+                    $"DesktopBCn VT layer/producer mismatch: {layers.Length} layers and "
+                    + $"{producers?.Length ?? 0} producers.");
+            }
+
+            if (sourceMipOffsets == null || sourceMipOffsets.Length != layers.Length)
+            {
+                throw new InvalidOperationException(
+                    $"DesktopBCn VT layer/source-mip mismatch: {layers.Length} layers and "
+                    + $"{sourceMipOffsets?.Length ?? 0} source mip offsets.");
+            }
+
             int pixelCount = checked(desc.PhysicalPageSize * desc.PhysicalPageSize);
             var encodedLayers = new byte[layers.Length][][];
             for (int layerIndex = 0; layerIndex < layers.Length; layerIndex++)
@@ -636,6 +650,14 @@ namespace VividRP.Editor
                         out string error))
                 {
                     throw new InvalidOperationException($"Failed to encode VT layer {layerIndex}: {error}");
+                }
+
+                if (encodedLayers[layerIndex] == null
+                    || encodedLayers[layerIndex].Length != plan.Tiles.Count)
+                {
+                    throw new InvalidOperationException(
+                        $"VT storage encoder returned {encodedLayers[layerIndex]?.Length ?? 0} pages for "
+                        + $"layer {layerIndex}; expected {plan.Tiles.Count}.");
                 }
             }
 
@@ -969,7 +991,15 @@ namespace VividRP.Editor
 
         private static Texture2D ResolvePrimaryTexture(in Parameters parameters)
         {
-            return parameters.SourceTexture ?? parameters.NormalTexture ?? parameters.MaskTexture;
+            // UnityEngine.Object overloads == so a missing serialized reference can be
+            // Unity-null while its managed wrapper is still non-null. The C# ?? operator
+            // only checks the managed reference and would select that invalid object ahead
+            // of a valid normal or mask texture (notably for mask-only terrain control VTs).
+            if (parameters.SourceTexture != null)
+                return parameters.SourceTexture;
+            if (parameters.NormalTexture != null)
+                return parameters.NormalTexture;
+            return parameters.MaskTexture != null ? parameters.MaskTexture : null;
         }
 
         private static void ResolveVirtualPageCounts(

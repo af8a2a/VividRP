@@ -16,7 +16,7 @@ namespace VividRP.Editor
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";
-        private const string Version3Marker = "VIVIDVT3";
+        internal const string Version3Marker = "VIVIDVT3";
 
         public Texture2D SourceTexture;
 

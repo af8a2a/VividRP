@@ -114,6 +114,65 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void BakeToAsset_PersistsTerrainControlMapBeforeBuildingStreamedVirtualTexture()
+        {
+            EnsureSupportedPlatform();
+            TerrainData source = CreateTerrainData("StreamedControlSource", out _);
+            string sourcePath = TempFolder + "/StreamedControlSource.asset";
+            string bakedPath = TempFolder + "/StreamedControlSource_VividTerrain.asset";
+            string firstLayerPath = TempFolder + "/StreamedControlLayer0.terrainlayer";
+            string secondLayerPath = TempFolder + "/StreamedControlLayer1.terrainlayer";
+            AssetDatabase.CreateAsset(source, sourcePath);
+
+            var firstLayer = new TerrainLayer { name = "Streamed Control Layer 0" };
+            var secondLayer = new TerrainLayer { name = "Streamed Control Layer 1" };
+            AssetDatabase.CreateAsset(firstLayer, firstLayerPath);
+            AssetDatabase.CreateAsset(secondLayer, secondLayerPath);
+            source.terrainLayers = new[] { firstLayer, secondLayer };
+            source.alphamapResolution = 8;
+
+            var alphamaps = new float[8, 8, 2];
+            for (int y = 0; y < 8; y++)
+            {
+                for (int x = 0; x < 8; x++)
+                {
+                    float secondLayerWeight = x / 7.0f;
+                    alphamaps[y, x, 0] = 1.0f - secondLayerWeight;
+                    alphamaps[y, x, 1] = secondLayerWeight;
+                }
+            }
+
+            source.SetAlphamaps(0, 0, alphamaps);
+            EditorUtility.SetDirty(source);
+            AssetDatabase.SaveAssets();
+
+            VividTerrainData baked = VividTerrainBaker.BakeToAsset(
+                bakedPath,
+                new VividTerrainBaker.Parameters
+                {
+                    SourceTerrainData = source,
+                    SourceTerrainDataGUID = AssetDatabase.AssetPathToGUID(sourcePath),
+                    Settings = new VividTerrainBakeSettings(1, 32, optimizeVertexCache: false),
+                    LogErrorHandler = Assert.Fail,
+                });
+
+            Assert.That(baked.ControlMaps, Has.Count.EqualTo(1));
+            Texture2D controlMap = baked.ControlMaps[0];
+            Assert.That(controlMap, Is.Not.Null);
+            Assert.That(EditorUtility.IsPersistent(controlMap), Is.True);
+            Assert.That(AssetDatabase.GetAssetPath(controlMap), Does.EndWith("_Control0_Source.asset"));
+            Assert.That(controlMap, Is.Not.SameAs(source.alphamapTextures[0]));
+            Assert.That(baked.ControlVirtualTextures, Has.Count.EqualTo(1));
+            Assert.That(baked.ControlVirtualTextures[0], Is.Not.Null);
+
+            VividTerrainData reloaded = AssetDatabase.LoadAssetAtPath<VividTerrainData>(bakedPath);
+            Assert.That(reloaded.ControlMaps, Has.Count.EqualTo(1));
+            Assert.That(reloaded.ControlMaps[0], Is.Not.Null);
+            Assert.That(reloaded.ControlVirtualTextures, Has.Count.EqualTo(1));
+            Assert.That(reloaded.ControlVirtualTextures[0], Is.Not.Null);
+        }
+
+        [Test]
         public void Generate_BuildsMultipleLODLevelsAndPreservesChunkBorders()
         {
             EnsureSupportedPlatform();

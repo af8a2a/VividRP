@@ -67,7 +67,6 @@ namespace VividRP.Editor.Tests
             Assert.That(outputTexture.desc.Width, Is.EqualTo(960));
             Assert.That(outputTexture.desc.Height, Is.EqualTo(540));
             Assert.That(outputTexture.desc.ColorFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
-            Assert.That(GetVectorField(pass, "m_OverlayRect"), Is.EqualTo(new Vector4(0.65f, 0.65f, 0.35f, 0.35f)));
         }
 
         [Test]
@@ -94,41 +93,24 @@ namespace VividRP.Editor.Tests
         public void Prepare_UsesRenderingDebuggerForAllVisualizationSettings()
         {
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode =
-                VirtualTextureVisualizationMode.PhysicalCache;
+                VirtualTextureVisualizationMode.PhysicalAtlas;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget =
                 VirtualTextureVisualizationTarget.FirstPublic;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer =
                 VirtualTextureVisualizationLayer.Mask;
-            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOverlayAmount = 0.5f;
-            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOpacity = 0.25f;
             var pass = new VirtualTextureVisualizationPass();
 
             pass.Prepare(new ContextContainer());
 
             Assert.That(
                 GetField<VirtualTextureVisualizationMode>(pass, "m_ResolvedVisualizationMode"),
-                Is.EqualTo(VirtualTextureVisualizationMode.PhysicalCache));
+                Is.EqualTo(VirtualTextureVisualizationMode.PhysicalAtlas));
             Assert.That(
                 GetField<VirtualTextureVisualizationTarget>(pass, "m_ResolvedVisualizationTarget"),
                 Is.EqualTo(VirtualTextureVisualizationTarget.FirstPublic));
             Assert.That(
                 GetField<VirtualTextureVisualizationLayer>(pass, "m_ResolvedVisualizationLayer"),
                 Is.EqualTo(VirtualTextureVisualizationLayer.Mask));
-            Assert.That(GetField<float>(pass, "m_ResolvedOpacity"), Is.EqualTo(0.25f));
-            Assert.That(
-                GetVectorField(pass, "m_OverlayRect"),
-                Is.EqualTo(new Vector4(0.325f, 0.325f, 0.675f, 0.675f)));
-        }
-
-        [Test]
-        public void ResolveOverlayRect_GrowsOverlayTowardFullscreen()
-        {
-            Assert.That(
-                VirtualTextureVisualizationPass.ResolveOverlayRect(0f),
-                Is.EqualTo(new Vector4(0.65f, 0.65f, 0.35f, 0.35f)));
-            Assert.That(
-                VirtualTextureVisualizationPass.ResolveOverlayRect(1f),
-                Is.EqualTo(new Vector4(0f, 0f, 1f, 1f)));
         }
 
         [Test]
@@ -187,26 +169,28 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void VisualizationShader_DeclaresPhysicalCacheAndPageTableViews()
+        public void VisualizationShader_DeclaresPhysicalAtlasAndPageTableViews()
         {
             string source = File.ReadAllText(GetShaderSourcePath());
 
             Assert.That(source, Does.Contain("Shader \"Hidden/VividRP/VirtualTextureVisualization\""));
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_NONE 0"));
             Assert.That(source, Does.Not.Contain("VIVID_VT_VISUALIZATION_USE_PASS_SETTINGS"));
-            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PHYSICAL_CACHE 2"));
+            Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS 2"));
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY 3"));
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESOLVED_MIP 5"));
             Assert.That(source, Does.Contain("#define VIVID_VT_VISUALIZATION_PAGE_TABLE_PHYSICAL_PAGE 6"));
-            Assert.That(source, Does.Contain("EvaluatePhysicalCacheColor"));
+            Assert.That(source, Does.Contain("EvaluatePhysicalAtlasColor"));
+            Assert.That(source, Does.Contain("SamplePhysicalAtlas"));
             Assert.That(source, Does.Contain("EvaluatePageTableResidencyColor"));
             Assert.That(source, Does.Contain("EvaluateResolvedMipColor"));
             Assert.That(source, Does.Contain("EvaluatePhysicalPageColor"));
             Assert.That(source, Does.Contain("EvaluateUnavailableColor"));
-            Assert.That(source, Does.Contain("_VTOverlayRect"));
+            Assert.That(source, Does.Not.Contain("_VTOverlayRect"));
+            Assert.That(source, Does.Not.Contain("_VTOverlayOpacity"));
             Assert.That(source, Does.Contain("_VTVisualizationLayer"));
             Assert.That(source, Does.Contain("_VTVisualizationAvailable"));
-            Assert.That(source, Does.Contain("VTSamplePhysicalCacheGroup"));
+            Assert.That(source, Does.Contain("_VTPhysicalCache3.GetDimensions"));
             Assert.That(source, Does.Contain("_VTPageTable[flatIndex]"));
         }
 
@@ -234,14 +218,6 @@ namespace VividRP.Editor.Tests
             var texture = (RenderGraphTexture)field.GetValue(pass);
             Assert.That(texture, Is.Not.Null);
             return texture;
-        }
-
-        private static Vector4 GetVectorField(VirtualTextureVisualizationPass pass, string fieldName)
-        {
-            FieldInfo field = typeof(VirtualTextureVisualizationPass).GetField(fieldName, BindingFlags.Instance | BindingFlags.NonPublic);
-
-            Assert.That(field, Is.Not.Null);
-            return (Vector4)field.GetValue(pass);
         }
 
         private static T GetField<T>(VirtualTextureVisualizationPass pass, string fieldName)

@@ -210,10 +210,59 @@ namespace VividRP.Editor.Tests
             Assert.That(materialProxy.StreamedVirtualTexture, Is.Not.Null);
             Assert.That(materialProxy.StreamedVirtualTexture.BuildProfile, Is.EqualTo(VividVirtualTextureBuildProfile.GPUDrivenSurface));
             Assert.That(materialProxy.StreamedVirtualTexture.AddressMode, Is.EqualTo(VividVirtualTextureAddressMode.Repeat));
+            Assert.That(materialProxy.StreamedVirtualTexture.StorageProfile, Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
+            Assert.That(
+                ((VividVirtualTextureAssetImporter)AssetImporter.GetAtPath(assetPath)).StreamCompression,
+                Is.EqualTo(VividVirtualTextureStreamCompression.Zstd));
+            Assert.That(File.ReadAllText(assetPath).Trim(), Is.EqualTo(VividVirtualTextureAssetImporter.Version3Marker));
             Assert.That(materialProxy.StreamedVirtualTexture.ContentLayerMask, Is.EqualTo(1));
             Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.HasStreamData, Is.True);
             Assert.That(materialProxy.StreamedVirtualTexture.BuiltData.RuntimeStreamDataPath, Is.Not.Empty);
             Assert.That(File.Exists(materialProxy.StreamedVirtualTexture.BuiltData.StreamDataPath), Is.True);
+        }
+
+        [Test]
+        public void BuildOrRefreshStreamedVirtualTexture_BuildsMaskOnlyTerrainControlAsset()
+        {
+            string texturePath = TempFolder + "/TerrainControl.asset";
+            string virtualTexturePath = TempFolder + "/TerrainControl.vividvt";
+            var texture = new Texture2D(8, 8, TextureFormat.RGBA32, true, linear: true)
+            {
+                name = "TerrainControl",
+                wrapMode = TextureWrapMode.Clamp,
+            };
+            var pixels = new Color32[8 * 8];
+            for (int pixelIndex = 0; pixelIndex < pixels.Length; pixelIndex++)
+            {
+                byte weight = (byte)(pixelIndex * byte.MaxValue / (pixels.Length - 1));
+                pixels[pixelIndex] = new Color32((byte)(byte.MaxValue - weight), weight, 0, 0);
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            AssetDatabase.CreateAsset(texture, texturePath);
+            texture = AssetDatabase.LoadAssetAtPath<Texture2D>(texturePath);
+
+            bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                virtualTexturePath,
+                null,
+                null,
+                texture,
+                GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness,
+                VividVirtualTextureAddressMode.Clamp,
+                out VividVirtualTextureAsset streamedAsset,
+                out bool wasCreated,
+                out string errorMessage);
+
+            Assert.That(success, Is.True, errorMessage);
+            Assert.That(wasCreated, Is.True);
+            Assert.That(streamedAsset, Is.Not.Null);
+            Assert.That(streamedAsset.ContentLayerMask, Is.EqualTo(4));
+            Assert.That(streamedAsset.StorageProfile, Is.EqualTo(VividVirtualTextureStorageProfile.DesktopBCn));
+            var importer = (VividVirtualTextureAssetImporter)AssetImporter.GetAtPath(virtualTexturePath);
+            Assert.That(importer.SourceTexture, Is.Null);
+            Assert.That(importer.NormalTexture, Is.Null);
+            Assert.That(importer.MaskTexture, Is.SameAs(texture));
         }
 
         private static GameObject CreateMeshletRendererObject(

@@ -81,9 +81,9 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Mode"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Visualization Target"), Is.Not.Null);
-            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Physical Cache Layer"), Is.Not.Null);
-            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Overlay Size"), Is.Not.Null);
-            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Opacity"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Physical Atlas Layer"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Overlay Size"), Is.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Opacity"), Is.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Stats Source"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Stats Camera"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> View"), Is.Not.Null);
@@ -93,6 +93,11 @@ namespace VividRP.Editor.Tests
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Pixel Size"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Supported"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Capacity"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> GPU VT Allocated"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Physical Atlas Allocated"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Physical Atlas Resident"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Page Tables"), Is.Not.Null);
+            Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Decoded Stream Cache"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Deduplicated Requests"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Feedback Overflow"), Is.Not.Null);
             Assert.That(DebugManager.instance.GetItem("Rendering -> VividRP Debug -> Virtual Texture -> Pending Mip Gap Avg"), Is.Not.Null);
@@ -113,8 +118,6 @@ namespace VividRP.Editor.Tests
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationMode = VirtualTextureVisualizationMode.PageTableResidency;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget = VirtualTextureVisualizationTarget.FirstPublic;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer = VirtualTextureVisualizationLayer.Mask;
-            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOverlayAmount = 1f;
-            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOpacity = 0.25f;
             VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode = VirtualTextureStatsViewMode.SelectedCamera;
 
             VividRenderingDebugDisplaySettings.Data.Reset();
@@ -129,12 +132,6 @@ namespace VividRP.Editor.Tests
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer,
                 Is.EqualTo(VirtualTextureVisualizationLayer.BaseColor));
-            Assert.That(
-                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOverlayAmount,
-                Is.EqualTo(0f));
-            Assert.That(
-                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOpacity,
-                Is.EqualTo(1f));
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureStatsViewMode,
                 Is.EqualTo(VirtualTextureStatsViewMode.Auto));
@@ -169,47 +166,29 @@ namespace VividRP.Editor.Tests
             var targetWidget = DebugManager.instance.GetItem(
                 "Rendering -> VividRP Debug -> Virtual Texture -> Visualization Target") as DebugUI.EnumField;
             var layerWidget = DebugManager.instance.GetItem(
-                "Rendering -> VividRP Debug -> Virtual Texture -> Physical Cache Layer") as DebugUI.EnumField;
-            var overlaySizeWidget = DebugManager.instance.GetItem(
-                "Rendering -> VividRP Debug -> Virtual Texture -> Overlay Size") as DebugUI.FloatField;
-            var opacityWidget = DebugManager.instance.GetItem(
-                "Rendering -> VividRP Debug -> Virtual Texture -> Opacity") as DebugUI.FloatField;
+                "Rendering -> VividRP Debug -> Virtual Texture -> Physical Atlas Layer") as DebugUI.EnumField;
 
             Assert.That(modeWidget, Is.Not.Null);
             Assert.That(targetWidget, Is.Not.Null);
             Assert.That(layerWidget, Is.Not.Null);
-            Assert.That(overlaySizeWidget, Is.Not.Null);
-            Assert.That(opacityWidget, Is.Not.Null);
             Assert.That(targetWidget.isHiddenCallback(), Is.True);
             Assert.That(layerWidget.isHiddenCallback(), Is.True);
-            Assert.That(overlaySizeWidget.isHiddenCallback(), Is.True);
-            Assert.That(opacityWidget.isHiddenCallback(), Is.True);
 
-            int physicalCacheIndex = Array.IndexOf(
+            int physicalAtlasIndex = Array.IndexOf(
                 modeWidget.enumValues,
-                (int)VirtualTextureVisualizationMode.PhysicalCache);
-            modeWidget.setIndex(physicalCacheIndex);
+                (int)VirtualTextureVisualizationMode.PhysicalAtlas);
+            modeWidget.setIndex(physicalAtlasIndex);
             targetWidget.setter((int)VirtualTextureVisualizationTarget.GPUDriven);
             layerWidget.setter((int)VirtualTextureVisualizationLayer.Mask);
-            overlaySizeWidget.setter(2f);
-            opacityWidget.setter(-1f);
 
             Assert.That(targetWidget.isHiddenCallback(), Is.False);
             Assert.That(layerWidget.isHiddenCallback(), Is.False);
-            Assert.That(overlaySizeWidget.isHiddenCallback(), Is.False);
-            Assert.That(opacityWidget.isHiddenCallback(), Is.False);
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationTarget,
                 Is.EqualTo(VirtualTextureVisualizationTarget.GPUDriven));
             Assert.That(
                 VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer,
                 Is.EqualTo(VirtualTextureVisualizationLayer.Mask));
-            Assert.That(
-                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOverlayAmount,
-                Is.EqualTo(1f));
-            Assert.That(
-                VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOpacity,
-                Is.EqualTo(0f));
         }
 
         [Test]
@@ -571,8 +550,6 @@ namespace VividRP.Editor.Tests
                 VirtualTextureVisualizationTarget.FirstAvailable;
             VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationLayer =
                 VirtualTextureVisualizationLayer.Mask;
-            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOverlayAmount = 1f;
-            VividRenderingDebugDisplaySettings.Data.virtualTextureVisualizationOpacity = 0.25f;
 
             Assert.That(VividRenderingDebugDisplaySettings.Data.AreAnySettingsActive, Is.False);
 

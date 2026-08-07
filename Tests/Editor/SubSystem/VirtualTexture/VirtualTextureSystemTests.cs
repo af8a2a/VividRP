@@ -63,6 +63,14 @@ namespace VividRP.Editor.Tests
                     desc.VirtualPageCountY,
                     desc.MipCount)));
                 Assert.That(VirtualTextureSystem.IsCameraFeedbackStateCreatedForTesting(camera), Is.True);
+                VTDebugStats stats = VirtualTextureStatsRegistry.LastStats.Stats;
+                long bytesPerPage = (long)desc.PhysicalPageSize * desc.PhysicalPageSize * 4;
+                Assert.That(stats.PhysicalPoolAllocatedByteCount, Is.EqualTo(bytesPerPage * 2));
+                Assert.That(stats.PhysicalPoolResidentByteCount, Is.EqualTo(bytesPerPage));
+                Assert.That(stats.PageTableByteCount, Is.EqualTo((long)desc.PageTableEntryCount * sizeof(uint)));
+                Assert.That(
+                    stats.GpuAllocatedByteCount,
+                    Is.EqualTo(stats.PhysicalPoolAllocatedByteCount + stats.PageTableByteCount));
             }
             finally
             {

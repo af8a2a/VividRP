@@ -19,12 +19,16 @@ namespace VividRP.Runtime
     public enum VirtualTextureVisualizationMode
     {
         None = 0,
-        [InspectorName("Physical Cache")]
-        PhysicalCache = 2,
+        [InspectorName("Physical Atlas")]
+        PhysicalAtlas = 2,
+        [Obsolete("Use PhysicalAtlas instead.")]
+        PhysicalCache = PhysicalAtlas,
         [InspectorName("Page Table / Residency")]
         PageTableResidency = 3,
-        [InspectorName("Physical Cache + Residency")]
-        PhysicalCacheAndPageTableResidency = 4,
+        [InspectorName("Physical Atlas + Residency")]
+        PhysicalAtlasAndPageTableResidency = 4,
+        [Obsolete("Use PhysicalAtlasAndPageTableResidency instead.")]
+        PhysicalCacheAndPageTableResidency = PhysicalAtlasAndPageTableResidency,
         [InspectorName("Page Table / Resolved Mip")]
         PageTableResolvedMip = 5,
         [InspectorName("Page Table / Physical Page")]
@@ -469,12 +473,14 @@ namespace VividRP.Runtime
             set => m_VirtualTextureVisualizationLayer = NormalizeVirtualTextureVisualizationLayer(value);
         }
 
+        [Obsolete("VT visualization now emits a dedicated full-screen debug output.")]
         internal float virtualTextureVisualizationOverlayAmount
         {
             get => Mathf.Clamp01(m_VirtualTextureVisualizationOverlayAmount);
             set => m_VirtualTextureVisualizationOverlayAmount = Mathf.Clamp01(value);
         }
 
+        [Obsolete("VT visualization now emits a dedicated full-screen debug output.")]
         internal float virtualTextureVisualizationOpacity
         {
             get => Mathf.Clamp01(m_VirtualTextureVisualizationOpacity);
@@ -601,7 +607,7 @@ namespace VividRP.Runtime
             VirtualTextureVisualizationMode value)
         {
             return value == VirtualTextureVisualizationMode.None
-                || value is >= VirtualTextureVisualizationMode.PhysicalCache
+                || value is >= VirtualTextureVisualizationMode.PhysicalAtlas
                     and <= VirtualTextureVisualizationMode.PageTablePhysicalPage
                     ? value
                     : VirtualTextureVisualizationMode.None;
@@ -961,20 +967,8 @@ namespace VividRP.Runtime
 
             public static readonly NameAndTooltip VirtualTextureVisualizationLayer = new()
             {
-                name = "Physical Cache Layer",
-                tooltip = "Select the Base Color, Normal, or Mask layer displayed by physical-cache views."
-            };
-
-            public static readonly NameAndTooltip VirtualTextureVisualizationOverlayAmount = new()
-            {
-                name = "Overlay Size",
-                tooltip = "Set the visualization size from the minimum corner overlay to full screen."
-            };
-
-            public static readonly NameAndTooltip VirtualTextureVisualizationOpacity = new()
-            {
-                name = "Opacity",
-                tooltip = "Set the virtual texture visualization opacity."
+                name = "Physical Atlas Layer",
+                tooltip = "Select the Base Color, Normal, or Mask atlas displayed by physical-atlas views."
             };
 
             public static readonly NameAndTooltip VirtualTextureStatsViewMode = new()
@@ -1420,30 +1414,10 @@ namespace VividRP.Runtime
                     () => data.virtualTextureVisualizationLayer,
                     value => data.virtualTextureVisualizationLayer = value);
                 layerField.isHiddenCallback = () =>
-                    data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalCache
+                    data.virtualTextureVisualizationMode != VirtualTextureVisualizationMode.PhysicalAtlas
                     && data.virtualTextureVisualizationMode
-                        != VirtualTextureVisualizationMode.PhysicalCacheAndPageTableResidency;
+                        != VirtualTextureVisualizationMode.PhysicalAtlasAndPageTableResidency;
                 foldout.children.Add(layerField);
-                foldout.children.Add(new DebugUI.FloatField
-                {
-                    nameAndTooltip = Strings.VirtualTextureVisualizationOverlayAmount,
-                    getter = () => data.virtualTextureVisualizationOverlayAmount,
-                    setter = value => data.virtualTextureVisualizationOverlayAmount = value,
-                    min = () => 0f,
-                    max = () => 1f,
-                    isHiddenCallback = () =>
-                        data.virtualTextureVisualizationMode == VirtualTextureVisualizationMode.None,
-                });
-                foldout.children.Add(new DebugUI.FloatField
-                {
-                    nameAndTooltip = Strings.VirtualTextureVisualizationOpacity,
-                    getter = () => data.virtualTextureVisualizationOpacity,
-                    setter = value => data.virtualTextureVisualizationOpacity = value,
-                    min = () => 0f,
-                    max = () => 1f,
-                    isHiddenCallback = () =>
-                        data.virtualTextureVisualizationMode == VirtualTextureVisualizationMode.None,
-                });
                 foldout.children.Add(CreateEnumField(
                     Strings.VirtualTextureStatsViewMode,
                     () => data.virtualTextureStatsViewMode,
@@ -1457,6 +1431,14 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("Feedback Supported", () => GetVirtualTextureDisplayStats(data).FeedbackSupported));
                 foldout.children.Add(CreateStatsValue("Feedback Capacity", () => GetVirtualTextureDisplayStats(data).FeedbackCapacity));
                 foldout.children.Add(CreateStatsValue("Physical Pools", () => GetVirtualTextureDisplayStats(data).PhysicalPoolCount));
+                foldout.children.Add(CreateStatsValue("GPU VT Allocated", () => FormatBytes(GetVirtualTextureDisplayStats(data).GpuAllocatedByteCount)));
+                foldout.children.Add(CreateStatsValue("Physical Atlas Allocated", () => FormatBytes(GetVirtualTextureDisplayStats(data).PhysicalPoolAllocatedByteCount)));
+                foldout.children.Add(CreateStatsValue("Physical Atlas Resident", () => FormatBytes(GetVirtualTextureDisplayStats(data).PhysicalPoolResidentByteCount)));
+                foldout.children.Add(CreateStatsValue("Page Tables", () => FormatBytes(GetVirtualTextureDisplayStats(data).PageTableByteCount)));
+                foldout.children.Add(CreateStatsValue(
+                    "Decoded Stream Cache",
+                    () => $"{FormatBytes(GetVirtualTextureDisplayStats(data).DecodedStreamCacheByteCount)} / "
+                          + FormatBytes(GetVirtualTextureDisplayStats(data).DecodedStreamCacheBudgetByteCount)));
                 foldout.children.Add(CreateStatsValue("Pool Resident Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolResidentPageCount));
                 foldout.children.Add(CreateStatsValue("Pool Free Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolFreePageCount));
                 foldout.children.Add(CreateStatsValue("Pool Locked Pages", () => GetVirtualTextureDisplayStats(data).PhysicalPoolLockedPageCount));
@@ -1547,6 +1529,22 @@ namespace VividRP.Runtime
             private static object FormatFrameIndex(int frameIndex)
             {
                 return frameIndex >= 0 ? frameIndex : "N/A";
+            }
+
+            internal static string FormatBytes(long byteCount)
+            {
+                double value = Math.Max(0L, byteCount);
+                string[] units = { "B", "KiB", "MiB", "GiB" };
+                int unitIndex = 0;
+                while (value >= 1024.0 && unitIndex < units.Length - 1)
+                {
+                    value /= 1024.0;
+                    unitIndex += 1;
+                }
+
+                return unitIndex == 0
+                    ? $"{value:0} {units[unitIndex]}"
+                    : $"{value:0.00} {units[unitIndex]}";
             }
 
             private static VirtualTextureStats GetVirtualTextureDisplayStats(

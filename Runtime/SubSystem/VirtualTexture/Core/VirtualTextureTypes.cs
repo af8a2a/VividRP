@@ -749,6 +749,18 @@ namespace VividRP.Runtime
 
         internal float AdaptiveMipBias => m_Stats.AdaptiveMipBias;
 
+        internal long PhysicalPoolAllocatedByteCount => m_Stats.PhysicalPoolAllocatedByteCount;
+
+        internal long PhysicalPoolResidentByteCount => m_Stats.PhysicalPoolResidentByteCount;
+
+        internal long PageTableByteCount => m_Stats.PageTableByteCount;
+
+        internal long GpuAllocatedByteCount => m_Stats.GpuAllocatedByteCount;
+
+        internal long DecodedStreamCacheByteCount => m_Stats.DecodedStreamCacheByteCount;
+
+        internal long DecodedStreamCacheBudgetByteCount => m_Stats.DecodedStreamCacheBudgetByteCount;
+
         internal bool IsViewSpecific => m_Stats.IsViewSpecific;
 
         internal string ViewLabel => m_Stats.ViewLabel;

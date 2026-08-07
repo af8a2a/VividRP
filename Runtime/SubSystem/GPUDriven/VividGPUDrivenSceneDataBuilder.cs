@@ -707,9 +707,13 @@ namespace VividRP.Runtime.GPUDriven
                         sceneData,
                         textureBackend,
                         new GPUDrivenSurfaceTextureSet(
+                            layer.StreamedVirtualTexture,
                             layer.DiffuseTexture,
                             layer.NormalMapTexture,
-                            layer.MaskMapTexture)
+                            layer.MaskMapTexture,
+                            layer.MaskMapTexture != null
+                                ? GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
+                                : GPUDrivenMaterialMaskMode.None)
                     );
                     if (usesLayerBlend)
                     {
@@ -790,6 +794,10 @@ namespace VividRP.Runtime.GPUDriven
                     hash = (hash ^ GetObjectRevisionId(layer.DiffuseTexture)) * 16777619u;
                     hash = (hash ^ GetObjectRevisionId(layer.NormalMapTexture)) * 16777619u;
                     hash = (hash ^ GetObjectRevisionId(layer.MaskMapTexture)) * 16777619u;
+                    hash = (hash ^ GetObjectRevisionId(layer.StreamedVirtualTexture)) * 16777619u;
+                    hash = (hash ^ (layer.StreamedVirtualTexture != null
+                        ? layer.StreamedVirtualTexture.ContentVersion
+                        : 0u)) * 16777619u;
                     hash = (hash ^ (uint) layer.TileSize.GetHashCode()) * 16777619u;
                     hash = (hash ^ (uint) layer.TileOffset.GetHashCode()) * 16777619u;
                     hash = (hash ^ (uint) layer.Metallic.GetHashCode()) * 16777619u;
@@ -804,6 +812,13 @@ namespace VividRP.Runtime.GPUDriven
                 for (int controlMapIndex = 0; controlMapIndex < controlMapCount; controlMapIndex++)
                 {
                     hash = (hash ^ GetObjectRevisionId(terrainData.ControlMaps[controlMapIndex])) * 16777619u;
+                    VividVirtualTextureAsset controlVirtualTexture = controlMapIndex < terrainData.ControlVirtualTextures.Count
+                        ? terrainData.ControlVirtualTextures[controlMapIndex]
+                        : null;
+                    hash = (hash ^ GetObjectRevisionId(controlVirtualTexture)) * 16777619u;
+                    hash = (hash ^ (controlVirtualTexture != null
+                        ? controlVirtualTexture.ContentVersion
+                        : 0u)) * 16777619u;
                 }
                 return hash;
             }
@@ -1028,10 +1043,19 @@ namespace VividRP.Runtime.GPUDriven
                 return VividSurfaceBindingData.InvalidResource;
             }
 
+            VividVirtualTextureAsset streamedAsset = controlMapIndex < terrainData.ControlVirtualTextures.Count
+                ? terrainData.ControlVirtualTextures[controlMapIndex]
+                : null;
+
             return AppendSurfaceBinding(
                 sceneData,
                 textureBackend,
-                new GPUDrivenSurfaceTextureSet(null, null, controlMap));
+                new GPUDrivenSurfaceTextureSet(
+                    streamedAsset,
+                    null,
+                    null,
+                    controlMap,
+                    GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness));
         }
 
         private static uint AppendSurfaceBinding(

@@ -279,13 +279,17 @@ namespace VividRP.Runtime
             int residentPageCount,
             int freePageCount,
             int lockedPageCount,
-            int evictedPageCount)
+            int evictedPageCount,
+            long allocatedByteCount = 0,
+            long residentByteCount = 0)
         {
             PoolCount = poolCount;
             ResidentPageCount = residentPageCount;
             FreePageCount = freePageCount;
             LockedPageCount = lockedPageCount;
             EvictedPageCount = evictedPageCount;
+            AllocatedByteCount = Math.Max(0L, allocatedByteCount);
+            ResidentByteCount = Math.Max(0L, residentByteCount);
         }
 
         internal int PoolCount { get; }
@@ -297,6 +301,10 @@ namespace VividRP.Runtime
         internal int LockedPageCount { get; }
 
         internal int EvictedPageCount { get; }
+
+        internal long AllocatedByteCount { get; }
+
+        internal long ResidentByteCount { get; }
     }
 
     internal readonly struct VTPhysicalAtlasLayout : IEquatable<VTPhysicalAtlasLayout>
@@ -466,6 +474,8 @@ namespace VividRP.Runtime
         private readonly List<PhysicalPageBinding>[] m_Bindings;
         private readonly Texture2D[] m_Textures;
         private readonly VTPhysicalAtlasLayout[] m_AtlasLayouts;
+        private readonly long m_AllocatedByteCount;
+        private readonly long m_BytesPerPhysicalPage;
 
         private int m_NextGeneration;
         private int m_RefCount;
@@ -501,6 +511,8 @@ namespace VividRP.Runtime
 
             m_Textures = new Texture2D[Mathf.Max(1, desc.PhysicalGroupCount)];
             m_AtlasLayouts = new VTPhysicalAtlasLayout[m_Textures.Length];
+            long allocatedByteCount = 0;
+            long bytesPerPhysicalPage = 0;
             try
             {
                 for (int groupIndex = 0; groupIndex < m_Textures.Length; groupIndex++)
@@ -528,6 +540,19 @@ namespace VividRP.Runtime
                         desc,
                         groupIndex,
                         m_AtlasLayouts[groupIndex]);
+                    allocatedByteCount = checked(
+                        allocatedByteCount
+                        + GetTextureByteCount(
+                            storageFormat,
+                            m_AtlasLayouts[groupIndex].Width,
+                            m_AtlasLayouts[groupIndex].Height));
+                    bytesPerPhysicalPage = checked(
+                        bytesPerPhysicalPage
+                        + GetTextureByteCount(
+                            storageFormat,
+                            desc.PhysicalPageSize,
+                            desc.PhysicalPageSize)
+                        * groupLayerCount);
                 }
             }
             catch
@@ -535,6 +560,9 @@ namespace VividRP.Runtime
                 DestroyTextures(m_Textures);
                 throw;
             }
+
+            m_AllocatedByteCount = allocatedByteCount;
+            m_BytesPerPhysicalPage = bytesPerPhysicalPage;
         }
 
         internal VTPhysicalPoolDesc Desc { get; }
@@ -622,6 +650,10 @@ namespace VividRP.Runtime
         }
 
         internal int EvictedPageCount => m_EvictedPageCount;
+
+        internal long AllocatedByteCount => m_AllocatedByteCount;
+
+        internal long ResidentByteCount => checked((long)ResidentPageCount * m_BytesPerPhysicalPage);
 
         internal void AddRef()
         {
@@ -1149,6 +1181,16 @@ namespace VividRP.Runtime
                 m_LruPhysicalPages.Remove(node);
 
             m_FreePhysicalPages.Push(physicalPageId);
+        }
+
+        private static long GetTextureByteCount(GraphicsFormat format, int width, int height)
+        {
+            long blockWidth = Math.Max(1u, GraphicsFormatUtility.GetBlockWidth(format));
+            long blockHeight = Math.Max(1u, GraphicsFormatUtility.GetBlockHeight(format));
+            long blockSize = Math.Max(1u, GraphicsFormatUtility.GetBlockSize(format));
+            long blocksX = (Math.Max(1, width) + blockWidth - 1) / blockWidth;
+            long blocksY = (Math.Max(1, height) + blockHeight - 1) / blockHeight;
+            return checked(blocksX * blocksY * blockSize);
         }
 
         private void AddPhysicalPageLookup(int physicalPageId, in VTPhysicalPageIdentity identity)

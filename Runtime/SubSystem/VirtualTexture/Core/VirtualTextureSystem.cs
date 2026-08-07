@@ -563,6 +563,7 @@ namespace VividRP.Runtime
             int residentPageCount = 0;
             int freePageCount = 0;
             int feedbackCapacity = 0;
+            long pageTableByteCount = 0;
             string statusMessage = s_PageTableSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
 
             foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
@@ -573,6 +574,9 @@ namespace VividRP.Runtime
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureFeedbackPrepareTargetsMarker.Auto())
                 {
                     feedbackCapacity += addressSpace.StackDesc.FeedbackCapacity;
+                    pageTableByteCount = checked(
+                        pageTableByteCount
+                        + (long)addressSpace.TotalPageCount * sizeof(uint));
 
                     if (supportsFeedback && cameraFeedbackState != null)
                     {
@@ -665,7 +669,12 @@ namespace VividRP.Runtime
                     gpuProducedPageCount,
                     gpuDispatchCount,
                     streamSaturatedRequestCount,
-                    adaptiveMipBias);
+                    adaptiveMipBias,
+                    physicalPoolStats.AllocatedByteCount,
+                    physicalPoolStats.ResidentByteCount,
+                    pageTableByteCount,
+                    VTStreamChunkManager.SharedReadyByteCount,
+                    VTStreamChunkManager.SharedDecodedCacheBudget);
                 VirtualTextureStatsRegistry.Report(globalStats);
             }
 
@@ -713,7 +722,12 @@ namespace VividRP.Runtime
                         gpuProducedPageCount,
                         gpuDispatchCount,
                         streamSaturatedRequestCount,
-                        adaptiveMipBias);
+                        adaptiveMipBias,
+                        physicalPoolStats.AllocatedByteCount,
+                        physicalPoolStats.ResidentByteCount,
+                        pageTableByteCount,
+                        VTStreamChunkManager.SharedReadyByteCount,
+                        VTStreamChunkManager.SharedDecodedCacheBudget);
                     VirtualTextureStatsRegistry.ReportView(viewStats);
                 }
             }
@@ -1327,12 +1341,16 @@ namespace VividRP.Runtime
             int freePageCount = 0;
             int lockedPageCount = 0;
             int evictedPageCount = 0;
+            long allocatedByteCount = 0;
+            long residentByteCount = 0;
             foreach (VTPhysicalPool pool in s_PhysicalPools.Values)
             {
                 residentPageCount += pool.ResidentPageCount;
                 freePageCount += pool.FreePageCount;
                 lockedPageCount += pool.LockedPageCount;
                 evictedPageCount += pool.EvictedPageCount;
+                allocatedByteCount = checked(allocatedByteCount + pool.AllocatedByteCount);
+                residentByteCount = checked(residentByteCount + pool.ResidentByteCount);
             }
 
             return new VTPhysicalPoolStats(
@@ -1340,7 +1358,9 @@ namespace VividRP.Runtime
                 residentPageCount,
                 freePageCount,
                 lockedPageCount,
-                evictedPageCount);
+                evictedPageCount,
+                allocatedByteCount,
+                residentByteCount);
         }
 
         private static void ReplacePageTableSpace(int spaceId, in VirtualTextureSpaceDesc desc, VTProducer producer)

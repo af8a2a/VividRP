@@ -1,10 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
+using VividRP.Editor.GPUDriven;
 using VividRP.Editor.GPUDriven.Meshlets;
 using VividRP.Runtime;
+using VividRP.Runtime.GPUDriven;
 using VividRP.Runtime.GPUDriven.Meshlets;
 using Object = UnityEngine.Object;
 
@@ -39,10 +42,16 @@ namespace VividRP.Editor.TerrainTools
             var data = ScriptableObject.CreateInstance<VividTerrainData>();
             data.name = System.IO.Path.GetFileNameWithoutExtension(assetPath);
             bool mainAssetCreated = false;
+            var createdVirtualTexturePaths = new List<string>();
 
             try
             {
                 Generate(data, parameters);
+                BuildStreamedVirtualTextures(
+                    data,
+                    parameters.SourceTerrainData,
+                    assetPath,
+                    createdVirtualTexturePaths);
                 AssetDatabase.CreateAsset(data, assetPath);
                 mainAssetCreated = true;
 
@@ -70,6 +79,8 @@ namespace VividRP.Editor.TerrainTools
                 {
                     DestroyGeneratedData(data);
                 }
+
+                DeleteCreatedAssets(createdVirtualTexturePaths);
 
                 throw;
             }
@@ -502,6 +513,188 @@ namespace VividRP.Editor.TerrainTools
             var controlMaps = new Texture2D[controlMapCount];
             Array.Copy(sourceControlMaps, controlMaps, controlMapCount);
             return controlMaps;
+        }
+
+        private static void BuildStreamedVirtualTextures(
+            VividTerrainData terrainData,
+            TerrainData sourceTerrainData,
+            string terrainAssetPath,
+            List<string> createdAssetPaths)
+        {
+            var layerVirtualTextures = new VividVirtualTextureAsset[terrainData.Layers.Count];
+            int supportedLayerCount = terrainData.SupportedSurfaceLayerCount;
+            for (int layerIndex = 0; layerIndex < supportedLayerCount; layerIndex++)
+            {
+                VividTerrainLayerData layer = terrainData.Layers[layerIndex];
+                if (layer.DiffuseTexture == null
+                    && layer.NormalMapTexture == null
+                    && layer.MaskMapTexture == null)
+                {
+                    continue;
+                }
+
+                string virtualTexturePath = CreateVirtualTextureAssetPath(
+                    terrainAssetPath,
+                    $"Layer{layerIndex}_Surface");
+                bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                    virtualTexturePath,
+                    layer.DiffuseTexture,
+                    layer.NormalMapTexture,
+                    layer.MaskMapTexture,
+                    GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness,
+                    VividVirtualTextureAddressMode.Repeat,
+                    out VividVirtualTextureAsset streamedAsset,
+                    out bool wasCreated,
+                    out string errorMessage);
+                if (wasCreated)
+                    createdAssetPaths.Add(virtualTexturePath);
+                if (!success)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to build streamed VT for terrain layer {layerIndex}: {errorMessage}");
+                }
+
+                layerVirtualTextures[layerIndex] = streamedAsset;
+            }
+
+            int controlMapCount = Mathf.Min(
+                terrainData.RequiredControlMapCount,
+                VividTerrainData.MaximumControlMapCount);
+            var persistentControlMaps = new Texture2D[controlMapCount];
+            var controlVirtualTextures = new VividVirtualTextureAsset[controlMapCount];
+            for (int controlMapIndex = 0; controlMapIndex < controlMapCount; controlMapIndex++)
+            {
+                string controlMapPath = CreateSiblingAssetPath(
+                    terrainAssetPath,
+                    $"Control{controlMapIndex}_Source",
+                    "asset");
+                Texture2D controlMap = CreatePersistentControlMap(
+                    sourceTerrainData,
+                    controlMapIndex,
+                    controlMapPath);
+                persistentControlMaps[controlMapIndex] = controlMap;
+                createdAssetPaths.Add(controlMapPath);
+
+                string virtualTexturePath = CreateVirtualTextureAssetPath(
+                    terrainAssetPath,
+                    $"Control{controlMapIndex}");
+                bool success = GPUDrivenMaterialProxyEditorUtility.BuildOrRefreshStreamedVirtualTexture(
+                    virtualTexturePath,
+                    null,
+                    null,
+                    controlMap,
+                    GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness,
+                    VividVirtualTextureAddressMode.Clamp,
+                    out VividVirtualTextureAsset streamedAsset,
+                    out bool wasCreated,
+                    out string errorMessage);
+                if (wasCreated)
+                    createdAssetPaths.Add(virtualTexturePath);
+                if (!success)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to build streamed VT for terrain control map {controlMapIndex}: {errorMessage}");
+                }
+
+                controlVirtualTextures[controlMapIndex] = streamedAsset;
+            }
+
+            terrainData.SetControlMaps(persistentControlMaps);
+            terrainData.SetStreamedVirtualTextures(layerVirtualTextures, controlVirtualTextures);
+        }
+
+        private static string CreateVirtualTextureAssetPath(string terrainAssetPath, string suffix)
+        {
+            return CreateSiblingAssetPath(
+                terrainAssetPath,
+                suffix,
+                VividVirtualTextureAssetImporter.Extension);
+        }
+
+        private static string CreateSiblingAssetPath(
+            string terrainAssetPath,
+            string suffix,
+            string extension)
+        {
+            string directory = Path.GetDirectoryName(terrainAssetPath)?.Replace('\\', '/') ?? "Assets";
+            string baseName = Path.GetFileNameWithoutExtension(terrainAssetPath);
+            string candidate = Path.Combine(directory, $"{baseName}_{suffix}.{extension}")
+                .Replace('\\', '/');
+            return AssetDatabase.GenerateUniqueAssetPath(candidate);
+        }
+
+        private static Texture2D CreatePersistentControlMap(
+            TerrainData sourceTerrainData,
+            int controlMapIndex,
+            string assetPath)
+        {
+            if (sourceTerrainData == null)
+                throw new ArgumentNullException(nameof(sourceTerrainData));
+
+            int width = Mathf.Max(1, sourceTerrainData.alphamapWidth);
+            int height = Mathf.Max(1, sourceTerrainData.alphamapHeight);
+            int layerCount = Mathf.Max(0, sourceTerrainData.alphamapLayers);
+            int firstLayer = checked(controlMapIndex * 4);
+            var pixels = new Color32[checked(width * height)];
+            const int rowBatchSize = 64;
+            for (int firstRow = 0; firstRow < height; firstRow += rowBatchSize)
+            {
+                int rowCount = Mathf.Min(rowBatchSize, height - firstRow);
+                float[,,] weights = sourceTerrainData.GetAlphamaps(0, firstRow, width, rowCount);
+                for (int localY = 0; localY < rowCount; localY++)
+                {
+                    int destinationRow = (firstRow + localY) * width;
+                    for (int x = 0; x < width; x++)
+                    {
+                        pixels[destinationRow + x] = new Color32(
+                            EncodeControlWeight(weights, localY, x, firstLayer, layerCount),
+                            EncodeControlWeight(weights, localY, x, firstLayer + 1, layerCount),
+                            EncodeControlWeight(weights, localY, x, firstLayer + 2, layerCount),
+                            EncodeControlWeight(weights, localY, x, firstLayer + 3, layerCount));
+                    }
+                }
+            }
+
+            var texture = new Texture2D(width, height, TextureFormat.RGBA32, mipChain: true, linear: true)
+            {
+                name = $"TerrainControl{controlMapIndex}",
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear,
+            };
+            texture.SetPixels32(pixels);
+            texture.Apply(updateMipmaps: true, makeNoLongerReadable: false);
+            AssetDatabase.CreateAsset(texture, assetPath);
+            Texture2D persistentTexture = AssetDatabase.LoadAssetAtPath<Texture2D>(assetPath);
+            if (persistentTexture == null)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to reload persistent terrain control map '{assetPath}'.");
+            }
+
+            return persistentTexture;
+        }
+
+        private static byte EncodeControlWeight(
+            float[,,] weights,
+            int y,
+            int x,
+            int layerIndex,
+            int layerCount)
+        {
+            if (layerIndex < 0 || layerIndex >= layerCount || layerIndex >= weights.GetLength(2))
+                return 0;
+
+            return (byte)Mathf.RoundToInt(Mathf.Clamp01(weights[y, x, layerIndex]) * byte.MaxValue);
+        }
+
+        private static void DeleteCreatedAssets(List<string> createdAssetPaths)
+        {
+            for (int assetIndex = 0; assetIndex < createdAssetPaths.Count; assetIndex++)
+            {
+                string assetPath = createdAssetPaths[assetIndex];
+                AssetDatabase.DeleteAsset(assetPath);
+                AssetDatabase.DeleteAsset(assetPath + ".stream");
+            }
         }
 
         private static void DestroyGeneratedData(VividTerrainData data)

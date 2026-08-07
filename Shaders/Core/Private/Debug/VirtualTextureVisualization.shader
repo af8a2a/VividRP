@@ -20,9 +20,9 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             #include "Packages/com.vivid.render-pipelines/Shaders/Core/Public/VirtualTexture/VirtualTexture.hlsl"
 
             #define VIVID_VT_VISUALIZATION_NONE 0
-            #define VIVID_VT_VISUALIZATION_PHYSICAL_CACHE 2
+            #define VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS 2
             #define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY 3
-            #define VIVID_VT_VISUALIZATION_PHYSICAL_CACHE_AND_PAGE_TABLE_RESIDENCY 4
+            #define VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS_AND_PAGE_TABLE_RESIDENCY 4
             #define VIVID_VT_VISUALIZATION_PAGE_TABLE_RESOLVED_MIP 5
             #define VIVID_VT_VISUALIZATION_PAGE_TABLE_PHYSICAL_PAGE 6
 
@@ -34,12 +34,10 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
             SAMPLER(sampler_SourceTexture);
 
             float4 _SourceTextureScaleBias;
-            float4 _VTOverlayRect;
             int _VTVisualizationMode;
             int _VTVisualizationLayer;
             int _VTVisualizationAvailable;
             int _VTVisualizationSpaceId;
-            float _VTOverlayOpacity;
 
             struct Attributes
             {
@@ -65,32 +63,11 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                 return output;
             }
 
-            bool IsInsideOverlay(float2 uv, float2 overlayMin, float2 overlayMax)
-            {
-                return all(uv >= overlayMin) && all(uv <= overlayMax);
-            }
-
-            bool IsOverlayBorder(float2 uv, float2 overlayMin, float2 overlayMax)
-            {
-                float2 borderThickness = max(_VTOverlayRect.zw * 0.01, float2(0.002, 0.002));
-                float2 distanceToMin = uv - overlayMin;
-                float2 distanceToMax = overlayMax - uv;
-                return any(distanceToMin <= borderThickness) || any(distanceToMax <= borderThickness);
-            }
-
             float GridBorderMask(float2 localUv)
             {
                 float2 edgeDistance = min(localUv, 1.0 - localUv);
                 float border = min(edgeDistance.x, edgeDistance.y);
                 return 1.0 - smoothstep(0.0, 0.025, border);
-            }
-
-            float2 ResolvePhysicalCacheGridCount()
-            {
-                float cachePageCount = max((float)VT_CACHE_PAGE_COUNT, 1.0);
-                float gridX = ceil(sqrt(cachePageCount));
-                float gridY = ceil(cachePageCount / gridX);
-                return float2(gridX, gridY);
             }
 
             int ResolveVisualizationLayerIndex()
@@ -117,39 +94,59 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                 return float4(lerp(dark, bright, saturate(checker * 0.55 + diagonal * 0.35)), 1.0);
             }
 
-            float4 EvaluatePhysicalCacheColor(float2 overlayUv)
+            float4 SamplePhysicalAtlas(uint physicalGroup, float2 atlasUv, out uint2 dimensions)
             {
-                float2 gridCount = ResolvePhysicalCacheGridCount();
-                float2 safeUv = min(saturate(overlayUv), 0.99999);
-                float2 scaledUv = safeUv * gridCount;
-                uint2 tileCoord = (uint2)floor(scaledUv);
-                uint pageId = tileCoord.y * (uint)gridCount.x + tileCoord.x;
+                uint clampedGroup = min(physicalGroup, 3u);
+                uint width;
+                uint height;
+                if (clampedGroup == 1u)
+                {
+                    _VTPhysicalCache1.GetDimensions(width, height);
+                    dimensions = uint2(width, height);
+                    return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache1, sampler_VTPhysicalCache, atlasUv, 0.0);
+                }
+                if (clampedGroup == 2u)
+                {
+                    _VTPhysicalCache2.GetDimensions(width, height);
+                    dimensions = uint2(width, height);
+                    return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache2, sampler_VTPhysicalCache, atlasUv, 0.0);
+                }
+                if (clampedGroup == 3u)
+                {
+                    _VTPhysicalCache3.GetDimensions(width, height);
+                    dimensions = uint2(width, height);
+                    return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, atlasUv, 0.0);
+                }
 
-                if (pageId >= (uint)VT_CACHE_PAGE_COUNT)
-                    return float4(0.05, 0.05, 0.05, 1.0);
+                _VTPhysicalCache.GetDimensions(width, height);
+                dimensions = uint2(width, height);
+                return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, atlasUv, 0.0);
+            }
 
-                float2 localUv = frac(scaledUv);
+            float4 EvaluatePhysicalAtlasColor(float2 atlasUv)
+            {
                 int configuredLayerIndex = ResolveVisualizationLayerIndex();
                 if (configuredLayerIndex < 0)
                 {
-                    float missingLayerChecker = fmod(floor(localUv.x * 8.0) + floor(localUv.y * 8.0), 2.0);
+                    float missingLayerChecker = fmod(floor(atlasUv.x * 16.0) + floor(atlasUv.y * 16.0), 2.0);
                     return float4(1.0, missingLayerChecker * 0.25, 1.0, 1.0);
                 }
 
                 uint layerIndex = VTResolveLayerIndex(configuredLayerIndex, 0u);
                 uint physicalGroup = VTGetLayerPhysicalGroup(layerIndex);
-                uint groupLayerCount = VTGetPhysicalGroupLayerCount(physicalGroup);
-                uint physicalLayer = min(VTGetLayerPhysicalLayer(layerIndex), groupLayerCount - 1u);
-                uint physicalSlice = pageId * groupLayerCount + physicalLayer;
-                float4 pageColor = VTSamplePhysicalCacheGroup(physicalGroup, float3(localUv, (float)physicalSlice));
+                uint2 dimensions;
+                float2 safeUv = min(saturate(atlasUv), 0.99999);
+                float4 pageColor = SamplePhysicalAtlas(physicalGroup, safeUv, dimensions);
+                pageColor = VTApplyLayerEncoding(pageColor, layerIndex);
+                if (_VTVisualizationLayer == VIVID_VT_VISUALIZATION_LAYER_BASE_COLOR)
+                    pageColor.rgb = VTApplyLayerColorSpace(pageColor.rgb, layerIndex);
                 if (_VTVisualizationLayer == VIVID_VT_VISUALIZATION_LAYER_NORMAL)
                 {
                     float3 decodedNormal = normalize(pageColor.xyz * 2.0 - 1.0);
                     pageColor.rgb = decodedNormal * 0.5 + 0.5;
                 }
-
-                pageColor.rgb = lerp(pageColor.rgb, HashDebugColor(pageId), 0.08);
-                return lerp(pageColor, float4(1.0, 1.0, 1.0, 1.0), GridBorderMask(localUv));
+                float2 tileUv = frac(safeUv * dimensions / max((float)VT_PHYSICAL_PAGE_SIZE, 1.0));
+                return lerp(pageColor, float4(1.0, 1.0, 1.0, 1.0), GridBorderMask(tileUv) * 0.75);
             }
 
             uint ReadPackedPageTableEntry(uint2 pageCoord, uint mip)
@@ -256,8 +253,8 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
 
             float4 EvaluateVisualizationColor(float2 overlayUv)
             {
-                if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PHYSICAL_CACHE)
-                    return EvaluatePhysicalCacheColor(overlayUv);
+                if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS)
+                    return EvaluatePhysicalAtlasColor(overlayUv);
 
                 if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PAGE_TABLE_RESIDENCY)
                     return EvaluatePageTableResidencyColor(overlayUv);
@@ -266,10 +263,10 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
                     || _VTVisualizationMode == VIVID_VT_VISUALIZATION_PAGE_TABLE_PHYSICAL_PAGE)
                     return EvaluatePageTableResidencyColor(overlayUv);
 
-                if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PHYSICAL_CACHE_AND_PAGE_TABLE_RESIDENCY)
+                if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_PHYSICAL_ATLAS_AND_PAGE_TABLE_RESIDENCY)
                 {
                     if (overlayUv.y >= 0.5)
-                        return EvaluatePhysicalCacheColor(float2(overlayUv.x, overlayUv.y * 2.0 - 1.0));
+                        return EvaluatePhysicalAtlasColor(float2(overlayUv.x, overlayUv.y * 2.0 - 1.0));
 
                     return EvaluatePageTableResidencyColor(float2(overlayUv.x, overlayUv.y * 2.0));
                 }
@@ -284,21 +281,10 @@ Shader "Hidden/VividRP/VirtualTextureVisualization"
 
                 if (_VTVisualizationMode == VIVID_VT_VISUALIZATION_NONE)
                     return sourceColor;
-
-                float2 overlayMin = _VTOverlayRect.xy;
-                float2 overlayMax = overlayMin + _VTOverlayRect.zw;
-                if (!IsInsideOverlay(input.uv, overlayMin, overlayMax))
-                    return sourceColor;
-
-                if (all(_VTOverlayRect.zw < 0.999) && IsOverlayBorder(input.uv, overlayMin, overlayMax))
-                    return float4(1.0, 1.0, 1.0, 1.0);
-
-                float2 overlayUv = saturate((input.uv - overlayMin) / max(_VTOverlayRect.zw, float2(1e-5, 1e-5)));
                 if (_VTVisualizationAvailable == 0)
-                    return lerp(sourceColor, EvaluateUnavailableColor(overlayUv), saturate(_VTOverlayOpacity));
+                    return EvaluateUnavailableColor(input.uv);
 
-                float4 overlayColor = EvaluateVisualizationColor(overlayUv);
-                return lerp(sourceColor, overlayColor, saturate(_VTOverlayOpacity));
+                return EvaluateVisualizationColor(input.uv);
             }
             ENDHLSL
         }

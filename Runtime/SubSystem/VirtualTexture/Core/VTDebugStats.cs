@@ -101,7 +101,12 @@ namespace VividRP.Runtime
             int gpuProducedPageCount = 0,
             int gpuDispatchCount = 0,
             int streamSaturatedRequestCount = 0,
-            float adaptiveMipBias = 0f)
+            float adaptiveMipBias = 0f,
+            long physicalPoolAllocatedByteCount = 0,
+            long physicalPoolResidentByteCount = 0,
+            long pageTableByteCount = 0,
+            long decodedStreamCacheByteCount = 0,
+            long decodedStreamCacheBudgetByteCount = 0)
         {
             ActiveSpaceCount = activeSpaceCount;
             ResidentPageCount = residentPageCount;
@@ -142,6 +147,11 @@ namespace VividRP.Runtime
             GpuDispatchCount = gpuDispatchCount;
             StreamSaturatedRequestCount = streamSaturatedRequestCount;
             AdaptiveMipBias = adaptiveMipBias;
+            PhysicalPoolAllocatedByteCount = Math.Max(0L, physicalPoolAllocatedByteCount);
+            PhysicalPoolResidentByteCount = Math.Max(0L, physicalPoolResidentByteCount);
+            PageTableByteCount = Math.Max(0L, pageTableByteCount);
+            DecodedStreamCacheByteCount = Math.Max(0L, decodedStreamCacheByteCount);
+            DecodedStreamCacheBudgetByteCount = Math.Max(0L, decodedStreamCacheBudgetByteCount);
         }
 
         internal int ActiveSpaceCount { get; }
@@ -222,6 +232,18 @@ namespace VividRP.Runtime
 
         internal float AdaptiveMipBias { get; }
 
+        internal long PhysicalPoolAllocatedByteCount { get; }
+
+        internal long PhysicalPoolResidentByteCount { get; }
+
+        internal long PageTableByteCount { get; }
+
+        internal long DecodedStreamCacheByteCount { get; }
+
+        internal long DecodedStreamCacheBudgetByteCount { get; }
+
+        internal long GpuAllocatedByteCount => PhysicalPoolAllocatedByteCount + PageTableByteCount;
+
         internal float PendingMipGapAverage => PendingMipGapSampleCount > 0
             ? PendingMipGapSum / (float)PendingMipGapSampleCount
             : 0f;
@@ -290,7 +312,12 @@ namespace VividRP.Runtime
                 GpuProducedPageCount,
                 GpuDispatchCount,
                 StreamSaturatedRequestCount,
-                AdaptiveMipBias);
+                AdaptiveMipBias,
+                PhysicalPoolAllocatedByteCount,
+                PhysicalPoolResidentByteCount,
+                PageTableByteCount,
+                DecodedStreamCacheByteCount,
+                DecodedStreamCacheBudgetByteCount);
         }
     }
 
@@ -502,7 +529,12 @@ namespace VividRP.Runtime
                 s_LastStats.GpuProducedPageCount,
                 s_LastStats.GpuDispatchCount,
                 s_LastStats.StreamSaturatedRequestCount,
-                s_LastStats.AdaptiveMipBias);
+                s_LastStats.AdaptiveMipBias,
+                s_LastStats.PhysicalPoolAllocatedByteCount,
+                s_LastStats.PhysicalPoolResidentByteCount,
+                s_LastStats.PageTableByteCount,
+                s_LastStats.DecodedStreamCacheByteCount,
+                s_LastStats.DecodedStreamCacheBudgetByteCount);
         }
 
         private static int ResolveCameraActualWidth(Camera camera)

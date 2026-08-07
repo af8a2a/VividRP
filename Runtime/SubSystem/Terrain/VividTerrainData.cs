@@ -76,6 +76,9 @@ namespace VividRP.Runtime
         private Texture2D m_MaskMapTexture;
 
         [SerializeField]
+        private VividVirtualTextureAsset m_StreamedVirtualTexture;
+
+        [SerializeField]
         private Vector2 m_TileSize;
 
         [SerializeField]
@@ -102,11 +105,13 @@ namespace VividRP.Runtime
             Color specular,
             float metallic,
             float smoothness,
-            float normalScale)
+            float normalScale,
+            VividVirtualTextureAsset streamedVirtualTexture = null)
         {
             m_DiffuseTexture = diffuseTexture;
             m_NormalMapTexture = normalMapTexture;
             m_MaskMapTexture = maskMapTexture;
+            m_StreamedVirtualTexture = streamedVirtualTexture;
             m_TileSize = tileSize;
             m_TileOffset = tileOffset;
             m_Specular = specular;
@@ -121,6 +126,8 @@ namespace VividRP.Runtime
 
         public Texture2D MaskMapTexture => m_MaskMapTexture;
 
+        public VividVirtualTextureAsset StreamedVirtualTexture => m_StreamedVirtualTexture;
+
         public Vector2 TileSize => m_TileSize;
 
         public Vector2 TileOffset => m_TileOffset;
@@ -132,6 +139,21 @@ namespace VividRP.Runtime
         public float Smoothness => m_Smoothness;
 
         public float NormalScale => m_NormalScale;
+
+        internal VividTerrainLayerData WithStreamedVirtualTexture(VividVirtualTextureAsset streamedVirtualTexture)
+        {
+            return new VividTerrainLayerData(
+                m_DiffuseTexture,
+                m_NormalMapTexture,
+                m_MaskMapTexture,
+                m_TileSize,
+                m_TileOffset,
+                m_Specular,
+                m_Metallic,
+                m_Smoothness,
+                m_NormalScale,
+                streamedVirtualTexture);
+        }
     }
 
     [Serializable]
@@ -188,7 +210,7 @@ namespace VividRP.Runtime
     [CreateAssetMenu(menuName = "VividRP/Terrain Data", fileName = "New Vivid Terrain Data")]
     public sealed class VividTerrainData : ScriptableObject
     {
-        public const uint CurrentBakeVersion = 1u;
+        public const uint CurrentBakeVersion = 2u;
         public const int MaximumSurfaceLayerCount = 8;
         public const int MaximumControlMapCount = MaximumSurfaceLayerCount / 4;
         public const int MinimumChunkLODCount = VividTerrainBakeSettings.LegacyMaxMeshLODLevelCount;
@@ -228,6 +250,9 @@ namespace VividRP.Runtime
         private Texture2D[] m_ControlMaps = Array.Empty<Texture2D>();
 
         [SerializeField]
+        private VividVirtualTextureAsset[] m_ControlVirtualTextures = Array.Empty<VividVirtualTextureAsset>();
+
+        [SerializeField]
         private VividTerrainChunkData[] m_Chunks = Array.Empty<VividTerrainChunkData>();
 
         public uint BakeVersion => m_BakeVersion;
@@ -251,6 +276,9 @@ namespace VividRP.Runtime
         public IReadOnlyList<VividTerrainLayerData> Layers => m_Layers;
 
         public IReadOnlyList<Texture2D> ControlMaps => m_ControlMaps ?? Array.Empty<Texture2D>();
+
+        public IReadOnlyList<VividVirtualTextureAsset> ControlVirtualTextures =>
+            m_ControlVirtualTextures ?? Array.Empty<VividVirtualTextureAsset>();
 
         public int SupportedSurfaceLayerCount => Mathf.Min(Layers.Count, MaximumSurfaceLayerCount);
 
@@ -423,7 +451,33 @@ namespace VividRP.Runtime
             m_SourceMaterial = sourceMaterial;
             m_Layers = layers ?? Array.Empty<VividTerrainLayerData>();
             m_ControlMaps = controlMaps ?? Array.Empty<Texture2D>();
+            m_ControlVirtualTextures = Array.Empty<VividVirtualTextureAsset>();
             m_Chunks = chunks ?? Array.Empty<VividTerrainChunkData>();
+        }
+
+        internal void SetStreamedVirtualTextures(
+            VividVirtualTextureAsset[] layerVirtualTextures,
+            VividVirtualTextureAsset[] controlVirtualTextures)
+        {
+            if (layerVirtualTextures != null && layerVirtualTextures.Length != m_Layers.Length)
+            {
+                throw new ArgumentException(
+                    $"Expected {m_Layers.Length} terrain layer VT assets, but received {layerVirtualTextures.Length}.",
+                    nameof(layerVirtualTextures));
+            }
+
+            for (int layerIndex = 0; layerIndex < m_Layers.Length; layerIndex++)
+            {
+                m_Layers[layerIndex] = m_Layers[layerIndex].WithStreamedVirtualTexture(
+                    layerVirtualTextures?[layerIndex]);
+            }
+
+            m_ControlVirtualTextures = controlVirtualTextures ?? Array.Empty<VividVirtualTextureAsset>();
+        }
+
+        internal void SetControlMaps(Texture2D[] controlMaps)
+        {
+            m_ControlMaps = controlMaps ?? Array.Empty<Texture2D>();
         }
     }
 }

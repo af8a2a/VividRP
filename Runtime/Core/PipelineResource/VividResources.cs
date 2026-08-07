@@ -358,6 +358,9 @@ namespace VividRP.Runtime
         [VividResourcePath("Shaders/Core/Private/GPUDriven/GPUDrivenVirtualTexturePageProducer.compute")]
         public ComputeShader GPUDrivenVirtualTexturePageProducerCompute;
 
+        [VividResourcePath("Shaders/Core/Private/GPUDriven/VirtualTexturePageTableScatter.compute")]
+        public ComputeShader VirtualTexturePageTableScatterCompute;
+
         // Film Grain preset textures
         [VividResourcePath("Texture/FilmGrain/Thin01.png")]
         public Texture2D FilmGrainThin1;

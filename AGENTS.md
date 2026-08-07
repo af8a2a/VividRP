@@ -41,11 +41,11 @@
 - For read/write resources, keep the generated port naming convention in mind: input uses `<FieldName>_In`, output uses `<FieldName>_Out`.
 - Preview nodes are texture-focused. If you add new preview behavior for buffers, render lists, or history resources, update both validator/drawer logic and tests in the same change.
 - Serialized fields and long-lived backing fields often use the Unity-style `m_` prefix, but some files already follow local alternatives. Match the style of the file you are editing instead of mass-renaming existing members.
-- Use `Undo.RecordObject(...)` before mutating user-facing serialized assets in editor tooling. When following the existing sync/generation patterns, also persist changes with `EditorUtility.SetDirty(...)` and `AssetDatabase.SaveAssetIfDirty(...)`.
+- Use `Undo.RecordObject(...)` b[License.md](../../../RTXGI/Libraries/Sharc/License.md)efore mutating user-facing serialized assets in editor tooling. When following the existing sync/generation patterns, also persist changes with `EditorUtility.SetDirty(...)` and `AssetDatabase.SaveAssetIfDirty(...)`.
 - Prefer minimal, assembly-appropriate visibility (`internal`, `internal sealed`, etc.) for editor helpers and node data types, matching the current codebase.
 - Do not hand-edit generated or synchronized artifacts such as `Editor/RenderGraph/GeneratedRenderPassNodes.g.cs` or `Runtime/Resources/PipelineResources.asset` unless you are intentionally fixing their generator/sync pipeline.
 
-## RenderGraph Rules
+## RenderGraph Rules[License.md](../../../RTXGI/Libraries/Sharc/License.md)
 - `.vrdg` files are the source of truth for graph authoring. Do not manually maintain derived `RenderGraphData` contents; let the importer/compiler regenerate them.
 - New passes should implement `Create()`, `Prepare(...)`, `Record(...)`, and `Dispose()` coherently; `Prepare(...)` is where per-frame descriptor sizing/imports should happen.
 - Use the appropriate resource wrapper type for graph integration: `RenderGraphTexture`, `RenderGraphBuffer`, `RenderGraphRenderList`, and `RenderGraphAccelerationStructureDesc` where supported by the runtime/editor flow.

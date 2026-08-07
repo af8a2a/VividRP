@@ -111,6 +111,7 @@ namespace VividRP.Runtime.RenderPass.Core
         {
             var cameraData = frameData.GetOrCreate<VividCameraData>();
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             m_FrameIndex = cameraData.frameIndex >= 0 ? cameraData.frameIndex : Time.frameCount;
             var visibilityBufferDescriptor = m_VisibilityBuffer?.desc;
             var width = ResolveOutputWidth(

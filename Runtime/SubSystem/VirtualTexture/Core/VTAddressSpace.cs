@@ -81,7 +81,7 @@ namespace VividRP.Runtime
             BootstrapLowestMip();
             m_PageTableUpdater.Rebuild(desc, m_MipOffsets, m_ResidencyManager);
             m_ResidencyManager.ClearDirtyPageTableUpdates();
-            m_PageTableUpdater.RefreshBuffer();
+            m_PageTableUpdater.RefreshBufferImmediate();
         }
 
         internal int SpaceId { get; }
@@ -119,6 +119,16 @@ namespace VividRP.Runtime
         internal int PageTableSparseUploadCount => m_PageTableUpdater.SparseUploadCount;
 
         internal int PageTableFullUploadCount => m_PageTableUpdater.FullUploadCount;
+
+        internal int PageTableScatterUploadCount => m_PageTableUpdater.ScatterUploadCount;
+
+        internal int PageTableLegacySetDataCallCount => m_PageTableUpdater.LegacySetDataCallCount;
+
+        internal int PageTablePendingUploadEntryCount => m_PageTableUpdater.PendingUploadEntryCount;
+
+        internal GraphicsBuffer PageTableBuffer => m_PageTableUpdater.PageTableBuffer;
+
+        internal VTPageTableUpdater PageTableUpdater => m_PageTableUpdater;
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
@@ -246,7 +256,7 @@ namespace VividRP.Runtime
                     m_MipOffsets,
                     coord,
                     locked);
-                RebuildAndRefreshPageTable();
+                RebuildPageTable();
                 return lockUpdated;
             }
 
@@ -278,7 +288,7 @@ namespace VividRP.Runtime
             }
 
             m_ResidencyManager.TrySetPageLocked(Descriptor, m_MipOffsets, coord, locked);
-            RebuildAndRefreshPageTable();
+            RebuildPageTable();
             return true;
         }
 
@@ -288,9 +298,22 @@ namespace VividRP.Runtime
             return m_PageTableUpdater.TryGetEntry(Descriptor, m_MipOffsets, coord, out entry);
         }
 
-        internal void RefreshPageTableBuffer()
+        internal int CopyPendingPageTableUpdates(
+            VTPageTableScatterUpdate[] destination,
+            int destinationStartIndex,
+            out int pendingVersion,
+            out bool fullUpload)
         {
-            m_PageTableUpdater.RefreshBuffer();
+            return m_PageTableUpdater.CopyPendingUpdates(
+                destination,
+                destinationStartIndex,
+                out pendingVersion,
+                out fullUpload);
+        }
+
+        internal void RefreshPageTableBufferImmediately()
+        {
+            m_PageTableUpdater.RefreshBufferImmediate();
         }
 
         internal bool RebuildPageTableIfDirty()
@@ -546,14 +569,13 @@ namespace VividRP.Runtime
         private void RollbackResidentPage(in VirtualTexturePageCoord coord)
         {
             m_ResidencyManager.FlushRegion(coord.Mip, new RectInt(coord.X, coord.Y, 1, 1));
-            RebuildAndRefreshPageTable();
+            RebuildPageTable();
         }
 
-        private void RebuildAndRefreshPageTable()
+        private void RebuildPageTable()
         {
             m_PageTableUpdater.Rebuild(Descriptor, m_MipOffsets, m_ResidencyManager);
             m_ResidencyManager.ClearDirtyPageTableUpdates();
-            m_PageTableUpdater.RefreshBuffer();
         }
 
         private static void BuildLayerFallbacks(in VirtualTextureSpaceDesc desc, Vector4[] output)

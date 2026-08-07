@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Collections;
 using UnityEngine;
 using UnityEngine.Rendering;
+using UnityEngine.Rendering.RenderGraphModule;
 
 namespace VividRP.Runtime
 {
@@ -26,6 +27,7 @@ namespace VividRP.Runtime
         private static readonly List<VTPendingUploadCandidate> s_PendingUploadCandidates = new();
         private static readonly UploadCommitterResolver s_UploadCommitterResolver = new();
         private static readonly VTAdaptiveMipBiasController s_AdaptiveMipBiasController = new();
+        private static readonly VTPageTableScatterUploader s_PageTableScatterUploader = new();
         private static VTUploadScheduler s_UploadScheduler = new();
         private static VTFeedbackNativeAggregator s_FeedbackAggregator;
 
@@ -165,6 +167,7 @@ namespace VividRP.Runtime
             s_NextAllocationId = 1;
             s_FallbackFrameIndex = -1;
             s_AdaptiveMipBiasController.Reset();
+            s_PageTableScatterUploader.Reset();
             s_UploadScheduler.Dispose();
             s_UploadScheduler = new VTUploadScheduler();
             VTUploadScheduler.ResetFenceFactory();
@@ -531,11 +534,7 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
             {
                 foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
-                {
                     pair.Value.RebuildPageTableIfDirty();
-                    using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableRefreshMarker.Auto())
-                        pair.Value.RefreshPageTableBuffer();
-                }
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureCleanupMarker.Auto())
@@ -712,6 +711,38 @@ namespace VividRP.Runtime
                         adaptiveMipBias);
                     VirtualTextureStatsRegistry.ReportView(viewStats);
                 }
+            }
+        }
+
+        internal static bool RecordPageTableUpdates(RenderGraph renderGraph)
+        {
+            Initialize();
+            return s_PageTableScatterUploader.Record(renderGraph, s_PageTableSpaces.Values);
+        }
+
+        internal static void CommitPageTableUpdates()
+        {
+            s_PageTableScatterUploader.Commit();
+        }
+
+        internal static void AbortPageTableUpdates()
+        {
+            s_PageTableScatterUploader.Abort();
+        }
+
+        internal static void RegisterPageTableReadDependencies(
+            IRenderPass pass,
+            VividVirtualTextureFrameData frameData)
+        {
+            if (pass == null || frameData == null || !PassRecorder.IsPassTextureImportActive)
+                return;
+
+            IReadOnlyList<VirtualTextureSpaceBinding> bindings = frameData.Bindings;
+            for (int bindingIndex = 0; bindingIndex < bindings.Count; bindingIndex++)
+            {
+                GraphicsBuffer pageTableBuffer = bindings[bindingIndex].PageTableBuffer;
+                if (pageTableBuffer != null)
+                    PassRecorder.ImportBufferForPass(pass, pageTableBuffer, AccessFlags.Read);
             }
         }
 
@@ -978,6 +1009,98 @@ namespace VividRP.Runtime
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
                 ? addressSpace.PageTableFullUploadCount
                 : 0;
+        }
+
+        internal static int GetPageTablePendingUploadEntryCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTablePendingUploadEntryCount
+                : 0;
+        }
+
+        internal static int GetPageTableScatterUploadCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableScatterUploadCount
+                : 0;
+        }
+
+        internal static int GetPageTableLegacySetDataCallCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableLegacySetDataCallCount
+                : 0;
+        }
+
+        internal static int GetLastPageTableScatterEntryCountForTesting()
+        {
+            return s_PageTableScatterUploader.LastScatterEntryCount;
+        }
+
+        internal static int GetLastPageTableScatterSpaceCountForTesting()
+        {
+            return s_PageTableScatterUploader.LastScatterSpaceCount;
+        }
+
+        internal static int GetLastPageTableScatterChunkCountForTesting()
+        {
+            return s_PageTableScatterUploader.LastScatterChunkCount;
+        }
+
+        internal static int GetLastPageTableScatterDispatchCountForTesting()
+        {
+            return s_PageTableScatterUploader.LastScatterDispatchCount;
+        }
+
+        internal static int GetLastPageTableTransientSetDataCallCountForTesting()
+        {
+            return s_PageTableScatterUploader.LastTransientSetDataCallCount;
+        }
+
+        internal static int GetLastPageTableLegacySetDataCallCountForTesting()
+        {
+            return s_PageTableScatterUploader.LastLegacySetDataCallCount;
+        }
+
+        internal static bool TryCapturePendingPageTableUpdatesForTesting(
+            int spaceId,
+            out VTPageTableScatterUpdate[] updates,
+            out int pendingVersion,
+            out bool fullUpload)
+        {
+            if (!s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                || addressSpace.PageTablePendingUploadEntryCount <= 0)
+            {
+                updates = Array.Empty<VTPageTableScatterUpdate>();
+                pendingVersion = 0;
+                fullUpload = false;
+                return false;
+            }
+
+            updates = new VTPageTableScatterUpdate[addressSpace.PageTablePendingUploadEntryCount];
+            int copiedCount = addressSpace.CopyPendingPageTableUpdates(
+                updates,
+                0,
+                out pendingVersion,
+                out fullUpload);
+            if (copiedCount == updates.Length)
+                return true;
+
+            Array.Resize(ref updates, copiedCount);
+            return copiedCount > 0;
+        }
+
+        internal static bool CommitCapturedPageTableUpdatesForTesting(
+            int spaceId,
+            int pendingVersion,
+            bool fullUpload,
+            int uploadedEntryCount)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                   && addressSpace.PageTableUpdater.CommitPendingUpload(
+                       pendingVersion,
+                       fullUpload,
+                       uploadedEntryCount);
         }
 
         internal static uint GetPendingRequestRevisionForTesting(int spaceId)

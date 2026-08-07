@@ -1,0 +1,18 @@
+#pragma kernel ScatterPageTableUpdates
+#pragma use_dxc
+
+StructuredBuffer<uint2> _VTPageTableUpdates;
+RWStructuredBuffer<uint> _VTPageTableDestination;
+uint _VTPageTableUpdateBase;
+uint _VTPageTableUpdateCount;
+
+[numthreads(64, 1, 1)]
+void ScatterPageTableUpdates(uint3 dispatchThreadId : SV_DispatchThreadID)
+{
+    const uint localUpdateIndex = dispatchThreadId.x;
+    if (localUpdateIndex >= _VTPageTableUpdateCount)
+        return;
+
+    const uint2 update = _VTPageTableUpdates[_VTPageTableUpdateBase + localUpdateIndex];
+    _VTPageTableDestination[update.x] = update.y;
+}

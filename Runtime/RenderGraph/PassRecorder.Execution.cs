@@ -451,6 +451,7 @@ namespace VividRP.Runtime
 
         internal static void AbortFrame()
         {
+            VirtualTextureSystem.AbortPageTableUpdates();
             ClearImportedTextures();
             ClearHistoryImportedHandles();
             ClearCodeManagedHistoryFrameState();
@@ -695,6 +696,7 @@ namespace VividRP.Runtime
         internal static void CommitFrame(RenderGraphData graphAsset)
         {
             using var commitFrameScope = RenderPassProfilingUtility.CommitFrameMarker.Auto();
+            VirtualTextureSystem.CommitPageTableUpdates();
             using (RenderPassProfilingUtility.CommitFrameTextureHistoriesMarker.Auto())
             {
                 CommitTextureHistories(graphAsset);
@@ -1792,6 +1794,8 @@ namespace VividRP.Runtime
             {
                 PreparePendingHistoryTextureImports(renderGraph);
             }
+
+            VirtualTextureSystem.RecordPageTableUpdates(renderGraph);
 
             s_CurrentRenderGraph = null;
 

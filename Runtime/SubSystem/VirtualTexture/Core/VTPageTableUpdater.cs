@@ -19,11 +19,14 @@ namespace VividRP.Runtime
         private bool m_HasBuiltPageTable;
         private bool m_FullBufferUploadRequired;
         private bool m_PageTableDirty;
+        private int m_PendingUploadVersion;
         private int m_RebuildCount;
         private int m_LastRecomputedEntryCount;
         private int m_LastUploadedEntryCount;
         private int m_SparseUploadCount;
         private int m_FullUploadCount;
+        private int m_ScatterUploadCount;
+        private int m_LegacySetDataCallCount;
 
         internal VTPageTableUpdater(string spaceName, int totalPageCount)
         {
@@ -70,6 +73,16 @@ namespace VividRP.Runtime
 
         internal int FullUploadCount => m_FullUploadCount;
 
+        internal int ScatterUploadCount => m_ScatterUploadCount;
+
+        internal int LegacySetDataCallCount => m_LegacySetDataCallCount;
+
+        internal int PendingUploadEntryCount => !m_PageTableDirty
+            ? 0
+            : ShouldUseFullUpload()
+                ? m_PageTableEntries.Length
+                : m_UploadIndices.Count;
+
         internal void Rebuild(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
@@ -90,6 +103,7 @@ namespace VividRP.Runtime
                 m_HasBuiltPageTable = true;
                 m_FullBufferUploadRequired = true;
                 m_PageTableDirty = true;
+                m_PendingUploadVersion = unchecked(m_PendingUploadVersion + 1);
                 m_LastRecomputedEntryCount = m_PageTableEntries.Length;
                 return;
             }
@@ -111,6 +125,7 @@ namespace VividRP.Runtime
                 RecomputeEntry(desc, mipOffsets, residencyManager, pageIndex);
                 if (m_PageTableEntries[pageIndex].PackedValue != previousValue)
                 {
+                    m_PendingUploadVersion = unchecked(m_PendingUploadVersion + 1);
                     MarkUploadDirty(pageIndex);
                 }
 
@@ -139,20 +154,77 @@ namespace VividRP.Runtime
             return true;
         }
 
-        internal void RefreshBuffer()
+        internal int CopyPendingUpdates(
+            VTPageTableScatterUpdate[] destination,
+            int destinationStartIndex,
+            out int pendingVersion,
+            out bool fullUpload)
+        {
+            if (destination == null)
+                throw new ArgumentNullException(nameof(destination));
+            if (destinationStartIndex < 0 || destinationStartIndex > destination.Length)
+                throw new ArgumentOutOfRangeException(nameof(destinationStartIndex));
+
+            pendingVersion = m_PendingUploadVersion;
+            fullUpload = ShouldUseFullUpload();
+            int updateCount = PendingUploadEntryCount;
+            if (updateCount <= 0)
+                return 0;
+            if (destination.Length - destinationStartIndex < updateCount)
+                throw new ArgumentException("The destination array cannot hold the pending page-table updates.", nameof(destination));
+
+            if (fullUpload)
+            {
+                for (int pageIndex = 0; pageIndex < m_PageTableEntries.Length; pageIndex++)
+                {
+                    destination[destinationStartIndex + pageIndex] = new VTPageTableScatterUpdate(
+                        pageIndex,
+                        m_PageTableEntries[pageIndex].PackedValue);
+                }
+
+                return m_PageTableEntries.Length;
+            }
+
+            m_UploadIndices.Sort();
+            for (int dirtyIndex = 0; dirtyIndex < m_UploadIndices.Count; dirtyIndex++)
+            {
+                int pageIndex = m_UploadIndices[dirtyIndex];
+                destination[destinationStartIndex + dirtyIndex] = new VTPageTableScatterUpdate(
+                    pageIndex,
+                    m_PageTableEntries[pageIndex].PackedValue);
+            }
+
+            return m_UploadIndices.Count;
+        }
+
+        internal bool CommitPendingUpload(int pendingVersion, bool fullUpload, int uploadedEntryCount)
+        {
+            if (!m_PageTableDirty || pendingVersion != m_PendingUploadVersion)
+                return false;
+
+            m_LastUploadedEntryCount = uploadedEntryCount;
+            if (fullUpload)
+                m_FullUploadCount += 1;
+            else
+                m_SparseUploadCount += 1;
+            m_ScatterUploadCount += 1;
+            ClearPendingUpload();
+            return true;
+        }
+
+        internal void RefreshBufferImmediate()
         {
             if (!m_PageTableDirty)
                 return;
 
             m_LastUploadedEntryCount = m_UploadIndices.Count;
-            int fullUploadThreshold = m_PageTableEntries.Length / 2 + m_PageTableEntries.Length % 2;
-            bool useFullUpload = m_FullBufferUploadRequired
-                                 || m_UploadIndices.Count >= fullUploadThreshold;
+            bool useFullUpload = ShouldUseFullUpload();
             if (useFullUpload)
             {
                 m_PageTableBuffer.SetData(m_PageTableEntries);
                 m_LastUploadedEntryCount = m_PageTableEntries.Length;
                 m_FullUploadCount += 1;
+                m_LegacySetDataCallCount += 1;
             }
             else
             {
@@ -175,6 +247,7 @@ namespace VividRP.Runtime
                         rangeStart,
                         rangeStart,
                         rangeCount);
+                    m_LegacySetDataCallCount += 1;
                     if (!endOfList)
                     {
                         rangeStart = pageIndex;
@@ -185,6 +258,21 @@ namespace VividRP.Runtime
                 m_SparseUploadCount += 1;
             }
 
+            ClearPendingUpload();
+        }
+
+        private bool ShouldUseFullUpload()
+        {
+            if (!m_PageTableDirty)
+                return false;
+
+            int fullUploadThreshold = m_PageTableEntries.Length / 2 + m_PageTableEntries.Length % 2;
+            return m_FullBufferUploadRequired
+                   || m_UploadIndices.Count >= fullUploadThreshold;
+        }
+
+        private void ClearPendingUpload()
+        {
             for (int dirtyIndex = 0; dirtyIndex < m_UploadIndices.Count; dirtyIndex++)
                 m_UploadMask[m_UploadIndices[dirtyIndex]] = false;
             m_UploadIndices.Clear();

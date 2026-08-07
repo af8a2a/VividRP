@@ -53,6 +53,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_VirtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
+            VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             VividRenderingDebugSettingsData debugSettings = VividRenderingDebugDisplaySettings.Data;
             m_ResolvedDebugMode = debugSettings != null
                 ? debugSettings.virtualTextureDebugMode

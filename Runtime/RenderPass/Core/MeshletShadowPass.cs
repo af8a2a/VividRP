@@ -75,6 +75,7 @@ namespace VividRP.Runtime.RenderPass.Core
             m_ShadowData = null;
             m_LODCamera = null;
             m_VirtualTextureFrameData = frameData.GetOrCreate<VividVirtualTextureFrameData>();
+            VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             var frameCameraData = frameData.GetOrCreate<VividCameraData>();
             m_FrameIndex = frameCameraData.frameIndex >= 0 ? frameCameraData.frameIndex : Time.frameCount;
 

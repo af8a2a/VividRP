@@ -107,6 +107,7 @@ namespace VividRP.Runtime.RenderPass.Core
         public override void Prepare(ContextContainer frameData)
         {
             m_VirtualTextureFrameData = frameData?.GetOrCreate<VividVirtualTextureFrameData>();
+            VirtualTextureSystem.RegisterPageTableReadDependencies(this, m_VirtualTextureFrameData);
             VividCameraData cameraData = frameData?.GetOrCreate<VividCameraData>();
             m_FrameIndex = cameraData != null && cameraData.frameIndex >= 0
                 ? cameraData.frameIndex

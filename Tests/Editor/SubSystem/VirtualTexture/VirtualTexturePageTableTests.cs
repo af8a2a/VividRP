@@ -297,7 +297,7 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void PageTable_RebuildsDirtySubtreeAndUploadsOnlyChangedEntries()
+        public void PageTable_RebuildsDirtySubtreeAndQueuesOnlyChangedEntries()
         {
             VirtualTextureSpaceDesc desc = CreateDesc("PartialPageTable", 8, 8, 4, 16, 4);
             int spaceId = VirtualTextureSystem.RegisterSpace(desc);
@@ -316,15 +316,61 @@ namespace VividRP.Editor.Tests
             RequestPages(spaceId, coord);
 
             // One mip-2 page covers 1 + 4 + 16 entries down through mip zero. Only
-            // the requested entry changes its pending flag before the upload commits.
+            // the requested entry changes its pending flag before the RDG upload is recorded.
             Assert.That(VirtualTextureSystem.GetPageTableLastRecomputedEntryCountForTesting(spaceId), Is.EqualTo(21));
+            Assert.That(VirtualTextureSystem.GetPageTableLastUploadedEntryCountForTesting(spaceId),
+                Is.EqualTo(totalPageCount));
+            Assert.That(VirtualTextureSystem.GetPageTablePendingUploadEntryCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableSparseUploadCountForTesting(spaceId), Is.EqualTo(0));
+            Assert.That(VirtualTextureSystem.GetPageTableFullUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableScatterUploadCountForTesting(spaceId), Is.EqualTo(0));
+            Assert.That(VirtualTextureSystem.GetPageTableLegacySetDataCallCountForTesting(spaceId), Is.EqualTo(1));
+
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId,
+                out VTPageTableScatterUpdate[] firstCapture,
+                out int pendingVersion,
+                out bool fullUpload), Is.True);
+            Assert.That(firstCapture, Has.Length.EqualTo(1));
+            Assert.That(fullUpload, Is.False);
+            Assert.That(firstCapture[0].DestinationIndex, Is.EqualTo((uint)VirtualTextureSpaceUtility.GetFlatIndex(
+                desc,
+                VirtualTextureSpaceUtility.BuildMipOffsets(
+                    desc.VirtualPageCountX,
+                    desc.VirtualPageCountY,
+                    desc.MipCount),
+                coord)));
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                coord,
+                out VirtualTexturePageTableEntry pendingEntry), Is.True);
+            Assert.That(firstCapture[0].PackedValue, Is.EqualTo(pendingEntry.PackedValue));
+
+            // Capturing is transactional: an aborted graph leaves the same update pending.
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId,
+                out VTPageTableScatterUpdate[] retryCapture,
+                out int retryVersion,
+                out bool retryFullUpload), Is.True);
+            Assert.That(retryCapture, Is.EqualTo(firstCapture));
+            Assert.That(retryVersion, Is.EqualTo(pendingVersion));
+            Assert.That(retryFullUpload, Is.EqualTo(fullUpload));
+
+            Assert.That(VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                spaceId,
+                pendingVersion,
+                fullUpload,
+                firstCapture.Length), Is.True);
+            Assert.That(VirtualTextureSystem.GetPageTablePendingUploadEntryCountForTesting(spaceId), Is.EqualTo(0));
             Assert.That(VirtualTextureSystem.GetPageTableLastUploadedEntryCountForTesting(spaceId), Is.EqualTo(1));
             Assert.That(VirtualTextureSystem.GetPageTableSparseUploadCountForTesting(spaceId), Is.EqualTo(1));
-            Assert.That(VirtualTextureSystem.GetPageTableFullUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableScatterUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableLegacySetDataCallCountForTesting(spaceId), Is.EqualTo(1));
 
             Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
             Assert.That(VirtualTextureSystem.CommitUpload(requests.Last()), Is.True);
             Assert.That(VirtualTextureSystem.GetPageTableLastRecomputedEntryCountForTesting(spaceId), Is.EqualTo(21));
+            Assert.That(VirtualTextureSystem.GetPageTablePendingUploadEntryCountForTesting(spaceId), Is.GreaterThan(0));
 
             Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
                 spaceId,
@@ -332,6 +378,68 @@ namespace VividRP.Editor.Tests
                 out VirtualTexturePageTableEntry descendantEntry), Is.True);
             Assert.That(descendantEntry.Fallback, Is.True);
             Assert.That(descendantEntry.ResolvedMip, Is.EqualTo(2));
+        }
+
+        [Test]
+        public void PageTable_StaleScatterCommitLeavesNewerUpdatesPending()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("StaleScatter", 4, 4, 3, 8, 4));
+            var coord = new VirtualTexturePageCoord(1, 1, 1);
+            RequestPages(spaceId, coord);
+
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId,
+                out VTPageTableScatterUpdate[] capturedUpdates,
+                out int capturedVersion,
+                out bool capturedFullUpload), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(VirtualTextureSystem.CommitUpload(requests.Last()), Is.True);
+
+            Assert.That(VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                spaceId,
+                capturedVersion,
+                capturedFullUpload,
+                capturedUpdates.Length), Is.False);
+            Assert.That(VirtualTextureSystem.GetPageTablePendingUploadEntryCountForTesting(spaceId),
+                Is.GreaterThan(0));
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId,
+                out _,
+                out int retryVersion,
+                out _), Is.True);
+            Assert.That(retryVersion, Is.Not.EqualTo(capturedVersion));
+        }
+
+        [Test]
+        public void PageTable_HalfDirtyThresholdCapturesFullScatterUpload()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("FullScatter", 2, 2, 2, 8, 8);
+            int spaceId = VirtualTextureSystem.RegisterSpace(desc);
+
+            RequestPages(
+                spaceId,
+                new VirtualTexturePageCoord(0, 0, 0),
+                new VirtualTexturePageCoord(1, 0, 0),
+                new VirtualTexturePageCoord(0, 1, 0));
+
+            Assert.That(VirtualTextureSystem.TryCapturePendingPageTableUpdatesForTesting(
+                spaceId,
+                out VTPageTableScatterUpdate[] updates,
+                out int pendingVersion,
+                out bool fullUpload), Is.True);
+            Assert.That(fullUpload, Is.True);
+            Assert.That(updates, Has.Length.EqualTo(desc.PageTableEntryCount));
+            for (int updateIndex = 0; updateIndex < updates.Length; updateIndex++)
+                Assert.That(updates[updateIndex].DestinationIndex, Is.EqualTo((uint)updateIndex));
+
+            Assert.That(VirtualTextureSystem.CommitCapturedPageTableUpdatesForTesting(
+                spaceId,
+                pendingVersion,
+                fullUpload,
+                updates.Length), Is.True);
+            Assert.That(VirtualTextureSystem.GetPageTableFullUploadCountForTesting(spaceId), Is.EqualTo(2));
+            Assert.That(VirtualTextureSystem.GetPageTableScatterUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableLegacySetDataCallCountForTesting(spaceId), Is.EqualTo(1));
         }
 
         private static VirtualTextureSpaceDesc CreateDesc(

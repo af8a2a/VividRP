@@ -816,14 +816,19 @@ namespace VividRP.Runtime
 
     internal static class VirtualTextureSpaceUtility
     {
+        internal const int PageTableEntryStride = sizeof(uint);
+        internal const int MaxPageTableEntryCount = int.MaxValue / PageTableEntryStride;
+
         internal static int[] BuildMipOffsets(int virtualPageCountX, int virtualPageCountY, int mipCount)
         {
+            GetTotalPageCount(virtualPageCountX, virtualPageCountY, mipCount);
             var offsets = new int[mipCount];
-            int runningOffset = 0;
+            long runningOffset = 0;
             for (int mip = 0; mip < mipCount; mip++)
             {
-                offsets[mip] = runningOffset;
-                runningOffset += GetPageCountX(virtualPageCountX, mip) * GetPageCountY(virtualPageCountY, mip);
+                offsets[mip] = (int)runningOffset;
+                runningOffset += (long)GetPageCountX(virtualPageCountX, mip)
+                                 * GetPageCountY(virtualPageCountY, mip);
             }
 
             return offsets;
@@ -831,11 +836,22 @@ namespace VividRP.Runtime
 
         internal static int GetTotalPageCount(int virtualPageCountX, int virtualPageCountY, int mipCount)
         {
-            int total = 0;
+            ValidatePageTableDimensions(virtualPageCountX, virtualPageCountY, mipCount);
+            long total = 0;
             for (int mip = 0; mip < mipCount; mip++)
-                total += GetPageCountX(virtualPageCountX, mip) * GetPageCountY(virtualPageCountY, mip);
+            {
+                total += (long)GetPageCountX(virtualPageCountX, mip)
+                         * GetPageCountY(virtualPageCountY, mip);
+                if (total > MaxPageTableEntryCount)
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(virtualPageCountX),
+                        $"Virtual texture page table requires {total} entries, exceeding the "
+                        + $"supported maximum of {MaxPageTableEntryCount} entries.");
+                }
+            }
 
-            return total;
+            return (int)total;
         }
 
         internal static int GetPageCountX(int virtualPageCountX, int mip)
@@ -952,6 +968,27 @@ namespace VividRP.Runtime
 
             int mipWidth = GetPageCountX(desc.VirtualPageCountX, coord.Mip);
             return mipOffsets[coord.Mip] + coord.Y * mipWidth + coord.X;
+        }
+
+        private static void ValidatePageTableDimensions(
+            int virtualPageCountX,
+            int virtualPageCountY,
+            int mipCount)
+        {
+            if (virtualPageCountX <= 0
+                || virtualPageCountX > VirtualTextureFeedbackProcessor.MaxPageCountPerDimension)
+            {
+                throw new ArgumentOutOfRangeException(nameof(virtualPageCountX));
+            }
+
+            if (virtualPageCountY <= 0
+                || virtualPageCountY > VirtualTextureFeedbackProcessor.MaxPageCountPerDimension)
+            {
+                throw new ArgumentOutOfRangeException(nameof(virtualPageCountY));
+            }
+
+            if (mipCount <= 0 || mipCount > VirtualTextureFeedbackProcessor.MaxMipCount)
+                throw new ArgumentOutOfRangeException(nameof(mipCount));
         }
     }
 }

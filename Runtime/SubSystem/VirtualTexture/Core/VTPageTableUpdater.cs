@@ -27,6 +27,7 @@ namespace VividRP.Runtime
 
         internal VTPageTableUpdater(string spaceName, int totalPageCount)
         {
+            ValidateBufferCapacity(totalPageCount);
             m_BestPhysicalPageIds = new int[totalPageCount];
             Array.Fill(m_BestPhysicalPageIds, -1);
             m_BestResolvedMips = new int[totalPageCount];
@@ -40,6 +41,21 @@ namespace VividRP.Runtime
             {
                 name = $"VividVT_{spaceName}_PageTable"
             };
+        }
+
+        private static void ValidateBufferCapacity(int totalPageCount)
+        {
+            if (totalPageCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(totalPageCount));
+
+            long requiredByteSize = (long)totalPageCount * VirtualTextureSpaceUtility.PageTableEntryStride;
+            long maxGraphicsBufferSize = SystemInfo.maxGraphicsBufferSize;
+            if (maxGraphicsBufferSize > 0 && requiredByteSize > maxGraphicsBufferSize)
+            {
+                throw new InvalidOperationException(
+                    $"Virtual texture page table requires a {requiredByteSize}-byte graphics buffer, "
+                    + $"but the active device supports at most {maxGraphicsBufferSize} bytes.");
+            }
         }
 
         internal GraphicsBuffer PageTableBuffer => m_PageTableBuffer;

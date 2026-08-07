@@ -249,6 +249,7 @@ namespace VividRP.Runtime
         internal const int SpaceIdBitCount = 16;
         internal const int PageCoordBitCount = 20;
         internal const int MaxMipCount = 16;
+        internal const int MaxPageCountPerDimension = 1 << PageCoordBitCount;
         private const int SpaceIdMask = (1 << SpaceIdBitCount) - 1;
         private const int PageCoordMask = (1 << PageCoordBitCount) - 1;
 

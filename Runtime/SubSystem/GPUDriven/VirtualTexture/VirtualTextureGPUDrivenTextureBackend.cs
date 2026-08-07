@@ -41,8 +41,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
     {
         internal const int PageSize = 128;
         internal const int BorderSize = 4;
-        internal const int AtlasPageCount = 128;
-        internal const int MaxAllocationPageCount = AtlasPageCount / 2;
+        internal const int AtlasPageCount = 256;
+        internal const int MaxAllocationPageCount = 64;
+        internal const int VirtualPageCapacity = AtlasPageCount * AtlasPageCount;
         internal const string SpaceName = "VividGPUDriven.StaticMesh";
 
         private const int CachePageCount = 512;
@@ -138,8 +139,10 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private uint m_SurfaceBindingUpdate = 1;
         private uint m_CreateResourceCallCountThisFrame;
         private int m_AllocatedPageCount;
+        private int m_AtlasAllocationFailureCount;
         private int m_QueuedMipTailCount;
         private int m_ResidentMipTailCount;
+        private string m_LastAtlasAllocationFailureReason = string.Empty;
         private bool m_SurfaceBindingUpdateActive;
         private bool m_RetrySurfaceBindingUpdate;
         private bool m_IsDisposed;
@@ -218,6 +221,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal int StreamedAtlasEntryCount => m_Producer?.StreamedEntryCount ?? 0;
 
         internal int AllocatedPageCount => m_AllocatedPageCount;
+
+        internal int AtlasAllocationFailureCount => m_AtlasAllocationFailureCount;
+
+        internal string LastAtlasAllocationFailureReason => m_LastAtlasAllocationFailureReason;
+
+        internal int LargestFreeAllocationPageCount => GetLargestFreeAllocationPageCount();
 
         internal int ResidentMipTailCount => m_ResidentMipTailCount;
 
@@ -350,8 +359,13 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 : ResolveAllocationPageCount(baseColor, normal, mask);
             if (!TryAllocatePageRegion(allocationPageCount, out RectInt pageRegion))
             {
-                Debug.LogWarning(
-                    $"[VividRP] GPUDriven VT atlas is full. Could not allocate a {allocationPageCount}x{allocationPageCount} page region.");
+                m_AtlasAllocationFailureCount += 1;
+                int largestFreeAllocation = GetLargestFreeAllocationPageCount();
+                m_LastAtlasAllocationFailureReason =
+                    $"GPUDriven VT atlas is full. Could not allocate a {allocationPageCount}x{allocationPageCount} page region. "
+                    + $"Used {m_AllocatedPageCount}/{VirtualPageCapacity} virtual pages; "
+                    + $"largest aligned free region is {largestFreeAllocation}x{largestFreeAllocation}.";
+                Debug.LogWarning($"[VividRP] {m_LastAtlasAllocationFailureReason}");
                 m_RetrySurfaceBindingUpdate = true;
                 return CreateEmptyBinding();
             }
@@ -454,8 +468,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             ThrowIfDisposed();
             return new GPUDrivenTextureBackendStats(
                 poolCount: IsAvailable ? 1u : 0u,
-                resourceCapacity: AtlasPageCount * AtlasPageCount,
-                allocatedResourceCount: (uint) m_RegisteredTextureIds.Count,
+                resourceCapacity: VirtualPageCapacity,
+                allocatedResourceCount: (uint) m_AllocatedPageCount,
                 createResourceCallCountThisFrame: m_CreateResourceCallCountThisFrame,
                 registeredResourceCount: m_RegisteredTextureIds.Count);
         }
@@ -639,6 +653,16 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         private bool TryAllocatePageRegion(int pageCount, out RectInt region)
         {
             int size = Mathf.Clamp(Mathf.NextPowerOfTwo(pageCount), 1, MaxAllocationPageCount);
+            if (!TryFindFreePageRegion(size, out region))
+                return false;
+
+            MarkPageRegionAllocated(region.x, region.y, size);
+            m_AllocatedPageCount += size * size;
+            return true;
+        }
+
+        private bool TryFindFreePageRegion(int size, out RectInt region)
+        {
             for (int y = 0; y + size <= AtlasPageCount; y += size)
             {
                 for (int x = 0; x + size <= AtlasPageCount; x += size)
@@ -646,15 +670,24 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                     if (!IsPageRegionFree(x, y, size))
                         continue;
 
-                    MarkPageRegionAllocated(x, y, size);
                     region = new RectInt(x, y, size, size);
-                    m_AllocatedPageCount += size * size;
                     return true;
                 }
             }
 
             region = default;
             return false;
+        }
+
+        private int GetLargestFreeAllocationPageCount()
+        {
+            for (int size = MaxAllocationPageCount; size >= 1; size >>= 1)
+            {
+                if (TryFindFreePageRegion(size, out _))
+                    return size;
+            }
+
+            return 0;
         }
 
         private bool IsPageRegionFree(int startX, int startY, int size)

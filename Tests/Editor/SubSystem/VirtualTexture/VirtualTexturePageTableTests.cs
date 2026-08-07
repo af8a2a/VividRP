@@ -129,6 +129,52 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void SpaceDesc_PrecomputesExpandedPageTableCapacity()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc(
+                "ExpandedCapacity",
+                virtualPageCountX: 256,
+                virtualPageCountY: 256,
+                mipCount: 9,
+                cachePageCount: 512,
+                maxUploadsPerFrame: 16);
+
+            Assert.That(desc.PageTableEntryCount, Is.EqualTo(87381));
+            Assert.That(
+                VirtualTextureSpaceUtility.GetTotalPageCount(256, 256, 9),
+                Is.EqualTo(desc.PageTableEntryCount));
+        }
+
+        [Test]
+        public void SpaceDesc_RejectsPageTablesWhoseBufferByteSizeWouldOverflow()
+        {
+            Assert.That(
+                () => CreateDesc(
+                    "PageTableOverflow",
+                    virtualPageCountX: 65536,
+                    virtualPageCountY: 8192,
+                    mipCount: 1,
+                    cachePageCount: 4,
+                    maxUploadsPerFrame: 4),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>()
+                    .With.Message.Contains("page table requires"));
+        }
+
+        [Test]
+        public void SpaceDesc_RejectsDimensionsThatFeedbackCannotEncode()
+        {
+            Assert.That(
+                () => CreateDesc(
+                    "FeedbackOverflow",
+                    VirtualTextureFeedbackProcessor.MaxPageCountPerDimension + 1,
+                    virtualPageCountY: 1,
+                    mipCount: 1,
+                    cachePageCount: 4,
+                    maxUploadsPerFrame: 4),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
+        }
+
+        [Test]
         public void SpaceUtility_ComputePageLocalUv_UsesLastPageEdge_WhenUvIsOne()
         {
             var uv = new Vector2(1f, 1f);

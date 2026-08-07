@@ -76,6 +76,12 @@ namespace VividRP.Editor.Tests
 
             Assert.That(backend.IsAvailable, Is.True, backend.UnavailableReason);
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.LayerCount, Is.EqualTo(3));
+            Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountX, Is.EqualTo(256));
+            Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountY, Is.EqualTo(256));
+            Assert.That(backend.VirtualTextureSpaceDesc.MipCount, Is.EqualTo(9));
+            Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(512));
+            Assert.That(backend.VirtualTextureSpaceDesc.PageTableEntryCount, Is.EqualTo(87381));
+            Assert.That(VirtualTextureGPUDrivenTextureBackend.MaxAllocationPageCount, Is.EqualTo(64));
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(0).Semantic, Is.EqualTo(VTLayerSemantic.BaseColor));
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(1).Semantic, Is.EqualTo(VTLayerSemantic.Normal));
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(2).Semantic, Is.EqualTo(VTLayerSemantic.Mask));
@@ -180,7 +186,13 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.BaseColorResource >> 8, Is.EqualTo(1u));
                 Assert.That(binding.NormalResource >> 8, Is.EqualTo(1u));
                 Assert.That(binding.MaskResource >> 8, Is.EqualTo(1u));
-                Assert.That(binding.UVScaleBias, Is.EqualTo(new float4(2.0f / 128.0f, 2.0f / 128.0f, 0.0f, 0.0f)));
+                Assert.That(
+                    binding.UVScaleBias,
+                    Is.EqualTo(new float4(
+                        2.0f / VirtualTextureGPUDrivenTextureBackend.AtlasPageCount,
+                        2.0f / VirtualTextureGPUDrivenTextureBackend.AtlasPageCount,
+                        0.0f,
+                        0.0f)));
                 Assert.That(backend.AtlasEntryCount, Is.EqualTo(1));
                 Assert.That(backend.AllocatedPageCount, Is.EqualTo(4));
                 Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
@@ -434,6 +446,91 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void CreateSurfaceBinding_ExpandedAtlasFitsSixteenMaxAllocationsAndReclaimsCapacity()
+        {
+            var textures = new System.Collections.Generic.List<Texture2D>();
+            try
+            {
+                using var backend = new VirtualTextureGPUDrivenTextureBackend();
+                int maxAllocationTextureWidth = VirtualTextureGPUDrivenTextureBackend.PageSize
+                                                * VirtualTextureGPUDrivenTextureBackend.MaxAllocationPageCount;
+                int maxAllocationCount = VirtualTextureGPUDrivenTextureBackend.VirtualPageCapacity
+                                         / (VirtualTextureGPUDrivenTextureBackend.MaxAllocationPageCount
+                                            * VirtualTextureGPUDrivenTextureBackend.MaxAllocationPageCount);
+
+                for (int allocationIndex = 0; allocationIndex < maxAllocationCount; allocationIndex++)
+                {
+                    var texture = new Texture2D(
+                        maxAllocationTextureWidth,
+                        1,
+                        TextureFormat.RGBA32,
+                        mipChain: false);
+                    textures.Add(texture);
+                    VividSurfaceBindingData binding = backend.CreateSurfaceBinding(
+                        new GPUDrivenSurfaceTextureSet(texture, null, null));
+
+                    Assert.That(binding.Flags, Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                }
+
+                Assert.That(maxAllocationCount, Is.EqualTo(16));
+                Assert.That(backend.AtlasEntryCount, Is.EqualTo(16));
+                Assert.That(backend.AllocatedPageCount, Is.EqualTo(
+                    VirtualTextureGPUDrivenTextureBackend.VirtualPageCapacity));
+                Assert.That(backend.LargestFreeAllocationPageCount, Is.Zero);
+                Assert.That(backend.VirtualTextureSpaceDesc.CachePageCount, Is.EqualTo(512));
+                GPUDrivenTextureBackendStats fullStats = backend.GetStats();
+                Assert.That(fullStats.ResourceCapacity, Is.EqualTo(65536u));
+                Assert.That(fullStats.AllocatedResourceCount, Is.EqualTo(65536u));
+                Assert.That(fullStats.RegisteredResourceCount, Is.EqualTo(16));
+
+                var rejectedTexture = new Texture2D(
+                    maxAllocationTextureWidth,
+                    1,
+                    TextureFormat.RGBA32,
+                    mipChain: false);
+                textures.Add(rejectedTexture);
+                LogAssert.Expect(
+                    LogType.Warning,
+                    new System.Text.RegularExpressions.Regex(
+                        "GPUDriven VT atlas is full.*Used 65536/65536 virtual pages.*0x0"));
+
+                VividSurfaceBindingData rejectedBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(rejectedTexture, null, null));
+
+                Assert.That(rejectedBinding.Flags, Is.EqualTo(VividSurfaceBindingFlags.None));
+                Assert.That(backend.AtlasAllocationFailureCount, Is.EqualTo(1));
+                Assert.That(backend.LastAtlasAllocationFailureReason, Does.Contain("65536/65536"));
+
+                backend.BeginSurfaceBindingUpdate();
+                backend.EndSurfaceBindingUpdate();
+
+                Assert.That(backend.AtlasEntryCount, Is.Zero);
+                Assert.That(backend.AllocatedPageCount, Is.Zero);
+                Assert.That(backend.LargestFreeAllocationPageCount, Is.EqualTo(
+                    VirtualTextureGPUDrivenTextureBackend.MaxAllocationPageCount));
+
+                var replacementTexture = new Texture2D(
+                    maxAllocationTextureWidth,
+                    1,
+                    TextureFormat.RGBA32,
+                    mipChain: false);
+                textures.Add(replacementTexture);
+                VividSurfaceBindingData replacementBinding = backend.CreateSurfaceBinding(
+                    new GPUDrivenSurfaceTextureSet(replacementTexture, null, null));
+
+                Assert.That(replacementBinding.Flags, Is.EqualTo(VividSurfaceBindingFlags.BaseColor));
+                Assert.That(replacementBinding.UVScaleBias.z, Is.Zero);
+                Assert.That(replacementBinding.UVScaleBias.w, Is.Zero);
+                Assert.That(backend.GetStats().AllocatedResourceCount, Is.EqualTo(4096u));
+            }
+            finally
+            {
+                for (int textureIndex = 0; textureIndex < textures.Count; textureIndex++)
+                    Destroy(textures[textureIndex]);
+            }
+        }
+
+        [Test]
         public void CreateSurfaceBinding_RollsBackAtlasRegionWhenLockedMipTailCannotBeQueued()
         {
             var textures = new System.Collections.Generic.List<Texture2D>();
@@ -493,7 +590,11 @@ namespace VividRP.Editor.Tests
 
                 Assert.That(
                     binding.UVScaleBias,
-                    Is.EqualTo(new float4(-1.0f / 128.0f, -1.0f / 128.0f, 0.0f, 0.0f)));
+                    Is.EqualTo(new float4(
+                        -1.0f / VirtualTextureGPUDrivenTextureBackend.AtlasPageCount,
+                        -1.0f / VirtualTextureGPUDrivenTextureBackend.AtlasPageCount,
+                        0.0f,
+                        0.0f)));
                 Assert.That(backend.QueuedMipTailCount, Is.EqualTo(1));
                 Assert.That(backend.ResidentMipTailCount, Is.Zero);
                 var mipTailCoord = new VirtualTexturePageCoord(0, 0, 0);

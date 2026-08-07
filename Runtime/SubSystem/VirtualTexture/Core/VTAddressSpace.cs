@@ -61,7 +61,7 @@ namespace VividRP.Runtime
             ProducerHandle = producer.Handle;
             ProducerName = producer.Name;
             m_MipOffsets = VirtualTextureSpaceUtility.BuildMipOffsets(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
-            TotalPageCount = VirtualTextureSpaceUtility.GetTotalPageCount(desc.VirtualPageCountX, desc.VirtualPageCountY, desc.MipCount);
+            TotalPageCount = desc.PageTableEntryCount;
             m_ShaderParams = new VirtualTextureSpaceShaderParams(spaceId, desc, TotalPageCount);
             BuildLayerFallbacks(desc, m_LayerFallbacks);
             PhysicalPool = physicalPool ?? throw new ArgumentNullException(nameof(physicalPool));

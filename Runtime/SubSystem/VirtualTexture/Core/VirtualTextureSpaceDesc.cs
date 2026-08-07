@@ -46,9 +46,17 @@ namespace VividRP.Runtime
                 throw new ArgumentOutOfRangeException(nameof(virtualPageCountX));
             if (virtualPageCountY <= 0)
                 throw new ArgumentOutOfRangeException(nameof(virtualPageCountY));
+            if (virtualPageCountX > VirtualTextureFeedbackProcessor.MaxPageCountPerDimension)
+                throw new ArgumentOutOfRangeException(nameof(virtualPageCountX));
+            if (virtualPageCountY > VirtualTextureFeedbackProcessor.MaxPageCountPerDimension)
+                throw new ArgumentOutOfRangeException(nameof(virtualPageCountY));
             if (mipCount <= 0 || mipCount > VirtualTextureFeedbackProcessor.MaxMipCount)
                 throw new ArgumentOutOfRangeException(nameof(mipCount));
 
+            PageTableEntryCount = VirtualTextureSpaceUtility.GetTotalPageCount(
+                virtualPageCountX,
+                virtualPageCountY,
+                mipCount);
             SpaceName = spaceName;
             StackDesc = stackDesc;
             VirtualPageCountX = virtualPageCountX;
@@ -69,6 +77,8 @@ namespace VividRP.Runtime
         public int VirtualPageCountY { get; }
 
         public int MipCount { get; }
+
+        public int PageTableEntryCount { get; }
 
         public int CachePageCount => StackDesc.CachePageCount;
 

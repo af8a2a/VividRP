@@ -109,6 +109,7 @@ namespace VividRP.Runtime.RenderPass.Core
                     m_LayerFallbacks,
                     m_FrameIndex,
                     m_FeedbackSampleRate,
+                    m_VirtualTextureFrameData.AdaptiveMipBias,
                     m_ResolvedDebugMode);
 
                 bool hasFeedback = VirtualTextureFeedbackBindingUtility.BindFeedbackTargets(nativeCmd, binding);

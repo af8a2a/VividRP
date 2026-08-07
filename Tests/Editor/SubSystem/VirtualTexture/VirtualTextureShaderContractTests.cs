@@ -35,6 +35,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("int _VTFeedbackFrameIndex;"));
             Assert.That(source, Does.Contain("int _VTFeedbackSampleRate;"));
             Assert.That(source, Does.Contain("float4 _VTFeedbackViewParams;"));
+            Assert.That(source, Does.Contain("float _VTAdaptiveMipBias;"));
             Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u"));
             Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_RESOLVED_MIP_BITS 6u"));
             Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_LOCKED_BIT 29u"));
@@ -45,6 +46,7 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRange"));
             Assert.That(source, Does.Contain("float VTComputeRequestedMipLevelGrad"));
             Assert.That(source, Does.Contain("VTMipRange VTComputeRequestedMipRangeGrad"));
+            Assert.That(source, Does.Contain("+ max(_VTAdaptiveMipBias, 0.0)"));
             Assert.That(source, Does.Contain("VTResolvedAddress VTResolveAddress"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVW"));
             Assert.That(source, Does.Contain("float3 VTComputePhysicalUVWLayer"));
@@ -85,6 +87,7 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureShaderIDs._VTDebugMode, Is.EqualTo(Shader.PropertyToID("_VTDebugMode")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackFrameIndex, Is.EqualTo(Shader.PropertyToID("_VTFeedbackFrameIndex")));
             Assert.That(VirtualTextureShaderIDs._VTFeedbackSampleRate, Is.EqualTo(Shader.PropertyToID("_VTFeedbackSampleRate")));
+            Assert.That(VirtualTextureShaderIDs._VTAdaptiveMipBias, Is.EqualTo(Shader.PropertyToID("_VTAdaptiveMipBias")));
         }
 
         [Test]

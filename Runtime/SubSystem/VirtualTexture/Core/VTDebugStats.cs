@@ -99,7 +99,9 @@ namespace VividRP.Runtime
             int prefetchRequestCount = 0,
             int cpuProducedPageCount = 0,
             int gpuProducedPageCount = 0,
-            int gpuDispatchCount = 0)
+            int gpuDispatchCount = 0,
+            int streamSaturatedRequestCount = 0,
+            float adaptiveMipBias = 0f)
         {
             ActiveSpaceCount = activeSpaceCount;
             ResidentPageCount = residentPageCount;
@@ -138,6 +140,8 @@ namespace VividRP.Runtime
             CpuProducedPageCount = cpuProducedPageCount;
             GpuProducedPageCount = gpuProducedPageCount;
             GpuDispatchCount = gpuDispatchCount;
+            StreamSaturatedRequestCount = streamSaturatedRequestCount;
+            AdaptiveMipBias = adaptiveMipBias;
         }
 
         internal int ActiveSpaceCount { get; }
@@ -214,6 +218,10 @@ namespace VividRP.Runtime
 
         internal int GpuDispatchCount { get; }
 
+        internal int StreamSaturatedRequestCount { get; }
+
+        internal float AdaptiveMipBias { get; }
+
         internal float PendingMipGapAverage => PendingMipGapSampleCount > 0
             ? PendingMipGapSum / (float)PendingMipGapSampleCount
             : 0f;
@@ -280,7 +288,9 @@ namespace VividRP.Runtime
                 PrefetchRequestCount,
                 CpuProducedPageCount,
                 GpuProducedPageCount,
-                GpuDispatchCount);
+                GpuDispatchCount,
+                StreamSaturatedRequestCount,
+                AdaptiveMipBias);
         }
     }
 
@@ -490,7 +500,9 @@ namespace VividRP.Runtime
                 s_LastStats.PrefetchRequestCount,
                 s_LastStats.CpuProducedPageCount,
                 s_LastStats.GpuProducedPageCount,
-                s_LastStats.GpuDispatchCount);
+                s_LastStats.GpuDispatchCount,
+                s_LastStats.StreamSaturatedRequestCount,
+                s_LastStats.AdaptiveMipBias);
         }
 
         private static int ResolveCameraActualWidth(Camera camera)

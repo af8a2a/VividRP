@@ -731,6 +731,10 @@ namespace VividRP.Runtime
 
         internal int GpuDispatchCount => m_Stats.GpuDispatchCount;
 
+        internal int StreamSaturatedRequestCount => m_Stats.StreamSaturatedRequestCount;
+
+        internal float AdaptiveMipBias => m_Stats.AdaptiveMipBias;
+
         internal bool IsViewSpecific => m_Stats.IsViewSpecific;
 
         internal string ViewLabel => m_Stats.ViewLabel;
@@ -804,6 +808,7 @@ namespace VividRP.Runtime
         public static readonly int _VTDebugMode = Shader.PropertyToID(nameof(_VTDebugMode));
         public static readonly int _VTFeedbackFrameIndex = Shader.PropertyToID(nameof(_VTFeedbackFrameIndex));
         public static readonly int _VTFeedbackSampleRate = Shader.PropertyToID(nameof(_VTFeedbackSampleRate));
+        public static readonly int _VTAdaptiveMipBias = Shader.PropertyToID(nameof(_VTAdaptiveMipBias));
 
         public static readonly int[] PhysicalCaches =
         {

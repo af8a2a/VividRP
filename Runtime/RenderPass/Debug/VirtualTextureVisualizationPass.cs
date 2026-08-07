@@ -266,6 +266,9 @@ namespace VividRP.Runtime.RenderPass.Core
             mpb.SetFloatArray(VirtualTextureShaderIDs._VTSpaceParams, m_SpaceParams);
             mpb.SetFloatArray(VirtualTextureShaderIDs._VTMipOffsets, m_MipOffsets);
             mpb.SetVectorArray(VirtualTextureShaderIDs._VTLayerFallbacks, m_LayerFallbacks);
+            mpb.SetFloat(
+                VirtualTextureShaderIDs._VTAdaptiveMipBias,
+                m_VirtualTextureFrameData.AdaptiveMipBias);
         }
 
         private static void BindPhysicalCaches(MaterialPropertyBlock mpb, in VirtualTextureSpaceBinding binding)

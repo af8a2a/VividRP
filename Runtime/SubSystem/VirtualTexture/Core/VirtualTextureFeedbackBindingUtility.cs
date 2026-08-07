@@ -47,6 +47,7 @@ namespace VividRP.Runtime
             Vector4[] layerFallbacks,
             int frameIndex,
             int feedbackSampleRate,
+            float adaptiveMipBias,
             VirtualTextureDebugMode debugMode)
         {
             if (cmd == null)
@@ -73,6 +74,9 @@ namespace VividRP.Runtime
             cmd.SetGlobalInt(
                 VirtualTextureShaderIDs._VTFeedbackSampleRate,
                 ResolveFeedbackSampleArea(feedbackSampleRate));
+            cmd.SetGlobalFloat(
+                VirtualTextureShaderIDs._VTAdaptiveMipBias,
+                Mathf.Max(0f, adaptiveMipBias));
             cmd.SetGlobalInt(VirtualTextureShaderIDs._VTDebugMode, (int)debugMode);
         }
 

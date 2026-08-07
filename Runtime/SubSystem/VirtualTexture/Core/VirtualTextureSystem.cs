@@ -25,6 +25,7 @@ namespace VividRP.Runtime
         private static readonly List<VTPageTableSpace> s_UploadSpaceOrder = new();
         private static readonly List<VTPendingUploadCandidate> s_PendingUploadCandidates = new();
         private static readonly UploadCommitterResolver s_UploadCommitterResolver = new();
+        private static readonly VTAdaptiveMipBiasController s_AdaptiveMipBiasController = new();
         private static VTUploadScheduler s_UploadScheduler = new();
         private static VTFeedbackNativeAggregator s_FeedbackAggregator;
 
@@ -163,6 +164,7 @@ namespace VividRP.Runtime
             s_NextSpaceId = 1;
             s_NextAllocationId = 1;
             s_FallbackFrameIndex = -1;
+            s_AdaptiveMipBiasController.Reset();
             s_UploadScheduler.Dispose();
             s_UploadScheduler = new VTUploadScheduler();
             VTUploadScheduler.ResetFenceFactory();
@@ -509,9 +511,23 @@ namespace VividRP.Runtime
             int inFlightUploadBatchCount = s_UploadScheduler.InFlightBatchCount;
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
+            int blockedUploadCount = Mathf.Max(0, skippedUploadCount - duplicateUploadCount);
+            int streamSaturatedRequestCount = VTVirtualTextureStreamRequestGate.LastSaturatedRequestCount;
             int cpuProducedPageCount = s_UploadScheduler.LastCpuProducedPageCount;
             int gpuProducedPageCount = s_UploadScheduler.LastGpuProducedPageCount;
             int gpuDispatchCount = s_UploadScheduler.LastGpuDispatchCount;
+            int pendingUploadCount = CollectPendingUploadCount();
+            float adaptiveMipBias = s_AdaptiveMipBiasController.Update(
+                frameIndex,
+                new VTAdaptiveMipBiasInputs(
+                    globalResidencyRequestBudget,
+                    pendingUploadCount,
+                    blockedUploadCount,
+                    streamSaturatedRequestCount,
+                    feedbackOverflowCount,
+                    fallbackSampleCount));
+            if (virtualTextureFrameData != null)
+                virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
             {
                 foreach (KeyValuePair<int, VTPageTableSpace> pair in s_PageTableSpaces)
@@ -542,7 +558,6 @@ namespace VividRP.Runtime
 
             int residentPageCount = 0;
             int freePageCount = 0;
-            int pendingUploadCount = 0;
             int feedbackCapacity = 0;
             string statusMessage = s_PageTableSpaces.Count == 0 ? "[VividRP] VT has no registered spaces." : string.Empty;
 
@@ -584,7 +599,6 @@ namespace VividRP.Runtime
                 {
                     residentPageCount += addressSpace.ResidentPageCount;
                     freePageCount += addressSpace.FreePageCount;
-                    pendingUploadCount += addressSpace.PendingRequestCount;
                     int allocationId = s_AllocationIdBySpaceId.TryGetValue(addressSpace.SpaceId, out int mappedAllocationId)
                         ? mappedAllocationId
                         : 0;
@@ -645,7 +659,9 @@ namespace VividRP.Runtime
                     prefetchRequestCount,
                     cpuProducedPageCount,
                     gpuProducedPageCount,
-                    gpuDispatchCount);
+                    gpuDispatchCount,
+                    streamSaturatedRequestCount,
+                    adaptiveMipBias);
                 VirtualTextureStatsRegistry.Report(globalStats);
             }
 
@@ -691,7 +707,9 @@ namespace VividRP.Runtime
                         prefetchRequestCount,
                         cpuProducedPageCount,
                         gpuProducedPageCount,
-                        gpuDispatchCount);
+                        gpuDispatchCount,
+                        streamSaturatedRequestCount,
+                        adaptiveMipBias);
                     VirtualTextureStatsRegistry.ReportView(viewStats);
                 }
             }
@@ -1080,6 +1098,11 @@ namespace VividRP.Runtime
             s_UploadScheduler.MaxUploadsPerFrame = maxUploadsPerFrame;
         }
 
+        internal static float GetAdaptiveMipBiasForTesting()
+        {
+            return s_AdaptiveMipBiasController.CurrentMipBias;
+        }
+
         internal static int GetGpuUploadStagingTextureCountForTesting()
         {
             return s_UploadScheduler.GpuStagingTextureCount;
@@ -1308,6 +1331,15 @@ namespace VividRP.Runtime
 
             foreach (KeyValuePair<int, VirtualTextureFeedbackBufferState> spacePair in cameraState.EnumerateSpaceStates())
                 spacePair.Value.CollectCompletedReadbacks(s_CompletedReadbacks, ref lastReadbackFrame);
+        }
+
+        private static int CollectPendingUploadCount()
+        {
+            int pendingUploadCount = 0;
+            foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
+                pendingUploadCount += addressSpace.PendingRequestCount;
+
+            return pendingUploadCount;
         }
 
         private static void AccumulateResidencyStats(

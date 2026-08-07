@@ -1475,9 +1475,11 @@ namespace VividRP.Runtime
                 foldout.children.Add(CreateStatsValue("CPU-Produced Pages", () => GetVirtualTextureDisplayStats(data).CpuProducedPageCount));
                 foldout.children.Add(CreateStatsValue("GPU-Produced Pages", () => GetVirtualTextureDisplayStats(data).GpuProducedPageCount));
                 foldout.children.Add(CreateStatsValue("GPU Page Dispatches", () => GetVirtualTextureDisplayStats(data).GpuDispatchCount));
+                foldout.children.Add(CreateStatsValue("Stream Saturated Requests", () => GetVirtualTextureDisplayStats(data).StreamSaturatedRequestCount));
                 foldout.children.Add(CreateStatsValue("Duplicate Uploads", () => GetVirtualTextureDisplayStats(data).DuplicateUploadCount));
                 foldout.children.Add(CreateStatsValue("Skipped Uploads", () => GetVirtualTextureDisplayStats(data).SkippedUploadCount));
                 foldout.children.Add(CreateStatsValue("Fallback Samples", () => GetVirtualTextureDisplayStats(data).FallbackSampleCount));
+                foldout.children.Add(CreateStatsValue("Adaptive Mip Bias", () => GetVirtualTextureDisplayStats(data).AdaptiveMipBias));
                 foldout.children.Add(new DebugUI.Value
                 {
                     displayName = "Status",

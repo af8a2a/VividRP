@@ -43,6 +43,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
                 layerFallbacks,
                 frameIndex,
                 feedbackSampleRate,
+                frameData.AdaptiveMipBias,
                 VirtualTextureDebugMode.None);
             return true;
         }
@@ -53,7 +54,8 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             float[] spaceParams,
             float[] mipOffsets,
             Vector4[] layerFallbacks,
-            int frameIndex)
+            int frameIndex,
+            float adaptiveMipBias)
         {
             if (properties == null || !binding.IsValid)
                 return;
@@ -74,6 +76,9 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             properties.SetInt(VirtualTextureShaderIDs._VTFeedbackFrameIndex, frameIndex);
             properties.SetInt(VirtualTextureShaderIDs._VTFeedbackSampleRate, 1);
             properties.SetVector(VirtualTextureShaderIDs._VTFeedbackViewParams, Vector4.zero);
+            properties.SetFloat(
+                VirtualTextureShaderIDs._VTAdaptiveMipBias,
+                Mathf.Max(0f, adaptiveMipBias));
             properties.SetInt(VirtualTextureShaderIDs._VTDebugMode, (int) VirtualTextureDebugMode.None);
         }
 

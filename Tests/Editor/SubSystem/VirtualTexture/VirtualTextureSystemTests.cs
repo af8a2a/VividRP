@@ -489,6 +489,7 @@ namespace VividRP.Editor.Tests
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("FeedbackCounters", cachePageCount: 2, maxUploadsPerFrame: 1));
             ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, new VirtualTexturePageCoord(0, 0, 0));
             var commandBuffer = new CommandBuffer();
+            var frameData = new ContextContainer();
 
             try
             {
@@ -497,7 +498,7 @@ namespace VividRP.Editor.Tests
                     3,
                     11,
                     requestKey);
-                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+                VirtualTextureSystem.Update(frameData, commandBuffer);
             }
             finally
             {
@@ -508,6 +509,9 @@ namespace VividRP.Editor.Tests
             Assert.That(stats.FaultCount, Is.EqualTo(1));
             Assert.That(stats.FeedbackOverflowCount, Is.EqualTo(3));
             Assert.That(stats.FallbackSampleCount, Is.EqualTo(11));
+            Assert.That(stats.AdaptiveMipBias, Is.EqualTo(0.5f));
+            Assert.That(frameData.Get<VividVirtualTextureFrameData>().AdaptiveMipBias, Is.EqualTo(0.5f));
+            Assert.That(VirtualTextureSystem.GetAdaptiveMipBiasForTesting(), Is.EqualTo(0.5f));
         }
 
         [Test]

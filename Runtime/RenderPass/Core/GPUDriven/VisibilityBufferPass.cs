@@ -545,7 +545,8 @@ namespace VividRP.Runtime.RenderPass.Core
                         m_VirtualTextureSpaceParams,
                         m_VirtualTextureMipOffsets,
                         m_VirtualTextureLayerFallbacks,
-                        m_FrameIndex);
+                        m_FrameIndex,
+                        m_VirtualTextureFrameData.AdaptiveMipBias);
                 }
 
                 cmd.DrawProceduralIndirect(

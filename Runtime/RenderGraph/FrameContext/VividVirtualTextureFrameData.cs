@@ -11,9 +11,12 @@ namespace VividRP.Runtime
 
         internal int BindingCount => m_Bindings.Count;
 
+        internal float AdaptiveMipBias { get; set; }
+
         public override void Reset()
         {
             m_Bindings.Clear();
+            AdaptiveMipBias = 0f;
         }
 
         internal int AddBinding(in VirtualTextureSpaceBinding binding)

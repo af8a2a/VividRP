@@ -28,6 +28,7 @@ int _VTFeedbackEnabled;
 int _VTFeedbackFrameIndex;
 int _VTFeedbackSampleRate;
 float4 _VTFeedbackViewParams;
+float _VTAdaptiveMipBias;
 
 #define VT_SPACE_ID               ((int)_VTSpaceParams[0])
 #define VT_PAGE_SIZE              ((int)_VTSpaceParams[1])
@@ -130,7 +131,7 @@ float VTComputeRequestedMipLevel(float2 virtualUv)
     float2 dx = ddx(virtualUv * virtualTexelCount);
     float2 dy = ddy(virtualUv * virtualTexelCount);
     float rho = max(dot(dx, dx), dot(dy, dy));
-    float requestedMip = 0.5 * log2(max(rho, 1e-8));
+    float requestedMip = 0.5 * log2(max(rho, 1e-8)) + max(_VTAdaptiveMipBias, 0.0);
     return clamp(requestedMip, 0.0, (float)max(VT_MIP_COUNT - 1, 0));
 }
 
@@ -142,7 +143,7 @@ float VTComputeRequestedMipLevelGrad(float2 virtualUvDdx, float2 virtualUvDdy, u
     float2 dx = virtualUvDdx * virtualTexelCount;
     float2 dy = virtualUvDdy * virtualTexelCount;
     float rho = max(dot(dx, dx), dot(dy, dy));
-    float requestedMip = 0.5 * log2(max(rho, 1e-8));
+    float requestedMip = 0.5 * log2(max(rho, 1e-8)) + max(_VTAdaptiveMipBias, 0.0);
     uint clampedMaxMip = min(maxMip, (uint)max(VT_MIP_COUNT - 1, 0));
     return clamp(requestedMip, 0.0, (float)clampedMaxMip);
 }

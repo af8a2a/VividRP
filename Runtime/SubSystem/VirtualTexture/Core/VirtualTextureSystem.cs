@@ -31,6 +31,10 @@ namespace VividRP.Runtime
         private static VTUploadScheduler s_UploadScheduler = new();
         private static VTFeedbackNativeAggregator s_FeedbackAggregator;
 
+        private const int MaxDemandEvictionsPerFrame = 4;
+        private static int s_DemandEvictionBudgetFrameIndex = int.MinValue;
+        private static int s_RemainingDemandEvictionBudget;
+
         private static int s_NextSpaceId = 1;
         private static int s_NextAllocationId = 1;
         private static int s_FallbackFrameIndex = -1;
@@ -167,6 +171,8 @@ namespace VividRP.Runtime
             s_NextSpaceId = 1;
             s_NextAllocationId = 1;
             s_FallbackFrameIndex = -1;
+            s_DemandEvictionBudgetFrameIndex = int.MinValue;
+            s_RemainingDemandEvictionBudget = 0;
             s_AdaptiveMipBiasController.Reset();
             s_PageTableScatterUploader.Reset();
             s_UploadScheduler.Dispose();
@@ -397,9 +403,21 @@ namespace VividRP.Runtime
                 s_UploadScheduler.BeginFrame();
             }
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
-                s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);
+                s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, frameIndex);
 
-            int globalResidencyRequestBudget = s_UploadScheduler.MaxUploadsPerFrame;
+            int freePhysicalPageCountBeforeResidency = CollectPhysicalPoolStats().FreePageCount;
+            if (s_DemandEvictionBudgetFrameIndex != frameIndex)
+            {
+                s_DemandEvictionBudgetFrameIndex = frameIndex;
+                s_RemainingDemandEvictionBudget = MaxDemandEvictionsPerFrame;
+            }
+
+            int guardedResidencyRequestBudget = freePhysicalPageCountBeforeResidency > int.MaxValue - s_RemainingDemandEvictionBudget
+                ? int.MaxValue
+                : freePhysicalPageCountBeforeResidency + s_RemainingDemandEvictionBudget;
+            int globalResidencyRequestBudget = Mathf.Min(
+                s_UploadScheduler.MaxUploadsPerFrame,
+                guardedResidencyRequestBudget);
             int remainingResidencyRequestBudget = globalResidencyRequestBudget;
             s_RemainingResidencyBudgetBySpace.Clear();
             foreach (VTPageTableSpace addressSpace in s_PageTableSpaces.Values)
@@ -483,7 +501,7 @@ namespace VividRP.Runtime
                 }
 
                 int spaceResidencyRequestBudget = s_RemainingResidencyBudgetBySpace[addressSpace.SpaceId];
-                if (spaceResidencyRequestBudget <= 0)
+                if (spaceResidencyRequestBudget <= 0 || addressSpace.FreePageCount <= 0)
                     continue;
 
                 s_PrefetchBiasBySpace.TryGetValue(addressSpace.SpaceId, out Vector2Int prefetchBias);
@@ -509,6 +527,10 @@ namespace VividRP.Runtime
                 prefetchRequestCount += residencyResult.PrefetchRequestCount;
             }
 
+            s_RemainingDemandEvictionBudget = Mathf.Max(
+                0,
+                s_RemainingDemandEvictionBudget - evictionCount);
+
             CollectAndSchedulePendingUploads(frameIndex, cmd);
             VTStreamChunkManager.Shared.SubmitPendingReads();
 
@@ -525,6 +547,9 @@ namespace VividRP.Runtime
             int gpuProducedPageCount = s_UploadScheduler.LastGpuProducedPageCount;
             int gpuDispatchCount = s_UploadScheduler.LastGpuDispatchCount;
             int pendingUploadCount = CollectPendingUploadCount();
+            VTPhysicalPoolStats physicalPoolStats;
+            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto())
+                physicalPoolStats = CollectPhysicalPoolStats();
             float adaptiveMipBias = s_AdaptiveMipBiasController.Update(
                 frameIndex,
                 new VTAdaptiveMipBiasInputs(
@@ -533,7 +558,9 @@ namespace VividRP.Runtime
                     blockedUploadCount,
                     streamSaturatedRequestCount,
                     feedbackOverflowCount,
-                    fallbackSampleCount));
+                    fallbackSampleCount,
+                    physicalPoolStats.FreePageCount,
+                    evictionCount));
             if (virtualTextureFrameData != null)
                 virtualTextureFrameData.AdaptiveMipBias = adaptiveMipBias;
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTexturePageTableMarker.Auto())
@@ -621,9 +648,6 @@ namespace VividRP.Runtime
                 }
             }
 
-            VTPhysicalPoolStats physicalPoolStats;
-            using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureStatsPhysicalPoolsMarker.Auto())
-                physicalPoolStats = CollectPhysicalPoolStats();
             residentPageCount = physicalPoolStats.ResidentPageCount;
             freePageCount = physicalPoolStats.FreePageCount;
 

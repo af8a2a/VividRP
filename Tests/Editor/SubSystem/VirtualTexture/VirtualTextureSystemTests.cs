@@ -559,6 +559,35 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Update_DoesNotEvictDemandPagesForNeighborPrefetch_WhenPoolIsFull()
+        {
+            int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
+                "FullPoolPrefetch",
+                cachePageCount: 2,
+                maxUploadsPerFrame: 3,
+                neighborPrefetchCount: 2));
+            var requestedCoord = new VirtualTexturePageCoord(1, 1, 0);
+            ulong requestKey = VirtualTextureFeedbackProcessor.EncodeKey(spaceId, requestedCoord);
+            var commandBuffer = new CommandBuffer();
+
+            try
+            {
+                VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, requestKey);
+                VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(requests.Count, Is.EqualTo(1));
+            Assert.That(requests[0].PageCoord, Is.EqualTo(requestedCoord));
+            Assert.That(VirtualTextureStatsRegistry.LastStats.PrefetchRequestCount, Is.Zero);
+            Assert.That(VirtualTextureStatsRegistry.LastStats.EvictionCount, Is.Zero);
+        }
+
+        [Test]
         public void Update_BiasesNeighborPrefetchTowardFeedbackMotion_WhenCentroidMoves()
         {
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc(
@@ -820,6 +849,14 @@ namespace VividRP.Editor.Tests
                 Assert.That(firstRequests.Count, Is.EqualTo(1));
                 Assert.That(VirtualTextureSystem.CommitUpload(firstRequests[0]), Is.True);
 
+                for (int frameOffset = 0;
+                     frameOffset < VTPhysicalPool.FeedbackEvictionProtectionFrames;
+                     frameOffset++)
+                {
+                    commandBuffer.Clear();
+                    VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
+                }
+
                 VirtualTextureSystem.InjectCompletedReadbackForTesting(CameraType.Game, secondKey);
                 VirtualTextureSystem.Update(new ContextContainer(), commandBuffer);
 
@@ -883,6 +920,42 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PhysicalPool_PageReplacementDiagnostics_AreGuardedByVtDebug()
+        {
+            string source = File.ReadAllText(GetPackageFilePath(
+                "Runtime",
+                "SubSystem",
+                "VirtualTexture",
+                "Core",
+                "VTPhysicalPool.cs"));
+            string[] diagnosticTags =
+            {
+                "[VividRP][VT_DEBUG][PageReplaceBegin]",
+                "[VividRP][VT_DEBUG][PageReplaceInvalidate]",
+                "[VividRP][VT_DEBUG][PageReplaceCommit]",
+            };
+
+            foreach (string diagnosticTag in diagnosticTags)
+            {
+                int diagnosticIndex = source.IndexOf(diagnosticTag, System.StringComparison.Ordinal);
+                Assert.That(diagnosticIndex, Is.GreaterThanOrEqualTo(0), diagnosticTag);
+
+                int guardIndex = source.LastIndexOf(
+                    "#if VT_DEBUG",
+                    diagnosticIndex,
+                    System.StringComparison.Ordinal);
+                Assert.That(guardIndex, Is.GreaterThanOrEqualTo(0), diagnosticTag);
+
+                int guardEndIndex = source.IndexOf(
+                    "#endif",
+                    guardIndex,
+                    System.StringComparison.Ordinal);
+
+                Assert.That(guardEndIndex, Is.GreaterThan(diagnosticIndex), diagnosticTag);
+            }
+        }
+
+        [Test]
         public void Update_ReusesFeedbackScratchCollectionsAndCommitCallbacks_ToAvoidPreRenderGc()
         {
             string systemSource = File.ReadAllText(GetPackageFilePath("Runtime", "SubSystem", "VirtualTexture", "Core", "VirtualTextureSystem.cs"));
@@ -931,7 +1004,7 @@ namespace VividRP.Editor.Tests
             Assert.That(feedbackSource, Does.Not.Contain("cmd.SetBufferData(writePair.CounterBuffer, s_ZeroCounterData);"));
             Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.TryGetValue"));
             Assert.That(debugStatsSource, Does.Contain("s_EditorGameViewTypeCache.Add"));
-            Assert.That(systemSource, Does.Contain("s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver);"));
+            Assert.That(systemSource, Does.Contain("s_UploadScheduler.CommitCompletedUploads(s_UploadCommitterResolver, frameIndex);"));
             Assert.That(addressSpaceSource, Does.Contain("CollectPendingUploads(VTUploadScheduler uploadScheduler, CommandBuffer cmd)"));
             Assert.That(addressSpaceSource, Does.Contain("m_CachedPendingRequestRevision"));
             Assert.That(addressSpaceSource, Does.Contain("PendingUploadSortEntry"));
@@ -941,7 +1014,8 @@ namespace VividRP.Editor.Tests
             Assert.That(residencySource, Does.Contain("IncrementPendingRequestRevision();"));
             Assert.That(uploadSchedulerSource, Does.Contain("internal int FilterInFlightRequests("));
             Assert.That(uploadSchedulerSource, Does.Not.Contain("CountInFlightDuplicates"));
-            Assert.That(uploadSchedulerSource, Does.Contain("CommitCompletedUploads(IVTUploadRequestCommitterResolver committerResolver)"));
+            Assert.That(uploadSchedulerSource, Does.Contain("IVTUploadRequestCommitterResolver committerResolver,"));
+            Assert.That(uploadSchedulerSource, Does.Contain("committer.TryCommitUpload(request, frameIndex)"));
             Assert.That(uploadSchedulerSource, Does.Not.Contain("Func<VTRequest"));
         }
 

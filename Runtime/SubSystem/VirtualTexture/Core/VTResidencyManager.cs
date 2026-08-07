@@ -604,7 +604,8 @@ namespace VividRP.Runtime
         internal bool TryCommitRequest(
             in VirtualTextureSpaceDesc desc,
             int[] mipOffsets,
-            in VTRequest request)
+            in VTRequest request,
+            int commitFrameIndex = -1)
         {
             if (!VirtualTextureSpaceUtility.IsCoordValid(desc, request.PageCoord))
                 return false;
@@ -618,18 +619,26 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            if (!m_PhysicalPool.TryCommitPage(request.PhysicalPageId, request.Generation))
+            if (!m_PhysicalPool.TryCommitPage(
+                    request.PhysicalPageId,
+                    request.Generation,
+                    commitFrameIndex))
                 return false;
 
             pageState.PendingUpload = false;
             pageState.Resident = true;
+            int residencyFrameIndex = commitFrameIndex >= 0
+                ? commitFrameIndex
+                : request.RequestFrame;
+            if (commitFrameIndex >= 0)
+                pageState.LastAllocationFrame = residencyFrameIndex;
             SetPageState(pageIndex, pageState);
             m_ResidentPageCount += 1;
             RemovePendingRequest(pageIndex, request.Generation);
             m_PhysicalPool.Touch(
                 pageState.PhysicalPageId,
                 VirtualTextureViewId.Invalid,
-                request.RequestFrame,
+                residencyFrameIndex,
                 updateAffinity: false);
             MarkPageTableDirty(pageIndex);
             return true;
@@ -971,6 +980,12 @@ namespace VividRP.Runtime
                 pageTableChanged = true;
                 return false;
             }
+
+            // Prefetch is speculative and must never displace a visible resident page.
+            // Once the shared pool is full, demand requests alone decide which LRU page
+            // is worth replacing.
+            if (isPrefetch && m_PhysicalPool.FreePageCount <= 0)
+                return false;
 
             VirtualTextureViewId evictionViewId = isPrefetch
                 ? activeViewId

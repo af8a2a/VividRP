@@ -246,6 +246,12 @@ namespace VividRP.Editor.Tests
             var replacementCoord = new VirtualTexturePageCoord(1, 0, 0);
 
             RequestPage(firstSpaceId, firstCoord);
+            for (int frameOffset = 0;
+                 frameOffset < VTPhysicalPool.FeedbackEvictionProtectionFrames;
+                 frameOffset++)
+            {
+                UpdateOnce();
+            }
             RequestPage(firstSpaceId, replacementCoord);
             IssueFeedback(secondSpaceId, firstCoord);
 
@@ -350,12 +356,82 @@ namespace VividRP.Editor.Tests
                     producerHandle,
                     pageIndex: 30,
                     new VirtualTexturePageCoord(2, 0, 0),
-                    frameIndex: 2,
+                    frameIndex: 1 + VTPhysicalPool.FeedbackEvictionProtectionFrames - 1,
+                    out _), Is.False);
+
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 30,
+                    new VirtualTexturePageCoord(2, 0, 0),
+                    frameIndex: 1 + VTPhysicalPool.FeedbackEvictionProtectionFrames,
                     out int reusedPhysicalPageId), Is.True);
                 Assert.That(reusedPhysicalPageId, Is.EqualTo(firstPhysicalPageId));
                 Assert.That(
                     pool.GetPhysicalTileRect(0, reusedPhysicalPageId, 0),
                     Is.EqualTo(firstPhysicalTile));
+                Assert.That(owner.LastInvalidatedPageIndex, Is.EqualTo(10));
+            }
+            finally
+            {
+                pool.Dispose();
+            }
+        }
+
+        [Test]
+        public void AsyncCommit_ProtectsNewlyVisiblePageUntilFeedbackCanTouchIt()
+        {
+            VTPhysicalPool pool = CreatePhysicalPoolForTesting(pageCount: 1);
+            var owner = new PhysicalPoolOwner(1);
+            var producerHandle = new VTProducerHandle(1);
+
+            try
+            {
+                Assert.That(pool.TryAllocatePage(
+                    owner,
+                    producerHandle,
+                    "IndexedProducer",
+                    pageIndex: 10,
+                    pageMip: 0,
+                    new VirtualTexturePageCoord(0, 0, 0),
+                    VirtualTextureViewId.Invalid,
+                    VirtualTextureViewId.Invalid,
+                    updateAffinity: false,
+                    frameIndex: 1,
+                    locked: false,
+                    pendingUpload: true,
+                    out int physicalPageId,
+                    out int generation,
+                    out _), Is.True);
+                Assert.That(pool.TryCommitPage(
+                    physicalPageId,
+                    generation,
+                    commitFrameIndex: 10), Is.True);
+
+                for (int frameIndex = 10;
+                     frameIndex < 10 + VTPhysicalPool.AsyncCommitEvictionProtectionFrames;
+                     frameIndex++)
+                {
+                    Assert.That(TryAllocatePhysicalPage(
+                        pool,
+                        owner,
+                        producerHandle,
+                        pageIndex: 20,
+                        new VirtualTexturePageCoord(1, 0, 0),
+                        frameIndex,
+                        out _), Is.False);
+                }
+
+                Assert.That(TryAllocatePhysicalPage(
+                    pool,
+                    owner,
+                    producerHandle,
+                    pageIndex: 20,
+                    new VirtualTexturePageCoord(1, 0, 0),
+                    frameIndex: 10 + VTPhysicalPool.AsyncCommitEvictionProtectionFrames,
+                    out int reusedPhysicalPageId), Is.True);
+                Assert.That(reusedPhysicalPageId, Is.EqualTo(physicalPageId));
                 Assert.That(owner.LastInvalidatedPageIndex, Is.EqualTo(10));
             }
             finally

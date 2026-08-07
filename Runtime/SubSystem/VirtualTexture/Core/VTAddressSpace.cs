@@ -987,7 +987,10 @@ namespace VividRP.Runtime
             }
         }
 
-        private bool TryCommitRequestInternal(in VTRequest request, bool rebuildPageTable)
+        private bool TryCommitRequestInternal(
+            in VTRequest request,
+            bool rebuildPageTable,
+            int commitFrameIndex = -1)
         {
             if (request.SpaceId != SpaceId)
                 return false;
@@ -995,7 +998,11 @@ namespace VividRP.Runtime
             if (RemoveResidentRefreshRequest(request))
                 return true;
 
-            if (!m_ResidencyManager.TryCommitRequest(Descriptor, m_MipOffsets, request))
+            if (!m_ResidencyManager.TryCommitRequest(
+                    Descriptor,
+                    m_MipOffsets,
+                    request,
+                    commitFrameIndex))
                 return false;
 
             if (rebuildPageTable)
@@ -1027,9 +1034,12 @@ namespace VividRP.Runtime
             return false;
         }
 
-        bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request)
+        bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request, int frameIndex)
         {
-            return TryCommitRequestInternal(request, rebuildPageTable: false);
+            return TryCommitRequestInternal(
+                request,
+                rebuildPageTable: false,
+                commitFrameIndex: frameIndex);
         }
     }
 }

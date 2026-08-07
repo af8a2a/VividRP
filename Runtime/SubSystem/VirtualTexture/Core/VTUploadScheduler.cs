@@ -18,7 +18,7 @@ namespace VividRP.Runtime
 
     internal interface IVTUploadRequestCommitter
     {
-        bool TryCommitUpload(in VTRequest request);
+        bool TryCommitUpload(in VTRequest request, int frameIndex);
     }
 
     internal interface IVTUploadRequestCommitterResolver
@@ -682,7 +682,9 @@ namespace VividRP.Runtime
                 return false;
             }
 
-            internal bool CommitCompletedUploads(IVTUploadRequestCommitterResolver committerResolver)
+            internal bool CommitCompletedUploads(
+                IVTUploadRequestCommitterResolver committerResolver,
+                int frameIndex)
             {
                 bool committedAny = false;
                 for (int batchIndex = 0; batchIndex < m_Batches.Count; batchIndex++)
@@ -696,7 +698,7 @@ namespace VividRP.Runtime
                         VTRequest request = batch.GetRequest(requestIndex);
                         IVTUploadRequestCommitter committer = committerResolver?.ResolveCommitter(request.SpaceId);
                         if (committer != null)
-                            committedAny |= committer.TryCommitUpload(request);
+                            committedAny |= committer.TryCommitUpload(request, frameIndex);
                     }
 
                     batch.Reset();
@@ -1093,11 +1095,13 @@ namespace VividRP.Runtime
             m_QueuedCountsByKey.Clear();
         }
 
-        internal bool CommitCompletedUploads(IVTUploadRequestCommitterResolver committerResolver)
+        internal bool CommitCompletedUploads(
+            IVTUploadRequestCommitterResolver committerResolver,
+            int frameIndex)
         {
             bool committedAny = false;
             foreach (UploadPool pool in m_Pools.Values)
-                committedAny |= pool.CommitCompletedUploads(committerResolver);
+                committedAny |= pool.CommitCompletedUploads(committerResolver, frameIndex);
 
             return committedAny;
         }

@@ -37,6 +37,7 @@ namespace VividRP.Editor.Tests
             VirtualTextureUploadRequest second = RequestPage(spaceId, new VirtualTexturePageCoord(1, 0, 0));
 
             IssueFeedback(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            AdvanceFrame(100);
             VirtualTextureUploadRequest third = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(2, 0, 0));
             Assert.That(third.PhysicalPageId, Is.EqualTo(second.PhysicalPageId));
             Assert.That(VirtualTextureSystem.CommitUpload(third), Is.True);
@@ -75,6 +76,7 @@ namespace VividRP.Editor.Tests
             Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(0));
 
             Assert.That(VirtualTextureSystem.SetPageLocked(spaceId, new VirtualTexturePageCoord(0, 0, 0), false), Is.True);
+            AdvanceFrame(100);
             VirtualTextureUploadRequest next = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(1, 0, 0));
             Assert.That(next.PhysicalPageId, Is.EqualTo(first.PhysicalPageId));
         }
@@ -85,6 +87,7 @@ namespace VividRP.Editor.Tests
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("Generation", cachePageCount: 2));
 
             VirtualTextureUploadRequest first = RequestPage(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            AdvanceFrame(100);
             VirtualTextureUploadRequest second = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(1, 0, 0));
 
             Assert.That(second.Generation, Is.Not.EqualTo(first.Generation));
@@ -99,6 +102,7 @@ namespace VividRP.Editor.Tests
 
             VirtualTextureUploadRequest coarse = RequestPage(spaceId, new VirtualTexturePageCoord(0, 0, 1));
             VirtualTextureUploadRequest fine = RequestPage(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            AdvanceFrame(100);
             VirtualTextureUploadRequest replacement = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(2, 0, 0));
             Assert.That(VirtualTextureSystem.CommitUpload(replacement), Is.True);
 
@@ -124,8 +128,10 @@ namespace VividRP.Editor.Tests
             int spaceId = VirtualTextureSystem.RegisterSpace(CreateDesc("DeterministicReuse", cachePageCount: 2));
 
             VirtualTextureUploadRequest first = RequestPage(spaceId, new VirtualTexturePageCoord(0, 0, 0));
+            AdvanceFrame(100);
             VirtualTextureUploadRequest second = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(1, 0, 0));
             Assert.That(VirtualTextureSystem.CommitUpload(second), Is.True);
+            AdvanceFrame(200);
             VirtualTextureUploadRequest third = GetLastPendingUpload(spaceId, new VirtualTexturePageCoord(2, 0, 0));
 
             Assert.That(second.PhysicalPageId, Is.EqualTo(first.PhysicalPageId));
@@ -149,7 +155,11 @@ namespace VividRP.Editor.Tests
 
                 VirtualTextureUploadRequest activePage = RequestPage(activeCamera, 1, spaceId, activeCoord);
                 VirtualTextureUploadRequest backgroundPage = RequestPage(backgroundCamera, 2, spaceId, backgroundCoord);
-                VirtualTextureUploadRequest replacement = GetLastPendingUpload(activeCamera, 3, spaceId, replacementCoord);
+                VirtualTextureUploadRequest replacement = GetLastPendingUpload(
+                    activeCamera,
+                    2 + VTPhysicalPool.FeedbackEvictionProtectionFrames,
+                    spaceId,
+                    replacementCoord);
 
                 Assert.That(replacement.PhysicalPageId, Is.EqualTo(backgroundPage.PhysicalPageId));
                 Assert.That(replacement.PhysicalPageId, Is.Not.EqualTo(activePage.PhysicalPageId));
@@ -182,7 +192,11 @@ namespace VividRP.Editor.Tests
 
                 VirtualTextureUploadRequest focusedPage = RequestPage(focusedCamera, 1, spaceId, focusedCoord);
                 VirtualTextureUploadRequest backgroundPage = RequestPage(backgroundCamera, 2, spaceId, backgroundCoord);
-                VirtualTextureUploadRequest replacement = GetLastPendingUpload(backgroundCamera, 3, spaceId, replacementCoord);
+                VirtualTextureUploadRequest replacement = GetLastPendingUpload(
+                    backgroundCamera,
+                    2 + VTPhysicalPool.FeedbackEvictionProtectionFrames,
+                    spaceId,
+                    replacementCoord);
 
                 Assert.That(replacement.PhysicalPageId, Is.EqualTo(backgroundPage.PhysicalPageId));
                 Assert.That(replacement.PhysicalPageId, Is.Not.EqualTo(focusedPage.PhysicalPageId));
@@ -283,6 +297,19 @@ namespace VividRP.Editor.Tests
                         VirtualTextureFeedbackProcessor.EncodeKey(spaceId, coord));
 
                 VirtualTextureSystem.Update(frameData, commandBuffer);
+            }
+            finally
+            {
+                commandBuffer.Dispose();
+            }
+        }
+
+        private static void AdvanceFrame(int frameIndex)
+        {
+            var commandBuffer = new CommandBuffer();
+            try
+            {
+                VirtualTextureSystem.Update(CreateFrameData(null, frameIndex), commandBuffer);
             }
             finally
             {

@@ -10,7 +10,9 @@ namespace VividRP.Runtime
             int blockedUploadCount,
             int streamSaturatedRequestCount,
             int feedbackOverflowCount,
-            int fallbackSampleCount)
+            int fallbackSampleCount,
+            int physicalPoolFreePageCount = int.MaxValue,
+            int evictionCount = 0)
         {
             UploadBudget = uploadBudget;
             PendingUploadCount = Mathf.Max(0, pendingUploadCount);
@@ -18,6 +20,8 @@ namespace VividRP.Runtime
             StreamSaturatedRequestCount = Mathf.Max(0, streamSaturatedRequestCount);
             FeedbackOverflowCount = Mathf.Max(0, feedbackOverflowCount);
             FallbackSampleCount = Mathf.Max(0, fallbackSampleCount);
+            PhysicalPoolFreePageCount = Mathf.Max(0, physicalPoolFreePageCount);
+            EvictionCount = Mathf.Max(0, evictionCount);
         }
 
         internal int UploadBudget { get; }
@@ -31,6 +35,10 @@ namespace VividRP.Runtime
         internal int FeedbackOverflowCount { get; }
 
         internal int FallbackSampleCount { get; }
+
+        internal int PhysicalPoolFreePageCount { get; }
+
+        internal int EvictionCount { get; }
     }
 
     internal sealed class VTAdaptiveMipBiasController
@@ -100,6 +108,15 @@ namespace VividRP.Runtime
             float streamPressure = inputs.StreamSaturatedRequestCount > 0 ? 1f : 0f;
             float fallbackPressure = NormalizeCount(inputs.FallbackSampleCount, pressureScale * 4f);
             float overflowPressure = inputs.FeedbackOverflowCount > 0 ? 1f : 0f;
+            float evictionPressure = NormalizeCount(
+                inputs.EvictionCount,
+                Mathf.Max(1f, pressureScale * 0.5f));
+            if (inputs.PhysicalPoolFreePageCount == 0 && inputs.EvictionCount > 0)
+            {
+                evictionPressure = Mathf.Max(
+                    evictionPressure,
+                    HighPressureThreshold);
+            }
 
             float backlogPressure = 0f;
             if (inputs.UploadBudget > 0 && inputs.UploadBudget < int.MaxValue)
@@ -109,7 +126,7 @@ namespace VividRP.Runtime
             }
 
             return Mathf.Max(
-                Mathf.Max(blockedUploadPressure, streamPressure),
+                Mathf.Max(Mathf.Max(blockedUploadPressure, streamPressure), evictionPressure),
                 Mathf.Max(backlogPressure, Mathf.Max(overflowPressure, fallbackPressure)));
         }
 

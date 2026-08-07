@@ -62,5 +62,33 @@ namespace VividRP.Editor.Tests
             Assert.That(VTAdaptiveMipBiasController.ComputePressure(
                 new VTAdaptiveMipBiasInputs(4, 0, 0, 0, 1, 0)), Is.EqualTo(1f));
         }
+
+        [Test]
+        public void ComputePressure_UsesEvictionsOnlyWhenThePhysicalPoolIsThrashing()
+        {
+            var fullButStable = new VTAdaptiveMipBiasInputs(
+                16,
+                0,
+                0,
+                0,
+                0,
+                0,
+                physicalPoolFreePageCount: 0,
+                evictionCount: 0);
+            var fullAndEvicting = new VTAdaptiveMipBiasInputs(
+                16,
+                0,
+                0,
+                0,
+                0,
+                0,
+                physicalPoolFreePageCount: 0,
+                evictionCount: 1);
+
+            Assert.That(VTAdaptiveMipBiasController.ComputePressure(fullButStable), Is.Zero);
+            Assert.That(
+                VTAdaptiveMipBiasController.ComputePressure(fullAndEvicting),
+                Is.GreaterThanOrEqualTo(VTAdaptiveMipBiasController.HighPressureThreshold));
+        }
     }
 }

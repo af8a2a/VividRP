@@ -12,10 +12,11 @@ using Object = UnityEngine.Object;
 
 namespace VividRP.Editor
 {
-    [ScriptedImporter(2, Extension)]
+    [ScriptedImporter(3, Extension)]
     internal sealed class VividVirtualTextureAssetImporter : ScriptedImporter
     {
         internal const string Extension = "vividvt";
+        private const string Version3Marker = "VIVIDVT3";
 
         public Texture2D SourceTexture;
 
@@ -26,6 +27,23 @@ namespace VividRP.Editor
         public VividVirtualTextureBuildProfile BuildProfile;
 
         public VividVirtualTextureAddressMode AddressMode = VividVirtualTextureAddressMode.Clamp;
+
+        public VividVirtualTextureStorageProfile StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+
+        public VividVirtualTextureStreamCompression StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+
+        public VividVirtualTextureMaskStorage MaskStorage;
+
+        public VividVirtualTextureBCQuality BCQuality = VividVirtualTextureBCQuality.Normal;
+
+        [Range(1, 3)]
+        public int ZstdLevel = 3;
+
+        [Range(128, 256)]
+        public int ChunkTargetKiB = 256;
+
+        [SerializeField, HideInInspector]
+        private bool m_StorageSettingsInitialized;
 
         [Min(1)]
         public int PageSize = 128;
@@ -77,6 +95,7 @@ namespace VividRP.Editor
 
             var timer = Stopwatch.StartNew();
             string virtualTextureGUID = AssetDatabase.AssetPathToGUID(ctx.assetPath);
+            bool useVersion3Defaults = m_StorageSettingsInitialized || HasVersion3Marker(ctx.assetPath);
             VividVirtualTextureAssetBuilder.Generate(asset, builtData, new VividVirtualTextureAssetBuilder.Parameters
             {
                 SourceTexture = SourceTexture,
@@ -95,6 +114,17 @@ namespace VividRP.Editor
                 BuildProfile = BuildProfile,
                 AddressMode = AddressMode,
                 RuntimeStreamDataPath = GetRuntimeStreamDataPath(virtualTextureGUID),
+                StorageProfile = useVersion3Defaults
+                    ? StorageProfile
+                    : VividVirtualTextureStorageProfile.LegacyRGBA32,
+                StreamCompression = useVersion3Defaults
+                    ? StreamCompression
+                    : VividVirtualTextureStreamCompression.None,
+                MaskStorage = MaskStorage,
+                BCQuality = useVersion3Defaults ? BCQuality : VividVirtualTextureBCQuality.Normal,
+                ZstdLevel = Mathf.Clamp(ZstdLevel, 1, 3),
+                ChunkTargetKiB = Mathf.Clamp(ChunkTargetKiB, 128, 256),
+                LogWarningHandler = message => ctx.LogImportWarning(message),
             });
 
             timer.Stop();
@@ -111,7 +141,7 @@ namespace VividRP.Editor
                 return;
             }
 
-            ProjectWindowUtil.CreateAssetWithTextContent("New Virtual Texture." + Extension, string.Empty);
+            ProjectWindowUtil.CreateAssetWithTextContent("New Virtual Texture." + Extension, Version3Marker);
         }
 
         internal static string[] CreateAssetsForSelection(IEnumerable<Object> selection)
@@ -147,15 +177,55 @@ namespace VividRP.Editor
             string assetPath = AssetDatabase.GenerateUniqueAssetPath(
                 Path.Combine(folder, assetBaseName + "." + Extension).Replace('\\', '/'));
 
-            File.WriteAllText(assetPath, string.Empty);
+            File.WriteAllText(assetPath, Version3Marker);
             AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceSynchronousImport);
 
             if (AssetImporter.GetAtPath(assetPath) is not VividVirtualTextureAssetImporter importer)
                 return string.Empty;
 
             importer.SourceTexture = texture;
+            importer.m_StorageSettingsInitialized = true;
+            importer.StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+            importer.StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+            importer.BCQuality = VividVirtualTextureBCQuality.Normal;
+            importer.ZstdLevel = 3;
+            importer.ChunkTargetKiB = 256;
             Save(assetPath, importer);
             return assetPath;
+        }
+
+        [MenuItem("Assets/VividRP/Virtual Texture/Upgrade To Desktop BCn", true)]
+        private static bool CanUpgradeSelectedAsset()
+        {
+            string path = AssetDatabase.GetAssetPath(Selection.activeObject);
+            return AssetImporter.GetAtPath(path) is VividVirtualTextureAssetImporter;
+        }
+
+        [MenuItem("Assets/VividRP/Virtual Texture/Upgrade To Desktop BCn")]
+        private static void UpgradeSelectedAsset()
+        {
+            string path = AssetDatabase.GetAssetPath(Selection.activeObject);
+            if (AssetImporter.GetAtPath(path) is not VividVirtualTextureAssetImporter importer)
+                return;
+
+            importer.m_StorageSettingsInitialized = true;
+            importer.StorageProfile = VividVirtualTextureStorageProfile.DesktopBCn;
+            importer.StreamCompression = VividVirtualTextureStreamCompression.Zstd;
+            importer.BCQuality = VividVirtualTextureBCQuality.Normal;
+            importer.ZstdLevel = 3;
+            importer.ChunkTargetKiB = 256;
+            Save(path, importer);
+        }
+
+        private static bool HasVersion3Marker(string assetPath)
+        {
+            if (string.IsNullOrWhiteSpace(assetPath) || !File.Exists(assetPath))
+                return false;
+
+            using var reader = new StreamReader(assetPath);
+            char[] marker = new char[Version3Marker.Length];
+            return reader.Read(marker, 0, marker.Length) == marker.Length
+                   && new string(marker).Equals(Version3Marker, StringComparison.Ordinal);
         }
 
         private static void Save(string assetPath, AssetImporter importer)

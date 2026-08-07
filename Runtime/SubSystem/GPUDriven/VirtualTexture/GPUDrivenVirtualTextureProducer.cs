@@ -13,6 +13,7 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
         internal const int BaseColorLayerIndex = 0;
         internal const int NormalLayerIndex = 1;
         internal const int MaskLayerIndex = 2;
+        internal const int ScalarMaskLayerIndex = 3;
         internal const int LayerCount = 3;
 
         private const int ThreadGroupSize = 8;
@@ -186,6 +187,23 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
                 return count;
             }
+        }
+
+        internal bool HasPermanentStreamFailure(RectInt pageRegion)
+        {
+            if (pageRegion.width <= 0
+                || pageRegion.xMin < 0
+                || pageRegion.yMin < 0
+                || pageRegion.xMax > m_EntriesByBasePage.GetLength(0)
+                || pageRegion.yMax > m_EntriesByBasePage.GetLength(1))
+            {
+                return false;
+            }
+
+            AtlasEntry entry = m_EntriesByBasePage[pageRegion.xMin, pageRegion.yMin];
+            return entry != null
+                   && entry.PageRegion.Equals(pageRegion)
+                   && entry.StreamedProducer?.HasPermanentFailure == true;
         }
 
         internal void RegisterEntry(

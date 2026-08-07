@@ -18,7 +18,14 @@ namespace VividRP.Runtime.GPUDriven
     internal readonly struct GPUDrivenSurfaceTextureSet
     {
         internal GPUDrivenSurfaceTextureSet(Texture baseColor, Texture normal, Texture mask)
-            : this(null, baseColor, normal, mask)
+            : this(
+                null,
+                baseColor,
+                normal,
+                mask,
+                mask != null
+                    ? GPUDrivenMaterialMaskMode.PackedMetallicOcclusionSmoothness
+                    : GPUDrivenMaterialMaskMode.None)
         {
         }
 
@@ -26,12 +33,14 @@ namespace VividRP.Runtime.GPUDriven
             VividVirtualTextureAsset streamedVirtualTexture,
             Texture baseColor,
             Texture normal,
-            Texture mask)
+            Texture mask,
+            GPUDrivenMaterialMaskMode maskMode = GPUDrivenMaterialMaskMode.None)
         {
             StreamedVirtualTexture = streamedVirtualTexture;
             BaseColor = baseColor;
             Normal = normal;
             Mask = mask;
+            MaskMode = maskMode;
             AddressMode = ResolveAddressMode(baseColor ?? normal ?? mask, out bool unsupportedAddressMode);
             bool baseColorIsMixed = IsMixedAddressMode(baseColor, AddressMode, ref unsupportedAddressMode);
             bool normalIsMixed = IsMixedAddressMode(normal, AddressMode, ref unsupportedAddressMode);
@@ -47,6 +56,8 @@ namespace VividRP.Runtime.GPUDriven
         internal Texture Normal { get; }
 
         internal Texture Mask { get; }
+
+        internal GPUDrivenMaterialMaskMode MaskMode { get; }
 
         internal GPUDrivenSurfaceAddressMode AddressMode { get; }
 

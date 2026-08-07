@@ -193,6 +193,13 @@ namespace VividRP.Runtime
         void RecordGpuUpload(CommandBuffer cmd, RenderTexture stagingTexture, int baseSlice);
     }
 
+    internal interface IVTEncodedPageFinalizer : IVTPageUploadFinalizer
+    {
+        int LayerCount { get; }
+
+        void FinalizeEncodedUploadLayer(Texture2DArray stagingTexture, int slice, int layerIndex);
+    }
+
     internal readonly struct VTPageUploadPayload
     {
         internal VTPageUploadPayload(in VTRequest request, IVTPageUploadFinalizer finalizer)
@@ -205,7 +212,7 @@ namespace VividRP.Runtime
 
         internal IVTPageUploadFinalizer Finalizer { get; }
 
-        internal bool IsValid => Finalizer is IVTPageFinalizer or IVTGpuPageFinalizer;
+        internal bool IsValid => Finalizer is IVTPageFinalizer or IVTGpuPageFinalizer or IVTEncodedPageFinalizer;
     }
 
     internal interface IVTPageProducer : VTProducer

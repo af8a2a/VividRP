@@ -505,6 +505,18 @@ namespace VividRP.Runtime
             {
                 for (int groupIndex = 0; groupIndex < m_Textures.Length; groupIndex++)
                 {
+                    GraphicsFormat storageFormat = desc.GetGroupStorageFormat(groupIndex);
+                    CopyTextureSupport requiredCopySupport =
+                        CopyTextureSupport.Basic | CopyTextureSupport.DifferentTypes;
+                    if (GraphicsFormatUtility.IsCompressedFormat(storageFormat)
+                        && (!SystemInfo.IsFormatSupported(storageFormat, GraphicsFormatUsage.Sample)
+                            || (SystemInfo.copyTextureSupport & requiredCopySupport) != requiredCopySupport))
+                    {
+                        throw new InvalidOperationException(
+                            $"The active graphics device cannot sample and CopyTexture the compressed VT format "
+                            + $"{storageFormat} used by physical group {groupIndex}.");
+                    }
+
                     int groupLayerCount = Mathf.Max(1, desc.GetGroupLayerCount(groupIndex));
                     int tileCount = checked(m_Slots.Length * groupLayerCount);
                     m_AtlasLayouts[groupIndex] = new VTPhysicalAtlasLayout(

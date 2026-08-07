@@ -72,12 +72,12 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Constructor_CreatesPrivateThreeLayerSharedSpace()
+        public void Constructor_CreatesPrivateFourLayerBcnSharedSpace()
         {
             using var backend = new VirtualTextureGPUDrivenTextureBackend();
 
             Assert.That(backend.IsAvailable, Is.True, backend.UnavailableReason);
-            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.LayerCount, Is.EqualTo(3));
+            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.LayerCount, Is.EqualTo(4));
             Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountX, Is.EqualTo(256));
             Assert.That(backend.VirtualTextureSpaceDesc.VirtualPageCountY, Is.EqualTo(256));
             Assert.That(backend.VirtualTextureSpaceDesc.MipCount, Is.EqualTo(9));
@@ -87,6 +87,11 @@ namespace VividRP.Editor.Tests
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(0).Semantic, Is.EqualTo(VTLayerSemantic.BaseColor));
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(1).Semantic, Is.EqualTo(VTLayerSemantic.Normal));
             Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(2).Semantic, Is.EqualTo(VTLayerSemantic.Mask));
+            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(3).Semantic, Is.EqualTo(VTLayerSemantic.Height));
+            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(0).GraphicsFormat, Is.EqualTo(GraphicsFormat.RGBA_BC7_SRGB));
+            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(1).GraphicsFormat, Is.EqualTo(GraphicsFormat.RG_BC5_UNorm));
+            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(2).GraphicsFormat, Is.EqualTo(GraphicsFormat.RGBA_BC7_UNorm));
+            Assert.That(backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(3).GraphicsFormat, Is.EqualTo(GraphicsFormat.R_BC4_UNorm));
             Assert.That(
                 backend.VirtualTextureSpaceDesc.StackDesc.GetLayer(1).FallbackColor,
                 Is.EqualTo(new Color32(128, 128, 255, 128)));
@@ -103,8 +108,8 @@ namespace VividRP.Editor.Tests
                     out Texture2D physicalAtlas),
                 Is.True);
             Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
-            Assert.That(physicalAtlas.width, Is.EqualTo(5440));
-            Assert.That(physicalAtlas.height, Is.EqualTo(5304));
+            Assert.That(physicalAtlas.width, Is.EqualTo(3128));
+            Assert.That(physicalAtlas.height, Is.EqualTo(3128));
         }
 
         [Test]

@@ -21,7 +21,7 @@ StructuredBuffer<uint2> _VTFeedbackRequests;
 StructuredBuffer<uint> _VTFeedbackCounter;
 #endif
 
-float _VTSpaceParams[32];
+float _VTSpaceParams[33];
 float _VTMipOffsets[VIVID_VT_MAX_MIPS];
 int _VTDebugMode;
 int _VTFeedbackEnabled;
@@ -62,6 +62,7 @@ float _VTAdaptiveMipBias;
 #define VT_LAYER1_PHYSICAL_LAYER  ((int)_VTSpaceParams[29])
 #define VT_LAYER2_PHYSICAL_LAYER  ((int)_VTSpaceParams[30])
 #define VT_LAYER3_PHYSICAL_LAYER  ((int)_VTSpaceParams[31])
+#define VT_LAYER_ENCODING_WORD    ((int)_VTSpaceParams[32])
 #define VT_FEEDBACK_REQUEST_COUNTER_INDEX 0
 #define VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX 1
 #define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u
@@ -341,6 +342,26 @@ int VTGetLayerSRGB(uint layerIndex)
     return VT_LAYER3_SRGB;
 }
 
+uint VTGetLayerEncoding(uint layerIndex)
+{
+    uint clampedLayer = min(layerIndex, 3u);
+    return ((uint)VT_LAYER_ENCODING_WORD >> (clampedLayer * 2u)) & 0x3u;
+}
+
+float4 VTApplyLayerEncoding(float4 value, uint layerIndex)
+{
+    // BC5 stores the normal's canonical X/Y channels in R/G. Reconstruct the
+    // encoded Z component so the existing XYZ normal decoder remains unchanged.
+    if (VTGetLayerEncoding(layerIndex) == 2u)
+    {
+        float2 normalXY = value.rg * 2.0 - 1.0;
+        float normalZ = sqrt(saturate(1.0 - dot(normalXY, normalXY)));
+        return float4(value.r, value.g, normalZ * 0.5 + 0.5, value.r);
+    }
+
+    return value;
+}
+
 float3 VTSRGBToLinear(float3 value)
 {
     float3 low = value / 12.92;
@@ -360,7 +381,8 @@ float4 VTSamplePhysicalCacheLayer(float2 virtualUv, VTResolvedAddress resolved, 
         return VTGetLayerFallback(layerIndex);
 
     float3 uvw = VTComputePhysicalUVWLayer(virtualUv, resolved, layerIndex);
-    return VTSamplePhysicalCacheGroup(VTGetLayerPhysicalGroup(layerIndex), uvw);
+    float4 value = VTSamplePhysicalCacheGroup(VTGetLayerPhysicalGroup(layerIndex), uvw);
+    return VTApplyLayerEncoding(value, layerIndex);
 }
 
 bool VTResolvedAddressMatches(VTResolvedAddress left, VTResolvedAddress right)

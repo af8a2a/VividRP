@@ -21,14 +21,19 @@ namespace VividRP.Runtime
             GraphicsFormat graphicsFormat,
             bool sRGB,
             Color32 fallbackColor,
-            int physicalGroup = 0)
+            int physicalGroup = 0,
+            VTLayerDataEncoding encoding = VTLayerDataEncoding.RGBA)
         {
             if (graphicsFormat == GraphicsFormat.None)
                 throw new ArgumentException("Layer graphics format must be valid.", nameof(graphicsFormat));
-            if (GraphicsFormatUtility.IsCompressedFormat(graphicsFormat))
+            if (GraphicsFormatUtility.IsCompressedFormat(graphicsFormat)
+                && graphicsFormat != GraphicsFormat.R_BC4_UNorm
+                && graphicsFormat != GraphicsFormat.RG_BC5_UNorm
+                && graphicsFormat != GraphicsFormat.RGBA_BC7_UNorm
+                && graphicsFormat != GraphicsFormat.RGBA_BC7_SRGB)
             {
                 throw new ArgumentException(
-                    "Compressed virtual texture cache formats require a block-compressed upload codec and are not supported yet.",
+                    "Only desktop BC4, BC5 and BC7 compressed virtual texture cache formats are supported.",
                     nameof(graphicsFormat));
             }
             if (GraphicsFormatUtility.IsDepthFormat(graphicsFormat)
@@ -42,6 +47,7 @@ namespace VividRP.Runtime
             SRGB = sRGB;
             FallbackColor = fallbackColor;
             PhysicalGroup = physicalGroup;
+            Encoding = encoding;
         }
 
         public VTLayerSemantic Semantic { get; }
@@ -54,13 +60,16 @@ namespace VividRP.Runtime
 
         public int PhysicalGroup { get; }
 
+        public VTLayerDataEncoding Encoding { get; }
+
         public bool Equals(VTLayerDesc other)
         {
             return Semantic == other.Semantic
                    && GraphicsFormat == other.GraphicsFormat
                    && SRGB == other.SRGB
                    && FallbackColor.Equals(other.FallbackColor)
-                   && PhysicalGroup == other.PhysicalGroup;
+                   && PhysicalGroup == other.PhysicalGroup
+                   && Encoding == other.Encoding;
         }
 
         public override bool Equals(object obj)
@@ -70,7 +79,7 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(Semantic, GraphicsFormat, SRGB, FallbackColor, PhysicalGroup);
+            return HashCode.Combine(Semantic, GraphicsFormat, SRGB, FallbackColor, PhysicalGroup, Encoding);
         }
     }
 
@@ -132,6 +141,7 @@ namespace VividRP.Runtime
             BorderSize = borderSize;
             CachePageCount = cachePageCount;
             m_Layers = new VTLayerDesc[layers.Length];
+            var groupFormats = new Dictionary<int, GraphicsFormat>();
             for (int layerIndex = 0; layerIndex < layers.Length; layerIndex++)
             {
                 if (layers[layerIndex].GraphicsFormat == GraphicsFormat.None)
@@ -140,6 +150,18 @@ namespace VividRP.Runtime
                     throw new ArgumentOutOfRangeException(
                         nameof(layers),
                         $"Physical group index must be smaller than {MaxLayerCount}.");
+
+                GraphicsFormat storageFormat = GraphicsFormatUtility.GetLinearFormat(layers[layerIndex].GraphicsFormat);
+                if (groupFormats.TryGetValue(layers[layerIndex].PhysicalGroup, out GraphicsFormat groupFormat)
+                    && groupFormat != storageFormat)
+                {
+                    throw new ArgumentException(
+                        $"Virtual texture physical group {layers[layerIndex].PhysicalGroup} mixes storage formats " +
+                        $"{groupFormat} and {storageFormat}.",
+                        nameof(layers));
+                }
+
+                groupFormats[layers[layerIndex].PhysicalGroup] = storageFormat;
 
                 m_Layers[layerIndex] = layers[layerIndex];
             }

@@ -152,6 +152,7 @@ namespace VividRP.Runtime
             s_AllocationIdBySpaceId.Clear();
             s_PhysicalPools.Clear();
             s_ProducerRegistry.Dispose();
+            VTStreamChunkManager.ResetShared();
             s_CompletedReadbacks.Clear();
             s_InjectedReadbacks.Clear();
             s_FeedbackAggregator?.Dispose();
@@ -392,6 +393,7 @@ namespace VividRP.Runtime
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsBeginFrameMarker.Auto())
             {
                 VTVirtualTextureStreamRequestGate.BeginFrame();
+                VTStreamChunkManager.Shared.BeginFrame();
                 s_UploadScheduler.BeginFrame();
             }
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCommitCompletedMarker.Auto())
@@ -508,6 +510,7 @@ namespace VividRP.Runtime
             }
 
             CollectAndSchedulePendingUploads(frameIndex, cmd);
+            VTStreamChunkManager.Shared.SubmitPendingReads();
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeMarker.Auto())
                 s_UploadScheduler.FinalizeUploads(cmd);
@@ -515,7 +518,9 @@ namespace VividRP.Runtime
             int duplicateUploadCount = s_UploadScheduler.LastDuplicateUploadCount;
             int skippedUploadCount = s_UploadScheduler.LastSkippedUploadCount;
             int blockedUploadCount = Mathf.Max(0, skippedUploadCount - duplicateUploadCount);
-            int streamSaturatedRequestCount = VTVirtualTextureStreamRequestGate.LastSaturatedRequestCount;
+            int streamSaturatedRequestCount = Mathf.Max(
+                VTVirtualTextureStreamRequestGate.LastSaturatedRequestCount,
+                VTStreamChunkManager.Shared.LastPressureCount);
             int cpuProducedPageCount = s_UploadScheduler.LastCpuProducedPageCount;
             int gpuProducedPageCount = s_UploadScheduler.LastGpuProducedPageCount;
             int gpuDispatchCount = s_UploadScheduler.LastGpuDispatchCount;

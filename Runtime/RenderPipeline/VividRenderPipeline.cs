@@ -85,6 +85,7 @@ namespace VividRP.Runtime
             m_Asset = asset;
             m_PreviousUseScriptableRenderPipelineBatching = GraphicsSettings.useScriptableRenderPipelineBatching;
             ApplySRPBatcherSetting(asset);
+            ApplyVirtualTextureStreamingSettings(asset);
 
             m_RenderGraph = new RenderGraph(RenderGraphName); 
             m_DebugDisplaySettingsUI = new DebugDisplaySettingsUI();
@@ -99,6 +100,7 @@ namespace VividRP.Runtime
             using (s_ApplySRPBatcherMarker.Auto())
             {
                 ApplySRPBatcherSetting(m_Asset);
+                ApplyVirtualTextureStreamingSettings(m_Asset);
             }
 
             if (!TryInitializeRuntimeResources())
@@ -111,6 +113,18 @@ namespace VividRP.Runtime
             {
                 m_RenderGraph.EndFrame();
             }
+        }
+
+        private static void ApplyVirtualTextureStreamingSettings(VividRenderPipelineAsset asset)
+        {
+            if (asset == null)
+                return;
+
+            VTStreamChunkManager.Shared.Configure(
+                asset.VirtualTextureIOBackend,
+                asset.VirtualTextureMaxInFlightChunks,
+                asset.VirtualTextureDecodeConcurrency,
+                asset.VirtualTextureDecodedCacheBudgetMiB);
         }
 
         private void RenderCamera(ScriptableRenderContext context, Camera camera)

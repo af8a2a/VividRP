@@ -47,6 +47,28 @@ namespace VividRP.Runtime
             return stagingTexture;
         }
 
+        internal static Texture2DArray CreateEncodedStagingTexture(
+            string spaceName,
+            int physicalPageSize,
+            int depth,
+            GraphicsFormat graphicsFormat,
+            string suffix)
+        {
+            var stagingTexture = new Texture2DArray(
+                physicalPageSize,
+                physicalPageSize,
+                Mathf.Max(1, depth),
+                graphicsFormat,
+                TextureCreationFlags.None)
+            {
+                name = $"VividVT_{spaceName}_{suffix}",
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Point,
+            };
+            return stagingTexture;
+        }
+
         internal static RenderTexture CreateGpuStagingTexture(
             string spaceName,
             int physicalPageSize,
@@ -254,7 +276,9 @@ namespace VividRP.Runtime
             private readonly VTRequest[] m_Requests;
             private readonly VTPhysicalPool[] m_PhysicalPools;
             private readonly bool[] m_UsesGpuStaging;
+            private readonly bool[] m_UsesEncodedStaging;
             private readonly RenderTexture[] m_ConvertedStagingTextures;
+            private readonly Texture2DArray[] m_EncodedStagingTextures;
 
             private int m_RequestCount;
             private IVTUploadFenceHandle m_Fence;
@@ -277,7 +301,9 @@ namespace VividRP.Runtime
                 m_Requests = new VTRequest[Capacity];
                 m_PhysicalPools = new VTPhysicalPool[Capacity];
                 m_UsesGpuStaging = new bool[Capacity];
+                m_UsesEncodedStaging = new bool[Capacity];
                 m_ConvertedStagingTextures = new RenderTexture[Mathf.Max(1, key.PhysicalGroupCount)];
+                m_EncodedStagingTextures = new Texture2DArray[Mathf.Max(1, key.PhysicalGroupCount)];
                 BatchIndex = batchIndex;
             }
 
@@ -333,6 +359,26 @@ namespace VividRP.Runtime
                     $"ConvertedUploadBatch{BatchIndex}_Group{physicalGroup}",
                     enableRandomWrite: false);
                 m_ConvertedStagingTextures[physicalGroup] = stagingTexture;
+                return stagingTexture;
+            }
+
+            internal Texture2DArray GetEncodedStagingTexture(int physicalGroup)
+            {
+                if (physicalGroup < 0 || physicalGroup >= m_EncodedStagingTextures.Length)
+                    throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+                Texture2DArray stagingTexture = m_EncodedStagingTextures[physicalGroup];
+                if (stagingTexture != null)
+                    return stagingTexture;
+
+                int groupLayerCount = Mathf.Max(1, m_Key.GetGroupLayerCount(physicalGroup));
+                stagingTexture = VTPageUploadUtility.CreateEncodedStagingTexture(
+                    m_SpaceName,
+                    m_PhysicalPageSize,
+                    Capacity * groupLayerCount,
+                    m_Key.GetGroupStorageFormat(physicalGroup),
+                    $"EncodedUploadBatch{BatchIndex}_Group{physicalGroup}");
+                m_EncodedStagingTextures[physicalGroup] = stagingTexture;
                 return stagingTexture;
             }
 
@@ -398,12 +444,27 @@ namespace VividRP.Runtime
                 m_UsesGpuStaging[index] = usesGpuStaging;
             }
 
-            internal Texture GetStagingTexture(int index)
+            internal void SetUsesEncodedStaging(int index, bool usesEncodedStaging)
+            {
+                if (index < 0 || index >= Capacity)
+                    throw new ArgumentOutOfRangeException(nameof(index));
+
+                m_UsesEncodedStaging[index] = usesEncodedStaging;
+            }
+
+            internal Texture GetStagingTexture(int index, int physicalGroup)
             {
                 if (index < 0 || index >= m_RequestCount)
                     throw new ArgumentOutOfRangeException(nameof(index));
 
+                if (m_UsesEncodedStaging[index])
+                    return GetEncodedStagingTexture(physicalGroup);
                 return m_UsesGpuStaging[index] ? m_GpuStagingTexture : m_CpuStagingTexture;
+            }
+
+            internal bool UsesEncodedStaging(int index)
+            {
+                return index >= 0 && index < m_RequestCount && m_UsesEncodedStaging[index];
             }
 
             internal VTPhysicalPool GetPhysicalPool(int index)
@@ -434,6 +495,7 @@ namespace VividRP.Runtime
                 m_Fence = null;
                 Array.Clear(m_PhysicalPools, 0, m_PhysicalPools.Length);
                 Array.Clear(m_UsesGpuStaging, 0, m_UsesGpuStaging.Length);
+                Array.Clear(m_UsesEncodedStaging, 0, m_UsesEncodedStaging.Length);
                 m_RequestCount = 0;
             }
 
@@ -460,6 +522,7 @@ namespace VividRP.Runtime
                     {
                         m_PhysicalPools[readIndex] = null;
                         m_UsesGpuStaging[readIndex] = false;
+                        m_UsesEncodedStaging[readIndex] = false;
                         removedCount += 1;
                         continue;
                     }
@@ -469,6 +532,7 @@ namespace VividRP.Runtime
                         m_Requests[writeIndex] = m_Requests[readIndex];
                         m_PhysicalPools[writeIndex] = m_PhysicalPools[readIndex];
                         m_UsesGpuStaging[writeIndex] = m_UsesGpuStaging[readIndex];
+                        m_UsesEncodedStaging[writeIndex] = m_UsesEncodedStaging[readIndex];
                     }
 
                     writeIndex += 1;
@@ -478,6 +542,7 @@ namespace VividRP.Runtime
                 {
                     Array.Clear(m_PhysicalPools, writeIndex, m_RequestCount - writeIndex);
                     Array.Clear(m_UsesGpuStaging, writeIndex, m_RequestCount - writeIndex);
+                    Array.Clear(m_UsesEncodedStaging, writeIndex, m_RequestCount - writeIndex);
                 }
 
                 m_RequestCount = writeIndex;
@@ -498,6 +563,9 @@ namespace VividRP.Runtime
                     if (m_ConvertedStagingTextures[groupIndex] != null)
                         CoreUtils.Destroy(m_ConvertedStagingTextures[groupIndex]);
                     m_ConvertedStagingTextures[groupIndex] = null;
+                    if (m_EncodedStagingTextures[groupIndex] != null)
+                        CoreUtils.Destroy(m_EncodedStagingTextures[groupIndex]);
+                    m_EncodedStagingTextures[groupIndex] = null;
                 }
             }
 
@@ -685,6 +753,7 @@ namespace VividRP.Runtime
 
                 int requestCount = 0;
                 bool usedCpuStaging = false;
+                var touchedEncodedGroups = new bool[Mathf.Max(1, m_Key.PhysicalGroupCount)];
                 try
                 {
                     using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeRenderPayloadsMarker.Auto())
@@ -707,7 +776,33 @@ namespace VividRP.Runtime
 
                             int baseSlice = requestCount * batch.LayerCount;
                             bool usesGpuStaging;
-                            if (payload.Finalizer is IVTGpuPageFinalizer gpuFinalizer)
+                            bool usesEncodedStaging = false;
+                            if (payload.Finalizer is IVTEncodedPageFinalizer encodedFinalizer)
+                            {
+                                if (encodedFinalizer.LayerCount != batch.LayerCount)
+                                {
+                                    skippedUploadCount += 1;
+                                    continue;
+                                }
+
+                                for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
+                                {
+                                    int physicalGroup = upload.PhysicalPool.GetLayerPhysicalGroup(layerIndex);
+                                    int groupLayerCount = Mathf.Max(1, upload.PhysicalPool.GetGroupLayerCount(physicalGroup));
+                                    int physicalLayerIndex = upload.PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                                    int encodedSlice = requestCount * groupLayerCount + physicalLayerIndex;
+                                    encodedFinalizer.FinalizeEncodedUploadLayer(
+                                        batch.GetEncodedStagingTexture(physicalGroup),
+                                        encodedSlice,
+                                        layerIndex);
+                                    touchedEncodedGroups[physicalGroup] = true;
+                                }
+
+                                usesGpuStaging = false;
+                                usesEncodedStaging = true;
+                                cpuProducedPageCount += 1;
+                            }
+                            else if (payload.Finalizer is IVTGpuPageFinalizer gpuFinalizer)
                             {
                                 if (gpuFinalizer.LayerCount != batch.LayerCount)
                                 {
@@ -750,6 +845,7 @@ namespace VividRP.Runtime
                             batch.SetRequest(requestCount, payload.Request);
                             batch.SetPhysicalPool(requestCount, upload.PhysicalPool);
                             batch.SetUsesGpuStaging(requestCount, usesGpuStaging);
+                            batch.SetUsesEncodedStaging(requestCount, usesEncodedStaging);
                             requestCount += 1;
                         }
                     }
@@ -768,6 +864,11 @@ namespace VividRP.Runtime
                     using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeApplyStagingMarker.Auto())
                         batch.CpuStagingTexture.Apply(false, false);
                 }
+                for (int physicalGroup = 0; physicalGroup < touchedEncodedGroups.Length; physicalGroup++)
+                {
+                    if (touchedEncodedGroups[physicalGroup])
+                        batch.GetEncodedStagingTexture(physicalGroup).Apply(false, false);
+                }
 
                 using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsFinalizeCopyToCacheMarker.Auto())
                 {
@@ -779,12 +880,12 @@ namespace VividRP.Runtime
                             continue;
 
                         int sourceBaseSlice = uploadIndex * batch.LayerCount;
-                        Texture stagingTexture = batch.GetStagingTexture(uploadIndex);
-                        if (stagingTexture == null)
-                            continue;
                         for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
                         {
                             int physicalGroup = physicalPool.GetLayerPhysicalGroup(layerIndex);
+                            Texture stagingTexture = batch.GetStagingTexture(uploadIndex, physicalGroup);
+                            if (stagingTexture == null)
+                                continue;
                             Texture2D physicalCache = physicalPool.GetTextureForGroup(physicalGroup);
                             if (physicalCache == null)
                                 continue;
@@ -796,7 +897,9 @@ namespace VividRP.Runtime
                                 physicalGroup,
                                 request.PhysicalPageId,
                                 physicalLayerIndex);
-                            int sourceSlice = sourceBaseSlice + layerIndex;
+                            int sourceSlice = batch.UsesEncodedStaging(uploadIndex)
+                                ? convertedSlice
+                                : sourceBaseSlice + layerIndex;
                             if (stagingTexture.graphicsFormat == physicalCache.graphicsFormat)
                             {
                                 cmd.CopyTexture(
@@ -813,6 +916,14 @@ namespace VividRP.Runtime
                                     destinationTile.x,
                                     destinationTile.y);
                                 continue;
+                            }
+
+                            if (batch.UsesEncodedStaging(uploadIndex))
+                            {
+                                throw new InvalidOperationException(
+                                    $"[VividRP] Encoded VT staging format {stagingTexture.graphicsFormat} does not "
+                                    + $"match physical cache format {physicalCache.graphicsFormat}. Runtime BC "
+                                    + "conversion is intentionally disabled.");
                             }
 
                             RenderTexture convertedStagingTexture =

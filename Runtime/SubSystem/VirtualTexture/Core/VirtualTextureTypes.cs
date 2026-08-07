@@ -275,7 +275,7 @@ namespace VividRP.Runtime
 
     public readonly struct VirtualTextureSpaceShaderParams
     {
-        internal const int IntCount = 32;
+        internal const int IntCount = 33;
 
         public VirtualTextureSpaceShaderParams(
             int spaceId,
@@ -318,6 +318,7 @@ namespace VividRP.Runtime
             Layer1PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 1);
             Layer2PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 2);
             Layer3PhysicalLayerIndex = GetLayerPhysicalLayerIndex(desc.StackDesc, 3);
+            LayerEncodingWord = PackLayerEncodings(desc.StackDesc);
         }
 
         public int SpaceId { get; }
@@ -384,6 +385,8 @@ namespace VividRP.Runtime
 
         public int Layer3PhysicalLayerIndex { get; }
 
+        public int LayerEncodingWord { get; }
+
         public int[] ToIntArray()
         {
             return new[]
@@ -420,6 +423,7 @@ namespace VividRP.Runtime
                 Layer1PhysicalLayerIndex,
                 Layer2PhysicalLayerIndex,
                 Layer3PhysicalLayerIndex,
+                LayerEncodingWord,
             };
         }
 
@@ -479,8 +483,18 @@ namespace VividRP.Runtime
                 29 => Layer1PhysicalLayerIndex,
                 30 => Layer2PhysicalLayerIndex,
                 31 => Layer3PhysicalLayerIndex,
+                32 => LayerEncodingWord,
                 _ => 0,
             };
+        }
+
+        private static int PackLayerEncodings(in VTStackDesc stackDesc)
+        {
+            int packed = 0;
+            for (int layerIndex = 0; layerIndex < Mathf.Min(4, stackDesc.LayerCount); layerIndex++)
+                packed |= ((int)stackDesc.GetLayer(layerIndex).Encoding & 0x3) << (layerIndex * 2);
+
+            return packed;
         }
 
         private static int GetLayerSRGBFlag(in VTStackDesc stackDesc, int layerIndex)

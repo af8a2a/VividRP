@@ -73,6 +73,18 @@ namespace VividRP.Runtime
             GPUDriven.GPUDrivenTextureBackendMode.VirtualTexture;
 
         [SerializeField]
+        private VividVirtualTextureIOBackendMode m_VirtualTextureIOBackend = VividVirtualTextureIOBackendMode.Auto;
+
+        [SerializeField, Min(1)]
+        private int m_VirtualTextureMaxInFlightChunks = 64;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureDecodeConcurrency;
+
+        [SerializeField, Min(0)]
+        private int m_VirtualTextureDecodedCacheBudgetMiB = 32;
+
+        [SerializeField]
         private bool m_EnableGPUDrivenDecal;
 
         [SerializeField]
@@ -179,6 +191,32 @@ namespace VividRP.Runtime
         {
             get => m_GPUDrivenTextureBackend;
             set => m_GPUDrivenTextureBackend = value;
+        }
+
+        public VividVirtualTextureIOBackendMode VirtualTextureIOBackend
+        {
+            get => m_VirtualTextureIOBackend;
+            set => m_VirtualTextureIOBackend = value;
+        }
+
+        public int VirtualTextureMaxInFlightChunks
+        {
+            get => Mathf.Max(1, m_VirtualTextureMaxInFlightChunks);
+            set => m_VirtualTextureMaxInFlightChunks = Mathf.Max(1, value);
+        }
+
+        public int VirtualTextureDecodeConcurrency
+        {
+            get => m_VirtualTextureDecodeConcurrency > 0
+                ? Mathf.Clamp(m_VirtualTextureDecodeConcurrency, 1, 64)
+                : Mathf.Clamp(SystemInfo.processorCount / 4, 2, 8);
+            set => m_VirtualTextureDecodeConcurrency = Mathf.Clamp(value, 0, 64);
+        }
+
+        public int VirtualTextureDecodedCacheBudgetMiB
+        {
+            get => Mathf.Max(0, m_VirtualTextureDecodedCacheBudgetMiB);
+            set => m_VirtualTextureDecodedCacheBudgetMiB = Mathf.Max(0, value);
         }
 
         public bool EnableGPUDrivenDecal

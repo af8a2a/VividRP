@@ -4,6 +4,7 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 
 namespace VividRP.Runtime
@@ -140,11 +141,13 @@ namespace VividRP.Runtime
             private readonly VividVirtualTextureTilePayload m_Payload;
             private readonly int m_ExpectedPixelCount;
             private readonly VTLayerDesc[] m_Layers;
+            private VTChunkLease m_Lease;
 
             internal Finalizer(
                 in VividVirtualTextureTilePayload payload,
                 int expectedPixelCount,
-                VTLayerDesc[] layers)
+                VTLayerDesc[] layers,
+                VTChunkLease lease = null)
             {
                 m_Payload = payload;
                 m_ExpectedPixelCount = expectedPixelCount;
@@ -158,6 +161,7 @@ namespace VividRP.Runtime
                             false,
                             new Color32(0, 0, 0, 255)),
                     };
+                m_Lease = lease;
             }
 
             public void FinalizeRender(CommandBuffer cmd)
@@ -214,6 +218,8 @@ namespace VividRP.Runtime
 
             public void Dispose()
             {
+                m_Lease?.Dispose();
+                m_Lease = null;
             }
 
             private void FillFallback(int layerIndex, Color32[] scratchPixels, int pixelCount)
@@ -224,15 +230,126 @@ namespace VividRP.Runtime
             }
         }
 
+        private sealed class ChunkTileRequest : IVTPageProducerTask, IDisposable
+        {
+            private VTChunkLease m_Lease;
+
+            internal ChunkTileRequest(VTChunkLease lease, in VividVirtualTextureTilePayloadLocation location)
+            {
+                m_Lease = lease ?? throw new ArgumentNullException(nameof(lease));
+                Location = location;
+            }
+
+            internal VividVirtualTextureTilePayloadLocation Location { get; }
+
+            internal VTStreamChunkState State => m_Lease?.State ?? VTStreamChunkState.Failed;
+
+            internal string Error => m_Lease?.Error;
+
+            public bool IsCompleted => State is VTStreamChunkState.Ready or VTStreamChunkState.Failed;
+
+            internal VTChunkLease DetachLease()
+            {
+                VTChunkLease lease = m_Lease;
+                m_Lease = null;
+                return lease;
+            }
+
+            internal bool TryGetPayload(out VividVirtualTextureTilePayload payload)
+            {
+                payload = default;
+                return m_Lease != null && m_Lease.TryGetTilePayload(Location, out payload);
+            }
+
+            public void Dispose()
+            {
+                m_Lease?.Dispose();
+                m_Lease = null;
+            }
+        }
+
+        private sealed class EncodedFinalizer : IVTEncodedPageFinalizer
+        {
+            private readonly VividVirtualTextureTilePayload m_Payload;
+            private readonly VTLayerDesc[] m_Layers;
+            private readonly int m_PhysicalPageSize;
+            private VTChunkLease m_Lease;
+
+            internal EncodedFinalizer(
+                in VividVirtualTextureTilePayload payload,
+                VTLayerDesc[] layers,
+                int physicalPageSize,
+                VTChunkLease lease)
+            {
+                m_Payload = payload;
+                m_Layers = layers ?? throw new ArgumentNullException(nameof(layers));
+                m_PhysicalPageSize = physicalPageSize;
+                m_Lease = lease ?? throw new ArgumentNullException(nameof(lease));
+            }
+
+            public int LayerCount => m_Layers.Length;
+
+            public void FinalizeEncodedUploadLayer(Texture2DArray stagingTexture, int slice, int layerIndex)
+            {
+                if (stagingTexture == null)
+                    throw new ArgumentNullException(nameof(stagingTexture));
+                if (!m_Payload.IsValid)
+                    throw new InvalidOperationException("[VividRP] Invalid encoded virtual texture tile payload.");
+                if (layerIndex < 0 || layerIndex >= m_Layers.Length)
+                    throw new ArgumentOutOfRangeException(nameof(layerIndex));
+
+                int relativeOffset = 0;
+                for (int index = 0; index < layerIndex; index++)
+                    relativeOffset = checked(relativeOffset + GetLayerByteSize(m_Layers[index], m_PhysicalPageSize));
+                int layerByteSize = GetLayerByteSize(m_Layers[layerIndex], m_PhysicalPageSize);
+                if (relativeOffset > m_Payload.ByteSize - layerByteSize)
+                    throw new InvalidOperationException("[VividRP] Encoded VT layer payload is truncated.");
+
+                stagingTexture.SetPixelData(
+                    m_Payload.Data,
+                    mipLevel: 0,
+                    element: slice,
+                    sourceDataStartIndex: m_Payload.ByteOffset + relativeOffset);
+            }
+
+            public void Dispose()
+            {
+                m_Lease?.Dispose();
+                m_Lease = null;
+            }
+
+            private static int GetLayerByteSize(in VTLayerDesc layer, int physicalPageSize)
+            {
+                uint blockWidth = Math.Max(
+                    1u,
+                    UnityEngine.Experimental.Rendering.GraphicsFormatUtility.GetBlockWidth(layer.GraphicsFormat));
+                uint blockHeight = Math.Max(
+                    1u,
+                    UnityEngine.Experimental.Rendering.GraphicsFormatUtility.GetBlockHeight(layer.GraphicsFormat));
+                uint blockSize = Math.Max(
+                    1u,
+                    UnityEngine.Experimental.Rendering.GraphicsFormatUtility.GetBlockSize(layer.GraphicsFormat));
+                long blocksX = (physicalPageSize + blockWidth - 1) / blockWidth;
+                long blocksY = (physicalPageSize + blockHeight - 1) / blockHeight;
+                return checked((int)(blocksX * blocksY * blockSize));
+            }
+        }
+
         private static Func<string, int, int, CancellationToken, Task<byte[]>> s_StreamReadHandler = ReadRangeAsync;
         private static Func<string, int, int, byte[]> s_SynchronousStreamReadHandler = ReadRange;
+        private static bool s_UseLegacyStreamReadHandlersForTesting;
 
         private readonly VividVirtualTextureAsset m_Asset;
         private readonly VividVirtualTextureBuiltData m_BuiltData;
         private readonly Dictionary<TileKey, StreamTileTask> m_StreamTasks = new();
+        private readonly Dictionary<TileKey, ChunkTileRequest> m_ChunkRequests = new();
         private readonly HashSet<TileKey> m_LiveStreamTaskKeys = new();
         private readonly List<TileKey> m_RetiredStreamTaskKeys = new();
         private readonly string m_ResolvedStreamDataPath;
+        private readonly bool m_StorageSupported;
+        private readonly bool m_ContainerHeaderValid;
+        private bool m_ChunkFailureWarningLogged;
+        private bool m_HasPermanentFailure;
 
         internal VividVirtualTextureAssetProducer(VividVirtualTextureAsset asset)
         {
@@ -245,6 +362,25 @@ namespace VividRP.Runtime
             m_ResolvedStreamDataPath = ResolveStreamDataPath(
                 m_BuiltData.StreamDataPath,
                 m_BuiltData.RuntimeStreamDataPath);
+            m_StorageSupported = IsStorageSupported(m_BuiltData, out string unsupportedStorageReason);
+            if (!m_StorageSupported)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] Streamed VT asset '{asset.name}' cannot be registered: {unsupportedStorageReason} "
+                    + "Material and page-table fallbacks remain active.",
+                    asset);
+            }
+            m_ContainerHeaderValid = m_BuiltData.ContainerSchemaVersion < VividVirtualTextureBuiltData.CurrentContainerSchemaVersion
+                                     || ValidateContainerHeader(m_ResolvedStreamDataPath, m_BuiltData);
+            m_HasPermanentFailure = !m_StorageSupported || !m_ContainerHeaderValid;
+            if (m_BuiltData.ContainerSchemaVersion >= VividVirtualTextureBuiltData.CurrentContainerSchemaVersion
+                && !m_ContainerHeaderValid)
+            {
+                Debug.LogWarning(
+                    $"[VividRP] Streamed VT asset '{asset.name}' has a missing, truncated, or mismatched v2 "
+                    + "container header. The existing VT fallback remains active.",
+                    asset);
+            }
 
             string producerName = string.IsNullOrWhiteSpace(asset.name)
                 ? nameof(VividVirtualTextureAsset)
@@ -273,11 +409,18 @@ namespace VividRP.Runtime
             in VirtualTextureSpaceDesc desc,
             in VTRequest request)
         {
+            if (m_HasPermanentFailure)
+                return VTPageRequestStatus.Invalid;
+
             if (!m_BuiltData.Matches(desc)
                 || !m_BuiltData.TryGetTilePayloadLocation(request.PageCoord, out VividVirtualTextureTilePayloadLocation location))
             {
+                m_HasPermanentFailure = true;
                 return VTPageRequestStatus.Invalid;
             }
+
+            if (UsesSharedChunkManager)
+                return RequestChunkData(request, location);
 
             if (m_BuiltData.HasInlineRawData)
                 return VTPageRequestStatus.Available;
@@ -316,6 +459,9 @@ namespace VividRP.Runtime
                 return null;
             }
 
+            if (UsesSharedChunkManager)
+                return ProduceEncodedPageData(desc, request);
+
             VividVirtualTextureTilePayload payload;
             if (m_BuiltData.HasInlineRawData)
             {
@@ -337,6 +483,87 @@ namespace VividRP.Runtime
             return new Finalizer(payload, pixelCount, CopyLayers(desc.StackDesc));
         }
 
+        private VTPageRequestStatus RequestChunkData(
+            in VTRequest request,
+            in VividVirtualTextureTilePayloadLocation location)
+        {
+            if (!m_StorageSupported
+                || !m_ContainerHeaderValid
+                || !m_BuiltData.HasStreamData
+                || string.IsNullOrWhiteSpace(m_ResolvedStreamDataPath))
+            {
+                m_HasPermanentFailure = true;
+                return VTPageRequestStatus.Invalid;
+            }
+
+            TileKey key = new(request.PageCoord);
+            if (!m_ChunkRequests.TryGetValue(key, out ChunkTileRequest chunkRequest))
+            {
+                bool highPriority = request.PageCoord.Mip == m_BuiltData.MipCount - 1
+                                    || (location.Flags & VividVirtualTextureChunkFlags.MipTail) != 0;
+                VTChunkLease lease = VTStreamChunkManager.Shared.Acquire(
+                    m_ResolvedStreamDataPath,
+                    m_BuiltData.ContentVersion,
+                    location,
+                    highPriority);
+                if (lease == null)
+                    return VTPageRequestStatus.Saturated;
+
+                chunkRequest = new ChunkTileRequest(lease, location);
+                m_ChunkRequests.Add(key, chunkRequest);
+            }
+
+            if (chunkRequest.State == VTStreamChunkState.Ready)
+                return VTPageRequestStatus.Available;
+            if (chunkRequest.State == VTStreamChunkState.Failed)
+            {
+                m_HasPermanentFailure = true;
+                if (!m_ChunkFailureWarningLogged)
+                {
+                    m_ChunkFailureWarningLogged = true;
+                    Debug.LogWarning(
+                        $"[VividRP] Streamed VT asset '{m_Asset.name}' rejected chunk {location.ChunkIndex}: "
+                        + $"{chunkRequest.Error ?? "unknown read or decode failure"}. The existing VT fallback remains active.",
+                        m_Asset);
+                }
+
+                RemoveChunkRequest(key);
+                return VTPageRequestStatus.Invalid;
+            }
+
+            return VTPageRequestStatus.Pending;
+        }
+
+        private IVTPageUploadFinalizer ProduceEncodedPageData(
+            in VirtualTextureSpaceDesc desc,
+            in VTRequest request)
+        {
+            TileKey key = new(request.PageCoord);
+            if (!m_ChunkRequests.TryGetValue(key, out ChunkTileRequest chunkRequest)
+                || chunkRequest.State != VTStreamChunkState.Ready
+                || !chunkRequest.TryGetPayload(out VividVirtualTextureTilePayload payload))
+            {
+                return null;
+            }
+
+            VTChunkLease lease = chunkRequest.DetachLease();
+            m_ChunkRequests.Remove(key);
+            if (m_BuiltData.StorageProfile == VividVirtualTextureStorageProfile.LegacyRGBA32)
+            {
+                return new Finalizer(
+                    payload,
+                    desc.PhysicalPageSize * desc.PhysicalPageSize,
+                    CopyLayers(desc.StackDesc),
+                    lease);
+            }
+
+            return new EncodedFinalizer(
+                payload,
+                CopyLayers(desc.StackDesc),
+                desc.PhysicalPageSize,
+                lease);
+        }
+
         public void GatherTasks(List<IVTPageProducerTask> tasks)
         {
             if (tasks == null)
@@ -347,6 +574,12 @@ namespace VividRP.Runtime
                 if (!task.IsCompleted)
                     tasks.Add(task);
             }
+
+            foreach (ChunkTileRequest request in m_ChunkRequests.Values)
+            {
+                if (!request.IsCompleted)
+                    tasks.Add(request);
+            }
         }
 
         public void CancelRequest(
@@ -354,11 +587,12 @@ namespace VividRP.Runtime
             in VTRequest request)
         {
             RemoveStreamTask(new TileKey(request.PageCoord));
+            RemoveChunkRequest(new TileKey(request.PageCoord));
         }
 
         public void RetireRequests(IReadOnlyList<VTRequest> liveRequests)
         {
-            if (m_StreamTasks.Count == 0)
+            if (m_StreamTasks.Count == 0 && m_ChunkRequests.Count == 0)
                 return;
 
             m_LiveStreamTaskKeys.Clear();
@@ -375,8 +609,17 @@ namespace VividRP.Runtime
                     m_RetiredStreamTaskKeys.Add(key);
             }
 
+            foreach (TileKey key in m_ChunkRequests.Keys)
+            {
+                if (!m_LiveStreamTaskKeys.Contains(key))
+                    m_RetiredStreamTaskKeys.Add(key);
+            }
+
             for (int keyIndex = 0; keyIndex < m_RetiredStreamTaskKeys.Count; keyIndex++)
+            {
                 RemoveStreamTask(m_RetiredStreamTaskKeys[keyIndex]);
+                RemoveChunkRequest(m_RetiredStreamTaskKeys[keyIndex]);
+            }
 
             m_RetiredStreamTaskKeys.Clear();
         }
@@ -386,12 +629,18 @@ namespace VividRP.Runtime
             foreach (StreamTileTask task in m_StreamTasks.Values)
                 task.Dispose();
 
+            foreach (ChunkTileRequest request in m_ChunkRequests.Values)
+                request.Dispose();
+
             m_StreamTasks.Clear();
+            m_ChunkRequests.Clear();
             m_LiveStreamTaskKeys.Clear();
             m_RetiredStreamTaskKeys.Clear();
         }
 
-        internal int PendingStreamTaskCountForTesting => m_StreamTasks.Count;
+        internal int PendingStreamTaskCountForTesting => m_StreamTasks.Count + m_ChunkRequests.Count;
+
+        internal bool HasPermanentFailure => m_HasPermanentFailure;
 
         internal static void SetStreamReadHandlersForTesting(
             Func<string, int, int, CancellationToken, Task<byte[]>> asyncReadHandler,
@@ -399,12 +648,14 @@ namespace VividRP.Runtime
         {
             s_StreamReadHandler = asyncReadHandler ?? ReadRangeAsync;
             s_SynchronousStreamReadHandler = synchronousReadHandler ?? ReadRange;
+            s_UseLegacyStreamReadHandlersForTesting = true;
         }
 
         internal static void ResetStreamReadHandlersForTesting()
         {
             s_StreamReadHandler = ReadRangeAsync;
             s_SynchronousStreamReadHandler = ReadRange;
+            s_UseLegacyStreamReadHandlersForTesting = false;
             VTVirtualTextureStreamRequestGate.ResetForTesting();
         }
 
@@ -415,6 +666,10 @@ namespace VividRP.Runtime
 
         internal static int GlobalPendingStreamReadCountForTesting =>
             VTVirtualTextureStreamRequestGate.PendingReadCount;
+
+        private bool UsesSharedChunkManager =>
+            m_BuiltData.ContainerSchemaVersion >= VividVirtualTextureBuiltData.CurrentContainerSchemaVersion
+            || (!m_BuiltData.HasInlineRawData && !s_UseLegacyStreamReadHandlersForTesting);
 
         private bool TryGetOrStartStreamTask(
             in TileKey key,
@@ -493,6 +748,83 @@ namespace VividRP.Runtime
 
             task.Dispose();
             m_StreamTasks.Remove(key);
+        }
+
+        private void RemoveChunkRequest(in TileKey key)
+        {
+            if (!m_ChunkRequests.TryGetValue(key, out ChunkTileRequest request))
+                return;
+
+            request.Dispose();
+            m_ChunkRequests.Remove(key);
+        }
+
+        private static bool IsStorageSupported(
+            VividVirtualTextureBuiltData builtData,
+            out string unsupportedReason)
+        {
+            if (builtData == null
+                || builtData.StorageProfile == VividVirtualTextureStorageProfile.LegacyRGBA32)
+            {
+                unsupportedReason = null;
+                return true;
+            }
+
+            CopyTextureSupport requiredCopySupport =
+                CopyTextureSupport.Basic | CopyTextureSupport.DifferentTypes;
+            if ((SystemInfo.copyTextureSupport & requiredCopySupport) != requiredCopySupport)
+            {
+                unsupportedReason =
+                    "the active graphics device cannot CopyTexture compressed Texture2DArray slices into the 2D VT atlas";
+                return false;
+            }
+
+            for (int layerIndex = 0; layerIndex < builtData.LayerCount; layerIndex++)
+            {
+                GraphicsFormat storageFormat = GraphicsFormatUtility.GetLinearFormat(builtData.Layers[layerIndex].Format);
+                if (!SystemInfo.IsFormatSupported(storageFormat, GraphicsFormatUsage.Sample))
+                {
+                    unsupportedReason = $"physical layer {layerIndex} uses unsupported sample format {storageFormat}";
+                    return false;
+                }
+            }
+
+            unsupportedReason = null;
+            return true;
+        }
+
+        private static bool ValidateContainerHeader(string path, VividVirtualTextureBuiltData builtData)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                return false;
+
+            try
+            {
+                var header = new byte[32];
+                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                if (stream.Length != builtData.StreamDataByteSize64 || stream.Read(header, 0, header.Length) != header.Length)
+                    return false;
+
+                return header[0] == (byte)'V'
+                       && header[1] == (byte)'I'
+                       && header[2] == (byte)'V'
+                       && header[3] == (byte)'I'
+                       && header[4] == (byte)'D'
+                       && header[5] == (byte)'V'
+                       && header[6] == (byte)'T'
+                       && header[7] == (byte)'2'
+                       && BitConverter.ToInt32(header, 8) == builtData.ContainerSchemaVersion
+                       && BitConverter.ToUInt32(header, 12) == builtData.ContentVersion
+                       && BitConverter.ToInt32(header, 16) == builtData.ChunkCount;
+            }
+            catch (IOException)
+            {
+                return false;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
         }
 
         private static string ResolveStreamDataPath(

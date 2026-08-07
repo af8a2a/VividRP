@@ -27,7 +27,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("_VTFeedbackCounter"));
             Assert.That(source, Does.Contain("register(u1)"));
             Assert.That(source, Does.Contain("register(u2)"));
-            Assert.That(source, Does.Contain("float _VTSpaceParams[32];"));
+            Assert.That(source, Does.Contain("float _VTSpaceParams[33];"));
+            Assert.That(source, Does.Contain("#define VT_LAYER_ENCODING_WORD    ((int)_VTSpaceParams[32])"));
+            Assert.That(source, Does.Contain("uint VTGetLayerEncoding(uint layerIndex)"));
+            Assert.That(source, Does.Contain("float4 VTApplyLayerEncoding(float4 value, uint layerIndex)"));
             Assert.That(source, Does.Contain("float4 _VTLayerFallbacks[4];"));
             Assert.That(source, Does.Contain("float _VTMipOffsets[VIVID_VT_MAX_MIPS];"));
             Assert.That(source, Does.Contain("int _VTDebugMode;"));

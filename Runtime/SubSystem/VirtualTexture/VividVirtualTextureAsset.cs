@@ -21,6 +21,55 @@ namespace VividRP.Runtime
         RawRGBA32 = 0,
     }
 
+    public enum VividVirtualTextureStorageProfile
+    {
+        LegacyRGBA32 = 0,
+        DesktopBCn = 1,
+    }
+
+    public enum VividVirtualTextureStreamCompression
+    {
+        None = 0,
+        Zstd = 1,
+        GDeflate = 2,
+    }
+
+    public enum VividVirtualTextureMaskStorage
+    {
+        PackedRGBA = 0,
+        SingleChannelR = 1,
+    }
+
+    public enum VividVirtualTextureIOBackendMode
+    {
+        Auto = 0,
+        AsyncReadManager = 1,
+        DirectStorage = 2,
+    }
+
+    public enum VividVirtualTextureBCQuality
+    {
+        Fast = 0,
+        Normal = 1,
+        High = 2,
+    }
+
+    public enum VTLayerDataEncoding
+    {
+        RGBA = 0,
+        LegacyNormalAG = 1,
+        NormalRG = 2,
+        SingleChannelR = 3,
+    }
+
+    [Flags]
+    public enum VividVirtualTextureChunkFlags
+    {
+        None = 0,
+        MipTail = 1 << 0,
+        LegacySynthetic = 1 << 1,
+    }
+
     [Serializable]
     public struct VividVirtualTextureLayerDescriptor : IEquatable<VividVirtualTextureLayerDescriptor>
     {
@@ -39,11 +88,17 @@ namespace VividRP.Runtime
         [SerializeField]
         private int m_PhysicalGroup;
 
+        [SerializeField]
+        private VTLayerDataEncoding m_Encoding;
+
+        [SerializeField]
+        private bool m_HasExplicitEncoding;
+
         public VividVirtualTextureLayerDescriptor(
             GraphicsFormat format,
             bool sRGB,
             Color32 fallbackColor)
-            : this(VTLayerSemantic.BaseColor, format, sRGB, fallbackColor, 0)
+            : this(VTLayerSemantic.BaseColor, format, sRGB, fallbackColor, 0, VTLayerDataEncoding.RGBA)
         {
         }
 
@@ -52,13 +107,16 @@ namespace VividRP.Runtime
             GraphicsFormat format,
             bool sRGB,
             Color32 fallbackColor,
-            int physicalGroup = 0)
+            int physicalGroup = 0,
+            VTLayerDataEncoding encoding = VTLayerDataEncoding.RGBA)
         {
             m_Semantic = semantic;
             m_Format = format;
             m_SRGB = sRGB;
             m_FallbackColor = fallbackColor;
             m_PhysicalGroup = Mathf.Max(0, physicalGroup);
+            m_Encoding = encoding;
+            m_HasExplicitEncoding = true;
         }
 
         public VTLayerSemantic Semantic => m_Semantic;
@@ -71,13 +129,20 @@ namespace VividRP.Runtime
 
         public int PhysicalGroup => m_PhysicalGroup;
 
+        public VTLayerDataEncoding Encoding => m_HasExplicitEncoding
+            ? m_Encoding
+            : m_Semantic == VTLayerSemantic.Normal
+                ? VTLayerDataEncoding.LegacyNormalAG
+                : VTLayerDataEncoding.RGBA;
+
         public bool Equals(VividVirtualTextureLayerDescriptor other)
         {
             return m_Semantic == other.m_Semantic
                    && m_Format == other.m_Format
                    && m_SRGB == other.m_SRGB
                    && m_FallbackColor.Equals(other.m_FallbackColor)
-                   && m_PhysicalGroup == other.m_PhysicalGroup;
+                   && m_PhysicalGroup == other.m_PhysicalGroup
+                   && Encoding == other.Encoding;
         }
 
         public override bool Equals(object obj)
@@ -87,7 +152,7 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(m_Semantic, m_Format, m_SRGB, m_FallbackColor, m_PhysicalGroup);
+            return HashCode.Combine(m_Semantic, m_Format, m_SRGB, m_FallbackColor, m_PhysicalGroup, Encoding);
         }
     }
 
@@ -109,6 +174,30 @@ namespace VividRP.Runtime
         [SerializeField]
         private VividVirtualTextureCodec m_Codec;
 
+        [SerializeField]
+        private long m_FileOffset;
+
+        [SerializeField]
+        private int m_StoredByteSize;
+
+        [SerializeField]
+        private int m_DecodedByteSize;
+
+        [SerializeField]
+        private VividVirtualTextureStreamCompression m_Compression;
+
+        [SerializeField]
+        private uint m_DecodedPayloadCRC;
+
+        [SerializeField]
+        private int m_FirstTile;
+
+        [SerializeField]
+        private int m_TileCount;
+
+        [SerializeField]
+        private VividVirtualTextureChunkFlags m_Flags;
+
         public VividVirtualTextureChunkDescriptor(
             int firstMip,
             int mipCount,
@@ -121,6 +210,48 @@ namespace VividRP.Runtime
             m_ByteOffset = byteOffset;
             m_ByteSize = byteSize;
             m_Codec = codec;
+            m_FileOffset = 0;
+            m_StoredByteSize = 0;
+            m_DecodedByteSize = 0;
+            m_Compression = VividVirtualTextureStreamCompression.None;
+            m_DecodedPayloadCRC = 0;
+            m_FirstTile = 0;
+            m_TileCount = 0;
+            m_Flags = VividVirtualTextureChunkFlags.None;
+        }
+
+        public VividVirtualTextureChunkDescriptor(
+            int firstMip,
+            int mipCount,
+            int firstTile,
+            int tileCount,
+            long fileOffset,
+            int storedByteSize,
+            int decodedByteSize,
+            VividVirtualTextureStreamCompression compression,
+            uint decodedPayloadCRC,
+            VividVirtualTextureChunkFlags flags = VividVirtualTextureChunkFlags.None)
+        {
+            if (fileOffset < 0)
+                throw new ArgumentOutOfRangeException(nameof(fileOffset));
+            if (storedByteSize < 0)
+                throw new ArgumentOutOfRangeException(nameof(storedByteSize));
+            if (decodedByteSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(decodedByteSize));
+
+            m_FirstMip = firstMip;
+            m_MipCount = mipCount;
+            m_ByteOffset = fileOffset <= int.MaxValue ? (int)fileOffset : 0;
+            m_ByteSize = storedByteSize;
+            m_Codec = VividVirtualTextureCodec.RawRGBA32;
+            m_FileOffset = fileOffset;
+            m_StoredByteSize = storedByteSize;
+            m_DecodedByteSize = decodedByteSize;
+            m_Compression = compression;
+            m_DecodedPayloadCRC = decodedPayloadCRC;
+            m_FirstTile = firstTile;
+            m_TileCount = tileCount;
+            m_Flags = flags;
         }
 
         public int FirstMip => m_FirstMip;
@@ -133,6 +264,26 @@ namespace VividRP.Runtime
 
         public VividVirtualTextureCodec Codec => m_Codec;
 
+        public bool UsesContainerSchemaV2 => m_DecodedByteSize > 0;
+
+        public long FileOffset => UsesContainerSchemaV2 ? m_FileOffset : m_ByteOffset;
+
+        public int StoredByteSize => UsesContainerSchemaV2 ? m_StoredByteSize : m_ByteSize;
+
+        public int DecodedByteSize => UsesContainerSchemaV2 ? m_DecodedByteSize : m_ByteSize;
+
+        public VividVirtualTextureStreamCompression Compression => UsesContainerSchemaV2
+            ? m_Compression
+            : VividVirtualTextureStreamCompression.None;
+
+        public uint DecodedPayloadCRC => m_DecodedPayloadCRC;
+
+        public int FirstTile => m_FirstTile;
+
+        public int TileCount => m_TileCount;
+
+        public VividVirtualTextureChunkFlags Flags => m_Flags;
+
         public bool ContainsMip(int mip)
         {
             return mip >= m_FirstMip && mip < m_FirstMip + m_MipCount;
@@ -142,8 +293,8 @@ namespace VividRP.Runtime
         {
             return relativeOffset >= 0
                    && byteSize >= 0
-                   && relativeOffset <= m_ByteSize
-                   && byteSize <= m_ByteSize - relativeOffset;
+                   && relativeOffset <= DecodedByteSize
+                   && byteSize <= DecodedByteSize - relativeOffset;
         }
 
         public bool Equals(VividVirtualTextureChunkDescriptor other)
@@ -152,7 +303,15 @@ namespace VividRP.Runtime
                    && m_MipCount == other.m_MipCount
                    && m_ByteOffset == other.m_ByteOffset
                    && m_ByteSize == other.m_ByteSize
-                   && m_Codec == other.m_Codec;
+                   && m_Codec == other.m_Codec
+                   && m_FileOffset == other.m_FileOffset
+                   && m_StoredByteSize == other.m_StoredByteSize
+                   && m_DecodedByteSize == other.m_DecodedByteSize
+                   && m_Compression == other.m_Compression
+                   && m_DecodedPayloadCRC == other.m_DecodedPayloadCRC
+                   && m_FirstTile == other.m_FirstTile
+                   && m_TileCount == other.m_TileCount
+                   && m_Flags == other.m_Flags;
         }
 
         public override bool Equals(object obj)
@@ -162,7 +321,21 @@ namespace VividRP.Runtime
 
         public override int GetHashCode()
         {
-            return HashCode.Combine(m_FirstMip, m_MipCount, m_ByteOffset, m_ByteSize, m_Codec);
+            var hash = new HashCode();
+            hash.Add(m_FirstMip);
+            hash.Add(m_MipCount);
+            hash.Add(m_ByteOffset);
+            hash.Add(m_ByteSize);
+            hash.Add(m_Codec);
+            hash.Add(m_FileOffset);
+            hash.Add(m_StoredByteSize);
+            hash.Add(m_DecodedByteSize);
+            hash.Add(m_Compression);
+            hash.Add(m_DecodedPayloadCRC);
+            hash.Add(m_FirstTile);
+            hash.Add(m_TileCount);
+            hash.Add(m_Flags);
+            return hash.ToHashCode();
         }
     }
 
@@ -256,20 +429,59 @@ namespace VividRP.Runtime
 
     internal readonly struct VividVirtualTextureTilePayloadLocation
     {
-        internal VividVirtualTextureTilePayloadLocation(int byteOffset, int byteSize, VividVirtualTextureCodec codec)
+        internal VividVirtualTextureTilePayloadLocation(
+            int chunkIndex,
+            long fileOffset,
+            int storedByteSize,
+            int decodedByteSize,
+            int tileByteOffset,
+            int tileByteSize,
+            VividVirtualTextureStreamCompression compression,
+            uint decodedPayloadCRC,
+            VividVirtualTextureChunkFlags flags)
         {
-            ByteOffset = byteOffset;
-            ByteSize = byteSize;
-            Codec = codec;
+            ChunkIndex = chunkIndex;
+            FileOffset = fileOffset;
+            StoredByteSize = storedByteSize;
+            DecodedByteSize = decodedByteSize;
+            TileByteOffset = tileByteOffset;
+            TileByteSize = tileByteSize;
+            Compression = compression;
+            DecodedPayloadCRC = decodedPayloadCRC;
+            Flags = flags;
         }
 
-        internal int ByteOffset { get; }
+        internal int ChunkIndex { get; }
 
-        internal int ByteSize { get; }
+        internal long FileOffset { get; }
 
-        internal VividVirtualTextureCodec Codec { get; }
+        internal int StoredByteSize { get; }
 
-        internal bool IsValid => ByteOffset >= 0 && ByteSize >= 0;
+        internal int DecodedByteSize { get; }
+
+        internal int TileByteOffset { get; }
+
+        internal int TileByteSize { get; }
+
+        internal VividVirtualTextureStreamCompression Compression { get; }
+
+        internal uint DecodedPayloadCRC { get; }
+
+        internal VividVirtualTextureChunkFlags Flags { get; }
+
+        internal int ByteOffset => checked((int)FileOffset + TileByteOffset);
+
+        internal int ByteSize => TileByteSize;
+
+        internal VividVirtualTextureCodec Codec => VividVirtualTextureCodec.RawRGBA32;
+
+        internal bool IsValid => ChunkIndex >= 0
+                                 && FileOffset >= 0
+                                 && StoredByteSize >= 0
+                                 && DecodedByteSize >= 0
+                                 && TileByteOffset >= 0
+                                 && TileByteSize >= 0
+                                 && TileByteOffset <= DecodedByteSize - TileByteSize;
     }
 
     public sealed class VividVirtualTextureAsset : ScriptableObject, VTProducer
@@ -306,6 +518,16 @@ namespace VividRP.Runtime
         public int ContentLayerMask => m_BuiltData != null ? m_BuiltData.ContentLayerMask : 0;
 
         public uint ContentVersion => m_BuiltData != null ? m_BuiltData.ContentVersion : 0u;
+
+        public int ContainerSchemaVersion => m_BuiltData != null ? m_BuiltData.ContainerSchemaVersion : 0;
+
+        public VividVirtualTextureStorageProfile StorageProfile => m_BuiltData != null
+            ? m_BuiltData.StorageProfile
+            : VividVirtualTextureStorageProfile.LegacyRGBA32;
+
+        public VividVirtualTextureMaskStorage MaskStorage => m_BuiltData != null
+            ? m_BuiltData.MaskStorage
+            : VividVirtualTextureMaskStorage.PackedRGBA;
 
         public VividVirtualTextureAddressMode AddressMode => m_BuiltData != null
             ? m_BuiltData.AddressMode

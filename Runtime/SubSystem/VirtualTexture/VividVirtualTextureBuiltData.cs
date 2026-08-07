@@ -7,6 +7,8 @@ namespace VividRP.Runtime
 {
     public sealed class VividVirtualTextureBuiltData : ScriptableObject
     {
+        public const int CurrentContainerSchemaVersion = 2;
+
         [SerializeField]
         private string m_SourceTextureGUID = string.Empty;
 
@@ -41,10 +43,16 @@ namespace VividRP.Runtime
         private int[] m_MipTileOffsets = Array.Empty<int>();
 
         [SerializeField]
+        private int[] m_TileLookup = Array.Empty<int>();
+
+        [SerializeField]
         private string m_StreamDataPath = string.Empty;
 
         [SerializeField]
         private int m_StreamDataByteSize;
+
+        [SerializeField]
+        private long m_StreamDataByteSize64;
 
         [SerializeField]
         private byte[] m_RawData = Array.Empty<byte>();
@@ -63,6 +71,15 @@ namespace VividRP.Runtime
 
         [SerializeField]
         private string m_RuntimeStreamDataPath = string.Empty;
+
+        [SerializeField]
+        private int m_ContainerSchemaVersion;
+
+        [SerializeField]
+        private VividVirtualTextureStorageProfile m_StorageProfile;
+
+        [SerializeField]
+        private VividVirtualTextureMaskStorage m_MaskStorage;
 
         public string SourceTextureGUID => m_SourceTextureGUID;
 
@@ -86,11 +103,15 @@ namespace VividRP.Runtime
 
         public int TileCount => m_Tiles?.Length ?? 0;
 
-        public int RawDataByteSize => HasInlineRawData ? m_RawData.Length : m_StreamDataByteSize;
+        public long RawDataByteSize => HasInlineRawData ? m_RawData.LongLength : StreamDataByteSize64;
 
         public string StreamDataPath => m_StreamDataPath;
 
         public int StreamDataByteSize => m_StreamDataByteSize;
+
+        public long StreamDataByteSize64 => m_StreamDataByteSize64 > 0
+            ? m_StreamDataByteSize64
+            : m_StreamDataByteSize;
 
         public bool HasInlineRawData => m_RawData != null && m_RawData.Length > 0;
 
@@ -105,6 +126,12 @@ namespace VividRP.Runtime
         public VividVirtualTextureAddressMode AddressMode => m_AddressMode;
 
         public string RuntimeStreamDataPath => m_RuntimeStreamDataPath;
+
+        public int ContainerSchemaVersion => m_ContainerSchemaVersion;
+
+        public VividVirtualTextureStorageProfile StorageProfile => m_StorageProfile;
+
+        public VividVirtualTextureMaskStorage MaskStorage => m_MaskStorage;
 
         public IReadOnlyList<VividVirtualTextureLayerDescriptor> Layers => m_Layers;
 
@@ -135,7 +162,12 @@ namespace VividRP.Runtime
             int contentLayerMask = 1,
             uint contentVersion = 1,
             VividVirtualTextureAddressMode addressMode = VividVirtualTextureAddressMode.Clamp,
-            string runtimeStreamDataPath = null)
+            string runtimeStreamDataPath = null,
+            int containerSchemaVersion = 0,
+            VividVirtualTextureStorageProfile storageProfile = VividVirtualTextureStorageProfile.LegacyRGBA32,
+            int[] tileLookup = null,
+            long streamDataByteSize64 = 0,
+            VividVirtualTextureMaskStorage maskStorage = VividVirtualTextureMaskStorage.PackedRGBA)
         {
             m_SourceTextureGUID = sourceTextureGUID ?? string.Empty;
             m_SourceTexturePath = sourceTexturePath ?? string.Empty;
@@ -148,14 +180,19 @@ namespace VividRP.Runtime
             m_Chunks = chunks ?? Array.Empty<VividVirtualTextureChunkDescriptor>();
             m_Tiles = tiles ?? Array.Empty<VividVirtualTextureTileDescriptor>();
             m_MipTileOffsets = mipTileOffsets ?? Array.Empty<int>();
+            m_TileLookup = tileLookup ?? Array.Empty<int>();
             m_RawData = rawData ?? Array.Empty<byte>();
             m_StreamDataPath = streamDataPath ?? string.Empty;
             m_StreamDataByteSize = Mathf.Max(0, streamDataByteSize);
+            m_StreamDataByteSize64 = Math.Max(0, streamDataByteSize64 > 0 ? streamDataByteSize64 : streamDataByteSize);
             m_BuildProfile = buildProfile;
             m_ContentLayerMask = Mathf.Max(0, contentLayerMask);
             m_ContentVersion = contentVersion != 0 ? contentVersion : 1u;
             m_AddressMode = addressMode;
             m_RuntimeStreamDataPath = runtimeStreamDataPath ?? string.Empty;
+            m_ContainerSchemaVersion = Mathf.Max(0, containerSchemaVersion);
+            m_StorageProfile = storageProfile;
+            m_MaskStorage = maskStorage;
         }
 
         internal VirtualTextureSpaceDesc CreateSpaceDesc(
@@ -184,12 +221,24 @@ namespace VividRP.Runtime
             in VirtualTexturePageCoord coord,
             out VividVirtualTextureTileDescriptor tile)
         {
+            return TryGetTileDescriptor(coord, out tile, out _);
+        }
+
+        private bool TryGetTileDescriptor(
+            in VirtualTexturePageCoord coord,
+            out VividVirtualTextureTileDescriptor tile,
+            out int tileIndex)
+        {
             tile = default;
+            tileIndex = -1;
             if (!IsCoordValid(coord) || m_Tiles == null || m_MipTileOffsets == null || coord.Mip >= m_MipTileOffsets.Length)
                 return false;
 
             int pageCountX = VirtualTextureSpaceUtility.GetPageCountX(m_VirtualPageCountX, coord.Mip);
-            int tileIndex = m_MipTileOffsets[coord.Mip] + coord.Y * pageCountX + coord.X;
+            int linearIndex = m_MipTileOffsets[coord.Mip] + coord.Y * pageCountX + coord.X;
+            tileIndex = m_TileLookup != null && linearIndex >= 0 && linearIndex < m_TileLookup.Length
+                ? m_TileLookup[linearIndex]
+                : linearIndex;
             if (tileIndex < 0 || tileIndex >= m_Tiles.Length)
                 return false;
 
@@ -217,7 +266,7 @@ namespace VividRP.Runtime
             out VividVirtualTextureTilePayloadLocation location)
         {
             location = default;
-            if (!TryGetTileDescriptor(coord, out VividVirtualTextureTileDescriptor tile))
+            if (!TryGetTileDescriptor(coord, out VividVirtualTextureTileDescriptor tile, out int tileIndex))
             {
                 return false;
             }
@@ -225,20 +274,52 @@ namespace VividRP.Runtime
             if (m_Chunks == null || tile.ChunkIndex < 0 || tile.ChunkIndex >= m_Chunks.Length)
                 return false;
 
-            int dataByteSize = RawDataByteSize;
+            long dataByteSize = RawDataByteSize;
             VividVirtualTextureChunkDescriptor chunk = m_Chunks[tile.ChunkIndex];
-            if (chunk.Codec != VividVirtualTextureCodec.RawRGBA32
-                || !chunk.ContainsMip(tile.Mip)
+            if (!chunk.ContainsMip(tile.Mip)
+                || (chunk.UsesContainerSchemaV2
+                    && (tileIndex < chunk.FirstTile || tileIndex >= chunk.FirstTile + chunk.TileCount))
                 || !chunk.ContainsByteRange(tile.ByteOffset, tile.ByteSize))
             {
                 return false;
             }
 
-            int absoluteOffset = chunk.ByteOffset + tile.ByteOffset;
-            if (absoluteOffset < 0 || tile.ByteSize < 0 || absoluteOffset > dataByteSize - tile.ByteSize)
-                return false;
+            if (!chunk.UsesContainerSchemaV2)
+            {
+                long legacyTileOffset = (long)chunk.ByteOffset + tile.ByteOffset;
+                if (legacyTileOffset < 0 || tile.ByteSize < 0 || legacyTileOffset > dataByteSize - tile.ByteSize)
+                    return false;
 
-            location = new VividVirtualTextureTilePayloadLocation(absoluteOffset, tile.ByteSize, chunk.Codec);
+                location = new VividVirtualTextureTilePayloadLocation(
+                    tile.ChunkIndex,
+                    legacyTileOffset,
+                    tile.ByteSize,
+                    tile.ByteSize,
+                    tileByteOffset: 0,
+                    tileByteSize: tile.ByteSize,
+                    compression: VividVirtualTextureStreamCompression.None,
+                    decodedPayloadCRC: 0,
+                    flags: VividVirtualTextureChunkFlags.LegacySynthetic);
+                return true;
+            }
+
+            if (chunk.FileOffset < 0
+                || chunk.StoredByteSize < 0
+                || chunk.FileOffset > dataByteSize - chunk.StoredByteSize)
+            {
+                return false;
+            }
+
+            location = new VividVirtualTextureTilePayloadLocation(
+                tile.ChunkIndex,
+                chunk.FileOffset,
+                chunk.StoredByteSize,
+                chunk.DecodedByteSize,
+                tile.ByteOffset,
+                tile.ByteSize,
+                chunk.Compression,
+                chunk.DecodedPayloadCRC,
+                chunk.Flags);
             return true;
         }
 
@@ -275,7 +356,8 @@ namespace VividRP.Runtime
                     layer.Format,
                     layer.SRGB,
                     layer.FallbackColor,
-                    layer.PhysicalGroup);
+                    layer.PhysicalGroup,
+                    layer.Encoding);
             }
 
             return layers;
@@ -297,7 +379,8 @@ namespace VividRP.Runtime
                     || stackLayer.GraphicsFormat != builtLayer.Format
                     || stackLayer.SRGB != builtLayer.SRGB
                     || !stackLayer.FallbackColor.Equals(builtLayer.FallbackColor)
-                    || stackLayer.PhysicalGroup != builtLayer.PhysicalGroup)
+                    || stackLayer.PhysicalGroup != builtLayer.PhysicalGroup
+                    || stackLayer.Encoding != builtLayer.Encoding)
                 {
                     return false;
                 }

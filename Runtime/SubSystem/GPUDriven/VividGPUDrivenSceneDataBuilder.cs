@@ -1050,7 +1050,8 @@ namespace VividRP.Runtime.GPUDriven
                 materialProxy != null ? materialProxy.StreamedVirtualTexture : null,
                 materialProxy != null ? materialProxy.BaseMap : null,
                 materialProxy != null ? materialProxy.BumpMap : null,
-                materialProxy != null ? materialProxy.MaskMap : null
+                materialProxy != null ? materialProxy.MaskMap : null,
+                materialProxy != null ? materialProxy.MaskMode : GPUDrivenMaterialMaskMode.None
             );
         }
 
@@ -1077,7 +1078,7 @@ namespace VividRP.Runtime.GPUDriven
             Texture mask = GetTexture(material, s_MaskMapPropertyId)
                            ?? GetTexture(material, s_MetallicGlossMapPropertyId)
                            ?? GetTexture(material, s_RoughnessMapPropertyId);
-            return new GPUDrivenSurfaceTextureSet(baseColor, normal, mask);
+            return new GPUDrivenSurfaceTextureSet(null, baseColor, normal, mask, GetMaskMode(material));
         }
 
         private static GPUDrivenMaterialMaskMode GetMaskMode(Material material)

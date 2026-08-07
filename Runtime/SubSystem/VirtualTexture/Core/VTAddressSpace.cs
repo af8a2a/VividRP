@@ -42,6 +42,8 @@ namespace VividRP.Runtime
         private readonly List<PendingUploadSortEntry> m_PendingUploadSortEntries = new();
         private readonly List<VTRequest> m_SortedPendingRequests = new();
         private readonly List<VTRequest> m_EligiblePendingRequests = new();
+        private readonly List<VTRequest> m_ResidentRefreshRequests = new();
+        private readonly List<VTRequest> m_LiveProducerRequests = new();
         private uint m_CachedPendingRequestRevision;
         private int m_PendingOrderCacheBuildCount;
         private int m_PendingOrderCacheHitCount;
@@ -49,6 +51,8 @@ namespace VividRP.Runtime
         private Texture2DArray m_ResidentPageStagingTexture;
         private readonly Texture2D[] m_ResidentPageConvertedStagingTextures =
             new Texture2D[VTStackDesc.MaxLayerCount];
+        private readonly Texture2DArray[] m_ResidentPageEncodedStagingTextures =
+            new Texture2DArray[VTStackDesc.MaxLayerCount];
         private Color32[] m_ResidentPageScratchPixels;
         private IVTPageProducer m_FallbackResidentPageProducer;
 
@@ -275,7 +279,7 @@ namespace VividRP.Runtime
 
             try
             {
-                if (!TryUploadResidentPage(request, allowFallbackProducer: false))
+                if (!TryUploadResidentPage(request, allowFallbackProducer: false, out _))
                 {
                     RollbackResidentPage(coord);
                     return false;
@@ -388,6 +392,8 @@ namespace VividRP.Runtime
             {
                 CoreUtils.Destroy(m_ResidentPageConvertedStagingTextures[physicalGroup]);
                 m_ResidentPageConvertedStagingTextures[physicalGroup] = null;
+                CoreUtils.Destroy(m_ResidentPageEncodedStagingTextures[physicalGroup]);
+                m_ResidentPageEncodedStagingTextures[physicalGroup] = null;
             }
             m_ResidentPageScratchPixels = null;
             m_FallbackResidentPageProducer = null;
@@ -419,31 +425,57 @@ namespace VividRP.Runtime
                             $"[VividRP] Failed to seed VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
                     }
 
-                    if (!TryUploadResidentPage(request, allowFallbackProducer: true))
+                    if (!TryUploadResidentPage(request, allowFallbackProducer: true, out bool usedFallback))
                     {
                         throw new InvalidOperationException(
                             $"[VividRP] Failed to produce VT lowest mip page {coord} for space '{Descriptor.SpaceName}'.");
                     }
+
+                    // Streamed compressed producers cannot synchronously block construction on IO/decode.
+                    // Keep the locked fallback resident, then overwrite the same physical page once its
+                    // encoded payload becomes available through the normal global upload scheduler.
+                    if (usedFallback && m_PageProducer is VividVirtualTextureAssetProducer)
+                        m_ResidentRefreshRequests.Add(request);
                 }
             }
         }
 
-        private bool TryUploadResidentPage(in VTRequest request, bool allowFallbackProducer)
+        private bool TryUploadResidentPage(
+            in VTRequest request,
+            bool allowFallbackProducer,
+            out bool usedFallback)
         {
-            bool hasCpuPayload = TryProduceUploadPayload(m_PageProducer, request, out VTPageUploadPayload payload)
-                                 && payload.Finalizer is IVTPageFinalizer;
-            if (!hasCpuPayload)
+            usedFallback = false;
+            bool hasPayload = TryProduceUploadPayload(m_PageProducer, request, out VTPageUploadPayload payload);
+            if (hasPayload && payload.Finalizer is not IVTPageFinalizer and not IVTEncodedPageFinalizer)
             {
                 payload.Finalizer?.Dispose();
                 payload = default;
+                hasPayload = false;
+            }
+
+            if (!hasPayload)
+            {
                 if (!allowFallbackProducer)
                     return false;
 
-                m_FallbackResidentPageProducer ??=
-                    VTRuntimeProducerUtility.CreateAdapter(VTProceduralPageProducer.Instance, Descriptor);
-                if (!TryProduceUploadPayload(m_FallbackResidentPageProducer, request, out payload))
-                    return false;
+                usedFallback = true;
+
+                if (UsesCompressedStorage(StackDesc))
+                {
+                    payload = new VTPageUploadPayload(request, new VTConstantEncodedPageFinalizer(StackDesc));
+                }
+                else
+                {
+                    m_FallbackResidentPageProducer ??=
+                        VTRuntimeProducerUtility.CreateAdapter(VTProceduralPageProducer.Instance, Descriptor);
+                    if (!TryProduceUploadPayload(m_FallbackResidentPageProducer, request, out payload))
+                        return false;
+                }
             }
+
+            if (payload.Finalizer is IVTEncodedPageFinalizer encodedFinalizer)
+                return UploadEncodedResidentPage(request, payload, encodedFinalizer);
 
             EnsureResidentPageUploadStorage();
             try
@@ -605,7 +637,8 @@ namespace VividRP.Runtime
                 throw new ArgumentNullException(nameof(output));
 
             IReadOnlyList<VTRequest> pendingRequests = PendingRequests;
-            if (pendingRequests == null || pendingRequests.Count == 0)
+            int pendingRequestCount = pendingRequests?.Count ?? 0;
+            if (pendingRequestCount == 0 && m_ResidentRefreshRequests.Count == 0)
             {
                 RetireProducerRequests(Array.Empty<VTRequest>());
                 return;
@@ -613,12 +646,19 @@ namespace VividRP.Runtime
 
             if (uploadScheduler == null || m_PageProducer == null || !uploadScheduler.IsEnabled)
             {
-                uploadScheduler?.AddSkippedUploadCount(pendingRequests.Count);
+                uploadScheduler?.AddSkippedUploadCount(pendingRequestCount + m_ResidentRefreshRequests.Count);
                 return;
             }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingRetireMarker.Auto())
-                RetireProducerRequests(pendingRequests);
+            {
+                m_LiveProducerRequests.Clear();
+                for (int refreshIndex = 0; refreshIndex < m_ResidentRefreshRequests.Count; refreshIndex++)
+                    m_LiveProducerRequests.Add(m_ResidentRefreshRequests[refreshIndex]);
+                for (int requestIndex = 0; requestIndex < pendingRequestCount; requestIndex++)
+                    m_LiveProducerRequests.Add(pendingRequests[requestIndex]);
+                RetireProducerRequests(m_LiveProducerRequests);
+            }
 
             using (RenderPassProfilingUtility.PrepareFrameSubsystemVirtualTextureUploadsCollectPendingGatherTasksMarker.Auto())
             {
@@ -639,6 +679,18 @@ namespace VividRP.Runtime
             }
 
             uploadScheduler.AddSkippedUploadCount(duplicateUploadCount);
+            for (int refreshIndex = 0; refreshIndex < m_ResidentRefreshRequests.Count; refreshIndex++)
+            {
+                VTRequest request = m_ResidentRefreshRequests[refreshIndex];
+                if (uploadScheduler.IsRequestInFlight(request))
+                {
+                    uploadScheduler.AddSkippedUploadCount(1);
+                    continue;
+                }
+
+                output.Add(new VTPendingUploadCandidate(this, request, locked: true, fairnessRank));
+            }
+
             for (int requestIndex = 0; requestIndex < m_EligiblePendingRequests.Count; requestIndex++)
             {
                 VTRequest request = m_EligiblePendingRequests[requestIndex];
@@ -664,7 +716,11 @@ namespace VividRP.Runtime
             if (status != VTPageRequestStatus.Available)
             {
                 if (status == VTPageRequestStatus.Invalid)
+                {
                     m_PageProducer.CancelRequest(Descriptor, request);
+                    if (!RemoveResidentRefreshRequest(request))
+                        RollbackResidentPage(request.PageCoord);
+                }
 
                 return false;
             }
@@ -691,6 +747,104 @@ namespace VividRP.Runtime
             }
 
             return true;
+        }
+
+        private bool UploadEncodedResidentPage(
+            in VTRequest request,
+            in VTPageUploadPayload payload,
+            IVTEncodedPageFinalizer encodedFinalizer)
+        {
+            if (encodedFinalizer.LayerCount != StackDesc.LayerCount)
+            {
+                payload.Finalizer.Dispose();
+                return false;
+            }
+
+            var touchedGroups = new bool[PhysicalPool.Desc.PhysicalGroupCount];
+            try
+            {
+                for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
+                {
+                    int physicalGroup = PhysicalPool.GetLayerPhysicalGroup(layerIndex);
+                    int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                    Texture2DArray stagingTexture = GetResidentPageEncodedStagingTexture(physicalGroup);
+                    encodedFinalizer.FinalizeEncodedUploadLayer(stagingTexture, physicalLayerIndex, layerIndex);
+                    touchedGroups[physicalGroup] = true;
+                }
+
+                for (int physicalGroup = 0; physicalGroup < touchedGroups.Length; physicalGroup++)
+                {
+                    if (touchedGroups[physicalGroup])
+                        GetResidentPageEncodedStagingTexture(physicalGroup).Apply(false, false);
+                }
+
+                for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
+                {
+                    int physicalGroup = PhysicalPool.GetLayerPhysicalGroup(layerIndex);
+                    int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                    Texture2DArray stagingTexture = GetResidentPageEncodedStagingTexture(physicalGroup);
+                    Texture2D physicalCache = PhysicalPool.GetTextureForGroup(physicalGroup);
+                    if (physicalCache == null || stagingTexture.graphicsFormat != physicalCache.graphicsFormat)
+                        return false;
+
+                    RectInt destinationTile = PhysicalPool.GetPhysicalTileRect(
+                        physicalGroup,
+                        request.PhysicalPageId,
+                        physicalLayerIndex);
+                    Graphics.CopyTexture(
+                        stagingTexture,
+                        physicalLayerIndex,
+                        0,
+                        0,
+                        0,
+                        destinationTile.width,
+                        destinationTile.height,
+                        physicalCache,
+                        0,
+                        0,
+                        destinationTile.x,
+                        destinationTile.y);
+                }
+            }
+            finally
+            {
+                payload.Finalizer.Dispose();
+            }
+
+            return true;
+        }
+
+        private Texture2DArray GetResidentPageEncodedStagingTexture(int physicalGroup)
+        {
+            if (physicalGroup < 0 || physicalGroup >= m_ResidentPageEncodedStagingTextures.Length)
+                throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+            Texture2DArray texture = m_ResidentPageEncodedStagingTextures[physicalGroup];
+            if (texture != null)
+                return texture;
+
+            texture = VTPageUploadUtility.CreateEncodedStagingTexture(
+                Descriptor.SpaceName,
+                Descriptor.PhysicalPageSize,
+                Mathf.Max(1, PhysicalPool.GetGroupLayerCount(physicalGroup)),
+                PhysicalPool.Desc.GetGroupStorageFormat(physicalGroup),
+                $"ResidentPageEncoded_Group{physicalGroup}");
+            m_ResidentPageEncodedStagingTextures[physicalGroup] = texture;
+            return texture;
+        }
+
+        private static bool UsesCompressedStorage(in VTStackDesc stackDesc)
+        {
+            for (int layerIndex = 0; layerIndex < stackDesc.LayerCount; layerIndex++)
+            {
+                if (UnityEngine.Experimental.Rendering.GraphicsFormatUtility.IsCompressedFormat(
+                        stackDesc.GetLayer(layerIndex).GraphicsFormat))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool TryProduceUploadPayload(
@@ -838,6 +992,9 @@ namespace VividRP.Runtime
             if (request.SpaceId != SpaceId)
                 return false;
 
+            if (RemoveResidentRefreshRequest(request))
+                return true;
+
             if (!m_ResidencyManager.TryCommitRequest(Descriptor, m_MipOffsets, request))
                 return false;
 
@@ -848,6 +1005,26 @@ namespace VividRP.Runtime
             }
 
             return true;
+        }
+
+        private bool RemoveResidentRefreshRequest(in VTRequest request)
+        {
+            for (int requestIndex = 0; requestIndex < m_ResidentRefreshRequests.Count; requestIndex++)
+            {
+                VTRequest candidate = m_ResidentRefreshRequests[requestIndex];
+                if (candidate.SpaceId != request.SpaceId
+                    || !candidate.PageCoord.Equals(request.PageCoord)
+                    || candidate.PhysicalPageId != request.PhysicalPageId
+                    || candidate.Generation != request.Generation)
+                {
+                    continue;
+                }
+
+                m_ResidentRefreshRequests.RemoveAt(requestIndex);
+                return true;
+            }
+
+            return false;
         }
 
         bool IVTUploadRequestCommitter.TryCommitUpload(in VTRequest request)

@@ -118,7 +118,10 @@ namespace VividRP.Editor.Tests
         [Test]
         public void RegisterAddressSpace_CreatesPhysicalTexturePerGroup()
         {
-            VirtualTextureSpaceDesc desc = CreateLayeredDesc("SplitPhysicalGroups", normalPhysicalGroup: 1);
+            VirtualTextureSpaceDesc desc = CreateLayeredDesc(
+                "SplitPhysicalGroups",
+                normalFormat: GraphicsFormat.R16G16B16A16_SFloat,
+                normalPhysicalGroup: 1);
 
             int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new NamedProducer("SplitGroupProducer"));
 
@@ -129,9 +132,23 @@ namespace VividRP.Editor.Tests
             Assert.That(baseCache.width, Is.EqualTo(desc.PhysicalPageSize));
             Assert.That(baseCache.height, Is.EqualTo(desc.PhysicalPageSize));
             Assert.That(baseCache.depth, Is.EqualTo(desc.CachePageCount));
+            Assert.That(baseCache.graphicsFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
             Assert.That(normalCache.width, Is.EqualTo(desc.PhysicalPageSize));
             Assert.That(normalCache.height, Is.EqualTo(desc.PhysicalPageSize));
             Assert.That(normalCache.depth, Is.EqualTo(desc.CachePageCount));
+            Assert.That(normalCache.graphicsFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
+        public void LayerDesc_RejectsCompressedCacheFormatUntilBlockCodecIsAvailable()
+        {
+            Assert.That(
+                () => new VTLayerDesc(
+                    VTLayerSemantic.BaseColor,
+                    GraphicsFormat.RGBA_DXT1_UNorm,
+                    sRGB: false,
+                    new Color32(0, 0, 0, 255)),
+                Throws.ArgumentException.With.Message.Contains("block-compressed upload codec"));
         }
 
         [Test]

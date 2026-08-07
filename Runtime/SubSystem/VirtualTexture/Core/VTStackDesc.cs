@@ -25,6 +25,15 @@ namespace VividRP.Runtime
         {
             if (graphicsFormat == GraphicsFormat.None)
                 throw new ArgumentException("Layer graphics format must be valid.", nameof(graphicsFormat));
+            if (GraphicsFormatUtility.IsCompressedFormat(graphicsFormat))
+            {
+                throw new ArgumentException(
+                    "Compressed virtual texture cache formats require a block-compressed upload codec and are not supported yet.",
+                    nameof(graphicsFormat));
+            }
+            if (GraphicsFormatUtility.IsDepthFormat(graphicsFormat)
+                || GraphicsFormatUtility.IsStencilFormat(graphicsFormat))
+                throw new ArgumentException("Virtual texture layers must use a color graphics format.", nameof(graphicsFormat));
             if (physicalGroup < 0)
                 throw new ArgumentOutOfRangeException(nameof(physicalGroup));
 

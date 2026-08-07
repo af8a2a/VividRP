@@ -36,7 +36,7 @@ namespace VividRP.Runtime
                 Mathf.Max(1, depth),
                 TextureFormat.RGBA32,
                 false,
-                false)
+                true)
             {
                 name = $"VividVT_{spaceName}_{suffix}",
                 hideFlags = HideFlags.HideAndDontSave,
@@ -52,7 +52,8 @@ namespace VividRP.Runtime
             int physicalPageSize,
             int depth,
             GraphicsFormat graphicsFormat,
-            string suffix)
+            string suffix,
+            bool enableRandomWrite = true)
         {
             var descriptor = new RenderTextureDescriptor(
                 physicalPageSize,
@@ -63,7 +64,7 @@ namespace VividRP.Runtime
                 msaaSamples = 1,
                 volumeDepth = Mathf.Max(1, depth),
                 dimension = TextureDimension.Tex2DArray,
-                enableRandomWrite = true,
+                enableRandomWrite = enableRandomWrite,
                 useMipMap = false,
                 autoGenerateMips = false,
                 sRGB = false,
@@ -149,21 +150,36 @@ namespace VividRP.Runtime
             internal UploadPoolKey(in VirtualTextureSpaceDesc desc)
             {
                 PhysicalPageSize = desc.PhysicalPageSize;
-                GraphicsFormat = VTPhysicalPoolDesc.ResolveStorageFormat(desc.GraphicsFormat);
-                LayerCount = Mathf.Max(1, desc.StackDesc.LayerCount);
+                PhysicalPoolDesc = VTPhysicalPoolDesc.FromSpaceDesc(desc);
+                LayoutKey = PhysicalPoolDesc.LayerGroup;
             }
 
             internal int PhysicalPageSize { get; }
 
-            internal UnityEngine.Experimental.Rendering.GraphicsFormat GraphicsFormat { get; }
+            internal VTPhysicalPoolDesc PhysicalPoolDesc { get; }
 
-            internal int LayerCount { get; }
+            internal string LayoutKey { get; }
+
+            internal GraphicsFormat GraphicsFormat => PhysicalPoolDesc.GraphicsFormat;
+
+            internal int LayerCount => PhysicalPoolDesc.LayerCount;
+
+            internal int PhysicalGroupCount => PhysicalPoolDesc.PhysicalGroupCount;
+
+            internal int GetGroupLayerCount(int physicalGroup)
+            {
+                return PhysicalPoolDesc.GetGroupLayerCount(physicalGroup);
+            }
+
+            internal GraphicsFormat GetGroupStorageFormat(int physicalGroup)
+            {
+                return PhysicalPoolDesc.GetGroupStorageFormat(physicalGroup);
+            }
 
             public bool Equals(UploadPoolKey other)
             {
                 return PhysicalPageSize == other.PhysicalPageSize
-                       && GraphicsFormat == other.GraphicsFormat
-                       && LayerCount == other.LayerCount;
+                       && string.Equals(LayoutKey, other.LayoutKey, StringComparison.Ordinal);
             }
 
             public override bool Equals(object obj)
@@ -173,7 +189,9 @@ namespace VividRP.Runtime
 
             public override int GetHashCode()
             {
-                return HashCode.Combine(PhysicalPageSize, GraphicsFormat, LayerCount);
+                return HashCode.Combine(
+                    PhysicalPageSize,
+                    StringComparer.Ordinal.GetHashCode(LayoutKey ?? string.Empty));
             }
         }
 
@@ -232,10 +250,11 @@ namespace VividRP.Runtime
         {
             private readonly string m_SpaceName;
             private readonly int m_PhysicalPageSize;
-            private readonly GraphicsFormat m_GraphicsFormat;
+            private readonly UploadPoolKey m_Key;
             private readonly VTRequest[] m_Requests;
             private readonly VTPhysicalPool[] m_PhysicalPools;
             private readonly bool[] m_UsesGpuStaging;
+            private readonly RenderTexture[] m_ConvertedStagingTextures;
 
             private int m_RequestCount;
             private IVTUploadFenceHandle m_Fence;
@@ -248,16 +267,17 @@ namespace VividRP.Runtime
                 int layerCount,
                 int capacity,
                 int batchIndex,
-                GraphicsFormat graphicsFormat)
+                in UploadPoolKey key)
             {
                 Capacity = Mathf.Max(1, capacity);
                 LayerCount = Mathf.Max(1, layerCount);
                 m_SpaceName = spaceName;
                 m_PhysicalPageSize = physicalPageSize;
-                m_GraphicsFormat = graphicsFormat;
+                m_Key = key;
                 m_Requests = new VTRequest[Capacity];
                 m_PhysicalPools = new VTPhysicalPool[Capacity];
                 m_UsesGpuStaging = new bool[Capacity];
+                m_ConvertedStagingTextures = new RenderTexture[Mathf.Max(1, key.PhysicalGroupCount)];
                 BatchIndex = batchIndex;
             }
 
@@ -288,10 +308,32 @@ namespace VividRP.Runtime
                         m_SpaceName,
                         m_PhysicalPageSize,
                         Capacity * LayerCount,
-                        m_GraphicsFormat,
+                        m_Key.GraphicsFormat,
                         $"GPUUploadBatch{BatchIndex}");
                     return m_GpuStagingTexture;
                 }
+            }
+
+            internal RenderTexture GetConvertedStagingTexture(int physicalGroup)
+            {
+                if (physicalGroup < 0 || physicalGroup >= m_ConvertedStagingTextures.Length)
+                    throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+                RenderTexture stagingTexture = m_ConvertedStagingTextures[physicalGroup];
+                if (stagingTexture != null)
+                    return stagingTexture;
+
+                int groupLayerCount = Mathf.Max(1, m_Key.GetGroupLayerCount(physicalGroup));
+                GraphicsFormat storageFormat = m_Key.GetGroupStorageFormat(physicalGroup);
+                stagingTexture = VTPageUploadUtility.CreateGpuStagingTexture(
+                    m_SpaceName,
+                    m_PhysicalPageSize,
+                    Capacity * groupLayerCount,
+                    storageFormat,
+                    $"ConvertedUploadBatch{BatchIndex}_Group{physicalGroup}",
+                    enableRandomWrite: false);
+                m_ConvertedStagingTextures[physicalGroup] = stagingTexture;
+                return stagingTexture;
             }
 
             internal bool InFlight => m_Fence != null;
@@ -451,6 +493,12 @@ namespace VividRP.Runtime
                 if (m_GpuStagingTexture != null)
                     CoreUtils.Destroy(m_GpuStagingTexture);
                 m_GpuStagingTexture = null;
+                for (int groupIndex = 0; groupIndex < m_ConvertedStagingTextures.Length; groupIndex++)
+                {
+                    if (m_ConvertedStagingTextures[groupIndex] != null)
+                        CoreUtils.Destroy(m_ConvertedStagingTextures[groupIndex]);
+                    m_ConvertedStagingTextures[groupIndex] = null;
+                }
             }
 
             private static bool IsSameUploadIdentity(in VTRequest left, in VTRequest right)
@@ -743,10 +791,31 @@ namespace VividRP.Runtime
 
                             int groupLayerCount = Mathf.Max(1, physicalPool.GetGroupLayerCount(physicalGroup));
                             int physicalLayerIndex = physicalPool.GetLayerPhysicalLayerIndex(layerIndex);
+                            int convertedSlice = uploadIndex * groupLayerCount + physicalLayerIndex;
                             int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
-                            cmd.CopyTexture(
+                            int sourceSlice = sourceBaseSlice + layerIndex;
+                            if (stagingTexture.graphicsFormat == physicalCache.graphicsFormat)
+                            {
+                                cmd.CopyTexture(
+                                    stagingTexture,
+                                    sourceSlice,
+                                    0,
+                                    physicalCache,
+                                    destinationSlice,
+                                    0);
+                                continue;
+                            }
+
+                            RenderTexture convertedStagingTexture =
+                                batch.GetConvertedStagingTexture(physicalGroup);
+                            cmd.ConvertTexture(
                                 stagingTexture,
-                                sourceBaseSlice + layerIndex,
+                                sourceSlice,
+                                convertedStagingTexture,
+                                convertedSlice);
+                            cmd.CopyTexture(
+                                convertedStagingTexture,
+                                convertedSlice,
                                 0,
                                 physicalCache,
                                 destinationSlice,
@@ -795,7 +864,7 @@ namespace VividRP.Runtime
                     m_Key.LayerCount,
                     BatchCapacity,
                     batchIndex,
-                    m_Key.GraphicsFormat);
+                    m_Key);
             }
         }
 
@@ -1210,7 +1279,22 @@ namespace VividRP.Runtime
         private static int ComputeUploadByteSize(in UploadPoolKey key)
         {
             int physicalPageSize = Mathf.Max(1, key.PhysicalPageSize);
-            return physicalPageSize * physicalPageSize * 4 * Mathf.Max(1, key.LayerCount);
+            long byteSize = 0;
+            for (int physicalGroup = 0; physicalGroup < key.PhysicalGroupCount; physicalGroup++)
+            {
+                GraphicsFormat storageFormat = key.GetGroupStorageFormat(physicalGroup);
+                long blockWidth = Math.Max(1u, GraphicsFormatUtility.GetBlockWidth(storageFormat));
+                long blockHeight = Math.Max(1u, GraphicsFormatUtility.GetBlockHeight(storageFormat));
+                long blockSize = Math.Max(1u, GraphicsFormatUtility.GetBlockSize(storageFormat));
+                long blocksX = (physicalPageSize + blockWidth - 1) / blockWidth;
+                long blocksY = (physicalPageSize + blockHeight - 1) / blockHeight;
+                byteSize += blocksX
+                            * blocksY
+                            * blockSize
+                            * Mathf.Max(1, key.GetGroupLayerCount(physicalGroup));
+            }
+
+            return byteSize >= int.MaxValue ? int.MaxValue : (int)byteSize;
         }
 
         private static void DisposePayloads(IReadOnlyList<QueuedUpload> uploads, int startIndex, int count)
@@ -1244,6 +1328,13 @@ namespace VividRP.Runtime
                 int layerCountCompare = left.Key.LayerCount.CompareTo(right.Key.LayerCount);
                 if (layerCountCompare != 0)
                     return layerCountCompare;
+
+                int layoutCompare = string.Compare(
+                    left.Key.LayoutKey,
+                    right.Key.LayoutKey,
+                    StringComparison.Ordinal);
+                if (layoutCompare != 0)
+                    return layoutCompare;
 
                 return left.Payload.Request.SpaceId.CompareTo(right.Payload.Request.SpaceId);
             }

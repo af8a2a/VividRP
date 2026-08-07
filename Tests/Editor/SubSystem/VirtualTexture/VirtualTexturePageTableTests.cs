@@ -36,6 +36,23 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void PageTableEntry_ReservesInvalidPhysicalIdAndTwoFutureFormatBits()
+        {
+            Assert.That(VirtualTexturePageTableEntry.MaxPhysicalPageId,
+                Is.EqualTo(VirtualTexturePageTableEntry.InvalidPhysicalPageId - 1));
+            Assert.That(VirtualTexturePageTableEntry.ReservedBitCount, Is.EqualTo(2));
+            Assert.That(
+                () => new VirtualTexturePageTableEntry(
+                    VirtualTexturePageTableEntry.InvalidPhysicalPageId,
+                    resolvedMip: 0,
+                    resident: true,
+                    fallback: false,
+                    pendingUpload: false,
+                    locked: false),
+                Throws.TypeOf<System.ArgumentOutOfRangeException>());
+        }
+
+        [Test]
         public void SpaceDesc_ComposesExpectedVTStackDesc()
         {
             var stackDesc = new VTStackDesc(
@@ -231,6 +248,44 @@ namespace VividRP.Editor.Tests
             Assert.That(childFallbackEntry.Fallback, Is.True);
             Assert.That(childFallbackEntry.ResolvedMip, Is.EqualTo(1));
             Assert.That(childFallbackEntry.PhysicalPageId, Is.EqualTo(childRequest.PhysicalPageId));
+        }
+
+        [Test]
+        public void PageTable_RebuildsDirtySubtreeAndUploadsOnlyChangedEntries()
+        {
+            VirtualTextureSpaceDesc desc = CreateDesc("PartialPageTable", 8, 8, 4, 16, 4);
+            int spaceId = VirtualTextureSystem.RegisterSpace(desc);
+            int totalPageCount = VirtualTextureSpaceUtility.GetTotalPageCount(
+                desc.VirtualPageCountX,
+                desc.VirtualPageCountY,
+                desc.MipCount);
+
+            Assert.That(VirtualTextureSystem.GetPageTableLastRecomputedEntryCountForTesting(spaceId),
+                Is.EqualTo(totalPageCount));
+            Assert.That(VirtualTextureSystem.GetPageTableLastUploadedEntryCountForTesting(spaceId),
+                Is.EqualTo(totalPageCount));
+            Assert.That(VirtualTextureSystem.GetPageTableFullUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+            var coord = new VirtualTexturePageCoord(0, 0, 2);
+            RequestPages(spaceId, coord);
+
+            // One mip-2 page covers 1 + 4 + 16 entries down through mip zero. Only
+            // the requested entry changes its pending flag before the upload commits.
+            Assert.That(VirtualTextureSystem.GetPageTableLastRecomputedEntryCountForTesting(spaceId), Is.EqualTo(21));
+            Assert.That(VirtualTextureSystem.GetPageTableLastUploadedEntryCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableSparseUploadCountForTesting(spaceId), Is.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPageTableFullUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+            Assert.That(VirtualTextureSystem.TryGetPendingUploadRequests(spaceId, out var requests), Is.True);
+            Assert.That(VirtualTextureSystem.CommitUpload(requests.Last()), Is.True);
+            Assert.That(VirtualTextureSystem.GetPageTableLastRecomputedEntryCountForTesting(spaceId), Is.EqualTo(21));
+
+            Assert.That(VirtualTextureSystem.TryGetPageTableEntryForTesting(
+                spaceId,
+                new VirtualTexturePageCoord(3, 3, 0),
+                out VirtualTexturePageTableEntry descendantEntry), Is.True);
+            Assert.That(descendantEntry.Fallback, Is.True);
+            Assert.That(descendantEntry.ResolvedMip, Is.EqualTo(2));
         }
 
         private static VirtualTextureSpaceDesc CreateDesc(

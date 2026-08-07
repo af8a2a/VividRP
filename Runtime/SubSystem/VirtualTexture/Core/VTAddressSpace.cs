@@ -110,6 +110,14 @@ namespace VividRP.Runtime
 
         internal int PageTableRebuildCount => m_PageTableUpdater.RebuildCount;
 
+        internal int PageTableLastRecomputedEntryCount => m_PageTableUpdater.LastRecomputedEntryCount;
+
+        internal int PageTableLastUploadedEntryCount => m_PageTableUpdater.LastUploadedEntryCount;
+
+        internal int PageTableSparseUploadCount => m_PageTableUpdater.SparseUploadCount;
+
+        internal int PageTableFullUploadCount => m_PageTableUpdater.FullUploadCount;
+
         internal IReadOnlyList<VTRequest> PendingRequests => m_ResidencyManager.PendingRequests;
 
         internal int ResidencyClassificationCapacity => m_ResidencyManager.ClassificationCapacity;
@@ -437,13 +445,28 @@ namespace VividRP.Runtime
                 int groupLayerCount = Mathf.Max(1, PhysicalPool.GetGroupLayerCount(physicalGroup));
                 int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
                 int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
-                Graphics.CopyTexture(
+                if (m_ResidentPageStagingTexture.graphicsFormat == physicalCache.graphicsFormat)
+                {
+                    Graphics.CopyTexture(
+                        m_ResidentPageStagingTexture,
+                        layerIndex,
+                        0,
+                        physicalCache,
+                        destinationSlice,
+                        0);
+                    continue;
+                }
+
+                if (!Graphics.ConvertTexture(
                     m_ResidentPageStagingTexture,
                     layerIndex,
-                    0,
                     physicalCache,
-                    destinationSlice,
-                    0);
+                    destinationSlice))
+                {
+                    throw new InvalidOperationException(
+                        $"[VividRP] Failed to convert VT bootstrap layer {layerIndex} into " +
+                        $"physical group {physicalGroup} for space '{Descriptor.SpaceName}'.");
+                }
             }
 
             return true;

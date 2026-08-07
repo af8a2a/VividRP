@@ -202,6 +202,7 @@ namespace VividRP.Runtime
     [StructLayout(LayoutKind.Sequential)]
     public readonly struct VirtualTexturePageTableEntry
     {
+        public const int PackedBitCount = 32;
         public const int PhysicalPageIdBitCount = 20;
         public const int ResolvedMipBitCount = 6;
         public const int ResidentBitOffset = 26;
@@ -212,6 +213,8 @@ namespace VividRP.Runtime
         public const uint ResolvedMipMask = (1u << ResolvedMipBitCount) - 1u;
         public const int MaxPhysicalPageCount = (int)PhysicalPageIdMask;
         public const int InvalidPhysicalPageId = MaxPhysicalPageCount;
+        public const int MaxPhysicalPageId = InvalidPhysicalPageId - 1;
+        public const int ReservedBitCount = PackedBitCount - LockedBitOffset - 1;
 
         public VirtualTexturePageTableEntry(
             int physicalPageId,
@@ -225,6 +228,14 @@ namespace VividRP.Runtime
                 throw new ArgumentOutOfRangeException(nameof(physicalPageId));
             if ((uint)resolvedMip > ResolvedMipMask)
                 throw new ArgumentOutOfRangeException(nameof(resolvedMip));
+            if (resident && fallback)
+                throw new ArgumentException("A page table entry cannot be both directly resident and a fallback.");
+            if ((resident || fallback) && physicalPageId == InvalidPhysicalPageId)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(physicalPageId),
+                    "Mapped page table entries must not use the reserved invalid physical page id.");
+            }
 
             PackedValue = ((uint)physicalPageId & PhysicalPageIdMask)
                           | (((uint)resolvedMip & ResolvedMipMask) << PhysicalPageIdBitCount)

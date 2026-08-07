@@ -934,6 +934,34 @@ namespace VividRP.Runtime
                 : 0;
         }
 
+        internal static int GetPageTableLastRecomputedEntryCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableLastRecomputedEntryCount
+                : 0;
+        }
+
+        internal static int GetPageTableLastUploadedEntryCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableLastUploadedEntryCount
+                : 0;
+        }
+
+        internal static int GetPageTableSparseUploadCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableSparseUploadCount
+                : 0;
+        }
+
+        internal static int GetPageTableFullUploadCountForTesting(int spaceId)
+        {
+            return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)
+                ? addressSpace.PageTableFullUploadCount
+                : 0;
+        }
+
         internal static uint GetPendingRequestRevisionForTesting(int spaceId)
         {
             return s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace)

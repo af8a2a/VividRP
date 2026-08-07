@@ -393,9 +393,11 @@ allocation id -> binding table lookup -> bind space globals -> draw
 - page table 是 2D space，尚未抽象出 3D、UDIM 或 sparse mega texture 的 page addressing。
 - `VirtualTextureSystem` 仍是静态全局 subsystem，多 world/多 pipeline 隔离还没有做。
 - render pass 多数仍使用 default binding，材质级 allocation 选择尚未贯穿。
-- upload staging 当前是 RGBA32 Color32 路径，高精度/压缩/平台特定格式需要扩展。
+- streamed payload 保持线性 RawRGBA32 staging；提交前按 physical group 转换到真实 storage format。
+  当前 cache 只接受非压缩 color format，BC/ASTC 仍需要独立 block codec/transcode 路径。
 - physical pool sharing 以 descriptor 完全匹配为前提，未来可继续引入更细的 pool policy。
 - page table entry 只存 physical page id/resolved mip/status，不存 group；group 由 layer shader params 决定。
+- page table 首次构建全量上传，后续由 residency dirty list 驱动子树重算，并合并连续 entry 做局部 buffer upload。
 - feedback 仍以 shader 全局 UAV 为主，未来多 VT 同 draw 或 bindless feedback 需要重新设计 feedback key 和绑定模型。
 
 ## 设计原则

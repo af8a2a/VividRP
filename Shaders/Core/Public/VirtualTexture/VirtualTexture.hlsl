@@ -63,6 +63,14 @@ float4 _VTFeedbackViewParams;
 #define VT_LAYER3_PHYSICAL_LAYER  ((int)_VTSpaceParams[31])
 #define VT_FEEDBACK_REQUEST_COUNTER_INDEX 0
 #define VT_FEEDBACK_FALLBACK_SAMPLE_COUNTER_INDEX 1
+#define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u
+#define VT_PAGE_TABLE_RESOLVED_MIP_BITS 6u
+#define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK ((1u << VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS) - 1u)
+#define VT_PAGE_TABLE_RESOLVED_MIP_MASK ((1u << VT_PAGE_TABLE_RESOLVED_MIP_BITS) - 1u)
+#define VT_PAGE_TABLE_RESIDENT_BIT 26u
+#define VT_PAGE_TABLE_FALLBACK_BIT 27u
+#define VT_PAGE_TABLE_PENDING_UPLOAD_BIT 28u
+#define VT_PAGE_TABLE_LOCKED_BIT 29u
 
 struct VTResolvedAddress
 {
@@ -186,12 +194,13 @@ VTResolvedAddress VTResolveAddress(float2 virtualUv, uint requestedMip)
     uint packedEntry = _VTPageTable[flatIndex];
 
     VTResolvedAddress resolved;
-    resolved.physicalPageId = packedEntry & 0xFFFFFu;
-    resolved.resolvedMip = (packedEntry >> 20u) & 0x3Fu;
-    resolved.resident = (packedEntry & (1u << 26u)) != 0u;
-    resolved.fallback = (packedEntry & (1u << 27u)) != 0u;
-    resolved.pendingUpload = (packedEntry & (1u << 28u)) != 0u;
-    resolved.locked = (packedEntry & (1u << 29u)) != 0u;
+    resolved.physicalPageId = packedEntry & VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK;
+    resolved.resolvedMip =
+        (packedEntry >> VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS) & VT_PAGE_TABLE_RESOLVED_MIP_MASK;
+    resolved.resident = (packedEntry & (1u << VT_PAGE_TABLE_RESIDENT_BIT)) != 0u;
+    resolved.fallback = (packedEntry & (1u << VT_PAGE_TABLE_FALLBACK_BIT)) != 0u;
+    resolved.pendingUpload = (packedEntry & (1u << VT_PAGE_TABLE_PENDING_UPLOAD_BIT)) != 0u;
+    resolved.locked = (packedEntry & (1u << VT_PAGE_TABLE_LOCKED_BIT)) != 0u;
     resolved.valid = resolved.resident || resolved.fallback;
     return resolved;
 }

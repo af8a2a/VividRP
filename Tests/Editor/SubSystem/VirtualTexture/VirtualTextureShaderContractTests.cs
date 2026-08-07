@@ -34,6 +34,10 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("int _VTFeedbackFrameIndex;"));
             Assert.That(source, Does.Contain("int _VTFeedbackSampleRate;"));
             Assert.That(source, Does.Contain("float4 _VTFeedbackViewParams;"));
+            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_PHYSICAL_PAGE_ID_BITS 20u"));
+            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_RESOLVED_MIP_BITS 6u"));
+            Assert.That(source, Does.Contain("#define VT_PAGE_TABLE_LOCKED_BIT 29u"));
+            Assert.That(source, Does.Contain("packedEntry & VT_PAGE_TABLE_PHYSICAL_PAGE_ID_MASK"));
             Assert.That(source, Does.Contain("struct VTMipRange"));
             Assert.That(source, Does.Contain("float VTComputeRequestedMipLevel"));
             Assert.That(source, Does.Contain("uint VTComputeRequestedMip"));

@@ -461,6 +461,29 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
+        public void Uploads_AccountForEachPhysicalGroupStorageFormat()
+        {
+            VirtualTextureSpaceDesc desc = CreateLayeredUploadDesc("FormatAwareMemoryBudget");
+            int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new TestRuntimeProducer());
+            var pageCoord = new VirtualTexturePageCoord(0, 0, 0);
+            int physicalPixelCount = desc.PhysicalPageSize * desc.PhysicalPageSize;
+            int legacyRgbaOnlyByteSize = physicalPixelCount * 4 * desc.StackDesc.LayerCount;
+            int formatAwareByteSize = physicalPixelCount * (4 + 8);
+
+            VirtualTextureSystem.SetUploadMemoryBudgetForTesting(legacyRgbaOnlyByteSize);
+            IssueFeedback(spaceId, pageCoord);
+
+            Assert.That(m_FenceFactory.Handles, Is.Empty);
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+
+            VirtualTextureSystem.SetUploadMemoryBudgetForTesting(formatAwareByteSize);
+            UpdateOnce();
+
+            Assert.That(m_FenceFactory.Handles, Has.Count.EqualTo(1));
+            Assert.That(VirtualTextureSystem.GetPendingUploadCountForTesting(spaceId), Is.EqualTo(1));
+        }
+
+        [Test]
         public void Residency_UsesGlobalPageBudgetAcrossSpaces_AndKeepsHighestPriorityRequest()
         {
             VirtualTextureSpaceDesc lowDesc = CreateDesc("GlobalResidencyLow");
@@ -920,6 +943,32 @@ namespace VividRP.Editor.Tests
                 graphicsFormat: GraphicsFormat.R8G8B8A8_UNorm,
                 maxUploadsPerFrame: maxUploadsPerFrame,
                 feedbackCapacity: 32);
+        }
+
+        private static VirtualTextureSpaceDesc CreateLayeredUploadDesc(string name)
+        {
+            var stackDesc = new VTStackDesc(
+                pageSize: 128,
+                borderSize: 4,
+                cachePageCount: 4,
+                layers: new[]
+                {
+                    new VTLayerDesc(
+                        VTLayerSemantic.BaseColor,
+                        GraphicsFormat.R8G8B8A8_UNorm,
+                        sRGB: false,
+                        new Color32(0, 0, 0, 255),
+                        physicalGroup: 0),
+                    new VTLayerDesc(
+                        VTLayerSemantic.Normal,
+                        GraphicsFormat.R16G16B16A16_SFloat,
+                        sRGB: false,
+                        new Color32(128, 128, 255, 255),
+                        physicalGroup: 1),
+                },
+                maxUploadsPerFrame: 1,
+                feedbackCapacity: 32);
+            return new VirtualTextureSpaceDesc(name, 4, 4, 3, stackDesc);
         }
 
         private static void IssueFeedback(int spaceId, params VirtualTexturePageCoord[] coords)

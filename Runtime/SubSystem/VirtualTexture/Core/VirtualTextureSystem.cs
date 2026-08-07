@@ -1006,7 +1006,7 @@ namespace VividRP.Runtime
             return CollectPhysicalPoolStats();
         }
 
-        internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2DArray physicalCache)
+        internal static bool TryGetPhysicalCacheForTesting(int spaceId, out Texture2D physicalCache)
         {
             return TryGetPhysicalCacheForTesting(spaceId, 0, out physicalCache);
         }
@@ -1014,7 +1014,7 @@ namespace VividRP.Runtime
         internal static bool TryGetPhysicalCacheForTesting(
             int spaceId,
             int physicalGroup,
-            out Texture2DArray physicalCache)
+            out Texture2D physicalCache)
         {
             if (s_PageTableSpaces.TryGetValue(spaceId, out VTPageTableSpace addressSpace))
             {

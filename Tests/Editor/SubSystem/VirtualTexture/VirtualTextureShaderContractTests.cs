@@ -18,10 +18,11 @@ namespace VividRP.Editor.Tests
                 "VirtualTexture.hlsl"));
 
             Assert.That(source, Does.Contain("StructuredBuffer<uint> _VTPageTable;"));
-            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache);"));
-            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache1);"));
-            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache2);"));
-            Assert.That(source, Does.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache3);"));
+            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache);"));
+            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache1);"));
+            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache2);"));
+            Assert.That(source, Does.Contain("TEXTURE2D(_VTPhysicalCache3);"));
+            Assert.That(source, Does.Not.Contain("TEXTURE2D_ARRAY(_VTPhysicalCache"));
             Assert.That(source, Does.Contain("_VTFeedbackRequests"));
             Assert.That(source, Does.Contain("_VTFeedbackCounter"));
             Assert.That(source, Does.Contain("register(u1)"));
@@ -50,9 +51,11 @@ namespace VividRP.Editor.Tests
             Assert.That(source, Does.Contain("uint VTGetPhysicalGroupLayerCount"));
             Assert.That(source, Does.Contain("uint VTGetLayerPhysicalGroup"));
             Assert.That(source, Does.Contain("uint VTGetLayerPhysicalLayer"));
+            Assert.That(source, Does.Contain("float2 VTComputePhysicalAtlasUv"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheGroup"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCache"));
-            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0)"));
+            Assert.That(source, Does.Contain("_VTPhysicalCache3.GetDimensions(width, height)"));
+            Assert.That(source, Does.Contain("SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, atlasUv, 0.0)"));
             Assert.That(source, Does.Contain("float4 VTSamplePhysicalCacheTrilinear"));
             Assert.That(source, Does.Contain("float4 VTSampleBaseColor"));
             Assert.That(source, Does.Contain("float3 VTSampleNormal"));

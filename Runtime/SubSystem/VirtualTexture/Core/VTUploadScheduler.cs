@@ -785,14 +785,17 @@ namespace VividRP.Runtime
                         for (int layerIndex = 0; layerIndex < batch.LayerCount; layerIndex++)
                         {
                             int physicalGroup = physicalPool.GetLayerPhysicalGroup(layerIndex);
-                            Texture2DArray physicalCache = physicalPool.GetTextureForGroup(physicalGroup);
+                            Texture2D physicalCache = physicalPool.GetTextureForGroup(physicalGroup);
                             if (physicalCache == null)
                                 continue;
 
                             int groupLayerCount = Mathf.Max(1, physicalPool.GetGroupLayerCount(physicalGroup));
                             int physicalLayerIndex = physicalPool.GetLayerPhysicalLayerIndex(layerIndex);
                             int convertedSlice = uploadIndex * groupLayerCount + physicalLayerIndex;
-                            int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
+                            RectInt destinationTile = physicalPool.GetPhysicalTileRect(
+                                physicalGroup,
+                                request.PhysicalPageId,
+                                physicalLayerIndex);
                             int sourceSlice = sourceBaseSlice + layerIndex;
                             if (stagingTexture.graphicsFormat == physicalCache.graphicsFormat)
                             {
@@ -800,9 +803,15 @@ namespace VividRP.Runtime
                                     stagingTexture,
                                     sourceSlice,
                                     0,
+                                    0,
+                                    0,
+                                    destinationTile.width,
+                                    destinationTile.height,
                                     physicalCache,
-                                    destinationSlice,
-                                    0);
+                                    0,
+                                    0,
+                                    destinationTile.x,
+                                    destinationTile.y);
                                 continue;
                             }
 
@@ -817,9 +826,15 @@ namespace VividRP.Runtime
                                 convertedStagingTexture,
                                 convertedSlice,
                                 0,
+                                0,
+                                0,
+                                destinationTile.width,
+                                destinationTile.height,
                                 physicalCache,
-                                destinationSlice,
-                                0);
+                                0,
+                                0,
+                                destinationTile.x,
+                                destinationTile.y);
                         }
                     }
                 }

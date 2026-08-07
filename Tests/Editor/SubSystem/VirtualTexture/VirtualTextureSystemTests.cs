@@ -53,9 +53,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.PageTableBuffer, Is.Not.Null);
                 Assert.That(binding.PageTableBuffer.count, Is.EqualTo(binding.ShaderParams.PageTableEntryCount));
                 Assert.That(binding.PhysicalCache, Is.Not.Null);
-                Assert.That(binding.PhysicalCache.width, Is.EqualTo(desc.PhysicalPageSize));
-                Assert.That(binding.PhysicalCache.height, Is.EqualTo(desc.PhysicalPageSize));
-                Assert.That(binding.PhysicalCache.depth, Is.EqualTo(desc.CachePageCount));
+                AssertPhysicalAtlas(binding.PhysicalCache, desc, groupLayerCount: 1);
                 Assert.That(binding.HasFeedback, Is.True);
                 Assert.That(binding.FeedbackCounter.count, Is.EqualTo(2));
                 Assert.That(binding.ShaderParams.SpaceId, Is.EqualTo(spaceId));
@@ -373,7 +371,7 @@ namespace VividRP.Editor.Tests
 
                 VirtualTextureSpaceBinding binding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
                 Assert.That(binding.SpaceId, Is.EqualTo(spaceId));
-                Assert.That(binding.PhysicalCache.depth, Is.EqualTo(desc.CachePageCount * stackDesc.LayerCount));
+                AssertPhysicalAtlas(binding.PhysicalCache, desc, stackDesc.LayerCount);
                 Assert.That(binding.ShaderParams.LayerCount, Is.EqualTo(2));
                 Assert.That(binding.ShaderParams.BaseColorLayerIndex, Is.EqualTo(0));
                 Assert.That(binding.ShaderParams.NormalLayerIndex, Is.EqualTo(1));
@@ -432,8 +430,8 @@ namespace VividRP.Editor.Tests
                 Assert.That(binding.PhysicalCaches[0], Is.Not.Null);
                 Assert.That(binding.PhysicalCaches[1], Is.Not.Null);
                 Assert.That(ReferenceEquals(binding.PhysicalCaches[0], binding.PhysicalCaches[1]), Is.False);
-                Assert.That(binding.PhysicalCaches[0].depth, Is.EqualTo(desc.CachePageCount));
-                Assert.That(binding.PhysicalCaches[1].depth, Is.EqualTo(desc.CachePageCount));
+                AssertPhysicalAtlas(binding.PhysicalCaches[0], desc, groupLayerCount: 1);
+                AssertPhysicalAtlas(binding.PhysicalCaches[1], desc, groupLayerCount: 1);
                 Assert.That(binding.ShaderParams.PhysicalGroup0LayerCount, Is.EqualTo(1));
                 Assert.That(binding.ShaderParams.PhysicalGroup1LayerCount, Is.EqualTo(1));
                 Assert.That(binding.ShaderParams.Layer0PhysicalGroup, Is.EqualTo(0));
@@ -751,7 +749,7 @@ namespace VividRP.Editor.Tests
                 VirtualTextureSystem.Update(frameData, commandBuffer);
                 VirtualTextureSpaceBinding initialBinding = frameData.Get<VividVirtualTextureFrameData>().Bindings.Single();
                 GraphicsBuffer oldPageTableBuffer = initialBinding.PageTableBuffer;
-                Texture2DArray oldPhysicalCache = initialBinding.PhysicalCache;
+                Texture2D oldPhysicalCache = initialBinding.PhysicalCache;
                 ComputeBuffer oldFeedbackRequests = initialBinding.FeedbackRequests;
                 ComputeBuffer oldFeedbackCounter = initialBinding.FeedbackCounter;
 
@@ -781,9 +779,7 @@ namespace VividRP.Editor.Tests
                 Assert.That(updatedBinding.SpaceId, Is.EqualTo(spaceId));
                 Assert.That(updatedBinding.SpaceName, Is.EqualTo(updatedDesc.SpaceName));
                 Assert.That(updatedBinding.PageTableBuffer.count, Is.EqualTo(updatedBinding.ShaderParams.PageTableEntryCount));
-                Assert.That(updatedBinding.PhysicalCache.width, Is.EqualTo(updatedDesc.PhysicalPageSize));
-                Assert.That(updatedBinding.PhysicalCache.height, Is.EqualTo(updatedDesc.PhysicalPageSize));
-                Assert.That(updatedBinding.PhysicalCache.depth, Is.EqualTo(updatedDesc.CachePageCount));
+                AssertPhysicalAtlas(updatedBinding.PhysicalCache, updatedDesc, groupLayerCount: 1);
                 Assert.That(updatedBinding.ShaderParams.PageSize, Is.EqualTo(updatedDesc.PageSize));
                 Assert.That(updatedBinding.ShaderParams.FeedbackCapacity, Is.EqualTo(updatedDesc.FeedbackCapacity));
                 Assert.That(updatedBinding.HasFeedback, Is.True);
@@ -845,7 +841,7 @@ namespace VividRP.Editor.Tests
                 GraphicsBuffer pageTableBuffer = binding.PageTableBuffer;
                 ComputeBuffer feedbackRequests = binding.FeedbackRequests;
                 ComputeBuffer feedbackCounter = binding.FeedbackCounter;
-                Texture2DArray physicalCache = binding.PhysicalCache;
+                Texture2D physicalCache = binding.PhysicalCache;
 
                 Assert.That(VirtualTextureSystem.IsCameraFeedbackStateCreatedForTesting(camera), Is.True);
 
@@ -1120,6 +1116,21 @@ namespace VividRP.Editor.Tests
             Assert.That(result.PageIndex, Is.EqualTo(pageIndex));
             Assert.That(result.MipGap, Is.EqualTo(mipGap));
             Assert.That(result.Classification, Is.EqualTo(classification));
+        }
+
+        private static void AssertPhysicalAtlas(
+            Texture2D physicalAtlas,
+            in VirtualTextureSpaceDesc desc,
+            int groupLayerCount)
+        {
+            var layout = new VTPhysicalAtlasLayout(
+                desc.PhysicalPageSize,
+                desc.CachePageCount * groupLayerCount,
+                SystemInfo.maxTextureSize);
+            Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
+            Assert.That(physicalAtlas.width, Is.EqualTo(layout.Width));
+            Assert.That(physicalAtlas.height, Is.EqualTo(layout.Height));
+            Assert.That(physicalAtlas.isReadable, Is.False);
         }
 
         private static Vector4 ToVector(Color32 color)

@@ -22,7 +22,9 @@ namespace VividRP.Editor.Tests
             internal bool SupportsLoadStore { get; set; } = true;
 
             internal CopyTextureSupport CopySupport { get; set; } =
-                CopyTextureSupport.Basic | CopyTextureSupport.RTToTexture;
+                CopyTextureSupport.Basic
+                | CopyTextureSupport.RTToTexture
+                | CopyTextureSupport.DifferentTypes;
 
             public bool SupportsComputeShaders => SupportsCompute;
 
@@ -95,6 +97,14 @@ namespace VividRP.Editor.Tests
                 Is.True);
             Assert.That(allocation.AllocationId, Is.EqualTo(backend.VirtualTextureAllocationId));
             Assert.That(allocation.Description.PrivateSpace, Is.True);
+            Assert.That(
+                VirtualTextureSystem.TryGetPhysicalCacheForTesting(
+                    backend.VirtualTextureSpaceId,
+                    out Texture2D physicalAtlas),
+                Is.True);
+            Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
+            Assert.That(physicalAtlas.width, Is.EqualTo(5440));
+            Assert.That(physicalAtlas.height, Is.EqualTo(5304));
         }
 
         [Test]
@@ -145,9 +155,10 @@ namespace VividRP.Editor.Tests
         }
 
         [Test]
-        public void Constructor_IsUnavailableWhenRenderTextureArrayCopyIsUnsupported()
+        public void Constructor_IsUnavailableWhenRenderTextureArrayToAtlasCopyIsUnsupported()
         {
-            const string reason = "The active graphics device cannot copy a RenderTexture array into the VT Texture2DArray cache.";
+            const string reason =
+                "The active graphics device cannot copy RenderTexture array slices into the VT 2D tile atlas.";
             LogAssert.Expect(
                 LogType.Warning,
                 $"[VividRP] GPUDriven virtual texture backend is unavailable: {reason}");

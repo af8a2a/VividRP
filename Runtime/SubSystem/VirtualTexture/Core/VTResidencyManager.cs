@@ -288,7 +288,7 @@ namespace VividRP.Runtime
 
         internal VTPhysicalPool PhysicalPool => m_PhysicalPool;
 
-        internal Texture2DArray PhysicalCache => m_PhysicalPool.Texture;
+        internal Texture2D PhysicalCache => m_PhysicalPool.Texture;
 
         internal IReadOnlyList<VTRequest> PendingRequests => m_PendingRequests;
 

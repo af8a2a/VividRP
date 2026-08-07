@@ -6,10 +6,10 @@
 #endif
 
 StructuredBuffer<uint> _VTPageTable;
-TEXTURE2D_ARRAY(_VTPhysicalCache);
-TEXTURE2D_ARRAY(_VTPhysicalCache1);
-TEXTURE2D_ARRAY(_VTPhysicalCache2);
-TEXTURE2D_ARRAY(_VTPhysicalCache3);
+TEXTURE2D(_VTPhysicalCache);
+TEXTURE2D(_VTPhysicalCache1);
+TEXTURE2D(_VTPhysicalCache2);
+TEXTURE2D(_VTPhysicalCache3);
 SAMPLER(sampler_VTPhysicalCache);
 float4 _VTLayerFallbacks[4];
 
@@ -262,17 +262,50 @@ float3 VTComputePhysicalUVWLayer(float2 virtualUv, VTResolvedAddress resolved, u
     return float3(physicalUv, (float)physicalSlice);
 }
 
+float2 VTComputePhysicalAtlasUv(float3 uvw, uint2 atlasDimensions)
+{
+    uint physicalPageSize = max((uint)VT_PHYSICAL_PAGE_SIZE, 1u);
+    uint tileCountX = max(atlasDimensions.x / physicalPageSize, 1u);
+    uint tileIndex = (uint)max(uvw.z, 0.0);
+    uint2 tileCoord = uint2(tileIndex % tileCountX, tileIndex / tileCountX);
+    float2 atlasTexelCoord = float2(tileCoord * physicalPageSize)
+        + saturate(uvw.xy) * (float)physicalPageSize;
+    return atlasTexelCoord / max(float2(atlasDimensions), float2(1.0, 1.0));
+}
+
 float4 VTSamplePhysicalCacheGroup(uint physicalGroup, float3 uvw)
 {
     uint clampedGroup = min(physicalGroup, 3u);
     if (clampedGroup == 1u)
-        return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache1, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    {
+        uint width;
+        uint height;
+        _VTPhysicalCache1.GetDimensions(width, height);
+        float2 atlasUv = VTComputePhysicalAtlasUv(uvw, uint2(width, height));
+        return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache1, sampler_VTPhysicalCache, atlasUv, 0.0);
+    }
     if (clampedGroup == 2u)
-        return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache2, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    {
+        uint width;
+        uint height;
+        _VTPhysicalCache2.GetDimensions(width, height);
+        float2 atlasUv = VTComputePhysicalAtlasUv(uvw, uint2(width, height));
+        return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache2, sampler_VTPhysicalCache, atlasUv, 0.0);
+    }
     if (clampedGroup == 3u)
-        return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    {
+        uint width;
+        uint height;
+        _VTPhysicalCache3.GetDimensions(width, height);
+        float2 atlasUv = VTComputePhysicalAtlasUv(uvw, uint2(width, height));
+        return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache3, sampler_VTPhysicalCache, atlasUv, 0.0);
+    }
 
-    return SAMPLE_TEXTURE2D_ARRAY_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, uvw.xy, uvw.z, 0.0);
+    uint width;
+    uint height;
+    _VTPhysicalCache.GetDimensions(width, height);
+    float2 atlasUv = VTComputePhysicalAtlasUv(uvw, uint2(width, height));
+    return SAMPLE_TEXTURE2D_LOD(_VTPhysicalCache, sampler_VTPhysicalCache, atlasUv, 0.0);
 }
 
 float3 VTComputePhysicalUVW(float2 virtualUv, VTResolvedAddress resolved)

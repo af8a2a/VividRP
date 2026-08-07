@@ -539,7 +539,7 @@ namespace VividRP.Runtime
             string spaceName,
             VTProducerHandle producerHandle,
             GraphicsBuffer pageTableBuffer,
-            IReadOnlyList<Texture2DArray> physicalCaches,
+            IReadOnlyList<Texture2D> physicalCaches,
             ComputeBuffer feedbackRequests,
             ComputeBuffer feedbackCounter,
             VirtualTextureSpaceShaderParams shaderParams,
@@ -553,7 +553,7 @@ namespace VividRP.Runtime
             SpaceName = spaceName;
             ProducerHandle = producerHandle;
             PageTableBuffer = pageTableBuffer;
-            PhysicalCaches = physicalCaches ?? Array.Empty<Texture2DArray>();
+            PhysicalCaches = physicalCaches ?? Array.Empty<Texture2D>();
             PhysicalCache = PhysicalCaches.Count > 0 ? PhysicalCaches[0] : null;
             FeedbackRequests = feedbackRequests;
             FeedbackCounter = feedbackCounter;
@@ -576,9 +576,9 @@ namespace VividRP.Runtime
 
         public GraphicsBuffer PageTableBuffer { get; }
 
-        public Texture2DArray PhysicalCache { get; }
+        public Texture2D PhysicalCache { get; }
 
-        public IReadOnlyList<Texture2DArray> PhysicalCaches { get; }
+        public IReadOnlyList<Texture2D> PhysicalCaches { get; }
 
         public ComputeBuffer FeedbackRequests { get; }
 

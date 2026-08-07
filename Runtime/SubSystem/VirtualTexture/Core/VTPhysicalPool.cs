@@ -299,6 +299,87 @@ namespace VividRP.Runtime
         internal int EvictedPageCount { get; }
     }
 
+    internal readonly struct VTPhysicalAtlasLayout : IEquatable<VTPhysicalAtlasLayout>
+    {
+        internal VTPhysicalAtlasLayout(int physicalPageSize, int tileCount, int maxTextureSize)
+        {
+            if (physicalPageSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(physicalPageSize));
+            if (tileCount <= 0)
+                throw new ArgumentOutOfRangeException(nameof(tileCount));
+            if (maxTextureSize <= 0)
+                throw new ArgumentOutOfRangeException(nameof(maxTextureSize));
+
+            int maxTileCountPerDimension = maxTextureSize / physicalPageSize;
+            if (maxTileCountPerDimension <= 0)
+            {
+                throw new InvalidOperationException(
+                    $"VT physical page size {physicalPageSize} exceeds the active device's "
+                    + $"maximum 2D texture size of {maxTextureSize}.");
+            }
+
+            int tileCountX = Mathf.CeilToInt(Mathf.Sqrt(tileCount));
+            int tileCountY = (tileCount + tileCountX - 1) / tileCountX;
+            if (tileCountX > maxTileCountPerDimension || tileCountY > maxTileCountPerDimension)
+            {
+                long atlasCapacity = (long)maxTileCountPerDimension * maxTileCountPerDimension;
+                throw new InvalidOperationException(
+                    $"VT physical cache requires {tileCount} atlas tiles, but the active device can fit at most "
+                    + $"{atlasCapacity} {physicalPageSize}x{physicalPageSize} tiles in a "
+                    + $"{maxTextureSize}x{maxTextureSize} 2D texture.");
+            }
+
+            PhysicalPageSize = physicalPageSize;
+            TileCount = tileCount;
+            TileCountX = tileCountX;
+            TileCountY = tileCountY;
+            Width = tileCountX * physicalPageSize;
+            Height = tileCountY * physicalPageSize;
+        }
+
+        internal int PhysicalPageSize { get; }
+
+        internal int TileCount { get; }
+
+        internal int TileCountX { get; }
+
+        internal int TileCountY { get; }
+
+        internal int Width { get; }
+
+        internal int Height { get; }
+
+        internal RectInt GetTileRect(int tileIndex)
+        {
+            if (tileIndex < 0 || tileIndex >= TileCount)
+                throw new ArgumentOutOfRangeException(nameof(tileIndex));
+
+            return new RectInt(
+                tileIndex % TileCountX * PhysicalPageSize,
+                tileIndex / TileCountX * PhysicalPageSize,
+                PhysicalPageSize,
+                PhysicalPageSize);
+        }
+
+        public bool Equals(VTPhysicalAtlasLayout other)
+        {
+            return PhysicalPageSize == other.PhysicalPageSize
+                   && TileCount == other.TileCount
+                   && TileCountX == other.TileCountX
+                   && TileCountY == other.TileCountY;
+        }
+
+        public override bool Equals(object obj)
+        {
+            return obj is VTPhysicalAtlasLayout other && Equals(other);
+        }
+
+        public override int GetHashCode()
+        {
+            return HashCode.Combine(PhysicalPageSize, TileCount, TileCountX, TileCountY);
+        }
+    }
+
     internal readonly struct VTPhysicalPageIdentity : IEquatable<VTPhysicalPageIdentity>
     {
         internal VTPhysicalPageIdentity(
@@ -383,7 +464,8 @@ namespace VividRP.Runtime
         private readonly int[] m_NextPhysicalPageWithSameIdentity;
         private readonly Dictionary<VTPhysicalPageIdentity, int> m_PhysicalPageLookup;
         private readonly List<PhysicalPageBinding>[] m_Bindings;
-        private readonly Texture2DArray[] m_Textures;
+        private readonly Texture2D[] m_Textures;
+        private readonly VTPhysicalAtlasLayout[] m_AtlasLayouts;
 
         private int m_NextGeneration;
         private int m_RefCount;
@@ -417,23 +499,65 @@ namespace VividRP.Runtime
             for (int slotIndex = m_Slots.Length - 1; slotIndex >= 0; slotIndex--)
                 m_FreePhysicalPages.Push(slotIndex);
 
-            m_Textures = new Texture2DArray[Mathf.Max(1, desc.PhysicalGroupCount)];
-            for (int groupIndex = 0; groupIndex < m_Textures.Length; groupIndex++)
-                m_Textures[groupIndex] = CreatePhysicalTexture(poolName, desc, groupIndex, m_Slots.Length);
+            m_Textures = new Texture2D[Mathf.Max(1, desc.PhysicalGroupCount)];
+            m_AtlasLayouts = new VTPhysicalAtlasLayout[m_Textures.Length];
+            try
+            {
+                for (int groupIndex = 0; groupIndex < m_Textures.Length; groupIndex++)
+                {
+                    int groupLayerCount = Mathf.Max(1, desc.GetGroupLayerCount(groupIndex));
+                    int tileCount = checked(m_Slots.Length * groupLayerCount);
+                    m_AtlasLayouts[groupIndex] = new VTPhysicalAtlasLayout(
+                        desc.PhysicalPageSize,
+                        tileCount,
+                        SystemInfo.maxTextureSize);
+                    m_Textures[groupIndex] = CreatePhysicalTexture(
+                        poolName,
+                        desc,
+                        groupIndex,
+                        m_AtlasLayouts[groupIndex]);
+                }
+            }
+            catch
+            {
+                DestroyTextures(m_Textures);
+                throw;
+            }
         }
 
         internal VTPhysicalPoolDesc Desc { get; }
 
-        internal Texture2DArray Texture => GetTextureForGroup(0);
+        internal Texture2D Texture => GetTextureForGroup(0);
 
-        internal IReadOnlyList<Texture2DArray> Textures => m_Textures ?? Array.Empty<Texture2DArray>();
+        internal IReadOnlyList<Texture2D> Textures => m_Textures ?? Array.Empty<Texture2D>();
 
-        internal Texture2DArray GetTextureForGroup(int physicalGroup)
+        internal Texture2D GetTextureForGroup(int physicalGroup)
         {
             if (m_Textures == null || physicalGroup < 0 || physicalGroup >= m_Textures.Length)
                 return null;
 
             return m_Textures[physicalGroup];
+        }
+
+        internal VTPhysicalAtlasLayout GetAtlasLayoutForGroup(int physicalGroup)
+        {
+            if (m_AtlasLayouts == null || physicalGroup < 0 || physicalGroup >= m_AtlasLayouts.Length)
+                throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+            return m_AtlasLayouts[physicalGroup];
+        }
+
+        internal RectInt GetPhysicalTileRect(int physicalGroup, int physicalPageId, int physicalLayerIndex)
+        {
+            if (physicalPageId < 0 || physicalPageId >= m_Slots.Length)
+                throw new ArgumentOutOfRangeException(nameof(physicalPageId));
+
+            int groupLayerCount = Mathf.Max(1, GetGroupLayerCount(physicalGroup));
+            if (physicalLayerIndex < 0 || physicalLayerIndex >= groupLayerCount)
+                throw new ArgumentOutOfRangeException(nameof(physicalLayerIndex));
+
+            int tileIndex = checked(physicalPageId * groupLayerCount + physicalLayerIndex);
+            return GetAtlasLayoutForGroup(physicalGroup).GetTileRect(tileIndex);
         }
 
         internal int GetGroupLayerCount(int physicalGroup)
@@ -752,39 +876,45 @@ namespace VividRP.Runtime
             if (m_Textures == null)
                 return;
 
-            for (int textureIndex = 0; textureIndex < m_Textures.Length; textureIndex++)
+            DestroyTextures(m_Textures);
+        }
+
+        private static void DestroyTextures(IReadOnlyList<Texture2D> textures)
+        {
+            if (textures == null)
+                return;
+
+            for (int textureIndex = 0; textureIndex < textures.Count; textureIndex++)
             {
-                if (m_Textures[textureIndex] != null)
-                    CoreUtils.Destroy(m_Textures[textureIndex]);
+                if (textures[textureIndex] != null)
+                    CoreUtils.Destroy(textures[textureIndex]);
             }
         }
 
-        private static Texture2DArray CreatePhysicalTexture(
+        private static Texture2D CreatePhysicalTexture(
             string poolName,
             in VTPhysicalPoolDesc desc,
             int physicalGroup,
-            int physicalPageCount)
+            in VTPhysicalAtlasLayout layout)
         {
-            int groupLayerCount = Mathf.Max(1, desc.GetGroupLayerCount(physicalGroup));
             GraphicsFormat storageFormat = desc.GetGroupStorageFormat(physicalGroup);
             if (storageFormat == GraphicsFormat.None)
                 storageFormat = desc.GraphicsFormat;
 
-            var texture = new Texture2DArray(
-                desc.PhysicalPageSize,
-                desc.PhysicalPageSize,
-                Mathf.Max(1, physicalPageCount) * groupLayerCount,
+            var texture = new Texture2D(
+                layout.Width,
+                layout.Height,
                 storageFormat,
                 TextureCreationFlags.None)
             {
                 name = physicalGroup == 0
-                    ? $"VividVT_{poolName}_PhysicalPool"
-                    : $"VividVT_{poolName}_PhysicalPool_Group{physicalGroup}",
+                    ? $"VividVT_{poolName}_PhysicalAtlas"
+                    : $"VividVT_{poolName}_PhysicalAtlas_Group{physicalGroup}",
                 hideFlags = HideFlags.HideAndDontSave,
                 wrapMode = TextureWrapMode.Clamp,
                 filterMode = FilterMode.Bilinear,
             };
-            texture.Apply(false, false);
+            texture.Apply(false, true);
             return texture;
         }
 

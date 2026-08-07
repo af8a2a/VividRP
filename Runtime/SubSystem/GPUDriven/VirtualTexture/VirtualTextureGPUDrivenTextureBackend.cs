@@ -574,9 +574,11 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
 
             CopyTextureSupport copySupport = capabilities.CopyTextureSupport;
             if ((copySupport & CopyTextureSupport.Basic) == 0
-                || (copySupport & CopyTextureSupport.RTToTexture) == 0)
+                || (copySupport & CopyTextureSupport.RTToTexture) == 0
+                || (copySupport & CopyTextureSupport.DifferentTypes) == 0)
             {
-                unavailableReason = "The active graphics device cannot copy a RenderTexture array into the VT Texture2DArray cache.";
+                unavailableReason =
+                    "The active graphics device cannot copy RenderTexture array slices into the VT 2D tile atlas.";
                 return false;
             }
 

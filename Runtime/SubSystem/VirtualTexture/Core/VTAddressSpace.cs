@@ -47,6 +47,8 @@ namespace VividRP.Runtime
         private int m_PendingOrderCacheHitCount;
         private bool m_HasPendingOrderCache;
         private Texture2DArray m_ResidentPageStagingTexture;
+        private readonly Texture2D[] m_ResidentPageConvertedStagingTextures =
+            new Texture2D[VTStackDesc.MaxLayerCount];
         private Color32[] m_ResidentPageScratchPixels;
         private IVTPageProducer m_FallbackResidentPageProducer;
 
@@ -359,6 +361,11 @@ namespace VividRP.Runtime
         {
             CoreUtils.Destroy(m_ResidentPageStagingTexture);
             m_ResidentPageStagingTexture = null;
+            for (int physicalGroup = 0; physicalGroup < m_ResidentPageConvertedStagingTextures.Length; physicalGroup++)
+            {
+                CoreUtils.Destroy(m_ResidentPageConvertedStagingTextures[physicalGroup]);
+                m_ResidentPageConvertedStagingTextures[physicalGroup] = null;
+            }
             m_ResidentPageScratchPixels = null;
             m_FallbackResidentPageProducer = null;
             m_PageTableUpdater.Dispose();
@@ -438,35 +445,60 @@ namespace VividRP.Runtime
             for (int layerIndex = 0; layerIndex < StackDesc.LayerCount; layerIndex++)
             {
                 int physicalGroup = PhysicalPool.GetLayerPhysicalGroup(layerIndex);
-                Texture2DArray physicalCache = PhysicalPool.GetTextureForGroup(physicalGroup);
+                Texture2D physicalCache = PhysicalPool.GetTextureForGroup(physicalGroup);
                 if (physicalCache == null)
                     continue;
 
-                int groupLayerCount = Mathf.Max(1, PhysicalPool.GetGroupLayerCount(physicalGroup));
                 int physicalLayerIndex = PhysicalPool.GetLayerPhysicalLayerIndex(layerIndex);
-                int destinationSlice = request.PhysicalPageId * groupLayerCount + physicalLayerIndex;
+                RectInt destinationTile = PhysicalPool.GetPhysicalTileRect(
+                    physicalGroup,
+                    request.PhysicalPageId,
+                    physicalLayerIndex);
                 if (m_ResidentPageStagingTexture.graphicsFormat == physicalCache.graphicsFormat)
                 {
                     Graphics.CopyTexture(
                         m_ResidentPageStagingTexture,
                         layerIndex,
                         0,
+                        0,
+                        0,
+                        destinationTile.width,
+                        destinationTile.height,
                         physicalCache,
-                        destinationSlice,
-                        0);
+                        0,
+                        0,
+                        destinationTile.x,
+                        destinationTile.y);
                     continue;
                 }
 
+                Texture2D convertedStagingTexture = GetResidentPageConvertedStagingTexture(
+                    physicalGroup,
+                    physicalCache.graphicsFormat);
                 if (!Graphics.ConvertTexture(
                     m_ResidentPageStagingTexture,
                     layerIndex,
-                    physicalCache,
-                    destinationSlice))
+                    convertedStagingTexture,
+                    0))
                 {
                     throw new InvalidOperationException(
                         $"[VividRP] Failed to convert VT bootstrap layer {layerIndex} into " +
                         $"physical group {physicalGroup} for space '{Descriptor.SpaceName}'.");
                 }
+
+                Graphics.CopyTexture(
+                    convertedStagingTexture,
+                    0,
+                    0,
+                    0,
+                    0,
+                    destinationTile.width,
+                    destinationTile.height,
+                    physicalCache,
+                    0,
+                    0,
+                    destinationTile.x,
+                    destinationTile.y);
             }
 
             return true;
@@ -481,6 +513,34 @@ namespace VividRP.Runtime
                 "ResidentPage");
             m_ResidentPageScratchPixels ??=
                 new Color32[Descriptor.PhysicalPageSize * Descriptor.PhysicalPageSize];
+        }
+
+        private Texture2D GetResidentPageConvertedStagingTexture(
+            int physicalGroup,
+            UnityEngine.Experimental.Rendering.GraphicsFormat graphicsFormat)
+        {
+            if (physicalGroup < 0 || physicalGroup >= m_ResidentPageConvertedStagingTextures.Length)
+                throw new ArgumentOutOfRangeException(nameof(physicalGroup));
+
+            Texture2D texture = m_ResidentPageConvertedStagingTextures[physicalGroup];
+            if (texture != null && texture.graphicsFormat == graphicsFormat)
+                return texture;
+
+            CoreUtils.Destroy(texture);
+            texture = new Texture2D(
+                Descriptor.PhysicalPageSize,
+                Descriptor.PhysicalPageSize,
+                graphicsFormat,
+                UnityEngine.Experimental.Rendering.TextureCreationFlags.None)
+            {
+                name = $"VividVT_{Descriptor.SpaceName}_ResidentPageConverted_Group{physicalGroup}",
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Point,
+            };
+            texture.Apply(false, true);
+            m_ResidentPageConvertedStagingTextures[physicalGroup] = texture;
+            return texture;
         }
 
         private void RollbackResidentPage(in VirtualTexturePageCoord coord)

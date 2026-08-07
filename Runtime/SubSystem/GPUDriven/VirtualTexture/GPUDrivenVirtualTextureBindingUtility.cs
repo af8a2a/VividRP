@@ -81,12 +81,12 @@ namespace VividRP.Runtime.GPUDriven.VirtualTexture
             MaterialPropertyBlock properties,
             in VirtualTextureSpaceBinding binding)
         {
-            Texture2DArray fallback = binding.PhysicalCache;
+            Texture2D fallback = binding.PhysicalCache;
             var physicalCaches = binding.PhysicalCaches;
             int[] shaderIds = VirtualTextureShaderIDs.PhysicalCaches;
             for (int physicalGroup = 0; physicalGroup < shaderIds.Length; physicalGroup++)
             {
-                Texture2DArray cache = physicalCaches != null && physicalGroup < physicalCaches.Count
+                Texture2D cache = physicalCaches != null && physicalGroup < physicalCaches.Count
                     ? physicalCaches[physicalGroup]
                     : null;
                 properties.SetTexture(shaderIds[physicalGroup], cache != null ? cache : fallback);

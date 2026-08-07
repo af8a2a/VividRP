@@ -53,8 +53,8 @@ namespace VividRP.Editor.Tests
             int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, new NamedProducer("ProducerB"));
 
             Assert.That(VirtualTextureSystem.GetPhysicalPoolCountForTesting(), Is.EqualTo(1));
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2DArray firstCache), Is.True);
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2DArray secondCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2D firstCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2D secondCache), Is.True);
             Assert.That(ReferenceEquals(firstCache, secondCache), Is.True);
 
             VTPhysicalPoolStats stats = VirtualTextureSystem.GetPhysicalPoolStatsForTesting();
@@ -89,8 +89,8 @@ namespace VividRP.Editor.Tests
             int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, new NamedProducer("GroupProducerB"));
 
             Assert.That(VirtualTextureSystem.GetPhysicalPoolCountForTesting(), Is.EqualTo(2));
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2DArray firstCache), Is.True);
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2DArray secondCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2D firstCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2D secondCache), Is.True);
             Assert.That(ReferenceEquals(firstCache, secondCache), Is.False);
         }
 
@@ -110,8 +110,8 @@ namespace VividRP.Editor.Tests
             int secondSpaceId = VirtualTextureSystem.RegisterAddressSpace(secondDesc, new NamedProducer("FormatProducerB"));
 
             Assert.That(VirtualTextureSystem.GetPhysicalPoolCountForTesting(), Is.EqualTo(2));
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2DArray firstCache), Is.True);
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2DArray secondCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(firstSpaceId, out Texture2D firstCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(secondSpaceId, out Texture2D secondCache), Is.True);
             Assert.That(ReferenceEquals(firstCache, secondCache), Is.False);
         }
 
@@ -125,18 +125,71 @@ namespace VividRP.Editor.Tests
 
             int spaceId = VirtualTextureSystem.RegisterAddressSpace(desc, new NamedProducer("SplitGroupProducer"));
 
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 0, out Texture2DArray baseCache), Is.True);
-            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 1, out Texture2DArray normalCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 0, out Texture2D baseCache), Is.True);
+            Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 1, out Texture2D normalCache), Is.True);
             Assert.That(VirtualTextureSystem.TryGetPhysicalCacheForTesting(spaceId, 2, out _), Is.False);
             Assert.That(ReferenceEquals(baseCache, normalCache), Is.False);
-            Assert.That(baseCache.width, Is.EqualTo(desc.PhysicalPageSize));
-            Assert.That(baseCache.height, Is.EqualTo(desc.PhysicalPageSize));
-            Assert.That(baseCache.depth, Is.EqualTo(desc.CachePageCount));
+            AssertPhysicalAtlas(baseCache, desc, groupLayerCount: 1);
             Assert.That(baseCache.graphicsFormat, Is.EqualTo(GraphicsFormat.R8G8B8A8_UNorm));
-            Assert.That(normalCache.width, Is.EqualTo(desc.PhysicalPageSize));
-            Assert.That(normalCache.height, Is.EqualTo(desc.PhysicalPageSize));
-            Assert.That(normalCache.depth, Is.EqualTo(desc.CachePageCount));
+            AssertPhysicalAtlas(normalCache, desc, groupLayerCount: 1);
             Assert.That(normalCache.graphicsFormat, Is.EqualTo(GraphicsFormat.R16G16B16A16_SFloat));
+        }
+
+        [Test]
+        public void PhysicalAtlasLayout_PacksGpuDrivenCapacityIntoNearSquareTexture()
+        {
+            var layout = new VTPhysicalAtlasLayout(
+                physicalPageSize: 136,
+                tileCount: 512 * 3,
+                maxTextureSize: 8192);
+
+            Assert.That(layout.TileCountX, Is.EqualTo(40));
+            Assert.That(layout.TileCountY, Is.EqualTo(39));
+            Assert.That(layout.Width, Is.EqualTo(5440));
+            Assert.That(layout.Height, Is.EqualTo(5304));
+            Assert.That(layout.GetTileRect(1535), Is.EqualTo(new RectInt(2040, 5168, 136, 136)));
+        }
+
+        [Test]
+        public void PhysicalAtlasLayout_RejectsCapacityBeyondDeviceTextureLimit()
+        {
+            Assert.That(
+                () => new VTPhysicalAtlasLayout(
+                    physicalPageSize: 136,
+                    tileCount: 512 * 3,
+                    maxTextureSize: 4096),
+                Throws.TypeOf<System.InvalidOperationException>()
+                    .With.Message.Contains("requires 1536 atlas tiles"));
+        }
+
+        [Test]
+        public void PhysicalPool_MapsPageAndLayerToStableAtlasTile()
+        {
+            var layers = new[]
+            {
+                new VTLayerDesc(
+                    VTLayerSemantic.BaseColor,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    sRGB: false,
+                    new Color32(255, 255, 255, 255)),
+                new VTLayerDesc(
+                    VTLayerSemantic.Normal,
+                    GraphicsFormat.R8G8B8A8_UNorm,
+                    sRGB: false,
+                    new Color32(128, 128, 255, 255)),
+            };
+            using var pool = new VTPhysicalPool(
+                "AtlasMapping",
+                new VTPhysicalPoolDesc(
+                    pageSize: 4,
+                    borderSize: 0,
+                    pageCount: 4,
+                    layers));
+
+            Assert.That(pool.GetAtlasLayoutForGroup(0).TileCountX, Is.EqualTo(3));
+            Assert.That(
+                pool.GetPhysicalTileRect(physicalGroup: 0, physicalPageId: 2, physicalLayerIndex: 1),
+                Is.EqualTo(new RectInt(8, 4, 4, 4)));
         }
 
         [Test]
@@ -282,6 +335,10 @@ namespace VividRP.Editor.Tests
                     new VirtualTexturePageCoord(1, 0, 0),
                     frameIndex: 0,
                     out int secondPhysicalPageId), Is.True);
+                RectInt firstPhysicalTile = pool.GetPhysicalTileRect(
+                    physicalGroup: 0,
+                    physicalPageId: firstPhysicalPageId,
+                    physicalLayerIndex: 0);
 
                 pool.Touch(firstPhysicalPageId, VirtualTextureViewId.Invalid, frameIndex: 1, updateAffinity: false);
                 pool.Touch(secondPhysicalPageId, VirtualTextureViewId.Invalid, frameIndex: 1, updateAffinity: false);
@@ -296,6 +353,9 @@ namespace VividRP.Editor.Tests
                     frameIndex: 2,
                     out int reusedPhysicalPageId), Is.True);
                 Assert.That(reusedPhysicalPageId, Is.EqualTo(firstPhysicalPageId));
+                Assert.That(
+                    pool.GetPhysicalTileRect(0, reusedPhysicalPageId, 0),
+                    Is.EqualTo(firstPhysicalTile));
                 Assert.That(owner.LastInvalidatedPageIndex, Is.EqualTo(10));
             }
             finally
@@ -450,6 +510,21 @@ namespace VividRP.Editor.Tests
                     borderSize: 0,
                     pageCount,
                     layers));
+        }
+
+        private static void AssertPhysicalAtlas(
+            Texture2D physicalAtlas,
+            in VirtualTextureSpaceDesc desc,
+            int groupLayerCount)
+        {
+            var layout = new VTPhysicalAtlasLayout(
+                desc.PhysicalPageSize,
+                desc.CachePageCount * groupLayerCount,
+                SystemInfo.maxTextureSize);
+            Assert.That(physicalAtlas.dimension, Is.EqualTo(TextureDimension.Tex2D));
+            Assert.That(physicalAtlas.width, Is.EqualTo(layout.Width));
+            Assert.That(physicalAtlas.height, Is.EqualTo(layout.Height));
+            Assert.That(physicalAtlas.isReadable, Is.False);
         }
 
         private static bool TryAllocatePhysicalPage(
